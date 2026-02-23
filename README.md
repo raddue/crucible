@@ -26,6 +26,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | **build** | End-to-end development pipeline: interactive brainstorming, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion. |
 | **brainstorming** | Interactive design refinement. Explores intent, requirements, and design before implementation. Produces a design doc. |
 | **writing-plans** | Creates detailed TDD implementation plans from specs or requirements. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
+| **executing-plans** | Standalone plan executor. Dispatches subagents per task with risk-based iterative review, verification gates, and architectural checkpoints. |
 
 ### Implementation
 
@@ -43,6 +44,8 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | **receiving-code-review** | Anti-sycophancy skill for receiving review feedback. Requires technical rigor and verification, not blind implementation. |
 | **verification-before-completion** | Evidence-before-claims discipline. Run verification commands and confirm output before making success claims. |
 | **finishing-a-development-branch** | Guides completion of development work — comprehensive review, then structured options for merge, PR, or cleanup. |
+| **red-team** | Adversarial review of any artifact. Iterates with fresh reviewers until clean or stagnation. Used on designs, plans, and implementations. |
+| **innovate** | Divergent creativity injection. Proposes the single most impactful addition before adversarial review. |
 
 ### Debugging
 
@@ -62,9 +65,11 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 The **build** skill is the main entry point for feature development. It chains through four phases:
 
 1. **Brainstorm** (interactive) — Refine the idea with the user, produce a design doc
-2. **Plan** (autonomous) — Write an implementation plan, review it, then red-team it with a devil's advocate
-3. **Execute** (autonomous, team-based) — Dispatch implementer subagents per task, two-pass code + test review
-4. **Complete** — Full test suite, summary report, branch completion
+2. **Innovate + Red-Team Design** (autonomous) — Creative enhancement, then adversarial review of the design (iterative until clean)
+3. **Plan** (autonomous) — Write implementation plan, review iteratively, innovate, then red-team iteratively
+4. **Execute** (autonomous, team-based) — Dispatch implementers per task, iterative code review per task
+5. **Red-Team Implementation** (autonomous) — Adversarial review of the complete implementation (iterative until clean)
+6. **Complete** — Full test suite, comprehensive code review, branch completion options
 
 Individual skills can also be used standalone (e.g., `crucible:test-driven-development` for any implementation work, `crucible:systematic-debugging` for any bug).
 
@@ -77,3 +82,7 @@ Forked from [obra/superpowers](https://github.com/obra/superpowers) with modific
 - Code review dispatch uses general-purpose subagent + prompt template (no custom subagent type)
 - Writing-plans execution handoff removed (build handles execution)
 - Dead/redundant skills trimmed
+- Iterative review loops everywhere (fresh reviewer each round, stagnation detection, no hard caps)
+- Standalone red-team skill with iterative adversarial review
+- Standalone innovate skill for creative enhancement before red-teaming
+- executing-plans skill ported from superpowers with iterative review loops
