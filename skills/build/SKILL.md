@@ -23,6 +23,15 @@ End-to-end development pipeline: interactive brainstorming, autonomous planning 
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
+### Step 2: Innovate and Red-Team the Design
+
+After the user approves the design and before starting Phase 2:
+
+1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
+2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) design doc. Iterates until clean or stagnation.
+3. If the red team requires changes, the Plan Writer updates the design doc and re-commits.
+4. Design doc is now finalized — proceed to Phase 2.
+
 ## Phase 2: Plan (Autonomous)
 
 ### Step 1: Write the Plan
@@ -46,58 +55,26 @@ Reviewer model selection:
 - Plan touches **1-3 systems** with **<10 tasks** → Sonnet
 - When in doubt → Opus
 
-Review protocol:
-- Round 1: Plan Reviewer checks plan against design doc
-- If issues: dispatch Plan Writer to revise → Plan Reviewer re-checks (Round 2)
-- Still failing after Round 2 → **escalate to user** with specific findings
+Review protocol (iterative):
+- Dispatch Plan Reviewer to check plan against design doc
+- If issues found: record issue count, dispatch Plan Writer to revise
+- Dispatch NEW fresh Plan Reviewer on revised plan (no anchoring)
+- Compare issue count to prior round:
+  - Strictly fewer issues → progress, loop again
+  - Same or more issues → stagnation, **escalate to user** with findings from both rounds
+- Loop until plan passes with no issues
 - **Architectural concerns bypass the loop** — immediate escalation regardless of round
 
 Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 
-### Step 3: Red Team the Plan
+### Step 3: Innovate and Red-Team the Plan
 
-**After the plan passes review**, dispatch a **Devil's Advocate** subagent (Opus):
+**After the plan passes review:**
 
-The Devil's Advocate's sole job is to **attack the plan**. They are not checking boxes — they are actively trying to break it. They look for:
-- Fatal flaws the reviewer missed
-- Better alternative approaches the plan didn't consider
-- Hidden integration risks, race conditions, or ordering problems
-- Assumptions that seem reasonable but are wrong
-- Scalability or maintainability traps
-- Cases where the plan will technically work but produce a fragile or over-engineered result
+1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
+2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) plan. Provides the plan and design doc as context.
 
-Use `./red-team-prompt.md` template for the dispatch prompt.
-
-**Red Team protocol:**
-
-```dot
-digraph red_team {
-  "Plan passes review" -> "Devil's Advocate attacks plan";
-  "Devil's Advocate attacks plan" -> "No valid challenges" [label="plan is solid"];
-  "No valid challenges" -> "Plan approved — proceed to Phase 3";
-  "Devil's Advocate attacks plan" -> "Valid challenges found";
-  "Valid challenges found" -> "Plan Writer revises plan";
-  "Plan Writer revises plan" -> "Devil's Advocate attacks revised plan" [label="round 2"];
-  "Devil's Advocate attacks revised plan" -> "Plan approved — proceed to Phase 3" [label="solid"];
-  "Devil's Advocate attacks revised plan" -> "Still has issues" [label="round 3"];
-  "Still has issues" -> "Escalate to user";
-}
-```
-
-- Devil's Advocate must **classify each challenge** as:
-  - **Fatal:** Plan will fail or produce broken output. Must be addressed.
-  - **Significant:** Plan will work but has a meaningful risk or missed opportunity. Should be addressed.
-  - **Minor:** Nitpick or preference. Log it but don't block.
-- Only **Fatal** and **Significant** challenges trigger a revision round
-- Plan Writer must **respond to each challenge** — either revise the plan or defend the current approach with a concrete argument (not hand-waving)
-- If the Devil's Advocate concedes or only has Minor challenges remaining → **plan is approved**
-- Maximum **3 total rounds** (initial attack + 2 revision rounds). Still contested after 3 → **escalate to user** with the full debate
-- **Architectural concerns → immediate escalation** regardless of round
-
-**What the Devil's Advocate is NOT:**
-- A second Plan Reviewer (don't re-check formatting, metadata, or completeness — that's already done)
-- A blocker for the sake of blocking — challenges must be specific and actionable
-- A rewriter — they challenge, they don't produce an alternative plan
+The red-team skill handles the iterative loop — fresh Devil's Advocate each round, stagnation detection, escalation. See `crucible:red-team` for details.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
@@ -161,11 +138,15 @@ digraph review {
 
 **Pass 2 — Test Review:** Stale tests? Missing coverage? Tests need updating? Dead tests to delete? Edge cases untested?
 
-#### Revision Cap
+#### Iterative Review Loop
 
-- Maximum **2 rounds** across combined code + test review
-- Still not clean after 2 → **escalate to user**
-- Architectural concerns → **immediate escalation**
+Each review pass (code and test) uses the iterative loop:
+- After fixes, dispatch a **NEW fresh Reviewer** (no anchoring to prior findings)
+- Track issue count between rounds
+- **Strictly fewer issues** → progress, loop again
+- **Same or more issues** → stagnation, **escalate to user**
+- Loop until clean
+- Architectural concerns → **immediate escalation** regardless of round
 
 #### Verification Gates
 
@@ -187,16 +168,17 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 
 After all tasks complete:
 1. Run full test suite
-2. Compile summary: what was built, tests passing, review findings addressed, concerns
-3. Report to user
-4. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
+2. **REQUIRED SUB-SKILL:** Use crucible:requesting-code-review on full implementation (iterative until clean)
+3. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
+4. Compile summary: what was built, tests passing, review findings addressed, concerns
+5. Report to user
+6. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
 
 ## Escalation Triggers (Any Phase)
 
 **STOP and ask the user when:**
 - Architectural concerns in plan or code review
-- 2 failed revision rounds (plan or code)
-- Red team challenges unresolved after 3 rounds
+- Review loop stagnation (same or more issues after fixes — any phase)
 - Test suite failures not obviously fixable
 - Multiple teammates fail on different tasks
 - Teammate reports context pressure at 50%+ with significant work remaining
@@ -223,16 +205,21 @@ After all tasks complete:
 
 - `./plan-writer-prompt.md` — Phase 2 plan writer dispatch
 - `./plan-reviewer-prompt.md` — Phase 2 plan reviewer dispatch
-- `./red-team-prompt.md` — Phase 2 devil's advocate dispatch
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch
 - `./build-reviewer-prompt.md` — Phase 3 reviewer dispatch
-- `./architecture-reviewer-prompt.md` — Mid-plan checkpoint (reused)
+- `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
+
+Red-team and innovate prompts live in their respective skills:
+- `crucible:red-team` — `skills/red-team/red-team-prompt.md`
+- `crucible:innovate` — `skills/innovate/innovate-prompt.md`
 
 ## Integration
 
 **Required sub-skills:**
 - **crucible:brainstorming** — Phase 1
 - **crucible:finishing-a-development-branch** — Phase 4
+- **crucible:red-team** — Adversarial review at each quality gate
+- **crucible:innovate** — Creative enhancement before red-teaming
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task
