@@ -9,7 +9,7 @@ description: Use when implementation is complete, all tests pass, and you need t
 
 Guide completion of development work by presenting clear options and handling chosen workflow.
 
-**Core principle:** Verify tests -> Code review -> Present options -> Execute choice -> Clean up.
+**Core principle:** Verify tests -> Code review -> Red-team -> Present options -> Execute choice -> Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
@@ -70,7 +70,22 @@ git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD ma
 
 **Do NOT skip this step.** The orchestrator did lightweight review during execution -- this is the comprehensive review before integration.
 
-### Step 3: Determine Base Branch
+### Step 3: Red-Team the Implementation (Mandatory)
+
+**After code review passes, red-team the full implementation.**
+
+**REQUIRED SUB-SKILL:** Use crucible:red-team
+
+1. Dispatch `crucible:red-team` on the full implementation:
+   - Artifact: the complete set of changes on this branch (provide `git diff --stat` and key files)
+   - Context: the design doc or plan this was built against
+   - Fix mechanism: dispatch fix subagent for any findings
+2. The red-team skill handles the iterative loop (fresh Devil's Advocate each round, stagnation detection)
+3. Fix all Fatal/Significant findings before proceeding
+
+**Do NOT skip this step.** Code review checks quality; red-teaming checks whether the system will actually work and survive real use.
+
+### Step 4: Determine Base Branch
 
 ```bash
 # Try common base branches
@@ -79,7 +94,7 @@ git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
 
 Or ask: "This branch split from main - is that correct?"
 
-### Step 4: Present Options
+### Step 5: Present Options
 
 Present exactly these 4 options:
 
@@ -96,7 +111,7 @@ Which option?
 
 **Don't add explanation** - keep options concise.
 
-### Step 5: Execute Choice
+### Step 6: Execute Choice
 
 #### Option 1: Merge Locally
 
@@ -117,7 +132,7 @@ git merge <feature-branch>
 git branch -d <feature-branch>
 ```
 
-Then: If using a worktree, clean it up (Step 6)
+Then: If using a worktree, clean it up (Step 7)
 
 #### Option 2: Push and Create PR
 
@@ -136,7 +151,7 @@ EOF
 )"
 ```
 
-Then: If using a worktree, clean it up (Step 6)
+Then: If using a worktree, clean it up (Step 7)
 
 #### Option 3: Keep As-Is
 
@@ -163,9 +178,9 @@ git checkout <base-branch>
 git branch -D <feature-branch>
 ```
 
-Then: If using a worktree, clean it up (Step 6)
+Then: If using a worktree, clean it up (Step 7)
 
-### Step 6: Cleanup Worktree (If Applicable)
+### Step 7: Cleanup Worktree (If Applicable)
 
 **Skip this step if not using git worktrees.**
 
@@ -219,6 +234,7 @@ git worktree remove <worktree-path>
 **Never:**
 - Proceed with failing tests
 - Skip code review because "it looks fine" or "subagents already reviewed it"
+- Skip red-team because "code review already passed"
 - Merge without verifying tests on result
 - Delete work without confirmation
 - Force-push without explicit request
@@ -226,6 +242,7 @@ git worktree remove <worktree-path>
 **Always:**
 - Verify tests before code review
 - Run full code review before presenting options
+- Run red-team after code review passes, before presenting options
 - Fix Critical/Important review findings before proceeding
 - Present exactly 4 options
 - Get typed confirmation for Option 4
@@ -238,3 +255,4 @@ git worktree remove <worktree-path>
 
 **Pairs with:**
 - **using-git-worktrees** - Cleans up worktree (if applicable)
+- **crucible:red-team** — Adversarial review before presenting options
