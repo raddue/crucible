@@ -79,8 +79,14 @@ Phase 3: Orchestrator forms hypothesis (no subagent -- lightweight decision-maki
 Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
-Orchestrator: Verify fix -> Success? Done. Failed? Cleanup, log, loop back.
+Orchestrator: Verify fix -> Success? Phase 5. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user.
+    |
+    v
+Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:requesting-code-review)
+    |
+    v
+Done.
 ```
 
 ---
@@ -209,13 +215,34 @@ Dispatch a single Implementation agent that receives:
 
 ---
 
+### Phase 5: Red-Team and Code Review (Post-Fix Quality Gate)
+
+After Phase 4 succeeds (fix works, tests pass, no regressions), the orchestrator runs two quality gates before declaring done:
+
+**Step 1: Red-team the fix** — Invoke `crucible:red-team` against the changed code. The red-team skill dispatches a fresh Devil's Advocate to adversarially review the fix for:
+- Edge cases the fix doesn't handle
+- New failure modes introduced by the fix
+- Assumptions that could break under different conditions
+- Regression risks not covered by the test
+
+If red-teaming finds Fatal or Significant issues, dispatch a fix agent to address them, then re-run red-team per the standard red-team loop. Do NOT skip this — a fix that introduces new risks is not done.
+
+**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:requesting-code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
+
+If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
+
+**Only after both gates pass clean is the debugging workflow complete.**
+
+---
+
 ### Loop-back, Cleanup, and Escalation
 
 After the Implementation agent reports back, the orchestrator evaluates:
 
-**Fix works, no regressions** -- Done. Log the result in the hypothesis log. Use `crucible:verification-before-completion` to confirm. Then:
+**Fix works, no regressions** -- Log the result in the hypothesis log. Use `crucible:verification-before-completion` to confirm. Then:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
 - **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
+- Proceed to Phase 5.
 
 **Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug.
 
@@ -252,6 +279,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **2. Pattern** | 1 subagent (skippable) | Find working examples, compare exhaustively | Differences identified |
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
 | **4. Implementation** | 1 subagent | TDD fix cycle | Bug resolved, tests pass |
+| **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
 
 ---
 
