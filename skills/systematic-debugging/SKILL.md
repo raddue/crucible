@@ -91,6 +91,8 @@ Orchestrator: Verify fix -> Success? Done. Failed? Cleanup, log, loop back.
 
 Dispatch 2-4 investigation subagents in parallel using the Task tool in a single message. All subagents use `subagent_type="general-purpose"`. Pass all known context (error messages, stack traces, file paths, user description) verbatim to each agent -- do not make them search for context you already have.
 
+**Before dispatching:** Use crucible:cartographer (load mode) — if module files exist for the area being investigated, paste them into each investigator's prompt so they don't waste time re-discovering codebase structure.
+
 **Always dispatch:**
 
 1. **Error Analysis Agent** -- Read error messages, stack traces, and logs. Identify the exact failure point, error codes, and what the error is telling us.
@@ -211,7 +213,9 @@ Dispatch a single Implementation agent that receives:
 
 After the Implementation agent reports back, the orchestrator evaluates:
 
-**Fix works, no regressions** -- Done. Log the result in the hypothesis log. Use `crucible:verification-before-completion` to confirm.
+**Fix works, no regressions** -- Done. Log the result in the hypothesis log. Use `crucible:verification-before-completion` to confirm. Then:
+- **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
+- **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
 
 **Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug.
 
@@ -332,6 +336,10 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:test-driven-development`** -- Implementation agent follows TDD for Phase 4
 - **`crucible:verification-before-completion`** -- Verify fix worked before claiming success
 - **`crucible:dispatching-parallel-agents`** -- Phase 1 parallel dispatch pattern
+
+**Recommended skills:**
+- **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)
+- **`crucible:cartographer`** -- Load module context for investigators, record discoveries after fix
 
 ## Real-World Impact
 

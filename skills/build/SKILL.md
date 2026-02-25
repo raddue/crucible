@@ -17,6 +17,8 @@ End-to-end development pipeline: interactive brainstorming, autonomous planning 
 
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
+- **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
+- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:brainstorming
 - Follow brainstorming skill for design refinement, section-by-section validation, and saving the design doc
 - **OVERRIDE:** When brainstorming completes and the design doc is saved, do NOT follow brainstorming's "Implementation" section (do not chain into writing-plans or using-git-worktrees from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
@@ -77,6 +79,10 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 The red-team skill handles the iterative loop — fresh Devil's Advocate each round, stagnation detection, escalation. See `crucible:red-team` for details.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
+
+### Step 0: Load Module Context for Subagents
+
+- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (load mode) — when dispatching implementers and reviewers, paste relevant module files, conventions.md, and landmines.md into their prompts
 
 ### Step 1: Create Team and Task List
 
@@ -170,9 +176,11 @@ After all tasks complete:
 1. Run full test suite
 2. **REQUIRED SUB-SKILL:** Use crucible:requesting-code-review on full implementation (iterative until clean)
 3. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
-4. Compile summary: what was built, tests passing, review findings addressed, concerns
-5. Report to user
-6. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
+4. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
+5. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
+6. Compile summary: what was built, tests passing, review findings addressed, concerns
+7. Report to user
+8. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
 
 ## Escalation Triggers (Any Phase)
 
@@ -220,6 +228,10 @@ Red-team and innovate prompts live in their respective skills:
 - **crucible:finishing-a-development-branch** — Phase 4
 - **crucible:red-team** — Adversarial review at each quality gate
 - **crucible:innovate** — Creative enhancement before red-teaming
+
+**Recommended sub-skills:**
+- **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
+- **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task

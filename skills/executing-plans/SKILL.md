@@ -18,11 +18,13 @@ Load plan, review critically, dispatch all tasks to subagents with maximum paral
 ## The Process
 
 ### Step 1: Load and Review Plan
-1. Read plan file
-2. Extract all tasks with full text — subagents should never read the plan file themselves
-3. Review critically — identify any questions or concerns about the plan
-4. If concerns: Raise them with your human partner before starting
-5. If no concerns: Create TodoWrite and proceed
+1. **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
+2. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
+3. Read plan file
+4. Extract all tasks with full text — subagents should never read the plan file themselves
+5. Review critically — identify any questions or concerns about the plan
+6. If concerns: Raise them with your human partner before starting
+7. If no concerns: Create TodoWrite and proceed
 
 ### Step 2: Analyze Task Dependencies, Shared Files, and Risk
 
@@ -69,6 +71,7 @@ Use the `./implementer-prompt.md` template. Key principles:
 - Pass the plan step text verbatim — don't make subagents read the plan file
 - Include file paths so the subagent doesn't waste context searching
 - Include project conventions (DI framework, naming, test style)
+- **RECOMMENDED:** Use crucible:cartographer (load mode) — paste relevant module files, conventions.md, and landmines.md into subagent prompts
 - Include verification criteria from the plan
 - For sequential tasks: include the result/output from the prior subagent
 - Ask subagents to report unexpected findings — relay these to subsequent subagents
@@ -176,6 +179,8 @@ When a subagent fails or produces poor results:
 
 ### Step 4: Final Report
 After ALL tasks are complete:
+- **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture plan vs actual execution
+- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist new codebase knowledge discovered during execution
 - Show summary of everything implemented
 - Show final verification output (tests, compilation, etc.)
 - Note any issues encountered and how they were resolved
@@ -241,6 +246,10 @@ After all tasks complete and verified:
 - **crucible:writing-plans** - Creates the plan this skill executes
 - **crucible:requesting-code-review** - Code quality review for medium/high-risk tasks (iterative)
 - **crucible:finishing-a-development-branch** - Complete development after all tasks
+
+**Recommended workflow skills:**
+- **crucible:forge** — Feed-forward at Step 1, retrospective at Step 4
+- **crucible:cartographer** — Consult at Step 1, load at subagent dispatch, record at Step 4
 
 **Optional workflow skills:**
 - **crucible:using-git-worktrees** - Set up isolated workspace (skip for projects where only one IDE instance can run, e.g. Unity)

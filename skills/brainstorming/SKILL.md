@@ -14,6 +14,8 @@ Start by understanding the current project context, then ask questions one at a 
 ## The Process
 
 **Understanding the idea:**
+- **RECOMMENDED:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
+- **RECOMMENDED:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
 - Check out the current project state first (files, docs, recent commits)
 - Ask questions one at a time to refine the idea
 - Prefer multiple choice questions when possible, but open-ended is fine too

@@ -70,6 +70,10 @@ git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD ma
 
 **Do NOT skip this step.** The orchestrator did lightweight review during execution -- this is the comprehensive review before integration.
 
+### Step 2.5: Forge Retrospective
+
+**RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned while execution context is still fresh. Run this BEFORE red-team so the retrospective has access to the full execution state.
+
 ### Step 3: Red-Team the Implementation (Mandatory)
 
 **After code review passes, red-team the full implementation.**
@@ -256,3 +260,6 @@ git worktree remove <worktree-path>
 **Pairs with:**
 - **using-git-worktrees** - Cleans up worktree (if applicable)
 - **crucible:red-team** — Adversarial review before presenting options
+
+**Recommended:**
+- **crucible:forge** — Retrospective between code review and red-team (Step 2.5)
