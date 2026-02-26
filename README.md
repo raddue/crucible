@@ -28,6 +28,14 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | **writing-plans** | Creates detailed TDD implementation plans from specs or requirements. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
 | **executing-plans** | Standalone plan executor. Dispatches subagents per task with risk-based iterative review, verification gates, and architectural checkpoints. |
 
+### Design & UI
+
+| Skill | Description |
+|-------|-------------|
+| **mockup-builder** | Creates HTML mockups constrained to Theme.uss variables, flexbox-only layout, and BEM naming. Ensures mockups are designed for direct translation to Unity UI Toolkit with player-customizable theming. |
+| **mock-to-unity** | Translates mockups into Unity UI Toolkit code via structured CSS→USS mapping, layered implementation (structure → styling → workarounds → interaction), and per-layer self-verification. Bakes in Unity 6 USS bug workarounds. |
+| **ui-verify** | Compares implemented UI against source mockup using MCP screenshots or code-level structural audit. Produces structured delta reports with [PASS]/[FAIL]/[WARN] per category. |
+
 ### Implementation
 
 | Skill | Description |
