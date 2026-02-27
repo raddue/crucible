@@ -336,6 +336,7 @@ Before marking work complete:
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
+- [ ] Test level matches the behavior (unit for isolated logic, integration for multi-component interaction)
 
 Can't check all boxes? You skipped TDD. Start over.
 
@@ -347,6 +348,43 @@ Can't check all boxes? You skipped TDD. Start over.
 | Test too complicated | Design too complicated. Simplify interface. |
 | Must mock everything | Code too coupled. Use dependency injection. |
 | Test setup huge | Extract helpers. Still complex? Simplify design. |
+
+## Test at the Right Level
+
+Unit tests verify a single component in isolation. Integration tests verify multiple components working together. **Both follow red-green-refactor.** Both require a failing test first.
+
+### When Unit Tests Are Right
+
+- Testing a single function, method, or class
+- Logic can be verified without collaborators (or with simple stubs)
+- Fast, deterministic, no external dependencies
+
+### When Integration Tests Are Right
+
+- Multiple components must collaborate to produce correct behavior
+- The bug or feature lives in the **seam between systems**, not within one
+- Unit tests pass but the system still breaks (wiring, lifecycle, event propagation)
+- Complex mock setups are hiding real interaction bugs
+
+### The Decision
+
+```
+Can this behavior be verified by testing one component alone?
+  YES → Unit test
+  NO  → Integration test
+
+Am I mocking so much that the test proves nothing about real behavior?
+  YES → Integration test (or simplify the design)
+
+Do unit tests pass but the feature is still broken?
+  YES → Missing integration test
+```
+
+### Common Mistake
+
+**"Default to unit tests, add integration tests later."** No. Think about test level DURING the RED phase. If the behavior you're specifying involves multiple components, write the integration test first. Don't force a unit test then "add integration tests after" — that's testing-after thinking.
+
+**Both levels follow TDD. No exceptions.**
 
 ## Debugging Integration
 

@@ -72,7 +72,7 @@ All data lives in the project memory directory:
 
 ### When to Trigger
 
-After any significant exploration — the agent read 5+ files, traced a call chain, investigated a module's behavior, or discovered something non-obvious about the codebase. This happens naturally during `crucible:build`, `crucible:systematic-debugging`, and `crucible:executing-plans`.
+After any significant exploration — the agent read 5+ files, traced a call chain, investigated a module's behavior, or discovered something non-obvious about the codebase. This happens naturally during `crucible:build` and `crucible:systematic-debugging`.
 
 ### The Process
 
@@ -219,7 +219,7 @@ digraph deps {
 
 ### When to Trigger
 
-Before `crucible:brainstorming`, `crucible:writing-plans`, `crucible:executing-plans`, or `crucible:build` begins its core work. Runs alongside `crucible:forge` feed-forward.
+Before `crucible:brainstorming`, `crucible:writing-plans`, or `crucible:build` begins its core work. Runs alongside `crucible:forge` feed-forward.
 
 ### The Process
 
@@ -290,9 +290,6 @@ During retrospective, Forge captures whether the Cartographer's information was 
 | `crucible:build` | Consult | Phase 1 start (with forge feed-forward) | Task description |
 | `crucible:build` | Load | Phase 3, each implementer/reviewer dispatch | Module names + file paths |
 | `crucible:build` | Record | Phase 4, after completion | Files explored, modules touched |
-| `crucible:executing-plans` | Consult | Step 1 (Load Plan) | Plan summary |
-| `crucible:executing-plans` | Load | Each task dispatch | Module names + file paths |
-| `crucible:executing-plans` | Record | Step 4 (Final Report) | New discoveries |
 | `crucible:systematic-debugging` | Load | Phase 1 investigator dispatch | Module names |
 | `crucible:systematic-debugging` | Record | After fix verified | What was learned |
 

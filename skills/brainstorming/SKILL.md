@@ -34,6 +34,18 @@ Start by understanding the current project context, then ask questions one at a 
 - Cover: architecture, components, data flow, error handling, testing
 - Be ready to go back and clarify if something doesn't make sense
 
+## Before Saving the Design
+
+Scan the design for gaps. Not every item applies to every feature — use judgment — but actively check:
+
+- [ ] **Acceptance criteria** — Can someone verify "done" without asking you? Are conditions concrete and testable?
+- [ ] **Testing strategy** — What needs unit tests vs integration tests? What level of testing covers each behavior?
+- [ ] **Integration impact** — What existing systems does this touch? Are those touchpoints addressed in the design?
+- [ ] **Failure modes** — What happens when things go wrong? Invalid data, missing dependencies, unexpected state?
+- [ ] **Edge cases** — What are the boundary conditions? Empty collections, max values, concurrent access?
+
+If a critical item is missing, raise it with the user before saving — don't silently skip it.
+
 ## After the Design
 
 **Documentation:**
