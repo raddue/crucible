@@ -32,7 +32,21 @@ After the user approves the design and before starting Phase 2:
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
 2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) design doc. Iterates until clean or stagnation.
 3. If the red team requires changes, the Plan Writer updates the design doc and re-commits.
-4. Design doc is now finalized — proceed to Phase 2.
+4. Design doc is now finalized — proceed to acceptance tests.
+
+### Step 3: Generate Acceptance Tests (RED)
+
+Before planning, define "done" with executable tests:
+
+1. Dispatch an **Acceptance Test Writer** subagent (Opus) using `./acceptance-test-writer-prompt.md`
+   - Input: finalized design doc (especially acceptance criteria)
+   - Output: integration-level test file(s) that verify feature behavior end-to-end
+2. Run the acceptance tests — verify they **FAIL** (the feature doesn't exist yet)
+   - If tests pass: something is wrong — investigate before proceeding
+   - If tests error (won't compile): this is expected in typed languages — note which tests exist and what they verify. They become the first implementation task.
+3. Commit: `test: add acceptance tests for [feature] (RED)`
+
+These tests define the feature-level RED-GREEN cycle that wraps the entire pipeline. The pipeline is done when these tests pass.
 
 ## Phase 2: Plan (Autonomous)
 
@@ -40,8 +54,9 @@ After the user approves the design and before starting Phase 2:
 
 Dispatch a **Plan Writer** subagent (Opus):
 
-- Read the design doc produced in Phase 1
+- Read the design doc produced in Phase 1 and the acceptance tests from Step 3
 - Write an implementation plan following the `crucible:writing-plans` format
+- If acceptance tests couldn't compile (typed language), Task 1 should create the interfaces/stubs needed for them to compile and fail correctly
 - Include per-task metadata: Files (with count), Complexity (Low/Medium/High), Dependencies
 - Save to `docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md`
 - Plan tasks should be scoped to 2-3 per subagent, ~10 files max (context budget awareness)
@@ -173,14 +188,17 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 ## Phase 4: Completion
 
 After all tasks complete:
-1. Run full test suite
-2. **REQUIRED SUB-SKILL:** Use crucible:requesting-code-review on full implementation (iterative until clean)
-3. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
-4. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
-5. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
-6. Compile summary: what was built, tests passing, review findings addressed, concerns
-7. Report to user
-8. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
+1. Run acceptance tests from Phase 1 Step 3 — verify they **PASS** (GREEN)
+   - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
+   - If all pass: feature is verifiably done. Proceed.
+2. Run full test suite (unit + integration)
+3. **REQUIRED SUB-SKILL:** Use crucible:requesting-code-review on full implementation (iterative until clean)
+4. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
+5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
+6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
+7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
+8. Report to user
+9. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
 
 ## Escalation Triggers (Any Phase)
 
@@ -211,6 +229,7 @@ After all tasks complete:
 
 ## Prompt Templates
 
+- `./acceptance-test-writer-prompt.md` — Phase 1 acceptance test generation
 - `./plan-writer-prompt.md` — Phase 2 plan writer dispatch
 - `./plan-reviewer-prompt.md` — Phase 2 plan reviewer dispatch
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch
