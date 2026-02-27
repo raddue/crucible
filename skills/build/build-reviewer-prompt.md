@@ -76,6 +76,17 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - Are tests independent and deterministic?
     - Do tests follow AAA pattern (Arrange, Act, Assert)?
 
+    **Test Level:**
+    - Are there multi-component behaviors tested only at the unit level?
+    - Should any of these have integration tests instead of (or in addition to) unit tests?
+    - Are complex mock setups masking the need for an integration test?
+
+    **TDD Process Evidence:**
+    - Does the implementer's TDD log list a failure message for each test?
+    - Do the failure messages make sense (indicate missing feature, not typo/setup error)?
+    - Does the git history show test-then-implementation ordering?
+    - If the TDD log is missing or vague, flag it — "TDD log incomplete, cannot verify red-green process"
+
     Report Pass 2 findings.
 
     ## Report Format
@@ -87,6 +98,7 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
 
     ### Pass 2: Test Review
     - **Verdict:** Clean | Issues found
+    - **TDD process:** Verified | Incomplete log | No evidence
     - **Stale tests:** [List]
     - **Missing coverage:** [List with specific code paths]
     - **Tests to update:** [List]

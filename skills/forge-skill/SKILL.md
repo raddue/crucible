@@ -39,7 +39,7 @@ digraph forge_modes {
 - **Feed-Forward** — before brainstorming, planning, or execution begins
 - **Mutation Proposals** — when enough data accumulates (10+ retrospectives, 3+ of same deviation type)
 
-**Significant task** = anything that used `crucible:build`, `crucible:executing-plans`, `crucible:systematic-debugging`, or `crucible:finishing-a-development-branch`. Simple questions and file reads do not qualify.
+**Significant task** = anything that used `crucible:build`, `crucible:systematic-debugging`, or `crucible:finishing-a-development-branch`. Simple questions and file reads do not qualify.
 
 ## Storage
 
@@ -93,7 +93,7 @@ If total retrospective count >= 10 AND any deviation type has 3+ occurrences, su
 
 ### When to Trigger
 
-Before `crucible:brainstorming`, `crucible:writing-plans`, `crucible:executing-plans`, or `crucible:build` begins its core work.
+Before `crucible:brainstorming`, `crucible:writing-plans`, or `crucible:build` begins its core work.
 
 ### The Process
 
@@ -147,8 +147,6 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 |---------------|------|------|--------------|
 | `crucible:build` | Feed-Forward | Phase 1 start | Feature description |
 | `crucible:build` | Retrospective | Phase 4, after red-team, before finishing | Full build summary |
-| `crucible:executing-plans` | Feed-Forward | Step 1 (Load Plan) | Plan summary |
-| `crucible:executing-plans` | Retrospective | Step 4 (Final Report) | Plan + execution summary |
 | `crucible:systematic-debugging` | Retrospective | After fix verified | Bug description + hypothesis log |
 | `crucible:finishing-a-development-branch` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
 | `crucible:brainstorming` | Feed-Forward | Before first question | Topic description |

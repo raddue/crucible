@@ -31,11 +31,15 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
 
     1. Read and understand the task requirements
     2. If anything is unclear, message the lead to ask BEFORE starting
-    3. Implement using TDD (write failing test, make it pass, refactor)
-    4. Run tests after each implementation step
-    5. Commit your work with descriptive messages
-    6. Self-review (see checklist below)
-    7. Report back to the lead
+    3. For each behavior you need to implement, follow this cycle:
+       a. **RED:** Write ONE failing test. Run it. Confirm it FAILS for the right reason (missing feature, not typo/error). Record the failure message.
+       b. **GREEN:** Write MINIMAL code to make the test pass. Run it. Confirm ALL tests pass.
+       c. **COMMIT:** `test: add failing test for X` is optional, but `feat: implement X` after green is required.
+       d. **REFACTOR:** Clean up if needed. Run tests. Confirm still green.
+       e. Repeat for the next behavior.
+    4. Do NOT batch — write one test, see it fail, implement, see it pass. Then next test.
+    5. Self-review (see checklist below)
+    6. Report back to the lead
 
     ## Self-Review Checklist
 
@@ -56,10 +60,13 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     - Did I only build what was requested?
     - Did I follow existing patterns in the codebase?
 
-    **Testing:**
+    **Testing (TDD Evidence):**
+    - For each test: can I name the failure message I saw during RED? If not, I skipped RED.
+    - Did I run tests between EVERY red-green step, or did I batch?
     - Do tests verify behavior (not just mock behavior)?
-    - Did I follow TDD?
     - Are tests comprehensive?
+    - Did I test at the right level? (unit for isolated logic, integration for multi-component behavior)
+    - Am I over-mocking to avoid writing an integration test?
 
     If you find issues during self-review, fix them before reporting.
 
@@ -81,9 +88,13 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
 
     When done, message the lead with:
     - What you implemented
-    - Test results (which tests, all passing?)
+    - **TDD log** — for each test, list: test name, failure message seen during RED, and confirm GREEN
     - Files changed
     - Self-review findings (if any)
     - Unexpected findings or deviations from the plan
     - Any concerns for subsequent tasks
+
+    Example TDD log entry:
+    - `DamageCalculator_CriticalHit_DoublesDamage` — RED: "Assert.AreEqual failed. Expected: 20, Got: 0" → GREEN: pass
+    - `DamageCalculator_ZeroDamage_ReturnsZero` — RED: "NullReferenceException" (test error, not failure — fixed setup, re-ran) → RED: "Assert.AreEqual failed. Expected: 0, Got: 10" → GREEN: pass
 ```

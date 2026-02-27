@@ -26,7 +26,6 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | **build** | End-to-end development pipeline: interactive brainstorming, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion. |
 | **brainstorming** | Interactive design refinement. Explores intent, requirements, and design before implementation. Produces a design doc. |
 | **writing-plans** | Creates detailed TDD implementation plans from specs or requirements. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
-| **executing-plans** | Standalone plan executor. Dispatches subagents per task with risk-based iterative review, verification gates, and architectural checkpoints. |
 
 ### Design & UI
 
@@ -102,7 +101,6 @@ Forked from [obra/superpowers](https://github.com/obra/superpowers) with modific
 - Iterative review loops everywhere (fresh reviewer each round, stagnation detection, no hard caps)
 - Standalone red-team skill with iterative adversarial review
 - Standalone innovate skill for creative enhancement before red-teaming
-- executing-plans skill ported from superpowers with iterative review loops
 - Forge skill for post-task retrospectives, pre-task feed-forward, and skill mutation proposals
 - Cartographer skill for persistent codebase mapping across sessions
 - Systematic debugging Phase 5: post-fix red-team and code review quality gate

@@ -55,6 +55,13 @@ Task tool (general-purpose, model: opus):
     - What does the plan assume about Unity/framework behavior that needs verification?
     - Are there undocumented dependencies on specific execution order or state?
 
+    **Completeness (especially for design docs):**
+    - What requirements are missing that a user would expect?
+    - Are failure modes and error paths specified, or only the happy path?
+    - Is there a testing strategy, or will implementers have to guess what level of testing each behavior needs?
+    - What existing systems are impacted but not mentioned?
+    - Are acceptance criteria concrete enough that "done" is unambiguous?
+
     ## Challenge Classification (REQUIRED)
 
     You MUST classify every challenge:
