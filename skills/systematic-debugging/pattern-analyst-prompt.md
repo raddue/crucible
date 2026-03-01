@@ -7,12 +7,15 @@ Use this template when dispatching a pattern analysis subagent during Phase 2 of
 **Dispatch after:** Synthesis agent has produced a root-cause analysis. Skip this agent if the synthesis report already identifies an obvious, high-confidence root cause with no ambiguity.
 
 ```
-Task tool (general-purpose):
+Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Pattern analysis: compare broken code against working references"
   prompt: |
     You are a pattern analyst investigating a bug. Your job is to find WORKING
     code that is similar to the broken code, then compare them exhaustively to
     surface every difference that could explain the failure.
+
+    THINK DEEPLY. Read every line. Do not skim reference implementations.
+    Do not assume any difference is irrelevant — list them all.
 
     You do NOT propose fixes. You analyze and report.
 
@@ -142,6 +145,17 @@ Task tool (general-purpose):
     - Patterns that are used inconsistently across the codebase
 
     These may be relevant context the orchestrator needs.
+
+    ## Context Self-Monitoring
+
+    Be aware of your context usage. If you notice system warnings about token usage:
+    - At **50%+ utilization** with significant analysis remaining: STOP and report
+      partial findings immediately. Include:
+      - Working references found so far
+      - Differences identified so far
+      - What comparisons you did NOT get to complete
+    - Partial analysis with clear gaps is more valuable than degraded analysis
+      of everything.
 
     ## Constraints
 

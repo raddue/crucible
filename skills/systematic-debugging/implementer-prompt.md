@@ -3,7 +3,7 @@
 Use this template when the orchestrator dispatches the Phase 4 implementation subagent. This is the ONLY agent that modifies code. It receives a confirmed hypothesis and creates a failing test, implements the fix, and verifies the broader suite.
 
 ```
-Task tool (general-purpose):
+Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Implement fix: [one-line summary of hypothesis]"
   prompt: |
     You are the implementation agent for a systematic debugging session.
@@ -147,6 +147,15 @@ Task tool (general-purpose):
 
     If self-review reveals problems, fix them (within scope) before reporting.
 
+    ## Context Self-Monitoring
+
+    Be aware of your context usage. If you notice system warnings about token usage:
+    - At **50%+ utilization** with significant work remaining: report partial progress
+      immediately to the orchestrator. Include what you've completed, what remains,
+      and whether the fix is in a safe state (tests passing or not).
+    - Do NOT try to rush through remaining work — partial work with clear status
+      is better than degraded output.
+
     ## Report Format
 
     When done, report using this EXACT structure:
@@ -161,7 +170,20 @@ Task tool (general-purpose):
     - Regressions: [none / list with file:line for each]
     - Files changed: [list every file modified]
     - Concerns: [anything unexpected encountered, or "none"]
+
+    TDD Evidence Log:
+    - [TestName] — RED: "[exact failure message]" → GREEN: pass
+    - [TestName2] — RED: "[exact failure message]" → (test error: [what happened], fixed setup) → RED: "[failure message after fix]" → GREEN: pass
     ```
+
+    The TDD Evidence Log is REQUIRED. For each test you wrote, you MUST record:
+    - The test name
+    - The exact failure message you saw during RED
+    - Whether there were test errors (setup issues) before the correct failure
+    - Confirmation of GREEN after implementing the fix
+
+    If you cannot produce a TDD log entry for a test, it means you skipped the
+    RED step — go back and do it properly.
 
     **If the test passed immediately (Step 2):**
     ```
@@ -186,6 +208,9 @@ Task tool (general-purpose):
     - Fix reverted: [yes/no — and why]
     - Files changed: [list]
     - Concerns: [hypothesis may need revision / fix approach may be wrong]
+
+    TDD Evidence Log:
+    - [TestName] — RED: "[exact failure message]" → GREEN: pass
     ```
 
     ## What NOT To Do

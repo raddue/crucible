@@ -15,6 +15,8 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 
 **Execution model:** The orchestrator dispatches all investigation and implementation to subagents. The orchestrator NEVER reads code, edits files, or runs tests directly. It forms hypotheses, dispatches work, and makes decisions based on subagent reports.
 
+**Depth principle:** When in doubt, dispatch MORE investigation agents, not fewer. A bug that looks simple from the surface often has a complex root cause. Spinning up 4-6 focused investigators in parallel costs minutes; missing the root cause costs hours.
+
 ## The Iron Law
 
 ```
@@ -49,7 +51,22 @@ Use for ANY technical issue:
 
 ## The Orchestrator-Subagent Debugging Workflow
 
-All investigation and implementation is delegated to subagents via the Task tool. The orchestrator handles hypothesis formation, dispatch decisions, and escalation -- nothing else.
+All investigation and implementation is delegated to subagents via the Agent tool. The orchestrator handles hypothesis formation, dispatch decisions, and escalation -- nothing else.
+
+### Subagent Model Selection
+
+| Phase | Agent | Model | Rationale |
+|-------|-------|-------|-----------|
+| Phase 1 | Error Analysis | Opus | Deep code reading and call-chain tracing |
+| Phase 1 | Change Analysis | Opus | Cross-file diff analysis |
+| Phase 1 | Evidence Gathering | Opus | Multi-component data flow tracing |
+| Phase 1 | Reproduction | Opus | Complex reproduction requires reasoning |
+| Phase 1 | Deep Dive (any) | Opus | Specialized investigation |
+| Synthesis | Consolidation | Sonnet | Summarization of existing findings |
+| Phase 2 | Pattern Analysis | Opus | Exhaustive comparison requires depth |
+| Phase 4 | Implementation | Opus | TDD + root cause fix |
+| Phase 5 | Red-team | Opus | Adversarial analysis |
+| Phase 5 | Code review | Opus or Sonnet | Lead decides by fix complexity |
 
 ### Workflow Overview
 
@@ -60,11 +77,15 @@ Bug reported / test failure / unexpected behavior
 Orchestrator: Parse initial context (error message, failing test, user description)
     |
     v
-Phase 1: Dispatch 2-4 parallel investigation subagents
+Phase 0: Load codebase context (crucible:cartographer)
+    |
+    v
+Phase 1: Dispatch 3-6 parallel investigation subagents
     |  +-- Error Analysis agent (always)
     |  +-- Change Analysis agent (always)
     |  +-- Evidence Gathering agent (conditional -- multi-component systems)
     |  +-- Reproduction agent (conditional -- intermittent/unclear bugs)
+    |  +-- Deep Dive agents (conditional -- 1-2 focused on specific subsystems)
     |
     v
 Synthesis agent: Consolidate all Phase 1 findings -> concise root-cause analysis
@@ -91,35 +112,53 @@ Done.
 
 ---
 
+### Phase 0: Load Codebase Context
+
+**Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, paste them into every investigator's prompt so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
+
+If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
+
+---
+
 ### Phase 1: Investigation (Parallel Subagent Dispatch)
 
 **Prompt template:** `./investigator-prompt.md`
 
-Dispatch 2-4 investigation subagents in parallel using the Task tool in a single message. All subagents use `subagent_type="general-purpose"`. Pass all known context (error messages, stack traces, file paths, user description) verbatim to each agent -- do not make them search for context you already have.
+Dispatch 3-6 investigation subagents in parallel using the Agent tool in a single message. All subagents use `subagent_type="general-purpose"`, `model: opus`. Pass all known context (error messages, stack traces, file paths, user description, and cartographer module context from Phase 0) verbatim to each agent -- do not make them search for context you already have.
 
-**Before dispatching:** Use crucible:cartographer (load mode) — if module files exist for the area being investigated, paste them into each investigator's prompt so they don't waste time re-discovering codebase structure.
+**Bias toward MORE agents, not fewer.** Each investigator is cheap. Missing a root cause is expensive. When in doubt about whether to dispatch an additional agent, dispatch it.
 
 **Always dispatch:**
 
-1. **Error Analysis Agent** -- Read error messages, stack traces, and logs. Identify the exact failure point, error codes, and what the error is telling us.
+1. **Error Analysis Agent** -- Read error messages, stack traces, and logs. Identify the exact failure point, error codes, and what the error is telling us. Trace the call chain backward to the originating bad value.
 
 2. **Change Analysis Agent** -- Check recent changes via git diff, recent commits, new dependencies, config changes, and environmental differences. Identify what changed that could cause this.
 
-**Conditionally dispatch:**
+**Conditionally dispatch (lean toward dispatching):**
 
 3. **Evidence Gathering Agent** -- For multi-component systems (CI pipelines, API chains, layered architectures). Add diagnostic instrumentation at component boundaries. Log what enters and exits each component. Run once, report where the data flow breaks.
 
 4. **Reproduction Agent** -- For intermittent, timing-dependent, or unclear bugs. Attempt to reproduce consistently. Document exact steps, frequency, and conditions. If not reproducible, gather more data rather than guessing.
 
+5. **Deep Dive Agent(s)** -- For bugs touching multiple subsystems, dispatch 1-2 additional agents each focused on a specific subsystem or code path. Give each a narrow scope: "Investigate how [specific subsystem] handles [specific scenario]." These agents read deeply into a single area rather than scanning broadly.
+
+6. **Dependency/Environment Agent** -- For bugs that might be caused by version mismatches, missing registrations, configuration drift, or framework behavior changes. Check DI registrations, package versions, framework release notes, and environment state.
+
 #### Phase 1 Dispatch Heuristics
 
 | Bug Characteristics | Agents to Dispatch |
 |--------------------|--------------------|
-| Test failure with clear stack trace | Error + Change |
-| Vague "something broke" across multiple systems | All four agents |
-| Intermittent / timing-dependent issue | Error + Change + Reproduction |
-| Multi-layer system failure (CI, API chain) | Error + Change + Evidence Gathering |
-| Performance regression | Error + Change + Evidence Gathering |
+| Test failure with clear stack trace | Error + Change + Deep Dive (on the failing subsystem) |
+| Vague "something broke" across multiple systems | All six agent types |
+| Intermittent / timing-dependent issue | Error + Change + Reproduction + Deep Dive |
+| Multi-layer system failure (CI, API chain) | Error + Change + Evidence Gathering + Deep Dive per layer |
+| Performance regression | Error + Change + Evidence Gathering + Deep Dive (hot path) |
+| "It worked yesterday" | Error + Change + Dependency/Environment |
+| Framework/library update broke things | Error + Change + Dependency/Environment + Deep Dive |
+
+#### Context Self-Monitoring (All Phase 1 Agents)
+
+Every investigation subagent prompt MUST include the context self-monitoring block from `./investigator-prompt.md`. Investigators reading large codebases are prime candidates for context exhaustion. If an agent hits 50%+ utilization with significant investigation remaining, it must report partial findings immediately rather than silently degrading.
 
 ---
 
@@ -127,15 +166,18 @@ Dispatch 2-4 investigation subagents in parallel using the Task tool in a single
 
 **Prompt template:** `./synthesis-prompt.md`
 
-After all Phase 1 agents report back, dispatch a single Synthesis agent that receives all Phase 1 reports verbatim.
+After all Phase 1 agents report back, dispatch a single Synthesis agent (model: sonnet) that receives all Phase 1 reports verbatim.
+
+**Trust-but-verify:** The synthesis agent does NOT take investigator claims at face value. It cross-references findings between agents, flags contradictions, and identifies claims that lack concrete evidence (file paths, line numbers, stack traces). Speculative findings are downgraded. Concrete artifacts outrank plausible theories.
 
 **The Synthesis agent produces:**
 - A 200-400 word root-cause analysis
-- Ranked list of likely causes (most to least probable)
+- Ranked list of likely causes (most to least probable), each with evidence strength rating
+- Cross-references between agent findings (where they agree, where they contradict)
 - Identified unknowns or gaps in evidence
 - Recommendation: is the root cause obvious, or is pattern analysis needed?
 
-**Skip-ahead rule:** If all Phase 1 agents converge on the same root cause and the Synthesis agent confirms it as obvious, the orchestrator may skip Phase 2 and proceed directly to Phase 3 (hypothesis formation).
+**Skip-ahead rule:** If all Phase 1 agents converge on the same root cause with concrete evidence (not just speculation) and the Synthesis agent confirms it as obvious, the orchestrator may skip Phase 2 and proceed directly to Phase 3 (hypothesis formation).
 
 ---
 
@@ -247,24 +289,39 @@ After the Implementation agent reports back, the orchestrator evaluates:
 **Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug.
 
 **Fix does not resolve the issue** -- Before looping back:
-1. Log the failure in the hypothesis log
+1. Log the failure in the hypothesis log with metrics (see Stagnation Detection below)
 2. Decide on cleanup: keep the test if it validly reproduces the bug (even if the fix was wrong). Revert both test and fix only if the test was hypothesis-specific and not a valid reproduction.
 3. If reversion is needed, dispatch a cleanup subagent (`subagent_type="general-purpose"`) with instructions to: revert the specific files listed in the Implementation Report's "Files changed" field using `git checkout -- <file>`, then verify the test suite passes after revert. Tell the agent which files to revert and whether to keep or remove the test file.
-4. Loop back to Phase 1 with the new information from the failed attempt.
+4. Loop back to Phase 1 with the new information from the failed attempt. On loop-back, dispatch MORE agents than the prior cycle, not fewer — widen the investigation.
+
+#### Stagnation Detection (from red-team pattern)
+
+Track a stagnation metric across cycles — the hypothesis specificity score:
+
+| Metric | What to Track |
+|--------|--------------|
+| Root causes identified | How many distinct root causes were surfaced across all investigators |
+| Evidence strength | How many findings had concrete evidence (file:line, stack trace, git blame) vs speculation |
+| New information | Did this cycle surface information that was NOT available in prior cycles? |
+
+**Stagnation rule:** If Cycle N+1 surfaces no new information compared to Cycle N (same root causes, same evidence, same gaps), the orchestrator STOPS and escalates immediately. Do not dispatch Cycle N+2 — the investigation is stuck, not progressing.
 
 #### Escalation Tiers
 
 | Cycle | Action |
 |-------|--------|
-| 1 | Normal flow |
-| 2 | Loop back with learnings from Cycle 1 |
-| 3 | Final attempt -- investigation agents are instructed to look for something fundamentally different from previous hypotheses |
+| 1 | Normal flow — dispatch 3-6 investigators |
+| 2 | Loop back with learnings. Dispatch MORE agents than Cycle 1. Explicitly exclude paths already ruled out. |
+| 3 | Final attempt — investigation agents are instructed to look for something fundamentally different from previous hypotheses. Add Deep Dive agents targeting areas not yet investigated. |
 | 4 | **No dispatch.** Present the full hypothesis log to the user. Flag as likely architectural problem. Discuss fundamentals before attempting more fixes. |
 
-**Pattern indicating architectural problem (Cycle 4 escalation):**
+**Stagnation overrides cycle count:** If stagnation is detected at any cycle (even Cycle 2), escalate immediately rather than waiting for Cycle 4.
+
+**Pattern indicating architectural problem (Cycle 4 or stagnation escalation):**
 - Each fix reveals new shared state, coupling, or problems in different places
 - Fixes require massive refactoring to implement
 - Each fix creates new symptoms elsewhere
+- Investigation keeps finding the same root causes but fixes don't resolve them
 
 This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with your human partner before attempting more fixes.
 
@@ -274,11 +331,12 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 
 | Phase | Agent(s) | Key Activities | Success Criteria |
 |-------|----------|---------------|------------------|
-| **1. Investigation** | 2-4 parallel subagents | Read errors, check changes, gather evidence, reproduce | Raw findings collected |
-| **Synthesis** | 1 subagent | Consolidate, rank, identify unknowns | Concise root-cause analysis |
-| **2. Pattern** | 1 subagent (skippable) | Find working examples, compare exhaustively | Differences identified |
+| **0. Context** | Cartographer + optional Explore | Load module context for investigators | Codebase context ready for prompts |
+| **1. Investigation** | 3-6 parallel subagents (Opus) | Read errors, check changes, gather evidence, deep dive, reproduce | Raw findings collected |
+| **Synthesis** | 1 subagent (Sonnet) | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
+| **2. Pattern** | 1 subagent (Opus, skippable) | Find working examples, compare exhaustively | Differences identified |
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
-| **4. Implementation** | 1 subagent | TDD fix cycle | Bug resolved, tests pass |
+| **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
 
 ---
@@ -364,10 +422,13 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:test-driven-development`** -- Implementation agent follows TDD for Phase 4
 - **`crucible:verification-before-completion`** -- Verify fix worked before claiming success
 - **`crucible:dispatching-parallel-agents`** -- Phase 1 parallel dispatch pattern
+- **`crucible:red-team`** -- Adversarial review in Phase 5 (stagnation detection pattern also used in loop-back)
+
+**Required skills:**
+- **`crucible:cartographer`** -- Phase 0: load module context for investigators. Phase 4 completion: record discoveries.
 
 **Recommended skills:**
 - **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)
-- **`crucible:cartographer`** -- Load module context for investigators, record discoveries after fix
 
 ## Real-World Impact
 
