@@ -12,6 +12,10 @@ Task tool (general-purpose, model: opus):
 
     [FULL TEXT of the design doc — paste it here, don't make the subagent read the file]
 
+    ## Acceptance Tests
+
+    [FULL TEXT or summary of acceptance tests generated from the design. These define "done" at the feature level. If tests couldn't compile (typed language), Task 1 of your plan should create the interfaces/stubs needed for them to compile and fail correctly.]
+
     ## Plan Format Requirements
 
     **REQUIRED SUB-SKILL:** Use crucible:writing-plans — follow its format exactly.
