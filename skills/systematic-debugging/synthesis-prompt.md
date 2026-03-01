@@ -5,11 +5,16 @@ Use this template when dispatching a synthesis subagent to consolidate Phase 1 i
 The orchestrator pastes ALL Phase 1 agent reports verbatim into the prompt below. The synthesis agent distills them into a concise root-cause analysis so the orchestrator only reads a short summary.
 
 ```
-Task tool (general-purpose):
+Agent tool (subagent_type: "general-purpose", model: sonnet):
   description: "Synthesize Phase 1 investigation findings into root-cause analysis"
   prompt: |
     You are a synthesis agent. Your job is to consolidate multiple investigation
     reports into a single, concise root-cause analysis.
+
+    CRITICAL: Do NOT take investigator claims at face value. Cross-reference
+    findings between agents. Downgrade claims that lack concrete evidence
+    (file paths, line numbers, stack traces, command output). Speculation is
+    noted but ranked below findings with artifacts.
 
     ## Bug Description
 
@@ -45,16 +50,25 @@ Task tool (general-purpose):
        evidence (more concrete: line numbers, stack traces, git diffs beat
        speculation).
 
-    3. **Ranks by evidence strength** — Order suspects from strongest to weakest
+    3. **Assesses evidence quality** — For each investigator finding, rate it:
+       - **Concrete:** Has file:line references, stack traces, git blame, or
+         command output. This is strong evidence.
+       - **Supported:** Has code references but the causal link is inferred,
+         not proven. This is medium evidence.
+       - **Speculative:** Plausible theory without concrete artifacts. This
+         is weak evidence. Do NOT rank speculative findings highly.
+
+    4. **Ranks by evidence strength** — Order suspects from strongest to weakest
        evidence. Concrete artifacts (stack traces, git blame, data flow traces)
        outrank plausible theories. If one suspect has overwhelming evidence,
        say so directly.
 
-    4. **Highlights unknowns** — What was NOT investigated? What gaps remain?
+    5. **Highlights unknowns** — What was NOT investigated? What gaps remain?
        What assumptions are agents making without proof? Be explicit about what
-       we still do not know.
+       we still do not know. If a Deep Dive agent reported partial findings
+       due to context exhaustion, flag the uninvestigated area explicitly.
 
-    5. **Recommends Phase 2 focus** — Tell the orchestrator exactly where
+    6. **Recommends Phase 2 focus** — Tell the orchestrator exactly where
        pattern analysis should look: which files to compare, which working
        examples to find, which differences to examine. If the root cause is
        already obvious from evidence, say so clearly — the orchestrator may
@@ -79,9 +93,12 @@ Task tool (general-purpose):
     ```
     Root Cause Analysis:
     - Primary suspect: [component/file/line] because [concrete evidence]
+    - Evidence quality: [Concrete / Supported / Speculative] — [what artifacts support this?]
     - Contributing factors: [list of secondary issues or conditions, if any]
+    - Cross-references: [which agents agree, which disagree, and on what]
     - Contradictions: [conflicting findings between agents, or "None"]
-    - Unknowns: [gaps in investigation, uninvestigated areas]
+    - Downgraded claims: [investigator findings that lacked evidence, or "None"]
+    - Unknowns: [gaps in investigation, uninvestigated areas, partial reports]
     - Confidence: [high/medium/low] — [one-sentence justification]
     - Recommended focus for pattern analysis: [specific files/patterns to
       compare, or "Root cause is clear — recommend proceeding directly to

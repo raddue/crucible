@@ -4,16 +4,22 @@ Use this template when dispatching Phase 1 investigation subagents. The orchestr
 
 - **Error Analysis** — Always dispatched
 - **Change Analysis** — Always dispatched
-- **Evidence Gathering** — Only when multiple components or layers are involved
-- **Reproduction** — Only when the bug is intermittent or repro steps are unclear
+- **Evidence Gathering** — When multiple components or layers are involved
+- **Reproduction** — When the bug is intermittent or repro steps are unclear
+- **Deep Dive** — When a specific subsystem needs exhaustive investigation
+- **Dependency/Environment** — When the bug might be environmental (versions, config, DI)
 
 Fill in the placeholders and select the role-specific instructions block for the agent being dispatched.
 
 ```
-Task tool (general-purpose):
+Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Investigate bug: [ROLE_NAME] — [short bug summary]"
   prompt: |
     You are a [ROLE_NAME] investigator for a systematic debugging session.
+
+    THINK DEEPLY. Do not skim. Do not settle for surface-level findings.
+    Read every line of relevant code. Trace every call chain to its origin.
+    Follow data through every transformation. Question every assumption.
 
     ## Bug Context
 
@@ -41,10 +47,20 @@ Task tool (general-purpose):
     The hypothesis log tells you what has already been tried. DO NOT re-investigate
     paths that have already been ruled out. Focus on what the prior cycles missed.]
 
+    ## Codebase Context (from Cartographer)
+
+    [PASTE module context from crucible:cartographer here. Include:
+    - Module map files for relevant subsystems
+    - Key file paths, class hierarchies, dependency chains
+    - Known conventions and landmines
+    If no cartographer data exists, write "No cartographer data available —
+    agent must discover codebase structure independently."]
+
     ## Your Role: [ROLE_NAME]
 
     [SELECT ONE of the four role-specific instruction blocks below and paste it here.
-    Delete the other three.]
+    Delete the other three. For Deep Dive or Dependency/Environment roles, see the
+    additional role blocks at the end.]
 
     --- ROLE: Error Analysis ---
 
@@ -158,7 +174,70 @@ Task tool (general-purpose):
     - If you could NOT reproduce: every variation you tried and the result of each
     - Environmental details: OS, versions, relevant config, state of the system before reproduction
 
+    --- ROLE: Deep Dive ---
+
+    You are a Deep Dive investigator. You are dispatched to investigate a
+    SPECIFIC subsystem or code path in depth. Your scope is narrow but your
+    investigation must be exhaustive.
+
+    **Your assigned focus area:**
+    [ORCHESTRATOR: Specify the exact subsystem, class, module, or code path
+    this agent should investigate. Be specific: "the TurnManager -> CombatSystem
+    interaction" not "the combat code."]
+
+    **What to investigate:**
+    1. Read EVERY file in your assigned focus area — do not skim
+    2. Trace every public method's callers (who calls this? with what values?)
+    3. Trace every dependency (what does this code depend on? are those dependencies healthy?)
+    4. Map the state transitions — what state does the code expect on entry, how does it mutate state, what state does it leave behind?
+    5. Look for implicit assumptions — null checks that are missing, ordering that is assumed but not guaranteed, state that is expected but not validated
+    6. Check lifecycle timing — when is this code initialized? When is it destroyed? Are there race windows?
+    7. If this code interacts with other subsystems, read the interaction boundary in both directions
+
+    **What to report:**
+    - Complete map of the focus area: classes, key methods, dependencies, state flow
+    - Every assumption the code makes (explicitly or implicitly)
+    - Anything that looks fragile, surprising, or inconsistent
+    - The specific interaction points where this subsystem connects to the rest of the codebase
+    - Evidence of the bug's manifestation within this area (or evidence that the bug is NOT in this area)
+
+    --- ROLE: Dependency/Environment ---
+
+    You are the Dependency/Environment investigator. You are dispatched because
+    the bug might be caused by environmental factors rather than code logic.
+
+    **What to investigate:**
+    1. Check package/dependency versions (package.json, .csproj, Packages/manifest.json)
+    2. Look for recent version bumps in dependencies and read their changelogs
+    3. Check DI/IoC container registrations — are all expected types registered? Are scopes correct?
+    4. Verify configuration files match expected format and values
+    5. Check for missing or changed environment variables
+    6. Look for framework/engine version requirements vs actual version
+    7. Check for deprecated APIs being used that may have changed behavior
+    8. Verify build configuration (debug vs release, defines, platform settings)
+
+    **What to report:**
+    - All dependency versions and any recent changes
+    - DI registration status for types involved in the bug
+    - Configuration state and any discrepancies
+    - Framework/engine version compatibility issues
+    - Deprecated API usage
+    - Build configuration relevant to the bug
+    - Any environmental factor that could explain the behavior difference
+
     --- END ROLE BLOCKS ---
+
+    ## Context Self-Monitoring
+
+    Be aware of your context usage. If you notice system warnings about token usage:
+    - At **50%+ utilization** with significant investigation remaining: STOP investigating
+      and report your PARTIAL findings immediately. Include:
+      - What you investigated so far
+      - What you found
+      - What you did NOT get to investigate
+      - Your best assessment based on partial information
+    - Do NOT try to rush through remaining investigation — partial findings with
+      clear gaps are more valuable than degraded analysis of everything.
 
     ## Constraints
 
