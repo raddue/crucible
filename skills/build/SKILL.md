@@ -129,8 +129,21 @@ For each task (or wave of parallel tasks):
    - Use `./build-implementer-prompt.md` template
    - Pass full task text, file paths, project conventions
    - Implementer follows TDD, writes tests, runs tests, commits, self-reviews
-3. When Implementer reports completion, spawn **Reviewer** teammate
+3. When Implementer reports completion, run **De-Sloppify Cleanup** (see below)
+4. After cleanup completes, spawn **Reviewer** teammate
    - Use `./build-reviewer-prompt.md` template
+
+#### De-Sloppify Cleanup
+
+After the implementer reports completion and before dispatching the reviewer:
+
+1. Record the pre-cleanup commit SHA
+2. Dispatch a fresh **Cleanup Agent** (Opus) using `./cleanup-prompt.md`
+   - Input: `git diff <pre-task-sha>..HEAD` (the implementer's committed changes)
+   - The orchestrator provides the pre-task commit SHA to the cleanup agent
+3. Cleanup agent reviews changes, removes unnecessary code (see allowlist), runs tests
+4. If cleanup made changes, commits separately: `refactor: cleanup task N implementation`
+5. If cleanup found nothing to remove, reports "No cleanup needed" and proceeds
 
 #### Reviewer Model Selection (Lead Decides Per-Task)
 
@@ -147,7 +160,8 @@ Each task gets TWO review passes before completion:
 
 ```dot
 digraph review {
-  "Implementer builds + tests" -> "Pass 1: Code Review";
+  "Implementer builds + tests" -> "De-sloppify cleanup";
+  "De-sloppify cleanup" -> "Pass 1: Code Review";
   "Pass 1: Code Review" -> "Implementer fixes code findings";
   "Implementer fixes code findings" -> "Pass 2: Test Review";
   "Pass 2: Test Review" -> "Implementer fixes test findings";
@@ -234,6 +248,7 @@ After all tasks complete:
 - `./plan-reviewer-prompt.md` — Phase 2 plan reviewer dispatch
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch
 - `./build-reviewer-prompt.md` — Phase 3 reviewer dispatch
+- `./cleanup-prompt.md` — Phase 3 de-sloppify cleanup dispatch
 - `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
 
 Red-team and innovate prompts live in their respective skills:
