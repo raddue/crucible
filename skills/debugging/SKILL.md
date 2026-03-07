@@ -13,6 +13,21 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 
 **Violating the letter of this process is violating the spirit of debugging.**
 
+## Communication Requirement (Non-Negotiable)
+
+**Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
+
+Every status update must include:
+1. **Current phase** — Which debugging phase you're in
+2. **Hypothesis status** — Current hypothesis being tested (or "forming hypothesis")
+3. **What just completed** — What the last agent reported (investigation findings, fix results)
+4. **What's being dispatched next** — What you're about to do and why
+5. **Cycle count** — Which hypothesis cycle you're on (cycle 1, cycle 2, etc.)
+
+**After compaction:** Re-read the hypothesis log from disk and output current status before continuing.
+
+**This requirement exists because:** Debugging sessions can involve multiple investigation rounds and fix attempts. Without narration, the user has no visibility into which hypotheses have been tried, what evidence was found, or why the orchestrator is pursuing a particular path.
+
 **Execution model:** The orchestrator dispatches all investigation and implementation to subagents. The orchestrator NEVER reads code, edits files, or runs tests directly. It forms hypotheses, dispatches work, and makes decisions based on subagent reports.
 
 **Depth principle:** When in doubt, dispatch MORE investigation agents, not fewer. A bug that looks simple from the surface often has a complex root cause. Spinning up 4-6 focused investigators in parallel costs minutes; missing the root cause costs hours.
@@ -435,6 +450,9 @@ If you catch yourself thinking:
 - "I already know what's wrong, I'll skip investigation"
 - "Let me just run the tests myself to check"
 - "I'll look at the code to confirm before dispatching"
+
+**Communication violations:**
+- "Dispatching agents without narrating what you're doing and why"
 
 **Classic debugging traps (still apply):**
 - "Quick fix for now, investigate later"

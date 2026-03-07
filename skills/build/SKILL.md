@@ -13,6 +13,25 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
 
+## Communication Requirement (Non-Negotiable)
+
+**Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
+
+Every status update must include:
+1. **Current phase** — Which pipeline phase you're in
+2. **What just completed** — What the last agent reported
+3. **What's being dispatched next** — What you're about to do and why
+4. **Task checklist** — Current status of all tasks (pending/in-progress/complete)
+
+**After compaction:** If you just experienced context compaction, re-read the task list from disk and output current status before continuing. Do NOT proceed silently.
+
+**Examples of GOOD narration:**
+> "Phase 3, Task 4 complete. Reviewer found 2 Important issues — dispatching implementer to fix. Tasks: [1] ✓ [2] ✓ [3] ✓ [4] fixing [5-8] pending"
+
+> "Phase 2 complete. Plan passed review with 0 issues on round 2. Dispatching innovate on the plan."
+
+**This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
+
 ## Phase 1: Brainstorm (Interactive)
 
 - **Model:** Opus (creative/architectural work needs the best model)
@@ -111,6 +130,21 @@ Read the approved plan. Create tasks via `TaskCreate` for each plan task, includ
 - Subject from plan task title
 - Description with full plan task text (subagents should never read the plan file)
 - Dependencies via `TaskUpdate` with `addBlockedBy`
+
+#### Agent Teams Fallback
+
+If `TeamCreate` fails (agent teams not available), output a clear one-time warning:
+
+> ⚠️ Agent teams are not available. Recommended: set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+> Falling back to sequential subagent dispatch via Agent tool.
+
+Then fall back to sequential subagent dispatch via the regular Task tool (without `team_name`). Everything still works — independent tasks run sequentially instead of in parallel via teammates.
+
+**What changes in fallback mode:**
+- Tasks are dispatched via `Agent` tool instead of as teammates
+- Independent tasks that would run in parallel now run sequentially
+- Task tracking still uses `TaskCreate`/`TaskUpdate` for state management
+- All other pipeline behavior (TDD, review, de-sloppify, quality gates) is unchanged
 
 ### Step 2: Analyze Dependencies and Execution Order
 
@@ -277,6 +311,7 @@ Decision types to capture:
 - All important state on disk (plan files, task list)
 - Teammates report at 50%+ context usage
 - Lead compaction acceptable — task list is source of truth
+- **Agent teams unavailable:** If agent teams are not enabled, the lead dispatches tasks sequentially via Agent tool. Task tracking still uses TaskCreate/TaskUpdate. The pipeline is slower but functionally identical.
 
 ## Prompt Templates
 
