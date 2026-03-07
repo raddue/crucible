@@ -1,5 +1,5 @@
 ---
-name: brainstorming
+name: design
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
 ---
 
@@ -55,8 +55,8 @@ If a critical item is missing, raise it with the user before saving — don't si
 
 **Implementation (if continuing):**
 - Ask: "Ready to set up for implementation?"
-- Use crucible:using-git-worktrees to create isolated workspace
-- Use crucible:writing-plans to create detailed implementation plan
+- Use crucible:worktree to create isolated workspace
+- Use crucible:planning to create detailed implementation plan
 
 ## Key Principles
 

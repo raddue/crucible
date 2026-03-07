@@ -1,6 +1,6 @@
 # Crucible
 
-A collection of [Claude Code](https://claude.ai/code) skills for systematic software development. Covers the full lifecycle: brainstorming, planning, TDD implementation, code review, debugging, and branch completion.
+A collection of [Claude Code](https://claude.ai/code) skills for systematic software development. Covers the full lifecycle: design, planning, TDD implementation, code review, debugging, and branch completion.
 
 ## Installation
 
@@ -24,8 +24,8 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | Skill | Description |
 |-------|-------------|
 | **build** | End-to-end development pipeline: interactive brainstorming, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion. |
-| **brainstorming** | Interactive design refinement. Explores intent, requirements, and design before implementation. Produces a design doc. |
-| **writing-plans** | Creates detailed TDD implementation plans from specs or requirements. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
+| **design** | Interactive design refinement. Explores intent, requirements, and design before implementation. Produces a design doc. |
+| **planning** | Creates detailed TDD implementation plans from specs or requirements. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
 
 ### Design & UI
 
@@ -40,17 +40,17 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | Skill | Description |
 |-------|-------------|
 | **test-driven-development** | Red-green-refactor discipline. Write failing test first, minimal implementation, refactor. Enforced rigorously with rationalization counters. |
-| **using-git-worktrees** | Creates isolated git worktrees for feature work with smart directory selection and safety verification. |
-| **dispatching-parallel-agents** | Pattern for launching 2+ independent subagents to work without shared state or sequential dependencies. |
+| **worktree** | Creates isolated git worktrees for feature work with smart directory selection and safety verification. |
+| **parallel** | Pattern for launching 2+ independent subagents to work without shared state or sequential dependencies. |
 
 ### Quality
 
 | Skill | Description |
 |-------|-------------|
-| **requesting-code-review** | Dispatches a code review subagent to verify work meets requirements. |
-| **receiving-code-review** | Anti-sycophancy skill for receiving review feedback. Requires technical rigor and verification, not blind implementation. |
-| **verification-before-completion** | Evidence-before-claims discipline. Run verification commands and confirm output before making success claims. |
-| **finishing-a-development-branch** | Guides completion of development work — comprehensive review, then structured options for merge, PR, or cleanup. |
+| **code-review** | Dispatches a code review subagent to verify work meets requirements. |
+| **review-feedback** | Anti-sycophancy skill for receiving review feedback. Requires technical rigor and verification, not blind implementation. |
+| **verify** | Evidence-before-claims discipline. Run verification commands and confirm output before making success claims. |
+| **finish** | Guides completion of development work — comprehensive review, then structured options for merge, PR, or cleanup. |
 | **red-team** | Adversarial review of any artifact. Iterates with fresh reviewers until clean or stagnation. Used on designs, plans, and implementations. |
 | **innovate** | Divergent creativity injection. Proposes the single most impactful addition before adversarial review. |
 
@@ -58,7 +58,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 
 | Skill | Description |
 |-------|-------------|
-| **systematic-debugging** | Structured investigation before proposing fixes. Includes investigator, pattern analyst, synthesis subagent templates, and post-fix red-team/code-review quality gate. |
+| **debugging** | Structured investigation before proposing fixes. Includes investigator, pattern analyst, synthesis subagent templates, and post-fix red-team/code-review quality gate. |
 
 ### Knowledge & Learning
 
@@ -71,8 +71,8 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 
 | Skill | Description |
 |-------|-------------|
-| **using-crucible** | Bootstrap skill. Establishes how to find and use skills, requiring skill invocation before any response. |
-| **writing-skills** | TDD applied to process documentation. Create, test, and refine skills with pressure scenarios and rationalization counters. |
+| **getting-started** | Bootstrap skill. Establishes how to find and use skills, requiring skill invocation before any response. |
+| **skill-authoring** | TDD applied to process documentation. Create, test, and refine skills with pressure scenarios and rationalization counters. |
 
 ## How It Works
 
@@ -87,7 +87,7 @@ The **build** skill is the main entry point for feature development. It chains t
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators that integrate across the pipeline. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom). Both accumulate across sessions.
 
-Individual skills can also be used standalone (e.g., `crucible:test-driven-development` for any implementation work, `crucible:systematic-debugging` for any bug).
+Individual skills can also be used standalone (e.g., `crucible:test-driven-development` for any implementation work, `crucible:debugging` for any bug).
 
 ## Origin
 

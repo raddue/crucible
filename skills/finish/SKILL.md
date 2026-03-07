@@ -1,5 +1,5 @@
 ---
-name: finishing-a-development-branch
+name: finish
 description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup
 ---
 
@@ -11,7 +11,7 @@ Guide completion of development work by presenting clear options and handling ch
 
 **Core principle:** Verify tests -> Code review -> Red-team -> Present options -> Execute choice -> Clean up.
 
-**Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
+**Announce at start:** "I'm using the finish skill to complete this work."
 
 ## The Process
 
@@ -41,7 +41,7 @@ Stop. Don't proceed to Step 2.
 
 **Before presenting options, run a full code review.**
 
-**REQUIRED SUB-SKILL:** Use crucible:requesting-code-review
+**REQUIRED SUB-SKILL:** Use crucible:code-review
 
 1. Get base and head SHAs:
 ```bash
@@ -54,7 +54,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)...HEAD
 ```
 
-3. Dispatch a code review subagent (general-purpose) using the `requesting-code-review/code-reviewer.md` template with:
+3. Dispatch a code review subagent (general-purpose) using the `code-review/code-reviewer.md` template with:
    - What was implemented (summary of branch work)
    - The plan or requirements it was built against
    - Base and head SHAs
@@ -219,7 +219,7 @@ git worktree remove <worktree-path>
 
 **Skipping code review**
 - **Problem:** Subtle bugs, architectural violations, and style drift make it into the branch
-- **Fix:** Always run crucible:requesting-code-review before presenting options. The orchestrator's lightweight review during execution is not sufficient.
+- **Fix:** Always run crucible:code-review before presenting options. The orchestrator's lightweight review during execution is not sufficient.
 
 **Open-ended questions**
 - **Problem:** "What should I do next?" -> ambiguous
@@ -258,7 +258,7 @@ git worktree remove <worktree-path>
 - **build** (Phase 4) - After all tasks complete
 
 **Pairs with:**
-- **using-git-worktrees** - Cleans up worktree (if applicable)
+- **worktree** - Cleans up worktree (if applicable)
 - **crucible:red-team** — Adversarial review before presenting options
 
 **Recommended:**

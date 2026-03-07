@@ -36,7 +36,7 @@ digraph cartographer_modes {
 
 **Three modes:**
 - **Record** — after significant exploration during build, debugging, or investigation
-- **Consult** — before brainstorming, planning, or execution (pairs with `crucible:forge` feed-forward)
+- **Consult** — before design, planning, or execution (pairs with `crucible:forge` feed-forward)
 - **Load** — when dispatching implementer/reviewer/investigator subagents into a mapped area
 
 ## Storage
@@ -72,7 +72,7 @@ All data lives in the project memory directory:
 
 ### When to Trigger
 
-After any significant exploration — the agent read 5+ files, traced a call chain, investigated a module's behavior, or discovered something non-obvious about the codebase. This happens naturally during `crucible:build` and `crucible:systematic-debugging`.
+After any significant exploration — the agent read 5+ files, traced a call chain, investigated a module's behavior, or discovered something non-obvious about the codebase. This happens naturally during `crucible:build` and `crucible:debugging`.
 
 ### The Process
 
@@ -219,7 +219,7 @@ digraph deps {
 
 ### When to Trigger
 
-Before `crucible:brainstorming`, `crucible:writing-plans`, or `crucible:build` begins its core work. Runs alongside `crucible:forge` feed-forward.
+Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its core work. Runs alongside `crucible:forge` feed-forward.
 
 ### The Process
 
@@ -290,8 +290,8 @@ During retrospective, Forge captures whether the Cartographer's information was 
 | `crucible:build` | Consult | Phase 1 start (with forge feed-forward) | Task description |
 | `crucible:build` | Load | Phase 3, each implementer/reviewer dispatch | Module names + file paths |
 | `crucible:build` | Record | Phase 4, after completion | Files explored, modules touched |
-| `crucible:systematic-debugging` | Load | Phase 1 investigator dispatch | Module names |
-| `crucible:systematic-debugging` | Record | After fix verified | What was learned |
+| `crucible:debugging` | Load | Phase 1 investigator dispatch | Module names |
+| `crucible:debugging` | Record | After fix verified | What was learned |
 
 **Cartographer is RECOMMENDED, not REQUIRED.** Like Forge, it is a knowledge accelerator, not a quality gate.
 

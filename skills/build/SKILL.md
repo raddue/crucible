@@ -7,7 +7,7 @@ description: Use when starting any feature development, building new functionali
 
 ## Overview
 
-End-to-end development pipeline: interactive brainstorming, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
+End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
 
@@ -19,9 +19,9 @@ End-to-end development pipeline: interactive brainstorming, autonomous planning 
 - **Mode:** Interactive with the user
 - **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
-- **REQUIRED SUB-SKILL:** Use crucible:brainstorming
-- Follow brainstorming skill for design refinement, section-by-section validation, and saving the design doc
-- **OVERRIDE:** When brainstorming completes and the design doc is saved, do NOT follow brainstorming's "Implementation" section (do not chain into writing-plans or using-git-worktrees from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
+- **REQUIRED SUB-SKILL:** Use crucible:design
+- Follow design skill for design refinement, section-by-section validation, and saving the design doc
+- **OVERRIDE:** When brainstorming completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
@@ -55,7 +55,7 @@ These tests define the feature-level RED-GREEN cycle that wraps the entire pipel
 Dispatch a **Plan Writer** subagent (Opus):
 
 - Read the design doc produced in Phase 1 and the acceptance tests from Step 3
-- Write an implementation plan following the `crucible:writing-plans` format
+- Write an implementation plan following the `crucible:planning` format
 - If acceptance tests couldn't compile (typed language), Task 1 should create the interfaces/stubs needed for them to compile and fail correctly
 - Include per-task metadata: Files (with count), Complexity (Low/Medium/High), Dependencies
 - Save to `docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md`
@@ -192,13 +192,13 @@ After all tasks complete:
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
-3. **REQUIRED SUB-SKILL:** Use crucible:requesting-code-review on full implementation (iterative until clean)
+3. **REQUIRED SUB-SKILL:** Use crucible:code-review on full implementation (iterative until clean)
 4. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
 5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
 8. Report to user
-9. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
+9. **REQUIRED SUB-SKILL:** Use crucible:finish
 
 ## Escalation Triggers (Any Phase)
 
@@ -243,8 +243,8 @@ Red-team and innovate prompts live in their respective skills:
 ## Integration
 
 **Required sub-skills:**
-- **crucible:brainstorming** — Phase 1
-- **crucible:finishing-a-development-branch** — Phase 4
+- **crucible:design** — Phase 1
+- **crucible:finish** — Phase 4
 - **crucible:red-team** — Adversarial review at each quality gate
 - **crucible:innovate** — Creative enhancement before red-teaming
 

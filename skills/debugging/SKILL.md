@@ -1,5 +1,5 @@
 ---
-name: systematic-debugging
+name: debugging
 description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
 ---
 
@@ -104,7 +104,7 @@ Orchestrator: Verify fix -> Success? Phase 5. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user.
     |
     v
-Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:requesting-code-review)
+Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:code-review)
     |
     v
 Done.
@@ -269,7 +269,7 @@ After Phase 4 succeeds (fix works, tests pass, no regressions), the orchestrator
 
 If red-teaming finds Fatal or Significant issues, dispatch a fix agent to address them, then re-run red-team per the standard red-team loop. Do NOT skip this — a fix that introduces new risks is not done.
 
-**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:requesting-code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
+**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 
@@ -281,7 +281,7 @@ If code review finds Critical or Important issues, fix them and re-review per th
 
 After the Implementation agent reports back, the orchestrator evaluates:
 
-**Fix works, no regressions** -- Log the result in the hypothesis log. Use `crucible:verification-before-completion` to confirm. Then:
+**Fix works, no regressions** -- Log the result in the hypothesis log. Use `crucible:verify` to confirm. Then:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
 - **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
 - Proceed to Phase 5.
@@ -420,8 +420,8 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 **Related skills:**
 - **`crucible:test-driven-development`** -- Implementation agent follows TDD for Phase 4
-- **`crucible:verification-before-completion`** -- Verify fix worked before claiming success
-- **`crucible:dispatching-parallel-agents`** -- Phase 1 parallel dispatch pattern
+- **`crucible:verify`** -- Verify fix worked before claiming success
+- **`crucible:parallel`** -- Phase 1 parallel dispatch pattern
 - **`crucible:red-team`** -- Adversarial review in Phase 5 (stagnation detection pattern also used in loop-back)
 
 **Required skills:**
