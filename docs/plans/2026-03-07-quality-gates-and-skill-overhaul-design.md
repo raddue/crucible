@@ -209,7 +209,9 @@ Add a hard communication requirement to build and debugging:
 
 - Reflect all skill renames in the skill table
 - Update descriptions to match new capabilities (quality gate, de-sloppify, session metrics)
-- Add a "Performance Tips" section with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50` recommendation
+- Add a "Setup" section with recommended prerequisites:
+  - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` — required for build's team-based execution (TeamCreate, team_name dispatching). Skills should degrade gracefully without it, but full pipeline orchestration depends on agent teams.
+  - `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50` — performance recommendation for long-running pipelines
 - Clean up superpowers origin references — crucible stands on its own now
 - Update the "How It Works" pipeline description to include quality gates and de-sloppify
 
@@ -223,5 +225,5 @@ Add a hard communication requirement to build and debugging:
 - [ ] All 11 skills renamed with all cross-references updated
 - [ ] Code reviewer and implementer prompts deduplicated
 - [ ] Build and debugging have mandatory status narration requirement
-- [ ] README reflects all changes with performance tips section
+- [ ] README reflects all changes with setup/prerequisites section
 - [ ] All internal `crucible:` references use new names
