@@ -156,7 +156,11 @@ Things that break non-obviously. Subagents reviewing or red-teaming should check
 ## Active Landmines
 
 - **[Short title]** — [What breaks and why. Module: X. Severity: high/medium]
+  - **Dead ends:** [hypothesis tried] — ruled out because [evidence]. (Optional)
+  - **Diagnostic path:** [steps that found root cause]. (Optional)
 - **[Short title]** — [What breaks and why. Module: X. Severity: high/medium]
+  - **Dead ends:** [hypothesis tried] — ruled out because [evidence]. (Optional)
+  - **Diagnostic path:** [steps that found root cause]. (Optional)
 
 ## Resolved Landmines
 
@@ -255,6 +259,7 @@ When dispatching an implementer, reviewer, investigator, or any subagent that wi
 4. Also paste `conventions.md` into implementer prompts
 5. Also paste `landmines.md` into reviewer and red-team prompts
 6. If no module file exists: dispatch without it (subagent explores normally, record afterwards)
+7. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing
 
 ### What Each Subagent Type Gets
 

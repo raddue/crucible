@@ -71,6 +71,7 @@ After any skill that completes a significant task reports success. The calling s
 3. Subagent returns structured retrospective entry
 4. Write entry to `~/.claude/projects/<project-hash>/memory/forge/retrospectives/YYYY-MM-DD-HHMMSS-<slug>.md`
 5. Update `patterns.md` — read current file, merge new findings, rewrite
+6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent (Opus). Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer` (record mode) with `dead_ends` and `diagnostic_path` fields.
 
 ### Update Rules for patterns.md
 
@@ -148,6 +149,7 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | `crucible:build` | Feed-Forward | Phase 1 start | Feature description |
 | `crucible:build` | Retrospective | Phase 4, after red-team, before finishing | Full build summary |
 | `crucible:debugging` | Retrospective | After fix verified | Bug description + hypothesis log |
+| `crucible:debugging` | Retrospective (diagnostic extraction) | After fix verified | Session artifacts → cartographer landmines with `dead_ends` + `diagnostic_path` |
 | `crucible:finish` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
 | `crucible:design` | Feed-Forward | Before first question | Topic description |
 
@@ -212,3 +214,4 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 - `./retrospective-prompt.md` — Post-task retrospective analyst dispatch
 - `./feed-forward-prompt.md` — Pre-task feed-forward advisor dispatch
 - `./mutation-proposal-prompt.md` — Skill mutation analyst dispatch
+- `./diagnostic-extraction-prompt.md` — Debugging session diagnostic pattern extraction dispatch
