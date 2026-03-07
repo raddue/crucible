@@ -86,3 +86,7 @@ At the bottom of every mockup, include a visible `<section class="translation-no
 1. If a browser is available, open the mockup to verify rendering. Otherwise, review the HTML/CSS source for structural correctness and consistency with Riftlock's visual language.
 2. Review the Translation Notes section for completeness
 3. Commit the mockup file to git
+
+## Quality Gate
+
+This skill produces **mockups**. When used standalone, invoke `crucible:quality-gate` after the mockup is created and committed. When used as a sub-skill of build, the parent orchestrator handles gating.
