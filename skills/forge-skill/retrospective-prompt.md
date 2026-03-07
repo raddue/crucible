@@ -31,6 +31,19 @@ Task tool (general-purpose, model: sonnet):
 
     [List of crucible skills invoked during this task]
 
+    ## Pipeline Decision Journal (if available)
+
+    [If a decision journal exists at `/tmp/crucible-decisions-<session-id>.log`, paste its contents here.
+    If no decision journal exists (pre-migration session), note: "No decision journal available — pre-migration session." and skip calibration analysis.]
+
+    When analyzing the decision journal, cross-reference decisions against outcomes:
+    - Did model selection choices (Opus vs Sonnet for reviewers) correlate with review quality?
+    - Were quality gate round counts appropriate, or did some gates end too early/late?
+    - Were escalation decisions timely and well-reasoned?
+    - Did investigator dispatch counts match the complexity of the bug?
+
+    Surface calibration insights as patterns for the feed-forward advisor.
+
     ## Your Job
 
     Analyze the gap between plan and execution. Be specific and actionable.

@@ -318,6 +318,38 @@ If code review finds Critical or Important issues, fix them and re-review per th
 
 **Only after both gates pass clean is the debugging workflow complete.**
 
+### Session Metrics
+
+Throughout the debugging session, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log`.
+
+At completion, compute and report:
+
+```
+-- Debugging Complete ---------------------------------------
+  Subagents dispatched:  12 (8 Opus, 4 Sonnet)
+  Active work time:      1h 15m
+  Wall clock time:       3h 42m
+  Hypothesis cycles:     3
+  Quality gate rounds:   2 (hypothesis: 1, fix: 1)
+-------------------------------------------------------------
+```
+
+Additional debugging metric: **hypothesis cycles** (number of hypothesis → investigate → implement cycles before resolution).
+
+### Pipeline Decision Journal
+
+Maintain a decision journal at `/tmp/crucible-decisions-<session-id>.log`:
+
+```
+[timestamp] DECISION: <type> | choice=<what> | reason=<why> | alternatives=<rejected>
+```
+
+Decision types:
+- `investigator-count` — why N investigators dispatched
+- `gate-round` — hypothesis red-team results per round
+- `escalation` — why orchestrator escalated
+- `hypothesis-reform` — why hypothesis was reformed after red-team
+
 ---
 
 ### Loop-back, Cleanup, and Escalation

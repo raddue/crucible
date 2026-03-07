@@ -56,6 +56,16 @@ Task tool (general-purpose, model: sonnet):
     **Confidence areas to watch:**
     - [Area where extra verification is warranted]
 
+    ## Decision Calibration
+
+    If past retrospectives have accumulated decision calibration data in patterns.md, surface relevant calibration patterns:
+
+    - Model selection accuracy: "In X/Y past tasks of this complexity, [model] reviewers [missed/caught] issues that [other model] found"
+    - Quality gate round predictions: "Design docs in this project average N rounds; plans average M rounds"
+    - Debugging dispatch efficiency: "For [bug pattern], N investigators were sufficient in X/Y past sessions"
+
+    Only surface calibration data when there are 3+ data points. Do not speculate from a single session.
+
     ## Rules
 
     - Maximum 5 warnings. Prioritize by relevance to THIS task, not by frequency.

@@ -211,6 +211,43 @@ After all tasks complete:
 5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
+
+### Session Metrics
+
+Throughout the pipeline, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log` on each subagent dispatch and completion.
+
+At completion (before reporting to user), read the metrics log and compute:
+
+```
+-- Pipeline Complete ----------------------------------------
+  Subagents dispatched:  23 (14 Opus, 7 Sonnet, 2 Haiku)
+  Active work time:      2h 47m
+  Wall clock time:       11h 13m
+  Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
+-------------------------------------------------------------
+```
+
+**Metrics tracked:**
+- Total subagents dispatched (by type and model tier: Opus/Sonnet/Haiku)
+- Active work time (merge overlapping parallel intervals — NOT naive sum)
+- Wall clock time (first dispatch to final completion)
+- Quality gate rounds (per gate: design, plan, implementation)
+
+### Pipeline Decision Journal
+
+Alongside the metrics log, maintain a decision journal at `/tmp/crucible-decisions-<session-id>.log`. Append a structured entry for every non-trivial routing decision:
+
+```
+[timestamp] DECISION: <type> | choice=<what> | reason=<why> | alternatives=<rejected>
+```
+
+Decision types to capture:
+- `reviewer-model` — why Opus vs Sonnet for this reviewer
+- `gate-round` — issue count, severity shifts, progress/stagnation per round
+- `escalation` — why the orchestrator escalated to user (and user's decision)
+- `task-grouping` — parallelism decisions for wave execution
+- `cleanup-removal` — what de-sloppify removed and accept/reject decision
+
 8. Report to user
 9. **REQUIRED SUB-SKILL:** Use crucible:finish
 
