@@ -184,6 +184,24 @@ Lightweight metrics report that appears when autonomous work completes and the u
 - Quality gate rounds (per gate)
 - Cycle count (debugging only — hypothesis cycles)
 
+### Pipeline Decision Journal
+
+Alongside the metrics log, the orchestrator maintains a decision journal at `/tmp/crucible-decisions-<session-id>.log`. This captures the reasoning behind every non-trivial routing decision in a structured one-line format:
+
+```
+[timestamp] DECISION: <type> | choice=<what> | reason=<why> | alternatives=<rejected>
+```
+
+Decision types:
+- `reviewer-model` — why Opus vs Sonnet for this reviewer
+- `gate-round` — issue count, severity shifts, progress/stagnation per round
+- `escalation` — why the orchestrator escalated to user (and what user decided)
+- `task-grouping` — parallelism decisions for wave execution
+- `cleanup-removal` — what de-sloppify removed and orchestrator's accept/reject
+- `investigator-count` — why N investigators dispatched (debugging only)
+
+The decision journal is fed into the forge retrospective as a first-class input. Forge cross-references decisions against outcomes to calibrate orchestrator judgment over time: model selection accuracy, quality gate round predictions, debugging dispatch efficiency. Feed-forward advisor surfaces calibration data (e.g., "Sonnet reviewers missed issues in 4/6 medium-complexity tasks — consider defaulting to Opus").
+
 ## 6. Skill Renames
 
 | Current | New |

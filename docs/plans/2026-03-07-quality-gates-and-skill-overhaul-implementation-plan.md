@@ -19,7 +19,7 @@ Task 5 (prompt dedup: reviewer) ── depends on 1,2  ──┤ │
 Task 6 (design + planning gate) ── depends on 1,3  ──┤ │
 Task 7 (debugging enhancements) ── depends on 1,3  ──┤ │
 Task 8 (de-sloppify) ── depends on 1  ───────────────┤ │
-Task 9 (session metrics) ── depends on 1,7,8  ───────┤ │
+Task 9 (metrics + decision journal) ── depends on 1,7,8┤ │
 Task 10 (orchestrator narration) ── depends on 1  ────┤ │
 Task 11 (skill stocktake) ── depends on 1  ──────────┤ │
 Task 12 (diagnostic pattern capture) ── depends on 1 ─┤ │
@@ -378,13 +378,15 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ---
 
-### Task 9: Session Metrics (Build and Debugging Completion Reports)
+### Task 9: Session Metrics and Decision Journal (Build and Debugging Completion Reports)
 
-**Files (2):**
+**Files (4):**
 - Modify: `skills/build/SKILL.md`
 - Modify: `skills/debugging/SKILL.md`
+- Modify: `skills/forge-skill/retrospective-prompt.md`
+- Modify: `skills/forge-skill/feed-forward-prompt.md`
 
-**Complexity:** Low
+**Complexity:** Medium
 **Dependencies:** Task 1, Task 7, Task 8
 
 **Steps:**
@@ -405,7 +407,22 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
    - Additional metric: cycle count (hypothesis cycles)
    - Same output format
 
-**Commit:** `feat: add session metrics to build and debugging completion reports`
+3. Add Pipeline Decision Journal to both `skills/build/SKILL.md` and `skills/debugging/SKILL.md`:
+   - Alongside the metrics log, the orchestrator maintains a decision journal at `/tmp/crucible-decisions-<session-id>.log`
+   - Captures non-trivial routing decisions in structured one-line format:
+     `[timestamp] DECISION: <type> | choice=<what> | reason=<why> | alternatives=<rejected>`
+   - Decision types: reviewer-model, gate-round, escalation, task-grouping, cleanup-removal, investigator-count
+   - Place the decision journal requirement adjacent to the metrics tracking requirement (same section)
+
+4. Edit `skills/forge-skill/retrospective-prompt.md`:
+   - Add decision journal as a first-class input to the retrospective subagent (alongside the execution summary)
+   - Instruct the retrospective analyst to cross-reference decisions against outcomes for calibration data
+
+5. Edit `skills/forge-skill/feed-forward-prompt.md`:
+   - Add "decision calibration" as an advisory category
+   - Feed-forward advisor surfaces calibration patterns from past decision journal analysis (e.g., "Sonnet reviewers missed issues in 4/6 medium-complexity tasks — consider defaulting to Opus")
+
+**Commit:** `feat: add session metrics, decision journal, and forge calibration integration`
 
 ---
 
