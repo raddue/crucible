@@ -247,11 +247,13 @@ Two agent prompts share common structure across skills but have context-specific
 - **Code reviewer** — build's reviewer and standalone code-review share: review checklist, issue classification, report format. They differ on: pipeline context (build reviewer knows about task numbering and plan references).
 - **Implementer** — build's implementer and debugging's implementer share: TDD discipline, self-review checklist, report format. They differ on: build implementer references plan tasks; debugging implementer references hypotheses.
 
-**Approach:** Extract shared structure (self-review checklist, report format, TDD discipline) into a reusable snippet file. Each prompt includes the snippet and adds its own context-specific instructions. This is composition, not deduplication — both prompts stay separate files with their own tuning, but the shared parts have a single source of truth.
+**Approach:** Extract shared structure (self-review checklist, report format, TDD discipline) into a canonical reference file. Each prompt template remains **self-contained** (subagents cannot resolve include directives and orchestrators have no include-resolution logic) but marks which sections are canonically defined in the shared file. When updating shared content, update the canonical file first, then propagate to each template.
 
-**Shared snippets:**
+**Shared canonical files:**
 - `shared/implementer-common.md` — TDD discipline, self-review checklist, report format
 - `shared/reviewer-common.md` — review checklist, issue classification, report format
+
+Prompt templates keep inline copies with `<!-- CANONICAL: shared/implementer-common.md -->` markers. The shared files are the single source of truth; templates are the runtime-ready copies.
 
 ## 8. Orchestrator Status Narration
 

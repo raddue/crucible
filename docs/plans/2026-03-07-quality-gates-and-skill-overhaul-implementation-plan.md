@@ -19,7 +19,7 @@ Task 5 (prompt dedup: reviewer) ── depends on 1,2  ──┤ │
 Task 6 (design + planning gate) ── depends on 1,3  ──┤ │
 Task 7 (debugging enhancements) ── depends on 1,3  ──┤ │
 Task 8 (de-sloppify) ── depends on 1  ───────────────┤ │
-Task 9 (metrics + decision journal) ── depends on 1,7,8┤ │
+Task 9 (metrics + decision journal) ── depends on 1  ──┤ │
 Task 10 (orchestrator narration) ── depends on 1  ────┤ │
 Task 11 (skill stocktake) ── depends on 1  ──────────┤ │
 Task 12 (diagnostic pattern capture) ── depends on 1 ─┤ │
@@ -116,10 +116,14 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 5. Update bare name references (not prefixed with `crucible:`) across all files. File-by-file listing:
    - `skills/build/SKILL.md`: lines 10, 23, 24 — bare `brainstorming` -> `design`, `writing-plans` -> `planning`, `using-git-worktrees` -> `worktree`
    - `skills/worktree/SKILL.md` (post-rename): `**brainstorming** (Phase 4)` -> `**design** (Phase 4)`, `finishing-a-development-branch` -> `finish`
-   - `skills/finish/SKILL.md` (post-rename): `requesting-code-review/code-reviewer.md` -> `code-review/code-reviewer.md`
+   - `skills/finish/SKILL.md` (post-rename): `requesting-code-review/code-reviewer.md` -> `code-review/code-reviewer.md`, `using-git-worktrees` -> `worktree` (Integration section), `finishing-a-development-branch` -> `finish` (Integration section)
    - `skills/skill-authoring/testing-skills-with-subagents.md` (post-rename): `writing-skills directory` -> `skill-authoring directory`
+   - `skills/skill-authoring/SKILL.md` (post-rename): `verification-before-completion` -> `verify` (examples section)
    - `skills/getting-started/SKILL.md` (post-rename): bare `brainstorming` references -> `design`
    - `skills/code-review/SKILL.md` (post-rename): path reference `requesting-code-review/code-reviewer.md` -> `code-review/code-reviewer.md`
+   - `skills/forge-skill/SKILL.md`: bare `brainstorming` -> `design` (lines 39, 176 — prose references in feed-forward and retrospective sections)
+   - `skills/cartographer-skill/SKILL.md`: bare `brainstorming` -> `design` (line 39 — prose reference in overview)
+   - `skills/planning/SKILL.md` (post-rename): `"writing-plans skill"` -> `"planning skill"` (announce line), `"brainstorming skill"` -> `"design skill"` (context line)
 
 6. Verify: grep for any remaining old names. Should be zero hits outside of `docs/plans/` (historical plans are not updated).
 
@@ -194,16 +198,17 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
    - Red flags and rationalization prevention
 
 3. Edit `skills/build/SKILL.md` — add quality gate orchestration points. Build is the outermost orchestrator and controls all gating. Add a "## Quality Gate Orchestration" section documenting WHEN build invokes `crucible:quality-gate`:
-   - **After design (Phase 1, Step 2):** When `crucible:design` completes, invoke quality gate on the design doc with artifact type "design" before proceeding to planning
-   - **After planning (Phase 2):** When `crucible:planning` completes and the plan passes review, invoke quality gate on the plan with artifact type "plan" before proceeding to implementation
-   - **After implementation (Phase 4):** After all tasks pass code review, invoke quality gate on the full implementation with artifact type "code" before reporting to user
+   - **After design (Phase 1, Step 2):** Quality gate on design doc (artifact type "design") — this REPLACES the existing standalone `crucible:red-team` invocation on the design. Quality gate wraps red-team internally.
+   - **After planning (Phase 2):** Quality gate on plan (artifact type "plan") — this REPLACES the existing standalone `crucible:red-team` invocation on the plan.
+   - **After implementation (Phase 4):** Quality gate on full implementation (artifact type "code") — this REPLACES the existing `crucible:red-team` invocation in Phase 4 Step 4. Code review (`crucible:code-review`) remains separate — it serves a different purpose (quality check vs. adversarial attack).
+   - Explicitly remove the standalone `crucible:red-team` calls from Phase 1 Step 2, Phase 2 Step 3, and Phase 4 Step 4, replacing each with `crucible:quality-gate`
    - Add `crucible:quality-gate` to build's integration/related skills list
 
 **Commit:** `feat: create quality-gate skill and add orchestration to build`
 
 ---
 
-### Task 4: Deduplicate Implementer Prompts (Composition)
+### Task 4: Align Implementer Prompts with Shared Canonical Reference
 
 **Files (2):**
 - Modify: `skills/build/build-implementer-prompt.md`
@@ -212,26 +217,26 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 **Complexity:** Low
 **Dependencies:** Task 1, Task 2
 
+**Note on composition approach:** Prompt templates remain **self-contained** — they contain the full text that gets pasted into subagent dispatches. Subagents cannot resolve include directives, and orchestrators have no include-resolution logic. Instead, `skills/shared/implementer-common.md` is the **canonical reference copy**. Each prompt template keeps its own inline copy of the shared sections, with a comment marking which sections are canonically defined in the shared file. When updating shared content, update the canonical file first, then propagate to each template.
+
 **Steps:**
 
 1. Edit `skills/build/build-implementer-prompt.md`:
-   - Replace the inline TDD discipline section with a reference: `[Include shared/implementer-common.md: TDD Discipline]`
-   - Replace the inline self-review checklist with: `[Include shared/implementer-common.md: Self-Review Checklist]`
-   - Replace the inline context self-monitoring with: `[Include shared/implementer-common.md: Context Self-Monitoring]`
-   - Replace the inline TDD Evidence Log format with: `[Include shared/implementer-common.md: Report Format]`
+   - Add a header comment: "Sections marked [CANONICAL: shared/implementer-common.md] are defined in the shared snippet. Keep in sync when updating."
+   - Mark the TDD discipline, self-review checklist, context self-monitoring, and report format sections with `<!-- CANONICAL: shared/implementer-common.md -->` comments
+   - Ensure the content of these sections matches `skills/shared/implementer-common.md` exactly
    - Keep build-specific sections intact: team communication, task description template, build-specific "Your Job" framing
 
 2. Edit `skills/debugging/implementer-prompt.md`:
-   - Same substitutions for shared sections
+   - Same canonical marking for shared sections
+   - Ensure content matches the shared file
    - Keep debugging-specific sections intact: hypothesis template, "The Iron Law" (no fix without failing test), hypothesis-specific self-review items (scope, unexpected findings), debugging-specific report format fields (test result before/after fix, regressions, files changed)
 
-3. Add a note in each prompt template's header comment: "This prompt uses shared snippets from `skills/shared/implementer-common.md`. When dispatching, paste the shared snippet content inline — subagents cannot read skill files."
-
-**Commit:** `refactor: deduplicate implementer prompts via shared snippets`
+**Commit:** `refactor: align implementer prompts with shared canonical reference`
 
 ---
 
-### Task 5: Deduplicate Reviewer Prompts (Composition)
+### Task 5: Align Reviewer Prompts with Shared Canonical Reference
 
 **Files (2):**
 - Modify: `skills/build/build-reviewer-prompt.md`
@@ -240,19 +245,22 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 **Complexity:** Low
 **Dependencies:** Task 1, Task 2
 
+**Note:** Same canonical reference approach as Task 4. Templates remain self-contained; shared file is the single source of truth for marked sections.
+
 **Steps:**
 
 1. Edit `skills/build/build-reviewer-prompt.md`:
-   - Replace inline review checklist with: `[Include shared/reviewer-common.md: Review Checklist]`
+   - Add canonical reference header comment
+   - Mark shared sections (review checklist, issue classification, report format) with `<!-- CANONICAL: shared/reviewer-common.md -->` comments
+   - Ensure marked sections match `skills/shared/reviewer-common.md` exactly
    - Keep build-specific sections: two-pass structure (Pass 1 Code + Pass 2 Test), task spec template, implementer report template, TDD process evidence checking
 
 2. Edit `skills/code-review/code-reviewer.md`:
-   - Replace inline review checklist with: `[Include shared/reviewer-common.md: Review Checklist]`
+   - Same canonical marking
+   - Ensure marked sections match the shared file
    - Keep code-review-specific sections: git range template, production readiness checks, example output
 
-3. Add header comments noting shared snippet usage and inline-paste requirement for subagents.
-
-**Commit:** `refactor: deduplicate reviewer prompts via shared snippets`
+**Commit:** `refactor: align reviewer prompts with shared canonical reference`
 
 ---
 
@@ -362,7 +370,8 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 2. Create `skills/build/cleanup-prompt.md`:
    - Prompt template for dispatching the cleanup subagent
-   - Framing: "You are a cleanup agent. Review the implementer's changes and remove unnecessary code."
+   - Framing: "You are a cleanup agent. Review the implementer's committed changes and remove unnecessary code."
+   - Scope: "Review all changes committed by the implementer for this task using `git diff <pre-task-sha>..HEAD`. The orchestrator provides the pre-task commit SHA. Do NOT use `git diff` of the working tree — the implementer has already committed."
    - Explicit removal categories (allowlist):
      - Over-defensive error handling for impossible states
      - Tests that verify language/framework behavior rather than business logic
@@ -387,7 +396,7 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 - Modify: `skills/forge-skill/feed-forward-prompt.md`
 
 **Complexity:** Medium
-**Dependencies:** Task 1, Task 7, Task 8
+**Dependencies:** Task 1 (coordinate edits with Tasks 7, 8, 10 on shared files — serialize if in same wave)
 
 **Steps:**
 
@@ -417,6 +426,7 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 4. Edit `skills/forge-skill/retrospective-prompt.md`:
    - Add decision journal as a first-class input to the retrospective subagent (alongside the execution summary)
    - Instruct the retrospective analyst to cross-reference decisions against outcomes for calibration data
+   - Add cold-start handling: "If no decision journal exists for this session (`/tmp/crucible-decisions-<session-id>.log` is missing), skip calibration analysis and note 'No decision journal available — pre-migration session.'"
 
 5. Edit `skills/forge-skill/feed-forward-prompt.md`:
    - Add "decision calibration" as an advisory category
@@ -662,9 +672,10 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 **Wave 2 (depends on Wave 1):**
 - Task 3: Create quality gate skill (depends on 1)
-- Task 4: Deduplicate implementer prompts (depends on 1, 2)
-- Task 5: Deduplicate reviewer prompts (depends on 1, 2)
+- Task 4: Align implementer prompts (depends on 1, 2)
+- Task 5: Align reviewer prompts (depends on 1, 2)
 - Task 8: De-sloppify (depends on 1)
+- Task 9: Session metrics + decision journal (depends on 1) — serialize with Tasks 8, 10 for build/SKILL.md edits
 - Task 10: Orchestrator narration (depends on 1)
 - Task 11: Skill stocktake (depends on 1)
 - Task 12: Diagnostic pattern capture (depends on 1)
@@ -674,7 +685,6 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 - Task 6: Quality gate in design + planning (depends on 1, 3)
 - Task 7: Debugging enhancements (depends on 1, 3)
 - Task 14: Quality gate in mockup-builder + mock-to-unity (depends on 1, 3)
-- Task 9: Session metrics (depends on 1, 7, 8)
 - Task 16: Forge stocktake nudge (depends on 1, 11)
 
 **Wave 4 (depends on all prior waves):**
