@@ -13,7 +13,7 @@
 ```
 Task 1 (renames) ─────────────────────────────────────┐
 Task 2 (shared snippets) ────────────────────────────┐ │
-Task 3 (quality gate) ── depends on 1 ───────────────┤ │
+Task 3 (quality gate + build orchestration) ─ dep 1 ─┤ │
 Task 4 (prompt dedup: implementer) ── depends on 1,2 │ │
 Task 5 (prompt dedup: reviewer) ── depends on 1,2  ──┤ │
 Task 6 (design + planning gate) ── depends on 1,3  ──┤ │
@@ -25,6 +25,7 @@ Task 11 (skill stocktake) ── depends on 1  ──────────┤
 Task 12 (diagnostic pattern capture) ── depends on 1 ─┤ │
 Task 13 (agent teams degradation) ── depends on 1  ──┤ │
 Task 14 (mockup/mock-to-unity gate) ── depends on 1,3│ │
+Task 16 (forge stocktake nudge) ── depends on 1,11 ──┤ │
 Task 15 (README update) ── depends on ALL above  ─────┘ │
                                                          │
 ```
@@ -33,7 +34,7 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 1: Rename All 11 Skills (Atomic)
 
-**Files:**
+**Files (28):**
 - Rename: `skills/systematic-debugging/` -> `skills/debugging/`
 - Rename: `skills/brainstorming/` -> `skills/design/`
 - Rename: `skills/writing-plans/` -> `skills/planning/`
@@ -46,7 +47,7 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 - Rename: `skills/using-crucible/` -> `skills/getting-started/`
 - Rename: `skills/writing-skills/` -> `skills/skill-authoring/`
 - Modify: All 11 renamed SKILL.md files (update `name:` frontmatter field)
-- Modify: `skills/build/SKILL.md` (update all `crucible:` references)
+- Modify: `skills/build/SKILL.md` (update all `crucible:` references and bare name references on lines 10, 23, 24)
 - Modify: `skills/build/plan-writer-prompt.md` (update `crucible:writing-plans` reference)
 - Modify: `skills/build/build-implementer-prompt.md` (no old-name references — clean)
 - Modify: `skills/debugging/SKILL.md` (update all `crucible:` references, post-rename)
@@ -57,9 +58,13 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 - Modify: `skills/finish/SKILL.md` (update `crucible:` references, post-rename)
 - Modify: `skills/worktree/SKILL.md` (update references, post-rename)
 - Modify: `skills/skill-authoring/SKILL.md` (update `crucible:systematic-debugging` reference, post-rename)
+- Modify: `skills/skill-authoring/testing-skills-with-subagents.md` (update `writing-skills directory` reference, post-rename)
+- Modify: `skills/getting-started/SKILL.md` (update bare `brainstorming` references in content, post-rename)
+- Modify: `skills/code-review/SKILL.md` (update `requesting-code-review/code-reviewer.md` path reference, post-rename)
 - Modify: `skills/innovate/SKILL.md` (no old-name references — clean)
 - Modify: `README.md` (update skill table names and all references)
 
+**Complexity:** High
 **Dependencies:** None
 
 **Steps:**
@@ -105,9 +110,16 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
    - `skills/finish/SKILL.md` (post-rename): `crucible:requesting-code-review` -> `crucible:code-review`
    - `skills/worktree/SKILL.md` (post-rename): Update integration references (`brainstorming` -> `design`, `finishing-a-development-branch` -> `finish`)
    - `skills/skill-authoring/SKILL.md` (post-rename): `crucible:systematic-debugging` -> `crucible:debugging`
+   - `skills/code-review/SKILL.md` (post-rename): `requesting-code-review/code-reviewer.md` -> `code-review/code-reviewer.md`
    - `README.md`: Update all skill names in the table and body text
 
-5. Also update any bare name references (not prefixed with `crucible:`) in integration sections, e.g., `**brainstorming** (Phase 4)` -> `**design** (Phase 4)` in worktree/SKILL.md, and `requesting-code-review/code-reviewer.md` path references in finish/SKILL.md -> `code-review/code-reviewer.md`.
+5. Update bare name references (not prefixed with `crucible:`) across all files. File-by-file listing:
+   - `skills/build/SKILL.md`: lines 10, 23, 24 — bare `brainstorming` -> `design`, `writing-plans` -> `planning`, `using-git-worktrees` -> `worktree`
+   - `skills/worktree/SKILL.md` (post-rename): `**brainstorming** (Phase 4)` -> `**design** (Phase 4)`, `finishing-a-development-branch` -> `finish`
+   - `skills/finish/SKILL.md` (post-rename): `requesting-code-review/code-reviewer.md` -> `code-review/code-reviewer.md`
+   - `skills/skill-authoring/testing-skills-with-subagents.md` (post-rename): `writing-skills directory` -> `skill-authoring directory`
+   - `skills/getting-started/SKILL.md` (post-rename): bare `brainstorming` references -> `design`
+   - `skills/code-review/SKILL.md` (post-rename): path reference `requesting-code-review/code-reviewer.md` -> `code-review/code-reviewer.md`
 
 6. Verify: grep for any remaining old names. Should be zero hits outside of `docs/plans/` (historical plans are not updated).
 
@@ -117,10 +129,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 2: Create Shared Prompt Snippets
 
-**Files:**
+**Files (2):**
 - Create: `skills/shared/implementer-common.md`
 - Create: `skills/shared/reviewer-common.md`
 
+**Complexity:** Medium
 **Dependencies:** None (can run in parallel with Task 1, but referenced content uses new names starting in Task 4)
 
 **Steps:**
@@ -136,7 +149,7 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 3. Create `skills/shared/reviewer-common.md` by extracting shared structure from `skills/build/build-reviewer-prompt.md` and `skills/code-review/code-reviewer.md`:
    - Review checklist categories (Architecture, Correctness, Quality, Testing)
-   - Issue classification scheme (Critical/Important/Minor for code-review, Clean/Issues/Architectural for build-reviewer — normalize to one scheme)
+   - Issue classification scheme: Use **Critical/Important/Minor/Suggestion** (from code-review) as the shared severity scale. The build-reviewer's Clean/Issues/Architectural categories serve a different purpose (overall verdict, not per-issue severity) and remain as verdict levels in the build-reviewer prompt. Both coexist: severity classifies individual issues, verdict classifies overall review outcome.
    - Report format structure (Verdict, Issues with file:line, Recommendations, Assessment)
    - "Do Not Trust" verification principle
 
@@ -148,9 +161,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 3: Create Quality Gate Skill
 
-**Files:**
+**Files (2):**
 - Create: `skills/quality-gate/SKILL.md`
+- Modify: `skills/build/SKILL.md` (add quality gate orchestration points)
 
+**Complexity:** Medium
 **Dependencies:** Task 1 (uses new skill names in cross-references)
 
 **Steps:**
@@ -178,16 +193,23 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
    - Integration section listing calling skills
    - Red flags and rationalization prevention
 
-**Commit:** `feat: create quality-gate skill`
+3. Edit `skills/build/SKILL.md` — add quality gate orchestration points. Build is the outermost orchestrator and controls all gating. Add a "## Quality Gate Orchestration" section documenting WHEN build invokes `crucible:quality-gate`:
+   - **After design (Phase 1, Step 2):** When `crucible:design` completes, invoke quality gate on the design doc with artifact type "design" before proceeding to planning
+   - **After planning (Phase 2):** When `crucible:planning` completes and the plan passes review, invoke quality gate on the plan with artifact type "plan" before proceeding to implementation
+   - **After implementation (Phase 4):** After all tasks pass code review, invoke quality gate on the full implementation with artifact type "code" before reporting to user
+   - Add `crucible:quality-gate` to build's integration/related skills list
+
+**Commit:** `feat: create quality-gate skill and add orchestration to build`
 
 ---
 
 ### Task 4: Deduplicate Implementer Prompts (Composition)
 
-**Files:**
+**Files (2):**
 - Modify: `skills/build/build-implementer-prompt.md`
 - Modify: `skills/debugging/implementer-prompt.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1, Task 2
 
 **Steps:**
@@ -211,10 +233,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 5: Deduplicate Reviewer Prompts (Composition)
 
-**Files:**
+**Files (2):**
 - Modify: `skills/build/build-reviewer-prompt.md`
 - Modify: `skills/code-review/code-reviewer.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1, Task 2
 
 **Steps:**
@@ -235,10 +258,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 6: Add Quality Gate to Design and Planning Skills
 
-**Files:**
+**Files (2):**
 - Modify: `skills/design/SKILL.md`
 - Modify: `skills/planning/SKILL.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1, Task 3
 
 **Steps:**
@@ -259,10 +283,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 7: Debugging Enhancements (Phase 3.5, Domain Detection, Strategic Compact)
 
-**Files:**
+**Files (2):**
 - Modify: `skills/debugging/SKILL.md`
 - Modify: `skills/debugging/investigator-prompt.md`
 
+**Complexity:** High
 **Dependencies:** Task 1, Task 3
 
 **Steps:**
@@ -313,10 +338,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 8: De-Sloppify (Build Phase 3 Addition)
 
-**Files:**
+**Files (2):**
 - Modify: `skills/build/SKILL.md`
 - Create: `skills/build/cleanup-prompt.md`
 
+**Complexity:** Medium
 **Dependencies:** Task 1
 
 **Steps:**
@@ -354,10 +380,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 9: Session Metrics (Build and Debugging Completion Reports)
 
-**Files:**
+**Files (2):**
 - Modify: `skills/build/SKILL.md`
 - Modify: `skills/debugging/SKILL.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1, Task 7, Task 8
 
 **Steps:**
@@ -384,10 +411,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 10: Orchestrator Status Narration (Build and Debugging)
 
-**Files:**
+**Files (2):**
 - Modify: `skills/build/SKILL.md`
 - Modify: `skills/debugging/SKILL.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1
 
 **Steps:**
@@ -410,9 +438,10 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 11: Skill Stocktake (New Skill)
 
-**Files:**
+**Files (1):**
 - Create: `skills/stocktake/SKILL.md`
 
+**Complexity:** Medium
 **Dependencies:** Task 1
 
 **Steps:**
@@ -444,11 +473,13 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 12: Diagnostic Pattern Capture (Cartographer Landmines Extension)
 
-**Files:**
+**Files (4):**
 - Modify: `skills/cartographer-skill/SKILL.md`
 - Modify: `skills/cartographer-skill/recorder-prompt.md`
 - Modify: `skills/forge-skill/SKILL.md`
+- Create: `skills/forge-skill/diagnostic-extraction-prompt.md`
 
+**Complexity:** Medium
 **Dependencies:** Task 1
 
 **Steps:**
@@ -472,6 +503,20 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 3. Edit `skills/forge-skill/SKILL.md`:
    - In the retrospective section, add: "For debugging sessions, the retrospective subagent also extracts diagnostic patterns using a dedicated extraction step. Patterns are written to cartographer's landmines via `crucible:cartographer` (record mode) with `dead_ends` and `diagnostic_path` fields."
    - Update the integration table: add a row for debugging retrospective -> cartographer recording
+   - Reference the new `./diagnostic-extraction-prompt.md` as the prompt template for the extraction subagent
+
+4. Create `skills/forge-skill/diagnostic-extraction-prompt.md`:
+   - This is a dedicated prompt template for the diagnostic pattern extraction subagent (not lightweight — full Opus agent)
+   - Separate from the existing retrospective prompt because diagnostic extraction requires different analysis: mining hypotheses, dead ends, and diagnostic steps from a debugging session transcript
+   - Framing: "You are a diagnostic pattern extractor. Given a debugging session transcript, extract the patterns that would help future debugging sessions."
+   - Inputs: debugging session transcript, hypothesis log, investigation reports
+   - Extraction targets:
+     - Dead ends: hypotheses tried and evidence that ruled them out
+     - Diagnostic path: the actual sequence of steps that revealed the root cause
+     - Root cause category: what class of bug this was (timing, state, config, etc.)
+     - Module/area affected: for cartographer landmine placement
+   - Output format: structured landmine entries ready for cartographer recording, with `dead_ends` and `diagnostic_path` fields populated
+   - Note: the extraction subagent writes to cartographer via `crucible:cartographer` record mode
 
 **Commit:** `feat: extend cartographer landmines with diagnostic pattern capture`
 
@@ -479,9 +524,10 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 13: Agent Teams Graceful Degradation
 
-**Files:**
+**Files (1):**
 - Modify: `skills/build/SKILL.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1
 
 **Steps:**
@@ -502,10 +548,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 14: Add Quality Gate to Mockup-Builder and Mock-to-Unity
 
-**Files:**
+**Files (2):**
 - Modify: `skills/mockup-builder/SKILL.md`
 - Modify: `skills/mock-to-unity/SKILL.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1, Task 3
 
 **Steps:**
@@ -524,10 +571,11 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 ### Task 15: Update README
 
-**Files:**
+**Files (1):**
 - Modify: `README.md`
 
-**Dependencies:** Tasks 1-14 (all prior tasks)
+**Complexity:** Medium
+**Dependencies:** Tasks 1-14 and 16 (all other tasks)
 
 **Steps:**
 
@@ -555,6 +603,7 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
    - Phase 5: mention quality gate on implementation
 
 4. Add a "## Setup" section after "## Installation":
+   - `--dangerously-skip-permissions` — recommended for long-running autonomous pipelines (crucible's primary use case), paired with a safety hook or other failsafe system to prevent destructive actions. Crucible is designed for fire-and-forget execution of complex development tasks without user intervention.
    - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` — required for build's team-based execution; skills degrade gracefully without it
    - `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50` — performance recommendation for long-running pipelines
 
@@ -564,15 +613,18 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 
 6. Add a "## Rename History" subsection (or note) documenting the rename table for users upgrading from pre-overhaul versions.
 
+7. Document the forge stocktake nudge integration (Task 16): mention that forge's feed-forward advisor checks stocktake staleness and nudges when results are 30+ days old.
+
 **Commit:** `docs: update README with new skills, setup section, pipeline changes`
 
 ---
 
 ### Task 16: Forge Stocktake Nudge Integration
 
-**Files:**
+**Files (1):**
 - Modify: `skills/forge-skill/feed-forward-prompt.md`
 
+**Complexity:** Low
 **Dependencies:** Task 1, Task 11
 
 **Steps:**
@@ -608,5 +660,5 @@ Task 15 (README update) ── depends on ALL above  ─────┘ │
 - Task 9: Session metrics (depends on 1, 7, 8)
 - Task 16: Forge stocktake nudge (depends on 1, 11)
 
-**Wave 4 (depends on everything):**
-- Task 15: README update (depends on all)
+**Wave 4 (depends on all prior waves):**
+- Task 15: README update (depends on Tasks 1-14 and 16)
