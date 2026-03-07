@@ -56,6 +56,12 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     If no cartographer data exists, write "No cartographer data available —
     agent must discover codebase structure independently."]
 
+    ## Domain Context (if detected)
+
+    [If the debugging orchestrator detected a domain match in Phase 0,
+    paste domain-specific skill knowledge and context files here.
+    If no domain was detected, omit this section entirely.]
+
     ## Your Role: [ROLE_NAME]
 
     [SELECT ONE of the four role-specific instruction blocks below and paste it here.

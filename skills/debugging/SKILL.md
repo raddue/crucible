@@ -97,6 +97,11 @@ Phase 2: Pattern Analysis agent (skipped if synthesis identified obvious root ca
 Phase 3: Orchestrator forms hypothesis (no subagent -- lightweight decision-making)
     |
     v
+Phase 3.5: Hypothesis Red-Team (crucible:quality-gate on hypothesis)
+    |  -> Survives? Proceed to Phase 4.
+    |  -> Torn apart? Reform hypothesis or loop back to Phase 1.
+    |
+    v
 Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
@@ -117,6 +122,29 @@ Done.
 **Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, paste them into every investigator's prompt so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
 If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
+
+### Domain Detection
+
+Check the project's CLAUDE.md for a `## Debugging Domains` table:
+
+```markdown
+| Signal | Domain | Skills | Context |
+|--------|--------|--------|---------|
+| file paths contain `/UI/`, `USS`, `VisualElement` | ui | mockup-builder, mock-to-unity, ui-verify | docs/mockups/ |
+| error mentions `GridWorld`, `Tile`, `hex` | grid | - | grid system architecture |
+```
+
+**Signal types:** File path patterns (regex against paths in error/stack trace), error message patterns (regex against error text), user description keywords. Evaluate signals in order; load context for all matching domains.
+
+**When domain is detected:**
+- Auto-load referenced skills' SKILL.md into investigator prompts (see Domain Context section in investigator-prompt.md)
+- Add a domain-specific investigator to Phase 1
+- Give Phase 4 implementer domain skill context
+- Load files from the Context column
+
+**When no domain table exists:** Proceed normally. Domain detection is opt-in.
+
+**When a referenced skill doesn't exist:** Log a warning and proceed without domain enrichment. Never fail on missing config.
 
 ---
 
@@ -231,6 +259,21 @@ Maintain a running log across cycles:
 
 ---
 
+### Phase 3.5: Hypothesis Red-Team
+
+Before dispatching the Phase 4 implementer, invoke `crucible:quality-gate` on the hypothesis with artifact type "hypothesis".
+
+The quality gate challenges:
+- Does the hypothesis explain ALL symptoms, or just some?
+- Could the root cause be upstream of what the hypothesis targets?
+- If this hypothesis is correct, what other symptoms should we expect? Do we see them?
+- Has this pattern been tried and failed before? (check hypothesis log and cartographer landmines for `dead_ends`)
+
+**If hypothesis survives:** Proceed to Phase 4.
+**If hypothesis is torn apart:** Reform the hypothesis or dispatch additional investigation (back to Phase 1) without wasting a full TDD cycle.
+
+---
+
 ### Phase 4: Implementation (Single Subagent -- TDD)
 
 **Prompt template:** `./implementer-prompt.md`
@@ -294,6 +337,8 @@ After the Implementation agent reports back, the orchestrator evaluates:
 3. If reversion is needed, dispatch a cleanup subagent (`subagent_type="general-purpose"`) with instructions to: revert the specific files listed in the Implementation Report's "Files changed" field using `git checkout -- <file>`, then verify the test suite passes after revert. Tell the agent which files to revert and whether to keep or remove the test file.
 4. Loop back to Phase 1 with the new information from the failed attempt. On loop-back, dispatch MORE agents than the prior cycle, not fewer — widen the investigation.
 
+**Context Preservation:** Before dispatching new investigation after a failed fix cycle, write the hypothesis log and investigation findings to a persistent file on disk (`/tmp/crucible-debug-<session-id>-hypothesis-log.md`). This preserves context across compaction events that occur after multiple investigation rounds and a failed implementation have accumulated in context. The trigger is deterministic (failed cycle → write to disk), not conditional on self-assessed context pressure.
+
 #### Stagnation Detection (from red-team pattern)
 
 Track a stagnation metric across cycles — the hypothesis specificity score:
@@ -336,8 +381,15 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **Synthesis** | 1 subagent (Sonnet) | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
 | **2. Pattern** | 1 subagent (Opus, skippable) | Find working examples, compare exhaustively | Differences identified |
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
+| **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
+
+---
+
+## Quality Gate
+
+This skill produces **hypotheses** (Phase 3.5) and **fixes** (Phase 5). When used standalone, quality gate is invoked at Phase 3.5 (on hypotheses) and Phase 5 (on fixes). When used as a sub-skill, the parent orchestrator may handle gating.
 
 ---
 
