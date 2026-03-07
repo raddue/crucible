@@ -30,8 +30,8 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 After the user approves the design and before starting Phase 2:
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
-2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) design doc. Iterates until clean or stagnation.
-3. If the red team requires changes, the Plan Writer updates the design doc and re-commits.
+2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) design doc with artifact type "design". Iterates until clean, stagnation, or 3-round cap.
+3. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 4. Design doc is now finalized — proceed to acceptance tests.
 
 ### Step 3: Generate Acceptance Tests (RED)
@@ -89,9 +89,9 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 **After the plan passes review:**
 
 1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
-2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) plan. Provides the plan and design doc as context.
+2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context.
 
-The red-team skill handles the iterative loop — fresh Devil's Advocate each round, stagnation detection, escalation. See `crucible:red-team` for details.
+The quality gate handles the iterative red-team loop — fresh review each round, stagnation detection, 3-round cap, escalation. See `crucible:quality-gate` for details.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
@@ -193,7 +193,7 @@ After all tasks complete:
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
 3. **REQUIRED SUB-SKILL:** Use crucible:code-review on full implementation (iterative until clean)
-4. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
+4. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
 5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
@@ -240,13 +240,28 @@ Red-team and innovate prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
 - `crucible:innovate` — `skills/innovate/innovate-prompt.md`
 
+## Quality Gate Orchestration
+
+Build is the outermost orchestrator and controls all quality gates via `crucible:quality-gate`. Quality gate wraps `crucible:red-team` internally — do NOT invoke red-team separately at these points.
+
+**Gate points in the pipeline:**
+
+| Pipeline Stage | Artifact Type | Replaces |
+|---------------|---------------|----------|
+| Phase 1, Step 2 (after design) | design | Existing `crucible:red-team` on design |
+| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:red-team` on plan |
+| Phase 4, Step 4 (after implementation) | code | Existing `crucible:red-team` on implementation |
+
+Code review (`crucible:code-review`) remains separate — it serves a different purpose (structured quality check vs. adversarial attack).
+
 ## Integration
 
 **Required sub-skills:**
 - **crucible:design** — Phase 1
 - **crucible:finish** — Phase 4
-- **crucible:red-team** — Adversarial review at each quality gate
-- **crucible:innovate** — Creative enhancement before red-teaming
+- **crucible:quality-gate** — Iterative red-teaming at each quality gate point
+- **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
+- **crucible:innovate** — Creative enhancement before quality gates
 
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
