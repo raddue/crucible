@@ -87,9 +87,23 @@ git commit -m "feat: add specific feature"
 ```
 ```
 
+## Quality Gate
+
+This skill produces **implementation plans**. When used standalone, invoke `crucible:quality-gate` after the plan is saved. When used as a sub-skill of build, the parent orchestrator handles gating.
+
+**Standalone invocation:**
+1. Plan is saved
+2. Invoke `crucible:quality-gate` with artifact type "plan"
+3. Address any findings, revise plan
+4. Quality gate iterates until clean or escalates after 3 rounds
+
 ## Remember
 - Exact file paths always
 - Complete code in plan (not "add validation")
 - Exact commands with expected output
 - Reference relevant skills with @ syntax
 - DRY, YAGNI, TDD, frequent commits
+
+## Integration
+
+**Related skills:** crucible:design, crucible:build, crucible:worktree, crucible:quality-gate
