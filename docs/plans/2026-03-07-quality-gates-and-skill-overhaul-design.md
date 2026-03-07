@@ -215,6 +215,37 @@ Add a hard communication requirement to build and debugging:
 - Clean up superpowers origin references — crucible stands on its own now
 - Update the "How It Works" pipeline description to include quality gates and de-sloppify
 
+## 10. Diagnostic Pattern Capture (Cartographer Landmines Extension)
+
+Extend cartographer's existing `landmines.md` format with two optional fields to capture diagnostic intelligence from debugging sessions.
+
+### New Fields
+
+- **`dead_ends`** — Hypotheses that were tried and rejected, with the specific evidence that ruled them out. Framed as "if you go here, check for X condition" rather than "don't go here."
+- **`diagnostic_path`** — The diagnostic steps that actually revealed the root cause (not a retroactively idealized "minimal" sequence).
+
+### How It Works
+
+- Forge's post-debugging retrospective extracts diagnostic patterns using a dedicated extraction subagent (not lightweight — proper quality gate)
+- Patterns are written to the relevant module's `landmines.md` in cartographer's existing format
+- Debugging Phase 0 already consults cartographer — no new retrieval mechanism needed
+- Injection happens after Phase 1 (as cross-reference against investigator findings), NOT at Phase 0 (avoids anchoring bias)
+- Staleness tracked via existing cartographer metadata (file paths, timestamps)
+
+### Why Not a Separate System
+
+- Cartographer landmines already capture ~70% of what fingerprints would (symptoms, root cause, fix)
+- One store, one retrieval surface — no split-recall problem
+- No new file format, directory, or retrieval mechanism
+- The debugging skill already loads cartographer context in Phase 0
+
+## 11. Agent Teams Graceful Degradation
+
+If build detects agent teams aren't available (TeamCreate fails), it should:
+- Output a clear one-time warning recommending `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+- Fall back to sequential subagent dispatch via regular Agent tool
+- Everything still works, just without parallel teammate coordination
+
 ## Acceptance Criteria
 
 - [ ] Quality gate skill exists and is invoked by design, planning, debugging, mockup-builder, mock-to-unity
@@ -227,3 +258,6 @@ Add a hard communication requirement to build and debugging:
 - [ ] Build and debugging have mandatory status narration requirement
 - [ ] README reflects all changes with setup/prerequisites section
 - [ ] All internal `crucible:` references use new names
+- [ ] Cartographer landmines extended with dead_ends and diagnostic_path fields
+- [ ] Forge retrospective includes diagnostic pattern extraction for debugging sessions
+- [ ] Build gracefully degrades when agent teams are unavailable
