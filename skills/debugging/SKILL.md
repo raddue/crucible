@@ -82,6 +82,7 @@ All investigation and implementation is delegated to subagents via the Agent too
 | Phase 4 | Implementation | Opus | TDD + root cause fix |
 | Phase 5 | Red-team | Opus | Adversarial analysis |
 | Phase 5 | Code review | Opus or Sonnet | Lead decides by fix complexity |
+| Phase 5 | Test gap writer | Opus | Test authoring requires reasoning |
 
 ### Workflow Overview
 
@@ -125,6 +126,9 @@ Orchestrator: Verify fix -> Success? Phase 5. Failed? Cleanup, log, loop back.
     |
     v
 Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:code-review)
+    |
+    v
+Test Gap Writer (if reviews flagged missing coverage)
     |
     v
 Done.
@@ -331,7 +335,9 @@ If red-teaming finds Fatal or Significant issues, dispatch a fix agent to addres
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 
-**Only after both gates pass clean is the debugging workflow complete.**
+**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. The agent writes tests only for gaps specifically flagged in the review — no scope creep. Tests should PASS immediately since the behavior already exists from the fix. If a test fails, it reveals genuinely missing fix coverage — flag for the implementer. Skipped when reviews report zero coverage gaps.
+
+**Only after all gates pass clean (and any test gaps are filled) is the debugging workflow complete.**
 
 ### Session Metrics
 
@@ -431,6 +437,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
+| **5b. Test Gaps** | Test gap writer (Opus, conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
 
 ---
 
@@ -514,6 +521,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`./synthesis-prompt.md`** -- Synthesis agent prompt
 - **`./pattern-analyst-prompt.md`** -- Phase 2 pattern analysis agent prompt
 - **`./implementer-prompt.md`** -- Phase 4 implementation agent prompt
+- **`./test-gap-writer-prompt.md`** -- Phase 5 test gap writer prompt (when reviews flag missing coverage)
 
 **Supporting techniques** (available in this directory):
 - **`root-cause-tracing.md`** -- Trace bugs backward through call stack to find original trigger
