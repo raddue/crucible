@@ -199,13 +199,26 @@ digraph review {
   "Pass 1: Code Review" -> "Implementer fixes code findings";
   "Implementer fixes code findings" -> "Pass 2: Test Review";
   "Pass 2: Test Review" -> "Implementer fixes test findings";
-  "Implementer fixes test findings" -> "Task complete";
+  "Implementer fixes test findings" -> "Test Gap Writer";
+  "Test Gap Writer" -> "Task complete";
 }
 ```
 
 **Pass 1 — Code Review:** Architecture, patterns, correctness, wiring (actually connected, not just existing?)
 
 **Pass 2 — Test Review:** Stale tests? Missing coverage? Tests need updating? Dead tests to delete? Edge cases untested?
+
+#### Test Gap Writer
+
+After the implementer addresses Pass 2 findings, dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
+
+1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes
+2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep
+3. Tests should pass immediately (the behavior already exists from implementation)
+4. If a test fails: the gap reveals genuinely missing implementation — flag for the implementer to fix before task completion
+5. Commits new tests: `test: fill coverage gaps for task N`
+
+**Skip this step if** the Pass 2 test reviewer reported zero missing coverage gaps.
 
 #### Iterative Review Loop
 
@@ -320,6 +333,7 @@ Decision types to capture:
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch
 - `./build-reviewer-prompt.md` — Phase 3 reviewer dispatch
 - `./cleanup-prompt.md` — Phase 3 de-sloppify cleanup dispatch
+- `./test-gap-writer-prompt.md` — Phase 3 test gap writer dispatch
 - `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
 
 Red-team and innovate prompts live in their respective skills:
