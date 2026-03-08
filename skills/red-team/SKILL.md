@@ -104,8 +104,8 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compare issu
 ## Integration
 
 **Called by:**
-- **crucible:build** — Phase 1 (design), Phase 2 (plan), Phase 4 (implementation)
-- **crucible:finish** — before presenting options
+- **crucible:quality-gate** — at each gate point (design, plan, implementation). Build invokes quality-gate, which invokes red-team.
+- **crucible:finish** — before presenting options (directly, not via quality-gate)
 
 **Pairs with:**
 - **crucible:innovate** — innovate runs before red-team at each gate
