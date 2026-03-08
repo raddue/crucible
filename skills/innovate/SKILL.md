@@ -64,6 +64,6 @@ Have the Plan Writer (or equivalent) incorporate the proposal into the artifact.
 - **crucible:build** — Phase 1 (after design), Phase 2 (after plan review)
 
 **Pairs with:**
-- **crucible:red-team** — always runs after innovate to validate the addition
+- **crucible:quality-gate** — always runs after innovate to validate the addition
 
 See prompt template: `innovate/innovate-prompt.md`

@@ -32,7 +32,7 @@ Every status update must include:
 
 **This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
 
-## Phase 1: Brainstorm (Interactive)
+## Phase 1: Design (Interactive)
 
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
@@ -40,7 +40,7 @@ Every status update must include:
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:design
 - Follow design skill for design refinement, section-by-section validation, and saving the design doc
-- **OVERRIDE:** When brainstorming completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
+- **OVERRIDE:** When design completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
@@ -245,12 +245,14 @@ After all tasks complete:
 5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
+8. Report to user
+9. **REQUIRED SUB-SKILL:** Use crucible:finish
 
 ### Session Metrics
 
 Throughout the pipeline, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log` on each subagent dispatch and completion.
 
-At completion (before reporting to user), read the metrics log and compute:
+At completion (before reporting to user, i.e. step 8), read the metrics log and compute:
 
 ```
 -- Pipeline Complete ----------------------------------------
@@ -281,9 +283,6 @@ Decision types to capture:
 - `escalation` — why the orchestrator escalated to user (and user's decision)
 - `task-grouping` — parallelism decisions for wave execution
 - `cleanup-removal` — what de-sloppify removed and accept/reject decision
-
-8. Report to user
-9. **REQUIRED SUB-SKILL:** Use crucible:finish
 
 ## Escalation Triggers (Any Phase)
 

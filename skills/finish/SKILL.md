@@ -259,7 +259,7 @@ git worktree remove <worktree-path>
 
 **Pairs with:**
 - **worktree** - Cleans up worktree (if applicable)
-- **crucible:red-team** — Adversarial review before presenting options
+- **crucible:red-team** — Adversarial review before presenting options. Note: finish uses `crucible:red-team` directly rather than `crucible:quality-gate` because it doesn't produce a typed artifact — it's a pre-completion sanity check, not an iterative gate.
 
 **Recommended:**
 - **crucible:forge** — Retrospective between code review and red-team (Step 2.5)
