@@ -1,5 +1,5 @@
 ---
-name: writing-plans
+name: planning
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
@@ -11,9 +11,9 @@ Write comprehensive implementation plans assuming the engineer has zero context 
 
 Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
 
-**Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
+**Announce at start:** "I'm using the planning skill to create the implementation plan."
 
-**Context:** This should be run in a dedicated worktree (created by brainstorming skill).
+**Context:** This should be run in a dedicated worktree (created by design skill).
 
 **Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>.md`
 
@@ -87,9 +87,23 @@ git commit -m "feat: add specific feature"
 ```
 ```
 
+## Quality Gate
+
+This skill produces **implementation plans**. When used standalone, invoke `crucible:quality-gate` after the plan is saved. When used as a sub-skill of build, the parent orchestrator handles gating.
+
+**Standalone invocation:**
+1. Plan is saved
+2. Invoke `crucible:quality-gate` with artifact type "plan"
+3. Address any findings, revise plan
+4. Quality gate iterates until clean or escalates after 3 rounds
+
 ## Remember
 - Exact file paths always
 - Complete code in plan (not "add validation")
 - Exact commands with expected output
 - Reference relevant skills with @ syntax
 - DRY, YAGNI, TDD, frequent commits
+
+## Integration
+
+**Related skills:** crucible:design, crucible:build, crucible:worktree, crucible:quality-gate

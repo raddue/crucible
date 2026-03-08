@@ -56,6 +56,16 @@ Task tool (general-purpose, model: sonnet):
     **Confidence areas to watch:**
     - [Area where extra verification is warranted]
 
+    ## Decision Calibration
+
+    If past retrospectives have accumulated decision calibration data in patterns.md, surface relevant calibration patterns:
+
+    - Model selection accuracy: "In X/Y past tasks of this complexity, [model] reviewers [missed/caught] issues that [other model] found"
+    - Quality gate round predictions: "Design docs in this project average N rounds; plans average M rounds"
+    - Debugging dispatch efficiency: "For [bug pattern], N investigators were sufficient in X/Y past sessions"
+
+    Only surface calibration data when there are 3+ data points. Do not speculate from a single session.
+
     ## Rules
 
     - Maximum 5 warnings. Prioritize by relevance to THIS task, not by frequency.
@@ -64,3 +74,15 @@ Task tool (general-purpose, model: sonnet):
     - If no warnings are relevant, say so: "No specific warnings apply. General caution: [most common deviation type]."
     - Keep total output under 30 lines. This goes into an orchestrator's context.
 ```
+
+## Skill Stocktake Staleness
+
+Also check for skill stocktake staleness:
+
+1. Check if `skills/stocktake/results.json` exists
+2. If it exists, read the `evaluated_at` timestamp
+3. If the last run was 30+ days ago, include this advisory:
+   > "Skill stocktake hasn't run in [N] days. Consider running `crucible:stocktake` to audit skill health."
+4. If the file doesn't exist (stocktake has never been run), include:
+   > "Skill stocktake has never been run. Consider running `crucible:stocktake` to audit skill health."
+5. If the last run was within 30 days, do not mention it

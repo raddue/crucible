@@ -88,7 +88,7 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compare issu
 
 ## What the Devil's Advocate is NOT
 
-- A code reviewer (don't check style, naming, or quality — that's `crucible:requesting-code-review`)
+- A code reviewer (don't check style, naming, or quality — that's `crucible:code-review`)
 - A blocker for the sake of blocking — challenges must be specific and actionable
 - A rewriter — they challenge, they don't produce an alternative
 
@@ -104,8 +104,8 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compare issu
 ## Integration
 
 **Called by:**
-- **crucible:build** — Phase 1 (design), Phase 2 (plan), Phase 4 (implementation)
-- **crucible:finishing-a-development-branch** — before presenting options
+- **crucible:quality-gate** — at each gate point (design, plan, implementation). Build invokes quality-gate, which invokes red-team.
+- **crucible:finish** — before presenting options (directly, not via quality-gate)
 
 **Pairs with:**
 - **crucible:innovate** — innovate runs before red-team at each gate

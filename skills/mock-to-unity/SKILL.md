@@ -9,7 +9,7 @@ Translate visual mockups into Unity UI Toolkit code (USS/C#) with structural fid
 
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
-**Related skills:** When writing C# controllers (Layers 1, 3, 4), `riftlock-standards` applies to all C# code. After implementation, `test-driven-development` applies for controller tests.
+**Related skills:** When writing C# controllers (Layers 1, 3, 4), `riftlock-standards` applies to all C# code. After implementation, `test-driven-development` applies for controller tests. After self-verification, `crucible:quality-gate` validates the output.
 
 ## Architecture Decision: Programmatic C# (Not UXML)
 
@@ -123,6 +123,10 @@ Verification is layer-appropriate — not every layer needs a screenshot:
 
 **If UI is NOT reachable** (requires specific game state like level 25, combat, NPC interaction):
 Fall back to code-level structural audit — invoke the `ui-verify` skill in code-audit mode.
+
+## Quality Gate
+
+This skill produces **translation maps** and **implementations**. When used standalone, invoke `crucible:quality-gate` after self-verification. When used as a sub-skill of build, the parent orchestrator handles gating.
 
 ## Riftlock-Specific Rules
 

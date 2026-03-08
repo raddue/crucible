@@ -96,6 +96,12 @@ Task tool (general-purpose, model: sonnet):
     - Dependencies must be bidirectional — if A depends on B, note it in
       both A's and B's module files.
     - Landmines must include: what breaks, why, and severity (high/medium).
+    - For debugging-originated landmines, include `dead_ends` (hypotheses
+      tried and evidence that ruled them out) and `diagnostic_path` (steps
+      that found the root cause). These fields are optional for non-debugging
+      landmines. Format:
+        - **Dead ends:** [hypothesis] — ruled out because [evidence].
+        - **Diagnostic path:** [steps that found root cause].
     - If updating an existing file, MERGE with existing content. Do not
       drop existing entries unless they are demonstrably wrong.
     - Keep module files under 100 lines. If you're exceeding that, the

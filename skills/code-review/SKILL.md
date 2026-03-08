@@ -1,5 +1,5 @@
 ---
-name: requesting-code-review
+name: code-review
 description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
 ---
 
@@ -119,4 +119,4 @@ Clean — proceed to Task 3.
 - Show code/tests that prove it works
 - Request clarification
 
-See template at: requesting-code-review/code-reviewer.md
+See template at: code-review/code-reviewer.md

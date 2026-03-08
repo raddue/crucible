@@ -1,3 +1,4 @@
+<!-- Sections marked CANONICAL are defined in shared/implementer-common.md. Keep in sync when updating. -->
 # Implementer Subagent Prompt Template
 
 Use this template when the orchestrator dispatches the Phase 4 implementation subagent. This is the ONLY agent that modifies code. It receives a confirmed hypothesis and creates a failing test, implements the fix, and verifies the broader suite.
@@ -40,6 +41,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
      - Coding style (e.g., PascalCase methods, _camelCase fields)
      - Any project-specific test utilities or base classes]
 
+    <!-- CANONICAL: shared/implementer-common.md — TDD Discipline (adapted for debugging) -->
     ## The Iron Law
 
     ```
@@ -118,6 +120,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     - If the regression is a pre-existing failure, note it clearly
     - Do NOT fix regressions by changing other code — report them
 
+    <!-- CANONICAL: shared/implementer-common.md — Self-Review Checklist (adapted for debugging) -->
     ### Step 6: Self-Review
 
     Before reporting, review your work against this checklist:
@@ -147,13 +150,13 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     If self-review reveals problems, fix them (within scope) before reporting.
 
+    <!-- CANONICAL: shared/implementer-common.md — Context Self-Monitoring -->
     ## Context Self-Monitoring
 
     Be aware of your context usage. If you notice system warnings about token usage:
-    - At **50%+ utilization** with significant work remaining: report partial progress
-      immediately to the orchestrator. Include what you've completed, what remains,
-      and whether the fix is in a safe state (tests passing or not).
-    - Do NOT try to rush through remaining work — partial work with clear status
+    - At **50%+ utilization** with significant work remaining: report partial progress immediately.
+      Include what you've completed, what remains, and whether work is in a safe state (tests passing or not).
+    - Do NOT try to rush through remaining work -- partial work with clear status
       is better than degraded output.
 
     ## Report Format
@@ -176,6 +179,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     - [TestName2] — RED: "[exact failure message]" → (test error: [what happened], fixed setup) → RED: "[failure message after fix]" → GREEN: pass
     ```
 
+    <!-- CANONICAL: shared/implementer-common.md — Report Format (TDD Evidence Log) -->
     The TDD Evidence Log is REQUIRED. For each test you wrote, you MUST record:
     - The test name
     - The exact failure message you saw during RED
@@ -183,7 +187,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     - Confirmation of GREEN after implementing the fix
 
     If you cannot produce a TDD log entry for a test, it means you skipped the
-    RED step — go back and do it properly.
+    RED step -- go back and do it properly.
 
     **If the test passed immediately (Step 2):**
     ```

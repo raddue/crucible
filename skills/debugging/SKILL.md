@@ -1,5 +1,5 @@
 ---
-name: systematic-debugging
+name: debugging
 description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
 ---
 
@@ -12,6 +12,21 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 **Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
 
 **Violating the letter of this process is violating the spirit of debugging.**
+
+## Communication Requirement (Non-Negotiable)
+
+**Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
+
+Every status update must include:
+1. **Current phase** — Which debugging phase you're in
+2. **Hypothesis status** — Current hypothesis being tested (or "forming hypothesis")
+3. **What just completed** — What the last agent reported (investigation findings, fix results)
+4. **What's being dispatched next** — What you're about to do and why
+5. **Cycle count** — Which hypothesis cycle you're on (cycle 1, cycle 2, etc.)
+
+**After compaction:** Re-read the hypothesis log from disk and output current status before continuing.
+
+**This requirement exists because:** Debugging sessions can involve multiple investigation rounds and fix attempts. Without narration, the user has no visibility into which hypotheses have been tried, what evidence was found, or why the orchestrator is pursuing a particular path.
 
 **Execution model:** The orchestrator dispatches all investigation and implementation to subagents. The orchestrator NEVER reads code, edits files, or runs tests directly. It forms hypotheses, dispatches work, and makes decisions based on subagent reports.
 
@@ -97,6 +112,11 @@ Phase 2: Pattern Analysis agent (skipped if synthesis identified obvious root ca
 Phase 3: Orchestrator forms hypothesis (no subagent -- lightweight decision-making)
     |
     v
+Phase 3.5: Hypothesis Red-Team (crucible:quality-gate on hypothesis)
+    |  -> Survives? Proceed to Phase 4.
+    |  -> Torn apart? Reform hypothesis or loop back to Phase 1.
+    |
+    v
 Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
@@ -104,7 +124,7 @@ Orchestrator: Verify fix -> Success? Phase 5. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user.
     |
     v
-Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:requesting-code-review)
+Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:code-review)
     |
     v
 Done.
@@ -117,6 +137,29 @@ Done.
 **Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, paste them into every investigator's prompt so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
 If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
+
+### Domain Detection
+
+Check the project's CLAUDE.md for a `## Debugging Domains` table:
+
+```markdown
+| Signal | Domain | Skills | Context |
+|--------|--------|--------|---------|
+| file paths contain `/UI/`, `USS`, `VisualElement` | ui | mockup-builder, mock-to-unity, ui-verify | docs/mockups/ |
+| error mentions `GridWorld`, `Tile`, `hex` | grid | - | grid system architecture |
+```
+
+**Signal types:** File path patterns (regex against paths in error/stack trace), error message patterns (regex against error text), user description keywords. Evaluate signals in order; load context for all matching domains.
+
+**When domain is detected:**
+- Auto-load referenced skills' SKILL.md into investigator prompts (see Domain Context section in investigator-prompt.md)
+- Add a domain-specific investigator to Phase 1
+- Give Phase 4 implementer domain skill context
+- Load files from the Context column
+
+**When no domain table exists:** Proceed normally. Domain detection is opt-in.
+
+**When a referenced skill doesn't exist:** Log a warning and proceed without domain enrichment. Never fail on missing config.
 
 ---
 
@@ -231,6 +274,21 @@ Maintain a running log across cycles:
 
 ---
 
+### Phase 3.5: Hypothesis Red-Team
+
+Before dispatching the Phase 4 implementer, invoke `crucible:quality-gate` on the hypothesis with artifact type "hypothesis".
+
+The quality gate challenges:
+- Does the hypothesis explain ALL symptoms, or just some?
+- Could the root cause be upstream of what the hypothesis targets?
+- If this hypothesis is correct, what other symptoms should we expect? Do we see them?
+- Has this pattern been tried and failed before? (check hypothesis log and cartographer landmines for `dead_ends`)
+
+**If hypothesis survives:** Proceed to Phase 4.
+**If hypothesis is torn apart:** Reform the hypothesis or dispatch additional investigation (back to Phase 1) without wasting a full TDD cycle.
+
+---
+
 ### Phase 4: Implementation (Single Subagent -- TDD)
 
 **Prompt template:** `./implementer-prompt.md`
@@ -269,11 +327,43 @@ After Phase 4 succeeds (fix works, tests pass, no regressions), the orchestrator
 
 If red-teaming finds Fatal or Significant issues, dispatch a fix agent to address them, then re-run red-team per the standard red-team loop. Do NOT skip this — a fix that introduces new risks is not done.
 
-**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:requesting-code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
+**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 
 **Only after both gates pass clean is the debugging workflow complete.**
+
+### Session Metrics
+
+Throughout the debugging session, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log`.
+
+At completion, compute and report:
+
+```
+-- Debugging Complete ---------------------------------------
+  Subagents dispatched:  12 (8 Opus, 4 Sonnet)
+  Active work time:      1h 15m
+  Wall clock time:       3h 42m
+  Hypothesis cycles:     3
+  Quality gate rounds:   2 (hypothesis: 1, fix: 1)
+-------------------------------------------------------------
+```
+
+Additional debugging metric: **hypothesis cycles** (number of hypothesis → investigate → implement cycles before resolution).
+
+### Pipeline Decision Journal
+
+Maintain a decision journal at `/tmp/crucible-decisions-<session-id>.log`:
+
+```
+[timestamp] DECISION: <type> | choice=<what> | reason=<why> | alternatives=<rejected>
+```
+
+Decision types:
+- `investigator-count` — why N investigators dispatched
+- `gate-round` — hypothesis red-team results per round
+- `escalation` — why orchestrator escalated
+- `hypothesis-reform` — why hypothesis was reformed after red-team
 
 ---
 
@@ -281,7 +371,7 @@ If code review finds Critical or Important issues, fix them and re-review per th
 
 After the Implementation agent reports back, the orchestrator evaluates:
 
-**Fix works, no regressions** -- Log the result in the hypothesis log. Use `crucible:verification-before-completion` to confirm. Then:
+**Fix works, no regressions** -- Log the result in the hypothesis log. Use `crucible:verify` to confirm. Then:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
 - **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
 - Proceed to Phase 5.
@@ -293,6 +383,8 @@ After the Implementation agent reports back, the orchestrator evaluates:
 2. Decide on cleanup: keep the test if it validly reproduces the bug (even if the fix was wrong). Revert both test and fix only if the test was hypothesis-specific and not a valid reproduction.
 3. If reversion is needed, dispatch a cleanup subagent (`subagent_type="general-purpose"`) with instructions to: revert the specific files listed in the Implementation Report's "Files changed" field using `git checkout -- <file>`, then verify the test suite passes after revert. Tell the agent which files to revert and whether to keep or remove the test file.
 4. Loop back to Phase 1 with the new information from the failed attempt. On loop-back, dispatch MORE agents than the prior cycle, not fewer — widen the investigation.
+
+**Context Preservation:** Before dispatching new investigation after a failed fix cycle, write the hypothesis log and investigation findings to a persistent file on disk (`/tmp/crucible-debug-<session-id>-hypothesis-log.md`). This preserves context across compaction events that occur after multiple investigation rounds and a failed implementation have accumulated in context. The trigger is deterministic (failed cycle → write to disk), not conditional on self-assessed context pressure.
 
 #### Stagnation Detection (from red-team pattern)
 
@@ -336,8 +428,15 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **Synthesis** | 1 subagent (Sonnet) | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
 | **2. Pattern** | 1 subagent (Opus, skippable) | Find working examples, compare exhaustively | Differences identified |
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
+| **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
+
+---
+
+## Quality Gate
+
+This skill produces **hypotheses** (Phase 3.5) and **fixes** (Phase 5). When used standalone, quality gate is invoked at Phase 3.5 (on hypotheses) and Phase 5 (on fixes). When used as a sub-skill, the parent orchestrator may handle gating.
 
 ---
 
@@ -351,6 +450,9 @@ If you catch yourself thinking:
 - "I already know what's wrong, I'll skip investigation"
 - "Let me just run the tests myself to check"
 - "I'll look at the code to confirm before dispatching"
+
+**Communication violations:**
+- "Dispatching agents without narrating what you're doing and why"
 
 **Classic debugging traps (still apply):**
 - "Quick fix for now, investigate later"
@@ -420,8 +522,8 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 **Related skills:**
 - **`crucible:test-driven-development`** -- Implementation agent follows TDD for Phase 4
-- **`crucible:verification-before-completion`** -- Verify fix worked before claiming success
-- **`crucible:dispatching-parallel-agents`** -- Phase 1 parallel dispatch pattern
+- **`crucible:verify`** -- Verify fix worked before claiming success
+- **`crucible:parallel`** -- Phase 1 parallel dispatch pattern
 - **`crucible:red-team`** -- Adversarial review in Phase 5 (stagnation detection pattern also used in loop-back)
 
 **Required skills:**

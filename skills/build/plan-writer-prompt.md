@@ -18,8 +18,8 @@ Task tool (general-purpose, model: opus):
 
     ## Plan Format Requirements
 
-    **REQUIRED SUB-SKILL:** Use crucible:writing-plans — follow its format exactly.
-    **OVERRIDE:** Skip writing-plans' "Execution Handoff" section entirely. Your job is ONLY to write and save the plan. Do NOT ask the user about execution approach — the build pipeline handles execution automatically.
+    **REQUIRED SUB-SKILL:** Use crucible:planning — follow its format exactly.
+    **OVERRIDE:** Skip planning's "Execution Handoff" section entirely. Your job is ONLY to write and save the plan. Do NOT ask the user about execution approach — the build pipeline handles execution automatically.
 
     ### Per-Task Metadata (REQUIRED)
 
