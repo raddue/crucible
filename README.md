@@ -69,7 +69,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 
 | Skill | Description |
 |-------|-------------|
-| **debugging** | Orchestrated debugging with Phase 3.5 hypothesis red-teaming, domain detection, and strategic context preservation. Includes investigator, pattern analyst, synthesis subagent templates, and post-fix quality gate. |
+| **debugging** | Orchestrated debugging with Phase 3.5 hypothesis red-teaming, domain detection, strategic context preservation, and post-fix quality gate with test gap writer. Includes investigator, pattern analyst, and synthesis subagent templates. |
 
 ### Knowledge & Learning
 
