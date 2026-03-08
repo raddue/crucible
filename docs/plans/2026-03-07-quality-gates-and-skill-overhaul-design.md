@@ -121,19 +121,25 @@ If the agent can't categorize a removal into one of these buckets, it flags it i
 Implementer builds + tests -> De-sloppify cleanup -> Pass 1: Code Review -> ...
 ```
 
-### Test Gap Writer (Build Phase 3 Addition)
+### Test Gap Writer (Build Phase 3 + Debugging Phase 5)
 
-After the Pass 2 test reviewer identifies coverage gaps, a Test Gap Writer agent writes tests for behaviors discovered during implementation that weren't in the original test plan. This complements de-sloppify — de-sloppify removes unnecessary tests, the test gap writer adds necessary ones the reviewer flagged as missing.
+After reviewers identify coverage gaps, a Test Gap Writer agent writes tests for behaviors discovered during implementation/fixing that weren't in the original test plan. This complements de-sloppify — de-sloppify removes unnecessary tests, the test gap writer adds necessary ones the reviewer flagged as missing.
 
+**In build (Phase 3):**
 ```
 ... -> Pass 2: Test Review -> Implementer fixes -> Test Gap Writer -> Task complete
+```
+
+**In debugging (Phase 5):**
+```
+... -> Red-team fix -> Code review -> Test Gap Writer -> Done
 ```
 
 The test gap writer:
 - Only writes tests for gaps the reviewer specifically identified (no scope creep)
 - Tests should PASS immediately since the behavior already exists
-- If a test fails, it reveals genuinely missing implementation — flagged for the implementer
-- Skipped when the test reviewer reports zero gaps
+- If a test fails, it reveals genuinely missing implementation/fix coverage — flagged for the implementer
+- Skipped when reviewers report zero gaps
 
 ## 4. Skill Stocktake (New)
 
