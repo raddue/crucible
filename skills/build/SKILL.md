@@ -7,21 +7,40 @@ description: Use when starting any feature development, building new functionali
 
 ## Overview
 
-End-to-end development pipeline: interactive brainstorming, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
+End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
 
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
 
-## Phase 1: Brainstorm (Interactive)
+## Communication Requirement (Non-Negotiable)
+
+**Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
+
+Every status update must include:
+1. **Current phase** — Which pipeline phase you're in
+2. **What just completed** — What the last agent reported
+3. **What's being dispatched next** — What you're about to do and why
+4. **Task checklist** — Current status of all tasks (pending/in-progress/complete)
+
+**After compaction:** If you just experienced context compaction, re-read the task list from disk and output current status before continuing. Do NOT proceed silently.
+
+**Examples of GOOD narration:**
+> "Phase 3, Task 4 complete. Reviewer found 2 Important issues — dispatching implementer to fix. Tasks: [1] ✓ [2] ✓ [3] ✓ [4] fixing [5-8] pending"
+
+> "Phase 2 complete. Plan passed review with 0 issues on round 2. Dispatching innovate on the plan."
+
+**This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
+
+## Phase 1: Design (Interactive)
 
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
 - **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
-- **REQUIRED SUB-SKILL:** Use crucible:brainstorming
-- Follow brainstorming skill for design refinement, section-by-section validation, and saving the design doc
-- **OVERRIDE:** When brainstorming completes and the design doc is saved, do NOT follow brainstorming's "Implementation" section (do not chain into writing-plans or using-git-worktrees from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
+- **REQUIRED SUB-SKILL:** Use crucible:design
+- Follow design skill for design refinement, section-by-section validation, and saving the design doc
+- **OVERRIDE:** When design completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
@@ -30,8 +49,8 @@ End-to-end development pipeline: interactive brainstorming, autonomous planning 
 After the user approves the design and before starting Phase 2:
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
-2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) design doc. Iterates until clean or stagnation.
-3. If the red team requires changes, the Plan Writer updates the design doc and re-commits.
+2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) design doc with artifact type "design". Iterates until clean, stagnation, or 3-round cap.
+3. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 4. Design doc is now finalized — proceed to acceptance tests.
 
 ### Step 3: Generate Acceptance Tests (RED)
@@ -55,7 +74,7 @@ These tests define the feature-level RED-GREEN cycle that wraps the entire pipel
 Dispatch a **Plan Writer** subagent (Opus):
 
 - Read the design doc produced in Phase 1 and the acceptance tests from Step 3
-- Write an implementation plan following the `crucible:writing-plans` format
+- Write an implementation plan following the `crucible:planning` format
 - If acceptance tests couldn't compile (typed language), Task 1 should create the interfaces/stubs needed for them to compile and fail correctly
 - Include per-task metadata: Files (with count), Complexity (Low/Medium/High), Dependencies
 - Save to `docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md`
@@ -89,9 +108,9 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 **After the plan passes review:**
 
 1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
-2. **Red-team:** Dispatch `crucible:red-team` on the (potentially updated) plan. Provides the plan and design doc as context.
+2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context.
 
-The red-team skill handles the iterative loop — fresh Devil's Advocate each round, stagnation detection, escalation. See `crucible:red-team` for details.
+The quality gate handles the iterative red-team loop — fresh review each round, stagnation detection, 3-round cap, escalation. See `crucible:quality-gate` for details.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
@@ -112,6 +131,21 @@ Read the approved plan. Create tasks via `TaskCreate` for each plan task, includ
 - Description with full plan task text (subagents should never read the plan file)
 - Dependencies via `TaskUpdate` with `addBlockedBy`
 
+#### Agent Teams Fallback
+
+If `TeamCreate` fails (agent teams not available), output a clear one-time warning:
+
+> ⚠️ Agent teams are not available. Recommended: set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+> Falling back to sequential subagent dispatch via Agent tool.
+
+Then fall back to sequential subagent dispatch via the regular Task tool (without `team_name`). Everything still works — independent tasks run sequentially instead of in parallel via teammates.
+
+**What changes in fallback mode:**
+- Tasks are dispatched via `Agent` tool instead of as teammates
+- Independent tasks that would run in parallel now run sequentially
+- Task tracking still uses `TaskCreate`/`TaskUpdate` for state management
+- All other pipeline behavior (TDD, review, de-sloppify, quality gates) is unchanged
+
 ### Step 2: Analyze Dependencies and Execution Order
 
 Before dispatching:
@@ -129,8 +163,21 @@ For each task (or wave of parallel tasks):
    - Use `./build-implementer-prompt.md` template
    - Pass full task text, file paths, project conventions
    - Implementer follows TDD, writes tests, runs tests, commits, self-reviews
-3. When Implementer reports completion, spawn **Reviewer** teammate
+3. When Implementer reports completion, run **De-Sloppify Cleanup** (see below)
+4. After cleanup completes, spawn **Reviewer** teammate
    - Use `./build-reviewer-prompt.md` template
+
+#### De-Sloppify Cleanup
+
+After the implementer reports completion and before dispatching the reviewer:
+
+1. Record the pre-cleanup commit SHA
+2. Dispatch a fresh **Cleanup Agent** (Opus) using `./cleanup-prompt.md`
+   - Input: `git diff <pre-task-sha>..HEAD` (the implementer's committed changes)
+   - The orchestrator provides the pre-task commit SHA to the cleanup agent
+3. Cleanup agent reviews changes, removes unnecessary code (see allowlist), runs tests
+4. If cleanup made changes, commits separately: `refactor: cleanup task N implementation`
+5. If cleanup found nothing to remove, reports "No cleanup needed" and proceeds
 
 #### Reviewer Model Selection (Lead Decides Per-Task)
 
@@ -147,17 +194,31 @@ Each task gets TWO review passes before completion:
 
 ```dot
 digraph review {
-  "Implementer builds + tests" -> "Pass 1: Code Review";
+  "Implementer builds + tests" -> "De-sloppify cleanup";
+  "De-sloppify cleanup" -> "Pass 1: Code Review";
   "Pass 1: Code Review" -> "Implementer fixes code findings";
   "Implementer fixes code findings" -> "Pass 2: Test Review";
   "Pass 2: Test Review" -> "Implementer fixes test findings";
-  "Implementer fixes test findings" -> "Task complete";
+  "Implementer fixes test findings" -> "Test Gap Writer";
+  "Test Gap Writer" -> "Task complete";
 }
 ```
 
 **Pass 1 — Code Review:** Architecture, patterns, correctness, wiring (actually connected, not just existing?)
 
 **Pass 2 — Test Review:** Stale tests? Missing coverage? Tests need updating? Dead tests to delete? Edge cases untested?
+
+#### Test Gap Writer
+
+After the implementer addresses Pass 2 findings, dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
+
+1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes
+2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep
+3. Tests should pass immediately (the behavior already exists from implementation)
+4. If a test fails: the gap reveals genuinely missing implementation — flag for the implementer to fix before task completion
+5. Commits new tests: `test: fill coverage gaps for task N`
+
+**Skip this step if** the Pass 2 test reviewer reported zero missing coverage gaps.
 
 #### Iterative Review Loop
 
@@ -192,13 +253,49 @@ After all tasks complete:
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
-3. **REQUIRED SUB-SKILL:** Use crucible:requesting-code-review on full implementation (iterative until clean)
-4. **REQUIRED SUB-SKILL:** Use crucible:red-team on full implementation (iterative until clean)
+3. **REQUIRED SUB-SKILL:** Use crucible:code-review on full implementation (iterative until clean)
+4. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
 5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
 8. Report to user
-9. **REQUIRED SUB-SKILL:** Use crucible:finishing-a-development-branch
+9. **REQUIRED SUB-SKILL:** Use crucible:finish
+
+### Session Metrics
+
+Throughout the pipeline, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log` on each subagent dispatch and completion.
+
+At completion (before reporting to user, i.e. step 8), read the metrics log and compute:
+
+```
+-- Pipeline Complete ----------------------------------------
+  Subagents dispatched:  23 (14 Opus, 7 Sonnet, 2 Haiku)
+  Active work time:      2h 47m
+  Wall clock time:       11h 13m
+  Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
+-------------------------------------------------------------
+```
+
+**Metrics tracked:**
+- Total subagents dispatched (by type and model tier: Opus/Sonnet/Haiku)
+- Active work time (merge overlapping parallel intervals — NOT naive sum)
+- Wall clock time (first dispatch to final completion)
+- Quality gate rounds (per gate: design, plan, implementation)
+
+### Pipeline Decision Journal
+
+Alongside the metrics log, maintain a decision journal at `/tmp/crucible-decisions-<session-id>.log`. Append a structured entry for every non-trivial routing decision:
+
+```
+[timestamp] DECISION: <type> | choice=<what> | reason=<why> | alternatives=<rejected>
+```
+
+Decision types to capture:
+- `reviewer-model` — why Opus vs Sonnet for this reviewer
+- `gate-round` — issue count, severity shifts, progress/stagnation per round
+- `escalation` — why the orchestrator escalated to user (and user's decision)
+- `task-grouping` — parallelism decisions for wave execution
+- `cleanup-removal` — what de-sloppify removed and accept/reject decision
 
 ## Escalation Triggers (Any Phase)
 
@@ -226,6 +323,7 @@ After all tasks complete:
 - All important state on disk (plan files, task list)
 - Teammates report at 50%+ context usage
 - Lead compaction acceptable — task list is source of truth
+- **Agent teams unavailable:** If agent teams are not enabled, the lead dispatches tasks sequentially via Agent tool. Task tracking still uses TaskCreate/TaskUpdate. The pipeline is slower but functionally identical.
 
 ## Prompt Templates
 
@@ -234,19 +332,36 @@ After all tasks complete:
 - `./plan-reviewer-prompt.md` — Phase 2 plan reviewer dispatch
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch
 - `./build-reviewer-prompt.md` — Phase 3 reviewer dispatch
+- `./cleanup-prompt.md` — Phase 3 de-sloppify cleanup dispatch
+- `./test-gap-writer-prompt.md` — Phase 3 test gap writer dispatch
 - `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
 
 Red-team and innovate prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
 - `crucible:innovate` — `skills/innovate/innovate-prompt.md`
 
+## Quality Gate Orchestration
+
+Build is the outermost orchestrator and controls all quality gates via `crucible:quality-gate`. Quality gate wraps `crucible:red-team` internally — do NOT invoke red-team separately at these points.
+
+**Gate points in the pipeline:**
+
+| Pipeline Stage | Artifact Type | Replaces |
+|---------------|---------------|----------|
+| Phase 1, Step 2 (after design) | design | Existing `crucible:red-team` on design |
+| Phase 2, Step 3 (after plan review) | plan | Existing `crucible:red-team` on plan |
+| Phase 4, Step 4 (after implementation) | code | Existing `crucible:red-team` on implementation |
+
+Code review (`crucible:code-review`) remains separate — it serves a different purpose (structured quality check vs. adversarial attack).
+
 ## Integration
 
 **Required sub-skills:**
-- **crucible:brainstorming** — Phase 1
-- **crucible:finishing-a-development-branch** — Phase 4
-- **crucible:red-team** — Adversarial review at each quality gate
-- **crucible:innovate** — Creative enhancement before red-teaming
+- **crucible:design** — Phase 1
+- **crucible:finish** — Phase 4
+- **crucible:quality-gate** — Iterative red-teaming at each quality gate point
+- **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
+- **crucible:innovate** — Creative enhancement before quality gates
 
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion

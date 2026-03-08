@@ -1,3 +1,5 @@
+<!-- Sections marked CANONICAL are defined in shared/reviewer-common.md. Keep in sync when updating. -->
+
 # Build Reviewer Prompt Template
 
 Use this template when dispatching a reviewer teammate in Phase 3. The reviewer performs TWO passes: code review then test review.
@@ -16,9 +18,29 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
 
     [What the implementer reported: files changed, what they built, test results]
 
+    <!-- CANONICAL: shared/reviewer-common.md — Verification Principle -->
     ## CRITICAL: Do Not Trust the Report
 
-    The implementer's report may be incomplete or optimistic. Verify everything by reading actual code.
+    The implementer's report may be incomplete or optimistic. Verify everything by reading actual code:
+
+    - Do NOT take the implementer's word for what was changed -- read the files yourself.
+    - Do NOT assume tests pass because the report says so -- check the actual test code and results.
+    - Do NOT assume requirements are met because the report claims they are -- compare implementation against the spec.
+    - Acknowledge strengths where they exist, but verify claims against actual code.
+
+    **DO:**
+    - Categorize by actual severity (not everything is Critical)
+    - Be specific (file:line, not vague)
+    - Explain WHY issues matter
+    - Acknowledge strengths
+    - Give a clear verdict
+
+    **DON'T:**
+    - Say "looks good" without checking
+    - Mark nitpicks as Critical
+    - Give feedback on code you didn't review
+    - Be vague ("improve error handling")
+    - Avoid giving a clear verdict
 
     ## Your Job: Two-Pass Review
 
@@ -28,19 +50,25 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
 
     Read the actual implementation code. Check:
 
+    <!-- CANONICAL: shared/reviewer-common.md — Review Checklist -->
     **Architecture and Patterns:**
-    - Does it follow project conventions (DI, events, ScriptableObjects)?
+    - Does it follow project conventions (DI, events, ScriptableObjects, etc.)?
     - Is it consistent with existing codebase patterns?
     - Are components properly wired (actually connected, not just existing)?
+    - Sound design decisions?
+    - Scalability and performance implications?
 
     **Correctness:**
-    - Does the implementation match the task requirements?
+    - Does the implementation match the task requirements / spec?
     - Are there logic errors, off-by-one errors, missing null checks?
     - Are edge cases handled?
+    - No scope creep -- implementation matches what was requested?
 
     **Quality:**
+    - Clean separation of concerns? Single responsibility per component?
     - Clear naming that matches what things DO, not how they work?
-    - Single responsibility per component?
+    - Proper error handling?
+    - DRY principle followed?
     - No overengineering or YAGNI violations?
 
     **Wiring:**
@@ -72,24 +100,51 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - Are there tests for deprecated behavior?
 
     **Test Quality:**
-    - Do tests verify behavior (not just mock interactions)?
-    - Are tests independent and deterministic?
-    - Do tests follow AAA pattern (Arrange, Act, Assert)?
+    - Tests actually test behavior (not just mock interactions)?
+    - Edge cases covered?
+    - Integration tests where needed? (Are complex mock setups masking the need for one?)
+    - All tests passing?
+    - Tests are independent and deterministic?
+    - Tests follow AAA pattern (Arrange, Act, Assert)?
 
     **Test Level:**
     - Are there multi-component behaviors tested only at the unit level?
     - Should any of these have integration tests instead of (or in addition to) unit tests?
-    - Are complex mock setups masking the need for an integration test?
 
+    <!-- CANONICAL: shared/reviewer-common.md — Review Checklist (TDD Process Evidence) -->
     **TDD Process Evidence:**
     - Does the implementer's TDD log list a failure message for each test?
     - Do the failure messages make sense (indicate missing feature, not typo/setup error)?
     - Does the git history show test-then-implementation ordering?
-    - If the TDD log is missing or vague, flag it — "TDD log incomplete, cannot verify red-green process"
+    - If the TDD log is missing or vague, flag it: "TDD log incomplete, cannot verify red-green process"
 
     Report Pass 2 findings.
 
+    <!-- CANONICAL: shared/reviewer-common.md — Issue Classification -->
+    ## Issue Classification
+
+    **Per-issue severity levels:**
+
+    - **Critical (Must Fix):** Bugs, security issues, data loss risks, broken functionality. The code cannot ship with these.
+    - **Important (Should Fix):** Architecture problems, missing error handling, test gaps, missing features from the spec. These materially affect quality or correctness.
+    - **Minor (Nice to Have):** Code style, optimization opportunities, documentation improvements. These improve polish but don't affect correctness.
+    - **Suggestion:** Not an issue per se -- ideas for future improvement, alternative approaches worth considering.
+
+    **Overall verdict levels:**
+
+    - **Clean:** No issues found. Code is ready to merge.
+    - **Issues Found:** Specific problems identified that need fixing before merge.
+    - **Architectural Concern:** Fundamental design issue that may require rethinking the approach. Escalate to lead immediately.
+
+    <!-- CANONICAL: shared/reviewer-common.md — Report Format -->
     ## Report Format
+
+    **For each issue found:**
+    - File:line reference (be specific, not vague)
+    - What's wrong
+    - Why it matters
+    - Severity classification
+    - How to fix (if not obvious)
 
     ### Pass 1: Code Review
     - **Verdict:** Clean | Issues found | Architectural concern
@@ -106,4 +161,11 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
 
     ### Overall
     - **Combined verdict:** Approved | Needs fixes (list them) | Escalate
+
+    ### Recommendations
+    [Improvements for code quality, architecture, or process]
+
+    ### Assessment
+    Ready to merge? [Yes / No / With fixes]
+    Reasoning: [Technical assessment in 1-2 sentences]
 ```

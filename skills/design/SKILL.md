@@ -1,5 +1,5 @@
 ---
-name: brainstorming
+name: design
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
 ---
 
@@ -55,8 +55,18 @@ If a critical item is missing, raise it with the user before saving — don't si
 
 **Implementation (if continuing):**
 - Ask: "Ready to set up for implementation?"
-- Use crucible:using-git-worktrees to create isolated workspace
-- Use crucible:writing-plans to create detailed implementation plan
+- Use crucible:worktree to create isolated workspace
+- Use crucible:planning to create detailed implementation plan
+
+## Quality Gate
+
+This skill produces **design docs**. When used standalone, invoke `crucible:quality-gate` after the design document is saved and committed. When used as a sub-skill of build, the parent orchestrator handles gating.
+
+**Standalone invocation:**
+1. Design doc is saved and committed
+2. Invoke `crucible:quality-gate` with artifact type "design"
+3. Address any findings, re-commit
+4. Quality gate iterates until clean or escalates after 3 rounds
 
 ## Key Principles
 
@@ -66,3 +76,7 @@ If a critical item is missing, raise it with the user before saving — don't si
 - **Explore alternatives** - Always propose 2-3 approaches before settling
 - **Incremental validation** - Present design in sections, validate each
 - **Be flexible** - Go back and clarify when something doesn't make sense
+
+## Integration
+
+**Related skills:** crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate

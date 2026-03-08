@@ -36,10 +36,10 @@ digraph forge_modes {
 
 **Three modes:**
 - **Retrospective** — after any significant task (build, debug, plan execution, branch finish)
-- **Feed-Forward** — before brainstorming, planning, or execution begins
+- **Feed-Forward** — before design, planning, or execution begins
 - **Mutation Proposals** — when enough data accumulates (10+ retrospectives, 3+ of same deviation type)
 
-**Significant task** = anything that used `crucible:build`, `crucible:systematic-debugging`, or `crucible:finishing-a-development-branch`. Simple questions and file reads do not qualify.
+**Significant task** = anything that used `crucible:build`, `crucible:debugging`, or `crucible:finish`. Simple questions and file reads do not qualify.
 
 ## Storage
 
@@ -71,6 +71,7 @@ After any skill that completes a significant task reports success. The calling s
 3. Subagent returns structured retrospective entry
 4. Write entry to `~/.claude/projects/<project-hash>/memory/forge/retrospectives/YYYY-MM-DD-HHMMSS-<slug>.md`
 5. Update `patterns.md` — read current file, merge new findings, rewrite
+6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent (Opus). Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer` (record mode) with `dead_ends` and `diagnostic_path` fields.
 
 ### Update Rules for patterns.md
 
@@ -93,7 +94,7 @@ If total retrospective count >= 10 AND any deviation type has 3+ occurrences, su
 
 ### When to Trigger
 
-Before `crucible:brainstorming`, `crucible:writing-plans`, or `crucible:build` begins its core work.
+Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its core work.
 
 ### The Process
 
@@ -147,9 +148,10 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 |---------------|------|------|--------------|
 | `crucible:build` | Feed-Forward | Phase 1 start | Feature description |
 | `crucible:build` | Retrospective | Phase 4, after red-team, before finishing | Full build summary |
-| `crucible:systematic-debugging` | Retrospective | After fix verified | Bug description + hypothesis log |
-| `crucible:finishing-a-development-branch` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
-| `crucible:brainstorming` | Feed-Forward | Before first question | Topic description |
+| `crucible:debugging` | Retrospective | After fix verified | Bug description + hypothesis log |
+| `crucible:debugging` | Retrospective (diagnostic extraction) | After fix verified | Session artifacts → cartographer landmines with `dead_ends` + `diagnostic_path` |
+| `crucible:finish` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
+| `crucible:design` | Feed-Forward | Before first question | Topic description |
 
 **Forge is RECOMMENDED, not REQUIRED.** It is a learning accelerator, not a quality gate. Skipping it does not produce broken output — it misses an opportunity to learn.
 
@@ -173,7 +175,7 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 
 **Always:**
 - Run retrospective after significant tasks
-- Check for patterns.md before brainstorming/planning
+- Check for patterns.md before design/planning
 - Write mutation proposals to disk for human review
 - Handle cold start gracefully (no data = no feed-forward, just say so)
 
@@ -212,3 +214,4 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 - `./retrospective-prompt.md` — Post-task retrospective analyst dispatch
 - `./feed-forward-prompt.md` — Pre-task feed-forward advisor dispatch
 - `./mutation-proposal-prompt.md` — Skill mutation analyst dispatch
+- `./diagnostic-extraction-prompt.md` — Debugging session diagnostic pattern extraction dispatch
