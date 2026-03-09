@@ -1,7 +1,7 @@
 # Adversarial Tester Skill — Design Doc
 
 **Date:** 2026-03-09
-**Status:** Approved
+**Status:** Approved (hardened after quality gate round 1)
 
 ## Summary
 
@@ -20,6 +20,7 @@ The adversarial tester identifies and ranks the top 5 most likely failure modes 
 - `adversarial-tester` is a standalone skill invocable independently (`crucible:adversarial-tester`)
 - Also integrated into the build pipeline's Phase 3 task execution flow
 - Can be used after any implementation work, not just build pipeline tasks
+- **Model:** Opus (adversarial reasoning about failure modes requires creative analytical thinking)
 
 ### 3. Pipeline Position: After Test Gap Writer
 
@@ -33,17 +34,76 @@ The adversarial tester runs last because:
 - Test gap writer fills known gaps; adversarial tester finds unknown ones
 - Failing adversarial tests trigger implementer fixes before task completion
 
-### 4. Skip Condition
+### 4. Skip Condition (Orchestrator-Assessed)
 
-Skip when the task is pure config, documentation, or scaffolding with no behavioral logic to break. The adversarial tester decides this based on the diff — if there's no testable behavior, it reports "No behavioral logic to attack" and exits.
+The **orchestrator** decides whether to skip, not the subagent. Skip when:
+- The task diff contains no behavioral source files (e.g., only `.md`, `.json`, `.yaml`, `.uss`, `.uxml`)
+- No tests were written during implementation (pure scaffolding)
+
+If borderline, dispatch the adversarial tester — it can still report "No behavioral logic to attack" as a secondary safety valve, but the orchestrator makes the primary call.
 
 ### 5. Distinction from Existing Agents
 
-| Agent | Question | Perspective |
-|-------|----------|-------------|
-| Red-team | "What's wrong with this design/code?" | Critic reviewing quality |
-| Test Gap Writer | "What coverage did the reviewer identify as missing?" | Gap-filler for known holes |
-| Adversarial Tester | "How can I make this break?" | Attacker finding unknown weaknesses |
+| Agent | Question | Output | Scope |
+|-------|----------|--------|-------|
+| Red-team | "What's wrong with this artifact?" | Written findings (Fatal/Significant/Minor) | Attacks designs, plans, code quality |
+| Test Gap Writer | "What known gaps need filling?" | Executable tests (expected to PASS) | Fills reviewer-identified holes |
+| Adversarial Tester | "What runtime behavior will break?" | Executable tests (may PASS or FAIL) | Finds unknown weaknesses in behavior |
+
+### 6. Fix Loop Mechanics
+
+When the adversarial tester's tests are run:
+
+- **All tests PASS:** Implementation is robust against these failure modes. Log results and proceed to task complete.
+- **Some tests FAIL:** Real weaknesses found. Dispatch implementer to fix. After fix, re-run all tests (including adversarial). If pass → task complete. If fail → one more fix attempt, then escalate.
+- **Tests ERROR (won't compile):** Adversarial tester made a mistake. Discard broken tests, log, proceed to task complete.
+
+**Quality bypass prevention:** If the implementer's fix touches more than 3 files, route through a lightweight code review before completing. Small fixes (1-3 files) proceed directly after tests pass.
+
+### 7. Prompt Template Structure
+
+The `break-it-prompt.md` template must include:
+
+**Input sections:**
+- Full diff of the task's changes (`git diff <pre-task-sha>..HEAD`)
+- Project test conventions (framework, naming, file locations)
+- Cartographer module context (if available)
+
+**Process:**
+1. Read the diff and identify the attack surface (public APIs, state transitions, boundary conditions, error paths)
+2. Generate candidate failure modes (aim for 8-10 candidates)
+3. Rank by likelihood × impact (likelihood: how easily triggered in normal use; impact: severity of consequence)
+4. Select top 5 failure modes
+5. Write one test per failure mode
+6. Run each test and record result (PASS/FAIL/ERROR)
+
+**Report format:**
+```
+## ADVERSARIAL TEST REPORT
+
+### Summary
+- Failure modes identified: N
+- Tests written: N
+- Tests PASSING (implementation robust): N
+- Tests FAILING (weaknesses found): N
+
+### Failure Mode 1: [Title]
+- **Attack vector:** [how this breaks]
+- **Likelihood:** High/Medium/Low
+- **Impact:** High/Medium/Low
+- **Test:** `TestClassName.TestMethodName`
+- **Result:** PASS/FAIL
+- **If FAIL — fix guidance:** [what the implementer should change]
+
+[repeat for each failure mode]
+```
+
+**Guardrails (must NOT do):**
+- Modify production code
+- Write more than 5 tests
+- Refactor or "improve" existing tests
+- Test implementation details (only test observable behavior)
+- Duplicate coverage already provided by existing tests
 
 ## Deliverables
 
@@ -54,19 +114,20 @@ Skip when the task is pure config, documentation, or scaffolding with no behavio
    - Process: read diff, identify attack surface, rank failure modes, write tests
    - Cap at 5 failure modes, ranked by likelihood × impact
    - Output: tests that expose weaknesses + brief rationale per test
-   - Skip condition for non-behavioral changes
+   - Fix loop mechanics and outcome handling
+   - Skip condition (orchestrator-assessed)
 
 2. **`skills/adversarial-tester/break-it-prompt.md`** — Subagent dispatch template
-   - Used by build pipeline to dispatch the adversarial tester as a subagent
-   - Includes: diff context, project conventions, test framework info
-   - Structured output format for failure modes and tests
+   - Follows the template structure defined in Design Decision #7
+   - Used by build pipeline and standalone invocation
 
 ### Modified Files
 
 3. **`skills/build/SKILL.md`** — Add adversarial tester step
    - New step after Test Gap Writer in Phase 3 Step 3
-   - Skip condition check
-   - Failing tests → dispatch implementer to fix before task completion
+   - Orchestrator-assessed skip condition
+   - Fix loop with quality bypass prevention
+   - Updated flow diagram
 
 4. **`skills/mockup-builder/SKILL.md`** — De-Riftlock (5 references)
    - Replace "Riftlock UI" → "your project's UI" or equivalent
@@ -84,7 +145,7 @@ Skip when the task is pure config, documentation, or scaffolding with no behavio
 7. **`skills/debugging/implementer-prompt.md`** — De-Riftlock (1 reference)
    - Replace "Riftlock.Tests.EditMode" namespace example with generic
 
-8. **`README.md`** — Updates
+8. **`README.md`** — Updates (additive only, no existing Riftlock references to clean)
    - Add `adversarial-tester` to Implementation skill table
    - Add "Project Origin" section noting Unity development roots
    - List Unity-specific skills (mockup-builder, mock-to-unity, ui-verify)
@@ -94,10 +155,16 @@ Skip when the task is pure config, documentation, or scaffolding with no behavio
 - [ ] `adversarial-tester` skill is invocable standalone and produces tests
 - [ ] Build pipeline dispatches adversarial tester after test gap writer
 - [ ] Adversarial tester respects 5 failure mode cap
-- [ ] Adversarial tester skips non-behavioral changes
+- [ ] Orchestrator correctly skips adversarial tester for non-behavioral changes
+- [ ] When adversarial tests fail, implementer is dispatched and all tests pass before task completion
 - [ ] No Riftlock references remain in mockup-builder, mock-to-unity, or debugging skills
 - [ ] README includes adversarial-tester and Project Origin section
-- [ ] All existing tests still pass (no regressions)
+
+## Future Enhancement: Mutation Replay
+
+Proposed during innovate phase — a companion step that generates semantic mutations of the implementation (invert conditionals, swap operators, delete early returns) and checks whether existing tests catch them. Surviving mutants reveal tests that touch code but assert nothing meaningful.
+
+Not included in this build because it's a separate concern (validating test *strength* vs. finding *missing* tests). Worth building as a follow-up skill or adversarial-tester extension.
 
 ## Testing Strategy
 
@@ -105,3 +172,4 @@ Skip when the task is pure config, documentation, or scaffolding with no behavio
 - **Build integration**: Verify the new step is correctly placed in the Phase 3 flow diagram and prose
 - **De-Riftlock audit**: Grep for "riftlock" (case-insensitive) in all skill files post-cleanup — zero hits expected (excluding docs/plans/)
 - **README accuracy**: Verify all skill names in tables match actual skill directories
+- **Fix loop validation**: Verify build SKILL.md defines outcome handling for PASS, FAIL, and ERROR cases
