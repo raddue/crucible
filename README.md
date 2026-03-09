@@ -52,6 +52,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | **test-driven-development** | Red-green-refactor discipline. Write failing test first, minimal implementation, refactor. Enforced rigorously with rationalization counters. |
 | **worktree** | Create isolated git worktrees for feature work with smart directory selection and safety verification. |
 | **parallel** | Dispatch independent tasks to parallel subagents to work without shared state or sequential dependencies. |
+| **adversarial-tester** | Reads completed implementation and writes up to 5 tests designed to expose unknown failure modes. Targets edge cases, boundary conditions, and runtime behavior the implementer didn't anticipate. |
 
 ### Quality
 
@@ -97,7 +98,7 @@ The **build** skill is the main entry point for feature development. It chains t
 
 1. **Phase 1: Design** (interactive) — Refine the idea with the user, produce a design doc. Forge feed-forward and Cartographer consult run at start. Design passes through a quality gate (replaces direct red-team).
 2. **Phase 2: Plan** (autonomous) — Write implementation plan, review, then quality gate on the plan (replaces direct red-team). Innovate proposes enhancements before the gate.
-3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup (removes unnecessary code), code review per task, and a test gap writer (fills coverage gaps identified by the test reviewer). Cartographer loads module context into subagent prompts.
+3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup (removes unnecessary code), code review per task, a test gap writer (fills coverage gaps identified by the test reviewer), and an adversarial tester (writes tests designed to break the implementation). Cartographer loads module context into subagent prompts.
 4. **Phase 4: Complete** (autonomous) — Quality gate on the full implementation (replaces direct red-team), session metrics report, full test suite, Forge retrospective, Cartographer recording, branch completion options.
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators that integrate across the pipeline. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom). Both accumulate across sessions.
@@ -107,6 +108,16 @@ Individual skills can also be used standalone (e.g., `crucible:test-driven-devel
 ## Origin
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged.
+
+## Project Origin
+
+Crucible was developed alongside [Riftlock](https://github.com/raddue/riftlock), a Unity 6 roguelike. Several skills reflect that Unity development context:
+
+- **mockup-builder** — Creates HTML mockups constrained to Theme.uss variables for Unity UI Toolkit translation
+- **mock-to-unity** — Translates mockups into Unity UI Toolkit USS/C# with Unity 6 bug workarounds
+- **ui-verify** — Compares implemented UI against mockups via MCP screenshots or structural audit
+
+These skills are usable in any Unity project. All other crucible skills are language- and framework-agnostic.
 
 ## Rename History
 
