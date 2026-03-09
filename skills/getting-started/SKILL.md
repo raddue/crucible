@@ -3,82 +3,75 @@ name: getting-started
 description: Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions
 ---
 
-<EXTREMELY-IMPORTANT>
-If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
-
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
-
-This is not negotiable. This is not optional. You cannot rationalize your way out of this.
-</EXTREMELY-IMPORTANT>
-
-## How to Access Skills
-
-**In Claude Code:** Use the `Skill` tool. When you invoke a skill, its content is loaded and presented to you--follow it directly. Never use the Read tool on skill files.
-
-**In other environments:** Check your platform's documentation for how skills are loaded.
-
-# Using Crucible
+# Using Crucible Skills
 
 ## The Rule
 
-**Invoke relevant or requested skills BEFORE any response or action.** Even a 1% chance a skill might apply means that you should invoke the skill to check. If an invoked skill turns out to be wrong for the situation, you don't need to use it.
+**Invoke relevant skills BEFORE taking action or responding.** Skills encode hard-won process discipline — skipping them loses that value.
 
-```dot
-digraph skill_flow {
-    "User message received" [shape=doublecircle];
-    "Might any skill apply?" [shape=diamond];
-    "Invoke Skill tool" [shape=box];
-    "Announce: 'Using [skill] to [purpose]'" [shape=box];
-    "Has checklist?" [shape=diamond];
-    "Create TodoWrite todo per item" [shape=box];
-    "Follow skill exactly" [shape=box];
-    "Respond (including clarifications)" [shape=doublecircle];
+**The test:** If the task involves writing, modifying, or debugging code — or planning to do so — a skill applies. Invoke it.
 
-    "User message received" -> "Might any skill apply?";
-    "Might any skill apply?" -> "Invoke Skill tool" [label="yes, even 1%"];
-    "Might any skill apply?" -> "Respond (including clarifications)" [label="definitely not"];
-    "Invoke Skill tool" -> "Announce: 'Using [skill] to [purpose]'";
-    "Announce: 'Using [skill] to [purpose]'" -> "Has checklist?";
-    "Has checklist?" -> "Create TodoWrite todo per item" [label="yes"];
-    "Has checklist?" -> "Follow skill exactly" [label="no"];
-    "Create TodoWrite todo per item" -> "Follow skill exactly";
-}
+**Access:** Use the `Skill` tool. Content is loaded and presented to you — follow it directly. Never use the Read tool on skill files.
+
 ```
+Skill applies? → Invoke it, announce purpose, follow it.
+No skill applies? → Respond directly.
+```
+
+## When Skills Apply (Always Invoke)
+
+These actions ALWAYS have a matching skill — invoke it, no exceptions:
+
+| Action | Skill |
+|--------|-------|
+| Building a feature, adding functionality | design → build |
+| Fixing a bug or test failure | debugging |
+| Implementing from a mockup/visual spec | mock-to-unity |
+| Creating a UI mockup | mockup-builder |
+| Writing implementation code | test-driven-development |
+| Claiming work is done | verify → finish |
+| Receiving code review feedback | review-feedback |
+
+## When Skills Don't Apply (Respond Directly)
+
+Do NOT invoke skills for:
+- **Pure information retrieval** — "read file X", "search for Y", "which branch am I on?" — only when there is no implied follow-up action. If the request is a precursor to building, fixing, or modifying code, the relevant process skill applies.
+- **Imperative commands with no follow-up** — "run the tests and show me output", "check the console" — but if the result reveals a problem (test failures, errors), treat the problem as a new task and perform a skill check before acting on it.
+- **Greetings and status updates** — conversational exchanges with no task implied.
+
+**Guard clause:** Once clarification is complete and you're ready to act, perform the skill check before taking action. The exception covers the exchange itself, not the subsequent work.
+
+**Continuation rule:** A workflow is "active" only while you are executing steps from a specific invoked skill. A new user request — even if related to prior work — requires a fresh skill check. When in doubt, invoke.
 
 ## Red Flags
 
-These thoughts mean STOP--you're rationalizing:
+These thoughts mean STOP — you're rationalizing skipping a skill:
 
 | Thought | Reality |
 |---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
-| "I need more context first" | Skill check comes BEFORE clarifying questions. |
-| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check git/files quickly" | Files lack conversation context. Check for skills. |
-| "Let me gather information first" | Skills tell you HOW to gather information. |
-| "This doesn't need a formal skill" | If a skill exists, use it. |
-| "I remember this skill" | Skills evolve. Read current version. |
-| "This doesn't count as a task" | Action = task. Check for skills. |
-| "The skill is overkill" | Simple things become complex. Use it. |
-| "I'll just do this one thing first" | Check BEFORE doing anything. |
-| "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
-| "I know what that means" | Knowing the concept != using the skill. Invoke it. |
+| "This is just a simple feature" | Simple features still need design → build. |
+| "I already know the fix" | debugging skill prevents guess-and-check. Use it. |
+| "I'll add tests after" | TDD skill exists for a reason. Invoke it. |
+| "Let me just code this quickly" | Skipping process = skipping quality. |
+| "The skill is overkill for this" | Skills adapt to scope. Invoke and let it guide you. |
+| "I remember this skill's content" | Skills evolve. Read the current version. |
+| "Let me explore first, then decide" | If you're exploring as a precursor to building or fixing, invoke the skill first — it tells you HOW to explore. |
+| "I'll just do this one thing first" | If "one thing" is the first step of a larger task, the skill should guide that step. |
 
 ## Skill Priority
 
-When multiple skills could apply, use this order:
+When multiple skills could apply:
 
-1. **Process skills first** (design, debugging) - these determine HOW to approach the task
-2. **Implementation skills second** (frontend-design, mcp-builder) - these guide execution
+1. **Process skills first** (design, debugging) — determine HOW to approach
+2. **Implementation skills second** (mock-to-unity, TDD) — guide execution
 
-"Let's build X" -> design first, then implementation skills.
-"Fix this bug" -> debugging first, then domain-specific skills.
+"Build X" → design first, then build.
+"Fix this bug" → debugging first, then domain skills.
 
 ## Skill Types
 
-**Rigid** (TDD, debugging): Follow exactly. Don't adapt away discipline.
-
-**Flexible** (patterns): Adapt principles to context.
+**Rigid** (TDD, debugging, verify): Follow exactly. Don't adapt away discipline.
+**Flexible** (patterns, design): Adapt principles to context.
 
 The skill itself tells you which.
 

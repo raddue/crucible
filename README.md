@@ -88,7 +88,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 
 | Skill | Description |
 |-------|-------------|
-| **getting-started** | Introduction to finding and using crucible skills. Establishes how to find and use skills, requiring skill invocation before any response. |
+| **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply (code-modifying intent), scoped exceptions for pure information retrieval, escalation clauses when exceptions reveal problems, and anti-rationalization red flags. |
 | **skill-authoring** | Guide for creating and testing new skills. TDD applied to process documentation — create, test, and refine skills with pressure scenarios and rationalization counters. |
 
 ## How It Works
