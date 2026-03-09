@@ -9,7 +9,7 @@ Translate visual mockups into Unity UI Toolkit code (USS/C#) with structural fid
 
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
-**Related skills:** When writing C# controllers (Layers 1, 3, 4), `riftlock-standards` applies to all C# code. After implementation, `test-driven-development` applies for controller tests. After self-verification, `crucible:quality-gate` validates the output.
+**Related skills:** When writing C# controllers (Layers 1, 3, 4), your project's coding standards apply to all C# code. After implementation, `test-driven-development` applies for controller tests. After self-verification, `crucible:quality-gate` validates the output.
 
 ## Architecture Decision: Programmatic C# (Not UXML)
 
@@ -21,9 +21,9 @@ Build VisualElement trees programmatically in C# — do not use UXML. The projec
 
 | Output | Location |
 |--------|----------|
-| USS files | `Riftlock/Assets/_Project/Resources/UI/` |
-| C# controllers | `Riftlock/Assets/_Project/Scripts/Systems/UI/<subsystem>/` |
-| Theme.uss variable additions | `Riftlock/Assets/_Project/Resources/UI/Theme.uss` |
+| USS files | `Assets/_Project/Resources/UI/` |
+| C# controllers | `Assets/_Project/Scripts/Systems/UI/<subsystem>/` |
+| Theme.uss variable additions | `Assets/_Project/Resources/UI/Theme.uss` |
 
 If unsure which subsystem directory, grep for similar controllers or check the cartographer module maps.
 
@@ -98,7 +98,7 @@ Build in this order. Do not skip layers or combine them.
 
 **Layer 1 — Structure:** VisualElement hierarchy only. No styling. Create all containers and elements matching the translation map hierarchy. Verify element names and nesting depth match.
 
-**Layer 2 — USS Styling:** Write USS selectors using Theme.uss variables. Reference the translation map for every property. Use `var()` references exclusively — no hardcoded values. For any variable flagged as "needs adding to Theme.uss" in the translation map, add it to `Riftlock/Assets/_Project/Resources/UI/Theme.uss` in the appropriate section with a comment. Also update `~/.claude/skills/mockup-builder/references/theme-variables.md` to include the new variable.
+**Layer 2 — USS Styling:** Write USS selectors using Theme.uss variables. Reference the translation map for every property. Use `var()` references exclusively — no hardcoded values. For any variable flagged as "needs adding to Theme.uss" in the translation map, add it to `Assets/_Project/Resources/UI/Theme.uss` in the appropriate section with a comment. Also update `~/.claude/skills/mockup-builder/references/theme-variables.md` to include the new variable.
 
 **Layer 3 — Inline C# Workarounds:** For every item flagged in the translation map's bug zone flags and property gaps. Each workaround gets a code comment:
 ```csharp
@@ -128,7 +128,7 @@ Fall back to code-level structural audit — invoke the `ui-verify` skill in cod
 
 This skill produces **translation maps** and **implementations**. When used standalone, invoke `crucible:quality-gate` after self-verification. When used as a sub-skill of build, the parent orchestrator handles gating.
 
-## Riftlock-Specific Rules
+## Unity 6 Rules
 
 These are non-negotiable. Violations are bugs.
 

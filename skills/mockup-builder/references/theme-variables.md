@@ -1,6 +1,6 @@
 # Theme.uss Variable Reference
 
-Source: `Riftlock/Assets/_Project/Resources/UI/Theme.uss`
+Source: Your project's Theme.uss file (e.g., `Assets/_Project/Resources/UI/Theme.uss`)
 Last synced: 2026-02-26
 
 All mockups MUST use these variables via CSS custom properties. No hardcoded values.

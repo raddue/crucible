@@ -36,7 +36,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
      - Test framework and runner (e.g., Unity Test Runner, Jest, pytest)
      - Test location (e.g., Assets/Tests/EditMode/, tests/)
      - Test naming pattern (e.g., [Feature]_[Scenario]_[ExpectedResult])
-     - Namespace conventions (e.g., Riftlock.Tests.EditMode)
+     - Namespace conventions (e.g., MyProject.Tests.EditMode)
      - DI framework (e.g., VContainer, no DI)
      - Coding style (e.g., PascalCase methods, _camelCase fields)
      - Any project-specific test utilities or base classes]

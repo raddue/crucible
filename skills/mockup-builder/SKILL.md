@@ -1,18 +1,18 @@
 ---
 name: mockup-builder
-description: Use when creating a visual mockup, UI prototype, or HTML reference for Riftlock UI. Triggers on "mockup", "prototype", "UI reference", "design a panel", "mock up", or any task producing a visual HTML file for later Unity UI Toolkit implementation.
+description: Use when creating a visual mockup, UI prototype, or HTML reference for your project's UI. Triggers on "mockup", "prototype", "UI reference", "design a panel", "mock up", or any task producing a visual HTML file for later Unity UI Toolkit implementation.
 ---
 
 # Mockup Builder
 
-Create HTML mockups for Riftlock UI that are constrained to Theme.uss variables and designed for direct translation to Unity UI Toolkit.
+Create HTML mockups for your project's UI that are constrained to Theme.uss variables and designed for direct translation to Unity UI Toolkit.
 
 **Skill type:** Rigid — follow exactly.
 
 ## Before Starting
 
 1. Read `references/theme-variables.md` for the full Theme.uss variable catalog
-2. Read existing mockups in `docs/mockups/` for visual language reference — but note that mockups created before this skill may use hardcoded hex values and lack CSS variables. Use them only to understand Riftlock's visual language (colors, proportions, layout patterns), NOT as CSS architecture exemplars.
+2. Read existing mockups in `docs/mockups/` for visual language reference — but note that mockups created before this skill may use hardcoded hex values and lack CSS variables. Use them only to understand the project's visual language (colors, proportions, layout patterns), NOT as CSS architecture exemplars.
 3. If the feature has a design doc in `docs/plans/`, read it for requirements
 
 ## Constraints
@@ -76,14 +76,14 @@ At the bottom of every mockup, include a visible `<section class="translation-no
 
 ## What This Skill Does NOT Do
 
-- Push for "bold", "unexpected", or "distinctive" aesthetics — match Riftlock's established dark sci-fi visual language
+- Push for "bold", "unexpected", or "distinctive" aesthetics — match the project's established visual language
 - Use CSS features without USS equivalents (grid, multi-column, custom properties in calc(), etc.)
 - Create multi-file mockups — always single HTML file
 - Generate Unity code — that is `mock-to-unity`'s job
 
 ## After Creating the Mockup
 
-1. If a browser is available, open the mockup to verify rendering. Otherwise, review the HTML/CSS source for structural correctness and consistency with Riftlock's visual language.
+1. If a browser is available, open the mockup to verify rendering. Otherwise, review the HTML/CSS source for structural correctness and consistency with the project's visual language.
 2. Review the Translation Notes section for completeness
 3. Commit the mockup file to git
 
