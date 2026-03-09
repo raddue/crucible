@@ -74,6 +74,7 @@ Task tool (general-purpose, model: opus):
 
     - Every challenge must be SPECIFIC and ACTIONABLE. "This might have issues" is not a challenge. "Task 3 creates MapDefinition but Task 5 assumes it has a field called TransitionPoints which isn't added until Task 7" is a challenge.
     - You must propose what should change, not just what's wrong.
+    - For every Fatal or Significant challenge, propose a **targeted fix** — the smallest concrete change to the artifact that addresses the issue. This grounds criticism in actionable remediation, not just identification.
     - If you can't find Fatal or Significant issues, say so honestly. Don't manufacture problems to justify your existence.
     - You are attacking the PLAN, not the design. The design was approved by the user. If you think the design itself is flawed, flag it as an architectural escalation.
 

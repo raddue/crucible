@@ -7,76 +7,146 @@ description: "You MUST use this before any creative work - creating features, bu
 
 ## Overview
 
-Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
+Turn ideas into fully formed designs through investigated, collaborative dialogue.
 
-Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design in small sections (200-300 words), checking after each section whether it looks right so far.
+Every significant design question is backed by parallel investigation agents that research the codebase, explore approaches, and assess impact BEFORE the question reaches the user. Questions arrive informed, not naive.
 
 ## The Process
 
-**Understanding the idea:**
-- **RECOMMENDED:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
-- **RECOMMENDED:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
-- Check out the current project state first (files, docs, recent commits)
-- Ask questions one at a time to refine the idea
-- Prefer multiple choice questions when possible, but open-ended is fine too
-- Only one question per message - if a topic needs more exploration, break it into multiple questions
-- Focus on understanding: purpose, constraints, success criteria
+### Phase 1: Context Gathering
 
-**Exploring approaches:**
-- Propose 2-3 different approaches with trade-offs
-- Present options conversationally with your recommendation and reasoning
-- Lead with your recommended option and explain why
+- **RECOMMENDED:** Use crucible:forge (feed-forward mode) — consult past lessons
+- **RECOMMENDED:** Use crucible:cartographer (consult mode) — review codebase map
+- Check current project state (files, docs, recent commits)
+- Understand the user's initial idea through open conversation
 
-**Presenting the design:**
-- Once you believe you understand what you're building, present the design
-- Break it into sections of 200-300 words
-- Ask after each section whether it looks right so far
+### Phase 2: Investigated Questions
+
+For each design dimension that needs a decision, follow this loop:
+
+#### Step 1: Identify the Design Dimension
+
+Before asking anything, name the decision needed (e.g., "persistence strategy," "component communication pattern," "UI architecture").
+
+#### Step 2: State Your Hypothesis
+
+Write down what you EXPECT to find before dispatching agents. After agents return, compare. **Surprises get highlighted** — they're the most valuable insights.
+
+#### Step 3: Triage Depth
+
+| Tier | When | Effort |
+|------|------|--------|
+| **Deep dive** | Architectural decisions, integration points, pattern choices, anything constraining future work | 3 parallel agents + challenger |
+| **Quick scan** | Implementation approach within decided architecture, which existing pattern to follow | Single codebase scout |
+| **Direct ask** | Naming, UI placement, priority ordering — no technical implications | Ask directly |
+
+#### Step 4: Dispatch Investigation
+
+**Deep dive** — spawn three agents in parallel (templates in `investigation-prompts.md`):
+
+1. **Codebase Scout** — What does the codebase already do in this area? Existing patterns, conventions, constraints.
+2. **Domain Researcher** — What are the viable approaches? Trade-offs, best practices, precedents.
+3. **Impact Analyst** — What existing systems does this decision affect? What could break?
+
+Pass the **cascading context** (all prior decisions and rationale) to each agent.
+
+**Quick scan** — dispatch only the Codebase Scout.
+
+#### Step 5: Synthesize
+
+After agents return:
+
+1. **Compare to hypothesis** — note surprises
+2. **Check for auto-resolution** — if only one viable path exists, inform the user rather than asking: "Investigation showed X is the only viable approach because [reasons]. Moving on." User can interrupt if they disagree.
+3. **Check for question redirection** — if agents found the wrong question is being asked, redirect: "Was going to ask about X, but investigation revealed the real decision is Y."
+4. **Synthesize into 2-3 informed options** with a recommended choice
+
+#### Step 6: Challenge (Deep Dive Only)
+
+Dispatch a **Challenger** agent (template in `investigation-prompts.md`):
+- Attacks the recommendation's assumptions
+- Checks for conflicts with prior decisions
+- Identifies blind spots in the investigation
+- Brief output — this is lightweight, not a full red-team
+
+#### Step 7: Present to User
+
+```
+### [Design Dimension]
+
+**Hypothesis:** [what you expected]
+**Surprises:** [anything that contradicted expectations — highlight these]
+
+**Investigation:**
+- **Codebase:** [2-3 sentence summary]
+- **Approaches:** [2-3 sentence summary of viable options]
+- **Impact:** [2-3 sentence summary of affected systems]
+
+**Challenge:** [1-2 sentence summary of what the challenger raised]
+
+**Recommendation:** [your recommended option and why]
+
+**Question:** [the refined question, prefer multiple choice]
+```
+
+For auto-resolved questions:
+
+```
+### [Design Dimension] — Auto-Resolved
+
+[Why only one viable path exists. Decision made.]
+*Speak up if you disagree.*
+```
+
+#### Step 8: Cascade
+
+After the user answers, add the decision and rationale to the running context. All subsequent agents receive this.
+
+### Phase 3: Design Presentation
+
+Once key dimensions are decided:
+- Present design in sections of 200-300 words
+- Ask after each section whether it looks right
 - Cover: architecture, components, data flow, error handling, testing
-- Be ready to go back and clarify if something doesn't make sense
+- Be ready to go back and re-investigate if something doesn't make sense
 
 ## Before Saving the Design
 
-Scan the design for gaps. Not every item applies to every feature — use judgment — but actively check:
+Scan for gaps (use judgment — not every item applies):
 
-- [ ] **Acceptance criteria** — Can someone verify "done" without asking you? Are conditions concrete and testable?
-- [ ] **Testing strategy** — What needs unit tests vs integration tests? What level of testing covers each behavior?
-- [ ] **Integration impact** — What existing systems does this touch? Are those touchpoints addressed in the design?
-- [ ] **Failure modes** — What happens when things go wrong? Invalid data, missing dependencies, unexpected state?
-- [ ] **Edge cases** — What are the boundary conditions? Empty collections, max values, concurrent access?
+- [ ] **Acceptance criteria** — Concrete and testable?
+- [ ] **Testing strategy** — Unit vs integration coverage?
+- [ ] **Integration impact** — Touchpoints addressed?
+- [ ] **Failure modes** — Invalid data, missing dependencies, unexpected state?
+- [ ] **Edge cases** — Boundary conditions?
 
-If a critical item is missing, raise it with the user before saving — don't silently skip it.
+Raise critical gaps with the user before saving.
 
 ## After the Design
 
-**Documentation:**
-- Write the validated design to `docs/plans/YYYY-MM-DD-<topic>-design.md`
-- Use elements-of-style:writing-clearly-and-concisely skill if available
-- Commit the design document to git
+- Write to `docs/plans/YYYY-MM-DD-<topic>-design.md`
+- Commit the design document
 
 **Implementation (if continuing):**
 - Ask: "Ready to set up for implementation?"
-- Use crucible:worktree to create isolated workspace
-- Use crucible:planning to create detailed implementation plan
+- Use crucible:worktree, then crucible:planning
 
 ## Quality Gate
 
 This skill produces **design docs**. When used standalone, invoke `crucible:quality-gate` after the design document is saved and committed. When used as a sub-skill of build, the parent orchestrator handles gating.
 
-**Standalone invocation:**
-1. Design doc is saved and committed
-2. Invoke `crucible:quality-gate` with artifact type "design"
-3. Address any findings, re-commit
-4. Quality gate iterates until clean or escalates after 3 rounds
-
 ## Key Principles
 
-- **One question at a time** - Don't overwhelm with multiple questions
-- **Multiple choice preferred** - Easier to answer than open-ended when possible
-- **YAGNI ruthlessly** - Remove unnecessary features from all designs
-- **Explore alternatives** - Always propose 2-3 approaches before settling
-- **Incremental validation** - Present design in sections, validate each
-- **Be flexible** - Go back and clarify when something doesn't make sense
+- **Investigated questions** — Never ask a significant question without research backing
+- **One question at a time** — Don't overwhelm
+- **Auto-resolve when possible** — Don't waste user attention on decided questions
+- **Hypothesis-first** — State expectations, highlight surprises
+- **Cascading context** — Each decision informs subsequent investigations
+- **YAGNI ruthlessly** — Remove unnecessary features
+- **Depth-appropriate effort** — Not every question needs deep investigation
 
 ## Integration
 
 **Related skills:** crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate
+
+**Prompt templates:** `design/investigation-prompts.md`
