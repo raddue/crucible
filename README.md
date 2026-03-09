@@ -111,7 +111,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Project Origin
 
-Crucible was developed alongside [Riftlock](https://github.com/raddue/riftlock), a Unity 6 roguelike. Several skills reflect that Unity development context:
+Crucible was developed for a Unity 6 project. Several skills reflect that Unity development context:
 
 - **mockup-builder** — Creates HTML mockups constrained to Theme.uss variables for Unity UI Toolkit translation
 - **mock-to-unity** — Translates mockups into Unity UI Toolkit USS/C# with Unity 6 bug workarounds
@@ -119,22 +119,3 @@ Crucible was developed alongside [Riftlock](https://github.com/raddue/riftlock),
 
 These skills are usable in any Unity project. All other crucible skills are language- and framework-agnostic.
 
-## Rename History
-
-The following skills were renamed in the quality gates overhaul (March 2026):
-
-| Previous Name | Current Name |
-|---------------|-------------|
-| systematic-debugging | debugging |
-| brainstorming | design |
-| writing-plans | planning |
-| requesting-code-review | code-review |
-| receiving-code-review | review-feedback |
-| finishing-a-development-branch | finish |
-| dispatching-parallel-agents | parallel |
-| verification-before-completion | verify |
-| using-git-worktrees | worktree |
-| using-crucible | getting-started |
-| writing-skills | skill-authoring |
-
-Old names are not preserved as aliases. Update any references in your CLAUDE.md or scripts.
