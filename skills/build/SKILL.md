@@ -200,7 +200,8 @@ digraph review {
   "Implementer fixes code findings" -> "Pass 2: Test Review";
   "Pass 2: Test Review" -> "Implementer fixes test findings";
   "Implementer fixes test findings" -> "Test Gap Writer";
-  "Test Gap Writer" -> "Task complete";
+  "Test Gap Writer" -> "Adversarial Tester";
+  "Adversarial Tester" -> "Task complete";
 }
 ```
 
@@ -219,6 +220,23 @@ After the implementer addresses Pass 2 findings, dispatch a **Test Gap Writer** 
 5. Commits new tests: `test: fill coverage gaps for task N`
 
 **Skip this step if** the Pass 2 test reviewer reported zero missing coverage gaps.
+
+#### Adversarial Tester
+
+After the test gap writer completes (or is skipped), dispatch an **Adversarial Tester** (Opus) using `skills/adversarial-tester/break-it-prompt.md`:
+
+1. Input: Full diff of the task's changes (`git diff <pre-task-sha>..HEAD`), project test conventions, cartographer module context (if available)
+2. The adversarial tester identifies the top 5 most likely failure modes, writes one test per mode, and runs them
+3. Outcome handling:
+   - **All tests PASS:** Implementation is robust. Log results and proceed to task complete.
+   - **Some tests FAIL:** Real weaknesses found. Dispatch implementer to fix. Re-run all tests (including adversarial). If pass → task complete. If fail → one more fix attempt, then escalate to user.
+   - **Tests ERROR (won't compile):** Adversarial tester mistake. Discard broken tests, log, proceed to task complete.
+4. Quality bypass prevention: If the implementer's fix touches more than 3 files, route through a lightweight code review before completing.
+5. Commit adversarial tests: `test: adversarial tests for task N`
+
+**Skip this step when:**
+- The task diff contains no behavioral source files (only `.md`, `.json`, `.yaml`, `.uss`, `.uxml`)
+- No tests were written during implementation (pure scaffolding)
 
 #### Iterative Review Loop
 
@@ -336,9 +354,10 @@ Decision types to capture:
 - `./test-gap-writer-prompt.md` — Phase 3 test gap writer dispatch
 - `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
 
-Red-team and innovate prompts live in their respective skills:
+Red-team, innovate, and adversarial tester prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
 - `crucible:innovate` — `skills/innovate/innovate-prompt.md`
+- `crucible:adversarial-tester` — `skills/adversarial-tester/break-it-prompt.md`
 
 ## Quality Gate Orchestration
 
