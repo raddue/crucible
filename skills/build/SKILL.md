@@ -216,8 +216,20 @@ After the implementer addresses Pass 2 findings, dispatch a **Test Gap Writer** 
 1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes
 2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep
 3. Tests should pass immediately (the behavior already exists from implementation)
-4. If a test fails: the gap reveals genuinely missing implementation — flag for the implementer to fix before task completion
+4. The test gap writer reports per-test PASS/FAIL results (see prompt template for report format)
 5. Commits new tests: `test: fill coverage gaps for task N`
+
+**If all tests PASS:** Continue to adversarial tester.
+
+**If some tests FAIL** (gaps reveal genuinely missing implementation):
+1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, and the gap descriptions from the reviewer
+2. Implementer fixes the missing behavior, then re-runs ALL test gap writer tests (not just the failures — catches regressions from the fix)
+3. If all tests pass after fix: commit (`fix: address test gap failures for task N`), continue to adversarial tester
+4. If tests still fail after one fix attempt: **escalate to user** with:
+   - Which coverage gaps the reviewer identified
+   - Which tests the gap writer wrote (per-test PASS/FAIL)
+   - What the implementer attempted to fix
+   - Which tests still fail and their current failure messages
 
 **Skip this step if** the Pass 2 test reviewer reported zero missing coverage gaps.
 

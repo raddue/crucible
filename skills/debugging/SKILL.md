@@ -335,9 +335,22 @@ If red-teaming finds Fatal or Significant issues, dispatch a fix agent to addres
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 
-**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. The agent writes tests only for gaps specifically flagged in the review — no scope creep. Tests should PASS immediately since the behavior already exists from the fix. If a test fails, it reveals genuinely missing fix coverage — flag for the implementer. Skipped when reviews report zero coverage gaps.
+**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. The agent writes tests only for gaps specifically flagged in the review — no scope creep. Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
-**Only after all gates pass clean (and any test gaps are filled) is the debugging workflow complete.**
+**If all tests PASS:** Debugging workflow is complete.
+
+**If some tests FAIL** (gaps reveal incomplete fix coverage):
+1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, gap descriptions, and the original bug context (hypothesis, root cause)
+2. Implementer fixes the incomplete coverage, re-runs ALL test gap writer tests (not just failures — catches regressions from the fix)
+3. If all tests pass after fix: commit (`fix: address test gap failures for debugging fix`), debugging workflow is complete
+4. If tests still fail after one fix attempt: **escalate to user** with:
+   - The original bug and confirmed root cause
+   - What was fixed in Phase 4
+   - Which test gaps were detected by reviewers
+   - What the retry implementer attempted
+   - Which tests still fail and their current failure messages
+
+**Only after all gates pass clean (and any test gaps are filled or escalated) is the debugging workflow complete.**
 
 ### Session Metrics
 

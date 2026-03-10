@@ -59,14 +59,17 @@ Task tool (general-purpose, model: opus):
     Bug: [brief description]
     Root cause: [hypothesis that was confirmed]
 
-    Tests written:
-    - [test_file:test_name] — Covers: [gap description from reviewer]
-    - [test_file:test_name] — Covers: [gap description from reviewer]
+    Tests written (per-test results):
+    - [test_file:test_name] — Covers: [gap description] — Result: PASS
+    - [test_file:test_name] — Covers: [gap description] — Result: FAIL
+      Failure: [assertion error or exception message]
+      Fix guidance: [what the fix doesn't cover and where to address it]
 
-    Gaps that revealed incomplete fix:
-    - [gap description] — Test fails because [fix doesn't cover this case]. Flagged for implementer.
+    Summary:
+    - Total tests written: N
+    - Passing: N
+    - Failing: N
 
-    Test suite: PASS (N tests, 0 failures)
-    New tests: X
+    Test suite (full): PASS/FAIL (N total tests, M failures)
     ```
 ```
