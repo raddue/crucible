@@ -95,7 +95,7 @@ This skill produces **implementation plans**. When used standalone, invoke `cruc
 1. Plan is saved
 2. Invoke `crucible:quality-gate` with artifact type "plan"
 3. Address any findings, revise plan
-4. Quality gate iterates until clean or escalates after 3 rounds
+4. Quality gate iterates until clean or stagnation is detected
 
 ## Remember
 - Exact file paths always
