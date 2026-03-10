@@ -59,7 +59,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 
 | Skill | Description |
 |-------|-------------|
-| **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Default 3-round cap. Invoked by artifact-producing skills. |
+| **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Loops until clean or stagnation (weighted scoring: Fatal=3, Significant=1). 15-round safety limit. Invoked by artifact-producing skills. |
 | **red-team** | Adversarial review engine. Dispatches fresh Devil's Advocate subagents per round with stagnation detection. Used by quality-gate internally. |
 | **code-review** | Dispatch code review with shared canonical review checklist. |
 | **review-feedback** | Process code review feedback with technical rigor. Requires verification, not blind implementation. |

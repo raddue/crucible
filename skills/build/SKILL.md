@@ -49,7 +49,7 @@ Every status update must include:
 After the user approves the design and before starting Phase 2:
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
-2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) design doc with artifact type "design". Iterates until clean, stagnation, or 3-round cap.
+2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) design doc with artifact type "design". Iterates until clean or stagnation.
 3. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 4. Design doc is now finalized — proceed to acceptance tests.
 
@@ -110,7 +110,7 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
 2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context.
 
-The quality gate handles the iterative red-team loop — fresh review each round, stagnation detection, 3-round cap, escalation. See `crucible:quality-gate` for details.
+The quality gate handles the iterative red-team loop — fresh review each round, weighted stagnation detection, 15-round safety limit, escalation. See `crucible:quality-gate` for details.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
