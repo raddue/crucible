@@ -30,10 +30,10 @@ digraph red_team_loop {
   "No Fatal/Significant issues" -> "Artifact approved -- proceed";
   "Reviewer returns findings" -> "Fatal/Significant issues found";
   "Fatal/Significant issues found" -> "Dispatch fix agent";
-  "Dispatch fix agent" -> "Count issues (Fatal + Significant)";
-  "Count issues (Fatal + Significant)" -> "Compare to prior round";
-  "Compare to prior round" -> "Dispatch FRESH Devil's Advocate" [label="strictly fewer = progress"];
-  "Compare to prior round" -> "Escalate to user" [label="same or more = stagnation"];
+  "Dispatch fix agent" -> "Score issues (Fatal=3, Significant=1)";
+  "Score issues (Fatal=3, Significant=1)" -> "Compare weighted score to prior round";
+  "Compare weighted score to prior round" -> "Dispatch FRESH Devil's Advocate" [label="strictly lower score = progress"];
+  "Compare weighted score to prior round" -> "Escalate to user" [label="same or higher score = stagnation"];
   "Reviewer returns findings" -> "Escalate to user" [label="architectural concern"];
 }
 ```
@@ -41,10 +41,20 @@ digraph red_team_loop {
 ### Rules
 
 1. **Fresh reviewer every round** — dispatch a NEW subagent each time. Never pass prior findings to the next reviewer. Each reviewer sees the artifact cold.
-2. **Stagnation = escalation** — if Round N+1 finds >= the number of Fatal+Significant issues as Round N, stop and escalate to user with full findings from both rounds.
+2. **Stagnation = escalation** — use weighted scoring to detect stagnation (see below). If the weighted score does not strictly decrease, stop and escalate to user with full findings from both rounds.
 3. **Architectural concerns bypass the loop** — immediate escalation regardless of round or progress.
-4. **No round cap** — loop as long as each round makes progress.
+4. **No round cap** — loop as long as each round makes progress. The caller (e.g., `crucible:quality-gate`) may impose a global safety limit.
 5. **Only Fatal and Significant count** — Minor observations are logged but don't count toward stagnation and don't trigger fix rounds.
+
+### Stagnation Detection
+
+Stagnation uses **weighted scoring**, not raw issue counts. This prevents false stagnation when Fatal issues are converted to Significant ones (which is genuine progress).
+
+**Weights:** Fatal = 3 points, Significant = 1 point.
+
+**Example:** Round 1 finds 2 Fatal + 1 Significant = score 7. Fixer eliminates both Fatals but surfaces 3 new Significants. Round 2 finds 0 Fatal + 3 Significant = score 3. That is progress (3 < 7), not stagnation.
+
+**If the weighted score is the same or higher than the prior round, that is stagnation.** Escalate to user with findings from both rounds.
 
 ### Issue Classification
 
@@ -77,14 +87,14 @@ Model: **Opus** (adversarial analysis needs the best model)
 ### 3. Process findings
 
 - **No Fatal/Significant issues:** Artifact is approved. Proceed.
-- **Fatal/Significant issues found:** Record the issue count. Dispatch fix mechanism. Then go to step 4.
+- **Fatal/Significant issues found:** Compute the weighted score (Fatal=3, Significant=1). Dispatch fix mechanism. Then go to step 4.
 - **Architectural concerns:** Escalate to user immediately. Do not attempt to fix.
 
 ### 4. Re-review after fixes
 
-Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compare issue count:
-- **Strictly fewer Fatal+Significant issues:** Progress. Loop back to step 3.
-- **Same or more Fatal+Significant issues:** Stagnation. Escalate to user with findings from both rounds.
+Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weighted score and compare:
+- **Strictly lower weighted score:** Progress. Loop back to step 3.
+- **Same or higher weighted score:** Stagnation. Escalate to user with findings from both rounds.
 
 ## What the Devil's Advocate is NOT
 
