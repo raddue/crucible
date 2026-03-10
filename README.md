@@ -53,6 +53,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | **worktree** | Create isolated git worktrees for feature work with smart directory selection and safety verification. |
 | **parallel** | Dispatch independent tasks to parallel subagents to work without shared state or sequential dependencies. |
 | **adversarial-tester** | Reads completed implementation and writes up to 5 tests designed to expose unknown failure modes. Targets edge cases, boundary conditions, and runtime behavior the implementer didn't anticipate. |
+| **inquisitor** | Full-feature cross-component adversarial testing. Dispatches 5 parallel dimensions (wiring, integration, edge cases, state/lifecycle, regression) against the complete implementation diff to find bugs that per-task testing misses. |
 
 ### Quality
 
@@ -99,7 +100,7 @@ The **build** skill is the main entry point for feature development. It chains t
 1. **Phase 1: Design** (interactive) — Refine the idea with the user, produce a design doc. Forge feed-forward and Cartographer consult run at start. Design passes through a quality gate (replaces direct red-team).
 2. **Phase 2: Plan** (autonomous) — Write implementation plan, review, then quality gate on the plan (replaces direct red-team). Innovate proposes enhancements before the gate.
 3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup (removes unnecessary code), code review per task, a test gap writer (fills coverage gaps identified by the test reviewer), and an adversarial tester (writes tests designed to break the implementation). Cartographer loads module context into subagent prompts.
-4. **Phase 4: Complete** (autonomous) — Quality gate on the full implementation (replaces direct red-team), session metrics report, full test suite, Forge retrospective, Cartographer recording, branch completion options.
+4. **Phase 4: Complete** (autonomous) — Code review on full implementation, inquisitor (5 parallel adversarial dimensions against the full feature diff), quality gate (replaces direct red-team), session metrics report, full test suite, Forge retrospective, Cartographer recording, branch completion options.
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators that integrate across the pipeline. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom). Both accumulate across sessions.
 

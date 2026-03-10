@@ -272,18 +272,27 @@ After all tasks complete:
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
 3. **REQUIRED SUB-SKILL:** Use crucible:code-review on full implementation (iterative until clean)
-4. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
-5. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
-6. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
-7. Compile summary: what was built, acceptance tests passing, review findings addressed, concerns
-8. Report to user
-9. **REQUIRED SUB-SKILL:** Use crucible:finish
+4. **REQUIRED SUB-SKILL:** Use crucible:inquisitor on full implementation (dispatches 5 parallel dimensions against full feature diff)
+   - Input: `git diff <base-sha>..HEAD` where base-sha is the commit before Phase 3 execution began
+   - Runs after code review (obvious issues already fixed) and before quality gate (gate reviews final state)
+   - The inquisitor manages its own fix cycle internally — do not intervene unless it escalates
+   - See `crucible:inquisitor` for full process
+5. **Conditional:** If the inquisitor's fix cycle produced any code changes, re-run crucible:code-review scoped to the inquisitor fix commits only (`git diff <pre-inquisitor-sha>..HEAD`)
+   - This is NOT a full implementation re-review — scope it to only the fixer's changes
+   - Iterative until clean, same as step 3
+   - Skip if the inquisitor reported all PASS (no fixes were needed)
+6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
+7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
+8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
+9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
+10. Report to user
+11. **REQUIRED SUB-SKILL:** Use crucible:finish
 
 ### Session Metrics
 
 Throughout the pipeline, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log` on each subagent dispatch and completion.
 
-At completion (before reporting to user, i.e. step 8), read the metrics log and compute:
+At completion (before reporting to user, i.e. step 9), read the metrics log and compute:
 
 ```
 -- Pipeline Complete ----------------------------------------
@@ -354,10 +363,11 @@ Decision types to capture:
 - `./test-gap-writer-prompt.md` — Phase 3 test gap writer dispatch
 - `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
 
-Red-team, innovate, and adversarial tester prompts live in their respective skills:
+Red-team, innovate, adversarial tester, and inquisitor prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`
 - `crucible:innovate` — `skills/innovate/innovate-prompt.md`
 - `crucible:adversarial-tester` — `skills/adversarial-tester/break-it-prompt.md`
+- `crucible:inquisitor` — `skills/inquisitor/inquisitor-prompt.md`
 
 ## Quality Gate Orchestration
 
@@ -369,9 +379,9 @@ Build is the outermost orchestrator and controls all quality gates via `crucible
 |---------------|---------------|----------|
 | Phase 1, Step 2 (after design) | design | Existing `crucible:red-team` on design |
 | Phase 2, Step 3 (after plan review) | plan | Existing `crucible:red-team` on plan |
-| Phase 4, Step 4 (after implementation) | code | Existing `crucible:red-team` on implementation |
+| Phase 4, Step 6 (after inquisitor + conditional re-review) | code | Existing `crucible:red-team` on implementation |
 
-Code review (`crucible:code-review`) remains separate — it serves a different purpose (structured quality check vs. adversarial attack).
+Code review (`crucible:code-review`) and inquisitor (`crucible:inquisitor`) remain separate from the quality gate — code-review does structured quality checks, inquisitor writes cross-component adversarial tests, and the quality gate does adversarial artifact review. All three serve distinct purposes.
 
 ## Integration
 
@@ -381,6 +391,7 @@ Code review (`crucible:code-review`) remains separate — it serves a different 
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
 - **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
 - **crucible:innovate** — Creative enhancement before quality gates
+- **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, after code-review, before quality-gate)
 
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
