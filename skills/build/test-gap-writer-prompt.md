@@ -52,14 +52,17 @@ Task tool (general-purpose, model: opus):
     TEST GAP REPORT
     ===============
 
-    Tests written:
-    - [test_file:test_name] — Covers: [gap description from reviewer]
-    - [test_file:test_name] — Covers: [gap description from reviewer]
+    Tests written (per-test results):
+    - [test_file:test_name] — Covers: [gap description] — Result: PASS
+    - [test_file:test_name] — Covers: [gap description] — Result: FAIL
+      Failure: [assertion error or exception message]
+      Fix guidance: [what behavior is missing and where to implement it]
 
-    Gaps that revealed missing implementation:
-    - [gap description] — Test fails because [behavior not implemented]. Flagged for implementer.
+    Summary:
+    - Total tests written: N
+    - Passing: N
+    - Failing: N
 
-    Test suite: PASS (N tests, 0 failures)
-    New tests: X
+    Test suite (full): PASS/FAIL (N total tests, M failures)
     ```
 ```
