@@ -5,48 +5,58 @@
     {
       "expectation": "Identifies the in-memory scheduler problem: scheduled jobs are lost on server restart with no persistence",
       "verdict": "PASS",
-      "justification": "Clearly identified under 'State & Lifecycle' Attack Vector 1: 'All scheduled jobs are stored in a Map<string, NodeJS.Timeout> that exists only in process memory. If the server restarts (crash, deploy, scaling event), all pending scheduled notifications are permanently lost with no recovery mechanism.'"
+      "justification": "State & Lifecycle Attack Vector 1: 'All scheduled jobs are stored in a Map<string, NodeJS.Timeout> that exists only in process memory. If the server restarts (crash, deploy, scaling event), all pending scheduled notifications are permanently lost with no recovery mechanism.'"
     },
     {
       "expectation": "Identifies the type mismatch: Date.now() returns a number but the notifications table sent_at column expects a TIMESTAMP",
       "verdict": "PASS",
-      "justification": "Clearly identified under 'Integration' Attack Vector 1: 'sendNotification writes sentAt: Date.now() which produces a numeric epoch value... The database notifications table has sent_at typed as TIMESTAMP. Knex will pass the raw number to PostgreSQL, which will either reject it or interpret it as an absurd date.'"
+      "justification": "Integration Attack Vector 1: 'sendNotification writes sentAt: Date.now() which produces a numeric epoch value (e.g., 1710950400000). The database notifications table has sent_at typed as TIMESTAMP. Knex will pass the raw number to PostgreSQL, which will either reject it or interpret it as an absurd date.'"
     },
     {
       "expectation": "Identifies the edge case: negative delay when scheduledAt is in the past (setTimeout with negative value fires immediately)",
       "verdict": "PASS",
-      "justification": "Clearly identified under 'Edge Cases' Attack Vector 1: 'When scheduledAt is a timestamp in the past... produces a negative number. setTimeout with a negative delay fires immediately (treated as 0).'"
+      "justification": "Edge Cases Attack Vector 1: 'When scheduledAt is a timestamp in the past, new Date(scheduledAt).getTime() - Date.now() produces a negative number. setTimeout with a negative delay fires immediately (treated as 0). This means a past-dated schedule request silently fires the notification instantly with no validation or warning.'"
     },
     {
       "expectation": "Identifies missing error handling: silently skipping missing users (notifier returns without response/logging)",
       "verdict": "PASS",
-      "justification": "Identified under 'Regression' Attack Vector 1: 'sendNotification function returns silently when a user is not found... produces no error, no log, and no database record.' Marked as PASS in their testing (design concern), but the issue was explicitly identified with fix guidance."
+      "justification": "Regression Attack Vector 1: 'The sendNotification function returns silently when a user is not found (if (!user) return). This means scheduled notifications for deleted users produce no error, no log, and no database record. The caller (setTimeout callback) has no way to know the notification was skipped.'"
     },
     {
       "expectation": "Identifies the lifecycle issue: no cleanup of pending timeouts on server shutdown (process.exit leaves timers dangling)",
       "verdict": "PASS",
-      "justification": "Identified under 'State & Lifecycle' Attack Vector 2: 'When the process receives SIGTERM or SIGINT, there is no graceful shutdown handler that clears pending timeouts. In-flight timers continue executing during shutdown.' Fix guidance recommends adding a shutdown() method."
+      "justification": "State & Lifecycle Attack Vector 2: 'When the process receives SIGTERM or SIGINT, there is no graceful shutdown handler that clears pending timeouts. In-flight timers continue executing during shutdown, potentially sending notifications after the server has begun tearing down database connections.'"
     },
     {
-      "expectation": "Identifies at least 3 of the 5 dimensions (wiring, integration, edge cases, state/lifecycle, regression)",
+      "expectation": "Identifies the dynamic require() in execute() as a wiring issue (breaks ESM compatibility, bundler tree-shaking, or testability)",
       "verdict": "PASS",
-      "justification": "All 5 dimensions were explicitly dispatched and reported on: Wiring (2 failures), Integration (3 failures), Edge Cases (2 failures), State & Lifecycle (1 failure), Regression (passes). Covers all 5 dimensions."
+      "justification": "Wiring Attack Vector 3 explicitly flags require() as problematic, not merely noting it exists: 'The execute method uses require(\"./notifier\") dynamically instead of a top-level import. This works in CommonJS but will fail if the project uses ESM modules or if bundler tree-shaking removes the notifier module.' It identifies ESM breakage and tree-shaking as specific consequences, and recommends restructuring the dependency graph if circular dependency avoidance was the motivation."
+    },
+    {
+      "expectation": "Identifies the scheduledAt deserialization gap: JSON.parse produces a string from req.body but NotificationPayload types scheduledAt as Date — new Date(scheduledAt).getTime() works by accident but the payload object carries the wrong type",
+      "verdict": "PASS",
+      "justification": "Integration Attack Vector 2 explicitly identifies this gap: 'The route destructures scheduledAt from req.body and passes it directly into the payload as type Date. However, JSON request bodies parse dates as strings, not Date objects. The NotificationPayload.scheduledAt field will be a string at runtime despite the TypeScript type declaration.' Fix guidance recommends 'Add explicit conversion: scheduledAt: new Date(scheduledAt) when constructing the payload in the route handler.'"
+    },
+    {
+      "expectation": "Identifies at least 8 distinct issues spanning at least 4 of the 5 analysis dimensions",
+      "verdict": "PASS",
+      "justification": "Counting distinct issues: (1) singleton instantiation risk [Wiring], (2) dynamic require [Wiring], (3) Date.now() vs TIMESTAMP [Integration], (4) scheduledAt string deserialization [Integration], (5) fetch error not caught [Integration], (6) negative delay [Edge Cases], (7) missing input validation [Edge Cases], (8) in-memory jobs lost on restart [State & Lifecycle], (9) no graceful shutdown [State & Lifecycle], (10) silent missing user skip [Regression]. That is 10 distinct issues spanning all 5 dimensions."
     },
     {
       "expectation": "Each identified issue includes a specific proposed fix or test to verify the problem",
       "verdict": "PASS",
-      "justification": "Every attack vector includes both a named test (e.g., 'SchedulerLifecycle.testJobSurvivesRestart') and specific fix guidance (e.g., 'Persist scheduled jobs to the database. On startup, query for pending scheduled notifications and re-register their timers.')"
+      "justification": "Every attack vector includes both a named test identifier (e.g., 'NotifierIntegration.testSentAtColumnTypeCompatibility') and specific fix guidance. Examples: 'Replace Date.now() with new Date()', 'Replace the dynamic require with a top-level import statement', 'Add explicit conversion: scheduledAt: new Date(scheduledAt)', 'Wrap the fetch call in a try/catch.'"
     },
     {
       "expectation": "Does NOT focus on code style or naming — focuses on behavioral/runtime issues",
       "verdict": "PASS",
-      "justification": "All 17 attack vectors focus on behavioral/runtime issues: type mismatches, missing error handling, state persistence, lifecycle management, integration bugs. No mentions of code style, naming conventions, or formatting."
+      "justification": "All 17 attack vectors across 5 dimensions focus on runtime behavior: type mismatches, missing error handling, state persistence, lifecycle management, integration bugs, edge cases. Zero mentions of code style, naming conventions, formatting, or cosmetic concerns."
     }
   ],
-  "score": "8/8",
+  "score": "10/10",
   "eval_feedback": [
-    "Expectation 4 ('silently skipping missing users') is somewhat ambiguous — the inquisitor identified the issue but rated it as PASS (design concern). The expectation could clarify whether merely identifying the issue is sufficient or whether it must be flagged as a defect.",
-    "Expectation 6 ('at least 3 of the 5 dimensions') is easy to pass given the skill's structured 5-dimension approach. Consider raising the bar or testing for quality within each dimension rather than just coverage.",
-    "Consider adding an expectation about identifying the scheduledAt string-vs-Date type issue (JSON deserialization produces a string, not a Date), which the inquisitor caught but no expectation covers."
+    "Perfect score on the updated, harder expectations. Both differentiating assertions (dynamic require as wiring issue, scheduledAt deserialization gap) were explicitly and correctly identified.",
+    "The structured 5-dimension approach surfaced the scheduledAt deserialization gap as a dedicated attack vector, which the without_skill version missed.",
+    "10 distinct issues identified across all 5 dimensions demonstrates thorough systematic coverage."
   ]
 }

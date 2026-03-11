@@ -8,7 +8,9 @@
     "Identifies the edge case: negative delay when scheduledAt is in the past (setTimeout with negative value fires immediately)",
     "Identifies missing error handling: silently skipping missing users (notifier returns without response/logging)",
     "Identifies the lifecycle issue: no cleanup of pending timeouts on server shutdown (process.exit leaves timers dangling)",
-    "Identifies at least 3 of the 5 dimensions (wiring, integration, edge cases, state/lifecycle, regression)",
+    "Identifies the dynamic require() in execute() as a wiring issue (breaks ESM compatibility, bundler tree-shaking, or testability)",
+    "Identifies the scheduledAt deserialization gap: JSON.parse produces a string from req.body but NotificationPayload types scheduledAt as Date — new Date(scheduledAt).getTime() works by accident but the payload object carries the wrong type",
+    "Identifies at least 8 distinct issues spanning at least 4 of the 5 analysis dimensions",
     "Each identified issue includes a specific proposed fix or test to verify the problem",
     "Does NOT focus on code style or naming — focuses on behavioral/runtime issues"
   ]

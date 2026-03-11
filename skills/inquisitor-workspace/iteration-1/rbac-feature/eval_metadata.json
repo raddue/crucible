@@ -5,11 +5,12 @@
   "expectations": [
     "Identifies the TypeScript type issue: req.userRole is set but Request type doesn't include this property",
     "Identifies that existing tests will break: they mock authMiddleware but the new requireRole middleware also queries the DB",
-    "Identifies the migration concern: existing users may have NULL role if DEFAULT doesn't backfill existing rows",
+    "Identifies the migration backfill question and correctly analyzes whether PostgreSQL DEFAULT applies to existing rows (not just asserting it's broken)",
     "Identifies the N+1 query issue: every role-protected request makes a separate DB call to check the user's role",
     "Identifies at least one missing role check or inconsistency in the permission model (e.g., GET /articles has no check)",
+    "Identifies the empty roles array edge case: requireRole() called with no arguments creates middleware that rejects all users including admins",
+    "Identifies the findById().select('role') return shape ambiguity: whether it returns an object like { role: 'admin' } or just the string 'admin' depends on the ORM, and the code assumes object shape without verification",
     "Each identified issue includes a specific proposed fix or test",
-    "Report covers at least 3 of the 5 dimensions",
     "Issues are specific to this codebase — not generic security advice"
   ]
 }

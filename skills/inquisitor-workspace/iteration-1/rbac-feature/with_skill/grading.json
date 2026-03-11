@@ -5,48 +5,54 @@
     {
       "expectation": "Identifies the TypeScript type issue: req.userRole is set but Request type doesn't include this property",
       "verdict": "PASS",
-      "justification": "Clearly identified under 'Wiring' Attack Vector 1: 'The requireRole middleware assigns req.userRole = userRole.role, but the Express Request type does not include a userRole property. This will cause a TypeScript compilation error in strict mode.' Provides fix guidance with type augmentation example."
+      "justification": "Wiring Attack Vector 1: 'The requireRole middleware assigns req.userRole = userRole.role, but the Express Request type does not include a userRole property. This will cause a TypeScript compilation error in strict mode.' Provides exact type augmentation code as fix guidance."
     },
     {
       "expectation": "Identifies that existing tests will break: they mock authMiddleware but the new requireRole middleware also queries the DB",
       "verdict": "PASS",
-      "justification": "Identified under 'Regression' Attack Vector 1: 'Existing tests... mock authMiddleware to set req.user. However, the new requireRole middleware makes its own database query (db.users.findById). These tests do not mock the database call in requireRole, so they will fail.' Rated as highest priority."
+      "justification": "Regression Attack Vector 1: 'Existing tests in tests/routes/admin.test.ts and tests/routes/content.test.ts mock authMiddleware to set req.user. However, the new requireRole middleware makes its own database query (db.users.findById). These tests do not mock the database call in requireRole, so they will fail with a database error or connection refusal in the test environment.' Rated highest priority."
     },
     {
-      "expectation": "Identifies the migration concern: existing users may have NULL role if DEFAULT doesn't backfill existing rows",
+      "expectation": "Identifies the migration backfill question and correctly analyzes whether PostgreSQL DEFAULT applies to existing rows (not just asserting it's broken)",
       "verdict": "PASS",
-      "justification": "Identified under 'Edge Cases' Attack Vector 1. The report actually correctly notes that PostgreSQL 11+ does backfill, marking it PASS. The concern was acknowledged and investigated rather than ignored. The report notes 'If running an older version, an UPDATE statement would be needed.'"
+      "justification": "Edge Cases Attack Vector 1 correctly analyzes: 'in PostgreSQL, ALTER TABLE ... ADD COLUMN ... DEFAULT does backfill existing rows with the default value (as of PostgreSQL 11+). Verified that existing users will get viewer role.' This is nuanced and correct -- it does not falsely assert the migration is broken, and notes the PG 11+ caveat."
     },
     {
       "expectation": "Identifies the N+1 query issue: every role-protected request makes a separate DB call to check the user's role",
       "verdict": "PASS",
-      "justification": "Clearly identified under 'Integration' Attack Vector 1: 'Every request to a role-protected route triggers a separate db.users.findById(userId).select('role') query. The auth middleware already queries the user... this doubles the per-request database load.' Proposes JWT-based or caching fixes."
+      "justification": "Integration Attack Vector 1: 'Every request to a role-protected route triggers a separate db.users.findById(userId).select(\"role\") query. The auth middleware already queries the user (to validate the JWT/session), but the role middleware queries again. For high-traffic endpoints, this doubles the per-request database load.'"
     },
     {
       "expectation": "Identifies at least one missing role check or inconsistency in the permission model (e.g., GET /articles has no check)",
       "verdict": "PASS",
-      "justification": "Identified under 'Wiring' Attack Vector 2: 'The GET /articles route still only requires authMiddleware with no requireRole guard.' Also identified under 'Edge Cases' Attack Vector 3 the empty roles array issue, and under 'State & Lifecycle' Attack Vector 2 the admin self-deletion inconsistency."
+      "justification": "Wiring Attack Vector 2: 'The GET /articles route still only requires authMiddleware with no requireRole guard. Any authenticated user can read articles, but POST, PUT, and DELETE are role-gated.' Also identified admin self-deletion as a State & Lifecycle inconsistency."
+    },
+    {
+      "expectation": "Identifies the empty roles array edge case: requireRole() called with no arguments creates middleware that rejects all users including admins",
+      "verdict": "PASS",
+      "justification": "Edge Cases Attack Vector 3 explicitly identifies this: 'Calling requireRole() with no arguments creates a middleware where roles is an empty array. roles.includes(userRole.role) will always be false, meaning the route is locked down to everyone including admins. No route currently does this, but it is an unguarded edge case in the API.' Fix: 'Add a runtime check: if (roles.length === 0) throw new Error(\"requireRole must be called with at least one role\").'"
+    },
+    {
+      "expectation": "Identifies the findById().select('role') return shape ambiguity: whether it returns an object like { role: 'admin' } or just the string 'admin' depends on the ORM, and the code assumes object shape without verification",
+      "verdict": "PASS",
+      "justification": "Integration Attack Vector 2 explicitly questions the return shape: 'Depending on the ORM/query builder, select(\"role\") might return { role: \"admin\" } or just the string \"admin\". If it returns the string, userRole.role will be undefined, and the role check will always fail, locking out all users.' Fix guidance: 'Verify the actual return type... Add a test that asserts the shape.'"
     },
     {
       "expectation": "Each identified issue includes a specific proposed fix or test",
       "verdict": "PASS",
-      "justification": "Every attack vector includes a named test and specific fix guidance. Examples: type augmentation code snippet for req.userRole, runtime check for empty roles array, self-deletion guard with code example, role constants/enum definition suggestion."
-    },
-    {
-      "expectation": "Report covers at least 3 of the 5 dimensions",
-      "verdict": "PASS",
-      "justification": "All 5 dimensions explicitly covered: Wiring (3 vectors), Integration (4 vectors), Edge Cases (3 vectors), State & Lifecycle (2 vectors), Regression (3 vectors). Failures found in 4 of 5 dimensions."
+      "justification": "Every attack vector includes both a named test (e.g., 'RBACEdgeCases.testEmptyRolesArray') and specific fix guidance. Examples: type augmentation code, 'if (roles.length === 0) throw new Error(...)', 'include the role in the JWT payload', 'Define roles as an enum or const object', 'if (req.params.id === req.user.id) return res.status(400)...'."
     },
     {
       "expectation": "Issues are specific to this codebase — not generic security advice",
       "verdict": "PASS",
-      "justification": "All issues reference specific code elements: req.userRole type, db.users.findById().select('role') return shape, specific test files (tests/routes/admin.test.ts), the exact migration SQL, specific route paths. No generic 'add rate limiting' or 'use HTTPS' advice."
+      "justification": "All issues reference specific code: req.userRole, db.users.findById(userId).select('role'), specific test files (tests/routes/admin.test.ts, tests/routes/content.test.ts), the exact migration SQL, specific route paths (/admin/users, /articles). No generic security advice like 'use HTTPS' or 'implement rate limiting'."
     }
   ],
-  "score": "8/8",
+  "score": "9/9",
   "eval_feedback": [
-    "Expectation 3 ('migration concern') is somewhat ambiguous — the inquisitor correctly identified that PostgreSQL 11+ DOES backfill and marked it PASS. Should the expectation reward identifying the concern even if the conclusion is 'no issue'? The current wording ('existing users may have NULL role') implies the expectation is that this is flagged as a bug, but the correct analysis is that it's not a bug in PG 11+.",
-    "Consider adding an expectation for the findById().select('role') return shape ambiguity, which the inquisitor caught and is a genuine integration risk.",
-    "The expectation about 'missing role check or inconsistency' is broad enough that many different findings could satisfy it. Consider being more specific about what constitutes a permission model inconsistency."
+    "Perfect score on updated expectations. Both hard differentiating assertions passed: empty roles array edge case and findById().select('role') return shape ambiguity.",
+    "The structured dimensional approach was critical for surfacing the empty roles edge case, which the without_skill version missed entirely.",
+    "Migration analysis was correctly nuanced (PG 11+ backfills, not broken) rather than falsely asserting it as broken.",
+    "Additional valuable issues beyond expectations: magic role strings, case sensitivity, admin self-deletion, middleware ordering verification."
   ]
 }

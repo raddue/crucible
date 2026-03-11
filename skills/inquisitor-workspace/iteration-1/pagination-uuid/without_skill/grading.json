@@ -5,27 +5,27 @@
     {
       "expectation": "Identifies the critical type mismatch: orders table uses UUID ids but paginate() uses parseInt() and numeric comparison",
       "verdict": "PASS",
-      "justification": "First and most prominent issue: 'The paginate function assumes integer IDs everywhere: the generic constraint is T extends { id: number }, the cursor is parsed with parseInt(params.cursor), and the WHERE clause uses > for numeric comparison. However, the orders table uses UUID primary keys.' Details all three manifestations of the mismatch."
+      "justification": "First issue: 'The paginate function assumes integer IDs everywhere: the generic constraint is T extends { id: number }, the cursor is parsed with parseInt(params.cursor), and the WHERE clause uses > for numeric comparison. However, the orders table uses UUID primary keys.'"
     },
     {
-      "expectation": "Identifies the breaking response shape change: endpoints now return {data, nextCursor} instead of a flat array",
+      "expectation": "Identifies the breaking response shape change: endpoints now return {data, nextCursor} instead of a flat array, breaking both frontend consumers and existing integration tests",
       "verdict": "PASS",
-      "justification": "Second issue: 'Both endpoints previously returned a flat JSON array. They now return { data: [...], nextCursor: \"...\" }. This is a breaking change for any frontend code consuming these endpoints. Calls like response.map(...) or response.length will fail because the response is now an object, not an array.'"
-    },
-    {
-      "expectation": "Identifies that existing integration tests will break due to the response shape change",
-      "verdict": "PASS",
-      "justification": "Explicitly stated: 'The existing integration tests that assert res.body is an array will also fail immediately. These tests need to be updated to expect the new response structure.'"
+      "justification": "'Breaking API change: response shape' section: 'Both endpoints previously returned a flat JSON array. They now return { data: [...], nextCursor: \"...\" }. This is a breaking change for any frontend code consuming these endpoints.' Also: 'The existing integration tests that assert res.body is an array will also fail immediately.'"
     },
     {
       "expectation": "Identifies that parseInt on a UUID cursor will return NaN, causing the WHERE clause to malfunction",
       "verdict": "PASS",
-      "justification": "Clearly identified in the first issue: 'parseInt(\"a1b2c3d4-e5f6-...\") returns NaN. The query becomes WHERE id > NaN, which matches zero rows in PostgreSQL. Pagination beyond the first page returns empty results.'"
+      "justification": "First issue: 'parseInt(\"a1b2c3d4-e5f6-...\") returns NaN. The query becomes WHERE id > NaN, which matches zero rows in PostgreSQL. Pagination beyond the first page returns empty results.'"
     },
     {
-      "expectation": "Identifies that the frontend currently expects a flat array response and will break",
+      "expectation": "Identifies that UUID v4 lexicographic ordering is meaningless for pagination — even if the parseInt bug is fixed, ORDER BY uuid ASC produces pseudo-random order not correlated with insertion time",
       "verdict": "PASS",
-      "justification": "Covered in the response shape issue: 'This is a breaking change for any frontend code consuming these endpoints. Calls like response.map(...) or response.length will fail because the response is now an object, not an array.'"
+      "justification": "Explicitly goes beyond parseInt: 'Even if parseInt were removed, UUIDs are randomly generated (v4), so ORDER BY id ASC produces pseudo-random ordering, and WHERE id > \"some-uuid\" uses lexicographic comparison that does not correspond to insertion order. Users would see rows in arbitrary order with potential duplicates or gaps across pages.' This clearly explains WHY UUID ordering is meaningless, not just that parseInt is broken."
+    },
+    {
+      "expectation": "Identifies that orderBy('id', 'asc') assumes integer insertion-order semantics that do not hold for UUID primary keys",
+      "verdict": "PASS",
+      "justification": "The first issue's UUID ordering analysis addresses this: 'ORDER BY id ASC produces pseudo-random ordering' for UUIDs, directly stating that ascending order does not equal insertion order. The fix suggestion reinforces the understanding: 'make the pagination function support different cursor strategies (numeric ID vs. timestamp-based for UUID tables),' acknowledging the fundamental semantic mismatch."
     },
     {
       "expectation": "Acknowledges that the pagination logic itself (limit+1 trick, cursor mechanics) is sound for integer IDs",
@@ -35,18 +35,19 @@
     {
       "expectation": "Each identified issue includes a specific proposed fix or test",
       "verdict": "PASS",
-      "justification": "Fixes provided for each issue: support different cursor strategies or add a sequential column for UUID tables, opt-in pagination via query parameter or API versioning, validate cursor format and return 400 for invalid values. The column name concern also includes a specific action item."
+      "justification": "Each issue includes specific fixes: 'make the pagination function support different cursor strategies (numeric ID vs. timestamp-based for UUID tables), or add a sequential column', 'adding pagination as an opt-in via query parameter... or version the API', 'validate that the cursor is a valid value for the ID column type and return a 400 error for invalid cursors.'"
     },
     {
       "expectation": "Does NOT manufacture issues with the core pagination algorithm — it's correct for its intended use case",
       "verdict": "PASS",
-      "justification": "Explicitly states: 'The core algorithm is well implemented for its intended use case' and 'the pagination utility is well-designed for integer-keyed tables.' No false negatives are raised against the limit+1 trick, cursor mechanics, or boundary clamping."
+      "justification": "Explicitly states: 'The core algorithm is well implemented for its intended use case' and 'the pagination utility is well-designed for integer-keyed tables.' All criticism is correctly directed at UUID incompatibility and the breaking API change, not at the pagination mechanics."
     }
   ],
   "score": "8/8",
   "eval_feedback": [
-    "All three evals score identically (8/8) for both conditions. The expectations are testing for issue identification that a capable LLM can achieve without the skill. Consider adding expectations that test for systematic coverage, structured reporting, or discovery of subtler issues.",
-    "The with_skill report found the UUID lexicographic ordering issue (UUIDv4 random order makes cursor pagination meaningless even if parseInt is fixed), which is a deeper insight not captured by any expectation. Consider adding this as an expectation.",
-    "Expectations 2 and 5 overlap heavily (response shape change vs frontend breakage). Consider merging or differentiating them more sharply."
+    "Perfect score. All hard differentiating assertions passed, matching the with_skill version.",
+    "The UUID v4 lexicographic ordering issue was explicitly identified with clear explanation of WHY ordering is meaningless -- not just that parseInt is broken.",
+    "This eval did not differentiate between with_skill and without_skill. Both achieved 8/8. The pagination-uuid scenario's issues are sufficiently prominent that the structured dimensional approach does not provide a measurable advantage. Consider adding subtler expectations to differentiate.",
+    "Notably, the with_skill version separated UUID ordering and orderBy semantics into distinct attack vectors, while the without_skill version combined them. Both are valid, but the with_skill decomposition is more actionable."
   ]
 }
