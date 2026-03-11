@@ -1,0 +1,91 @@
+{
+  "expectations": [
+    {
+      "text": "Announced use of the red-team skill at the start of the review",
+      "passed": false,
+      "evidence": "The report begins with \"# Design Review: Notification Service\" and \"## Overall Impression\" — no mention of the red-team skill. This is the without_skill run."
+    },
+    {
+      "text": "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
+      "passed": false,
+      "evidence": "The report identifies the single partition/single instance issue under \"Scaling: Single Instance / Single Partition Won't Scale\" and correctly explains the Kafka parallelism model. However, it does not classify the issue as Fatal. It states \"you'll probably be fine initially, but you're designing yourself into a corner\" — which understates the severity. There are no severity classifications in the report at all."
+    },
+    {
+      "text": "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
+      "passed": false,
+      "evidence": "The report identifies \"No Retries or Dead-Letter Queue\" and correctly explains the impact (\"The notification is permanently lost\"). However, it does not classify this as Significant or Fatal — there are no severity classifications in the report. The content is present but the severity labeling is not."
+    },
+    {
+      "text": "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
+      "passed": true,
+      "evidence": "\"Synchronous Fan-Out\" section identifies: \"If Twilio has high latency, it blocks email and push processing for subsequent events,\" \"A crash in any handler could bring down the entire service,\" and \"You can't scale channels independently.\" Recommends dispatching to separate channel-specific queues or workers."
+    },
+    {
+      "text": "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
+      "passed": true,
+      "evidence": "\"Rate Limiting for External Providers\" section states: \"SES, Firebase, and Twilio all have rate limits. At 1M events/day, if even a fraction of users have all three channels enabled, you could hit provider throttling.\" Recommends per-provider rate limiting and HTTP 429 handling."
+    },
+    {
+      "text": "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
+      "passed": true,
+      "evidence": "The scaling section states: \"you're limited to vertical scaling ('scale up'), which has hard limits and is expensive\" and recommends multiple partitions with a consumer group. The inadequacy of the scale-up strategy is clearly communicated."
+    },
+    {
+      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+      "passed": false,
+      "evidence": "The report does not use Fatal/Significant severity classifications. While most concerns include fix suggestions (multiple partitions, retry with backoff, DLQ, channel-specific queues, rate limiting), the structural format requirement is not met. Additionally, some fixes are brief recommendations rather than detailed proposed solutions."
+    },
+    {
+      "text": "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
+      "passed": true,
+      "evidence": "The scaling section specifically references \"single NotificationRouter instance consuming from a single Kafka partition\" and \"vertical scaling ('scale up').\" The retry section references the design's own words. The fan-out section references \"function calls within the same NotificationRouter process.\" Challenges are anchored to specific design elements."
+    },
+    {
+      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+      "passed": false,
+      "evidence": "The report uses: \"## Overall Impression,\" \"## Concerns\" (flat list), \"## Summary.\" It does not use Fatal Challenges, Significant Challenges, Minor Observations sections, nor an Overall Assessment with explicit Verdict and Confidence."
+    },
+    {
+      "text": "Overall Assessment verdict reflects that the design has fundamental issues that must be addressed before implementation",
+      "passed": true,
+      "evidence": "The summary states: \"the design has fundamental scaling and reliability issues that need to be addressed before you can grow to 1M events/day\" and \"I'd recommend redesigning with multiple partitions, independent channel workers, retry logic, and rate limiting before building this out.\" This clearly conveys that fundamental issues must be addressed."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 5,
+    "total": 10,
+    "pass_rate": 0.5
+  },
+  "claims": [
+    {
+      "claim": "1M events/day is approximately 12 events/second average",
+      "type": "factual",
+      "verified": true,
+      "evidence": "1,000,000 / 86,400 = 11.57 events/second. ~12 is a reasonable rounding."
+    },
+    {
+      "claim": "Single partition cannot have multiple consumers in a consumer group",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Correct. In Kafka, each partition can only be consumed by one consumer within a consumer group."
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
+        "reason": "This expectation bundles two requirements: (1) identifying the issue and (2) classifying it as Fatal. The without_skill run clearly identified the issue with correct technical reasoning but did not use severity labels. Consider splitting into 'identified the bottleneck' and 'classified severity appropriately' for fairer cross-condition comparison."
+      },
+      {
+        "assertion": "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
+        "reason": "Same bundling issue — the content finding is present but severity classification is absent. The without_skill run correctly identified missing retries and DLQ."
+      },
+      {
+        "assertion": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "reason": "This is inherently a skill-format expectation. Without the skill, the model uses its own review format. This tests skill adherence, not analytical quality."
+      }
+    ],
+    "overall": "The without_skill run identified all the same core technical issues as the with_skill run (single partition bottleneck, no retries/DLQ, synchronous fan-out, missing rate limiting, inadequate scale-up strategy). It failed on structural/format expectations that are intrinsic to the red-team skill. The eval conflates content quality with format compliance, making it hard to fairly compare the two conditions on analytical substance alone. Five of the failures are format/severity-classification related, not content-quality related."
+  }
+}

@@ -16,7 +16,6 @@
         "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
         "Design specifies error response format with consistent structure (status codes, error codes, messages)",
         "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
-        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
         "Gap scan is performed before saving, checking at least acceptance criteria and failure modes"
       ]
     },
@@ -35,7 +34,6 @@
         "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
         "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
         "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
-        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
         "Gap scan is performed before saving, checking at least failure modes and edge cases"
       ]
     },
@@ -53,8 +51,7 @@
         "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
         "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
         "Design considers the 6-engineer team constraint — does not propose extracting all services simultaneously or an unrealistic timeline",
-        "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
-        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention"
+        "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)"
       ]
     },
     {
@@ -72,7 +69,6 @@
         "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
         "At least one investigated question redirects — the investigation reveals the real decision is different from the originally framed question",
         "Design presentation is broken into sections with opportunity for user feedback between sections",
-        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
         "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy"
       ]
     }
