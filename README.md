@@ -91,7 +91,7 @@ ln -s ~/repos/crucible/skills/* ~/.claude/skills/
 | Skill | Description |
 |-------|-------------|
 | **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply (code-modifying intent), scoped exceptions for pure information retrieval, escalation clauses when exceptions reveal problems, and anti-rationalization red flags. |
-| **skill-authoring** | Guide for creating and testing new skills. TDD applied to process documentation — create, test, and refine skills with pressure scenarios and rationalization counters. |
+| **skill-creator** | Create new skills, modify and improve existing skills, and measure skill performance. Structured eval/iterate loop with grading, benchmarking, blind A/B comparison, and description optimization. From [anthropics/skills](https://github.com/anthropics/skills) (Apache 2.0). |
 
 ## How It Works
 
@@ -109,6 +109,12 @@ Individual skills can also be used standalone (e.g., `crucible:test-driven-devel
 ## Origin
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged.
+
+## Third-Party Skills
+
+| Skill | Source | License |
+|-------|--------|---------|
+| **skill-creator** | [anthropics/skills](https://github.com/anthropics/skills/tree/main/skills/skill-creator) | Apache 2.0 |
 
 ## Project Origin
 
