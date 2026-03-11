@@ -1,0 +1,46 @@
+{
+  "eval_name": "batch-invoice",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Proposes exactly ONE addition, not a feature wishlist",
+      "verdict": "PASS",
+      "justification": "Proposes a single, clearly scoped addition: an idempotency layer using a deterministic hash-based payment_idempotency_key and batch_run_id. No other features are suggested."
+    },
+    {
+      "expectation": "The proposed addition addresses a genuine gap or risk in the design — not cosmetic",
+      "verdict": "PASS",
+      "justification": "Duplicate payments from a crashed-and-restarted nightly batch job is a real, high-severity operational risk. The design doc has no mechanism to prevent this, making it a genuine gap."
+    },
+    {
+      "expectation": "Proposal includes a 'why this over alternatives' comparison with at least one runner-up",
+      "verdict": "PASS",
+      "justification": "Two runner-ups are explicitly compared: (1) real-time webhook processing (rejected as too complex for constraints) and (2) a dead-letter queue for failed invoices (rejected as addressing post-failure triage rather than prevention)."
+    },
+    {
+      "expectation": "Proposal states the expected impact (what it enables or what risk it mitigates)",
+      "verdict": "PASS",
+      "justification": "Impact section clearly states: prevents duplicate payments, makes batch job safely re-runnable, enables confident retries after failures, and makes partial runs resumable. Quantifies the risk context (200 invoices/day, real money)."
+    },
+    {
+      "expectation": "Proposal states the cost in terms of added complexity or scope",
+      "verdict": "PASS",
+      "justification": "Cost section estimates 1-2 days of work and enumerates specific implementation tasks: new column on invoices table, new column on payment_results, pre-send check in InvoiceBatcher, passing key to Stripe API. Notes that testing partial-failure scenarios is the main complexity."
+    },
+    {
+      "expectation": "Proposal fits within the stated constraints (2 engineers, 6 weeks, existing stack)",
+      "verdict": "PASS",
+      "justification": "1-2 days of work fits comfortably in the 6-week timeline. No new infrastructure or dependencies are introduced. Uses Stripe's existing idempotencyKey parameter and the existing PostgreSQL tables."
+    },
+    {
+      "expectation": "Proposal is specific enough to implement (not vague like 'add better error handling')",
+      "verdict": "PASS",
+      "justification": "Extremely specific: deterministic hash of (po_number, amount, vendor_email, due_date) for the idempotency key, batch_run_id as UUID generated at cron start, pre-send check against payment_results, and use of Stripe's native idempotencyKey parameter. An engineer could start implementing from this description."
+    }
+  ],
+  "score": "7/7",
+  "eval_feedback": [
+    "This eval worked well — the with_skill output clearly demonstrates all expected behaviors. The expectations are well-calibrated for this design doc.",
+    "Consider adding an expectation about whether the proposal identifies the right priority gap (e.g., 'addresses the highest-severity risk rather than a nice-to-have'), since multiple genuine gaps could exist but only one is critical."
+  ]
+}

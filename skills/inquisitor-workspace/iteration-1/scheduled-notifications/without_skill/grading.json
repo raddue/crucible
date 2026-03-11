@@ -1,0 +1,52 @@
+{
+  "eval_name": "scheduled-notifications",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Identifies the in-memory scheduler problem: scheduled jobs are lost on server restart with no persistence",
+      "verdict": "PASS",
+      "justification": "Issue #1 clearly states: 'The NotificationScheduler stores all scheduled jobs in a plain Map<string, NodeJS.Timeout> in process memory. This means every server restart, deployment, or crash wipes out all pending scheduled notifications with no way to recover them.'"
+    },
+    {
+      "expectation": "Identifies the type mismatch: Date.now() returns a number but the notifications table sent_at column expects a TIMESTAMP",
+      "verdict": "PASS",
+      "justification": "Issue #2 clearly identifies: 'Date.now() returns a number (epoch milliseconds, e.g., 1710950400000). But the notifications table has sent_at typed as a TIMESTAMP column. PostgreSQL will either reject this outright or interpret the large integer incorrectly.' Proposes fix: 'sentAt: new Date()'"
+    },
+    {
+      "expectation": "Identifies the edge case: negative delay when scheduledAt is in the past (setTimeout with negative value fires immediately)",
+      "verdict": "PASS",
+      "justification": "Issue #3 clearly identifies: 'When a client submits a scheduledAt value that is in the past, the calculation produces a negative number. setTimeout treats negative values the same as 0, so the notification fires immediately.' Suggests checking delay > 0 and returning 400."
+    },
+    {
+      "expectation": "Identifies missing error handling: silently skipping missing users (notifier returns without response/logging)",
+      "verdict": "PASS",
+      "justification": "Issue #5 identifies: 'when the user lookup returns null, the function just returns silently -- no log, no error, no record. A scheduled notification for a user who was deleted between scheduling and execution simply vanishes.' Recommends logging and persisting delivery failure records."
+    },
+    {
+      "expectation": "Identifies the lifecycle issue: no cleanup of pending timeouts on server shutdown (process.exit leaves timers dangling)",
+      "verdict": "PASS",
+      "justification": "Issue #7 identifies: 'There is no mechanism to clean up pending timers when the server shuts down. Active setTimeout callbacks may fire during shutdown, attempting to use database connections that are already closing.' Proposes a shutdown() method."
+    },
+    {
+      "expectation": "Identifies at least 3 of the 5 dimensions (wiring, integration, edge cases, state/lifecycle, regression)",
+      "verdict": "PASS",
+      "justification": "Though not formally structured by dimension, the review covers: wiring (dynamic require, issue #8), integration (type mismatch issue #2, fetch error handling issue #4), edge cases (negative delay issue #3, missing validation issue #6), state/lifecycle (in-memory storage issue #1, shutdown issue #7). At least 4 dimensions covered."
+    },
+    {
+      "expectation": "Each identified issue includes a specific proposed fix or test to verify the problem",
+      "verdict": "PASS",
+      "justification": "All 8 issues include specific fixes: use new Date() instead of Date.now(), check delay > 0 and return 400, add try/catch around sendNotification, add validation middleware, expose shutdown() method, replace dynamic require with top-level import. No generic 'add tests' suggestions — fixes are actionable and specific."
+    },
+    {
+      "expectation": "Does NOT focus on code style or naming — focuses on behavioral/runtime issues",
+      "verdict": "PASS",
+      "justification": "All 8 issues focus on runtime behavior: type mismatches, error handling, state persistence, lifecycle management. No comments about naming, formatting, or code style. The closing summary correctly prioritizes reliability and correctness gaps."
+    }
+  ],
+  "score": "8/8",
+  "eval_feedback": [
+    "Both with_skill and without_skill achieved perfect scores on this eval, suggesting the expectations may not be differentiating enough between the two conditions. Consider adding expectations that test for structured multi-dimensional coverage or systematic enumeration that the skill specifically adds.",
+    "The without_skill response is arguably more concise and readable while covering the same ground. Consider adding expectations about report structure or comprehensiveness (e.g., 'identifies at least N distinct issues') to better differentiate.",
+    "Expectation 6 ('at least 3 of the 5 dimensions') rewards breadth but not depth. The without_skill response covers 4+ dimensions without formal structure, matching the skill's explicit 5-dimension dispatch."
+  ]
+}

@@ -1,91 +1,62 @@
 {
+  "eval_name": "scaling-bottleneck",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": false,
-      "evidence": "The report begins with \"# Design Review: Notification Service\" and \"## Overall Impression\" — no mention of the red-team skill. This is the without_skill run."
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "Opens with 'The design covers the basic requirements — event consumption, preference lookup, multi-channel dispatch, and audit logging' and frames the key tensions around scaling from 10k to 1M events/day and reliability gaps."
     },
     {
-      "text": "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
-      "passed": false,
-      "evidence": "The report identifies the single partition/single instance issue under \"Scaling: Single Instance / Single Partition Won't Scale\" and correctly explains the Kafka parallelism model. However, it does not classify the issue as Fatal. It states \"you'll probably be fine initially, but you're designing yourself into a corner\" — which understates the severity. There are no severity classifications in the report at all."
+      "expectation": "Identified single Kafka partition with single consumer as the most critical scaling bottleneck, explaining why it cannot handle the 1M events/day growth target",
+      "verdict": "PASS",
+      "justification": "First finding identifies this clearly: 'a single NotificationRouter instance consuming from a single Kafka partition. Kafka's parallelism model is based on partitions — one consumer per partition. With a single partition, you cannot add more consumers.' Explains the ceiling and calls it the most pressing concern in the summary. Does note 'you'll probably be fine initially' at 1M/day, slightly softening severity, but still identifies it as the primary bottleneck."
     },
     {
-      "text": "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
-      "passed": false,
-      "evidence": "The report identifies \"No Retries or Dead-Letter Queue\" and correctly explains the impact (\"The notification is permanently lost\"). However, it does not classify this as Significant or Fatal — there are no severity classifications in the report. The content is present but the severity labeling is not."
+      "expectation": "Identified missing retry mechanism and dead-letter queue for failed notifications as a major reliability risk",
+      "verdict": "PASS",
+      "justification": "Second finding: 'If a channel fails... you log the error and move on. The notification is permanently lost. This is a poor user experience.' Proposes retries with exponential backoff, dead-letter queue, and alerting on DLQ growth."
     },
     {
-      "text": "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
-      "passed": true,
-      "evidence": "\"Synchronous Fan-Out\" section identifies: \"If Twilio has high latency, it blocks email and push processing for subsequent events,\" \"A crash in any handler could bring down the entire service,\" and \"You can't scale channels independently.\" Recommends dispatching to separate channel-specific queues or workers."
+      "expectation": "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
+      "verdict": "PASS",
+      "justification": "Third finding identifies three specific risks: high-latency provider blocks subsequent event processing, a crash in any handler brings down the entire service, and channels can't scale independently. Recommends separate channel-specific queues or workers."
     },
     {
-      "text": "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
-      "passed": true,
-      "evidence": "\"Rate Limiting for External Providers\" section states: \"SES, Firebase, and Twilio all have rate limits. At 1M events/day, if even a fraction of users have all three channels enabled, you could hit provider throttling.\" Recommends per-provider rate limiting and HTTP 429 handling."
+      "expectation": "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
+      "verdict": "PASS",
+      "justification": "Fourth finding: 'SES, Firebase, and Twilio all have rate limits. At 1M events/day, if even a fraction of users have all three channels enabled, you could hit provider throttling. The design doesn't mention any rate limiting or backpressure mechanism.' Recommends per-provider rate limiting and HTTP 429 handling."
     },
     {
-      "text": "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
-      "passed": true,
-      "evidence": "The scaling section states: \"you're limited to vertical scaling ('scale up'), which has hard limits and is expensive\" and recommends multiple partitions with a consumer group. The inadequacy of the scale-up strategy is clearly communicated."
+      "expectation": "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
+      "verdict": "PASS",
+      "justification": "In the scaling section: 'You're limited to vertical scaling (\"scale up\"), which has hard limits and is expensive.' Directly challenges the design's stated scaling strategy and recommends horizontal scaling with multiple partitions and consumer groups."
     },
     {
-      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-      "passed": false,
-      "evidence": "The report does not use Fatal/Significant severity classifications. While most concerns include fix suggestions (multiple partitions, retry with backoff, DLQ, channel-specific queues, rate limiting), the structural format requirement is not met. Additionally, some fixes are brief recommendations rather than detailed proposed solutions."
+      "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+      "verdict": "PASS",
+      "justification": "All major findings include concrete fixes: multiple partitions + consumer groups for scaling, retry with exponential backoff + DLQ + alerting for reliability, separate channel queues/workers for fan-out, per-provider rate limiting + 429 backoff for throttling."
     },
     {
-      "text": "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
-      "passed": true,
-      "evidence": "The scaling section specifically references \"single NotificationRouter instance consuming from a single Kafka partition\" and \"vertical scaling ('scale up').\" The retry section references the design's own words. The fan-out section references \"function calls within the same NotificationRouter process.\" Challenges are anchored to specific design elements."
+      "expectation": "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
+      "verdict": "PASS",
+      "justification": "Directly references: 'single NotificationRouter instance consuming from a single Kafka partition', 'vertical scaling (\"scale up\")', 'log the error and move on', 'function calls within the same NotificationRouter process', specific provider names (SES, Firebase, Twilio). All challenges are anchored to concrete design elements."
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": false,
-      "evidence": "The report uses: \"## Overall Impression,\" \"## Concerns\" (flat list), \"## Summary.\" It does not use Fatal Challenges, Significant Challenges, Minor Observations sections, nor an Overall Assessment with explicit Verdict and Confidence."
+      "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
+      "verdict": "PASS",
+      "justification": "Scaling bottleneck (most critical) first, then reliability (retries/DLQ), then architecture (synchronous fan-out), then operational (rate limiting), then secondary concerns (data model, idempotency). Summary provides clear verdict recommending redesign before building."
     },
     {
-      "text": "Overall Assessment verdict reflects that the design has fundamental issues that must be addressed before implementation",
-      "passed": true,
-      "evidence": "The summary states: \"the design has fundamental scaling and reliability issues that need to be addressed before you can grow to 1M events/day\" and \"I'd recommend redesigning with multiple partitions, independent channel workers, retry logic, and rate limiting before building this out.\" This clearly conveys that fundamental issues must be addressed."
+      "expectation": "Overall assessment reflects that the design has fundamental issues that must be addressed before implementation",
+      "verdict": "PASS",
+      "justification": "Summary states: 'the design has fundamental scaling and reliability issues that need to be addressed before you can grow to 1M events/day' and 'I'd recommend redesigning with multiple partitions, independent channel workers, retry logic, and rate limiting before building this out.' Unambiguously signals the design is not implementation-ready."
     }
   ],
-  "summary": {
-    "passed": 5,
-    "failed": 5,
-    "total": 10,
-    "pass_rate": 0.5
-  },
-  "claims": [
-    {
-      "claim": "1M events/day is approximately 12 events/second average",
-      "type": "factual",
-      "verified": true,
-      "evidence": "1,000,000 / 86,400 = 11.57 events/second. ~12 is a reasonable rounding."
-    },
-    {
-      "claim": "Single partition cannot have multiple consumers in a consumer group",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Correct. In Kafka, each partition can only be consumed by one consumer within a consumer group."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
-        "reason": "This expectation bundles two requirements: (1) identifying the issue and (2) classifying it as Fatal. The without_skill run clearly identified the issue with correct technical reasoning but did not use severity labels. Consider splitting into 'identified the bottleneck' and 'classified severity appropriately' for fairer cross-condition comparison."
-      },
-      {
-        "assertion": "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
-        "reason": "Same bundling issue — the content finding is present but severity classification is absent. The without_skill run correctly identified missing retries and DLQ."
-      },
-      {
-        "assertion": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-        "reason": "This is inherently a skill-format expectation. Without the skill, the model uses its own review format. This tests skill adherence, not analytical quality."
-      }
-    ],
-    "overall": "The without_skill run identified all the same core technical issues as the with_skill run (single partition bottleneck, no retries/DLQ, synchronous fan-out, missing rate limiting, inadequate scale-up strategy). It failed on structural/format expectations that are intrinsic to the red-team skill. The eval conflates content quality with format compliance, making it hard to fairly compare the two conditions on analytical substance alone. Five of the failures are format/severity-classification related, not content-quality related."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "The transcript somewhat softens the scaling bottleneck severity by saying 'you'll probably be fine initially' at 1M/day. The expectation says 'explaining why it cannot handle the 1M events/day growth target' — consider whether the expectation should account for nuanced assessments where the bottleneck is more about architectural inflexibility than raw throughput failure.",
+    "Consider adding an expectation about whether the review identifies missing idempotency/deduplication, since the transcript catches this (Kafka offset commit vs. notification send) and it represents deeper architectural thinking.",
+    "The expectations provide excellent coverage across scaling, reliability, architecture, and operations. The eval effectively tests whether the reviewer catches the multi-layered nature of the design's problems."
+  ]
 }

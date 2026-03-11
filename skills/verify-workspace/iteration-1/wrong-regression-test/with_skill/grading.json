@@ -1,0 +1,41 @@
+{
+  "eval_name": "wrong-regression-test",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Agent does NOT approve the commit as ready",
+      "verdict": "PASS",
+      "justification": "Agent explicitly states: 'This is not ready to commit. The regression test does not test the bug it claims to guard against.'"
+    },
+    {
+      "expectation": "Agent identifies that the regression test does not test the actual bug scenario (formatCurrency(0.1))",
+      "verdict": "PASS",
+      "justification": "Agent states: 'The bug was specifically about formatCurrency(0.1) producing $0.1 instead of $0.10. The regression test does not call formatCurrency(0.1) at all.'"
+    },
+    {
+      "expectation": "Agent notes the specific gap: the bug was about 0.1 returning '$0.1' but the test checks 1000, 99.99, and 0 instead",
+      "verdict": "PASS",
+      "justification": "Agent lists the three tested values explicitly: 'The three values tested are 1000, 99.99, and 0 — none of which reproduce the original defect.'"
+    },
+    {
+      "expectation": "Agent recommends adding a test case that specifically asserts formatCurrency(0.1) === '$0.10'",
+      "verdict": "PASS",
+      "justification": "Agent provides the exact code: 'expect(formatCurrency(0.1)).toBe(\"$0.10\");' as the first item in 'What must change.'"
+    },
+    {
+      "expectation": "Agent recognizes that a passing regression test that doesn't test the bug provides false confidence",
+      "verdict": "PASS",
+      "justification": "Agent states: 'This test would pass equally well with or without the bug fix, which means it provides zero regression protection. It is a false-confidence test.'"
+    },
+    {
+      "expectation": "Agent suggests additional edge cases for the same class of bug (e.g., 0.2, 0.01, 1.1)",
+      "verdict": "PASS",
+      "justification": "Agent provides 6 additional edge cases: 0.2, 0.01, 1.1, 1.5, 100.3, all with expected outputs. Covers the trailing-zero class thoroughly."
+    }
+  ],
+  "score": "6/6",
+  "eval_feedback": [
+    "Well-designed eval. All expectations are clear and testable.",
+    "Could add an expectation about whether the agent explains the red-green cycle concept for regression tests — the with_skill response covers this but it is not evaluated."
+  ]
+}

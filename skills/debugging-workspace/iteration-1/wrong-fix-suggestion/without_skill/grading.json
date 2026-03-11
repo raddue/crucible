@@ -1,99 +1,62 @@
 {
+  "eval_name": "wrong-fix-suggestion",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Orchestrator does NOT immediately implement the user's suggested fix (cache invalidation)",
-      "passed": true,
-      "evidence": "The transcript begins with 'Before implementing the suggested fix, let me examine the evidence more closely.' The suggested fix is never implemented; instead the transcript investigates first and proposes an entirely different fix."
+      "expectation": "Agent does NOT immediately implement the user's suggested fix (cache invalidation)",
+      "verdict": "PASS",
+      "justification": "The transcript begins with 'Before implementing the suggested fix, let me examine the evidence more closely.' The suggested cache invalidation fix is never implemented; the transcript investigates first and proposes entirely different solutions."
     },
     {
-      "text": "Phase 1 investigation is dispatched BEFORE any fix is attempted — the Iron Law is followed",
-      "passed": false,
-      "evidence": "No formal Phase 1 or subagent dispatch occurs. The transcript does investigate before fixing, but there is no Phase system or Iron Law reference. The investigation precedes the fix but is not structured as a Phase 1 dispatch."
+      "expectation": "Investigation is performed BEFORE any fix is attempted -- evidence is gathered first",
+      "verdict": "PASS",
+      "justification": "The transcript follows a clear structure: Investigation (with detailed evidence analysis) -> 'Why Cache Invalidation Won't Fix This' -> Root Cause -> Fix. Evidence is gathered and analyzed thoroughly before any fix is proposed."
     },
     {
-      "text": "At least one investigator examines the timing evidence (5-second gap matching retry timeout)",
-      "passed": true,
-      "evidence": "The investigation section identifies: 'The 5-second gap matches the frontend retry timeout exactly. The frontend retries on network timeout (5s). So the first call was made, 5 seconds passed without a response, the frontend retimed out and retried.'"
+      "expectation": "Investigation examines the timing evidence (5-second gap matching the frontend retry timeout)",
+      "verdict": "PASS",
+      "justification": "The investigation identifies: 'The 5-second gap matches the frontend retry timeout exactly. The frontend retries on network timeout (5s). So the first call was made, 5 seconds passed without a response, the frontend retimed out and retried.'"
     },
     {
-      "text": "Synthesis identifies the race condition: first Stripe call still in-flight when retry arrives, so status is still 'pending'",
-      "passed": false,
-      "evidence": "No formal synthesis report. However, the investigation section does identify the race condition: 'While waiting for Stripe to respond, 5 seconds elapse. The frontend times out... processPayment is called again. It reads the order -- status is STILL pending because the first call hasn't returned from Stripe yet to update the DB.' The content is present but not in a synthesis format."
+      "expectation": "Investigation identifies the race condition: first Stripe call still in-flight when retry arrives, so order status is still 'pending'",
+      "verdict": "PASS",
+      "justification": "The investigation traces through 8 numbered steps showing the exact race condition: 'While waiting for Stripe to respond, 5 seconds elapse. The frontend times out... processPayment is called again. It reads the order -- status is STILL pending because the first call hasn't returned from Stripe yet to update the DB.'"
     },
     {
-      "text": "Phase 3 hypothesis identifies the race condition or lack of idempotency — NOT stale cache — as the root cause",
-      "passed": true,
-      "evidence": "Root Cause section identifies: 'The processPayment function has a classic check-then-act race condition' with clear step breakdown. Explicitly states 'This is a race condition, not a caching issue.'"
+      "expectation": "Hypothesis identifies the race condition or lack of idempotency -- NOT stale cache -- as the root cause",
+      "verdict": "PASS",
+      "justification": "Root Cause section identifies: 'The processPayment function has a classic check-then-act race condition' with a clear 3-step breakdown (Check, Act, Update). Explicitly states: 'This is a race condition, not a caching issue.'"
     },
     {
-      "text": "Hypothesis explicitly addresses why cache invalidation would NOT fix the problem (cache correctly shows 'pending' during the race window)",
-      "passed": true,
-      "evidence": "Dedicated section 'Why Cache Invalidation Won't Fix This' with 3 bullets: 'The cache is correct. When the retry arrives, the order status genuinely IS pending in both the cache AND the database', 'Even if you deleted the cache and forced a DB read, the DB also shows pending', 'This isn't stale data -- it's a race condition.'"
+      "expectation": "Hypothesis explicitly addresses why cache invalidation would NOT fix the problem (cache correctly shows 'pending' during the race window)",
+      "verdict": "PASS",
+      "justification": "Dedicated section 'Why Cache Invalidation Won't Fix This' provides 3 specific reasons: (1) 'The cache is correct. When the retry arrives, the order status genuinely IS pending in both the cache AND the database', (2) 'Even if you deleted the cache and forced a DB read, the DB also shows pending', (3) 'This isn't stale data -- it's a race condition where two concurrent requests both see a legitimately pending status.'"
     },
     {
-      "text": "Phase 3.5 red-team challenges whether the hypothesis explains the 1-in-50 frequency (correlates with slow Stripe responses exceeding 5s timeout)",
-      "passed": false,
-      "evidence": "No red-teaming phase exists. The transcript does mention the 1-in-50 rate: 'The 1-in-50 rate correlates with how often Stripe responses take longer than 5 seconds, triggering the frontend retry.' But this is stated as a fact in the Root Cause section, not challenged in a red-team exercise."
+      "expectation": "Hypothesis is verified by explaining the 1-in-50 frequency (correlates with slow Stripe responses exceeding the 5-second timeout)",
+      "verdict": "PASS",
+      "justification": "The Root Cause section states: 'The 1-in-50 rate correlates with how often Stripe responses take longer than 5 seconds, triggering the frontend retry.' This directly connects the failure frequency to the distribution of Stripe response times relative to the 5-second timeout."
     },
     {
-      "text": "Phase 4 fix involves idempotency keys, distributed locking, or optimistic locking — not cache invalidation",
-      "passed": true,
-      "evidence": "Fix provides three options: Option 1 (Stripe Idempotency Keys), Option 2 (Optimistic Locking on Order Status), and Option 3 (Increase Frontend Timeout). Recommends Options 1+2 together for defense in depth. No cache invalidation is used."
+      "expectation": "Fix involves idempotency keys, distributed locking, or optimistic locking -- not cache invalidation",
+      "verdict": "PASS",
+      "justification": "The fix provides three options: (1) Stripe Idempotency Keys (primary fix), (2) Optimistic Locking on Order Status (secondary fix), (3) Increase Frontend Timeout (supplementary). Recommends Options 1+2 together for defense in depth. Cache invalidation is explicitly rejected."
     },
     {
-      "text": "Orchestrator explains to the user why their suggested fix is insufficient, with specific evidence from investigation",
-      "passed": true,
-      "evidence": "Dedicated section 'Why Cache Invalidation Won't Fix This' provides specific technical reasoning. The explanation covers: cache is correct, DB also shows pending, race condition is the real issue."
+      "expectation": "Agent explains to the user why their suggested cache invalidation fix is insufficient, citing specific evidence",
+      "verdict": "PASS",
+      "justification": "The dedicated 'Why Cache Invalidation Won't Fix This' section provides a thorough, evidence-based explanation with 3 specific bullets explaining why the cache is not the problem. The investigation also establishes 'This is a race condition, not a caching issue' with supporting evidence."
     },
     {
-      "text": "The debugging workflow resists pressure to skip investigation despite the user presenting a 'simple' fix",
-      "passed": true,
-      "evidence": "The transcript starts with 'Before implementing the suggested fix, let me examine the evidence more closely' and proceeds to a thorough investigation before proposing a different fix. The user's suggestion is never implemented."
+      "expectation": "Agent resists pressure to skip investigation despite the user presenting a 'simple' fix",
+      "verdict": "PASS",
+      "justification": "The transcript explicitly resists the user's pressure: 'Before implementing the suggested fix, let me examine the evidence more closely.' Despite the user saying 'Just add the cache invalidation and it should be fine, right?', the agent performs a thorough investigation and arrives at a fundamentally different diagnosis and fix."
     }
   ],
-  "summary": {
-    "passed": 7,
-    "failed": 3,
-    "total": 10,
-    "pass_rate": 0.7
-  },
-  "claims": [
-    {
-      "claim": "The race condition is correctly identified as the root cause",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Root Cause section describes the check-then-act race condition with step-by-step breakdown."
-    },
-    {
-      "claim": "Cache invalidation is explicitly and correctly refuted",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Dedicated section with 3 evidence-backed reasons why cache invalidation won't work."
-    },
-    {
-      "claim": "The fix uses both idempotency keys and optimistic locking",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Option 1 (idempotency keys) and Option 2 (optimistic locking) both provided, with recommendation to use both."
-    },
-    {
-      "claim": "The fix includes error recovery (revert to pending on failure)",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Option 2 code includes catch block that reverts status to 'pending' if Stripe fails."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Phase 1 investigation is dispatched BEFORE any fix is attempted — the Iron Law is followed",
-        "reason": "The without_skill transcript does investigate before fixing, which is the substantive intent. But the assertion checks for 'Phase 1 dispatch' and 'Iron Law' which are skill-specific methodology terms. The spirit of the assertion (investigate first) is met, but the letter (Phase 1 dispatch) is not."
-      },
-      {
-        "assertion": "Synthesis identifies the race condition",
-        "reason": "The assertion requires a 'synthesis' format that the without_skill run doesn't use. The race condition is correctly identified in the investigation narrative. Consider separating the format requirement from the content requirement."
-      }
-    ],
-    "overall": "The without_skill run performs well on domain assertions (7/10 pass) -- it correctly identifies the race condition, refutes the cache theory, provides a multi-layered fix, and resists user pressure. The 3 failures are all process/format assertions (no Phase 1 dispatch, no synthesis report, no red-teaming). Notably, this is a harder eval than the obvious-encoding-bug because it requires resisting a plausible wrong answer, and the without_skill run handles this well despite lacking the structured methodology. The eval could benefit from distinguishing 'investigation precedes fix' (which passes) from 'formal Phase 1 dispatch occurs' (which fails)."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "This is a well-designed eval with expectations that test substantive debugging quality rather than process methodology. All expectations are fair for both with_skill and without_skill conditions.",
+    "The expectation about 'citing specific evidence' when explaining why cache invalidation is insufficient could be slightly more precise -- it passes easily here because the transcript has a whole dedicated section, but the threshold for 'citing specific evidence' could vary in interpretation.",
+    "Consider adding an expectation about the fix quality -- e.g., whether the fix includes error handling/recovery. The transcript's Option 2 includes a catch block that reverts status to 'pending' on Stripe failure, which is an important quality detail not currently measured."
+  ]
 }

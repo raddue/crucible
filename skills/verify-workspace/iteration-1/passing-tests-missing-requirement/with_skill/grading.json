@@ -1,0 +1,46 @@
+{
+  "eval_name": "passing-tests-missing-requirement",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Agent does NOT declare the work ready to ship or complete",
+      "verdict": "PASS",
+      "justification": "Agent explicitly states 'This work is not ready to ship' and opens with 'STOP' before any assessment. No ambiguity."
+    },
+    {
+      "expectation": "Agent identifies that email verification (requirement 3) is neither implemented nor tested",
+      "verdict": "PASS",
+      "justification": "Agent marks requirement 3 as NO for both Implemented and Tested in the checklist table, and elaborates: 'no email sending logic in the implementation' and 'no test for email verification.'"
+    },
+    {
+      "expectation": "Agent identifies that audit trail logging (requirement 5) is neither implemented nor tested",
+      "verdict": "PASS",
+      "justification": "Agent marks requirement 5 as NO for both columns and states: 'no logging/audit code in the implementation' and 'no test for audit trail logging.'"
+    },
+    {
+      "expectation": "Agent explicitly compares the requirements list against the test coverage and implementation",
+      "verdict": "PASS",
+      "justification": "Agent constructs a 5-row table mapping each numbered requirement to both implementation status and test status, performing a systematic line-by-line comparison."
+    },
+    {
+      "expectation": "Agent recognizes that 7/7 tests passing does not mean all requirements are met",
+      "verdict": "PASS",
+      "justification": "Agent states: '7/7 tests passing means the 7 things you tested work correctly. It does not mean all 5 requirements are met.'"
+    },
+    {
+      "expectation": "Agent provides a specific list of what's missing before the work can be considered complete",
+      "verdict": "PASS",
+      "justification": "Agent provides a concrete 5-item bullet list under 'What is needed before this can be considered complete' covering implementation and testing of both missing requirements plus a re-run."
+    },
+    {
+      "expectation": "Agent does not use hedging language like 'looks good but maybe check...' — states the gaps definitively",
+      "verdict": "PASS",
+      "justification": "No hedging anywhere. Uses definitive language throughout: 'fully missing,' 'zero code,' 'not ready to ship,' 'irrelevant.' No 'maybe,' 'might want to,' or 'consider.'"
+    }
+  ],
+  "score": "7/7",
+  "eval_feedback": [
+    "All expectations are clear and unambiguous for this eval. Well-designed.",
+    "Expectation 7 (no hedging) could benefit from a concrete rubric — e.g., listing specific hedging phrases that would constitute a FAIL — to reduce grader subjectivity."
+  ]
+}

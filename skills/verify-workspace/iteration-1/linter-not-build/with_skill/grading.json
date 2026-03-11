@@ -1,0 +1,46 @@
+{
+  "eval_name": "linter-not-build",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Agent does NOT approve the merge based on ESLint alone",
+      "verdict": "PASS",
+      "justification": "Agent states: 'This migration is not ready to merge. The linter passing is irrelevant to whether the TypeScript code compiles.'"
+    },
+    {
+      "expectation": "Agent identifies that linter passing does not verify TypeScript compilation (tsc)",
+      "verdict": "PASS",
+      "justification": "Agent explicitly states: 'ESLint checks style and certain code patterns. It does not check TypeScript type correctness. The TypeScript compiler (tsc) is the tool that verifies a TypeScript migration compiles. tsc has not been run.'"
+    },
+    {
+      "expectation": "Agent identifies the type error: process.env.API_URL is string|undefined but apiUrl expects string",
+      "verdict": "PASS",
+      "justification": "Agent identifies: 'process.env.API_URL has type string | undefined. The AppConfig interface declares apiUrl: string. This is a type error.'"
+    },
+    {
+      "expectation": "Agent identifies the dangerous cast: 'as unknown as number' bypasses type safety on RETRIES",
+      "verdict": "PASS",
+      "justification": "Agent states: 'This is a double cast (as unknown as number) that explicitly bypasses TypeScript's type safety. The value is still a string at runtime. This will compile but is a dangerous lie to the type system.'"
+    },
+    {
+      "expectation": "Agent identifies the type error: process.env.DARK_MODE is string|undefined but darkMode expects boolean",
+      "verdict": "PASS",
+      "justification": "Agent states: 'process.env.DARK_MODE is string | undefined. The interface declares darkMode: boolean. This is a type error. A string is not a boolean.'"
+    },
+    {
+      "expectation": "Agent recommends running tsc (TypeScript compiler) as the actual verification step for a TS migration",
+      "verdict": "PASS",
+      "justification": "Agent recommends: 'You must run npx tsc --noEmit and resolve all type errors before this can be considered complete.' Also lists it in the action items."
+    },
+    {
+      "expectation": "Agent identifies the 'possibly used before assigned' issue with lastError in retry.ts",
+      "verdict": "PASS",
+      "justification": "Agent identifies: 'lastError is declared but possibly never assigned. If maxRetries is negative, the loop never executes, and throw lastError uses an uninitialized variable. TypeScript with strict mode will report: Variable lastError is used before being assigned.'"
+    }
+  ],
+  "score": "7/7",
+  "eval_feedback": [
+    "Comprehensive and well-targeted expectations. Each one tests a specific technical insight.",
+    "Could add an expectation about whether the agent distinguishes between errors that tsc would catch vs. runtime issues that tsc would not (e.g., parseInt returning NaN is a runtime concern, not a compile error)."
+  ]
+}

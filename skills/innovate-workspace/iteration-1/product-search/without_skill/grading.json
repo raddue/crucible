@@ -1,0 +1,46 @@
+{
+  "eval_name": "product-search",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Proposes exactly ONE addition, not a feature wishlist",
+      "verdict": "FAIL",
+      "justification": "Proposes six separate additions: (1) typeahead/autocomplete, (2) search result highlighting with ts_headline(), (3) zero-result query handling with pg_trgm, (4) query normalization for analytics, (5) pg_trgm for fuzzy matching, and (6) caching popular searches. This is clearly a feature wishlist."
+    },
+    {
+      "expectation": "The proposed addition builds on existing plan components rather than introducing entirely new infrastructure",
+      "verdict": "PASS",
+      "justification": "Most suggestions build on existing plan components — tsvector, the analytics table, debounced input, PostgreSQL extensions. The caching suggestion mentions Redis which may or may not be in the stack, but the closing line claims no new infrastructure is needed."
+    },
+    {
+      "expectation": "Proposal fits within the 4-week timeline and doesn't require new infrastructure beyond PostgreSQL",
+      "verdict": "FAIL",
+      "justification": "Six separate additions collectively represent substantial scope expansion that is unlikely to fit within the 4-week timeline alongside the existing 8 tasks. No time estimates are provided for any suggestion. The Redis caching suggestion potentially introduces new infrastructure."
+    },
+    {
+      "expectation": "Proposal includes why this addition over alternatives",
+      "verdict": "FAIL",
+      "justification": "No alternatives comparison is provided. Each suggestion is presented independently without justification for why it was chosen over other possible improvements. There is no prioritization or tradeoff analysis."
+    },
+    {
+      "expectation": "Proposal states impact and cost",
+      "verdict": "FAIL",
+      "justification": "Impact is described informally within each suggestion ('reduces zero-result searches significantly,' 'makes the results feel much more polished') but there are no structured impact or cost statements. No time estimates, complexity assessments, or scope tradeoffs are provided for any suggestion."
+    },
+    {
+      "expectation": "Proposal is genuinely useful — not obvious busywork that adds complexity without proportional value",
+      "verdict": "PASS",
+      "justification": "The individual suggestions are genuinely useful — typeahead, highlighting, fuzzy matching, and query normalization all address real search UX and data quality problems. The ideas themselves have merit even though the presentation lacks structure."
+    },
+    {
+      "expectation": "Proposal does NOT expand scope dramatically (no Elasticsearch, no ML, no A/B testing)",
+      "verdict": "PASS",
+      "justification": "No Elasticsearch, ML, or A/B testing is proposed. The suggestions stay within the PostgreSQL ecosystem (pg_trgm, ts_headline, materialized views). The Redis caching suggestion is minor and presented as a future optimization."
+    }
+  ],
+  "score": "3/7",
+  "eval_feedback": [
+    "The 'proposes exactly ONE addition' expectation again cleanly discriminates between conditions. The without_skill output proposes six additions.",
+    "The 'fits within 4-week timeline' expectation is harder to evaluate without_skill because no cost estimates are given. Consider rephrasing to 'provides evidence that the proposal fits within the timeline' to make it clearer that the burden of proof is on the output."
+  ]
+}

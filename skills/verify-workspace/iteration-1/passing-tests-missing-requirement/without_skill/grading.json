@@ -1,0 +1,46 @@
+{
+  "eval_name": "passing-tests-missing-requirement",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Agent does NOT declare the work ready to ship or complete",
+      "verdict": "FAIL",
+      "justification": "Agent opens with 'Nice work on the registration endpoint!' and concludes 'I'd say you're in good shape to ship the core registration' and 'solid implementation of the core flow.' While it mentions missing items, it frames them as optional follow-ups, effectively approving the ship."
+    },
+    {
+      "expectation": "Agent identifies that email verification (requirement 3) is neither implemented nor tested",
+      "verdict": "PASS",
+      "justification": "Agent states: 'your requirements mention email verification being sent after registration, and I don't see that in the implementation.' Identified as missing."
+    },
+    {
+      "expectation": "Agent identifies that audit trail logging (requirement 5) is neither implemented nor tested",
+      "verdict": "PASS",
+      "justification": "Agent states: 'the audit trail logging from requirement 5 doesn't seem to be in the current implementation.' Identified as missing."
+    },
+    {
+      "expectation": "Agent explicitly compares the requirements list against the test coverage and implementation",
+      "verdict": "FAIL",
+      "justification": "Agent does not perform a systematic comparison. It mentions requirements 3 and 5 in passing but never walks through all 5 requirements against tests and code. Requirements 1, 2, and 4 are discussed only in vague praise, not as a formal checklist comparison."
+    },
+    {
+      "expectation": "Agent recognizes that 7/7 tests passing does not mean all requirements are met",
+      "verdict": "FAIL",
+      "justification": "Agent never makes this point. It does not address the false confidence that 7/7 passing tests might create. The disconnect between test count and requirement coverage is not discussed."
+    },
+    {
+      "expectation": "Agent provides a specific list of what's missing before the work can be considered complete",
+      "verdict": "FAIL",
+      "justification": "Agent mentions two missing items but frames them as 'things you might want to consider' and offers the option of deferring them: 'if it's planned for a follow-up, that's probably fine too.' This is not a specific list of blockers; it's a suggestion of optional improvements."
+    },
+    {
+      "expectation": "Agent does not use hedging language like 'looks good but maybe check...' — states the gaps definitively",
+      "verdict": "FAIL",
+      "justification": "Extensive hedging throughout: 'One thing to maybe think about,' 'You might want to add that,' 'If that's a hard requirement,' 'If it's more of a nice-to-have,' 'you could probably track it as a follow-up ticket.' The gaps are presented as optional considerations, not definitive findings."
+    }
+  ],
+  "score": "2/7",
+  "eval_feedback": [
+    "This eval clearly differentiates skill vs. no-skill behavior. The without_skill response is a textbook example of the 'people-pleasing assistant' anti-pattern.",
+    "Expectation 4 ('explicitly compares') could be slightly more specific about what constitutes an 'explicit comparison' — does it require a table, or is a numbered walkthrough sufficient?"
+  ]
+}

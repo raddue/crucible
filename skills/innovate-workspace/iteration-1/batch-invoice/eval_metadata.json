@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "batch-invoice",
+  "prompt": "Use the innovate skill on this finalized design doc:\n\n## Design: Batch Invoice Processing\n\n**Context:** Accounting team manually processes ~200 invoices/day. We're building automation.\n\n**Architecture:**\n- Upload CSV of invoices via admin UI\n- Backend parses CSV, validates each row against schema\n- Valid invoices are created in the database\n- Invalid rows are collected and returned as an error report\n- Invoices in 'pending' status are sent to the payment processor (Stripe) in a nightly batch job\n\n**Components:**\n- `POST /api/invoices/upload` — accepts CSV, returns validation report\n- `InvoiceParser` — CSV parsing and schema validation\n- `InvoiceBatcher` — nightly cron job that processes pending invoices via Stripe\n- PostgreSQL tables: `invoices`, `invoice_errors`, `payment_results`\n\n**Constraints:** Team of 2, 6-week timeline. Node.js/Express/PostgreSQL stack.\n\n**What's been decided:**\n- CSV format: amount, vendor_email, due_date, description, po_number\n- Validation: amount > 0, valid email, due_date in future, PO number matches pattern\n- Nightly batch at 2 AM UTC\n- Stripe payment intents for each invoice",
+  "expectations": [
+    "Proposes exactly ONE addition, not a feature wishlist",
+    "The proposed addition addresses a genuine gap or risk in the design — not cosmetic",
+    "Proposal includes a 'why this over alternatives' comparison with at least one runner-up",
+    "Proposal states the expected impact (what it enables or what risk it mitigates)",
+    "Proposal states the cost in terms of added complexity or scope",
+    "Proposal fits within the stated constraints (2 engineers, 6 weeks, existing stack)",
+    "Proposal is specific enough to implement (not vague like 'add better error handling')"
+  ]
+}

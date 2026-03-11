@@ -1,88 +1,57 @@
 {
+  "eval_name": "nearly-perfect",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": true,
-      "evidence": "First line: \"I'm using the red-team skill to adversarially review this artifact.\""
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "The report opens with an 'Artifact Under Review' section describing the plan as 'An implementation plan for adding cursor-based pagination to an Express/PostgreSQL/Knex/React API' covering all six tasks."
     },
     {
-      "text": "Did NOT classify any issues as Fatal — the plan has no fatal flaws",
-      "passed": true,
-      "evidence": "The Fatal Challenges section explicitly states: \"None identified.\" followed by a paragraph explaining the plan is well-structured with no fatal flaws."
+      "expectation": "Did NOT characterize any issues as showstoppers or blockers — the plan has no fatal flaws",
+      "verdict": "PASS",
+      "justification": "The Fatal Challenges section explicitly states 'None identified.' followed by a positive paragraph explaining the plan is well-structured with no fatal flaws. No language anywhere in the report characterizes any issue as a showstopper or blocker."
     },
     {
-      "text": "Correctly assessed the plan as fundamentally sound in the Overall Assessment",
-      "passed": true,
-      "evidence": "Overall Assessment Summary: \"This is a well-structured, correctly decomposed plan. Cursor-based pagination is the right choice for infinite scroll. The +1 trick for next-page detection, test-first approach at every layer, and explicit final regression pass (Task 6) all demonstrate solid engineering practice.\""
+      "expectation": "Correctly assessed the plan as fundamentally sound in the overall assessment",
+      "verdict": "PASS",
+      "justification": "The Overall Assessment states 'This is a well-structured, correctly decomposed plan' and that it 'can proceed as-is with high confidence.' The verdict is 'Plan is solid.'"
     },
     {
-      "text": "Identified the assumption that IDs are sequential integers as a Minor or Significant concern (UUIDs would break the cursor logic)",
-      "passed": true,
-      "evidence": "S1 titled \"Cursor Logic Assumes Sequential, Sortable IDs — Breaks with UUIDs or Non-Sequential PKs\" is classified as Significant. Explains that UUID v4 values are random so `WHERE id > cursor` produces arbitrary ordering. Notes \"if either uses UUIDs, the pagination is broken.\" Proposes configurable cursor column and UUID v7 alternative."
+      "expectation": "Identified the assumption that IDs are sequential integers as a minor concern (UUIDs would break the cursor logic)",
+      "verdict": "PASS",
+      "justification": "Section S1 identifies 'Cursor Logic Assumes Sequential, Sortable IDs — Breaks with UUIDs or Non-Sequential PKs' explaining that UUID v4 values are random so 'WHERE id > cursor' produces non-deterministic ordering. It is categorized as Significant rather than minor, but the concern is correctly identified and appropriately qualified with 'Likelihood: Medium' and 'If sequential integers are used, this is a non-issue.'"
     },
     {
-      "text": "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
-      "passed": true,
-      "evidence": "First Minor Observation: \"SQLite vs PostgreSQL test fidelity gap (Task 2). The plan tests the paginate helper against in-memory SQLite but production runs PostgreSQL. SQLite and PostgreSQL have subtle differences in type coercion, collation, and comparison behavior.\" Notes this is unlikely to cause issues for simple integer comparisons but is worth noting."
+      "expectation": "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
+      "verdict": "PASS",
+      "justification": "The first Minor Observation identifies 'SQLite vs PostgreSQL test fidelity gap (Task 2)' noting 'subtle differences in type coercion, collation, and comparison behavior' between the two databases. Appropriately notes it is unlikely to cause issues for simple integer comparisons."
     },
     {
-      "text": "Did NOT manufacture severity inflation — Minor issues are classified as Minor, not Significant or Fatal",
-      "passed": true,
-      "evidence": "The report has zero Fatal issues. Only one Significant issue (UUID assumption, which genuinely would break the pagination if applicable). All other observations (SQLite fidelity, sort order customization, payload sizes, cursor type coercion, CI pipeline specificity) are appropriately classified as Minor Observations. No inflation detected."
+      "expectation": "Did NOT manufacture severity inflation — minor concerns are not exaggerated into major issues",
+      "verdict": "PASS",
+      "justification": "The report has zero Fatal issues. The one Significant issue (UUID assumption) is genuinely functionality-breaking if applicable, qualified with 'Likelihood: Medium' and 'may not apply.' All other observations (SQLite fidelity, sort order, payload size, cursor type, CI specificity) are appropriately placed in Minor Observations. The overall tone is measured, not alarmist."
     },
     {
-      "text": "Overall Assessment verdict is 'Plan is solid' or equivalent positive assessment",
-      "passed": true,
-      "evidence": "Verdict explicitly states: \"Plan is solid.\""
+      "expectation": "Overall assessment verdict is positive ('plan is solid', 'ship it', or equivalent)",
+      "verdict": "PASS",
+      "justification": "Verdict is explicitly 'Plan is solid' and the summary recommends the plan 'can proceed as-is with high confidence.'"
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": true,
-      "evidence": "Report contains all required sections: \"## Fatal Challenges\" (None identified), \"## Significant Challenges\" (S1), \"## Minor Observations\" (5 bullet points), \"## Overall Assessment\" with \"Verdict: Plan is solid\" and \"Confidence: High.\""
+      "expectation": "Findings are organized by severity with an overall assessment and verdict",
+      "verdict": "PASS",
+      "justification": "Report is organized as Fatal Challenges (none identified), Significant Challenges (S1), Minor Observations (5 items), and Overall Assessment with verdict, confidence, and summary."
     },
     {
-      "text": "Confidence level is stated in the Overall Assessment",
-      "passed": true,
-      "evidence": "Overall Assessment includes: \"Confidence: High. I reviewed each task for logical correctness, integration risks, and edge cases.\""
+      "expectation": "Overall assessment conveys a clear confidence level in the review's conclusions",
+      "verdict": "PASS",
+      "justification": "The Overall Assessment explicitly states 'Confidence: High' with justification: 'I reviewed each task for logical correctness, integration risks, and edge cases.'"
     }
   ],
-  "summary": {
-    "passed": 9,
-    "failed": 0,
-    "total": 9,
-    "pass_rate": 1.0
-  },
-  "claims": [
-    {
-      "claim": "UUID v4 values are random and WHERE id > cursor produces arbitrary, non-deterministic ordering",
-      "type": "factual",
-      "verified": true,
-      "evidence": "UUID v4 is randomly generated. Lexicographic ordering of UUID v4 strings has no correlation with creation time or insertion order. Correct."
-    },
-    {
-      "claim": "UUID v7 is time-sortable",
-      "type": "factual",
-      "verified": true,
-      "evidence": "UUID v7 (RFC 9562) encodes a Unix timestamp in the most significant bits, making it naturally sortable by creation time. Correct."
-    },
-    {
-      "claim": "SQLite and PostgreSQL have subtle differences in type coercion, collation, and comparison behavior",
-      "type": "factual",
-      "verified": true,
-      "evidence": "SQLite uses dynamic typing with type affinity, while PostgreSQL uses strict static typing. Collation defaults differ. This is a well-known testing concern."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Did NOT manufacture severity inflation — Minor issues are classified as Minor, not Significant or Fatal",
-        "reason": "Good calibration expectation. This tests whether the reviewer can correctly identify a well-designed plan without over-criticizing. However, the UUID assumption was classified as Significant (S1), not Minor. The eval accepts this as reasonable (Minor or Significant per expectation #4), but the inflation check should acknowledge that Significant is defensible for a genuine functionality-breaking concern. The expectation passes because UUIDs genuinely would break the system."
-      },
-      {
-        "assertion": "Did NOT classify any issues as Fatal — the plan has no fatal flaws",
-        "reason": "This is arguably the most important expectation for this eval — it tests whether the reviewer can resist the temptation to find something Fatal in every review. Well-conceived."
-      }
-    ],
-    "overall": "This is the best-designed eval of the four. The 'nearly-perfect' scenario tests calibration and restraint — qualities harder to evaluate than bug-finding ability. The expectations correctly test that the reviewer doesn't over-inflate severity, gives a positive verdict, and still identifies the legitimate concerns (UUID assumption, SQLite gap). One possible addition: an expectation that the report acknowledges the plan's testing strategy as a strength, since the plan includes tests at every layer."
-  }
+  "score": "9/9",
+  "eval_feedback": [
+    "The expectation 'Identified the assumption that IDs are sequential integers as a minor concern' uses the word 'minor' but the transcript categorizes it as 'Significant.' This is arguably justified since UUIDs would genuinely break pagination. Consider rewording to 'Identified the assumption that IDs are sequential integers as a concern' without prescribing severity, to avoid ambiguity about whether Significant classification should pass or fail.",
+    "The 'Did NOT manufacture severity inflation' expectation is somewhat subjective. Clear criteria for what constitutes inflation vs. legitimate severity classification would strengthen this expectation.",
+    "Consider adding an expectation testing that the report identifies at least one genuine concern (not just rubber-stamps the plan), to verify analytical effort even on a well-designed plan."
+  ]
 }

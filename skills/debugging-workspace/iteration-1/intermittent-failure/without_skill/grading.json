@@ -1,105 +1,62 @@
 {
+  "eval_name": "intermittent-failure",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Phase 1 dispatches a Reproduction or Dependency/Environment agent in addition to Error and Change Analysis",
-      "passed": false,
-      "evidence": "No agents are dispatched. The transcript is a single-threaded investigation with no Phase 1, no subagents, and no parallel dispatch."
+      "expectation": "Investigation includes environment/dependency analysis in addition to error and change analysis",
+      "verdict": "PASS",
+      "justification": "The investigation includes a timeline table that analyzes both environment changes (CI runner downgrade from 4-core to 2-core) and dependency changes (Node 18.17 to 18.19). It also considers resource contention effects: 'On 2-core machines, they're contending for CPU, making fulfillment consistently slower.' This covers error analysis, change analysis, and environment/dependency analysis."
     },
     {
-      "text": "Investigation identifies the fixed sleep(2000) as a timing assumption that doesn't account for variable fulfillment time (500ms-3000ms)",
-      "passed": true,
-      "evidence": "Under 'The critical timing issue': 'The test waits exactly 2000ms for all fulfillment jobs to complete. But the fulfillment worker takes between 500ms and 3000ms per job. If any of the 3 jobs takes longer than 2 seconds, the test fails.'"
+      "expectation": "Investigation identifies the fixed sleep(2000) as a timing assumption that doesn't account for variable fulfillment time (500ms-3000ms)",
+      "verdict": "PASS",
+      "justification": "Under 'The critical timing issue': 'The test waits exactly 2000ms for all fulfillment jobs to complete. But the fulfillment worker takes between 500ms and 3000ms per job. If any of the 3 jobs takes longer than 2 seconds, the test fails.'"
     },
     {
-      "text": "Investigation correlates the failure onset with the CI runner downgrade from 4-core to 2-core machines 2 weeks ago",
-      "passed": true,
-      "evidence": "Timeline table explicitly shows: 'CI runner downgraded from 4-core to 2-core | 2 weeks ago | Less CPU = slower job processing' and 'Test started failing intermittently | 2 weeks ago | Exact match'. The analysis explains why slower hardware worsens the timing: 'On 4-core machines, the fulfillment worker, job queue, database, and test runner all had dedicated cores. On 2-core machines, they're contending for CPU.'"
+      "expectation": "Investigation correlates the failure onset with the CI runner downgrade from 4-core to 2-core machines 2 weeks ago",
+      "verdict": "PASS",
+      "justification": "The timeline table explicitly shows: 'CI runner downgraded from 4-core to 2-core | 2 weeks ago | Less CPU = slower job processing' alongside 'Test started failing intermittently | 2 weeks ago | Exact match'. The Node version bump is correctly ruled out (happened 1 week ago, failures started 2 weeks ago)."
     },
     {
-      "text": "Synthesis cross-references the timing: fulfillment takes up to 3000ms but test only waits 2000ms, and slower CI runners make this worse",
-      "passed": false,
-      "evidence": "No formal synthesis report exists. The investigation section does contain this cross-reference: the timing issue section identifies the 2000ms vs 3000ms mismatch, and the timeline section connects the runner downgrade. But these are not consolidated in a synthesis format."
+      "expectation": "Investigation cross-references the timing: fulfillment takes up to 3000ms but test only waits 2000ms, and slower CI runners exacerbate the gap",
+      "verdict": "PASS",
+      "justification": "The investigation connects both factors: the timing section identifies the 2000ms vs 3000ms mismatch, and the timeline section explains why slower hardware makes it worse: 'On 4-core machines, the fulfillment worker, job queue, database, and test runner all had dedicated cores. On 2-core machines, they're contending for CPU, making fulfillment consistently slower and pushing more jobs past the 2-second window.'"
     },
     {
-      "text": "Phase 3 hypothesis identifies the fragile sleep-based waiting pattern as the root cause, not a code bug in the order processing logic",
-      "passed": true,
-      "evidence": "Root Cause section: 'This is not an application code bug. The order processing logic is correct. This is a test infrastructure issue: the test uses a fixed sleep(2000) to wait for asynchronous job completion, but the actual fulfillment time can be up to 3000ms (or more under resource contention).'"
+      "expectation": "Hypothesis identifies the fragile sleep-based waiting pattern as the root cause, not a code bug in the order processing logic",
+      "verdict": "PASS",
+      "justification": "Root Cause section: 'This is not an application code bug. The order processing logic is correct. This is a test infrastructure issue: the test uses a fixed sleep(2000) to wait for asynchronous job completion, but the actual fulfillment time can be up to 3000ms (or more under resource contention).'"
     },
     {
-      "text": "Phase 3.5 red-team verifies the hypothesis explains the 30% failure rate (correlates with fulfillment time distribution exceeding 2s more often on slower hardware)",
-      "passed": false,
-      "evidence": "No red-teaming step exists. The transcript does address the 30% rate: 'The ~30% failure rate makes sense: if fulfillment time is roughly uniformly distributed between 500ms-3000ms, on a 2-core machine with overhead, there's a meaningful probability that at least one of the 3 concurrent jobs exceeds 2 seconds total.' But this is stated as analysis, not challenged in a red-team exercise."
+      "expectation": "Hypothesis is verified by explaining the ~30% failure rate (correlates with fulfillment time distribution exceeding 2s more often on slower hardware)",
+      "verdict": "PASS",
+      "justification": "The investigation states: 'The ~30% failure rate makes sense: if fulfillment time is roughly uniformly distributed between 500ms-3000ms, on a 2-core machine with overhead, there's a meaningful probability that at least one of the 3 concurrent jobs exceeds 2 seconds total (including queue overhead).' This connects the failure rate to the fulfillment time distribution on slower hardware."
     },
     {
-      "text": "Phase 4 fix replaces the fixed sleep with condition-based polling or retry-until-condition (e.g., poll order status with timeout)",
-      "passed": true,
-      "evidence": "Fix provides a 'waitForCondition' helper that polls 'conditionFn' every 500ms with a 15-second timeout, and updates the test to use it: 'await waitForCondition(async () => { ... return statuses.every(s => s === 'fulfilled'); }, { timeout: 15000, interval: 500 })'"
+      "expectation": "Fix replaces the fixed sleep with condition-based polling or retry-until-condition (e.g., poll order status with timeout)",
+      "verdict": "PASS",
+      "justification": "The fix provides a waitForCondition helper that polls every 500ms with a 15-second timeout, replacing the fixed sleep(2000): 'await waitForCondition(async () => { ... return statuses.every(s => \"fulfilled\"); }, { timeout: 15000, interval: 500 });'"
     },
     {
-      "text": "Phase 4 implementer writes a test that proves the sleep-based approach fails under slow conditions before implementing the fix",
-      "passed": false,
-      "evidence": "No failing test is written before the fix. The transcript goes directly from Root Cause to Fix without a TDD step."
+      "expectation": "A test or demonstration is provided showing why the sleep-based approach is fragile before implementing the fix",
+      "verdict": "FAIL",
+      "justification": "No test or demonstration is provided before the fix. The transcript explains the fragility in prose (the timing analysis and 30% failure rate explanation) but does not write a failing test, create a reproduction, or provide a concrete demonstration of the sleep-based approach's fragility before implementing the polling fix."
     },
     {
-      "text": "Phase 5 quality gate is run on the fix to verify it doesn't introduce flaky behavior of its own",
-      "passed": false,
-      "evidence": "No quality gate or red-team review of the fix. The transcript does explain key properties of the fix (no fixed sleep, generous timeout, clear failure mode) but does not perform a formal quality gate or explicitly verify non-flakiness."
+      "expectation": "Quality review is performed on the fix to verify it doesn't introduce flaky behavior of its own",
+      "verdict": "PASS",
+      "justification": "The transcript includes a 'Key properties of this fix' section that explicitly addresses flakiness: (1) 'No fixed sleep' eliminates the timing assumption, (2) 'Generous timeout' of 15 seconds covers even slow environments, (3) 'Polling interval' of 500ms balances responsiveness with DB load, (4) 'Clear failure mode' ensures the test fails with a message rather than hanging. While not a formal separate review phase, this constitutes a quality assessment of the fix specifically examining whether it introduces its own flaky behavior."
     },
     {
-      "text": "Orchestrator identifies this as a test infrastructure issue, not an application code bug, and communicates this distinction clearly",
-      "passed": true,
-      "evidence": "Root Cause section: 'This is not an application code bug. The order processing logic is correct. This is a test infrastructure issue.' Also stated in the fix section: 'the test fails' (not the code fails). Additional Recommendations section: 'Don't revert the CI runner change: The 2-core machines exposed a pre-existing fragility.'"
+      "expectation": "Agent identifies this as a test infrastructure issue, not an application code bug, and communicates this distinction clearly",
+      "verdict": "PASS",
+      "justification": "Root Cause section states: 'This is not an application code bug. The order processing logic is correct. This is a test infrastructure issue.' Additional Recommendations reinforces: 'Don't revert the CI runner change: The 2-core machines exposed a pre-existing fragility.' The distinction is communicated clearly and repeatedly."
     }
   ],
-  "summary": {
-    "passed": 5,
-    "failed": 5,
-    "total": 10,
-    "pass_rate": 0.5
-  },
-  "claims": [
-    {
-      "claim": "The root cause is correctly identified as the fragile sleep(2000) pattern",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Root Cause section explicitly identifies sleep(2000) and the 500ms-3000ms fulfillment range."
-    },
-    {
-      "claim": "The CI runner downgrade is correctly identified as the trigger",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Timeline table shows exact temporal match between runner downgrade and failure onset."
-    },
-    {
-      "claim": "The fix uses condition-based polling",
-      "type": "quality",
-      "verified": true,
-      "evidence": "waitForCondition utility with polling interval and timeout replaces the fixed sleep."
-    },
-    {
-      "claim": "The transcript correctly classifies this as a test infrastructure issue",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Multiple explicit statements distinguishing test infrastructure from application code."
-    },
-    {
-      "claim": "The Node version change is correctly ruled out",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Timeline table shows Node bump happened 1 week ago but failures started 2 weeks ago."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Phase 1 dispatches a Reproduction or Dependency/Environment agent",
-        "reason": "This assertion tests for skill-specific methodology. The without_skill run addresses environment analysis directly in the investigation but doesn't dispatch agents. The spirit (analyze environment factors) is met; the letter (dispatch agents) is not."
-      },
-      {
-        "assertion": "Synthesis cross-references the timing",
-        "reason": "The without_skill run does cross-reference the timing (2000ms vs 3000ms, runner downgrade) but in the body of the investigation, not in a formal synthesis report. Consider testing for the cross-reference content separately from the format."
-      }
-    ],
-    "overall": "The without_skill run achieves 50% pass rate -- all 5 domain-correctness assertions pass (identifies sleep fragility, correlates runner downgrade, identifies correct root cause, proposes polling fix, classifies as test issue). All 5 failures are process/methodology assertions (no agents, no synthesis, no red-teaming, no TDD, no quality gate). The debugging quality is solid -- correct diagnosis, correct fix, correct classification, useful additional recommendations (audit other tests, don't revert runner change). The eval highlights the value of the skill's structured methodology while showing that an unstructured approach can still reach the right answer for this class of problem."
-  }
+  "score": "9/10",
+  "eval_feedback": [
+    "The expectation about 'a test or demonstration' before the fix is slightly ambiguous -- it could mean a failing test (TDD-style), a code demonstration, or just a clear prose explanation. The transcript provides a thorough prose explanation of the fragility but no code artifact. Clarifying whether prose analysis counts as a 'demonstration' would reduce ambiguity.",
+    "The quality review expectation is well-designed -- the transcript's 'Key properties' section naturally serves as a quality review, making this a fair test of debugging quality rather than process compliance.",
+    "Consider adding an expectation about whether the agent recommends auditing other tests for the same sleep-based fragility pattern -- the transcript does this ('Audit other tests: Search for sleep calls in the integration test suite') which is a valuable debugging practice."
+  ]
 }

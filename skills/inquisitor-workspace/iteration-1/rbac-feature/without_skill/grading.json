@@ -1,0 +1,52 @@
+{
+  "eval_name": "rbac-feature",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Identifies the TypeScript type issue: req.userRole is set but Request type doesn't include this property",
+      "verdict": "PASS",
+      "justification": "First issue identified: 'The requireRole middleware sets req.userRole = userRole.role, but... the Express Request type only includes { id: string; email: string } for req.user. There is no userRole property defined on the Request type. This will cause TypeScript compilation errors in strict mode.'"
+    },
+    {
+      "expectation": "Identifies that existing tests will break: they mock authMiddleware but the new requireRole middleware also queries the DB",
+      "verdict": "PASS",
+      "justification": "Second issue: 'existing tests... mock authMiddleware to set req.user, but they do not account for the new requireRole middleware. Since requireRole makes its own database query... any test that only mocks the auth middleware will now fail.' Proposes two concrete fix options."
+    },
+    {
+      "expectation": "Identifies the migration concern: existing users may have NULL role if DEFAULT doesn't backfill existing rows",
+      "verdict": "PASS",
+      "justification": "Addressed in the migration section: 'In PostgreSQL 11+, adding a column with a DEFAULT value does backfill existing rows, so this should be fine. However, if you need to support older PostgreSQL versions, you would need a separate UPDATE statement.' Correctly identifies the concern and its resolution."
+    },
+    {
+      "expectation": "Identifies the N+1 query issue: every role-protected request makes a separate DB call to check the user's role",
+      "verdict": "PASS",
+      "justification": "Third issue: 'Every request to a role-protected endpoint now makes an additional database round-trip. The auth middleware already validates the user... and then requireRole queries the database again just to get the role. On high-traffic routes, this doubles the per-request query count.' Proposes JWT or single-fetch alternatives."
+    },
+    {
+      "expectation": "Identifies at least one missing role check or inconsistency in the permission model (e.g., GET /articles has no check)",
+      "verdict": "PASS",
+      "justification": "Explicitly called out: 'POST, PUT, and DELETE on /articles all have role requirements, but GET /articles only requires authentication... it creates an asymmetry where a viewer role can read articles but not create them, and there is no route-level indication that this was a deliberate choice vs. an oversight.' Also identifies admin self-deletion inconsistency."
+    },
+    {
+      "expectation": "Each identified issue includes a specific proposed fix or test",
+      "verdict": "PASS",
+      "justification": "All issues include specific fixes: augment Express Request type, mock db.users.findById or seed test users, include role in JWT, test findById().select('role') return shape, define shared roles constant, add self-deletion guard. Fixes are concrete and actionable."
+    },
+    {
+      "expectation": "Report covers at least 3 of the 5 dimensions",
+      "verdict": "PASS",
+      "justification": "Covers: wiring (TypeScript type, middleware), integration (N+1 query, findById return shape), edge cases (migration backfill), state/lifecycle (admin self-deletion), regression (test breakage). At least 4 dimensions covered despite no formal dimension structure."
+    },
+    {
+      "expectation": "Issues are specific to this codebase — not generic security advice",
+      "verdict": "PASS",
+      "justification": "All issues reference specific codebase elements: req.user type definition, specific test file paths, db.users.findById().select('role'), the migration SQL, specific route paths like GET /articles. No generic security platitudes."
+    }
+  ],
+  "score": "8/8",
+  "eval_feedback": [
+    "Both with_skill and without_skill achieved 8/8, indicating the expectations do not differentiate the skill's value. The with_skill report found additional issues (empty roles array edge case, role string magic values) that no expectation rewards.",
+    "Consider adding expectations for issues that require more systematic analysis, such as the empty roles array edge case or the findById().select('role') return shape ambiguity, which test deeper investigation.",
+    "Expectation 3 about migration concern is ambiguous — both transcripts correctly note that PG 11+ handles it. The expectation wording implies it should be flagged as a problem, but the correct answer is more nuanced."
+  ]
+}

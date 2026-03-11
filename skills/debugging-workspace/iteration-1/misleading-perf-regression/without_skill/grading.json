@@ -1,99 +1,62 @@
 {
+  "eval_name": "misleading-perf-regression",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Phase 1 dispatches at least 3 investigation subagents including Error Analysis, Change Analysis, and a Deep Dive or Evidence Gathering agent",
-      "passed": false,
-      "evidence": "No subagents are dispatched. The transcript is a single-threaded analysis with numbered 'Key observations' but no structured Phase 1, no subagent dispatch, and no parallel investigation."
+      "expectation": "Investigation examines at least 3 distinct angles before forming a hypothesis (e.g., error analysis, change history, environment/dependency review)",
+      "verdict": "PASS",
+      "justification": "The investigation examines 5 distinct angles: (1) the new recommendation endpoint's actual performance (30ms), (2) the scope of the slowdown (all endpoints, not just recommendations), (3) the specific slow query and its origin (/api/users/recent, unchanged for months), (4) the EXPLAIN output showing Seq Scan, and (5) the v2.3 migration that altered the users table. These span error analysis, change history, and database internals."
     },
     {
-      "text": "Investigation does NOT immediately blame the new recommendation engine code — it follows evidence",
-      "passed": true,
-      "evidence": "The very first observation is: 'The new /api/recommendations endpoint itself responds in ~30ms. If the new recommendation code were the problem, that endpoint would be slow too.' The investigation systematically follows evidence through 5 key observations before reaching a conclusion."
+      "expectation": "Investigation does NOT immediately blame the new recommendation engine code -- it follows evidence",
+      "verdict": "PASS",
+      "justification": "The first observation explicitly exonerates the recommendation code: 'The new /api/recommendations endpoint itself responds in ~30ms. If the new recommendation code were the problem, that endpoint would be slow too.' The investigation follows evidence systematically through 5 observations before reaching the root cause."
     },
     {
-      "text": "Synthesis report identifies that the slow query is on an EXISTING endpoint, not the new feature",
-      "passed": false,
-      "evidence": "No formal synthesis report exists. However, Key observation #3 does identify: 'The top offending slow query is from /api/users/recent, which hasn't been changed in months.' The content is present but not in a synthesis report format."
+      "expectation": "Investigation identifies that the slow query is on an EXISTING endpoint (/api/users/recent), not the new recommendation feature",
+      "verdict": "PASS",
+      "justification": "Key observation #3 states: 'The top offending slow query is from /api/users/recent, which hasn't been changed in months.' This is clearly identified and emphasized."
     },
     {
-      "text": "Synthesis report notes the Seq Scan in the EXPLAIN output as concrete evidence of a missing or invalidated index",
-      "passed": false,
-      "evidence": "No synthesis report exists. Key observation #4 does analyze the EXPLAIN output and identifies the Seq Scan, but this is in the investigation section, not a synthesis report."
+      "expectation": "Investigation notes the Seq Scan in the EXPLAIN output as concrete evidence of a missing or invalidated index",
+      "verdict": "PASS",
+      "justification": "Key observation #4 analyzes the EXPLAIN output: 'This is scanning all 50M rows sequentially instead of using an index on created_at.' The Root Cause section further explains: 'Existing indexes (including presumably one on created_at) may need to be rebuilt after such a rewrite, or they may become bloated and less efficient. The planner may stop choosing them.'"
     },
     {
-      "text": "Phase 3 hypothesis targets the database migration's effect on the users table (index invalidation, table bloat, or missing index on created_at) — NOT the recommendation code",
-      "passed": true,
-      "evidence": "Root Cause section correctly identifies: 'The migration ALTER TABLE users ADD COLUMN preferences JSONB DEFAULT '{}' is almost certainly the cause' and describes table bloat, index invalidation/bloat, and statistics staleness as mechanisms. The recommendation code is excluded."
+      "expectation": "Hypothesis targets the database migration's effect on the users table (index invalidation, table bloat, or missing index on created_at) -- NOT the recommendation code",
+      "verdict": "PASS",
+      "justification": "Root Cause section identifies: 'The migration ALTER TABLE users ADD COLUMN preferences JSONB DEFAULT '{}' is almost certainly the cause.' It provides three specific mechanisms: table bloat, index invalidation/bloat, and statistics staleness. The recommendation code is explicitly excluded."
     },
     {
-      "text": "Phase 3.5 red-teams the hypothesis and verifies it explains ALL symptoms (all endpoints slow, not just recommendations)",
-      "passed": false,
-      "evidence": "No red-teaming step exists in the transcript. The analysis is confident but never explicitly challenges itself with adversarial questions."
+      "expectation": "Hypothesis is verified against ALL symptoms (all endpoints slow, not just recommendations) before implementation",
+      "verdict": "PASS",
+      "justification": "The Root Cause section explains: 'causing the query planner to fall back to sequential scans on all queries touching the users table.' The Summary section also verifies: 'The correlation with v2.3 was real but the causation was misattributed.' The hypothesis accounts for the systemic nature of the slowdown affecting all endpoints."
     },
     {
-      "text": "The hypothesis is specific and testable — e.g., 'The ALTER TABLE caused a full table rewrite that invalidated the index on users.created_at'",
-      "passed": true,
-      "evidence": "Root Cause section provides specific mechanisms: full table rewrite, table bloat, index invalidation/bloat, and statistics staleness. The fix section provides testable verification steps (EXPLAIN ANALYZE after fix should show Index Scan)."
+      "expectation": "The hypothesis is specific and testable -- e.g., 'The ALTER TABLE caused a full table rewrite that invalidated the index on users.created_at'",
+      "verdict": "PASS",
+      "justification": "The hypothesis provides specific, testable mechanisms: full table rewrite causing table bloat, index invalidation/bloat, and statistics staleness. The Verification section provides a concrete test: 'After the fix, re-run the EXPLAIN on the slow query and confirm it now shows an Index Scan instead of a Seq Scan.' The fix steps also include checking if the index exists and is healthy."
     },
     {
-      "text": "Phase 4 fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
-      "passed": true,
-      "evidence": "Fix is a multi-step database maintenance plan: ANALYZE users, check indexes, REINDEX INDEX CONCURRENTLY, CREATE INDEX CONCURRENTLY, VACUUM. No application code changes are proposed."
+      "expectation": "Fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
+      "verdict": "PASS",
+      "justification": "The fix is a 5-step database maintenance plan: (1) ANALYZE users, (2) check existing indexes, (3) REINDEX INDEX CONCURRENTLY, (4) CREATE INDEX CONCURRENTLY if needed, (5) VACUUM. No application code changes are proposed."
     },
     {
-      "text": "Orchestrator explicitly rejects or deprioritizes the DBA's suggestion to rewrite recommendation queries as misdirected",
-      "passed": true,
-      "evidence": "Root Cause section states: 'Your DBA's suggestion to \"rewrite the recommendation queries\" is misdirected. The slow query has nothing to do with the recommendation feature.' Summary reiterates: 'The actual cause was the database migration that altered the 50M-row users table, which invalidated or degraded the index.'"
+      "expectation": "Agent explicitly rejects or deprioritizes the DBA's suggestion to rewrite recommendation queries as misdirected",
+      "verdict": "PASS",
+      "justification": "The transcript states: 'Your DBA's suggestion to \"rewrite the recommendation queries\" is misdirected. The slow query has nothing to do with the recommendation feature. It's a pre-existing query on the users table that became slow because the migration changed the table's physical characteristics.'"
     },
     {
-      "text": "At least one status update mentions the misleading nature of the timing correlation with v2.3 deployment",
-      "passed": true,
-      "evidence": "Summary section states: 'The correlation with v2.3 was real but the causation was misattributed. The new recommendation code is fine (it responds in 30ms). The actual cause was the database migration that altered the 50M-row users table.' While not a formal 'status update,' the misleading correlation is explicitly called out."
+      "expectation": "Agent explicitly addresses the misleading timing correlation between the v2.3 deployment and the performance regression",
+      "verdict": "PASS",
+      "justification": "The Summary section states: 'The correlation with v2.3 was real but the causation was misattributed. The new recommendation code is fine (it responds in 30ms). The actual cause was the database migration that altered the 50M-row users table.' This directly addresses the misleading correlation between the deployment and the regression."
     }
   ],
-  "summary": {
-    "passed": 6,
-    "failed": 4,
-    "total": 10,
-    "pass_rate": 0.6
-  },
-  "claims": [
-    {
-      "claim": "The root cause was correctly identified as the ALTER TABLE migration",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Root Cause section names the exact migration and describes three specific mechanisms (table rewrite, index issues, stale statistics)."
-    },
-    {
-      "claim": "The fix is technically appropriate (database maintenance, not code rewrite)",
-      "type": "quality",
-      "verified": true,
-      "evidence": "ANALYZE, REINDEX CONCURRENTLY, CREATE INDEX CONCURRENTLY, VACUUM -- all correct database maintenance operations."
-    },
-    {
-      "claim": "The DBA's suggestion is rejected with evidence",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Explicitly calls the DBA's suggestion 'misdirected' with reasoning."
-    },
-    {
-      "claim": "Prevention measures are provided",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Prevention section includes staging environment testing, pg_stat_user_tables monitoring, post-migration ANALYZE, and batch backfilling advice."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Synthesis report identifies that the slow query is on an EXISTING endpoint, not the new feature",
-        "reason": "The without_skill transcript correctly identifies this fact (Key observation #3) but not in a 'synthesis report' format. This assertion conflates content correctness with format compliance. Consider splitting into two assertions: one for the insight itself and one for the synthesis format."
-      },
-      {
-        "assertion": "Synthesis report notes the Seq Scan in the EXPLAIN output as concrete evidence",
-        "reason": "Same issue -- the content is present but not in the expected format. The Seq Scan analysis is thorough in Key observation #4."
-      }
-    ],
-    "overall": "The without_skill run achieves the correct diagnosis and fix but fails 4 of 10 assertions, all process-related (no subagents, no synthesis report, no red-teaming, no formal phase dispatches). The domain-level analysis is strong: correctly identifies the migration as root cause, provides specific mechanisms, rejects the DBA's misdirection, and includes prevention measures. The 60% pass rate more accurately reflects the absence of structured methodology than any deficiency in debugging quality. The eval would benefit from separating process expectations from domain expectations to give a more nuanced picture."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "This eval is well-constructed -- all expectations test for substantive debugging quality rather than process methodology, which makes them fair for both with_skill and without_skill conditions.",
+    "The expectation about '3 distinct angles' could be more precise about what counts as distinct -- the transcript examines 5 angles, but some could be argued to be sub-aspects of the same angle (e.g., 'slow query origin' and 'EXPLAIN output' are both database analysis).",
+    "Consider adding an expectation about prevention recommendations -- the transcript provides strong prevention advice (test migrations on staging, monitor pg_stat_user_tables, run ANALYZE post-migration) that isn't measured."
+  ]
 }

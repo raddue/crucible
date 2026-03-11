@@ -1,0 +1,46 @@
+{
+  "eval_name": "batch-invoice",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Proposes exactly ONE addition, not a feature wishlist",
+      "verdict": "FAIL",
+      "justification": "Proposes five separate additions: (1) duplicate payment protection, (2) retry and partial failure handling, (3) batch run observability, (4) CSV upload feedback improvements (async job pattern), and (5) duplicate invoice check via PO number uniqueness. This is a feature wishlist."
+    },
+    {
+      "expectation": "The proposed addition addresses a genuine gap or risk in the design — not cosmetic",
+      "verdict": "PASS",
+      "justification": "The first suggestion (duplicate payment protection) addresses a genuine, high-severity gap. Several other suggestions also address real gaps. Grading this on the substance of the ideas rather than the structure."
+    },
+    {
+      "expectation": "Proposal includes a 'why this over alternatives' comparison with at least one runner-up",
+      "verdict": "FAIL",
+      "justification": "No alternatives comparison is provided for any of the five suggestions. Each is presented as a standalone recommendation without justification for why it was chosen over other possible improvements."
+    },
+    {
+      "expectation": "Proposal states the expected impact (what it enables or what risk it mitigates)",
+      "verdict": "FAIL",
+      "justification": "Impact is mentioned only in passing and informally. For example, 'resulting in double payments' is noted as a risk, but there is no structured impact statement quantifying what the addition enables or prevents. The closing sentence is generic."
+    },
+    {
+      "expectation": "Proposal states the cost in terms of added complexity or scope",
+      "verdict": "FAIL",
+      "justification": "No cost estimation is provided for any of the five suggestions — no time estimates, no complexity assessment, no discussion of tradeoffs or what the additions add to scope."
+    },
+    {
+      "expectation": "Proposal fits within the stated constraints (2 engineers, 6 weeks, existing stack)",
+      "verdict": "FAIL",
+      "justification": "While individual suggestions might fit, five separate additions collectively represent significant scope expansion. Without cost estimates, it is impossible to assess fit. The Slack notification and async job pattern suggestions hint at scope creep beyond the stated constraints."
+    },
+    {
+      "expectation": "Proposal is specific enough to implement (not vague like 'add better error handling')",
+      "verdict": "PASS",
+      "justification": "Most suggestions are reasonably specific — e.g., generating an idempotency key, adding a status column with named states (pending, submitted, paid, failed), adding a batch_runs table with specific columns. Not as detailed as the with_skill output, but implementable."
+    }
+  ],
+  "score": "2/7",
+  "eval_feedback": [
+    "The 'proposes exactly ONE addition' expectation is the strongest discriminator between with_skill and without_skill conditions. The without_skill output clearly fails this.",
+    "Consider whether the 'fits within constraints' expectation should be evaluated per-suggestion or holistically. When five suggestions are made, it is ambiguous whether to assess each individually or the cumulative scope impact. Recommend clarifying this as 'cumulative additions fit within constraints.'"
+  ]
+}

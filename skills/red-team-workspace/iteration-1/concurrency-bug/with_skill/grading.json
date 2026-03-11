@@ -1,99 +1,61 @@
 {
+  "eval_name": "concurrency-bug",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": true,
-      "evidence": "First line of the report: \"I'm using the red-team skill to adversarially review this artifact.\""
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "The report opens with an 'Artifact Under Review' section that clearly establishes scope: 'A TypeScript WebhookWorkerPool class intended to process incoming webhook events at ~500 events/second in a Node.js service.'"
     },
     {
-      "text": "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
-      "passed": true,
-      "evidence": "F1 titled \"Race Condition in processNext — The processing Guard is Broken Across Async Boundaries\" provides a detailed step-by-step explanation of how microtasks scheduled between `this.processing = false` and `this.processNext()` can bypass the guard, with two invocations both seeing `processing === false`."
+      "expectation": "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
+      "verdict": "PASS",
+      "justification": "Section F1 ('Race Condition in processNext — The processing Guard is Broken Across Async Boundaries') explains in detail how a microtask scheduled between 'this.processing = false' and 'this.processNext()' can see processing as false and begin a second concurrent invocation, causing two events to process simultaneously."
     },
     {
-      "text": "Classified the race condition as Fatal severity",
-      "passed": true,
-      "evidence": "The race condition is listed under \"## Fatal Challenges\" as \"F1.\""
+      "expectation": "Identified the race condition as one of the most critical issues, explaining the potential impact (data corruption, lost events, or duplicate processing)",
+      "verdict": "PASS",
+      "justification": "The race condition is listed as Fatal Challenge F1 (the highest severity tier, positioned first in the report). Impact is explicitly stated as 'Duplicate event processing, corrupted results Map state, unpredictable behavior under load.'"
     },
     {
-      "text": "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
-      "passed": true,
-      "evidence": "F2 titled \"Sequential Processing Cannot Handle 500 Events/Second\" explains: \"this class processes exactly one event at a time\" and calculates that at 100-500ms per round-trip, throughput is 2-10 events/second, meaning the queue grows by ~490-498 events/second."
+      "expectation": "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
+      "verdict": "PASS",
+      "justification": "Section F2 ('Sequential Processing Cannot Handle 500 Events/Second') states 'this class processes exactly one event at a time' and calculates throughput of 2-10 events/second at 100-500ms latency, showing the queue grows by ~490-498 events/second."
     },
     {
-      "text": "Identified the unbounded results Map as a memory leak that grows without limit",
-      "passed": true,
-      "evidence": "S1 titled \"Unbounded results Map Is a Memory Leak\" calculates ~43 million entries per day at 500 events/second, consuming ~4-8 GB of memory per day, leading to eventual OOM."
+      "expectation": "Identified the unbounded results Map as a memory leak that grows without limit",
+      "verdict": "PASS",
+      "justification": "Section S1 identifies 'The results Map stores every processed event result and is never pruned. At 500 events/second, this accumulates ~43 million entries per day' consuming '~4-8 GB of memory per day.'"
     },
     {
-      "text": "Identified missing retry logic for failed webhook deliveries",
-      "passed": true,
-      "evidence": "S2 titled \"No Retry Logic for Failed Webhook Deliveries\" explains that transient failures permanently lose events and provides exponential backoff code as a fix."
+      "expectation": "Identified missing retry logic for failed webhook deliveries",
+      "verdict": "PASS",
+      "justification": "Section S2 ('No Retry Logic for Failed Webhook Deliveries') explains that 'transient failures permanently lose the event notification' and calculates ~43,000 lost events per day at a 0.1% failure rate."
     },
     {
-      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-      "passed": true,
-      "evidence": "F1 includes a while-loop fix. F2 includes a concurrent drain pattern with configurable concurrency. S1 includes TTL-based cleanup and auto-expire-on-retrieval options. S2 includes exponential backoff retry code. S3 includes AbortSignal.timeout() fix. All Fatal and Significant items have proposed fixes with code examples."
+      "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+      "verdict": "PASS",
+      "justification": "All five major findings include 'Proposed fix' sections with code: a while-loop pattern for F1, a concurrent drain pattern with configurable concurrency for F2, TTL-based cleanup for S1, exponential backoff retry for S2, and AbortSignal.timeout for S3."
     },
     {
-      "text": "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
-      "passed": true,
-      "evidence": "F1 quotes the exact two lines (`this.processing = false;` / `this.processNext();`) and explains the microtask interleaving. F2 quotes the guard logic (`if (this.processing || this.queue.length === 0) return;`). S2 provides specific failure rate math (0.1% = 43,000 lost events/day). All challenges reference specific code constructs."
+      "expectation": "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
+      "verdict": "PASS",
+      "justification": "F1 quotes the exact two non-atomic statements ('this.processing = false; this.processNext()') and provides a step-by-step interleaving scenario. F2 quotes the guard logic. S2 calculates specific failure rates. All challenges reference specific code constructs and provide numbered interleaving sequences."
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": true,
-      "evidence": "Report has sections: \"## Fatal Challenges\" (F1, F2), \"## Significant Challenges\" (S1, S2, S3), \"## Minor Observations\" (4 bullet points), \"## Overall Assessment\" with explicit \"Verdict: Fundamentally flawed\" and \"Confidence: High.\""
+      "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
+      "verdict": "PASS",
+      "justification": "Report is organized as Fatal Challenges (F1, F2), Significant Challenges (S1, S2, S3), Minor Observations (4 bullet points), and Overall Assessment with verdict ('Fundamentally flawed'), confidence ('High'), and summary."
     },
     {
-      "text": "Did NOT focus on code style, naming conventions, or formatting as primary findings",
-      "passed": true,
-      "evidence": "All Fatal and Significant findings are substantive technical issues (race condition, throughput, memory leak, retry logic, timeout). Minor observations include a type-checking note and missing Content-Type header, but these are appropriately classified as minor. No primary findings relate to code style, naming, or formatting."
+      "expectation": "Did NOT focus on code style, naming conventions, or formatting as primary findings",
+      "verdict": "PASS",
+      "justification": "All Fatal and Significant findings are substantive engineering issues (race condition, throughput bottleneck, memory leak, retry logic, timeouts). Code style concerns (err.message typing, missing Content-Type header) are relegated to Minor Observations only."
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 0,
-    "total": 10,
-    "pass_rate": 1.0
-  },
-  "claims": [
-    {
-      "claim": "Microtask can interleave between processing=false and recursive processNext() call",
-      "type": "factual",
-      "verified": true,
-      "evidence": "This is technically accurate in Node.js. A resolved Promise callback (microtask) from an enqueue() call in another part of the system can fire between these two synchronous statements if scheduled at the right time. The report correctly identifies that these two statements are not atomic."
-    },
-    {
-      "claim": "Sequential processing yields only 2-10 events/second at 100-500ms latency",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Math checks out: 1/0.1s = 10 events/s at 100ms, 1/0.5s = 2 events/s at 500ms. With 500 events/second incoming, the queue grows at ~490-498 events/second."
-    },
-    {
-      "claim": "Results Map accumulates ~43 million entries per day at 500 events/second",
-      "type": "factual",
-      "verified": true,
-      "evidence": "500 events/s * 86400 seconds/day = 43,200,000 entries/day. Math is correct."
-    },
-    {
-      "claim": "50 concurrent workers with 200ms average latency yields ~250 events/second",
-      "type": "factual",
-      "verified": true,
-      "evidence": "50 / 0.2s = 250 events/second. Math is correct."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Classified the race condition as Fatal severity",
-        "reason": "The race condition in this specific Node.js code is subtle — it requires a microtask to fire between two synchronous statements within the same tick. While technically possible, it is unlikely in practice compared to the sequential processing bottleneck. Requiring Fatal classification is reasonable but could be debated; the eval could allow Significant as an acceptable classification."
-      },
-      {
-        "assertion": "Identified missing retry logic for failed webhook deliveries",
-        "reason": "This is a good expectation but fairly generic — most code reviews would flag missing retry logic. Consider adding a more specific expectation about the lack of fetch timeout/AbortSignal, which the with_skill output identified as S3 and is a more targeted finding."
-      }
-    ],
-    "overall": "This eval is well-designed with a good mix of specific technical expectations (race condition, throughput math) and structural expectations (format, fix proposals). The expectations cover the most important findings without being overly prescriptive. One potential addition: an expectation about the missing Content-Type header on the fetch request, which both outputs identified."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "All expectations are clear, specific, and well-calibrated. The mix of technical identification expectations and structural/format expectations provides good coverage.",
+    "Consider adding an expectation about whether the report identifies the misleading class name (WebhookWorkerPool implies parallelism but implements serial processing), since the transcript catches this and it demonstrates analytical depth."
+  ]
 }

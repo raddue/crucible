@@ -1,0 +1,52 @@
+{
+  "eval_name": "rbac-feature",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Identifies the TypeScript type issue: req.userRole is set but Request type doesn't include this property",
+      "verdict": "PASS",
+      "justification": "Clearly identified under 'Wiring' Attack Vector 1: 'The requireRole middleware assigns req.userRole = userRole.role, but the Express Request type does not include a userRole property. This will cause a TypeScript compilation error in strict mode.' Provides fix guidance with type augmentation example."
+    },
+    {
+      "expectation": "Identifies that existing tests will break: they mock authMiddleware but the new requireRole middleware also queries the DB",
+      "verdict": "PASS",
+      "justification": "Identified under 'Regression' Attack Vector 1: 'Existing tests... mock authMiddleware to set req.user. However, the new requireRole middleware makes its own database query (db.users.findById). These tests do not mock the database call in requireRole, so they will fail.' Rated as highest priority."
+    },
+    {
+      "expectation": "Identifies the migration concern: existing users may have NULL role if DEFAULT doesn't backfill existing rows",
+      "verdict": "PASS",
+      "justification": "Identified under 'Edge Cases' Attack Vector 1. The report actually correctly notes that PostgreSQL 11+ does backfill, marking it PASS. The concern was acknowledged and investigated rather than ignored. The report notes 'If running an older version, an UPDATE statement would be needed.'"
+    },
+    {
+      "expectation": "Identifies the N+1 query issue: every role-protected request makes a separate DB call to check the user's role",
+      "verdict": "PASS",
+      "justification": "Clearly identified under 'Integration' Attack Vector 1: 'Every request to a role-protected route triggers a separate db.users.findById(userId).select('role') query. The auth middleware already queries the user... this doubles the per-request database load.' Proposes JWT-based or caching fixes."
+    },
+    {
+      "expectation": "Identifies at least one missing role check or inconsistency in the permission model (e.g., GET /articles has no check)",
+      "verdict": "PASS",
+      "justification": "Identified under 'Wiring' Attack Vector 2: 'The GET /articles route still only requires authMiddleware with no requireRole guard.' Also identified under 'Edge Cases' Attack Vector 3 the empty roles array issue, and under 'State & Lifecycle' Attack Vector 2 the admin self-deletion inconsistency."
+    },
+    {
+      "expectation": "Each identified issue includes a specific proposed fix or test",
+      "verdict": "PASS",
+      "justification": "Every attack vector includes a named test and specific fix guidance. Examples: type augmentation code snippet for req.userRole, runtime check for empty roles array, self-deletion guard with code example, role constants/enum definition suggestion."
+    },
+    {
+      "expectation": "Report covers at least 3 of the 5 dimensions",
+      "verdict": "PASS",
+      "justification": "All 5 dimensions explicitly covered: Wiring (3 vectors), Integration (4 vectors), Edge Cases (3 vectors), State & Lifecycle (2 vectors), Regression (3 vectors). Failures found in 4 of 5 dimensions."
+    },
+    {
+      "expectation": "Issues are specific to this codebase — not generic security advice",
+      "verdict": "PASS",
+      "justification": "All issues reference specific code elements: req.userRole type, db.users.findById().select('role') return shape, specific test files (tests/routes/admin.test.ts), the exact migration SQL, specific route paths. No generic 'add rate limiting' or 'use HTTPS' advice."
+    }
+  ],
+  "score": "8/8",
+  "eval_feedback": [
+    "Expectation 3 ('migration concern') is somewhat ambiguous — the inquisitor correctly identified that PostgreSQL 11+ DOES backfill and marked it PASS. Should the expectation reward identifying the concern even if the conclusion is 'no issue'? The current wording ('existing users may have NULL role') implies the expectation is that this is flagged as a bug, but the correct analysis is that it's not a bug in PG 11+.",
+    "Consider adding an expectation for the findById().select('role') return shape ambiguity, which the inquisitor caught and is a genuine integration risk.",
+    "The expectation about 'missing role check or inconsistency' is broad enough that many different findings could satisfy it. Consider being more specific about what constitutes a permission model inconsistency."
+  ]
+}

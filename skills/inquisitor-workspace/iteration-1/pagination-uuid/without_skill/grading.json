@@ -1,0 +1,52 @@
+{
+  "eval_name": "pagination-uuid",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Identifies the critical type mismatch: orders table uses UUID ids but paginate() uses parseInt() and numeric comparison",
+      "verdict": "PASS",
+      "justification": "First and most prominent issue: 'The paginate function assumes integer IDs everywhere: the generic constraint is T extends { id: number }, the cursor is parsed with parseInt(params.cursor), and the WHERE clause uses > for numeric comparison. However, the orders table uses UUID primary keys.' Details all three manifestations of the mismatch."
+    },
+    {
+      "expectation": "Identifies the breaking response shape change: endpoints now return {data, nextCursor} instead of a flat array",
+      "verdict": "PASS",
+      "justification": "Second issue: 'Both endpoints previously returned a flat JSON array. They now return { data: [...], nextCursor: \"...\" }. This is a breaking change for any frontend code consuming these endpoints. Calls like response.map(...) or response.length will fail because the response is now an object, not an array.'"
+    },
+    {
+      "expectation": "Identifies that existing integration tests will break due to the response shape change",
+      "verdict": "PASS",
+      "justification": "Explicitly stated: 'The existing integration tests that assert res.body is an array will also fail immediately. These tests need to be updated to expect the new response structure.'"
+    },
+    {
+      "expectation": "Identifies that parseInt on a UUID cursor will return NaN, causing the WHERE clause to malfunction",
+      "verdict": "PASS",
+      "justification": "Clearly identified in the first issue: 'parseInt(\"a1b2c3d4-e5f6-...\") returns NaN. The query becomes WHERE id > NaN, which matches zero rows in PostgreSQL. Pagination beyond the first page returns empty results.'"
+    },
+    {
+      "expectation": "Identifies that the frontend currently expects a flat array response and will break",
+      "verdict": "PASS",
+      "justification": "Covered in the response shape issue: 'This is a breaking change for any frontend code consuming these endpoints. Calls like response.map(...) or response.length will fail because the response is now an object, not an array.'"
+    },
+    {
+      "expectation": "Acknowledges that the pagination logic itself (limit+1 trick, cursor mechanics) is sound for integer IDs",
+      "verdict": "PASS",
+      "justification": "Explicitly acknowledged: 'The core algorithm is well implemented for its intended use case. The limit+1 trick to detect whether more pages exist is a standard approach. The cursor mechanics (fetch N+1 rows, slice to N, use the last row's ID as the next cursor) are correct. The parsePaginationParams function properly clamps the limit between 1 and 100 with a sensible default of 20.'"
+    },
+    {
+      "expectation": "Each identified issue includes a specific proposed fix or test",
+      "verdict": "PASS",
+      "justification": "Fixes provided for each issue: support different cursor strategies or add a sequential column for UUID tables, opt-in pagination via query parameter or API versioning, validate cursor format and return 400 for invalid values. The column name concern also includes a specific action item."
+    },
+    {
+      "expectation": "Does NOT manufacture issues with the core pagination algorithm — it's correct for its intended use case",
+      "verdict": "PASS",
+      "justification": "Explicitly states: 'The core algorithm is well implemented for its intended use case' and 'the pagination utility is well-designed for integer-keyed tables.' No false negatives are raised against the limit+1 trick, cursor mechanics, or boundary clamping."
+    }
+  ],
+  "score": "8/8",
+  "eval_feedback": [
+    "All three evals score identically (8/8) for both conditions. The expectations are testing for issue identification that a capable LLM can achieve without the skill. Consider adding expectations that test for systematic coverage, structured reporting, or discovery of subtler issues.",
+    "The with_skill report found the UUID lexicographic ordering issue (UUIDv4 random order makes cursor pagination meaningless even if parseInt is fixed), which is a deeper insight not captured by any expectation. Consider adding this as an expectation.",
+    "Expectations 2 and 5 overlap heavily (response shape change vs frontend breakage). Consider merging or differentiating them more sharply."
+  ]
+}

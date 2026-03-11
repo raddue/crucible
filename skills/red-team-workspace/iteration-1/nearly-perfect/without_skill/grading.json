@@ -1,92 +1,57 @@
 {
+  "eval_name": "nearly-perfect",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": false,
-      "evidence": "The report begins with \"# Review: Cursor-based Pagination Plan\" and \"## Overall Impression\" — no mention of the red-team skill. This is the without_skill run."
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "Opens with 'This is a well-structured plan. Cursor-based pagination is the right choice over offset-based pagination for performance at scale, and the implementation approach is sound.' Establishes what is being reviewed and gives an initial assessment."
     },
     {
-      "text": "Did NOT classify any issues as Fatal — the plan has no fatal flaws",
-      "passed": true,
-      "evidence": "The report does not use Fatal/Significant/Minor severity classifications at all. There is no section labeled Fatal and no issues described using the word 'fatal.' All issues are framed as \"Minor Observations\" in the heading, and the summary says \"none of them are blockers.\" No severity inflation detected."
+      "expectation": "Did NOT characterize any issues as showstoppers or blockers — the plan has no fatal flaws",
+      "verdict": "PASS",
+      "justification": "Explicitly states 'I have a few minor observations but nothing that should block this.' All findings are under the 'Minor Observations' heading. No language suggesting showstoppers, blockers, or fatal flaws anywhere."
     },
     {
-      "text": "Correctly assessed the plan as fundamentally sound in the Overall Assessment",
-      "passed": true,
-      "evidence": "Opening paragraph: \"This is a well-structured plan. Cursor-based pagination is the right choice over offset-based pagination for performance at scale, and the implementation approach is sound.\" Summary: \"This plan is solid. The approach is correct, the task breakdown is logical, and testing is baked in at every step.\""
+      "expectation": "Correctly assessed the plan as fundamentally sound in the overall assessment",
+      "verdict": "PASS",
+      "justification": "Multiple affirmations: 'well-structured plan', 'the right choice', 'implementation approach is sound', 'Good work.' Summary: 'This plan is solid. The approach is correct, the task breakdown is logical, and testing is baked in at every step.'"
     },
     {
-      "text": "Identified the assumption that IDs are sequential integers as a Minor or Significant concern (UUIDs would break the cursor logic)",
-      "passed": true,
-      "evidence": "\"Cursor assumes sequential integer IDs\" observation explains: \"which assumes IDs are sequential integers (or at least monotonically increasing). If any of the tables use UUIDs, CUIDs, or non-sequential primary keys, this cursor logic will not produce correct ordering.\" Classified under \"## Minor Observations\" which satisfies the Minor classification."
+      "expectation": "Identified the assumption that IDs are sequential integers as a minor concern (UUIDs would break the cursor logic)",
+      "verdict": "PASS",
+      "justification": "First observation: 'assumes IDs are sequential integers (or at least monotonically increasing). If any of the tables use UUIDs, CUIDs, or non-sequential primary keys, this cursor logic will not produce correct ordering.' Appropriately scoped as minor with caveat: 'This is unlikely to be a problem if your tables already use auto-incrementing integer PKs.'"
     },
     {
-      "text": "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
-      "passed": true,
-      "evidence": "\"SQLite vs PostgreSQL test fidelity\" observation states: \"SQLite and PostgreSQL have subtle differences in type coercion, collation, and query behavior. For example, string comparison of cursor values might behave differently between the two.\" Recommends testcontainers as an alternative."
+      "expectation": "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
+      "verdict": "PASS",
+      "justification": "Second observation: 'SQLite and PostgreSQL have subtle differences in type coercion, collation, and query behavior. For example, string comparison of cursor values might behave differently between the two.' Suggests testcontainers as an alternative while acknowledging the tradeoff."
     },
     {
-      "text": "Did NOT manufacture severity inflation — Minor issues are classified as Minor, not Significant or Fatal",
-      "passed": true,
-      "evidence": "The heading is \"## Minor Observations\" for all findings. The summary explicitly states: \"I have a few minor observations but nothing that should block this\" and \"The minor items above are worth considering but none of them are blockers.\" No inflation at any level."
+      "expectation": "Did NOT manufacture severity inflation — minor concerns are not exaggerated into major issues",
+      "verdict": "PASS",
+      "justification": "All findings are labeled 'Minor Observations.' Appropriate hedging throughout: 'This is unlikely to be a problem if...', 'This is fine for now — premature generalization would be worse', 'Minor, but worth a type guard.' No alarmist language or disproportionate urgency."
     },
     {
-      "text": "Overall Assessment verdict is 'Plan is solid' or equivalent positive assessment",
-      "passed": true,
-      "evidence": "Summary states: \"This plan is solid. The approach is correct, the task breakdown is logical, and testing is baked in at every step. The minor items above are worth considering but none of them are blockers. Ship it.\""
+      "expectation": "Overall assessment verdict is positive ('plan is solid', 'ship it', or equivalent)",
+      "verdict": "PASS",
+      "justification": "Summary concludes: 'This plan is solid... none of them are blockers. Ship it.' Unambiguously positive verdict."
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": false,
-      "evidence": "The report uses: \"## Overall Impression,\" \"## Minor Observations\" (flat list), \"## Summary.\" It does not use the full required format with Fatal Challenges, Significant Challenges sections, nor an Overall Assessment section with explicit Verdict and Confidence labels."
+      "expectation": "Findings are organized by severity with an overall assessment and verdict",
+      "verdict": "PASS",
+      "justification": "Structure has Overall Impression at top, all findings grouped under Minor Observations (appropriate since there are no major issues), and a Summary section with verdict. Organization reflects the reality that all findings are minor."
     },
     {
-      "text": "Confidence level is stated in the Overall Assessment",
-      "passed": false,
-      "evidence": "The report has a \"## Summary\" section but no explicit confidence level statement. No variation of 'confidence' or certainty level appears in the report."
+      "expectation": "Overall assessment conveys a clear confidence level in the review's conclusions",
+      "verdict": "PASS",
+      "justification": "High confidence conveyed through decisive language: 'This plan is solid. The approach is correct, the task breakdown is logical, and testing is baked in at every step. The minor items above are worth considering but none of them are blockers. Ship it.' No waffling or excessive caveats in the verdict."
     }
   ],
-  "summary": {
-    "passed": 6,
-    "failed": 3,
-    "total": 9,
-    "pass_rate": 0.67
-  },
-  "claims": [
-    {
-      "claim": "Cursor-based pagination is the right choice over offset-based pagination for performance at scale",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Cursor-based pagination avoids the O(n) offset skip problem in SQL and provides stable page boundaries when data is inserted/deleted. This is the standard recommendation for large datasets."
-    },
-    {
-      "claim": "The limit + 1 trick for determining next page existence is a clean pattern",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Fetching limit+1 rows and checking if the extra row exists is a standard, efficient technique to determine if there is a next page without a separate COUNT query."
-    },
-    {
-      "claim": "Base64-encoding cursors makes them opaque and gives flexibility to change format later",
-      "type": "factual",
-      "verified": true,
-      "evidence": "This is a common API design best practice. Opaque cursors prevent clients from constructing cursors manually and allow the server to change the internal cursor format without breaking the API contract."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-        "reason": "As with the other without_skill runs, this is a skill-format expectation that will always fail without the skill. The without_skill run naturally uses a different (but perfectly reasonable) review format."
-      },
-      {
-        "assertion": "Confidence level is stated in the Overall Assessment",
-        "reason": "The without_skill run conveys high confidence through language ('This plan is solid', 'Ship it') but does not state an explicit confidence level. This is a format expectation tied to the skill's template."
-      },
-      {
-        "assertion": "Did NOT classify any issues as Fatal — the plan has no fatal flaws",
-        "reason": "This expectation is somewhat awkward for the without_skill run. Since the report uses no severity classifications at all, the absence of Fatal is trivially true — not because the reviewer deliberately chose not to escalate to Fatal, but because the severity system was never used. The pass is technically correct but tests a different thing than the with_skill version."
-      }
-    ],
-    "overall": "The without_skill run demonstrates excellent calibration: it correctly identifies the plan as solid, flags the UUID and SQLite concerns without overreacting, and recommends shipping. The three failures are all format/structure related (no full required format, no explicit confidence level, no skill announcement). The analytical quality is high — arguably as well-calibrated as the with_skill version, with additional useful observations (cursor encoding with base64, limit validation edge cases) that the with_skill version also noted. The eval successfully differentiates skill-format adherence from review quality."
-  }
+  "score": "9/9",
+  "eval_feedback": [
+    "This eval effectively tests the hardest red-team calibration skill: restraint when the artifact is actually good. The expectations correctly check for absence of false positives and severity inflation.",
+    "The 'clear confidence level' expectation is somewhat subjective — 'Ship it' clearly conveys confidence, but a more hedged positive assessment might be harder to grade. Consider specifying what would constitute a FAIL (e.g., 'expressed significant uncertainty about whether the plan should proceed').",
+    "Consider adding an expectation that the review does NOT recommend a 'substantial redesign' or 'going back to the drawing board,' which would further test for inappropriate severity escalation."
+  ]
 }

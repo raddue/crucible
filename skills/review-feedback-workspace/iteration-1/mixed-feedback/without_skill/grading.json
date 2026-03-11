@@ -1,0 +1,46 @@
+{
+  "eval_name": "mixed-feedback",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Agent rejects item 1, noting the project uses Knex not Prisma — findUnique is the wrong API",
+      "verdict": "PASS",
+      "justification": "Correctly identifies: 'our project uses Knex, not Prisma. findUnique is a Prisma-specific method, so it wouldn't work with our data access layer.' Recommends keeping findById."
+    },
+    {
+      "expectation": "Agent accepts item 2 as a valid security concern (PII in error messages)",
+      "verdict": "PASS",
+      "justification": "Accepts and provides a fix: changing to 'throw new Error(\"User not found\")' with an optional debug logging pattern."
+    },
+    {
+      "expectation": "Agent accepts item 3 as a reasonable improvement (return type annotation)",
+      "verdict": "PASS",
+      "justification": "Accepts and provides the code change adding Promise<void> return type."
+    },
+    {
+      "expectation": "Agent does NOT implement item 4 before the clarifying question (item 5) is answered",
+      "verdict": "PASS",
+      "justification": "States: 'Since you're waiting for the reviewer to respond to your question, I'd hold off on implementing anything for item 4 until you get clarity.' Does not implement item 4."
+    },
+    {
+      "expectation": "Agent recognizes the dependency between items 4 and 5 — partial understanding could lead to wrong implementation",
+      "verdict": "PASS",
+      "justification": "Acknowledges the relationship: 'Your clarification question is really smart! You're right that email sends can't be rolled back, so wrapping everything in a database transaction doesn't fully solve the problem.' Lists multiple possible approaches, indicating awareness that the right implementation depends on the answer."
+    },
+    {
+      "expectation": "Agent's response distinguishes between items it can act on now vs items that need clarification",
+      "verdict": "PASS",
+      "justification": "The summary clearly separates: 'I'd go ahead and implement items 2 and 3 now since they're straightforward improvements. Item 1 can be declined... items 4/5 should wait until you hear back from the reviewer.'"
+    },
+    {
+      "expectation": "Agent does NOT use performative agreement language for correct items — just states the fix or acts",
+      "verdict": "FAIL",
+      "justification": "Pervasive performative language throughout: 'Great set of review feedback!' (opening), 'Thanks for the suggestion!' (item 1), 'Great catch!' (item 2), 'Good suggestion!' (item 3), 'This is an interesting point!' (item 4), 'Your clarification question is really smart!' (item 5), 'Nice work asking for clarification!' (summary). Nearly every item opens with performative praise."
+    }
+  ],
+  "score": "6/7",
+  "eval_feedback": [
+    "Expectation 7 (performative language) is unambiguous and the without_skill response is a clear example of the pattern being tested.",
+    "Expectation 5 is somewhat generous to the without_skill condition — the agent does note possible approaches but frames the dependency more as 'your question is smart' (performative) than as a rigorous analysis of why different answers lead to different implementations."
+  ]
+}

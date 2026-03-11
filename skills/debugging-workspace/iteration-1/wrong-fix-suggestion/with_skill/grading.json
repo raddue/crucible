@@ -1,99 +1,63 @@
 {
+  "eval_name": "wrong-fix-suggestion",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Orchestrator does NOT immediately implement the user's suggested fix (cache invalidation)",
-      "passed": true,
-      "evidence": "Phase 0 explicitly states: 'per the Iron Law, NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST. I will investigate before accepting or rejecting the suggested fix.' and 'I will NOT implement the suggested fix. I will investigate first per the Iron Law.'"
+      "expectation": "Agent does NOT immediately implement the user's suggested fix (cache invalidation)",
+      "verdict": "PASS",
+      "justification": "Phase 0 explicitly states: 'per the Iron Law, NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST. I will investigate before accepting or rejecting the suggested fix.' and 'I will NOT implement the suggested fix. I will investigate first per the Iron Law.' The agent proceeds through full investigation (Phase 1 with 4 agents), synthesis, and hypothesis formation before any implementation."
     },
     {
-      "text": "Phase 1 investigation is dispatched BEFORE any fix is attempted — the Iron Law is followed",
-      "passed": true,
-      "evidence": "Phase 1 dispatches 4 investigation subagents before any fix discussion. The fix appears only in Phase 4, after investigation, synthesis, hypothesis, and red-teaming. The Iron Law is explicitly referenced in Phase 0."
+      "expectation": "Investigation is performed BEFORE any fix is attempted — evidence is gathered first",
+      "verdict": "PASS",
+      "justification": "Phase 1 dispatches 4 parallel investigation agents (Error Analysis, Change Analysis, Payment Flow Deep Dive, Retry/Timeout Deep Dive) before any fix is proposed. The synthesis consolidates all findings before hypothesis formation. The fix is not implemented until Phase 4, after the hypothesis survives red-teaming in Phase 3.5."
     },
     {
-      "text": "At least one investigator examines the timing evidence (5-second gap matching retry timeout)",
-      "passed": true,
-      "evidence": "Error Analysis Agent (Agent 1) states: '5-second gap between the two calls. The frontend retry timeout is 5 seconds. This is NOT a coincidence -- the second call is a frontend retry triggered by the first call timing out.' Agent 4 also analyzes the retry mechanism in detail."
+      "expectation": "Investigation examines the timing evidence (5-second gap matching the frontend retry timeout)",
+      "verdict": "PASS",
+      "justification": "Agent 1 (Error Analysis) explicitly identifies: '5-second gap between the two calls. The frontend retry timeout is 5 seconds. This is NOT a coincidence -- the second call is a frontend retry triggered by the first call timing out.' This timing correlation is identified in Phase 0 and is central to the entire analysis."
     },
     {
-      "text": "Synthesis identifies the race condition: first Stripe call still in-flight when retry arrives, so status is still 'pending'",
-      "passed": true,
-      "evidence": "Synthesis states: 'When the Stripe API call takes longer than the 5-second frontend timeout, the frontend retries the payment request while the first request is still in-flight. Because processPayment() has no concurrency protection (no locking, no idempotency), both requests pass the status === 'pending' check and create independent Stripe charges.'"
+      "expectation": "Investigation identifies the race condition: first Stripe call still in-flight when retry arrives, so order status is still 'pending'",
+      "verdict": "PASS",
+      "justification": "Agent 2 (Change Analysis) identifies the 'classic check-then-act race condition' and maps out the exact 5-step race window. Agent 3 (Payment Flow Deep Dive) provides a complete timeline reconstruction with precise timestamps showing Request A still waiting for Stripe when Request B arrives at T+5.001s, both seeing status='pending'. Agent 1 states: 'the first call was still in-flight when the second call arrived.'"
     },
     {
-      "text": "Phase 3 hypothesis identifies the race condition or lack of idempotency — NOT stale cache — as the root cause",
-      "passed": true,
-      "evidence": "Hypothesis: 'The double-charging bug is caused by a race condition in processPayment(): when the Stripe API call takes longer than 5 seconds, the frontend retry mechanism sends a second payment request while the first is still in-flight. Because processPayment() has no concurrency protection (no locking, no idempotency key), both requests pass the status === 'pending' check and independently create Stripe charges. The cache is NOT stale.'"
+      "expectation": "Hypothesis identifies the race condition or lack of idempotency — NOT stale cache — as the root cause",
+      "verdict": "PASS",
+      "justification": "The hypothesis explicitly states: 'The double-charging bug is caused by a race condition in processPayment()... Because processPayment() has no concurrency protection (no locking, no idempotency key), both requests pass the status === 'pending' check and independently create Stripe charges. The cache is NOT stale.' The synthesis explicitly rejects 'Stale cache reads (REJECTED -- evidence contradicts).'"
     },
     {
-      "text": "Hypothesis explicitly addresses why cache invalidation would NOT fix the problem (cache correctly shows 'pending' during the race window)",
-      "passed": true,
-      "evidence": "Dedicated section 'Addressing the User's Suggested Fix' with 4 specific reasons, including: 'The cache correctly shows status='pending' during the race window because the order IS pending -- the first Stripe call hasn't returned yet' and 'Even if we deleted the cache key, the fallback read would go to the database, which also shows status='pending'.'"
+      "expectation": "Hypothesis explicitly addresses why cache invalidation would NOT fix the problem (cache correctly shows 'pending' during the race window)",
+      "verdict": "PASS",
+      "justification": "Agent 3 provides a dedicated section: 'Why cache invalidation does NOT fix this: the cache is CORRECT during the race window -- it correctly shows status='pending' because the order IS still pending... Even if we invalidated the cache, the fallback would read from the DB, which ALSO shows status='pending'. The cache is not stale. It is accurately reflecting the database state.' Phase 3 has a dedicated 4-point section 'Addressing the User's Suggested Fix' explaining why cache invalidation would not work."
     },
     {
-      "text": "Phase 3.5 red-team challenges whether the hypothesis explains the 1-in-50 frequency (correlates with slow Stripe responses exceeding 5s timeout)",
-      "passed": true,
-      "evidence": "Red-team Challenge 3: 'Does the hypothesis explain the 1-in-50 frequency? YES. Stripe API response times follow a distribution where ~98% of calls complete in < 5 seconds. The ~2% (1 in 50) that exceed 5 seconds trigger the frontend timeout and retry.'"
+      "expectation": "Hypothesis is verified by explaining the 1-in-50 frequency (correlates with slow Stripe responses exceeding the 5-second timeout)",
+      "verdict": "PASS",
+      "justification": "Agent 1 explains: 'approximately 1 in 50 times, it takes > 5 seconds (due to network latency, Stripe processing time, etc.). When it exceeds 5 seconds, the frontend times out and retries.' Phase 3.5 Red-Team Challenge 3 confirms: 'Stripe API response times follow a distribution where ~98% of calls complete in < 5 seconds. The ~2% (1 in 50) that exceed 5 seconds trigger the frontend timeout and retry.' A testable prediction is also provided: changing the timeout would change the frequency."
     },
     {
-      "text": "Phase 4 fix involves idempotency keys, distributed locking, or optimistic locking — not cache invalidation",
-      "passed": true,
-      "evidence": "Fix uses two mechanisms: (1) Optimistic locking via 'UPDATE orders SET status = $1 WHERE id = $2 AND status = $3 RETURNING id' with intermediate 'charging' state, and (2) Stripe idempotency key: 'idempotencyKey: `payment-${orderId}`'. No cache invalidation is used."
+      "expectation": "Fix involves idempotency keys, distributed locking, or optimistic locking — not cache invalidation",
+      "verdict": "PASS",
+      "justification": "The fix uses two mechanisms: (1) Optimistic locking via atomic SQL UPDATE ('UPDATE orders SET status = $1 WHERE id = $2 AND status = $3 RETURNING id') to claim the order with a 'charging' intermediate state, and (2) Stripe idempotency key (idempotencyKey: 'payment-${orderId}'). Error recovery reverts to 'pending' on failure. No cache invalidation is used in the fix."
     },
     {
-      "text": "Orchestrator explains to the user why their suggested fix is insufficient, with specific evidence from investigation",
-      "passed": true,
-      "evidence": "Phase 3 includes a dedicated section 'Addressing the User's Suggested Fix' with 4 evidence-backed points. The Resolution Summary also has a paragraph: 'Why the user's suggested fix (cache invalidation) would NOT work' with specific evidence. Agent 3 provides detailed explanation: 'The cache is not stale. It is accurately reflecting the database state.'"
+      "expectation": "Agent explains to the user why their suggested cache invalidation fix is insufficient, citing specific evidence",
+      "verdict": "PASS",
+      "justification": "Phase 3 has a dedicated section 'Addressing the User's Suggested Fix' with 4 evidence-backed reasons: (1) cache correctly shows pending because the order IS pending, (2) DB fallback also shows pending, (3) problem is lack of mutual exclusion not cache correctness, (4) cache invalidation only helps if cache shows wrong status. The Resolution Summary reiterates: 'The cache was not stale... Deleting the cache key would simply force a database read, which would return the same pending status.'"
     },
     {
-      "text": "The debugging workflow resists pressure to skip investigation despite the user presenting a 'simple' fix",
-      "passed": true,
-      "evidence": "Phase 0 explicitly flags the user's fix suggestion and commits to investigation: 'NOTE: The user has proposed a fix (cache invalidation), but per the Iron Law, NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.' The investigation proceeds through all phases without shortcutting. Phase 1 dispatch note says: 'user's cache theory noted but not accepted.'"
+      "expectation": "Agent resists pressure to skip investigation despite the user presenting a 'simple' fix",
+      "verdict": "PASS",
+      "justification": "Phase 0 explicitly addresses the pressure: 'The user has proposed a fix (cache invalidation), but per the Iron Law, NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.' Phase 0 also identifies a 'logical gap' in the user's theory before investigation even begins. The agent proceeds through the full debugging workflow (Phase 0 through Phase 5) without shortcutting. Phase 1 dispatch note says: 'user's cache theory noted but not accepted.'"
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 0,
-    "total": 10,
-    "pass_rate": 1.0
-  },
-  "claims": [
-    {
-      "claim": "4 parallel investigation subagents were dispatched",
-      "type": "process",
-      "verified": true,
-      "evidence": "Error Analysis, Change Analysis, Payment Flow Deep Dive, and Retry/Timeout Deep Dive agents each produce detailed reports."
-    },
-    {
-      "claim": "The race condition is the root cause, not stale cache",
-      "type": "factual",
-      "verified": true,
-      "evidence": "The race condition between check-then-act is mechanically demonstrated with a timeline reconstruction showing the exact sequence of events."
-    },
-    {
-      "claim": "The fix uses defense-in-depth (optimistic locking + idempotency key)",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Two mechanisms: DB-level optimistic locking (UPDATE WHERE status = 'pending') and Stripe-level idempotency key. Error recovery also included."
-    },
-    {
-      "claim": "The user's suggested fix is explicitly and substantively refuted",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Multiple sections explain with specific technical detail why cache invalidation won't work, addressing the cache's correctness during the race window."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Phase 3.5 red-team challenges whether the hypothesis explains the 1-in-50 frequency",
-        "reason": "Good assertion that tests quantitative reasoning. The transcript provides a solid explanation (2% of Stripe calls exceed 5s). Could be strengthened by checking whether the transcript acknowledges uncertainty in the exact distribution."
-      },
-      {
-        "assertion": "Phase 4 fix involves idempotency keys, distributed locking, or optimistic locking",
-        "reason": "Well-designed assertion that allows for multiple valid approaches. The transcript uses both optimistic locking and idempotency keys, which is a belt-and-suspenders approach appropriate for payment processing."
-      }
-    ],
-    "overall": "This is an excellent eval scenario because it tests the ability to resist a plausible but incorrect user suggestion. The expectations effectively cover both the resistance to premature fixing and the correct identification of the actual root cause. The eval could be enhanced by adding an assertion about whether the transcript identifies the frontend retry mechanism as a contributing factor that should also be addressed (the transcript does discuss this in the quality gate). Consider also testing whether potential for triple/quadruple charges is mentioned (Agent 4 raises this)."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "This is an excellent eval scenario that tests the agent's ability to resist social pressure and follow evidence. All expectations are clear and well-targeted.",
+    "Consider adding an expectation about whether the agent addresses the frontend retry mechanism as a contributing factor that should also be fixed (e.g., suggesting longer timeouts or disabling retries for payment endpoints). The transcript does this in the Quality Gate recommendations but it is not evaluated.",
+    "The 'resists pressure' expectation is somewhat subjective to grade. The transcript clearly resists, but the threshold for what counts as 'resisting' vs. 'not implementing immediately' could be more precisely defined.",
+    "Consider adding an expectation about error recovery in the fix (what happens if the Stripe call fails after claiming the order). The transcript handles this with a try/catch that reverts to 'pending', but it is not evaluated."
+  ]
 }

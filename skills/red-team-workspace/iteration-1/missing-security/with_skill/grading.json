@@ -1,95 +1,62 @@
 {
+  "eval_name": "missing-security",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": true,
-      "evidence": "First line: \"I'm using the red-team skill to adversarially review this artifact.\""
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "The report opens with an 'Artifact Under Review' section: 'An implementation plan for adding file upload/download functionality to an Express.js + PostgreSQL + React web application' with expected usage parameters (~200 users, PDFs and spreadsheets, up to 50MB)."
     },
     {
-      "text": "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
-      "passed": true,
-      "evidence": "F1 titled \"Path Traversal Vulnerability in the Download Endpoint (Task 2)\" provides a detailed attack scenario: crafted filename like `../../../etc/passwd`, explains how res.sendFile() resolves relative paths without a root option, and demonstrates the full attack chain from upload to download. Quotes Task 2's specification directly."
+      "expectation": "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
+      "verdict": "PASS",
+      "justification": "Section F1 ('Path Traversal Vulnerability in the Download Endpoint (Task 2)') provides a 3-step attack scenario showing how crafted filenames like '../../../etc/passwd' exploit res.sendFile() to read arbitrary server files. Explains that Express's res.sendFile() resolves relative paths without a root option."
     },
     {
-      "text": "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
-      "passed": true,
-      "evidence": "F2 titled \"Missing Authorization on File Downloads — Any Authenticated User Can Access Any User's Files\" describes the attack: User B requests GET /api/files/42 to access User A's file. Notes sequential fileId enumeration. Distinguishes authentication (JWT middleware) from authorization (ownership check). Cites that Task 3's data model has user_id but Task 2 never references it."
+      "expectation": "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
+      "verdict": "PASS",
+      "justification": "Section F2 clearly distinguishes authentication from authorization, explains that JWT middleware only proves identity not ownership, provides an attack scenario where User B accesses User A's files via GET /api/files/42, and notes that sequential fileIds enable enumeration of all files."
     },
     {
-      "text": "Classified at least one of the security issues (path traversal or missing download auth) as Fatal",
-      "passed": true,
-      "evidence": "Both path traversal (F1) and missing authorization (F2) are classified under \"## Fatal Challenges.\""
+      "expectation": "Identified path traversal or missing download authorization as the most critical security issues, explaining the attack scenario",
+      "verdict": "PASS",
+      "justification": "Both path traversal (F1) and missing authorization (F2) are classified as Fatal Challenges (the highest severity tier). Both include detailed multi-step attack scenarios with concrete exploit examples and evidence quoted from the plan."
     },
     {
-      "text": "Identified missing file type validation (no restriction on what file types can be uploaded)",
-      "passed": true,
-      "evidence": "S1 titled \"No File Type Validation — Arbitrary File Upload\" identifies that no file type restrictions exist, lists risks (executable files, stored XSS via HTML/SVG, malware), and proposes an allowlist with MIME type inspection using magic bytes."
+      "expectation": "Identified missing file type validation (no restriction on what file types can be uploaded)",
+      "verdict": "PASS",
+      "justification": "Section S1 ('No File Type Validation — Arbitrary File Upload') identifies that 'Task 1 accepts multipart form data with no restriction on file types' and lists risks including executables, stored XSS via HTML/SVG, and malware. Proposes allowlist with magic byte inspection."
     },
     {
-      "text": "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
-      "passed": true,
-      "evidence": "S2 titled \"Local Filesystem Storage — Not Scalable, Not Durable\" identifies three problems: no durability (files lost on redeploy), no horizontal scaling (different instances have different files), and disk exhaustion (calculates 500GB for modest usage). Proposes S3/GCS/Azure Blob migration with code example."
+      "expectation": "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
+      "verdict": "PASS",
+      "justification": "Section S2 ('Local Filesystem Storage — Not Scalable, Not Durable') identifies three specific problems: no durability (files lost on redeploy), no horizontal scaling (different instances have different filesystems), and disk exhaustion (calculates 500GB for modest usage). Proposes S3 migration with code."
     },
     {
-      "text": "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
-      "passed": true,
-      "evidence": "S3 titled \"No Server-Side File Size Enforcement\" explains that client-side limits are trivially bypassed, an attacker can upload multi-gigabyte files causing OOM or disk exhaustion, and provides a multer configuration fix with fileSize limit."
+      "expectation": "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
+      "verdict": "PASS",
+      "justification": "Section S3 ('No Server-Side File Size Enforcement') explicitly states the plan 'does not specify server-side size limits' and notes 'Client-side size limits (if any exist in the React component) are trivially bypassed with curl or any HTTP client.' Identifies DoS via resource exhaustion and provides multer configuration fix."
     },
     {
-      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-      "passed": true,
-      "evidence": "F1: three-part fix (sanitize filenames with UUID, constrain sendFile with root option, validate resolved path). F2: ownership verification code example. S1: extension allowlist, MIME type inspection, Content-Disposition header. S2: S3 migration with upload/download code. S3: multer limits configuration. S4: ClamAV integration. All include code examples."
+      "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+      "verdict": "PASS",
+      "justification": "All major findings include 'Proposed fix' sections with code: F1 has a 3-part fix (UUID filenames, sendFile root option, resolved path validation), F2 has ownership verification query, S1 has extension allowlist and magic bytes, S2 has S3 migration, S3 has multer limits, and S4 has ClamAV integration."
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": true,
-      "evidence": "Report contains: \"## Fatal Challenges\" (F1, F2), \"## Significant Challenges\" (S1, S2, S3, S4), \"## Minor Observations\" (5 bullet points), \"## Overall Assessment\" with \"Verdict: Has fundamental issues that must be addressed before implementation\" and \"Confidence: High.\""
+      "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
+      "verdict": "PASS",
+      "justification": "Report is structured as Fatal Challenges (F1, F2), Significant Challenges (S1-S4), Minor Observations (5 bullet points), and Overall Assessment with verdict ('Has fundamental issues that must be addressed before implementation') and confidence level ('High')."
     },
     {
-      "text": "Security issues were prioritized over structural or stylistic concerns in the findings",
-      "passed": true,
-      "evidence": "Both Fatal issues (F1, F2) are security vulnerabilities (path traversal, missing authorization). Significant issues include security (file type validation S1, no size limits S3, no malware scanning S4) alongside operational concerns (local storage S2). Structural and stylistic concerns appear only in Minor Observations (CORS, filename collisions, progress bar, test coverage, orphan cleanup). Security is clearly prioritized."
+      "expectation": "Security issues were prioritized over structural or stylistic concerns in the findings",
+      "verdict": "PASS",
+      "justification": "Both Fatal issues are security vulnerabilities (path traversal, missing authorization). Significant issues include security (file type validation S1, size limits S3, malware scanning S4) alongside one operational concern (local storage S2). Structural and stylistic concerns (CORS, filename collisions, progress bars, test coverage, orphan cleanup) appear only in Minor Observations."
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 0,
-    "total": 10,
-    "pass_rate": 1.0
-  },
-  "claims": [
-    {
-      "claim": "res.sendFile() resolves relative paths and without a root option operates relative to the process's working directory",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Express documentation confirms that res.sendFile() requires an absolute path unless the root option is set. When given a relative path with traversal sequences, it resolves them, potentially serving files outside the intended directory."
-    },
-    {
-      "claim": "Path traversal is a standard OWASP Top 10 vulnerability",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Path traversal falls under OWASP Top 10 category A01:2021 - Broken Access Control."
-    },
-    {
-      "claim": "200 users uploading 50 files each at 50MB = 500GB",
-      "type": "factual",
-      "verified": true,
-      "evidence": "200 users * 50 files * 50MB = 500,000 MB = ~500GB. Correct."
-    },
-    {
-      "claim": "SVG files with embedded JavaScript can cause XSS when rendered in the browser",
-      "type": "factual",
-      "verified": true,
-      "evidence": "SVG files can contain <script> tags and JavaScript event handlers. When served with image/svg+xml content type and rendered inline, they execute JavaScript in the page's context."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
-        "reason": "The plan does not actually mention client-side limits — it only states 'up to 50MB each' as a usage expectation. The expectation's parenthetical about 'relying on client-side limits' reads extra context into the plan. The core assertion (missing server-side enforcement) is still valid and well-tested."
-      }
-    ],
-    "overall": "Excellent eval for this scenario. The expectations cover the two critical security vulnerabilities (path traversal, missing auth), the supporting security concerns (file type, size), the operational concern (local storage), and structural requirements (format, severity, prioritization). The expectations are well-calibrated — they test for the right findings at the right severity levels. One possible addition: an expectation about missing Content-Disposition headers, which both outputs identified as a risk for inline rendering attacks."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "All expectations are well-targeted and specific. The combination of vulnerability identification expectations with severity/prioritization expectations provides thorough coverage.",
+    "The expectation about 'missing file size enforcement' includes a parenthetical about 'relying on client-side limits' but the plan never actually mentions client-side limits. The core expectation is still valid. Consider removing the parenthetical to avoid implying something the plan doesn't state.",
+    "Consider adding an expectation about whether the report identifies missing Content-Disposition headers (which would prevent inline rendering attacks), as the transcript identifies this in the S1 proposed fix."
+  ]
 }

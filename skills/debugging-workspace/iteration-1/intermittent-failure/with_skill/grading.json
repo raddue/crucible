@@ -1,105 +1,63 @@
 {
+  "eval_name": "intermittent-failure",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Phase 1 dispatches a Reproduction or Dependency/Environment agent in addition to Error and Change Analysis",
-      "passed": true,
-      "evidence": "Phase 1 dispatches 4 agents: 'Error Analysis Agent', 'Change Analysis Agent', 'Reproduction Agent', and 'Dependency/Environment Agent'. Both Reproduction and Dependency/Environment are present alongside the required Error and Change Analysis."
+      "expectation": "Investigation includes environment/dependency analysis in addition to error and change analysis",
+      "verdict": "PASS",
+      "justification": "Phase 1 dispatches 4 agents including a dedicated 'Dependency/Environment Agent' (Agent 4) that investigates the CI runner downgrade (4-core to 2-core) and Node version change (18.17 to 18.19) separately. This is in addition to Error Analysis (Agent 1), Change Analysis (Agent 2), and Reproduction Analysis (Agent 3)."
     },
     {
-      "text": "Investigation identifies the fixed sleep(2000) as a timing assumption that doesn't account for variable fulfillment time (500ms-3000ms)",
-      "passed": true,
-      "evidence": "Error Analysis Agent (Agent 1) identifies: 'sleep(2000) is the critical code... This is a fixed wait that assumes ALL fulfillment jobs will complete within 2 seconds. But the fulfillment worker documentation says jobs can take up to 3000ms.' Phase 0 also notes this: 'The test uses a fixed sleep(2000) to wait for async job completion, but the fulfillment worker can take up to 3000ms.'"
+      "expectation": "Investigation identifies the fixed sleep(2000) as a timing assumption that doesn't account for variable fulfillment time (500ms-3000ms)",
+      "verdict": "PASS",
+      "justification": "Phase 0 identifies this immediately: 'The test uses a fixed sleep(2000) to wait for async job completion, but the fulfillment worker can take up to 3000ms.' Agent 1 reiterates: 'This is a fixed wait that assumes ALL fulfillment jobs will complete within 2 seconds. But the fulfillment worker documentation says jobs can take up to 3000ms.' Agent 4 calls it 'a common anti-pattern in integration tests.'"
     },
     {
-      "text": "Investigation correlates the failure onset with the CI runner downgrade from 4-core to 2-core machines 2 weeks ago",
-      "passed": true,
-      "evidence": "Change Analysis Agent (Agent 2): 'The failure onset (2 weeks ago) exactly matches the runner downgrade (2 weeks ago).' Environment Agent (Agent 4): 'CI runner downgrade: 4-core to 2-core (2 WEEKS AGO -- matches failure onset).' Also rules out Node version change: 'The failures started BEFORE this change (2 weeks ago vs 1 week ago).'"
+      "expectation": "Investigation correlates the failure onset with the CI runner downgrade from 4-core to 2-core machines 2 weeks ago",
+      "verdict": "PASS",
+      "justification": "Agent 2 (Change Analysis) explicitly states: 'The failure onset (2 weeks ago) exactly matches the runner downgrade (2 weeks ago).' Agent 4 confirms: 'CI runner downgrade: 4-core to 2-core (2 WEEKS AGO -- matches failure onset).' The Node version change is explicitly ruled out because 'failures started 1 week BEFORE this change.'"
     },
     {
-      "text": "Synthesis cross-references the timing: fulfillment takes up to 3000ms but test only waits 2000ms, and slower CI runners make this worse",
-      "passed": true,
-      "evidence": "Synthesis states: 'The test uses sleep(2000) to wait for async fulfillment jobs that can take up to 3000ms. This worked on 4-core CI runners because jobs completed faster, but the downgrade to 2-core runners 2 weeks ago shifted the processing time distribution, causing ~30% of runs to exceed the 2-second wait.'"
+      "expectation": "Investigation cross-references the timing: fulfillment takes up to 3000ms but test only waits 2000ms, and slower CI runners exacerbate the gap",
+      "verdict": "PASS",
+      "justification": "Agent 2 explains: 'On 4-core machines, each of the 3 concurrent fulfillment jobs gets approximately its own core. Processing time stays in the 500ms-1500ms range, well within the 2000ms sleep. On 2-core machines, the 3 jobs compete for 2 cores, increasing processing time.' Agent 3 provides probability analysis. The Synthesis consolidates: 'This worked on 4-core CI runners because jobs completed faster, but the downgrade to 2-core runners 2 weeks ago shifted the processing time distribution, causing ~30% of runs to exceed the 2-second wait.'"
     },
     {
-      "text": "Phase 3 hypothesis identifies the fragile sleep-based waiting pattern as the root cause, not a code bug in the order processing logic",
-      "passed": true,
-      "evidence": "Hypothesis: 'The intermittent CI test failure... is caused by a fragile timing assumption: the test uses sleep(2000) to wait for async fulfillment jobs that can take up to 3000ms.' Classification section explicitly states: 'This is a test infrastructure issue, NOT an application code bug.'"
+      "expectation": "Hypothesis identifies the fragile sleep-based waiting pattern as the root cause, not a code bug in the order processing logic",
+      "verdict": "PASS",
+      "justification": "The hypothesis explicitly states: 'The intermittent CI test failure... is caused by a fragile timing assumption: the test uses sleep(2000) to wait for async fulfillment jobs that can take up to 3000ms... This is a test infrastructure bug, not an application code bug.' The synthesis ranks 'Fragile sleep-based waiting in the test' as ROOT CAUSE and 'Application code bug' as RULED OUT."
     },
     {
-      "text": "Phase 3.5 red-team verifies the hypothesis explains the 30% failure rate (correlates with fulfillment time distribution exceeding 2s more often on slower hardware)",
-      "passed": true,
-      "evidence": "Red-team Challenge 3: 'Does the hypothesis explain the 30% failure rate specifically? YES. With fulfillment taking 500ms-3000ms per job and 3 concurrent jobs on 2-core hardware: CPU contention causes the distribution to shift right... On 2-core, the longer tail causes ~30% of test runs to have at least one job exceed 2000ms. This matches the observed failure rate.'"
+      "expectation": "Hypothesis is verified by explaining the ~30% failure rate (correlates with fulfillment time distribution exceeding 2s more often on slower hardware)",
+      "verdict": "PASS",
+      "justification": "Agent 3 (Reproduction) provides a detailed probability analysis: P(single order > 2000ms) = 40% for uniform distribution, P(at least one > 2000ms) = 78.4%, then explains the observed 30% rate means the distribution is skewed toward faster completions. Phase 3.5 Red-Team Challenge 3 confirms: 'CPU contention causes the distribution to shift right... On 2-core, the longer tail causes ~30% of test runs to have at least one job exceed 2000ms. This matches the observed failure rate.'"
     },
     {
-      "text": "Phase 4 fix replaces the fixed sleep with condition-based polling or retry-until-condition (e.g., poll order status with timeout)",
-      "passed": true,
-      "evidence": "Fix creates 'waitForCondition' utility that polls every 250ms with a 30-second timeout. The test is updated: 'await waitForCondition(async () => { const statuses = await Promise.all(orders.map(async (order) => { const updated = await getOrder(order.id); return updated.status; })); return statuses.every(status => status === 'fulfilled'); }, { timeout: 30000, interval: 250 })'"
+      "expectation": "Fix replaces the fixed sleep with condition-based polling or retry-until-condition (e.g., poll order status with timeout)",
+      "verdict": "PASS",
+      "justification": "The fix creates a 'waitForCondition' utility that polls a condition function at 250ms intervals with a 30-second timeout. The test replaces 'await sleep(2000)' with 'await waitForCondition()' that checks whether all orders have reached 'fulfilled' status. The utility is placed in tests/helpers/waitForCondition.js for reuse."
     },
     {
-      "text": "Phase 4 implementer writes a test that proves the sleep-based approach fails under slow conditions before implementing the fix",
-      "passed": true,
-      "evidence": "Step 1 'Write Failing Test (Demonstrating the Sleep Fragility)' creates 'tests/integration/timing-fragility.test.js' that mocks the worker to take 2500ms and demonstrates that sleep(2000) is insufficient. This precedes Step 2 'Implement the Fix'."
+      "expectation": "A test or demonstration is provided showing why the sleep-based approach is fragile before implementing the fix",
+      "verdict": "PASS",
+      "justification": "Phase 4 Step 1 includes a 'timing-fragility.test.js' demonstration test that mocks the fulfillment worker to take 2500ms and shows that after sleep(2000) the order is still in 'processing' status, proving the sleep-based approach is insufficient. This demonstration test appears before Step 2 which implements the fix."
     },
     {
-      "text": "Phase 5 quality gate is run on the fix to verify it doesn't introduce flaky behavior of its own",
-      "passed": true,
-      "evidence": "Phase 5 red-team review explicitly asks: 'Does the fix introduce flaky behavior of its own? No. Condition-based polling is deterministic -- it waits until the condition is true or times out. There is no timing-dependent race between the polling and the fulfillment.' Also examines edge cases (stuck orders, aggressive polling, 30-second runs)."
+      "expectation": "Quality review is performed on the fix to verify it doesn't introduce flaky behavior of its own",
+      "verdict": "PASS",
+      "justification": "Phase 5 Red-Team Review explicitly asks: 'Does the fix introduce flaky behavior of its own?' and answers: 'No. Condition-based polling is deterministic -- it waits until the condition is true or times out. There is no timing-dependent race between the polling and the fulfillment.' It also examines edge cases: stuck orders, aggressive polling interval, and whether the generous timeout masks real issues."
     },
     {
-      "text": "Orchestrator identifies this as a test infrastructure issue, not an application code bug, and communicates this distinction clearly",
-      "passed": true,
-      "evidence": "Multiple explicit statements: Phase 3 Classification: 'This is a test infrastructure issue, NOT an application code bug.' Synthesis ranked causes: 'Application code bug (RULED OUT).' Phase 4: 'No application code changes.' Resolution Summary: 'The intermittent CI test failure was caused by a fragile timing assumption in the test code: sleep(2000)... This is a test infrastructure issue, not an application code bug.'"
+      "expectation": "Agent identifies this as a test infrastructure issue, not an application code bug, and communicates this distinction clearly",
+      "verdict": "PASS",
+      "justification": "Phase 3 has a dedicated 'Classification' section: 'This is a test infrastructure issue, NOT an application code bug. The distinction matters: the order processing code works correctly, the fulfillment worker works correctly, the test's method of verifying correctness is unreliable, the fix targets the test, not the application.' The Resolution Summary reiterates: 'This is a test infrastructure issue, not an application code bug.' No application code is changed in the fix."
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 0,
-    "total": 10,
-    "pass_rate": 1.0
-  },
-  "claims": [
-    {
-      "claim": "4 parallel investigation subagents were dispatched",
-      "type": "process",
-      "verified": true,
-      "evidence": "Error Analysis, Change Analysis, Reproduction, and Dependency/Environment agents each produce detailed reports."
-    },
-    {
-      "claim": "The root cause is correctly identified as the fragile sleep(2000) pattern",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Hypothesis explicitly names sleep(2000) and the 500ms-3000ms fulfillment range as the core mismatch."
-    },
-    {
-      "claim": "The CI runner downgrade is correctly identified as the trigger (not root cause)",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Synthesis ranked causes distinguishes 'Fragile sleep-based waiting (ROOT CAUSE)' from 'CI runner downgrade (TRIGGER)'. The Node version change is ruled out."
-    },
-    {
-      "claim": "The fix creates a reusable polling utility",
-      "type": "quality",
-      "verified": true,
-      "evidence": "waitForCondition is placed in 'tests/helpers/waitForCondition.js' as a reusable module with configurable timeout, interval, and description."
-    },
-    {
-      "claim": "The Reproduction agent provides probabilistic analysis of the 30% rate",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Agent 3 calculates P(any > 2000ms) assuming uniform distribution, gets 78.4%, and then explains why the actual 30% rate implies a non-uniform distribution skewed toward faster times."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Phase 4 implementer writes a test that proves the sleep-based approach fails under slow conditions before implementing the fix",
-        "reason": "Good assertion that tests TDD rigor. The transcript provides a fragility demonstration test. However, the test as written asserts 'expect(updated.status).toBe('processing')' which is actually checking that the sleep IS insufficient, not that the fix works. The logic is sound but the test structure is unusual -- it's a meta-test about the test infrastructure rather than a traditional failing unit test."
-      },
-      {
-        "assertion": "Phase 3.5 red-team verifies the hypothesis explains the 30% failure rate",
-        "reason": "Excellent assertion that requires quantitative reasoning. The transcript handles this well with probabilistic analysis. Could be strengthened by checking whether the transcript acknowledges the approximate nature of the probability estimate."
-      }
-    ],
-    "overall": "This is a well-designed eval for a tricky scenario that requires distinguishing application bugs from test infrastructure issues. The expectations comprehensively cover the correct classification (test issue vs code bug), the trigger identification (runner downgrade), the timing analysis (sleep vs fulfillment time), and the fix quality (polling vs sleeping). The eval could be enhanced by adding an assertion about whether other tests with similar sleep patterns are flagged for audit (the transcript does mention this). Consider also testing whether the transcript recommends NOT reverting the CI runner downgrade (since it would mask the fragility)."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "This is a well-designed eval that tests the agent's ability to distinguish between application bugs and test infrastructure issues. All expectations are clear and precisely graded.",
+    "Consider adding an expectation about whether the agent identifies other potentially fragile tests in the suite that use similar sleep-based patterns. The synthesis mentions this as an unknown but the agent does not proactively search for them.",
+    "The 'demonstration test' expectation could be more precise about what counts as a valid demonstration -- the transcript provides a mock-based test showing the timing gap, which is reasonable, but the threshold is loosely defined.",
+    "Consider adding an expectation about whether the agent recommends NOT reverting the CI runner downgrade, since doing so would mask the latent fragility rather than fix it."
+  ]
 }

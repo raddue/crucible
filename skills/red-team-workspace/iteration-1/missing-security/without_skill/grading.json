@@ -1,87 +1,62 @@
 {
+  "eval_name": "missing-security",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": false,
-      "evidence": "The report begins with \"# Review: User File Upload Implementation Plan\" and \"## Overall Impression\" — no mention of the red-team skill. This is the without_skill run."
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "Opens with 'The plan covers the basic flow — upload, store, retrieve, and test' and notes 'significant security and operational gaps that need to be addressed before this is implemented.'"
     },
     {
-      "text": "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
-      "passed": true,
-      "evidence": "\"Path Traversal Vulnerability (Task 2)\" section explains: \"an attacker could craft a filename like ../../etc/passwd or ../../../app/.env to read arbitrary files from the server\" and identifies that \"if the upload step (Task 1) stores the user-provided filename directly into the path column without sanitization, the download step will happily serve any file on the filesystem.\" Provides a fix using path.resolve() validation and UUID filenames."
+      "expectation": "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
+      "verdict": "PASS",
+      "justification": "First finding: 'an attacker could craft a filename like ../../etc/passwd or ../../../app/.env to read arbitrary files from the server.' Correctly traces the vulnerability through both the upload path (Task 1 storing unsanitized filenames) and the download path (Task 2 using res.sendFile)."
     },
     {
-      "text": "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
-      "passed": true,
-      "evidence": "\"Missing Authorization on Downloads\" section states: \"There's no mention of checking whether the requesting user owns that file. Any authenticated user could enumerate file IDs and download other users' files.\" Provides fix: \"Add a WHERE user_id = req.user.id clause.\""
+      "expectation": "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
+      "verdict": "PASS",
+      "justification": "Second finding: 'There's no mention of checking whether the requesting user owns that file. Any authenticated user could enumerate file IDs and download other users' files.'"
     },
     {
-      "text": "Classified at least one of the security issues (path traversal or missing download auth) as Fatal",
-      "passed": false,
-      "evidence": "The report does not use severity classifications (Fatal, Significant, Minor). Issues are listed under a flat \"## Issues\" section with descriptive headings. The summary calls path traversal and missing authorization \"the most serious\" but does not classify them as Fatal."
+      "expectation": "Identified path traversal or missing download authorization as the most critical security issues, explaining the attack scenario",
+      "verdict": "PASS",
+      "justification": "These are the first two findings listed, and the summary explicitly states: 'The path traversal vulnerability and missing download authorization are the most serious — either one could lead to unauthorized data access.' Attack scenarios are explained for both (crafted filenames for traversal, ID enumeration for auth bypass)."
     },
     {
-      "text": "Identified missing file type validation (no restriction on what file types can be uploaded)",
-      "passed": true,
-      "evidence": "\"No File Type Validation\" section explains: \"nothing enforces this. Users could upload executable files, HTML files (which could lead to stored XSS if served with the wrong content type), or other dangerous content.\" Recommends extension and MIME type validation with an allowlist."
+      "expectation": "Identified missing file type validation (no restriction on what file types can be uploaded)",
+      "verdict": "PASS",
+      "justification": "Dedicated 'No File Type Validation' section: 'nothing enforces this. Users could upload executable files, HTML files (which could lead to stored XSS if served with the wrong content type), or other dangerous content.'"
     },
     {
-      "text": "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
-      "passed": true,
-      "evidence": "\"Local Filesystem Storage\" section identifies three problems: \"Files are lost if the server is redeployed, the container is replaced, or the disk fails,\" \"You can't scale horizontally — two app instances would have different files,\" and \"Disk space is finite and not easily expandable.\" Recommends object storage (S3, GCS, Azure Blob)."
+      "expectation": "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
+      "verdict": "PASS",
+      "justification": "Dedicated 'Local Filesystem Storage' section listing three specific risks: files lost on redeploy/container replacement/disk failure, can't scale horizontally with multiple instances, and finite disk space."
     },
     {
-      "text": "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
-      "passed": true,
-      "evidence": "\"No File Size Enforcement on the Server\" section states: \"Without a size limit in the Express middleware... a user could upload arbitrarily large files and exhaust disk space or memory.\" Recommends multer's fileSize limit with 413 response."
+      "expectation": "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
+      "verdict": "PASS",
+      "justification": "Dedicated section: 'The plan mentions files \"up to 50MB each\" but doesn't include server-side enforcement. Without a size limit in the Express middleware... a user could upload arbitrarily large files and exhaust disk space or memory.'"
     },
     {
-      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-      "passed": false,
-      "evidence": "The report does not use Fatal/Significant classifications, so this expectation cannot be evaluated as stated. However, examining the content: most issues include brief fix suggestions (path.resolve validation, WHERE clause, allowlist, multer limits, S3, ClamAV, Content-Disposition). The fixes are generally shorter and less detailed than the with_skill version but are present for all major issues."
+      "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+      "verdict": "PASS",
+      "justification": "Every finding includes a 'Fix:' subsection: path.resolve() + UUID filenames for traversal, WHERE user_id clause for auth, extension/MIME allowlist for file types, multer fileSize limit for size enforcement, S3/GCS/Azure for storage, ClamAV for malware, Content-Disposition for download headers."
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": false,
-      "evidence": "The report uses: \"## Overall Impression,\" \"## Issues\" (flat list of 7 items), \"## Summary.\" Does not use Fatal Challenges, Significant Challenges, Minor Observations sections, nor Overall Assessment with Verdict and Confidence."
+      "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
+      "verdict": "PASS",
+      "justification": "Path traversal and authorization (most critical security issues) come first, followed by validation, size limits, storage, and scanning in decreasing severity. Summary provides a clear verdict: 'I'd recommend going back and adding security tasks before writing any code.'"
     },
     {
-      "text": "Security issues were prioritized over structural or stylistic concerns in the findings",
-      "passed": true,
-      "evidence": "The first three issues are security vulnerabilities (path traversal, missing authorization, file type validation). File size enforcement (also security-related) is fourth. Local filesystem storage and virus scanning follow. The summary explicitly states: \"The path traversal vulnerability and missing download authorization are the most serious.\" Security is clearly prioritized over structural concerns."
+      "expectation": "Security issues were prioritized over structural or stylistic concerns in the findings",
+      "verdict": "PASS",
+      "justification": "All findings are security or operational concerns. The first four are pure security vulnerabilities. No code style, naming, or formatting issues are raised anywhere in the review."
     }
   ],
-  "summary": {
-    "passed": 6,
-    "failed": 4,
-    "total": 10,
-    "pass_rate": 0.6
-  },
-  "claims": [
-    {
-      "claim": "An attacker could craft filenames like ../../etc/passwd to exploit path traversal",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Standard path traversal attack vector. Correct for Express's res.sendFile() when path is user-influenced."
-    },
-    {
-      "claim": "Authenticated users can enumerate file IDs and download other users' files",
-      "type": "factual",
-      "verified": true,
-      "evidence": "If fileId is sequential and there's no ownership check, incrementing the ID provides access to any file. Correct."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Classified at least one of the security issues (path traversal or missing download auth) as Fatal",
-        "reason": "The without_skill run calls these 'the most serious' in the summary. The content finding is present and correctly prioritized, but the specific 'Fatal' label is not used. This tests skill vocabulary, not analytical quality."
-      },
-      {
-        "assertion": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-        "reason": "The without_skill run includes fixes for all major issues. This expectation fails only because the Fatal/Significant classification system is not used — the fixes themselves are present. Consider rephrasing as 'Major issues include proposed fixes.'"
-      }
-    ],
-    "overall": "The without_skill run identified all the same security issues (path traversal, missing auth, no file type validation, no size enforcement, local storage risks) and correctly prioritized them. Four failures are all format/classification related (no skill announcement, no Fatal label, no severity classification system, no required format structure). The content quality gap between with_skill and without_skill is minimal for this scenario — the skill primarily adds structure and severity labeling, not analytical depth. The eval could better separate content expectations from format expectations."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "This eval is well-constructed with clear, measurable expectations that form a natural hierarchy: identify the bugs, rank them correctly, provide fixes, organize by severity.",
+    "The 'security issues prioritized over structural concerns' expectation partially overlaps with the severity-ordering expectation — consider whether both are needed or if they test meaningfully different reviewer behaviors.",
+    "Consider adding an expectation about whether the review identifies missing virus/malware scanning, since the transcript does cover this and it represents deeper security thinking beyond the obvious issues."
+  ]
 }

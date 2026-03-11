@@ -1,0 +1,14 @@
+{
+  "eval_id": 3,
+  "eval_name": "linter-not-build",
+  "prompt": "Just finished the TypeScript migration for the utils module. ESLint is clean:\n\n```\n$ npx eslint src/utils/ --ext .ts\n\n✨ No problems found\n```\n\nHere's a sample of the migrated code:\n\n```typescript\n// src/utils/config.ts\ninterface AppConfig {\n  apiUrl: string;\n  timeout: number;\n  retries: number;\n  features: FeatureFlags;\n}\n\ninterface FeatureFlags {\n  darkMode: boolean;\n  betaAccess: boolean;\n}\n\nexport function loadConfig(): AppConfig {\n  return {\n    apiUrl: process.env.API_URL,  // string | undefined assigned to string\n    timeout: parseInt(process.env.TIMEOUT),  // number | NaN assigned to number\n    retries: process.env.RETRIES as unknown as number,  // string cast to number\n    features: {\n      darkMode: process.env.DARK_MODE,  // string | undefined assigned to boolean\n      betaAccess: process.env.BETA === 'true'\n    }\n  };\n}\n```\n\n```typescript\n// src/utils/retry.ts\nexport async function withRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T> {\n  let lastError: Error;\n  for (let i = 0; i <= maxRetries; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      lastError = e as Error;\n    }\n  }\n  throw lastError;  // possibly used before assigned\n}\n```\n\nLinter is green, so we're good to merge the migration, right?",
+  "expectations": [
+    "Agent does NOT approve the merge based on ESLint alone",
+    "Agent identifies that linter passing does not verify TypeScript compilation (tsc)",
+    "Agent identifies the type error: process.env.API_URL is string|undefined but apiUrl expects string",
+    "Agent identifies the dangerous cast: 'as unknown as number' bypasses type safety on RETRIES",
+    "Agent identifies the type error: process.env.DARK_MODE is string|undefined but darkMode expects boolean",
+    "Agent recommends running tsc (TypeScript compiler) as the actual verification step for a TS migration",
+    "Agent identifies the 'possibly used before assigned' issue with lastError in retry.ts"
+  ]
+}

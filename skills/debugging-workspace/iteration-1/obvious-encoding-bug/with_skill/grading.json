@@ -1,104 +1,67 @@
 {
+  "eval_name": "obvious-encoding-bug",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Phase 0 context loading is performed or acknowledged before investigation begins",
-      "passed": true,
-      "evidence": "Transcript has a dedicated 'Phase 0: Load Codebase Context' section that identifies the two key files, the stack trace, and the mysql package before proceeding to Phase 1."
+      "expectation": "Available context (error logs, code, timeline) is reviewed before jumping to a fix",
+      "verdict": "PASS",
+      "justification": "Phase 0 explicitly reviews the stack trace, the two code files (feedback.js and connection.js), the mysql package, and the timeline ('added the feedback feature two weeks ago') before any investigation or fix begins."
     },
     {
-      "text": "Phase 1 dispatches at least 2 parallel investigation subagents (Error Analysis and Change Analysis at minimum)",
-      "passed": true,
-      "evidence": "Phase 1 dispatches 3 parallel investigators: 'Error Analysis Agent', 'Change Analysis Agent', and 'Deep Dive Agent (SQL Construction)', all with individual reports."
+      "expectation": "Investigation examines at least 2 distinct dimensions of the problem (error analysis, change history, code review) before forming a hypothesis",
+      "verdict": "PASS",
+      "justification": "Phase 1 dispatches 3 parallel investigators covering 3 distinct dimensions: Error Analysis (error message deconstruction, call chain tracing), Change Analysis (what was introduced 2 weeks ago, query construction pattern), and Deep Dive on SQL Construction (reproduction with various special characters). All report back before the synthesis and hypothesis formation."
     },
     {
-      "text": "Orchestrator provides a status update between dispatches including current phase and what is being investigated",
-      "passed": true,
-      "evidence": "Between Phase 0 and Phase 1, the orchestrator states: 'Current phase: Phase 1 -- Investigation', 'What just completed: Phase 0 context loading', 'What's being dispatched next: 3 parallel investigation subagents'. Similar updates appear at every phase transition."
+      "expectation": "Findings from different investigation angles are consolidated before forming a hypothesis — not jumping from a single clue to a fix",
+      "verdict": "PASS",
+      "justification": "A dedicated 'Synthesis Report' section consolidates findings from all 3 agents, providing ranked causes, cross-references between agents, and identified unknowns before proceeding to Phase 3 hypothesis formation."
     },
     {
-      "text": "A synthesis report is produced consolidating Phase 1 findings before hypothesis formation",
-      "passed": true,
-      "evidence": "A full 'Synthesis Report' section exists between Phase 1 and Phase 3, consolidating findings from all 3 agents, providing ranked causes and cross-references."
+      "expectation": "Hypothesis specifically identifies string interpolation in SQL as the root cause — not just 'SQL error' or 'special characters'",
+      "verdict": "PASS",
+      "justification": "The hypothesis explicitly states: 'The 500 errors on the feedback form are caused by direct string interpolation of user input into SQL queries in src/routes/feedback.js. When user input contains single quotes (or other SQL-significant characters), the interpolated string produces syntactically invalid SQL, causing MySQL ER_PARSE_ERROR.'"
     },
     {
-      "text": "Phase 3 hypothesis specifically identifies string interpolation in SQL as the root cause — not just 'SQL error' or 'special characters'",
-      "passed": true,
-      "evidence": "Hypothesis states: 'The 500 errors on the feedback form are caused by direct string interpolation of user input into SQL queries in src/routes/feedback.js. When user input contains single quotes (or other SQL-significant characters), the interpolated string produces syntactically invalid SQL.'"
+      "expectation": "Hypothesis is challenged or verified against evidence before implementation begins",
+      "verdict": "PASS",
+      "justification": "Phase 3.5 'Hypothesis Red-Team' poses 4 adversarial challenges: (1) does it explain ALL symptoms including ampersands, (2) could the cause be upstream, (3) what other symptoms should we expect, (4) has this been tried before. The hypothesis survives all challenges before proceeding to Phase 4 implementation."
     },
     {
-      "text": "Phase 3.5 red-teams the hypothesis before implementation proceeds",
-      "passed": true,
-      "evidence": "A dedicated 'Phase 3.5: Hypothesis Red-Team' section poses 4 adversarial challenges (explains all symptoms, upstream causes, expected other symptoms, prior attempts) and concludes 'HYPOTHESIS SURVIVES'."
+      "expectation": "A failing test is written before the fix is implemented",
+      "verdict": "PASS",
+      "justification": "Phase 4 Step 1 writes 3 test cases (special chars, SQL injection, data integrity) with expected failure explanation: 'FAIL -- the first test will produce ER_PARSE_ERROR due to the single quote in It's, returning a 500 status instead of 200.' This appears before Step 2 which implements the fix."
     },
     {
-      "text": "Phase 4 implementer writes a failing test BEFORE implementing the fix",
-      "passed": true,
-      "evidence": "Phase 4 begins with 'Step 1: Write Failing Test' containing 3 test cases, followed by 'Expected test result with current code: FAIL', before 'Step 2: Implement the Fix'."
+      "expectation": "The fix uses parameterized queries or prepared statements — not string escaping as a band-aid",
+      "verdict": "PASS",
+      "justification": "The fix uses parameterized queries with '?' placeholders: \"const query = 'INSERT INTO feedback (name, email, comment) VALUES (?, ?, ?)'; await db.query(query, [name, email, comment]);\". The transcript explicitly states: 'Parameterized queries, not string escaping. We did NOT use mysql.escape() or manual escaping -- those are band-aids.'"
     },
     {
-      "text": "The fix uses parameterized queries or prepared statements — not string escaping as a band-aid",
-      "passed": true,
-      "evidence": "Fix uses parameterized queries with '?' placeholders: \"const query = 'INSERT INTO feedback (name, email, comment) VALUES (?, ?, ?)'\". Transcript explicitly states: 'Parameterized queries, not string escaping. We did NOT use mysql.escape() or manual escaping -- those are band-aids.'"
+      "expectation": "The fix addresses the root cause (SQL injection vulnerability) not just the symptom (500 error on special characters)",
+      "verdict": "PASS",
+      "justification": "The transcript explicitly states: 'Addresses root cause, not symptom. The 500 error was the visible symptom. The root cause is the SQL injection vulnerability created by string interpolation. Parameterized queries eliminate the entire vulnerability class.' The security dimension is identified by Agent 1's 'Security observation' and carried through to the fix and quality review."
     },
     {
-      "text": "Phase 5 quality gate (red-team and/or code review) is performed on the fix",
-      "passed": true,
-      "evidence": "Phase 5 has both a 'Red-Team Review of Fix' (edge cases, new failure modes, regression risks) and a 'Code Review of Fix' (correctness, test coverage, backward compatibility), concluding with 'Quality Gate Verdict: PASS'."
+      "expectation": "The fix also handles the ampersand case mentioned in the bug report, not just the single-quote case shown in the stack trace",
+      "verdict": "PASS",
+      "justification": "Agent 3 (Deep Dive) explicitly tests the ampersand case and notes that '& is not a SQL special character -- this would NOT cause a parse error in MySQL.' The failing test uses the input \"It's a great product & we love it\" which includes both single quote and ampersand. The fix (parameterized queries) handles all special characters uniformly. The synthesis notes the ampersand as a minor unknown but the fix covers it by design."
     },
     {
-      "text": "Orchestrator narrates each phase transition with hypothesis status and cycle count",
-      "passed": true,
-      "evidence": "Every phase section includes 'Current phase', 'Hypothesis status', 'What just completed', 'What's being dispatched next', and 'Cycle count: Cycle 1'. Phase transitions from 0->1->Synthesis->3->3.5->4->5 are all narrated."
+      "expectation": "Quality review is performed on the fix before declaring it complete",
+      "verdict": "PASS",
+      "justification": "Phase 5 includes both a 'Red-Team Review of Fix' examining edge cases (missing fields, long input, non-string input, new failure modes, regression risks) and a 'Code Review of Fix' examining correctness, test coverage, and backward compatibility, concluding with 'Quality Gate Verdict: PASS'."
     },
     {
-      "text": "The fix addresses the root cause (SQL injection vulnerability) not just the symptom (500 error on special characters)",
-      "passed": true,
-      "evidence": "Transcript states: 'Addresses root cause, not symptom. The 500 error was the visible symptom. The root cause is the SQL injection vulnerability created by string interpolation. Parameterized queries eliminate the entire vulnerability class.' The security dimension is identified by Agent 1 and carried through to the fix."
+      "expectation": "Agent communicates reasoning progression clearly, showing how evidence led to the hypothesis",
+      "verdict": "PASS",
+      "justification": "The transcript follows a clear progression: Phase 0 (context loading) -> Phase 1 (3 investigation agents with detailed findings) -> Synthesis (consolidation with ranked causes and cross-references) -> Phase 3 (hypothesis formation citing specific agent findings) -> Phase 3.5 (red-team) -> Phase 4 (implementation). Each phase transition includes status updates showing current phase, what completed, and what's next. The hypothesis log explicitly cites evidence from each agent."
     }
   ],
-  "summary": {
-    "passed": 11,
-    "failed": 0,
-    "total": 11,
-    "pass_rate": 1.0
-  },
-  "claims": [
-    {
-      "claim": "3 parallel investigation subagents were dispatched",
-      "type": "process",
-      "verified": true,
-      "evidence": "Error Analysis, Change Analysis, and Deep Dive agents each produce separate reports in Phase 1."
-    },
-    {
-      "claim": "The hypothesis specifically identifies SQL injection, not just the syntax error",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Hypothesis says 'This is the symptom of an underlying SQL injection vulnerability -- the root cause is the absence of parameterized queries.'"
-    },
-    {
-      "claim": "TDD approach was followed with failing test first",
-      "type": "process",
-      "verified": true,
-      "evidence": "Step 1 writes 3 failing tests with expected failure explanation before Step 2 implements the fix."
-    },
-    {
-      "claim": "7 total subagents dispatched",
-      "type": "factual",
-      "verified": false,
-      "evidence": "Transcript claims '7 total' but counting by role there are 3 investigators + synthesis + implementer + red-team + code review = 7. This is plausible but since this is a simulated transcript, the actual agent dispatches cannot be independently verified."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Phase 4 implementer writes a failing test BEFORE implementing the fix",
-        "reason": "This eval cannot verify the tests were actually run and actually failed. The transcript describes expected failure behavior but in a simulated/synthetic context, the test-first claim is based on ordering within the document, not observed execution."
-      },
-      {
-        "assertion": "Phase 1 dispatches at least 2 parallel investigation subagents",
-        "reason": "The assertion checks for parallelism but the transcript format makes it impossible to verify true parallel execution -- only that multiple agent reports are presented sequentially within the same phase."
-      }
-    ],
-    "overall": "This eval is well-designed for verifying process compliance and domain correctness. The expectations cover the full debugging lifecycle from context loading through quality gate. However, since this is a synthetic/simulated transcript, process claims (parallel dispatch, TDD execution) are based on narrative structure rather than observed runtime behavior. The domain assertions (parameterized queries, SQL injection root cause) are strong and verifiable. Consider adding an assertion about whether the ampersand issue (mentioned in the prompt) is addressed or explicitly deprioritized."
-  }
+  "score": "11/11",
+  "eval_feedback": [
+    "The 'fix also handles the ampersand case' expectation is somewhat ambiguous: Agent 3 correctly identifies that ampersands are NOT a SQL issue, yet the expectation implies the fix should 'handle' them. The transcript addresses this well by noting it may be a client-side issue, but the expectation could be clearer about whether 'handling' means fixing vs. investigating and explaining.",
+    "The 'failing test is written before the fix' expectation cannot be verified as actually executed in a transcript-based eval -- only that it appears before the fix in the document. Consider clarifying this is about ordering in the reasoning process.",
+    "The 'at least 2 distinct dimensions' expectation is easily met (3 agents). Consider raising the bar or being more specific about what counts as a 'distinct dimension' to differentiate strong from adequate performance."
+  ]
 }

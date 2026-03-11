@@ -1,97 +1,62 @@
 {
+  "eval_name": "concurrency-bug",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Announced use of the red-team skill at the start of the review",
-      "passed": false,
-      "evidence": "The report begins with \"# Code Review: WebhookWorkerPool\" and \"## Overview\" — no mention of the red-team skill anywhere in the output. This is the without_skill run, so this is expected behavior."
+      "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
+      "verdict": "PASS",
+      "justification": "Opens with 'Looking at this webhook worker pool implementation' and immediately establishes context around concurrency and scalability at 500 events/second."
     },
     {
-      "text": "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
-      "passed": true,
-      "evidence": "Issue #2 \"Race condition on the processing flag\" identifies the interleaving: \"When processNext() finishes processing an event, it sets this.processing = false and then calls this.processNext() recursively. But if enqueue() is called between the this.processing = false line and the recursive this.processNext() call, the enqueue's own this.processNext() call could start a second concurrent processing chain. Now you have two chains both calling shift() on the same queue.\""
+      "expectation": "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
+      "verdict": "PASS",
+      "justification": "Issue #2 correctly identifies the interleaving problem: enqueue() calling processNext() between the 'processing = false' line and the recursive processNext() call, leading to two concurrent processing chains both calling shift() on the same queue."
     },
     {
-      "text": "Classified the race condition as Fatal severity",
-      "passed": false,
-      "evidence": "The report does not use severity classifications. Issues are numbered 1-7 without any severity labels (Fatal, Significant, Minor, etc.). The race condition is listed as issue #2 but has no severity classification."
+      "expectation": "Identified the race condition as one of the most critical issues, explaining the potential impact (data corruption, lost events, or duplicate processing)",
+      "verdict": "PASS",
+      "justification": "The race condition is listed as issue #2 and called a 'significant problem' in the summary. Impact is explained: 'two chains both calling shift() on the same queue, which could lead to undefined behavior or skipped events.' Treated as a top-tier finding alongside the sequential processing bottleneck."
     },
     {
-      "text": "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
-      "passed": true,
-      "evidence": "Issue #1 \"This isn't really a worker pool — it's a sequential queue\" explains: \"this processes events one at a time... At 500 events/second, and assuming each fetch call to the callback URL takes even 100ms, you'd process at most 10 events/second. The queue will grow unboundedly.\""
+      "expectation": "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
+      "verdict": "PASS",
+      "justification": "Issue #1 clearly identifies this: 'this processes events one at a time' and quantifies the gap — at 100ms per fetch, only 10 events/second vs. the 500/s requirement. States 'The queue will grow unboundedly and events will be delayed indefinitely.'"
     },
     {
-      "text": "Identified the unbounded results Map as a memory leak that grows without limit",
-      "passed": true,
-      "evidence": "Issue #3 \"Unbounded results Map\" states: \"The results Map grows without limit. Every processed event adds an entry, and nothing ever removes them. Over time, this will consume increasing amounts of memory. At 500 events/second, that's 43 million entries per day. This is a memory leak.\""
+      "expectation": "Identified the unbounded results Map as a memory leak that grows without limit",
+      "verdict": "PASS",
+      "justification": "Issue #3 explicitly identifies the memory leak: 'The results Map grows without limit. Every processed event adds an entry, and nothing ever removes them... At 500 events/second, that's 43 million entries per day. This is a memory leak.'"
     },
     {
-      "text": "Identified missing retry logic for failed webhook deliveries",
-      "passed": true,
-      "evidence": "Issue #4 \"No retry logic\" states: \"If a webhook delivery fails (network error, timeout, 5xx response), the event is simply marked as failed and discarded. For webhook delivery, retries with exponential backoff are standard practice.\""
+      "expectation": "Identified missing retry logic for failed webhook deliveries",
+      "verdict": "PASS",
+      "justification": "Issue #4 identifies the lack of retries: 'If a webhook delivery fails (network error, timeout, 5xx response), the event is simply marked as failed and discarded... Without retries, transient failures cause permanent data loss for the consumer.'"
     },
     {
-      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-      "passed": false,
-      "evidence": "The report does not classify issues by severity (no Fatal/Significant categories). While some issues have fix suggestions (Issue #1 mentions p-limit, Issue #3 mentions TTL/LRU/Redis), others lack concrete fixes. Issue #2 (race condition) identifies the problem but provides no fix. Issue #5 (no timeout) identifies the problem but provides no fix. The standard is not met because the classification system is not used."
+      "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+      "verdict": "FAIL",
+      "justification": "Issue #1 proposes concurrent workers/p-limit. Issue #3 proposes TTL/LRU/Redis eviction. Issue #4 mentions retries with exponential backoff. However, Issue #2 (race condition) — one of the most critical findings — describes the problem in detail but does not propose a fix or mitigation strategy."
     },
     {
-      "text": "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
-      "passed": true,
-      "evidence": "Issue #1 references the processing boolean guard specifically. Issue #2 walks through the exact interleaving scenario with specific code references (this.processing = false, recursive this.processNext()). Issue #3 calculates 43 million entries per day. Most issues cite specific code constructs."
+      "expectation": "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
+      "verdict": "PASS",
+      "justification": "The review traces specific execution paths: the processing boolean guard, shift() on the queue, the timing between 'processing = false' and the recursive call. Quantifies the throughput gap (10/s vs 500/s) and memory growth (43M entries/day)."
     },
     {
-      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-      "passed": false,
-      "evidence": "The report uses a flat list of \"## Issues Found\" numbered 1-7, followed by a \"## Summary\". It does not use the required format with Fatal Challenges, Significant Challenges, Minor Observations sections, nor does it include an Overall Assessment with explicit Verdict and Confidence labels."
+      "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
+      "verdict": "PASS",
+      "justification": "Findings are ordered from most critical (sequential processing bottleneck, race condition) to less critical (memory leak, retries, timeout, error handling, backpressure). Summary section provides an overall assessment recommending 'a substantial redesign before this goes to production.'"
     },
     {
-      "text": "Did NOT focus on code style, naming conventions, or formatting as primary findings",
-      "passed": true,
-      "evidence": "All 7 issues are substantive technical concerns: sequential processing, race condition, memory leak, missing retries, missing timeout, error handling, and backpressure. No issues focus on code style, naming, or formatting."
+      "expectation": "Did NOT focus on code style, naming conventions, or formatting as primary findings",
+      "verdict": "PASS",
+      "justification": "All primary findings are about correctness, concurrency, performance, and reliability. The naming observation ('isn't really a worker pool') is used to highlight a functional concern (sequential processing), not a style complaint."
     }
   ],
-  "summary": {
-    "passed": 6,
-    "failed": 4,
-    "total": 10,
-    "pass_rate": 0.6
-  },
-  "claims": [
-    {
-      "claim": "At 500 events/second with 100ms fetch latency, throughput is at most 10 events/second",
-      "type": "factual",
-      "verified": true,
-      "evidence": "1/0.1s = 10 events/second for sequential processing. Correct."
-    },
-    {
-      "claim": "Results Map accumulates 43 million entries per day at 500 events/second",
-      "type": "factual",
-      "verified": true,
-      "evidence": "500 * 86400 = 43,200,000. Correct."
-    },
-    {
-      "claim": "The race condition analysis involving two concurrent processing chains from interleaved enqueue",
-      "type": "factual",
-      "verified": true,
-      "evidence": "The analysis correctly identifies that an enqueue() call between processing=false and the recursive processNext() can create a second processing chain. However, the report initially second-guesses itself (\"actually wait, in this specific code the check and set are synchronous within the same tick, so the classic race doesn't apply\") before arriving at the correct conclusion."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Announced use of the red-team skill at the start of the review",
-        "reason": "This expectation is unfair for the without_skill run — the whole point of the without_skill condition is that the skill is not used. This expectation will always FAIL for without_skill runs by design. Consider separating skill-specific expectations from content expectations in the eval metadata, or having separate expectation sets for with/without skill runs."
-      },
-      {
-        "assertion": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-        "reason": "Same concern as above — the required format is defined by the red-team skill. Without the skill, the model uses a generic review format. This expectation tests skill adherence, not review quality."
-      },
-      {
-        "assertion": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-        "reason": "This expectation implicitly requires the Fatal/Significant classification system. Without the skill, the model may still provide fixes but not under those severity labels. Consider rephrasing as 'Major issues include proposed fixes' for without_skill runs."
-      }
-    ],
-    "overall": "Three of the four failed expectations (skill announcement, required format, severity-classified fixes) are structural requirements defined by the red-team skill itself, not content quality measures. The without_skill run identified all four core technical issues (race condition, sequential bottleneck, memory leak, missing retries) with good specificity. The eval would benefit from separating content expectations (did it find the bugs?) from format expectations (did it use the skill's template?) to enable fair comparison."
-  }
+  "score": "9/10",
+  "eval_feedback": [
+    "The 'every major finding includes a proposed fix' expectation is good for measuring actionability. The transcript failed because the race condition section focused on explaining the problem without offering a solution.",
+    "The expectation about 'most critical issues' could specify whether 'one of the most critical' means top-2 or top-3 to reduce grading ambiguity.",
+    "Consider adding an expectation about whether the review identifies backpressure or queue growth as a concern, since the transcript does cover this (Issue #7) and it naturally extends the throughput problem."
+  ]
 }

@@ -1,0 +1,46 @@
+{
+  "eval_name": "rate-limiter",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Proposes exactly ONE addition, not a feature wishlist",
+      "verdict": "PASS",
+      "justification": "Proposes a single addition: an in-process LRU cache for known rate-limited clients that short-circuits Redis lookups. No other features are suggested."
+    },
+    {
+      "expectation": "Proposal fits within the 1-week solo developer constraint",
+      "verdict": "PASS",
+      "justification": "Cost section estimates half a day of work: 20-30 lines of code using an existing library (lru-cache), plus one additional unit test. This comfortably fits within the 1-week constraint."
+    },
+    {
+      "expectation": "Proposal does NOT add more than 5ms latency (respects the stated constraint)",
+      "verdict": "PASS",
+      "justification": "The proposal explicitly addresses the latency constraint, stating it provides 'sub-millisecond response times for known-blocked requests.' The local in-memory cache lookup is faster than the Redis round-trip it replaces, so it reduces latency rather than adding it."
+    },
+    {
+      "expectation": "Proposal addresses a gap that the existing design doesn't cover",
+      "verdict": "PASS",
+      "justification": "The design describes aggressive clients as the core problem but has no optimization for the hot path of repeatedly rejecting already-blocked clients. Every over-limit request still hits Redis for the full sliding window calculation. This is a genuine performance gap."
+    },
+    {
+      "expectation": "Proposal includes why this over alternatives",
+      "verdict": "PASS",
+      "justification": "Two runner-ups are compared: (1) request queuing with backpressure (rejected as overscoped for 1 week and fundamentally changing the middleware contract) and (2) IP reputation scoring with escalating bans (rejected as requiring statefulness beyond simple counters, better as a follow-up)."
+    },
+    {
+      "expectation": "Proposal states impact and cost",
+      "verdict": "PASS",
+      "justification": "Impact: could reduce Redis operations by 80-90% for aggressive client traffic, guarantees sub-millisecond responses for blocked requests. Cost: half a day of work, 20-30 lines of code, one additional unit test. The 1-second TTL is noted as the correctness tradeoff (delays unblocking by at most 1 second)."
+    },
+    {
+      "expectation": "Proposal is proportionate to the project scope — not overengineering for a 1-week middleware",
+      "verdict": "PASS",
+      "justification": "An LRU cache with 1000 entries and 1-second TTL is minimal in scope. It uses a likely-already-present npm library, adds ~20-30 lines of code, and takes half a day. This is proportionate to a 1-week middleware project."
+    }
+  ],
+  "score": "7/7",
+  "eval_feedback": [
+    "This eval is well-designed. The 1-week solo developer constraint and 5ms latency requirement create tight boundaries that test whether the proposal respects real-world limitations.",
+    "Consider adding an expectation about whether the proposal acknowledges distributed deployment implications (the local cache means different instances may disagree for up to 1 second about whether a client is blocked). The with_skill output implicitly handles this via the 1-second TTL but does not discuss multi-instance scenarios explicitly."
+  ]
+}

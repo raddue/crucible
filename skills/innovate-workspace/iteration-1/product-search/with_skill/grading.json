@@ -1,0 +1,46 @@
+{
+  "eval_name": "product-search",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Proposes exactly ONE addition, not a feature wishlist",
+      "verdict": "PASS",
+      "justification": "Proposes a single addition: a search_suggestions materialized view powering a typeahead/autocomplete endpoint. No other features are suggested."
+    },
+    {
+      "expectation": "The proposed addition builds on existing plan components rather than introducing entirely new infrastructure",
+      "verdict": "PASS",
+      "justification": "The proposal directly reuses the tsvector index from Task 2, the debounced input pattern from Task 6, and the existing PostgreSQL infrastructure. The materialized view is a native PostgreSQL feature. No new infrastructure is introduced."
+    },
+    {
+      "expectation": "Proposal fits within the 4-week timeline and doesn't require new infrastructure beyond PostgreSQL",
+      "verdict": "PASS",
+      "justification": "Cost section estimates 2-3 days of work within the existing timeline. All components use PostgreSQL (materialized view, REFRESH MATERIALIZED VIEW CONCURRENTLY). No new infrastructure is required."
+    },
+    {
+      "expectation": "Proposal includes why this addition over alternatives",
+      "verdict": "PASS",
+      "justification": "Two runner-ups are compared: (1) synonym expansion/query rewriting (rejected as requiring curated dictionary with uncertain payoff) and (2) faceted search counts (rejected as primarily a UI enhancement that doesn't improve search quality). Clear reasoning for why typeahead wins."
+    },
+    {
+      "expectation": "Proposal states impact and cost",
+      "verdict": "PASS",
+      "justification": "Impact section explains how typeahead eliminates zero-result searches from typos/wrong terminology and has a multiplicative effect on other search features. Cost section estimates 2-3 days, enumerates specific work items (SQL migration, Express route, React component), and addresses the materialized view refresh strategy."
+    },
+    {
+      "expectation": "Proposal is genuinely useful — not obvious busywork that adds complexity without proportional value",
+      "verdict": "PASS",
+      "justification": "Typeahead/autocomplete is a high-impact search UX improvement that directly addresses a real problem (users of a 50k product catalog cannot guess matching terms). It leverages existing infrastructure being built, so the marginal cost is low relative to the value."
+    },
+    {
+      "expectation": "Proposal does NOT expand scope dramatically (no Elasticsearch, no ML, no A/B testing)",
+      "verdict": "PASS",
+      "justification": "No new infrastructure, no Elasticsearch, no ML, no A/B testing. The addition is a materialized view, one API endpoint, and a small React component — all within the existing PostgreSQL/Express/React stack."
+    }
+  ],
+  "score": "7/7",
+  "eval_feedback": [
+    "This eval's expectations are well-targeted. The 'builds on existing plan components' expectation is a strong differentiator for this particular design doc since the plan already enumerates specific tasks.",
+    "The 'genuinely useful — not obvious busywork' expectation is somewhat subjective. Consider adding a more concrete criterion, such as 'the proposal addresses a user-facing problem identified in the design context.'"
+  ]
+}

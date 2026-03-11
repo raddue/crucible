@@ -1,0 +1,52 @@
+{
+  "eval_name": "pagination-uuid",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Identifies the critical type mismatch: orders table uses UUID ids but paginate() uses parseInt() and numeric comparison",
+      "verdict": "PASS",
+      "justification": "Identified across multiple attack vectors. Wiring AV1: 'The paginate function signature is paginate<T extends { id: number }>. This constrains the generic type to entities with a numeric id field. The orders table uses UUID primary keys.' Integration AV1: 'parseInt(params.cursor) on this value returns NaN.' Integration AV3: 'orderBy(\"id\", \"asc\") assumes integer semantics.'"
+    },
+    {
+      "expectation": "Identifies the breaking response shape change: endpoints now return {data, nextCursor} instead of a flat array",
+      "verdict": "PASS",
+      "justification": "Clearly identified under 'Regression' Attack Vector 1: 'The GET /users and GET /orders endpoints previously returned a flat JSON array. They now return { data: [...], nextCursor: \"...\" }. Any frontend code that treats the response as an array (e.g., response.map(...), response.length) will break immediately. This is a breaking API change with no versioning.'"
+    },
+    {
+      "expectation": "Identifies that existing integration tests will break due to the response shape change",
+      "verdict": "PASS",
+      "justification": "Identified under 'Regression' Attack Vector 2: 'The codebase has existing integration tests that assert res.body is an array. These tests will now fail because res.body is { data: [...], nextCursor: ... }. The tests need to be updated to expect the new shape.'"
+    },
+    {
+      "expectation": "Identifies that parseInt on a UUID cursor will return NaN, causing the WHERE clause to malfunction",
+      "verdict": "PASS",
+      "justification": "Identified under 'Integration' Attack Vector 1: 'parseInt(params.cursor) on this value returns NaN. The resulting query becomes WHERE id > NaN, which in PostgreSQL evaluates to false for all rows, returning an empty result set. Pagination beyond the first page is completely broken for orders.'"
+    },
+    {
+      "expectation": "Identifies that the frontend currently expects a flat array response and will break",
+      "verdict": "PASS",
+      "justification": "Identified under 'Regression' Attack Vector 1, which explicitly mentions frontend impact: 'Any frontend code that treats the response as an array (e.g., response.map(...), response.length, response[0]) will break immediately.' Also references the codebase context about frontend expectations."
+    },
+    {
+      "expectation": "Acknowledges that the pagination logic itself (limit+1 trick, cursor mechanics) is sound for integer IDs",
+      "verdict": "PASS",
+      "justification": "Under 'State & Lifecycle', the stateless design is praised. Under 'Edge Cases' AV3, the limit clamping is validated as correct. Under 'Lifecycle' AV2, cursor-based pagination's handling of concurrent modifications is acknowledged as superior to offset-based. The report correctly marks these as PASS, affirming the core algorithm works for integer IDs."
+    },
+    {
+      "expectation": "Each identified issue includes a specific proposed fix or test",
+      "verdict": "PASS",
+      "justification": "Every attack vector includes a named test and fix guidance. Examples: 'Make the paginate function generic over the cursor type', 'Remove parseInt() call... detect whether cursor is numeric or UUID', 'For UUID-keyed tables, paginate using created_at timestamp', 'Version the API and maintain backward compatibility.'"
+    },
+    {
+      "expectation": "Does NOT manufacture issues with the core pagination algorithm — it's correct for its intended use case",
+      "verdict": "PASS",
+      "justification": "The report correctly marks the core algorithm aspects as PASS: stateless behavior, concurrent modification handling, limit boundary clamping, empty result handling. All failures are about the UUID mismatch, response shape change, and edge cases — not about the fundamental limit+1 cursor algorithm."
+    }
+  ],
+  "score": "8/8",
+  "eval_feedback": [
+    "Both conditions likely score similarly on this eval since the UUID/parseInt issue is obvious. Consider adding expectations that test for deeper analysis, such as identifying that UUID v4 lexicographic ordering is meaningless (which the with_skill report caught under Integration AV2).",
+    "Expectation 5 ('frontend currently expects a flat array') overlaps significantly with expectation 2 ('breaking response shape change'). These could be merged or differentiated more clearly — e.g., expectation 5 could specifically require mentioning the frontend, while expectation 2 focuses on the API contract.",
+    "Consider adding an expectation about the db('orders') vs db.orders.findAll API change and whether the column name 'user_id' is verified as correct."
+  ]
+}
