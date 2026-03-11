@@ -11,7 +11,6 @@
     "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
     "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
     "Design considers the 6-engineer team constraint — does not propose extracting all services simultaneously or an unrealistic timeline",
-    "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
-    "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention"
+    "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)"
   ]
 }

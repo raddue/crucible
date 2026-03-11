@@ -12,7 +12,6 @@
     "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
     "Design specifies error response format with consistent structure (status codes, error codes, messages)",
     "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
-    "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
     "Gap scan is performed before saving, checking at least acceptance criteria and failure modes"
   ]
 }

@@ -1,0 +1,105 @@
+{
+  "expectations": [
+    {
+      "text": "Announced use of the red-team skill at the start of the review",
+      "passed": true,
+      "evidence": "First line: \"I'm using the red-team skill to adversarially review this artifact.\""
+    },
+    {
+      "text": "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
+      "passed": true,
+      "evidence": "F1 titled \"Single Kafka Partition + Single Consumer Instance Cannot Scale to 1M Events/Day\" provides detailed throughput math: at 200-500ms per API call with 3 channels, single-threaded throughput is ~0.7-1.7 events/second, failing at ~60k-150k events/day — well short of 1M. Classified under Fatal Challenges."
+    },
+    {
+      "text": "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
+      "passed": true,
+      "evidence": "F2 titled \"No Retry Mechanism or Dead-Letter Queue for Failed Notifications\" is classified as Fatal. It explains that transient failures permanently drop notifications, quantifies impact at 0.1% failure rate = ~3,000 lost notifications/day, and notes the absence of a DLQ."
+    },
+    {
+      "text": "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
+      "passed": true,
+      "evidence": "S1 titled \"Synchronous Fan-Out Within a Single Process Creates Cascading Failure Risk\" identifies serial execution (600-1500ms per event), cascading failure (slow Twilio blocks email and push), and crash isolation. Proposes separate Kafka topics per channel."
+    },
+    {
+      "text": "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
+      "passed": true,
+      "evidence": "S2 titled \"No Rate Limiting or Backpressure for External Provider APIs\" quantifies ~35 API calls/second at 1M events/day, lists specific provider limits (SES: 14/s, Twilio: 1/s per number, FCM: 500/s), and explains that without rate limiting, throttled messages are permanently lost."
+    },
+    {
+      "text": "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
+      "passed": true,
+      "evidence": "In F1, the report directly addresses the scale-up strategy with three points: (1) bottleneck is I/O wait, not CPU/memory, (2) single Kafka partition cannot be split across consumers, (3) vertical scaling has a hard ceiling. Quotes the design directly: \"If load increases, we plan to 'scale up' the instance.\""
+    },
+    {
+      "text": "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+      "passed": true,
+      "evidence": "F1: multiple partitions (12-24) with consumer group, partition by user_id. F2: per-channel retry with backoff, DLQ topic, DLQ consumer, delivery status tracking. S1: separate Kafka topics per channel with independent consumers. S2: per-provider rate limiters, batch APIs, backpressure via offset commit delay. S3: table partitioning, indexing, async audit writes, archival. All have concrete proposed fixes."
+    },
+    {
+      "text": "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
+      "passed": true,
+      "evidence": "F1 quotes: \"The NotificationRouter runs as a single instance consuming from a single Kafka partition.\" F2 quotes: \"If a channel fails, we log the error and move on to the next event. No retries.\" S1 references: \"a function call within the NotificationRouter process.\" All challenges cite specific design text."
+    },
+    {
+      "text": "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+      "passed": true,
+      "evidence": "Report contains: \"## Fatal Challenges\" (F1, F2), \"## Significant Challenges\" (S1, S2, S3), \"## Minor Observations\" (4 bullet points), \"## Overall Assessment\" with \"Verdict: Has fundamental issues that must be addressed before implementation\" and \"Confidence: High.\""
+    },
+    {
+      "text": "Overall Assessment verdict reflects that the design has fundamental issues that must be addressed before implementation",
+      "passed": true,
+      "evidence": "Verdict explicitly states: \"Has fundamental issues that must be addressed before implementation.\" Summary elaborates: \"its scaling architecture is fundamentally inadequate for the stated growth from 10k to 1M events/day.\""
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  },
+  "claims": [
+    {
+      "claim": "Single-threaded throughput is ~0.7-1.7 events/second with 200-500ms per API call and 3 channels",
+      "type": "factual",
+      "verified": true,
+      "evidence": "3 channels * 200ms = 600ms per event = 1.67 events/s. 3 channels * 500ms = 1500ms per event = 0.67 events/s. Math is correct."
+    },
+    {
+      "claim": "System fails at roughly 60k-150k events/day",
+      "type": "factual",
+      "verified": true,
+      "evidence": "0.67 events/s * 86400 = 57,888 events/day. 1.67 events/s * 86400 = 144,288 events/day. Range of 60k-150k is reasonable."
+    },
+    {
+      "claim": "At 1M events/day, the system generates ~35 API calls/second to external providers",
+      "type": "factual",
+      "verified": true,
+      "evidence": "1M events/day = 11.6 events/s. With up to 3 channels, that's ~34.7 API calls/s. ~35 is correct."
+    },
+    {
+      "claim": "AWS SES default rate is 14 emails/second",
+      "type": "factual",
+      "verified": true,
+      "evidence": "AWS SES default sending rate is 14 messages per second for accounts in the sandbox/default tier. This is accurate."
+    },
+    {
+      "claim": "notifications_sent table receives ~2-3 million inserts per day at scale",
+      "type": "factual",
+      "verified": true,
+      "evidence": "1M events * 2-3 notifications per event = 2-3 million inserts. Correct."
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
+        "reason": "Good flexible expectation allowing either Significant or Fatal classification. Both are defensible for a no-retry policy."
+      },
+      {
+        "assertion": "Overall Assessment verdict reflects that the design has fundamental issues that must be addressed before implementation",
+        "reason": "This is a good expectation that tests the overall calibration of the review. It ensures the reviewer doesn't under-rate a design with clear architectural flaws."
+      }
+    ],
+    "overall": "This is a well-balanced eval. The expectations cover the key scaling, reliability, and architectural concerns in the design doc. The expectations are specific enough to test domain knowledge (Kafka partitioning, provider rate limits) without being so narrow that reasonable alternative framings would fail. One possible addition: an expectation about the notifications_sent table becoming a bottleneck, which the with_skill output identified as S3."
+  }
+}

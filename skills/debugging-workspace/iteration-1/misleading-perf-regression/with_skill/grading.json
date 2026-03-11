@@ -1,0 +1,99 @@
+{
+  "expectations": [
+    {
+      "text": "Phase 1 dispatches at least 3 investigation subagents including Error Analysis, Change Analysis, and a Deep Dive or Evidence Gathering agent",
+      "passed": true,
+      "evidence": "Phase 1 dispatches 4 agents: 'Error Analysis Agent', 'Change Analysis Agent', 'Deep Dive Agent (Database/Migration)', and 'Evidence Gathering Agent'. All produce detailed individual reports."
+    },
+    {
+      "text": "Investigation does NOT immediately blame the new recommendation engine code — it follows evidence",
+      "passed": true,
+      "evidence": "Phase 0 explicitly states: 'I must follow the evidence, not the narrative.' All 4 agents independently conclude the recommendation engine is not the cause. Change Analysis states: 'Is NOT causing the performance regression.' Evidence Gathering calls the narrative 'a classic correlation-not-causation trap.'"
+    },
+    {
+      "text": "Synthesis report identifies that the slow query is on an EXISTING endpoint, not the new feature",
+      "passed": true,
+      "evidence": "Synthesis states: 'the slow query is from an unchanged endpoint' and ranks 'New recommendation engine code (REJECTED -- evidence contradicts)' as cause #3 with evidence against it."
+    },
+    {
+      "text": "Synthesis report notes the Seq Scan in the EXPLAIN output as concrete evidence of a missing or invalidated index",
+      "passed": true,
+      "evidence": "Error Analysis agent identifies 'Seq Scan (sequential scan) instead of an Index Scan -- the query planner is NOT using an index on created_at'. Synthesis states: 'The EXPLAIN output is the strongest evidence: it shows a sequential scan on the users table where an index scan should be used.'"
+    },
+    {
+      "text": "Phase 3 hypothesis targets the database migration's effect on the users table (index invalidation, table bloat, or missing index on created_at) — NOT the recommendation code",
+      "passed": true,
+      "evidence": "Hypothesis: 'The migration invalidated or caused the query planner to stop using the index on users.created_at, forcing sequential scans on what should be indexed lookups... The fix is to rebuild/recreate the index on users.created_at and run ANALYZE on the users table -- NOT to rewrite application code or recommendation queries.'"
+    },
+    {
+      "text": "Phase 3.5 red-teams the hypothesis and verifies it explains ALL symptoms (all endpoints slow, not just recommendations)",
+      "passed": true,
+      "evidence": "Red-team Challenge 1 explicitly checks all symptoms: response time jump (YES), slowdown affects ALL endpoints (YES), recommendations respond in 30ms (YES), regression started after v2.3 (YES). Also includes 'Challenge 4: The misleading timing correlation' addressing the narrative trap."
+    },
+    {
+      "text": "The hypothesis is specific and testable — e.g., 'The ALTER TABLE caused a full table rewrite that invalidated the index on users.created_at'",
+      "passed": true,
+      "evidence": "Hypothesis is highly specific: names the exact migration, the exact table, the exact column (created_at), the mechanism (index invalidation or stale statistics), and provides testable predictions (EXPLAIN should show Index Scan after fix, ANALYZE should improve performance)."
+    },
+    {
+      "text": "Phase 4 fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
+      "passed": true,
+      "evidence": "Fix is a 4-step SQL maintenance plan: 'ANALYZE users', 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_created_at ON users (created_at DESC)', 'REINDEX INDEX CONCURRENTLY idx_users_created_at', 'VACUUM (VERBOSE) users'. No application code changes."
+    },
+    {
+      "text": "Orchestrator explicitly rejects or deprioritizes the DBA's suggestion to rewrite recommendation queries as misdirected",
+      "passed": true,
+      "evidence": "Phase 3 has a dedicated section 'Explicitly Rejecting Misdirected Suggestions' that states: 'DBA's suggestion: \"Just rewrite the recommendation queries\" -- REJECTED. This is misdirected. The recommendation queries are not slow. The slow queries are on existing endpoints that touch the users table. Rewriting recommendation queries would have zero impact on the regression.'"
+    },
+    {
+      "text": "At least one status update mentions the misleading nature of the timing correlation with v2.3 deployment",
+      "passed": true,
+      "evidence": "Multiple mentions: Phase 0 says 'The narrative... and the DBA's suggestion... are both pointing at the new feature code. But the evidence points elsewhere.' Evidence Gathering Agent calls it 'a classic correlation-not-causation trap.' Red-team Challenge 4 addresses 'The misleading timing correlation'. Resolution Summary calls it 'a textbook example of correlation-not-causation in incident response.'"
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  },
+  "claims": [
+    {
+      "claim": "4 parallel investigation subagents were dispatched",
+      "type": "process",
+      "verified": true,
+      "evidence": "Error Analysis, Change Analysis, Deep Dive (Database/Migration), and Evidence Gathering agents each produce detailed reports."
+    },
+    {
+      "claim": "The hypothesis correctly identifies the ALTER TABLE migration as root cause",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Hypothesis names the exact migration SQL, the 50M-row table, and the mechanism (index invalidation / stale statistics)."
+    },
+    {
+      "claim": "The DBA's suggestion is explicitly rejected with evidence",
+      "type": "quality",
+      "verified": true,
+      "evidence": "Dedicated section 'Explicitly Rejecting Misdirected Suggestions' with evidence-based reasoning."
+    },
+    {
+      "claim": "8 total subagents dispatched",
+      "type": "factual",
+      "verified": false,
+      "evidence": "Transcript claims 8 total but this is a simulated count. The role breakdown (4 investigators + synthesis + implementer + red-team + code review) adds to 8 but cannot be independently verified."
+    }
+  ],
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Phase 4 fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
+        "reason": "This assertion is good but could be more specific about verifying the fix is safe for production (e.g., using CONCURRENTLY flag). The transcript does use CONCURRENTLY, which is a quality signal worth evaluating."
+      },
+      {
+        "assertion": "Investigation does NOT immediately blame the new recommendation engine code — it follows evidence",
+        "reason": "Strong assertion that tests resistance to narrative bias. Could be strengthened by checking whether the transcript explicitly names the correlation-causation fallacy."
+      }
+    ],
+    "overall": "This is a well-designed eval that tests both process compliance and the ability to resist misleading narratives. The expectations cover the critical domain skill of distinguishing correlation from causation, explicitly testing for rejection of the DBA's misdirected advice. The eval could be improved by adding an assertion about prevention/recurrence measures (the transcript includes deployment runbook updates but this is not tested). Consider also testing whether the transcript identifies specific unknowns (PostgreSQL version, index existence) as the with_skill transcript does this well."
+  }
+}

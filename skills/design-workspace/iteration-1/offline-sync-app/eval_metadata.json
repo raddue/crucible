@@ -12,7 +12,6 @@
     "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
     "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
     "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
-    "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
     "Gap scan is performed before saving, checking at least failure modes and edge cases"
   ]
 }
