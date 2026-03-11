@@ -7,15 +7,15 @@
       "expected_output": "Red-team should find the race condition in processNext (multiple concurrent calls can bypass the processing guard due to async/await yielding), the unbounded memory leak in results Map, the lack of retry logic, and the fact that this 'worker pool' is actually single-threaded sequential processing — completely inadequate for 500 events/second. Should NOT focus on style or naming.",
       "files": [],
       "expectations": [
-        "Announced use of the red-team skill at the start of the review",
+        "Review begins by establishing the scope and context of what artifact is being evaluated",
         "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
-        "Classified the race condition as Fatal severity",
+        "Identified the race condition as one of the most critical issues, explaining the potential impact (data corruption, lost events, or duplicate processing)",
         "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
         "Identified the unbounded results Map as a memory leak that grows without limit",
         "Identified missing retry logic for failed webhook deliveries",
-        "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+        "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
         "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
-        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
         "Did NOT focus on code style, naming conventions, or formatting as primary findings"
       ]
     },
@@ -25,16 +25,16 @@
       "expected_output": "Red-team should catch the single-partition bottleneck that cannot scale to 1M events/day, the lack of retry/dead-letter queue for failed notifications, the synchronous fan-out within a single process, and the missing rate limiting that could trigger provider throttling at scale. Should classify the scaling approach as Fatal since it contradicts stated growth targets.",
       "files": [],
       "expectations": [
-        "Announced use of the red-team skill at the start of the review",
-        "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
-        "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
+        "Review begins by establishing the scope and context of what artifact is being evaluated",
+        "Identified single Kafka partition with single consumer as the most critical scaling bottleneck, explaining why it cannot handle the 1M events/day growth target",
+        "Identified missing retry mechanism and dead-letter queue for failed notifications as a major reliability risk",
         "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
         "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
         "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
-        "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+        "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
         "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
-        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-        "Overall Assessment verdict reflects that the design has fundamental issues that must be addressed before implementation"
+        "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
+        "Overall assessment reflects that the design has fundamental issues that must be addressed before implementation"
       ]
     },
     {
@@ -43,15 +43,15 @@
       "expected_output": "Red-team should catch the path traversal vulnerability in Task 2, missing file type validation, missing file size limits, no virus/malware scanning, storing files on local filesystem (not scalable, lost on redeploy), and missing access control on downloads (any authenticated user can download any file). Should NOT miss the security gaps even though the prompt doesn't mention security.",
       "files": [],
       "expectations": [
-        "Announced use of the red-team skill at the start of the review",
+        "Review begins by establishing the scope and context of what artifact is being evaluated",
         "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
         "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
-        "Classified at least one of the security issues (path traversal or missing download auth) as Fatal",
+        "Identified path traversal or missing download authorization as the most critical security issues, explaining the attack scenario",
         "Identified missing file type validation (no restriction on what file types can be uploaded)",
         "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
         "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
-        "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
-        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+        "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
         "Security issues were prioritized over structural or stylistic concerns in the findings"
       ]
     },
@@ -61,15 +61,15 @@
       "expected_output": "Red-team should find this plan is well-structured with only minor issues. It should NOT manufacture Fatal issues. It might flag: using `id` for cursor assumes sequential IDs (minor), no mention of sort order customization (minor), SQLite vs PostgreSQL test fidelity (minor/significant). Should give a positive overall assessment.",
       "files": [],
       "expectations": [
-        "Announced use of the red-team skill at the start of the review",
-        "Did NOT classify any issues as Fatal — the plan has no fatal flaws",
-        "Correctly assessed the plan as fundamentally sound in the Overall Assessment",
-        "Identified the assumption that IDs are sequential integers as a Minor or Significant concern (UUIDs would break the cursor logic)",
+        "Review begins by establishing the scope and context of what artifact is being evaluated",
+        "Did NOT characterize any issues as showstoppers or blockers — the plan has no fatal flaws",
+        "Correctly assessed the plan as fundamentally sound in the overall assessment",
+        "Identified the assumption that IDs are sequential integers as a minor concern (UUIDs would break the cursor logic)",
         "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
-        "Did NOT manufacture severity inflation — Minor issues are classified as Minor, not Significant or Fatal",
-        "Overall Assessment verdict is 'Plan is solid' or equivalent positive assessment",
-        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
-        "Confidence level is stated in the Overall Assessment"
+        "Did NOT manufacture severity inflation — minor concerns are not exaggerated into major issues",
+        "Overall assessment verdict is positive ('plan is solid', 'ship it', or equivalent)",
+        "Findings are organized by severity with an overall assessment and verdict",
+        "Overall assessment conveys a clear confidence level in the review's conclusions"
       ]
     }
   ]
