@@ -7,17 +7,17 @@
       "expected_output": "Agent follows the full debugging workflow: dispatches parallel investigators in Phase 1, receives a synthesis report, forms a specific hypothesis about SQL injection via string interpolation, red-teams the hypothesis, then dispatches an implementer who writes a failing test and fixes with parameterized queries. The root cause (string interpolation in SQL) should be identified clearly, not just the symptom (500 error).",
       "files": [],
       "expectations": [
-        "Phase 0 context loading is performed or acknowledged before investigation begins",
-        "Phase 1 dispatches at least 2 parallel investigation subagents (Error Analysis and Change Analysis at minimum)",
-        "Orchestrator provides a status update between dispatches including current phase and what is being investigated",
-        "A synthesis report is produced consolidating Phase 1 findings before hypothesis formation",
-        "Phase 3 hypothesis specifically identifies string interpolation in SQL as the root cause — not just 'SQL error' or 'special characters'",
-        "Phase 3.5 red-teams the hypothesis before implementation proceeds",
-        "Phase 4 implementer writes a failing test BEFORE implementing the fix",
+        "Available context (error logs, code, timeline) is reviewed before jumping to a fix",
+        "Investigation examines at least 2 distinct dimensions of the problem (error analysis, change history, code review) before forming a hypothesis",
+        "Findings from different investigation angles are consolidated before forming a hypothesis — not jumping from a single clue to a fix",
+        "Hypothesis specifically identifies string interpolation in SQL as the root cause — not just 'SQL error' or 'special characters'",
+        "Hypothesis is challenged or verified against evidence before implementation begins",
+        "A failing test is written before the fix is implemented",
         "The fix uses parameterized queries or prepared statements — not string escaping as a band-aid",
-        "Phase 5 quality gate (red-team and/or code review) is performed on the fix",
-        "Orchestrator narrates each phase transition with hypothesis status and cycle count",
-        "The fix addresses the root cause (SQL injection vulnerability) not just the symptom (500 error on special characters)"
+        "The fix addresses the root cause (SQL injection vulnerability) not just the symptom (500 error on special characters)",
+        "The fix also handles the ampersand case mentioned in the bug report, not just the single-quote case shown in the stack trace",
+        "Quality review is performed on the fix before declaring it complete",
+        "Agent communicates reasoning progression clearly, showing how evidence led to the hypothesis"
       ]
     },
     {
@@ -26,16 +26,16 @@
       "expected_output": "Agent should NOT jump to blaming the new recommendation code. Investigation should reveal that the migration (ALTER TABLE ADD COLUMN on 50M rows) likely caused a table rewrite that invalidated existing indexes or bloated the table, causing the query planner to choose sequential scans over index scans. The hypothesis should target the missing/invalidated index on users.created_at, not the new recommendation feature.",
       "files": [],
       "expectations": [
-        "Phase 1 dispatches at least 3 investigation subagents including Error Analysis, Change Analysis, and a Deep Dive or Evidence Gathering agent",
+        "Investigation examines at least 3 distinct angles before forming a hypothesis (e.g., error analysis, change history, environment/dependency review)",
         "Investigation does NOT immediately blame the new recommendation engine code — it follows evidence",
-        "Synthesis report identifies that the slow query is on an EXISTING endpoint, not the new feature",
-        "Synthesis report notes the Seq Scan in the EXPLAIN output as concrete evidence of a missing or invalidated index",
-        "Phase 3 hypothesis targets the database migration's effect on the users table (index invalidation, table bloat, or missing index on created_at) — NOT the recommendation code",
-        "Phase 3.5 red-teams the hypothesis and verifies it explains ALL symptoms (all endpoints slow, not just recommendations)",
+        "Investigation identifies that the slow query is on an EXISTING endpoint (/api/users/recent), not the new recommendation feature",
+        "Investigation notes the Seq Scan in the EXPLAIN output as concrete evidence of a missing or invalidated index",
+        "Hypothesis targets the database migration's effect on the users table (index invalidation, table bloat, or missing index on created_at) — NOT the recommendation code",
+        "Hypothesis is verified against ALL symptoms (all endpoints slow, not just recommendations) before implementation",
         "The hypothesis is specific and testable — e.g., 'The ALTER TABLE caused a full table rewrite that invalidated the index on users.created_at'",
-        "Phase 4 fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
-        "Orchestrator explicitly rejects or deprioritizes the DBA's suggestion to rewrite recommendation queries as misdirected",
-        "At least one status update mentions the misleading nature of the timing correlation with v2.3 deployment"
+        "Fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
+        "Agent explicitly rejects or deprioritizes the DBA's suggestion to rewrite recommendation queries as misdirected",
+        "Agent explicitly addresses the misleading timing correlation between the v2.3 deployment and the performance regression"
       ]
     },
     {
@@ -44,16 +44,16 @@
       "expected_output": "Agent should NOT accept the user's suggested fix (cache invalidation). Investigation should reveal that the real issue is a race condition: the payment takes >5s sometimes, the frontend times out and retries, but the first payment is still in-flight. The order status hasn't been updated yet because the first Stripe call hasn't returned. Adding cache invalidation wouldn't help because the cache is correct — the status IS 'pending' when the retry arrives. The fix needs idempotency (idempotency key with Stripe) or a locking mechanism.",
       "files": [],
       "expectations": [
-        "Orchestrator does NOT immediately implement the user's suggested fix (cache invalidation)",
-        "Phase 1 investigation is dispatched BEFORE any fix is attempted — the Iron Law is followed",
-        "At least one investigator examines the timing evidence (5-second gap matching retry timeout)",
-        "Synthesis identifies the race condition: first Stripe call still in-flight when retry arrives, so status is still 'pending'",
-        "Phase 3 hypothesis identifies the race condition or lack of idempotency — NOT stale cache — as the root cause",
+        "Agent does NOT immediately implement the user's suggested fix (cache invalidation)",
+        "Investigation is performed BEFORE any fix is attempted — evidence is gathered first",
+        "Investigation examines the timing evidence (5-second gap matching the frontend retry timeout)",
+        "Investigation identifies the race condition: first Stripe call still in-flight when retry arrives, so order status is still 'pending'",
+        "Hypothesis identifies the race condition or lack of idempotency — NOT stale cache — as the root cause",
         "Hypothesis explicitly addresses why cache invalidation would NOT fix the problem (cache correctly shows 'pending' during the race window)",
-        "Phase 3.5 red-team challenges whether the hypothesis explains the 1-in-50 frequency (correlates with slow Stripe responses exceeding 5s timeout)",
-        "Phase 4 fix involves idempotency keys, distributed locking, or optimistic locking — not cache invalidation",
-        "Orchestrator explains to the user why their suggested fix is insufficient, with specific evidence from investigation",
-        "The debugging workflow resists pressure to skip investigation despite the user presenting a 'simple' fix"
+        "Hypothesis is verified by explaining the 1-in-50 frequency (correlates with slow Stripe responses exceeding the 5-second timeout)",
+        "Fix involves idempotency keys, distributed locking, or optimistic locking — not cache invalidation",
+        "Agent explains to the user why their suggested cache invalidation fix is insufficient, citing specific evidence",
+        "Agent resists pressure to skip investigation despite the user presenting a 'simple' fix"
       ]
     },
     {
@@ -62,16 +62,16 @@
       "expected_output": "Agent should investigate the intermittent nature, identify that the test uses a fixed 2-second sleep to wait for async job completion, but fulfillment can take up to 3 seconds. The CI runner downgrade from 4-core to 2-core made processing slower, pushing more jobs past the 2-second window. The root cause is the fragile timing assumption (sleep-based waiting), not a code bug. The fix should replace the sleep with condition-based polling.",
       "files": [],
       "expectations": [
-        "Phase 1 dispatches a Reproduction or Dependency/Environment agent in addition to Error and Change Analysis",
+        "Investigation includes environment/dependency analysis in addition to error and change analysis",
         "Investigation identifies the fixed sleep(2000) as a timing assumption that doesn't account for variable fulfillment time (500ms-3000ms)",
         "Investigation correlates the failure onset with the CI runner downgrade from 4-core to 2-core machines 2 weeks ago",
-        "Synthesis cross-references the timing: fulfillment takes up to 3000ms but test only waits 2000ms, and slower CI runners make this worse",
-        "Phase 3 hypothesis identifies the fragile sleep-based waiting pattern as the root cause, not a code bug in the order processing logic",
-        "Phase 3.5 red-team verifies the hypothesis explains the 30% failure rate (correlates with fulfillment time distribution exceeding 2s more often on slower hardware)",
-        "Phase 4 fix replaces the fixed sleep with condition-based polling or retry-until-condition (e.g., poll order status with timeout)",
-        "Phase 4 implementer writes a test that proves the sleep-based approach fails under slow conditions before implementing the fix",
-        "Phase 5 quality gate is run on the fix to verify it doesn't introduce flaky behavior of its own",
-        "Orchestrator identifies this as a test infrastructure issue, not an application code bug, and communicates this distinction clearly"
+        "Investigation cross-references the timing: fulfillment takes up to 3000ms but test only waits 2000ms, and slower CI runners exacerbate the gap",
+        "Hypothesis identifies the fragile sleep-based waiting pattern as the root cause, not a code bug in the order processing logic",
+        "Hypothesis is verified by explaining the ~30% failure rate (correlates with fulfillment time distribution exceeding 2s more often on slower hardware)",
+        "Fix replaces the fixed sleep with condition-based polling or retry-until-condition (e.g., poll order status with timeout)",
+        "A test or demonstration is provided showing why the sleep-based approach is fragile before implementing the fix",
+        "Quality review is performed on the fix to verify it doesn't introduce flaky behavior of its own",
+        "Agent identifies this as a test infrastructure issue, not an application code bug, and communicates this distinction clearly"
       ]
     }
   ]
