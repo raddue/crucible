@@ -1,0 +1,80 @@
+{
+  "skill_name": "design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Design a REST API for an event ticketing platform. The platform needs to handle events (concerts, conferences, sports), venues with seating maps, ticket purchasing with seat selection, and waitlists when events sell out. We're using Node.js with Express and PostgreSQL. The API will serve both a web frontend and a mobile app. We expect up to 10,000 concurrent users during popular event on-sales.",
+      "expected_output": "Design document covering resource modeling, HTTP verb usage, pagination, error responses, concurrency handling for seat selection, and a clear architecture for the ticketing domain. Should follow the investigated-questions workflow with hypotheses, agent dispatches, and synthesis.",
+      "files": [],
+      "expectations": [
+        "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+        "Investigation findings include surprises or confirmations compared to the stated hypotheses",
+        "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
+        "Design decisions are presented with 2-3 informed options and a recommendation",
+        "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
+        "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
+        "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
+        "Design specifies error response format with consistent structure (status codes, error codes, messages)",
+        "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
+        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
+        "Gap scan is performed before saving, checking at least acceptance criteria and failure modes"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Design an offline-first mobile app for field inspectors who visit construction sites without reliable internet. They need to fill out inspection forms with photos, get signatures, and sync everything when back online. The backend is a Django REST API with PostgreSQL. Multiple inspectors might visit the same site and edit overlapping data. We're building with React Native.",
+      "expected_output": "Design document addressing offline storage, sync protocol, conflict resolution for concurrent edits, photo handling, and signature capture. Should demonstrate the investigated-questions process with cascading context between decisions.",
+      "files": [],
+      "expectations": [
+        "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+        "Cascading context is maintained — later design questions reference and build on earlier decisions",
+        "At least one question is auto-resolved with explanation when only one viable path exists",
+        "Design specifies a local storage strategy for offline data (e.g., SQLite, WatermelonDB, or Realm with explicit rationale)",
+        "Design includes a concrete conflict resolution strategy for overlapping edits (e.g., last-write-wins, field-level merge, operational transforms, or CRDTs — with trade-off analysis)",
+        "Design addresses sync protocol with specific mechanism (e.g., change tracking with timestamps/version vectors, event sourcing, or delta sync)",
+        "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
+        "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
+        "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
+        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
+        "Gap scan is performed before saving, checking at least failure modes and edge cases"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Design the migration of our e-commerce monolith into services. The monolith handles: user accounts, product catalog, inventory, orders, payments (via Stripe), shipping label generation, email notifications, and a recommendation engine. It's a Rails app with a single PostgreSQL database. We have 50,000 daily active users and zero downtime tolerance. The team has 6 backend engineers.",
+      "expected_output": "Design document with bounded context identification, phased migration plan, data ownership strategy, and inter-service communication patterns. Should use deep-dive investigations for architectural decisions and address team capacity constraints.",
+      "files": [],
+      "expectations": [
+        "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+        "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
+        "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
+        "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
+        "Design addresses data ownership — each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
+        "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
+        "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
+        "Design considers the 6-engineer team constraint — does not propose extracting all services simultaneously or an unrealistic timeline",
+        "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
+        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Design a real-time collaborative document editor (like Google Docs) that must also work offline, support documents up to 500 pages, and maintain a complete version history. The target is sub-100ms latency for keystroke propagation between collaborators. We're a team of 2 engineers with 3 months. Use TypeScript for both frontend and backend.",
+      "expected_output": "Design should surface the tension between the ambitious requirements and the team constraints. The investigated-questions process should reveal that some requirements conflict or need scoping down. Design should make hard trade-off decisions rather than hand-waving.",
+      "files": [],
+      "expectations": [
+        "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+        "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
+        "Design recommends scoping down or phasing the requirements rather than promising to deliver everything — YAGNI principle is applied",
+        "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
+        "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
+        "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
+        "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
+        "At least one investigated question redirects — the investigation reveals the real decision is different from the originally framed question",
+        "Design presentation is broken into sections with opportunity for user feedback between sections",
+        "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
+        "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy"
+      ]
+    }
+  ]
+}
