@@ -1,0 +1,76 @@
+{
+  "skill_name": "red-team",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Red-team this code. It's a worker pool for processing incoming webhook events in our Node.js service:\n\n```typescript\nclass WebhookWorkerPool {\n  private queue: WebhookEvent[] = [];\n  private processing = false;\n  private results: Map<string, ProcessingResult> = new Map();\n\n  async enqueue(event: WebhookEvent): Promise<void> {\n    this.queue.push(event);\n    this.processNext();\n  }\n\n  private async processNext(): Promise<void> {\n    if (this.processing || this.queue.length === 0) return;\n    this.processing = true;\n\n    const event = this.queue.shift()!;\n    try {\n      const result = await this.handle(event);\n      this.results.set(event.id, result);\n    } catch (err) {\n      this.results.set(event.id, { status: 'failed', error: err.message });\n    }\n\n    this.processing = false;\n    this.processNext();\n  }\n\n  private async handle(event: WebhookEvent): Promise<ProcessingResult> {\n    const response = await fetch(event.callbackUrl, {\n      method: 'POST',\n      body: JSON.stringify(event.payload),\n    });\n    return { status: response.ok ? 'success' : 'failed' };\n  }\n\n  getResult(eventId: string): ProcessingResult | undefined {\n    return this.results.get(eventId);\n  }\n}\n```\n\nThe code compiles fine and handles the happy path correctly. Our load is about 500 events/second.",
+      "expected_output": "Red-team should find the race condition in processNext (multiple concurrent calls can bypass the processing guard due to async/await yielding), the unbounded memory leak in results Map, the lack of retry logic, and the fact that this 'worker pool' is actually single-threaded sequential processing — completely inadequate for 500 events/second. Should NOT focus on style or naming.",
+      "files": [],
+      "expectations": [
+        "Announced use of the red-team skill at the start of the review",
+        "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
+        "Classified the race condition as Fatal severity",
+        "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
+        "Identified the unbounded results Map as a memory leak that grows without limit",
+        "Identified missing retry logic for failed webhook deliveries",
+        "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+        "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
+        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "Did NOT focus on code style, naming conventions, or formatting as primary findings"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Red-team this design doc for our new event-driven notification system:\n\n## Notification Service Design\n\n**Goal:** Send user notifications (email, push, SMS) when events occur in the system.\n\n**Architecture:**\n- A single `NotificationRouter` service reads from a Kafka topic (`events`).\n- For each event, it looks up the user's notification preferences in a PostgreSQL table and fans out to the appropriate channels.\n- Email is sent via SES, push via Firebase, SMS via Twilio.\n- Each channel handler is a function call within the NotificationRouter process.\n- We store a `notifications_sent` log table for auditing.\n\n**Scaling:** The NotificationRouter runs as a single instance consuming from a single Kafka partition. If load increases, we plan to 'scale up' the instance.\n\n**Error handling:** If a channel fails, we log the error and move on to the next event. No retries.\n\n**Data model:**\n- `user_preferences`: user_id (PK), email_enabled, push_enabled, sms_enabled\n- `notifications_sent`: id, user_id, channel, event_type, sent_at\n\nWe expect ~10k events/day initially, growing to ~1M events/day within 6 months.",
+      "expected_output": "Red-team should catch the single-partition bottleneck that cannot scale to 1M events/day, the lack of retry/dead-letter queue for failed notifications, the synchronous fan-out within a single process, and the missing rate limiting that could trigger provider throttling at scale. Should classify the scaling approach as Fatal since it contradicts stated growth targets.",
+      "files": [],
+      "expectations": [
+        "Announced use of the red-team skill at the start of the review",
+        "Identified single Kafka partition with single consumer as a Fatal scaling bottleneck given the 1M events/day growth target",
+        "Identified missing retry mechanism and dead-letter queue for failed notifications as Significant or Fatal",
+        "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
+        "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
+        "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
+        "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+        "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
+        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "Overall Assessment verdict reflects that the design has fundamental issues that must be addressed before implementation"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Red-team this implementation plan for adding a file upload feature to our web app:\n\n## Plan: User File Upload\n\n**Task 1:** Add a POST /api/files endpoint that accepts multipart form data. Save the uploaded file to the local filesystem under /uploads/{userId}/{filename}.\n\n**Task 2:** Add a GET /api/files/{fileId} endpoint that returns the file. Look up the file path from the database and use `res.sendFile(path)`.\n\n**Task 3:** Add a files table: id, user_id, filename, path, uploaded_at.\n\n**Task 4:** Add a UI component with a drag-and-drop zone that calls the upload endpoint.\n\n**Task 5:** Write integration tests for upload and download.\n\nThe app uses Express.js, PostgreSQL, and React. We use JWT auth middleware on all /api routes. Expected usage: ~200 users uploading documents (PDFs, spreadsheets) up to 50MB each.",
+      "expected_output": "Red-team should catch the path traversal vulnerability in Task 2, missing file type validation, missing file size limits, no virus/malware scanning, storing files on local filesystem (not scalable, lost on redeploy), and missing access control on downloads (any authenticated user can download any file). Should NOT miss the security gaps even though the prompt doesn't mention security.",
+      "files": [],
+      "expectations": [
+        "Announced use of the red-team skill at the start of the review",
+        "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
+        "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
+        "Classified at least one of the security issues (path traversal or missing download auth) as Fatal",
+        "Identified missing file type validation (no restriction on what file types can be uploaded)",
+        "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
+        "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
+        "Every Fatal and Significant challenge includes a proposed fix, not just identification of the problem",
+        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "Security issues were prioritized over structural or stylistic concerns in the findings"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Red-team this implementation plan for adding pagination to our API:\n\n## Plan: Cursor-based Pagination\n\n**Task 1:** Create a `PaginationParams` type with `cursor?: string` and `limit: number` (default 20, max 100). Write unit tests for parameter validation.\n\n**Task 2:** Implement a `paginate<T>` helper that takes a Knex query builder, applies `WHERE id > cursor ORDER BY id ASC LIMIT limit+1`, returns `{ data: T[], nextCursor: string | null }`. The +1 trick determines if there's a next page. Write tests with an in-memory SQLite database.\n\n**Task 3:** Apply `paginate` to GET /api/users and GET /api/orders endpoints. Each endpoint already has integration tests — extend them with pagination test cases.\n\n**Task 4:** Update the React frontend to use `nextCursor` for infinite scroll. Add a `useInfiniteQuery` hook wrapping React Query.\n\n**Task 5:** Update API documentation with cursor pagination examples.\n\n**Task 6:** Run the full test suite and verify all existing tests still pass.\n\nTech stack: Express, PostgreSQL, Knex, React, React Query, Vitest.",
+      "expected_output": "Red-team should find this plan is well-structured with only minor issues. It should NOT manufacture Fatal issues. It might flag: using `id` for cursor assumes sequential IDs (minor), no mention of sort order customization (minor), SQLite vs PostgreSQL test fidelity (minor/significant). Should give a positive overall assessment.",
+      "files": [],
+      "expectations": [
+        "Announced use of the red-team skill at the start of the review",
+        "Did NOT classify any issues as Fatal — the plan has no fatal flaws",
+        "Correctly assessed the plan as fundamentally sound in the Overall Assessment",
+        "Identified the assumption that IDs are sequential integers as a Minor or Significant concern (UUIDs would break the cursor logic)",
+        "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
+        "Did NOT manufacture severity inflation — Minor issues are classified as Minor, not Significant or Fatal",
+        "Overall Assessment verdict is 'Plan is solid' or equivalent positive assessment",
+        "Report uses the required format: Fatal Challenges, Significant Challenges, Minor Observations, Overall Assessment with Verdict and Confidence",
+        "Confidence level is stated in the Overall Assessment"
+      ]
+    }
+  ]
+}
