@@ -1,0 +1,82 @@
+{
+  "skill_name": "quality-gate",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just finished writing a design doc for adding a caching layer to our REST API. The design says we'll use Redis for everything — session data, query caches, rate limiting counters, and as the primary data store for user preferences. We'll run a single Redis instance with no replication. The cache invalidation strategy is 'clear everything on deploy'. Please run a quality gate on this design.",
+      "expected_output": "Quality gate should identify multiple issues across multiple rounds, tracking weighted severity scores, and iterate until findings are addressed or stagnation is detected.",
+      "files": [],
+      "expectations": [
+        "Performed at least 2 iterative red-team rounds",
+        "Each round includes explicit Fatal or Significant severity ratings",
+        "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+        "Artifact was revised between rounds based on findings",
+        "Stagnation detection applied via weighted score comparison after each round",
+        "First output message explicitly states this is a quality gate review",
+        "Identified single point of failure as a Fatal-severity issue",
+        "Identified using Redis as primary data store as a Fatal-severity issue",
+        "Identified naive cache invalidation strategy as a problem",
+        "Final round has zero Fatal findings in the revised artifact",
+        "Final revised design no longer uses Redis as primary data store",
+        "Final revised design addresses single point of failure with replication or failover"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Here's my implementation plan for adding email notifications. Task 1: Install nodemailer. Task 2: Write a sendEmail function that takes to/subject/body and calls nodemailer.sendMail directly from the request handler. Task 3: Add a POST /send-notification endpoint. Task 4: Deploy. Run a quality gate on this plan.",
+      "expected_output": "Quality gate should catch missing error handling, no queuing/async processing, no retry logic, no TDD structure, missing tests, tight coupling to request handler. Should iterate with weighted scoring.",
+      "files": [],
+      "expectations": [
+        "Performed at least 2 iterative red-team rounds",
+        "Each round includes explicit Fatal or Significant severity ratings",
+        "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+        "Artifact was revised between rounds based on findings",
+        "Stagnation detection applied via weighted score comparison after each round",
+        "Explicitly announced running a quality gate at start",
+        "Identified synchronous email sending in request handler as a problem",
+        "Identified missing authentication/authorization on the endpoint",
+        "Identified missing tests in the plan",
+        "Final round has zero Fatal findings in the revised artifact",
+        "Final revised plan includes async/queued email processing instead of synchronous sending",
+        "Final revised plan includes authentication on the notification endpoint"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I wrote a utility function and I think it's ready. Can you quality gate this code?\n\n```python\ndef process_user_data(data):\n    name = data['name']\n    email = data['email']\n    age = int(data['age'])\n    query = f\"INSERT INTO users VALUES ('{name}', '{email}', {age})\"\n    db.execute(query)\n    return {'status': 'ok', 'message': f'Added {name}'}\n```",
+      "expected_output": "Quality gate should identify SQL injection (Fatal), no input validation, no error handling. Should iterate with Fatal issues weighted at 3 and drive toward parameterized queries.",
+      "files": [],
+      "expectations": [
+        "Performed at least 2 iterative red-team rounds",
+        "Each round includes explicit Fatal or Significant severity ratings",
+        "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+        "Artifact was revised between rounds based on findings",
+        "Stagnation detection applied via weighted score comparison after each round",
+        "Explicitly announced running a quality gate at start",
+        "Identified SQL injection as a Fatal-severity issue",
+        "Identified missing input validation as a problem",
+        "Identified missing error handling as a problem",
+        "Final revised code uses parameterized queries instead of f-string SQL",
+        "Final revised code includes input validation for name, email, and age fields",
+        "Final revised code includes error handling with try/catch or equivalent"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Run a quality gate on this design for a microservices architecture:\n\nWe'll split our monolith into 47 microservices, one per database table. Each service owns exactly one table and communicates via synchronous REST calls. Service A calls Service B which calls Service C which calls Service D for every user request. We'll use eventual consistency everywhere — no transactions. Each service will have its own copy of shared data, synced via nightly batch jobs. Authentication is handled by passing the user's raw password between services in HTTP headers.\n\nThis design is intentionally resistant to quick fixes — the fundamental architecture (47 services mirroring tables, deep synchronous call chains, password in headers) cannot be incrementally patched.",
+      "expected_output": "Quality gate should find Fatal architectural issues that cannot be incrementally fixed. Should detect stagnation (weighted score not decreasing) and escalate to user rather than looping forever.",
+      "files": [],
+      "expectations": [
+        "Performed at least 2 iterative red-team rounds",
+        "Each round includes explicit Fatal or Significant severity ratings",
+        "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+        "Detected stagnation when weighted score did not strictly decrease between rounds",
+        "Escalated to user with findings when stagnation was detected",
+        "Identified passing raw passwords in HTTP headers as a Fatal security issue",
+        "Identified deep synchronous call chain as a Fatal reliability issue",
+        "Identified 1-table-per-service decomposition as architecturally unsound (services should align with bounded contexts)",
+        "Identified passing raw passwords between services as the highest-severity security issue"
+      ]
+    }
+  ]
+}

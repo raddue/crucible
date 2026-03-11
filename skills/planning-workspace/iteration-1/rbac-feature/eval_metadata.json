@@ -1,0 +1,18 @@
+{
+  "eval_id": 3,
+  "eval_name": "rbac-feature",
+  "prompt": "Add role-based access control to our existing API. We have users in a PostgreSQL database and JWT auth already working. Need three roles: admin, editor, viewer. Admins can do everything, editors can create/edit but not delete, viewers are read-only. The auth middleware is at src/middleware/auth.ts.",
+  "expectations": [
+    "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+    "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+    "Every task specifies exact file paths for files to Create, Modify, and Test",
+    "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+    "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+    "Exact test commands with expected output are included",
+    "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+    "Plan defines exactly three roles: admin, editor, viewer",
+    "Plan's permission model gives admin full access, editor create+edit but not delete, viewer read-only",
+    "Plan includes a database migration for roles (new table or column)",
+    "Plan modifies or extends the existing auth middleware at src/middleware/auth.ts"
+  ]
+}

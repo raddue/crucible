@@ -1,0 +1,17 @@
+{
+  "eval_id": 1,
+  "eval_name": "websocket-feature",
+  "prompt": "We need to add WebSocket support to our Express API for real-time notifications. Users should be able to subscribe to events for specific resources (like 'order:123:status'). The server is in src/server.ts, routes are in src/routes/, and we use PostgreSQL. Write an implementation plan.",
+  "expectations": [
+    "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+    "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+    "Every task specifies exact file paths for files to Create, Modify, and Test",
+    "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+    "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+    "Exact test commands with expected output are included",
+    "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+    "Plan includes a subscription mechanism for resource-specific events (e.g., 'order:123:status' pattern)",
+    "Plan addresses WebSocket authentication/authorization",
+    "Plan includes PostgreSQL integration for event persistence or LISTEN/NOTIFY"
+  ]
+}

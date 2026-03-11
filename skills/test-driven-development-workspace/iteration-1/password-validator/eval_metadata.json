@@ -1,0 +1,16 @@
+{
+  "eval_id": 1,
+  "eval_name": "password-validator",
+  "prompt": "Add a password strength validator to our auth module. It should check minimum 8 characters, at least one uppercase, one lowercase, one digit, and one special character. Return a score from 0-4 based on how many criteria are met. The file is at src/auth/validators.ts and tests go in tests/auth/validators.test.ts.",
+  "expectations": [
+    "Test written BEFORE implementation code — a test file exists before the validator function is implemented",
+    "Test is run and verified to fail before any implementation is written",
+    "The initial failure is for the right reason (missing function/module, not a syntax error)",
+    "Minimal implementation written to make failing tests pass — no over-engineering beyond what tests require",
+    "Tests run again and verified to pass after implementation",
+    "At least 3 separate red-green cycles visible (not one big batch of tests then one big implementation)",
+    "Final implementation correctly returns score 0 for empty string",
+    "Final implementation correctly returns score 4 for a password meeting all criteria",
+    "Tests cover all 5 criteria: min length, uppercase, lowercase, digit, special character"
+  ]
+}

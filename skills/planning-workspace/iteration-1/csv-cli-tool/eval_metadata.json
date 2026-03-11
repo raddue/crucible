@@ -1,0 +1,17 @@
+{
+  "eval_id": 2,
+  "eval_name": "csv-cli-tool",
+  "prompt": "We need a CLI tool that reads a CSV file, validates the data against a JSON schema, and outputs a report of validation errors. It should support custom validators via a plugin directory. Write a plan.",
+  "expectations": [
+    "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+    "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+    "Every task specifies exact file paths for files to Create, Modify, and Test",
+    "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+    "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+    "Exact test commands with expected output are included",
+    "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+    "Plan includes CSV parsing with configurable delimiters or at minimum comma support",
+    "Plan includes JSON Schema validation of CSV row data",
+    "Plan includes a plugin loading mechanism for custom validators"
+  ]
+}
