@@ -10,7 +10,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 | Platform | Status |
 |----------|--------|
-| Claude Code | Pending submission |
+| Claude Code | Pending review |
 | Cursor | Planned |
 | OpenAI Codex | Planned |
 | [skills.sh](https://skills.sh) | Planned |
