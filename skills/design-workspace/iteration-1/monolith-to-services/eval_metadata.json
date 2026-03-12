@@ -1,16 +1,5 @@
 {
   "eval_id": 3,
   "eval_name": "monolith-to-services",
-  "prompt": "Design the migration of our e-commerce monolith into services. The monolith handles: user accounts, product catalog, inventory, orders, payments (via Stripe), shipping label generation, email notifications, and a recommendation engine. It's a Rails app with a single PostgreSQL database. We have 50,000 daily active users and zero downtime tolerance. The team has 6 backend engineers.",
-  "expectations": [
-    "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-    "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
-    "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
-    "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
-    "Design addresses data ownership — each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
-    "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
-    "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
-    "Design considers the 6-engineer team constraint — does not propose extracting all services simultaneously or an unrealistic timeline",
-    "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)"
-  ]
+  "prompt": "Design the migration of our e-commerce monolith into services. The monolith handles: user accounts, product catalog, inventory, orders, payments (via Stripe), shipping label generation, email notifications, and a recommendation engine. It's a Rails app with a single PostgreSQL database. We have 50,000 daily active users and zero downtime tolerance. The team has 6 backend engineers."
 }

@@ -1,14 +1,5 @@
 {
   "eval_id": 2,
   "eval_name": "product-search",
-  "prompt": "Use the innovate skill on this finalized implementation plan:\n\n## Plan: Add Search to Product Catalog\n\n**Task 1:** Add a `GET /api/products/search?q=term&category=X&minPrice=N&maxPrice=N` endpoint\n**Task 2:** Implement full-text search using PostgreSQL `tsvector` and `tsquery` on product name and description\n**Task 3:** Add indexed `category` and `price` columns for filtering\n**Task 4:** Add relevance ranking using `ts_rank()` and sort by relevance by default\n**Task 5:** Add pagination using our existing `paginate()` helper (cursor-based)\n**Task 6:** Update frontend search component to use the new endpoint with debounced input\n**Task 7:** Write integration tests for search with various query combinations\n**Task 8:** Add a search analytics table to log queries (for future relevance tuning)\n\n**Context:** E-commerce app, ~50k products, PostgreSQL 15, Express, React. Current 'search' is just a `LIKE '%term%'` query on product name. Team of 4, 2-sprint timeline (4 weeks).\n\n**Already decided:** PostgreSQL full-text search (not Elasticsearch — not enough scale to justify ops overhead). Cursor-based pagination reuses existing infrastructure.",
-  "expectations": [
-    "Proposes exactly ONE addition, not a feature wishlist",
-    "The proposed addition builds on existing plan components rather than introducing entirely new infrastructure",
-    "Proposal fits within the 4-week timeline and doesn't require new infrastructure beyond PostgreSQL",
-    "Proposal includes why this addition over alternatives",
-    "Proposal states impact and cost",
-    "Proposal is genuinely useful — not obvious busywork that adds complexity without proportional value",
-    "Proposal does NOT expand scope dramatically (no Elasticsearch, no ML, no A/B testing)"
-  ]
+  "prompt": "Use the innovate skill on this finalized implementation plan:\n\n## Plan: Add Search to Product Catalog\n\n**Task 1:** Add a `GET /api/products/search?q=term&category=X&minPrice=N&maxPrice=N` endpoint\n**Task 2:** Implement full-text search using PostgreSQL `tsvector` and `tsquery` on product name and description\n**Task 3:** Add indexed `category` and `price` columns for filtering\n**Task 4:** Add relevance ranking using `ts_rank()` and sort by relevance by default\n**Task 5:** Add pagination using our existing `paginate()` helper (cursor-based)\n**Task 6:** Update frontend search component to use the new endpoint with debounced input\n**Task 7:** Write integration tests for search with various query combinations\n**Task 8:** Add a search analytics table to log queries (for future relevance tuning)\n\n**Context:** E-commerce app, ~50k products, PostgreSQL 15, Express, React. Current 'search' is just a `LIKE '%term%'` query on product name. Team of 4, 2-sprint timeline (4 weeks).\n\n**Already decided:** PostgreSQL full-text search (not Elasticsearch — not enough scale to justify ops overhead). Cursor-based pagination reuses existing infrastructure."
 }

@@ -1,19 +1,5 @@
 {
   "eval_id": 1,
   "eval_name": "flawed-design",
-  "prompt": "I just finished writing a design doc for adding a caching layer to our REST API. The design says we'll use Redis for everything — session data, query caches, rate limiting counters, and as the primary data store for user preferences. We'll run a single Redis instance with no replication. The cache invalidation strategy is 'clear everything on deploy'. Please run a quality gate on this design.",
-  "expectations": [
-    "Performed at least 2 iterative red-team rounds",
-    "Each round includes explicit Fatal or Significant severity ratings",
-    "Weighted score tracked between rounds using Fatal=3 and Significant=1",
-    "Artifact was revised between rounds based on findings",
-    "Stagnation detection applied via weighted score comparison after each round",
-    "First output message explicitly states this is a quality gate review",
-    "Identified single point of failure as a Fatal-severity issue",
-    "Identified using Redis as primary data store as a Fatal-severity issue",
-    "Identified naive cache invalidation strategy as a problem",
-    "Final round has zero Fatal findings in the revised artifact",
-    "Final revised design no longer uses Redis as primary data store",
-    "Final revised design addresses single point of failure with replication or failover"
-  ]
+  "prompt": "I just finished writing a design doc for adding a caching layer to our REST API. The design says we'll use Redis for everything — session data, query caches, rate limiting counters, and as the primary data store for user preferences. We'll run a single Redis instance with no replication. The cache invalidation strategy is 'clear everything on deploy'. Please run a quality gate on this design."
 }

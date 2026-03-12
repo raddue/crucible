@@ -10,32 +10,37 @@
     {
       "expectation": "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
       "verdict": "PASS",
-      "justification": "Issue #2 correctly identifies the interleaving problem: enqueue() calling processNext() between the 'processing = false' line and the recursive processNext() call, leading to two concurrent processing chains both calling shift() on the same queue."
+      "justification": "Issue #2 correctly identifies the interleaving problem: 'if enqueue() is called between the this.processing = false line and the recursive this.processNext() call, the enqueue's own this.processNext() call could start a second concurrent processing chain. Now you have two chains both calling shift() on the same queue.'"
     },
     {
       "expectation": "Identified the race condition as one of the most critical issues, explaining the potential impact (data corruption, lost events, or duplicate processing)",
       "verdict": "PASS",
-      "justification": "The race condition is listed as issue #2 and called a 'significant problem' in the summary. Impact is explained: 'two chains both calling shift() on the same queue, which could lead to undefined behavior or skipped events.' Treated as a top-tier finding alongside the sequential processing bottleneck."
+      "justification": "The race condition is listed as issue #2 and called a 'significant problem' in the summary. Impact is explained: 'could lead to undefined behavior or skipped events.' Treated as a top-tier finding."
     },
     {
       "expectation": "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
       "verdict": "PASS",
-      "justification": "Issue #1 clearly identifies this: 'this processes events one at a time' and quantifies the gap — at 100ms per fetch, only 10 events/second vs. the 500/s requirement. States 'The queue will grow unboundedly and events will be delayed indefinitely.'"
+      "justification": "Issue #1 clearly identifies: 'this processes events one at a time' and quantifies the gap — 'assuming each fetch call to the callback URL takes even 100ms, you'd process at most 10 events/second. The queue will grow unboundedly and events will be delayed indefinitely.'"
+    },
+    {
+      "expectation": "Quantifies or explains the throughput gap: at 500 events/second with sequential async processing, the queue will grow unboundedly",
+      "verdict": "PASS",
+      "justification": "Issue #1 provides quantitative reasoning: 'assuming each fetch call to the callback URL takes even 100ms, you'd process at most 10 events/second' against the 500/second load. Explicitly states 'The queue will grow unboundedly and events will be delayed indefinitely.' This is a clear explanation of the throughput mismatch with unbounded queue growth."
     },
     {
       "expectation": "Identified the unbounded results Map as a memory leak that grows without limit",
       "verdict": "PASS",
-      "justification": "Issue #3 explicitly identifies the memory leak: 'The results Map grows without limit. Every processed event adds an entry, and nothing ever removes them... At 500 events/second, that's 43 million entries per day. This is a memory leak.'"
+      "justification": "Issue #3: 'The results Map grows without limit. Every processed event adds an entry, and nothing ever removes them... At 500 events/second, that's 43 million entries per day. This is a memory leak.'"
     },
     {
       "expectation": "Identified missing retry logic for failed webhook deliveries",
       "verdict": "PASS",
-      "justification": "Issue #4 identifies the lack of retries: 'If a webhook delivery fails (network error, timeout, 5xx response), the event is simply marked as failed and discarded... Without retries, transient failures cause permanent data loss for the consumer.'"
+      "justification": "Issue #4: 'If a webhook delivery fails (network error, timeout, 5xx response), the event is simply marked as failed and discarded... Without retries, transient failures cause permanent data loss for the consumer.'"
     },
     {
       "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
       "verdict": "FAIL",
-      "justification": "Issue #1 proposes concurrent workers/p-limit. Issue #3 proposes TTL/LRU/Redis eviction. Issue #4 mentions retries with exponential backoff. However, Issue #2 (race condition) — one of the most critical findings — describes the problem in detail but does not propose a fix or mitigation strategy."
+      "justification": "Issue #1 proposes concurrent workers/p-limit. Issue #3 proposes TTL/LRU/Redis eviction. Issue #4 mentions retries with exponential backoff. However, Issue #2 (race condition) — one of the most critical findings — describes the problem in detail but does not propose a fix or mitigation strategy. The expectation requires EVERY major finding to include a fix."
     },
     {
       "expectation": "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
@@ -50,13 +55,11 @@
     {
       "expectation": "Did NOT focus on code style, naming conventions, or formatting as primary findings",
       "verdict": "PASS",
-      "justification": "All primary findings are about correctness, concurrency, performance, and reliability. The naming observation ('isn't really a worker pool') is used to highlight a functional concern (sequential processing), not a style complaint."
+      "justification": "All primary findings are about correctness, concurrency, performance, and reliability. The naming observation ('isn't really a worker pool') is used to highlight a functional concern (sequential processing), not a style complaint. The err.message typing note (issue #6) is listed as minor."
     }
   ],
-  "score": "9/10",
+  "score": "10/11",
   "eval_feedback": [
-    "The 'every major finding includes a proposed fix' expectation is good for measuring actionability. The transcript failed because the race condition section focused on explaining the problem without offering a solution.",
-    "The expectation about 'most critical issues' could specify whether 'one of the most critical' means top-2 or top-3 to reduce grading ambiguity.",
-    "Consider adding an expectation about whether the review identifies backpressure or queue growth as a concern, since the transcript does cover this (Issue #7) and it naturally extends the throughput problem."
+    "Strong review that identifies all key technical issues with quantitative reasoning. The one miss is the race condition finding lacking a proposed fix, which the with_skill condition addressed with a while-loop pattern."
   ]
 }

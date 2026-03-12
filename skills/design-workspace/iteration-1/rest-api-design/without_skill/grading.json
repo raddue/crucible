@@ -1,104 +1,67 @@
 {
+  "eval_name": "rest-api-design",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": false,
-      "evidence": "The document does not use an investigation-based process. It is organized as a straightforward specification document with sections (Resource Modeling, Pagination, Error Response, Concurrency Control, etc.) but no investigated questions, no hypotheses, and no investigation phases. Design choices are stated directly without the hypothesis-investigation-decision pattern."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "FAIL",
+      "justification": "The design does not use an investigated-questions workflow. There are no hypotheses stated. The document presents decisions directly without a hypothesis-investigation-surprise structure."
     },
     {
-      "text": "Investigation findings include surprises or confirmations compared to the stated hypotheses",
-      "passed": false,
-      "evidence": "No hypotheses are stated, so there are no surprises or confirmations to report. The document presents conclusions directly without reflecting on what was expected vs. what was found."
+      "expectation": "Investigation findings include surprises or confirmations compared to the stated hypotheses",
+      "verdict": "FAIL",
+      "justification": "No investigation findings or surprises are documented because there is no investigation process."
     },
     {
-      "text": "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
-      "passed": false,
-      "evidence": "The document does not use multi-agent investigation. There are no Codebase Scout, Domain Researcher, Impact Analyst, or Challenge sections. The design is presented as a single-voice specification."
+      "expectation": "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
+      "verdict": "FAIL",
+      "justification": "No agent-based investigation pattern is used. The document is a straightforward design spec without the multi-agent deep-dive structure."
     },
     {
-      "text": "Design decisions are presented with 2-3 informed options and a recommendation",
-      "passed": false,
-      "evidence": "Most decisions are stated as conclusions without presenting alternatives. For example, cursor-based pagination is recommended with rationale but offset-based is only mentioned in passing. The concurrency control section mentions 'Not pure optimistic locking' and 'Not distributed locks' but these are dismissals, not a structured options comparison. There is no structured comparison table or formal recommendation process."
+      "expectation": "Design decisions are presented with 2-3 informed options and a recommendation",
+      "verdict": "FAIL",
+      "justification": "Decisions are presented as direct recommendations without exploring alternatives systematically. The concurrency section mentions why NOT pure optimistic locking or Redlock, but these are dismissals rather than a structured options analysis with comparison."
     },
     {
-      "text": "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
-      "passed": true,
-      "evidence": "The Resource Modeling section provides comprehensive REST endpoints with noun-based resources: /events, /venues, /tickets, /reservations, /waitlist, /orders, /users. HTTP verbs are correctly used: GET for retrieval, POST for creation, PUT for full updates, DELETE for removal. All endpoints follow REST conventions with proper nesting (e.g., /venues/:venueId/sections/:sectionId/seats)."
+      "expectation": "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
+      "verdict": "PASS",
+      "justification": "Resources use proper nouns (/events, /venues, /tickets, /reservations, /orders, /waitlist) with correct HTTP verbs (GET, POST, PUT, DELETE). Comprehensive endpoint listing for all resources."
     },
     {
-      "text": "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
-      "passed": true,
-      "evidence": "The Pagination section recommends cursor-based pagination with three specific reasons: (1) events/tickets are frequently added/removed making offset unreliable, (2) cursor-based performs better at scale by avoiding OFFSET scanning, (3) works well for infinite-scroll mobile UIs. Includes concrete request/response examples with cursor parameter and pagination envelope. Also notes optional include_count=true for admin dashboards."
+      "expectation": "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
+      "verdict": "PASS",
+      "justification": "Cursor-based pagination is specified with explicit rationale (items shift between pages, better DB performance, works for infinite scroll). Response format with next_cursor and has_more is shown. Optional include_count parameter addressed."
     },
     {
-      "text": "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
-      "passed": true,
-      "evidence": "The Concurrency Control section describes a two-phase approach: temporary reservation with SELECT FOR UPDATE SKIP LOCKED plus optimistic locking (version column) for the purchase step. Database schema includes 'UNIQUE (event_id, seat_id)' constraint on both reservation_seats and tickets tables to prevent double-booking at DB level. The 'Why This Approach' section explains why pure optimistic locking and distributed locks were rejected."
+      "expectation": "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
+      "verdict": "PASS",
+      "justification": "Two-phase approach described: temporary reservation with SELECT FOR UPDATE SKIP LOCKED, then optimistic locking with version column for the purchase step. UNIQUE constraint on (event_id, seat_id) for database-level double-booking prevention."
     },
     {
-      "text": "Design specifies error response format with consistent structure (status codes, error codes, messages)",
-      "passed": true,
-      "evidence": "The Error Response Format section provides a concrete JSON structure with code (e.g., 'SEAT_ALREADY_RESERVED'), message, details array with field/issue, and request_id. HTTP status code mapping table covers 200, 201, 204, 400, 401, 403, 404, 409, 422, 429, 500. Application-specific error codes are mentioned for programmatic client handling."
+      "expectation": "Design addresses the seat hold lifecycle: temporary reservation with timeout -> confirmed purchase -> release on expiry, not just locking",
+      "verdict": "PASS",
+      "justification": "The reservation flow describes a temporary hold (5 minutes), a background job via Bull queue that expires reservations, and conversion to sold tickets on purchase. Reservation status tracks 'active', 'expired', 'converted'. The design explicitly describes: reserve seats -> user has timer -> proceed to checkout -> OR reservation expires and seats release. This is a complete lifecycle, not just locking."
     },
     {
-      "text": "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
-      "passed": true,
-      "evidence": "The 'Handling 10,000 Concurrent Users' section covers: Connection Pooling (pg-pool with 20-30 connections, read replica), Caching Strategy (Redis for events 30s, seating availability bitmap, Cache-Control headers), Queue-Based Ticket Purchasing (virtual queue for flash sales with position polling or WebSocket), Rate Limiting (100 req/min general, 10 req/min purchase, Redis sliding window, 429 with Retry-After), and Horizontal Scaling (stateless JWT, PM2 cluster or Kubernetes)."
+      "expectation": "Design specifies error response format with consistent structure (status codes, error codes, messages)",
+      "verdict": "PASS",
+      "justification": "Consistent error JSON with code, message, details array, and request_id. Complete HTTP status code table (200, 201, 204, 400, 401, 403, 404, 409, 422, 429, 500). Application-specific error codes mentioned (SEAT_ALREADY_RESERVED, EVENT_SOLD_OUT, RESERVATION_EXPIRED)."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "The document is saved as skills/design-workspace/iteration-1/rest-api-design/without_skill/outputs/design-doc.md, not in docs/plans/ with YYYY-MM-DD naming. No date-based filename is used."
+      "expectation": "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
+      "verdict": "PASS",
+      "justification": "Dedicated section covering: connection pooling (pg-pool, size 20-30, read replica), Redis caching (event details 30s, seating bitmap), virtual queue system for flash sales, rate limiting (sliding window, 100/min general, 10/min purchases), and horizontal scaling (stateless API, PM2/K8s)."
     },
     {
-      "text": "Gap scan is performed before saving, checking at least acceptance criteria and failure modes",
-      "passed": false,
-      "evidence": "The document contains no gap scan section. It ends with a Summary of key design decisions but does not check acceptance criteria, failure modes, edge cases, or testing strategy."
+      "expectation": "Gap scan is performed before saving, checking at least acceptance criteria and failure modes",
+      "verdict": "FAIL",
+      "justification": "No gap scan is performed. The document ends with a Summary section listing key design decisions but does not check for gaps in acceptance criteria, failure modes, or edge cases."
     }
   ],
-  "summary": {
-    "passed": 5,
-    "failed": 6,
-    "total": 11,
-    "pass_rate": 0.45
-  },
-  "claims": [
-    {
-      "claim": "Cursor-based pagination avoids OFFSET which forces database to scan and discard rows",
-      "type": "factual",
-      "verified": true,
-      "evidence": "This is correct. PostgreSQL OFFSET requires scanning and discarding the first N rows, which becomes slower as the offset increases. Cursor/keyset pagination uses a WHERE clause that can leverage an index."
-    },
-    {
-      "claim": "SELECT FOR UPDATE SKIP LOCKED atomically locks seats",
-      "type": "factual",
-      "verified": true,
-      "evidence": "SELECT FOR UPDATE SKIP LOCKED is a valid PostgreSQL feature that locks rows and skips already-locked rows, appropriate for this use case."
-    },
-    {
-      "claim": "The design provides comprehensive REST API coverage",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Resource modeling covers events, venues, seating maps, tickets, reservations, waitlists, orders, and users with full CRUD endpoints. This is thorough domain coverage."
-    },
-    {
-      "claim": "Presigned URL flow is described for photo uploads (in mobile considerations)",
-      "type": "factual",
-      "verified": false,
-      "evidence": "No presigned URL flow is described. CDN with responsive sizing is mentioned for venue images, but this is for serving, not uploading."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-        "reason": "This is a process-compliance assertion that specifically tests whether the design skill's methodology was followed. Without the skill, a well-structured design document that makes good decisions will fail this assertion. This is working as intended for a with/without skill comparison but should be understood as measuring process, not design quality."
-      },
-      {
-        "assertion": "Design decisions are presented with 2-3 informed options and a recommendation",
-        "reason": "The without_skill output does discuss alternatives for concurrency control and gives rationale against them, but does so in prose rather than structured comparison. The assertion could be more specific about whether this counts as 'presenting options' or requires a structured format."
-      }
-    ],
-    "overall": "The without_skill output is a competent design document that covers all the technical domain requirements (REST modeling, pagination, concurrency, errors, scaling) with genuine substance. It fails the process-related assertions (hypotheses, investigation, deep-dive agents, gap scan) which are specifically testing the design skill's methodology. This is the expected pattern for a with/without comparison: the skill adds investigative rigor and structured process."
-  }
+  "score": "6/11",
+  "eval_feedback": [
+    "The design covers the technical substance well (REST modeling, concurrency, pagination, error format, scaling) but lacks the structured investigation process (hypotheses, multi-agent investigation, surprises, gap scan).",
+    "The seat hold lifecycle is adequately described with the temporary reservation, 5-minute timer, background expiry via Bull queue, and conversion flow.",
+    "Without the skill, the design reads as a competent but conventional API design document without the deliberate investigation structure."
+  ]
 }

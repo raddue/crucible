@@ -1,13 +1,5 @@
 {
   "eval_id": 2,
   "eval_name": "currency-bugfix",
-  "prompt": "There's a bug where our formatCurrency function returns '$1,00' instead of '$1.00' for input 1. Can you fix it? The function is in src/utils/format.ts.",
-  "expectations": [
-    "A failing test that reproduces the bug is written BEFORE touching the implementation",
-    "The test is run and verified to fail with the current broken behavior",
-    "The fix is minimal — only the bug-causing code is changed, not a rewrite",
-    "Tests run again and verified to pass after the fix",
-    "The regression test specifically asserts formatCurrency(1) returns '$1.00'",
-    "All pre-existing tests still pass after the fix (no regressions)"
-  ]
+  "prompt": "There's a bug where our formatCurrency function returns '$1,00' instead of '$1.00' for input 1. Can you fix it? The function is in src/utils/format.ts."
 }

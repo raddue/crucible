@@ -1,104 +1,63 @@
 {
+  "eval_name": "offline-sync-app",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": false,
-      "evidence": "The document does not include any investigated questions or hypotheses. It is organized as a traditional design document with sections (Architecture, Local Storage, Sync Protocol, Conflict Resolution, etc.) where decisions are stated directly. There is no hypothesis-investigation-decision pattern."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "FAIL",
+      "justification": "No investigated-questions workflow is used. The document presents design decisions directly without hypotheses, investigations, or surprises."
     },
     {
-      "text": "Cascading context is maintained — later design questions reference and build on earlier decisions",
-      "passed": false,
-      "evidence": "There are no explicit cascading context references. While the design is internally consistent (e.g., the sync protocol section assumes WatermelonDB from the storage decision), there are no explicit cross-references like 'Given our earlier decision on X, this affects Y.' The document reads as a standalone specification rather than a sequence of connected decisions."
+      "expectation": "Cascading context is maintained -- later design questions reference and build on earlier decisions",
+      "verdict": "PASS",
+      "justification": "While not using explicit cascading context labels, the design shows implicit cascading: the sync protocol section references WatermelonDB's push/pull model from the storage decision; the conflict resolution strategy references field-level tracking from the schema design; photo handling references the separate sync phases. The three-phase sync order is justified with dependencies between phases."
     },
     {
-      "text": "At least one question is auto-resolved with explanation when only one viable path exists",
-      "passed": false,
-      "evidence": "No auto-resolution pattern is used. All decisions are presented directly without classifying them as investigated vs. auto-resolved. The document does not use the concept of question resolution at all."
+      "expectation": "At least one question is auto-resolved with explanation when only one viable path exists",
+      "verdict": "FAIL",
+      "justification": "No auto-resolution pattern is used. All decisions are presented as straightforward recommendations without identifying which questions have only one viable path."
     },
     {
-      "text": "Design specifies a local storage strategy for offline data (e.g., SQLite, WatermelonDB, or Realm with explicit rationale)",
-      "passed": true,
-      "evidence": "The Local Storage Strategy section recommends WatermelonDB with four specific reasons: (1) built for React Native with lazy loading, (2) built-in sync primitives, (3) observable queries for reactive UI, (4) SQLite underneath. Alternatives considered include raw SQLite ('requires building all sync infrastructure from scratch'), Realm ('vendor lock-in with MongoDB'), and AsyncStorage ('not appropriate for structured relational data'). Local schema is provided with tables for inspections, inspection_fields, photos, and signatures."
+      "expectation": "Design specifies a local storage strategy for offline data (e.g., SQLite, WatermelonDB, or Realm with explicit rationale)",
+      "verdict": "PASS",
+      "justification": "WatermelonDB is recommended with explicit rationale: built for React Native with lazy loading, built-in sync primitives, observable queries, SQLite underneath. Alternatives considered: raw SQLite (too much sync work), Realm (vendor lock-in with MongoDB), AsyncStorage (not appropriate for relational data)."
     },
     {
-      "text": "Design includes a concrete conflict resolution strategy for overlapping edits (e.g., last-write-wins, field-level merge, operational transforms, or CRDTs — with trade-off analysis)",
-      "passed": true,
-      "evidence": "The Conflict Resolution section specifies field-level merge with LWW per field. Explains why record-level LWW is insufficient ('Inspector A might update foundation_condition while Inspector B updates electrical_status... Record-level LWW would lose one inspector's entire set of changes'). Why CRDTs are overkill ('we don't need character-level merging of text fields'). Differentiates behavior by field type: non-text fields use LWW by timestamp, text fields flag conflicts for manual resolution, photos are additive (no conflict). However, the trade-off analysis is lighter than the with_skill version — no comparison table of multiple strategies."
+      "expectation": "Design includes a concrete conflict resolution strategy for overlapping edits (e.g., last-write-wins, field-level merge, operational transforms, or CRDTs -- with trade-off analysis)",
+      "verdict": "PASS",
+      "justification": "Field-level merge with LWW per field is specified. Explains why record-level LWW is unacceptable (would lose one inspector's changes). Distinguishes handling for non-text fields (LWW by timestamp), text fields (keep both values, flag as conflicted), and photos (additive, no conflict). Includes conflict notification response format."
     },
     {
-      "text": "Design addresses sync protocol with specific mechanism (e.g., change tracking with timestamps/version vectors, event sourcing, or delta sync)",
-      "passed": true,
-      "evidence": "The Sync Protocol section describes a three-phase flow: (1) Pull (GET /api/sync/pull?last_synced_at=timestamp), (2) Push form data (POST /api/sync/push with created/updated/deleted changes), (3) Upload binaries. Change tracking uses _sync_status (created/updated/synced), _version (integer counter), and updated_at timestamp. Server response includes per-record resolution status. However, the mechanism relies on client timestamps (last_synced_at) rather than server-assigned versions, which is less robust for clock-skew scenarios."
+      "expectation": "Design addresses sync protocol with specific mechanism (e.g., change tracking with timestamps/version vectors, event sourcing, or delta sync)",
+      "verdict": "PASS",
+      "justification": "Three-phase sync protocol specified: pull (GET /api/sync/pull with last_synced_at timestamp), push form data (POST /api/sync/push with created/updated/deleted changes), upload binaries (POST /api/sync/upload). Change tracking via _sync_status, _version, and updated_at fields per record."
     },
     {
-      "text": "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
-      "passed": true,
-      "evidence": "Phase 3 of the sync protocol explicitly separates binary upload: 'Photos and signature images are uploaded separately and asynchronously.' Four reasons given: form data is small (KB) vs photos (5-15 MB), mixing would block critical data, binary uploads can resume independently, and per-photo progress tracking. Uses multipart/form-data upload endpoint. Also includes a presigned S3 URL flow for direct-to-S3 uploads to avoid loading the Django server."
+      "expectation": "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
+      "verdict": "PASS",
+      "justification": "Photos are explicitly handled in a separate Phase 3 of the sync process. Rationale clearly stated: form data is KB-sized and syncs quickly, photos are 5-15 MB and would block critical data. Separate binary upload endpoint with presigned S3 URLs. Upload status tracked per photo (pending/uploading/uploaded/failed)."
     },
     {
-      "text": "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
-      "passed": true,
-      "evidence": "The Partial Sync Recovery section provides a table mapping each failure point to its recovery strategy: Pull fails midway -> re-pull with same timestamp (idempotent). Push fails before server response -> re-push using UUIDs + versions as idempotency keys. Push succeeds but client doesn't get response -> server detects duplicate. Photo upload fails -> stays in pending/failed status, next sync retries. App crashes -> sync status flags are still accurate, sync restarts. 'All sync operations are designed to be idempotent' is the core principle."
+      "expectation": "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
+      "verdict": "PASS",
+      "justification": "Dedicated 'Partial Sync Recovery' section with a table covering 5 failure scenarios: pull fails (re-pull, idempotent), push fails before response (re-push, UUID idempotency), push succeeds but client misses response (duplicate detection), photo upload fails (retry from status), app crashes (sync status flags preserved). States 'All sync operations are designed to be idempotent.'"
     },
     {
-      "text": "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
-      "passed": true,
-      "evidence": "The Signature Capture section covers: capture via react-native-signature-canvas as SVG path data plus PNG rasterization. Legal Validity subsection lists: (1) signed_at timestamp with device clock + server time offset, (2) device_id stored alongside signature, (3) signer name and role recorded, (4) immutability — once created, cannot be edited or deleted locally, (5) server-side audit trail of all signature events, (6) SHA-256 hash integrity check computed at capture time and verified on server. This is substantive coverage of legal validity."
+      "expectation": "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
+      "verdict": "PASS",
+      "justification": "Signature capture section addresses: SVG path data capture, legal validity with 6 specific requirements (timestamp, device ID, signer identification, immutability, audit trail, SHA-256 hash integrity). States signatures cannot be edited or deleted locally. Server logs all signature-related events."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "Document is saved as skills/design-workspace/iteration-1/offline-sync-app/without_skill/outputs/design-doc.md, not in docs/plans/ with YYYY-MM-DD naming convention."
-    },
-    {
-      "text": "Gap scan is performed before saving, checking at least failure modes and edge cases",
-      "passed": false,
-      "evidence": "The document contains no gap scan section. It ends with a Summary of key design decisions. No explicit check of failure modes, edge cases, or acceptance criteria is performed."
+      "expectation": "Gap scan is performed before saving, checking at least failure modes and edge cases",
+      "verdict": "FAIL",
+      "justification": "No gap scan is performed. The document ends with a Summary section listing key design decisions but does not systematically check for gaps in failure modes, edge cases, or acceptance criteria."
     }
   ],
-  "summary": {
-    "passed": 6,
-    "failed": 5,
-    "total": 11,
-    "pass_rate": 0.55
-  },
-  "claims": [
-    {
-      "claim": "WatermelonDB has built-in sync primitives designed for offline-first apps",
-      "type": "factual",
-      "verified": true,
-      "evidence": "WatermelonDB provides a synchronize() function with pull/push semantics designed for offline-first React Native apps. This is accurate."
-    },
-    {
-      "claim": "Photos can be 5-15 MB each",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Modern smartphone photos at full resolution are typically 3-15 MB. This range is reasonable for construction inspection photos."
-    },
-    {
-      "claim": "Presigned S3 URLs offload binary transfer from the Django server",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Presigned URLs allow the client to upload directly to S3 without routing through the application server. This is a correct and common optimization pattern."
-    },
-    {
-      "claim": "Field-level merge preserves independent edits from multiple inspectors",
-      "type": "quality",
-      "verified": true,
-      "evidence": "The design correctly identifies that field-level merge is superior to record-level LWW for inspection forms where different inspectors update different fields. The example of foundation_condition vs electrical_status is apt."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Cascading context is maintained — later design questions reference and build on earlier decisions",
-        "reason": "This assertion is heavily tied to the skill's structured investigation process. A traditional design document can be internally consistent without explicitly labeling cascading context. Consider whether implicit consistency should partially satisfy this assertion."
-      },
-      {
-        "assertion": "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
-        "reason": "Good domain-specific assertion. The without_skill output actually does well here with 6 specific legal validity measures. This shows the prompt itself was strong enough to elicit this content. Consider adding an assertion about what happens when a signed inspection is later modified by sync (the with_skill version catches this critical edge case but the without_skill version does not)."
-      }
-    ],
-    "overall": "The without_skill output is a solid design document that covers all the core technical requirements with genuine substance. It fails the process-oriented assertions (investigated questions, cascading context, auto-resolution, gap scan) but passes all domain-correctness assertions. Notably, the signature legal validity coverage is thorough even without the skill. The key quality difference from the with_skill version is depth of analysis: the without_skill version doesn't explore the 'as-signed' vs 'current' version distinction for signatures, uses client timestamps instead of server-assigned versions for change tracking, and doesn't address offline conflict resolution (resolving conflicts while offline). These are genuine design quality gaps that the process-oriented assertions don't directly capture."
-  }
+  "score": "7/10",
+  "eval_feedback": [
+    "Strong technical design covering all the substantive requirements (storage, conflict resolution, sync protocol, photo handling, partial sync recovery, signatures).",
+    "The cascading context is implicitly maintained through the three-phase sync design where each phase depends on the previous.",
+    "Lacks the structured investigation process (hypotheses, agents, surprises, auto-resolution, gap scan) from the skill, but the technical substance is solid.",
+    "The presigned S3 URL flow for photo uploads is a nice implementation detail not present in the with_skill version."
+  ]
 }

@@ -5,27 +5,27 @@
     {
       "expectation": "Available context (error logs, code, timeline) is reviewed before jumping to a fix",
       "verdict": "PASS",
-      "justification": "The transcript begins with an 'Investigation' section that reviews the error message, the code in feedback.js, and traces through what happens when a single quote is present in the input. It examines the evidence before proposing any fix."
+      "justification": "The transcript begins with an 'Investigation' section that reviews the error message, the code in feedback.js showing the string interpolation pattern, and traces through what happens when a single quote is present. Evidence is examined before any fix is proposed."
     },
     {
       "expectation": "Investigation examines at least 2 distinct dimensions of the problem (error analysis, change history, code review) before forming a hypothesis",
       "verdict": "FAIL",
-      "justification": "The investigation examines only one real dimension: error analysis combined with code review (tracing the error message through the string interpolation code). There is no examination of change history (e.g., what changed recently, when the feature was added), no environment analysis, and no broader investigation. The investigation goes directly from the error + code to the root cause in a single analytical pass."
+      "justification": "The investigation examines only one consolidated dimension: error analysis combined with code review (tracing the error message through the string interpolation code to identify the broken SQL). There is no examination of change history (when the feature was added, what else changed), no environment analysis, and no broader investigation. The analysis goes directly from the error + code to the root cause in a single analytical pass."
     },
     {
-      "expectation": "Findings from different investigation angles are consolidated before forming a hypothesis -- not jumping from a single clue to a fix",
+      "expectation": "Findings from different investigation angles are consolidated before forming a hypothesis — not jumping from a single clue to a fix",
       "verdict": "FAIL",
-      "justification": "The transcript jumps from analyzing the error message and the code to the root cause in one step. There is no consolidation of findings from multiple angles. The investigation essentially follows a single thread: error message -> string interpolation in code -> root cause."
+      "justification": "The transcript follows a single analytical thread: error message -> string interpolation in code -> broken SQL -> root cause -> fix. There is no consolidation of multiple investigation angles because only one angle was examined. The transition from investigation to root cause to fix is linear and single-threaded."
     },
     {
-      "expectation": "Hypothesis specifically identifies string interpolation in SQL as the root cause -- not just 'SQL error' or 'special characters'",
+      "expectation": "Hypothesis specifically identifies string interpolation in SQL as the root cause — not just 'SQL error' or 'special characters'",
       "verdict": "PASS",
-      "justification": "The Root Cause section states: 'String interpolation is used to embed user-provided values directly into SQL queries without any parameterization or escaping.' This is specific and technically precise."
+      "justification": "The Root Cause section states: 'String interpolation is used to embed user-provided values directly into SQL queries without any parameterization or escaping.' This is specific and technically precise, identifying the exact code pattern rather than just the symptom."
     },
     {
       "expectation": "Hypothesis is challenged or verified against evidence before implementation begins",
       "verdict": "FAIL",
-      "justification": "The transcript moves directly from the Root Cause section to the Fix section. There is no step where the hypothesis is challenged, tested against alternative explanations, or verified against the evidence before implementation. The SQL injection explanation in the Investigation section is presented as a certainty, not a hypothesis to be tested."
+      "justification": "The transcript moves directly from 'Root Cause' to 'Fix' without any challenge or verification step. The root cause is presented as established fact, not as a hypothesis to be tested. No alternative explanations are considered or ruled out. The 'Why Not String Escaping?' section at the end is about fix methodology, not hypothesis verification."
     },
     {
       "expectation": "A failing test is written before the fix is implemented",
@@ -33,36 +33,35 @@
       "justification": "No tests are written at any point in the transcript. The fix is provided directly as code without any test-first approach."
     },
     {
-      "expectation": "The fix uses parameterized queries or prepared statements -- not string escaping as a band-aid",
+      "expectation": "The fix uses parameterized queries or prepared statements — not string escaping as a band-aid",
       "verdict": "PASS",
-      "justification": "The fix uses parameterized queries with '?' placeholders: \"const query = 'INSERT INTO feedback (name, email, comment) VALUES (?, ?, ?)'; await db.query(query, [name, email, comment]);\" The transcript also includes a dedicated 'Why Not String Escaping?' section explicitly arguing against mysql.escape() or manual escaping."
+      "justification": "The fix uses parameterized queries with ? placeholders: \"const query = 'INSERT INTO feedback (name, email, comment) VALUES (?, ?, ?)'; await db.query(query, [name, email, comment]);\". A dedicated 'Why Not String Escaping?' section explicitly argues against mysql.escape() or manual escaping."
     },
     {
       "expectation": "The fix addresses the root cause (SQL injection vulnerability) not just the symptom (500 error on special characters)",
       "verdict": "PASS",
-      "justification": "The transcript explicitly identifies the issue as a SQL injection vulnerability: 'This is a SQL injection vulnerability, not just an encoding bug.' The fix (parameterized queries) 'eliminates both the syntax error and the SQL injection vulnerability.' It also demonstrates the injection risk with the DROP TABLE example."
+      "justification": "The transcript explicitly identifies: 'This is a SQL injection vulnerability, not just an encoding bug.' It explains that parameterized queries 'eliminates both the syntax error and the SQL injection vulnerability.' The DROP TABLE example demonstrates the security severity."
     },
     {
       "expectation": "The fix also handles the ampersand case mentioned in the bug report, not just the single-quote case shown in the stack trace",
       "verdict": "PASS",
-      "justification": "The fix uses parameterized queries, which handle ALL special characters uniformly at the protocol level. The transcript states: 'the database driver handles escaping properly. The user's input is never interpolated into the SQL string -- it's sent as separate data to the database engine.' This inherently handles ampersands, single quotes, and any other special character. However, the transcript does not explicitly mention ampersands or test the ampersand case specifically."
+      "justification": "The fix uses parameterized queries which handle ALL special characters uniformly at the protocol level. The transcript states: 'The user's input is never interpolated into the SQL string -- it's sent as separate data to the database engine.' This inherently handles ampersands. However, the transcript does not explicitly mention or test the ampersand case -- the handling is implicit via the fix mechanism."
     },
     {
       "expectation": "Quality review is performed on the fix before declaring it complete",
       "verdict": "FAIL",
-      "justification": "No formal quality review of the fix is performed. The transcript includes 'Additional Recommendations' (input validation, error handling, audit other queries) and a 'Why Not String Escaping?' section, but these are supplementary suggestions rather than a quality review that examines the fix for correctness, edge cases, or regressions."
+      "justification": "No formal quality review of the fix is performed. The transcript includes 'Additional Recommendations' (input validation, error handling, audit other queries) and 'Why Not String Escaping?', but these are supplementary suggestions and design rationale, not a quality review examining the fix for correctness, edge cases, regressions, or new failure modes."
     },
     {
       "expectation": "Agent communicates reasoning progression clearly, showing how evidence led to the hypothesis",
       "verdict": "PASS",
-      "justification": "The transcript shows a clear reasoning chain: error message analysis -> code examination -> tracing the SQL with a concrete example ('It's a great product') -> identifying the broken SQL -> connecting to SQL injection. The reasoning is easy to follow and well-structured, even if it is linear rather than multi-dimensional."
+      "justification": "The transcript shows a clear, followable reasoning chain: error message analysis -> code examination -> tracing SQL with a concrete example ('It's a great product') -> identifying the SQL syntax break -> connecting to SQL injection vulnerability. The reasoning is well-structured and easy to follow, even if linear rather than multi-dimensional."
     }
   ],
   "score": "6/11",
   "eval_feedback": [
-    "The expectation 'Investigation examines at least 2 distinct dimensions' is reasonable but could benefit from specifying what counts as a 'distinct dimension' -- e.g., is tracing the error through the code one dimension (error+code) or two (error analysis, code review)?",
-    "The expectation about the ampersand case is borderline -- parameterized queries inherently handle all special characters, so the fix does handle ampersands, but the transcript never explicitly mentions or tests ampersands. Consider clarifying whether implicit handling via the fix mechanism counts or whether explicit mention/testing is required.",
-    "The 'quality review' expectation could be more specific about what constitutes a quality review -- the transcript does include substantial supplementary analysis (Why Not String Escaping, Additional Recommendations) that arguably demonstrates quality thinking without being a formal review.",
-    "The expectation about challenging the hypothesis may be too strict for an obvious bug -- when the error message literally shows the broken SQL syntax from string interpolation, challenging this hypothesis would be somewhat artificial. Consider whether this expectation should be weighted differently for obvious vs. subtle bugs."
+    "The without_skill transcript correctly identifies the root cause and produces a high-quality fix, but skips several process steps that the expectations require: multi-dimensional investigation, hypothesis consolidation, hypothesis verification, test-first development, and quality review.",
+    "The core technical analysis is sound -- the root cause identification and fix quality are equivalent to the with_skill condition. The score difference reflects process rigor, not analytical accuracy.",
+    "The ampersand expectation is borderline -- parameterized queries inherently handle all special characters, but the transcript never explicitly addresses the ampersand case mentioned in the bug report. Graded as PASS because the fix mechanism covers it."
   ]
 }

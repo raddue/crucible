@@ -1,107 +1,63 @@
 {
+  "eval_name": "monolith-to-services",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": true,
-      "evidence": "Five design dimensions are investigated, each with an explicit hypothesis before investigation: (1) Bounded Context Identification — hypothesis about 8 contexts with Inventory/Orders tension, (2) Extraction Order — hypothesis about sequencing starting with Notifications, (3) Data Ownership — hypothesis about strangler fig at data layer with sync strategy, (4) Inter-Service Communication — hypothesis about REST/gRPC vs async events mix with saga, (5) Zero-Downtime Migration — hypothesis about strangler fig + feature flags + blue-green."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "PASS",
+      "justification": "Five design dimensions are investigated, each with explicit hypotheses. Examples: 'I expect the natural bounded contexts to be: (1) Identity... (7) Recommendations', 'I expect the right order to be: (1) Notifications first...', 'I expect the strangler fig pattern at the data layer...'."
     },
     {
-      "text": "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
-      "passed": true,
-      "evidence": "Multiple challenger steps present. Dimension 1 challenger attacks the 8-context proposal by noting 8 services for 6 engineers creates operational overhead and suggests modular monolith intermediate step. Dimension 2 challenger attacks Identity extraction in Phase 2 as too risky (auth outage = full platform outage) and challenges the 14-month timeline as unrealistic. Dimension 3 challenger attacks the join refactoring being mentioned 'almost in passing' and questions CDC/Kafka complexity. Dimension 4 challenger questions REST overhead for high-frequency auth calls, recommending JWT local validation instead."
+      "expectation": "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
+      "verdict": "PASS",
+      "justification": "Multiple dimensions include a Challenge step. Dimension 1 challenges the 8-service count vs 6 engineers. Dimension 2 challenges extracting Identity early (authentication outage risk). Dimension 3 challenges the cross-schema join refactoring being mentioned 'in passing' and suggests PostgreSQL logical replication over CDC. These are substantive attacks on assumptions."
     },
     {
-      "text": "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
-      "passed": true,
-      "evidence": "Eight bounded contexts are defined by domain function, not by database table: Identity (users + auth + addresses), Catalog (products + categories + search), Inventory (stock levels + warehouses + SKU), Order Management (orders + order items + carts), Payments (Stripe integration + charges + refunds + disputes), Fulfillment (shipping labels + tracking), Notifications (templates + delivery + log), Recommendations (user behavior + similarity). The design explicitly discusses whether Orders and Payments should merge, concluding they are separate contexts coordinated via APIs — a domain-driven decision, not a table-mirroring one."
+      "expectation": "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
+      "verdict": "PASS",
+      "justification": "Eight bounded contexts identified based on business capabilities (Identity, Catalog, Inventory, Order Management, Payments, Fulfillment, Notifications, Recommendations). The design explicitly addresses the Orders vs Payments grouping question, arguing they should be separate contexts with an anti-corruption layer rather than merged, because payments have independent lifecycle (refunds, disputes, chargebacks)."
     },
     {
-      "text": "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
-      "passed": true,
-      "evidence": "Five-phase extraction plan with explicit ordering and rationale: Phase 1 (Month 1-3) — Notifications + Recommendations first because they are low-risk, low-coupling, and build extraction muscle. Phase 2 (Month 4-7) — Catalog + Inventory for scale benefits. Phase 3 (Month 8-10) — Fulfillment + Identity (deferred from earlier phase based on challenger feedback about auth outage risk). Phase 4 (Month 11-12) — Consolidation sprint. Phase 5 (Month 13-18) — Payments + Order Management last because they are highest risk and highest coupling. The ordering criteria table evaluates coupling, revenue risk, learning value, and scaling value."
+      "expectation": "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
+      "verdict": "PASS",
+      "justification": "Detailed 5-phase plan over 18 months with explicit ordering rationale: Phase 1 (Notifications + Recommendations - low risk, build muscle), Phase 2 (Catalog + Inventory - scale-sensitive), Phase 3 (Fulfillment + Identity - medium risk, deferred from earlier per challenger feedback), Phase 4 (Consolidation), Phase 5 (Payments + Orders - highest risk, last). Each phase has team allocation."
     },
     {
-      "text": "Design addresses data ownership — each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
-      "passed": true,
-      "evidence": "Three-step data strategy is defined in Dimension 3: Step 1 (Phase 0) — Join audit and refactoring to eliminate cross-domain queries. Step 2 (Phases 1-3) — Schema separation within same PostgreSQL instance (e.g., identity.users, catalog.products). Step 3 (Phases 4-5) — Separate database instances with PostgreSQL logical replication during transition, with CDC/Debezium as fallback. Each extracted service owns its own schema, with cross-schema FK constraints removed and replaced by application-level validation."
+      "expectation": "First service(s) extracted are low-coupling candidates (e.g., notifications, recommendations, email) -- not core coupled services like orders or payments",
+      "verdict": "PASS",
+      "justification": "Phase 1 explicitly extracts Notifications and Recommendations first, with explicit rationale: 'Both are low-risk -- failures degrade experience but don't break checkout.' The analysis table shows Notifications as 'Very Low' coupling and Recommendations as 'Low' coupling. Orders and Payments are explicitly deferred to Phase 5 as the highest-risk, highest-coupling extraction."
     },
     {
-      "text": "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
-      "passed": true,
-      "evidence": "Dimension 4 provides a detailed communication pattern breakdown. Synchronous REST for stock checks, product details, and user profile lookups (caller needs response to continue). Asynchronous RabbitMQ events for order.placed → Notifications/Recommendations/Fulfillment, payment.refunded → Order status, inventory.low_stock → admin alerts (fire-and-forget). JWT local validation for auth (avoids per-request sync call). Orchestrated saga for order placement (multi-service transaction). Rationale given for each: REST chosen over gRPC because team knows REST/Rails, RabbitMQ over Kafka because simpler for event-driven at this scale."
+      "expectation": "Design addresses data ownership -- each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
+      "verdict": "PASS",
+      "justification": "Dimension 3 provides a three-step data strategy: Step 1 (Phase 0) - join audit and refactoring of cross-domain queries; Step 2 (Phases 1-3) - schema separation within the same PostgreSQL instance; Step 3 (Phases 4-5) - separate databases with PostgreSQL logical replication, with CDC via Debezium only if needed."
     },
     {
-      "text": "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
-      "passed": true,
-      "evidence": "Dimension 5 specifies a combined approach: Branch by Abstraction (introduce API boundaries in monolith), Strangler Fig (route traffic gradually to new service), Feature Flags (toggle between monolith and service implementations with percentage-based rollout: 1% → 10% → 50% → 100%), Shadow Testing (run both old and new in parallel, compare outputs), and instant rollback via feature flag flip. Database migration safety addressed with backward-compatible schema changes and strong_migrations gem."
+      "expectation": "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
+      "verdict": "PASS",
+      "justification": "Dimension 4 specifies REST for synchronous calls (stock check, product details, user profile), RabbitMQ for async events (order.placed, payment.refunded, inventory.low_stock), and orchestrated saga for the order placement flow. Explicit interaction table maps each interaction to a pattern with rationale. JWT local validation for auth (avoiding per-request service calls)."
     },
     {
-      "text": "Design considers the 6-engineer team constraint — does not propose extracting all services simultaneously or an unrealistic timeline",
-      "passed": true,
-      "evidence": "Team allocation is specified per phase: Phase 1 splits 2+2+2 (2 on Notifications, 2 on Recommendations, 2 on features). Phase 2 splits 3+3. Phase 3 splits 3+3. Phase 4 puts all 6 on stabilization. Phase 5 splits 4+2. Total timeline revised from initial 14 months to realistic 18 months based on challenger feedback about feature development pressure. Consolidation sprint (Phase 4) explicitly accounts for team fatigue. The design never proposes more than 2 service extractions simultaneously."
+      "expectation": "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
+      "verdict": "PASS",
+      "justification": "Dimension 5 combines Branch by Abstraction (internal API boundary in monolith), Strangler Fig (routing), shadow testing (parallel running with output comparison), feature flags (gradual traffic shift 1% -> 10% -> 50% -> 100%), and backward-compatible database migrations with strong_migrations gem."
     },
     {
-      "text": "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
-      "passed": true,
-      "evidence": "Orchestrated saga pattern defined for order placement with 5 steps: (1) Create order (pending), (2) Reserve inventory (sync REST, compensate: release), (3) Charge payment (sync REST, compensate: refund), (4) Confirm order (commit point), (5) Publish order.placed event (async). Saga state persisted in Order database for crash recovery. Idempotency keys on every step. Explicit failure scenarios: step 2 fails → order marked failed; step 3 fails → inventory released via compensation. Partial compensation failure → 'compensation_failed' state with manual intervention alert."
+      "expectation": "Design considers the 6-engineer team constraint -- does not propose extracting all services simultaneously or an unrealistic timeline",
+      "verdict": "PASS",
+      "justification": "Team constraint explicitly addressed throughout. Phase 1: 2+2 on extraction, 2 on feature work. Phase 2: 3 on extraction, 3 on features. Phase 4 is a consolidation sprint with no new extractions. The challenger extends the timeline from 14 to 18-24 months to account for feature development pressure. Final timeline: 18 months."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "The output file is at outputs/design-doc.md, not in a docs/plans/ directory. The document header shows 'Date: 2026-03-11' but the file itself is not saved to a docs/plans/ path with YYYY-MM-DD naming convention in the filename."
+      "expectation": "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
+      "verdict": "PASS",
+      "justification": "Dimension 4 specifies an orchestrated saga for order placement: Create Order -> Reserve Inventory -> Charge Payment -> Confirm Order -> Publish event. Compensating actions defined for each step (release stock, refund payment). Circuit breakers on all synchronous calls. Event-based async for non-critical operations (notifications, recommendations)."
     }
   ],
-  "summary": {
-    "passed": 9,
-    "failed": 1,
-    "total": 10,
-    "pass_rate": 0.90
-  },
-  "claims": [
-    {
-      "claim": "Eight bounded contexts identified using DDD principles",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Contexts are defined by domain function (Identity, Catalog, Inventory, Order Management, Payments, Fulfillment, Notifications, Recommendations) with coupling analysis, entity mapping, and explicit rationale for keeping Orders and Payments separate."
-    },
-    {
-      "claim": "Phased extraction with realistic timeline",
-      "type": "process",
-      "verified": true,
-      "evidence": "5-phase plan over 18 months with team allocations per phase. Timeline was revised from 14 to 18 months based on challenger feedback. Consolidation sprint included."
-    },
-    {
-      "claim": "Challenger steps influenced final decisions",
-      "type": "process",
-      "verified": true,
-      "evidence": "Multiple challenger-driven revisions: Identity extraction deferred from Phase 2 to Phase 3 based on auth outage risk argument. Timeline extended from 14 to 18 months. Phase 0 join audit added. PostgreSQL logical replication chosen over Debezium/Kafka for early phases. JWT local validation instead of per-request auth service call."
-    },
-    {
-      "claim": "Strangler fig ensures zero downtime",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Strangler fig + Branch by Abstraction + Shadow Testing + Feature Flags with percentage-based rollout. Rollback via feature flag flip. Circuit breakers fall back to monolith during transition."
-    },
-    {
-      "claim": "Saga pattern handles distributed transactions",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Orchestrated saga with 5 steps, compensating actions for each, persisted saga state for crash recovery, idempotency keys. Explicit failure scenarios documented."
-    },
-    {
-      "claim": "Data ownership strategy addresses shared PostgreSQL",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Three-step strategy: join audit (Phase 0), schema separation within same instance (Phases 1-3), separate databases with logical replication (Phases 4-5). Pragmatic progression from simple to complex."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-        "reason": "This assertion tests file system behavior (where the agent saves the file) rather than design quality. The design itself is comprehensive. Consider separating file-saving mechanics from design content evaluation, or verify the agent was instructed to save to docs/plans/."
-      }
-    ],
-    "overall": "This is an exceptionally thorough monolith-to-services migration design. All substantive design expectations pass with strong evidence. The only failure is the file path convention, which is a mechanical/process issue rather than a design quality issue. The challenger pattern is used effectively, producing meaningful revisions (Identity extraction deferral, timeline extension, Phase 0 join audit, simpler early-phase data migration). The design appropriately handles all major microservices migration concerns: bounded contexts, phased extraction, data ownership, communication patterns, zero-downtime migration, team capacity, and cross-service consistency."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "Comprehensive design that excels in all areas. The challenger pattern adds particular value here -- the Identity extraction deferral (from Phase 2 to Phase 3) based on the challenger's risk argument is a genuine improvement.",
+    "The new expectation about low-coupling first extraction is clearly met: Notifications and Recommendations are explicitly identified as the lowest-coupling, lowest-risk candidates.",
+    "The three-step data strategy (join audit -> schema separation -> logical replication) is a pragmatic approach that avoids premature infrastructure complexity.",
+    "The Phase 4 consolidation sprint between medium-risk and high-risk extractions shows mature planning."
+  ]
 }

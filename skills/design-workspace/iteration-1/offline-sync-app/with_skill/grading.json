@@ -1,110 +1,62 @@
 {
+  "eval_name": "offline-sync-app",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": true,
-      "evidence": "Five design dimensions are investigated, each with explicit hypotheses. Dimension 1 Hypothesis: 'I expect WatermelonDB (built on SQLite) to be the best fit...' Dimension 2 Hypothesis: 'Given that multiple inspectors edit overlapping data, we need field-level merge rather than whole-record last-write-wins...' Dimension 3 Hypothesis about pull/push sync with idempotent pushes. Dimension 4 Hypothesis about background photo upload queue. Dimension 5 Hypothesis about SVG signatures with content hashing."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "PASS",
+      "justification": "Five design dimensions are investigated, each with explicit hypotheses. Examples: 'I expect WatermelonDB to be the best fit...', 'Given that multiple inspectors edit overlapping data, we need field-level merge rather than whole-record last-write-wins...', 'the sync protocol will be: pull server changes first, then push local changes...'."
     },
     {
-      "text": "Cascading context is maintained — later design questions reference and build on earlier decisions",
-      "passed": true,
-      "evidence": "Each decision section ends with a 'Cascading context update' that feeds into subsequent investigations. Dimension 2 opens with 'Given WatermelonDB's sync adapter model (pull/push)' (referencing Dimension 1). Dimension 3 opens 'Given WatermelonDB's pull/push model and our field-level conflict resolution' (referencing both Dimensions 1 and 2). Dimension 4 references 'Photos are stored separately from the database' from Dimension 1. Dimension 5's challenger identifies interaction between signatures and conflict resolution (Dimension 2)."
+      "expectation": "Cascading context is maintained -- later design questions reference and build on earlier decisions",
+      "verdict": "PASS",
+      "justification": "Each decision section ends with an explicit 'Cascading context update' note. Dimension 2 (conflict resolution) references WatermelonDB's sync adapter from Dimension 1. Dimension 3 (sync protocol) builds on both WatermelonDB and field-level merge decisions. Dimension 5 (signatures) addresses the interaction between signatures and the conflict resolution strategy."
     },
     {
-      "text": "At least one question is auto-resolved with explanation when only one viable path exists",
-      "passed": true,
-      "evidence": "Dimension 4 (Photo Handling) is explicitly auto-resolved: 'This is well-established practice with no real alternatives — auto-resolving.' The decision header reads 'Decision — Auto-Resolved: Background Photo Upload Queue' with the explanation: 'Only one viable approach: decouple photo uploads from form sync.' Also Dimension 4 on error format (in the rest-api design) uses this pattern."
+      "expectation": "At least one question is auto-resolved with explanation when only one viable path exists",
+      "verdict": "PASS",
+      "justification": "Dimension 4 (Photo Handling) is explicitly auto-resolved: 'This is well-established practice with no real alternatives -- auto-resolving.' The decision is labeled 'Decision -- Auto-Resolved: Background Photo Upload Queue'."
     },
     {
-      "text": "Design specifies a local storage strategy for offline data (e.g., SQLite, WatermelonDB, or Realm with explicit rationale)",
-      "passed": true,
-      "evidence": "Dimension 1 investigates four options: WatermelonDB, Realm, Raw SQLite (op-sqlite/expo-sqlite), MMKV + JSON blobs. Provides comparison table with Sync Built-in, Backend Fit, Complexity, and Performance. Recommendation: WatermelonDB with explicit rationale — built-in sync protocol adaptable to Django, handles change tracking and lazy loading, enough flexibility for custom conflict resolution. Realm rejected due to MongoDB Atlas lock-in with a PostgreSQL backend."
+      "expectation": "Design specifies a local storage strategy for offline data (e.g., SQLite, WatermelonDB, or Realm with explicit rationale)",
+      "verdict": "PASS",
+      "justification": "Dimension 1 provides a deep-dive comparing 4 options (WatermelonDB, Realm, raw SQLite, MMKV) with a detailed comparison table. WatermelonDB selected with rationale: built-in sync protocol, lazy-loading, React Native optimization. Realm eliminated due to MongoDB Atlas lock-in."
     },
     {
-      "text": "Design includes a concrete conflict resolution strategy for overlapping edits (e.g., last-write-wins, field-level merge, operational transforms, or CRDTs — with trade-off analysis)",
-      "passed": true,
-      "evidence": "Dimension 2 investigates four strategies: LWW whole-record (rejected as 'Unacceptable'), field-level LWW, field-level with manual resolution, CRDTs (rejected as 'Over-engineered'). Includes comparison table with Data Safety, Complexity, User Burden, and Fit columns. Decision is hybrid: field-level LWW for non-critical fields (measurements, timestamps) and manual conflict resolution for critical fields (inspection status, pass/fail, compliance findings). Critical fields list is admin-configurable per inspection template."
+      "expectation": "Design includes a concrete conflict resolution strategy for overlapping edits (e.g., last-write-wins, field-level merge, operational transforms, or CRDTs -- with trade-off analysis)",
+      "verdict": "PASS",
+      "justification": "Dimension 2 evaluates 4 approaches (record-level LWW, field-level LWW, field-level + manual resolution, CRDTs) with a comparison table. Selects hybrid approach: field-level LWW for non-critical fields, manual conflict resolution for critical fields (inspection status, pass/fail, compliance). CRDTs dismissed as over-engineered for forms."
     },
     {
-      "text": "Design addresses sync protocol with specific mechanism (e.g., change tracking with timestamps/version vectors, event sourcing, or delta sync)",
-      "passed": true,
-      "evidence": "Dimension 3 specifies a pull-then-push protocol with server-assigned monotonic version numbers (not client timestamps, per Dimension 1's decision). Pull: client sends last_version, server returns created/updated/deleted records since that version. Push: chunked (50 records or 500KB), per-record processing with sync session IDs for recovery. Change tracking includes per-field version numbers: 'field_versions: { field_a: 5, field_b: 3 }'. Complete sync flow diagram with 6 steps including POST /api/sync/push/complete endpoint."
+      "expectation": "Design addresses sync protocol with specific mechanism (e.g., change tracking with timestamps/version vectors, event sourcing, or delta sync)",
+      "verdict": "PASS",
+      "justification": "Dimension 3 specifies pull-then-push with server-assigned monotonic version numbers, per-record processing, chunked transport (50 records or 500KB per chunk), sync session IDs for recovery, and idempotent operations. Full sync flow with API endpoints is shown."
     },
     {
-      "text": "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
-      "passed": true,
-      "evidence": "Dimension 4 (auto-resolved) explicitly decouples photo sync from form sync. 'Photos stored on device filesystem at capture time, referenced by UUID in WatermelonDB.' Background upload queue using react-native-background-upload processes photos independently. Upload endpoint: PUT /api/photos/{uuid} (idempotent). Client tracks per-photo status: pending -> uploading -> uploaded -> confirmed. Server-side: photos stored in S3-compatible object storage, not PostgreSQL. Code example shows syncPhotos() running independently from performSync()."
+      "expectation": "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
+      "verdict": "PASS",
+      "justification": "Dimension 4 explicitly decouples photo sync from form data. Photos stored on filesystem, uploaded via background queue using react-native-background-upload, referenced by UUID. Upload endpoint is PUT /api/photos/{uuid} (idempotent). Form data syncs independently."
     },
     {
-      "text": "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
-      "passed": true,
-      "evidence": "Dimension 3 addresses partial failure directly. Per-record processing with batch transport: 'Send all changes in one HTTP request (efficient), but the server processes and responds per-record. A failed record doesn't block others.' Chunked push with sync session tracking: incomplete sync sessions are detected on app restart and resumed. Idempotency: server stores (sync_session, record_id) pairs; duplicate pushes are no-ops. Gap scan failure modes cover: network drops during push, server rejects due to version mismatch, app killed during sync."
+      "expectation": "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
+      "verdict": "PASS",
+      "justification": "Dimension 3 extensively covers partial failure: per-record processing so one failed record doesn't block others, sync session IDs for resumability, idempotency via (sync_session, record_id) pairs, chunked transport with resumption from last successful chunk, and app restart recovery for incomplete sync sessions."
     },
     {
-      "text": "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
-      "passed": true,
-      "evidence": "Dimension 5 provides comprehensive signature design. Capture: SVG via react-native-signature-canvas. Audit trail per signature includes: signature_svg, signer_name, signer_role, signed_at (with timezone), device_id, app_version, content_hash (SHA-256), inspection_snapshot_id. Legal validity: content hash proves inspection wasn't modified after signing. State machine: draft -> inspector_signed -> manager_countersigned -> finalized. Critical insight from challenger: 'as-signed' vs 'current' version distinction to prevent conflict resolution from invalidating signatures. Django InspectionSnapshot model stores immutable copy at signing time."
+      "expectation": "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
+      "verdict": "PASS",
+      "justification": "Dimension 5 provides comprehensive signature design: SVG capture with react-native-signature-canvas, audit trail including signer_name, signer_role, signed_at, device_id, app_version, content_hash (SHA-256). Content hash computed on canonical JSON at signing time. 'As-signed' snapshot vs 'current' versioning for post-merge integrity. State machine (draft -> inspector_signed -> manager_countersigned -> finalized). Signed inspections are immutable."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "Document is saved as skills/design-workspace/iteration-1/offline-sync-app/with_skill/outputs/design-doc.md, not in docs/plans/ with YYYY-MM-DD naming. The document header contains 'Date: 2026-03-11' but the file path does not follow the convention."
-    },
-    {
-      "text": "Gap scan is performed before saving, checking at least failure modes and edge cases",
-      "passed": true,
-      "evidence": "Gap Scan section checks: acceptance criteria, testing strategy (unit/integration/E2E/edge case tests with specific examples), integration impact (Django endpoints, S3, background upload), failure modes (network drops, photo upload failure, version mismatch, device storage full, app killed during sync), and edge cases (signed inspection divergence, concurrent new inspections for same site, local photo deletion, very long offline period, oversized signature SVG)."
+      "expectation": "Gap scan is performed before saving, checking at least failure modes and edge cases",
+      "verdict": "PASS",
+      "justification": "Gap scan covers acceptance criteria, testing strategy (unit, integration, E2E, edge case tests), integration impact, failure modes (network drops, photo upload failure, version mismatch, storage full, app killed during sync), and edge cases (signature with offline conflict, concurrent new inspections, photo deletion, long offline periods, large signature SVG)."
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 1,
-    "total": 11,
-    "pass_rate": 0.91
-  },
-  "claims": [
-    {
-      "claim": "WatermelonDB's sync protocol uses timestamp-based change tracking which can miss changes with clock skew",
-      "type": "factual",
-      "verified": true,
-      "evidence": "WatermelonDB's default sync uses client-side timestamps. Clock skew between devices can cause changes to be missed or ordered incorrectly. The design correctly identifies this and mitigates with server-assigned version numbers."
-    },
-    {
-      "claim": "Realm Sync doesn't work with arbitrary backends (requires MongoDB Atlas)",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Realm Sync (now Atlas Device Sync) is tightly coupled to MongoDB Atlas backend. It cannot sync with a Django/PostgreSQL backend without building a custom proxy layer."
-    },
-    {
-      "claim": "CRDTs are overkill for structured form data conflict resolution",
-      "type": "factual",
-      "verified": true,
-      "evidence": "CRDTs excel at collaborative text editing (character-level merging) but add enormous complexity for simple field-level form updates. Field-level merge is the appropriate granularity for inspection forms. This is a sound engineering judgment."
-    },
-    {
-      "claim": "Content hash must account for conflict resolution modifying post-signed data",
-      "type": "quality",
-      "verified": true,
-      "evidence": "The design correctly identifies that field-level merge could modify an inspection after signing, invalidating the content hash. The 'as-signed' snapshot vs 'current' version distinction is a genuine insight that prevents data integrity issues."
-    },
-    {
-      "claim": "The cascading context pattern produces better-connected design decisions",
-      "type": "process",
-      "verified": true,
-      "evidence": "Each dimension explicitly references prior decisions. Dimension 5's challenger catches an interaction between signatures and conflict resolution that only emerges because both systems are designed with awareness of each other."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "At least one question is auto-resolved with explanation when only one viable path exists",
-        "reason": "This tests whether the skill recognizes when investigation is unnecessary. However, the threshold for 'only one viable path' is subjective — photo decoupling from form data is indeed standard practice, but alternative approaches do exist (e.g., inline base64 in form data for small images). The assertion is reasonable but could be gamed by declaring any obvious choice as auto-resolved."
-      },
-      {
-        "assertion": "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
-        "reason": "This is a well-targeted domain-correctness assertion. Consider adding an assertion about photo compression strategy (the design covers this well: JPEG 80%, max 2048px) which is important for real-world field inspection apps with limited bandwidth."
-      }
-    ],
-    "overall": "Excellent eval set that covers the unique challenges of offline-first architecture. The assertions target the genuinely hard problems: conflict resolution strategy (not just mentioning it), sync protocol specifics (not just 'it syncs'), partial failure recovery, binary data handling, and legal signature validity. The cascading context assertion is particularly good for testing whether the design skill produces coherent, interconnected decisions rather than isolated answers. Missing: no assertion about queue size management or storage limits on the device."
-  }
+  "score": "10/10",
+  "eval_feedback": [
+    "Exceptionally thorough design. The cascading context pattern is well-executed, with each decision explicitly referencing prior decisions.",
+    "The challenger pattern adds real value, particularly in Dimension 5 where it identifies the critical interaction between signatures and conflict resolution (the 'as-signed' vs 'current' version issue).",
+    "The field-level conflict resolution with configurable critical fields is a sophisticated approach well-suited to the inspection domain."
+  ]
 }

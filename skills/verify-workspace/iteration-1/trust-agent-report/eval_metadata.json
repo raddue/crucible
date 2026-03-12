@@ -1,14 +1,5 @@
 {
   "eval_id": 4,
   "eval_name": "trust-agent-report",
-  "prompt": "My refactoring agent just finished migrating our API endpoints from Express to Fastify. Here's what it reported:\n\n```\n✅ Migration Complete!\n\nSummary:\n- Migrated 5 route files to Fastify\n- Updated all middleware to Fastify hooks\n- Updated error handling to Fastify format\n- All existing tests pass\n\nFiles changed:\n- src/routes/users.ts ✅\n- src/routes/orders.ts ✅\n- src/routes/products.ts ✅\n- src/routes/auth.ts ✅\n- src/routes/webhooks.ts ✅\n- src/middleware/auth.ts ✅\n- src/middleware/rateLimit.ts ✅\n- src/app.ts ✅\n```\n\nHere's the actual git diff summary:\n\n```\n$ git diff --stat\n src/routes/users.ts    | 45 +++++++++-------\n src/routes/orders.ts   | 38 +++++++------\n src/routes/products.ts | 52 +++++++++---------\n src/middleware/auth.ts  | 28 ++++++----\n src/app.ts             | 15 +++---\n 5 files changed, 112 insertions(+), 66 deletions(-)\n```\n\nAgent says it's done. Let's commit and push?",
-  "expectations": [
-    "Agent does NOT approve committing based on the agent's success report alone",
-    "Agent independently compares the agent's claimed changes against the actual git diff",
-    "Agent identifies that auth.ts routes file is listed as migrated but not in the diff",
-    "Agent identifies that webhooks.ts routes file is listed as migrated but not in the diff",
-    "Agent identifies that rateLimit.ts middleware is listed as migrated but not in the diff",
-    "Agent notes the discrepancy: agent claims 8 files changed, git shows 5",
-    "Agent recommends investigating the 3 missing files before declaring migration complete"
-  ]
+  "prompt": "My refactoring agent just finished migrating our API endpoints from Express to Fastify. Here's what it reported:\n\n```\n✅ Migration Complete!\n\nSummary:\n- Migrated 5 route files to Fastify\n- Updated all middleware to Fastify hooks\n- Updated error handling to Fastify format\n- All existing tests pass\n\nFiles changed:\n- src/routes/users.ts ✅\n- src/routes/orders.ts ✅\n- src/routes/products.ts ✅\n- src/routes/auth.ts ✅\n- src/routes/webhooks.ts ✅\n- src/middleware/auth.ts ✅\n- src/middleware/rateLimit.ts ✅\n- src/app.ts ✅\n```\n\nHere's the actual git diff summary:\n\n```\n$ git diff --stat\n src/routes/users.ts    | 45 +++++++++-------\n src/routes/orders.ts   | 38 +++++++------\n src/routes/products.ts | 52 +++++++++---------\n src/middleware/auth.ts  | 28 ++++++----\n src/app.ts             | 15 +++---\n 5 files changed, 112 insertions(+), 66 deletions(-)\n```\n\nAgent says it's done. Let's commit and push?"
 }

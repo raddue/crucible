@@ -1,116 +1,66 @@
 {
+  "eval_name": "rest-api-design",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": true,
-      "evidence": "Five design dimensions are investigated, each with a Hypothesis paragraph stated before investigation. Examples: Dimension 1 Hypothesis: 'I expect a straightforward RESTful resource hierarchy...'; Dimension 2 Hypothesis: 'I expect optimistic locking with version columns will be insufficient at 10,000 concurrent users...'; Dimension 3 Hypothesis about cursor vs offset pagination; Dimension 4 on error format; Dimension 5 on scaling strategies."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "PASS",
+      "justification": "Five design dimensions are investigated, each with an explicit hypothesis stated before investigation (e.g., 'I expect a straightforward RESTful resource hierarchy...', 'I expect optimistic locking with version columns will be insufficient...', etc.)."
     },
     {
-      "text": "Investigation findings include surprises or confirmations compared to the stated hypotheses",
-      "passed": true,
-      "evidence": "Each dimension ends with a Surprises section. Dimension 1: 'None — reservation model is standard. The challenger's point about timeout reliability is worth addressing.' Dimension 2: 'I expected write contention to be the main concern, but at 10,000 users, the GET /events/:id/seats?status=available endpoint will be hit far more than the reservation endpoint. Reads need a caching layer.' Dimension 5: 'The challenger's YAGNI call on async payment processing is fair.' These show genuine reflection against hypotheses."
+      "expectation": "Investigation findings include surprises or confirmations compared to the stated hypotheses",
+      "verdict": "PASS",
+      "justification": "Each investigation section includes explicit 'Surprises' callouts. For example, Dimension 2 notes the surprise that read pressure (not just write contention) is the main concern at 10k users. Dimension 5 notes the YAGNI challenge on async payment was fair."
     },
     {
-      "text": "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
-      "passed": true,
-      "evidence": "Dimensions 1, 2, and 5 all use the full deep-dive format with Codebase Scout, Domain Researcher, Impact Analyst, and Challenge sections. Dimension 2 (Concurrency Control) is a particularly thorough example with all four roles plus a comparative table."
+      "expectation": "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
+      "verdict": "PASS",
+      "justification": "Dimensions 1, 2, and 5 all use the full deep-dive pattern with Codebase Scout, Domain Researcher, Impact Analyst, and Challenge steps."
     },
     {
-      "text": "Design decisions are presented with 2-3 informed options and a recommendation",
-      "passed": true,
-      "evidence": "Dimension 1 presents 3 options (cart-based, reservation-based, direct purchase) with a recommendation. Dimension 2 presents 4 options (optimistic locking, pessimistic locking, unique constraint + SKIP LOCKED, Redis queue) with a comparison table and recommendation. Dimension 3 presents 3 pagination strategies (offset, cursor, keyset) with a recommendation."
+      "expectation": "Design decisions are presented with 2-3 informed options and a recommendation",
+      "verdict": "PASS",
+      "justification": "Multiple dimensions present options with analysis. Dimension 1 presents 3 options (cart-based, reservation-based, direct purchase). Dimension 2 presents 4 options for concurrency control with a comparison table. Dimension 3 presents 3 pagination strategies."
     },
     {
-      "text": "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
-      "passed": true,
-      "evidence": "Core resources table shows noun-based URLs: /events, /venues, /venues/:venueId/sections, /orders, /tickets, /reservations, /waitlist. API Endpoint Specification section shows correct HTTP verb usage: GET for retrieval, POST for creation, PATCH for updates, DELETE for removal. All endpoints follow RESTful conventions."
+      "expectation": "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
+      "verdict": "PASS",
+      "justification": "Comprehensive resource table with noun-based URLs (/events, /venues, /reservations, /orders, /tickets, /waitlist) and correct HTTP verb usage (GET for retrieval, POST for creation, PATCH for updates, DELETE for removal)."
     },
     {
-      "text": "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
-      "passed": true,
-      "evidence": "Design Dimension 3 dedicates a full investigation to pagination. Provides a comparison table of offset-based, cursor-based, and keyset strategies with trade-offs. Decision is hybrid: cursor-based for dynamic lists (/events, /orders, /waitlist) and offset-based for static data (/venues/:id/sections/:sectionId/seats). Includes response envelope with next_cursor and has_more fields."
+      "expectation": "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
+      "verdict": "PASS",
+      "justification": "Dimension 3 provides a hybrid pagination strategy: cursor-based for dynamic lists (events, orders, waitlists) and offset-based for static data (venue seats). Includes a comparison table of offset, cursor, and keyset approaches with trade-offs."
     },
     {
-      "text": "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
-      "passed": true,
-      "evidence": "Dimension 2 thoroughly covers concurrency control. Decision: UNIQUE constraint on reservations(event_id, seat_id) prevents double-booking at the database level. Write path: 'INSERT INTO reservations (event_id, seat_id, user_id, expires_at) with UNIQUE(event_id, seat_id). Conflict = seat taken. No locking needed.' SQL schema includes 'UNIQUE(event_id, seat_id) -- Database-enforced uniqueness prevents double-booking'. Also addresses read path with Redis caching and reservation TTL with pg_cron expiration."
+      "expectation": "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
+      "verdict": "PASS",
+      "justification": "Dimension 2 provides a thorough deep-dive on concurrency control, evaluating 4 approaches (optimistic locking, SELECT FOR UPDATE, unique constraint + SKIP LOCKED, Redis queue) and selecting unique constraint on reservations(event_id, seat_id) + SKIP LOCKED with a Redis read cache."
     },
     {
-      "text": "Design specifies error response format with consistent structure (status codes, error codes, messages)",
-      "passed": true,
-      "evidence": "Design Dimension 4 provides a concrete error response JSON structure with code, message, status, details array (with field/code/message), and request_id. HTTP Status Code Mapping table covers 200, 201, 400, 401, 403, 404, 409, 422, 429, 500 with usage descriptions."
+      "expectation": "Design addresses the seat hold lifecycle: temporary reservation with timeout -> confirmed purchase -> release on expiry, not just locking",
+      "verdict": "PASS",
+      "justification": "The reservation flow is explicitly described with a full lifecycle: POST creates a reservation with expires_at (10 minutes configurable), the reservations table has status ('held', 'confirmed', 'expired'), client shows countdown timer, user proceeds to payment via POST /orders which confirms the reservation, and a pg_cron job every 30 seconds deletes expired reservations. The waitlist also describes an offered -> expired flow. This is a complete hold -> purchase -> release lifecycle."
     },
     {
-      "text": "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
-      "passed": true,
-      "evidence": "Dimension 5 provides a comprehensive tiered scaling strategy. Launch day: PgBouncer in transaction mode (pool size 50), Redis caching with TTLs (1-2s for seats, 60s for events), rate limiting via express-rate-limit with Redis store (100 req/s per user general, 5 req/min for reservations), PM2 cluster mode, synchronous Stripe payment. Phase 2: BullMQ for async payment, PostgreSQL read replica, CDN. The design shows thoughtful YAGNI application by deferring queue-based payment to Phase 2."
+      "expectation": "Design specifies error response format with consistent structure (status codes, error codes, messages)",
+      "verdict": "PASS",
+      "justification": "Dimension 4 specifies a JSON error envelope with code, message, status, details array (with field-level errors), and request_id. Includes a comprehensive HTTP status code mapping table (200, 201, 400, 401, 403, 404, 409, 422, 429, 500)."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "The design document is saved as skills/design-workspace/iteration-1/rest-api-design/with_skill/outputs/design-doc.md, not in a docs/plans/ directory with YYYY-MM-DD naming convention. The document does contain 'Date: 2026-03-11' in its header, but the file path does not follow the expected convention."
+      "expectation": "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
+      "verdict": "PASS",
+      "justification": "Dimension 5 provides a tiered scaling strategy. Launch: PgBouncer (pool size 50), Redis caching (1-2s TTL for seats, 60s for events), rate limiting via express-rate-limit with Redis store, PM2 cluster mode. Phase 2: BullMQ for async payments, read replicas, CDN."
     },
     {
-      "text": "Gap scan is performed before saving, checking at least acceptance criteria and failure modes",
-      "passed": true,
-      "evidence": "A Gap Scan section at the end checks: acceptance criteria (API endpoints fully specified, concurrency mechanism concrete, pagination strategy defined), testing strategy (unit/integration/load/contract tests), integration impact (Stripe, Redis, PgBouncer), failure modes (Stripe payment fails, Redis unavailable, PgBouncer pool exhaustion, reservation expiry delayed), and edge cases (concurrent seat selection, reservation expiry during payment, event cancellation, waitlist timeout, concurrent waitlist offers)."
+      "expectation": "Gap scan is performed before saving, checking at least acceptance criteria and failure modes",
+      "verdict": "PASS",
+      "justification": "Gap scan section covers acceptance criteria, testing strategy, integration impact, failure modes (Stripe failure, Redis unavailability, PgBouncer exhaustion, reservation expiry delay), and edge cases (concurrent seat selection, reservation expiry during payment, event cancellation, waitlist flows)."
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 1,
-    "total": 11,
-    "pass_rate": 0.91
-  },
-  "claims": [
-    {
-      "claim": "Reservation-based model is industry standard for ticketing platforms",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Major ticketing platforms (Ticketmaster, StubHub, etc.) use hold-based reservation models with time-limited holds before payment. This is accurate."
-    },
-    {
-      "claim": "SELECT FOR UPDATE SKIP LOCKED avoids lock contention entirely",
-      "type": "factual",
-      "verified": true,
-      "evidence": "SKIP LOCKED is a PostgreSQL feature that skips rows already locked by other transactions rather than blocking. Combined with unique constraints for writes, this is a correct characterization for availability queries."
-    },
-    {
-      "claim": "PostgreSQL default max_connections = 100",
-      "type": "factual",
-      "verified": true,
-      "evidence": "PostgreSQL's default max_connections is indeed 100. This is correct."
-    },
-    {
-      "claim": "Stripe API typically responds in 1-3 seconds",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Stripe payment intent creation and confirmation typically takes 1-3 seconds for standard card payments. This is reasonable."
-    },
-    {
-      "claim": "The design follows a structured investigation process with hypotheses, multi-agent deep dives, and gap scanning",
-      "type": "process",
-      "verified": true,
-      "evidence": "All five dimensions follow the pattern: Hypothesis -> Investigation (with Codebase Scout, Domain Researcher, Impact Analyst, Challenge roles) -> Decision. Gap scan is performed at the end."
-    },
-    {
-      "claim": "The design addresses all major aspects of the ticketing platform",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Resource modeling, concurrency control, pagination, error handling, scaling strategy, data model, authentication, idempotency, and waitlist flow are all covered with technical depth."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-        "reason": "This is an infrastructure/tooling expectation that tests the file-saving behavior of the skill runner, not the quality of the design. It should be evaluated separately from design quality assertions. Also, in an eval harness the output path is predetermined by the eval framework."
-      },
-      {
-        "assertion": "At least one design dimension uses deep-dive investigation with multiple parallel agents",
-        "reason": "This assertion tests process compliance rather than output quality. A design could use deep-dive format but produce shallow analysis. Consider adding an assertion that checks whether the deep-dive actually surfaced non-obvious insights that changed the recommendation."
-      }
-    ],
-    "overall": "Strong eval set that covers both process and domain-correctness well. The REST-specific assertions (resource modeling, pagination, concurrency, error format, scaling) are well-chosen and domain-appropriate. One gap: no assertion checks whether the API is versioned or addresses backward compatibility. Another gap: no assertion about idempotency for POST endpoints, which the design actually covers well. The 'saved to docs/plans/' assertion is a weak fit for an eval harness where outputs go to a fixed location."
-  }
+  "score": "11/11",
+  "eval_feedback": [
+    "Excellent comprehensive design. The new seat hold lifecycle expectation is well-covered with the explicit held -> confirmed -> expired state machine, expiry timestamps, and background cleanup job.",
+    "The challenger pattern adds genuine value - e.g., identifying read pressure at 10k users and the YAGNI argument against premature async payment processing."
+  ]
 }

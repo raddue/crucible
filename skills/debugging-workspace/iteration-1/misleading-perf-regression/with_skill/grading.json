@@ -5,7 +5,7 @@
     {
       "expectation": "Investigation examines at least 3 distinct angles before forming a hypothesis (e.g., error analysis, change history, environment/dependency review)",
       "verdict": "PASS",
-      "justification": "Phase 1 dispatches 4 parallel investigators covering 4 distinct angles: Error Analysis (slow query and EXPLAIN analysis), Change Analysis (all v2.3 changes), Deep Dive on Database/Migration (ALTER TABLE effects on indexes and statistics), and Evidence Gathering (performance impact across endpoints). All 4 report back before synthesis and hypothesis formation."
+      "justification": "Phase 1 dispatches 4 parallel investigators covering 4 distinct angles: (1) Error Analysis -- slow query and EXPLAIN output analysis; (2) Change Analysis -- all v2.3 changes including code, serialization, and migration; (3) Deep Dive on Database/Migration -- ALTER TABLE effects on indexes, statistics, and table bloat; (4) Evidence Gathering -- performance impact pattern across all endpoints. All 4 report before synthesis."
     },
     {
       "expectation": "Investigation does NOT immediately blame the new recommendation engine code — it follows evidence",
@@ -15,48 +15,48 @@
     {
       "expectation": "Investigation identifies that the slow query is on an EXISTING endpoint (/api/users/recent), not the new recommendation feature",
       "verdict": "PASS",
-      "justification": "Agent 1 (Error Analysis) explicitly states: 'This query is from /api/users/recent -- an endpoint that has not been changed in months.' This is reiterated in the Synthesis Report and Resolution Summary."
+      "justification": "Agent 1 (Error Analysis) explicitly states: 'This query is from /api/users/recent -- an endpoint that has not been changed in months.' This finding is reiterated in the Synthesis Report, the hypothesis, and the Resolution Summary."
     },
     {
       "expectation": "Investigation notes the Seq Scan in the EXPLAIN output as concrete evidence of a missing or invalidated index",
       "verdict": "PASS",
-      "justification": "Agent 1 calls the EXPLAIN analysis 'the smoking gun' and identifies: 'Seq Scan (sequential scan) instead of an Index Scan -- the query planner is NOT using an index on created_at.' Agent 3 further elaborates on index invalidation mechanisms. The Synthesis Report lists this as the strongest evidence."
+      "justification": "Agent 1 labels the EXPLAIN analysis 'the smoking gun' and identifies: 'Seq Scan (sequential scan) instead of an Index Scan -- the query planner is NOT using an index on created_at.' It also notes the suspicious width=892 and the 25M rows removed by filter. Agent 3 elaborates on index invalidation mechanisms. The Synthesis lists this as the strongest evidence."
     },
     {
       "expectation": "Hypothesis targets the database migration's effect on the users table (index invalidation, table bloat, or missing index on created_at) — NOT the recommendation code",
       "verdict": "PASS",
-      "justification": "The hypothesis explicitly states: 'The system-wide API performance regression is caused by the database migration ALTER TABLE users ADD COLUMN preferences JSONB DEFAULT '{}' on the 50M-row users table. The migration invalidated or caused the query planner to stop using the index on users.created_at...' The recommendation code is explicitly rejected in a dedicated section 'Explicitly Rejecting Misdirected Suggestions.'"
+      "justification": "The hypothesis explicitly states: 'The system-wide API performance regression is caused by the database migration ALTER TABLE users ADD COLUMN preferences JSONB DEFAULT '{}' on the 50M-row users table. The migration invalidated or caused the query planner to stop using the index on users.created_at.' A dedicated section 'Explicitly Rejecting Misdirected Suggestions' rejects both the recommendation code and the DBA's suggestion."
     },
     {
       "expectation": "Hypothesis is verified against ALL symptoms (all endpoints slow, not just recommendations) before implementation",
       "verdict": "PASS",
-      "justification": "Phase 3.5 Red-Team Challenge 1 verifies the hypothesis against 4 specific symptoms: response times 50ms->500ms (YES), ALL endpoints affected (YES), /api/recommendations responds in 30ms (YES), and regression started after v2.3 (YES). Each symptom is individually explained. Challenge 2 rules out alternative causes (network, application code, load)."
+      "justification": "Phase 3.5 Red-Team Challenge 1 systematically verifies the hypothesis against 4 specific symptoms: response times 50ms->500ms, ALL endpoints affected, /api/recommendations responds in 30ms, regression started after v2.3. Each symptom is individually explained by the hypothesis. Challenge 2 rules out alternative upstream causes."
     },
     {
       "expectation": "The hypothesis is specific and testable — e.g., 'The ALTER TABLE caused a full table rewrite that invalidated the index on users.created_at'",
       "verdict": "PASS",
-      "justification": "The hypothesis states the specific mechanism: 'ALTER TABLE migration on 50M-row users table invalidated the index on users.created_at or caused stale query planner statistics, forcing sequential scans system-wide.' It includes testable predictions in Red-Team Challenge 3: 'Running ANALYZE users should immediately improve performance' and 'EXPLAIN after ANALYZE should show Index Scan instead of Seq Scan.'"
+      "justification": "The hypothesis specifies the exact mechanism: 'ALTER TABLE migration on 50M-row users table invalidated the index on users.created_at or caused stale query planner statistics.' Red-Team Challenge 3 provides testable predictions: 'Running ANALYZE users should immediately improve performance' and 'EXPLAIN after ANALYZE should show Index Scan instead of Seq Scan.'"
     },
     {
       "expectation": "Fix addresses the index issue (recreate/rebuild index, REINDEX, or add missing index) rather than rewriting application code",
       "verdict": "PASS",
-      "justification": "The fix consists of 4 SQL operations: (1) ANALYZE users, (2) CREATE INDEX CONCURRENTLY on created_at, (3) REINDEX INDEX CONCURRENTLY, (4) VACUUM users. The fix also adds a post-migration ANALYZE step and deployment runbook updates. No application code changes are made."
+      "justification": "The fix consists of 4 SQL operations in priority order: (1) ANALYZE users to update planner statistics, (2) CREATE INDEX CONCURRENTLY on created_at, (3) REINDEX INDEX CONCURRENTLY, (4) VACUUM users. Also adds post-migration ANALYZE to deployment runbook. Zero application code changes."
     },
     {
       "expectation": "Agent explicitly rejects or deprioritizes the DBA's suggestion to rewrite recommendation queries as misdirected",
       "verdict": "PASS",
-      "justification": "The transcript explicitly rejects this in multiple places: Agent 2 states 'The DBA's suggestion to \"rewrite the recommendation queries\" is misdirected -- the slow query has nothing to do with recommendations.' Agent 4 states 'Rewriting recommendation queries would have zero impact on the regression.' Phase 3 has a dedicated section 'Explicitly Rejecting Misdirected Suggestions' that rejects the DBA's suggestion with specific evidence."
+      "justification": "Multiple explicit rejections: Agent 2 states the DBA's suggestion 'is misdirected -- the slow query has nothing to do with recommendations.' Agent 4: 'Rewriting recommendation queries would have zero impact.' Phase 3 dedicates a section 'Explicitly Rejecting Misdirected Suggestions' that rejects the DBA's advice with specific evidence."
     },
     {
       "expectation": "Agent explicitly addresses the misleading timing correlation between the v2.3 deployment and the performance regression",
       "verdict": "PASS",
-      "justification": "This is addressed in multiple places: Agent 4 calls it 'a classic correlation-not-causation trap.' Agent 2 distinguishes the correlation with the MIGRATION vs. the code. Phase 3.5 Red-Team Challenge 4 explicitly discusses 'The misleading timing correlation.' The Resolution Summary states: 'This is a textbook example of correlation-not-causation in incident response.'"
+      "justification": "Addressed in multiple places: Agent 2 distinguishes correlation with the MIGRATION vs. the code. Agent 4 calls it 'a classic correlation-not-causation trap.' Phase 3.5 Red-Team Challenge 4 is dedicated to 'The misleading timing correlation.' The Resolution Summary states: 'This is a textbook example of correlation-not-causation in incident response.'"
     }
   ],
   "score": "10/10",
   "eval_feedback": [
-    "All expectations are well-targeted and clearly graded against the transcript. This eval set is strong.",
-    "Consider adding an expectation about whether the agent addresses prevention of future occurrences (e.g., adding ANALYZE to migration scripts). The transcript does this in Phase 4 Step 4, but it is not evaluated.",
-    "The 'specific and testable' expectation could benefit from more precise criteria for what counts as 'testable' -- the current bar is met by stating a verifiable prediction, but the threshold is somewhat subjective."
+    "All expectations are met with strong evidence from the transcript. The multi-agent investigation structure naturally produces evidence for each expectation.",
+    "The explicit rejection of misdirected suggestions in a dedicated section is a notable strength -- it demonstrates active resistance to social pressure from both the team narrative and the DBA's authority.",
+    "The fix is well-ordered (ANALYZE first as the most likely and least disruptive, then escalating) showing practical operational judgment."
   ]
 }

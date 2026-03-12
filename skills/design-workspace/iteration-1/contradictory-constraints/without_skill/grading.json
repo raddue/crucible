@@ -1,110 +1,68 @@
 {
+  "eval_name": "contradictory-constraints",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": false,
-      "evidence": "The document does not include investigated questions or explicit hypotheses. It is organized as a traditional design document with sections (Honest Assessment, Phased Approach, Collaboration Algorithm, Architecture, etc.) where decisions are presented directly. No hypothesis-investigation-decision pattern is used."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "FAIL",
+      "justification": "No investigated-questions workflow with hypotheses is used. The document presents a direct assessment and design decisions without the hypothesis-investigation-surprise structure."
     },
     {
-      "text": "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
-      "passed": true,
-      "evidence": "The 'Honest Assessment: Scope vs. Constraints' section directly confronts this: 'Google Docs is built by hundreds of engineers over 15+ years. The combination of requirements here... represents several PhD-level problems packed into a 3-month timeline for 2 engineers.' A detailed table estimates each requirement's engineering effort (totaling 16-25 engineer-months vs 6 available) and identifies conflicts."
+      "expectation": "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
+      "verdict": "PASS",
+      "justification": "Opens with an 'Honest Assessment: Scope vs. Constraints' section comparing requirements to Google Docs (hundreds of engineers, 15+ years). Provides a table quantifying each requirement's effort (real-time: 8-12 engineer-months, offline: 4-6, 500-page: 2-3, version history: 2-4, total: 16-25 engineer-months vs. 6 available). States: 'We must scope down.'"
     },
     {
-      "text": "Design recommends scoping down or phasing the requirements rather than promising to deliver everything — YAGNI principle is applied",
-      "passed": true,
-      "evidence": "The design explicitly recommends phased delivery. Phase 1 (months 1-3): real-time collaboration for ~50 pages, basic version history, no offline, same-region sub-100ms latency. Phase 2 (months 4-6): offline editing, 500-page scaling, efficient snapshots. 'What's Cut and Why' section explains each deferral. 'Scope reduction is mandatory' is listed as key design decision #1. The entire document applies YAGNI by not building offline, large-doc support, or sophisticated versioning in Phase 1."
+      "expectation": "Design recommends scoping down or phasing the requirements rather than promising to deliver everything -- YAGNI principle is applied",
+      "verdict": "PASS",
+      "justification": "Two-phase approach: Phase 1 (3 months) covers real-time collaboration for ~50 pages with basic version history and sub-100ms latency. Phase 2 (months 4-6) adds offline editing, 500-page scaling, and efficient version history. Explicit 'What's Cut and Why' section explains deferrals: offline (compounding bugs on unstable collaboration), 500 pages (90% of use cases are smaller), version history (store log, build UI later)."
     },
     {
-      "text": "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
-      "passed": true,
-      "evidence": "The 'Real-Time Collaboration Algorithm' section chooses CRDT (specifically Yjs) over OT with a 5-factor comparison table: server requirement, offline support, implementation complexity, performance at scale, future offline support. Yjs specifically chosen for: TypeScript library, production use in Notion/JupyterLab, provider ecosystem (y-websocket, y-indexeddb, y-prosemirror), compact encoding. 'Why Not OT' subsection explains central server bottleneck, transformation function complexity, and difficulty of adding offline later."
+      "expectation": "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
+      "verdict": "PASS",
+      "justification": "CRDT (Yjs) chosen over OT with a comparison table across 5 dimensions (server requirement, offline support, implementation complexity, performance, future offline support). Explains why Yjs specifically: open-source TypeScript, used by Notion/JupyterLab, provider libraries for WebSocket/IndexedDB/ProseMirror, compact encoding. 'Why Not OT' section addresses central server bottleneck, transformation function complexity, and Google's years-long stabilization."
     },
     {
-      "text": "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
-      "passed": true,
-      "evidence": "The 'Offline Support (Phase 2)' section addresses this specifically: 'Edits made offline are applied to the local Yjs document. When the user comes back online, the Yjs WebSocket provider reconnects and automatically syncs — the CRDT merge handles conflicts by design.' Goes beyond generic sync to address semantic conflicts: 'two users rewrote the same paragraph with different intent — the CRDT merges the characters, but the meaning might be garbled. This requires human review and is a UX problem, not a data problem.' While this is deferred to Phase 2, the architectural choice of CRDT is explicitly motivated by making this merge possible."
+      "expectation": "Design recommends using an existing CRDT/OT library (e.g., Yjs, Automerge) rather than building from scratch, given the 2-engineer 3-month constraint",
+      "verdict": "PASS",
+      "justification": "Yjs is explicitly recommended as an existing library. States: 'Choosing Yjs dramatically reduces engineering effort from \"build a CRDT from scratch\" (months) to \"integrate a library\" (weeks).' Also recommends Hocuspocus (open-source Yjs WebSocket backend) and TipTap with y-prosemirror binding. The design is built entirely around leveraging existing libraries rather than building from scratch."
     },
     {
-      "text": "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
-      "passed": true,
-      "evidence": "The Version History section explicitly rejects naive snapshots: 'Storing full document snapshots for every edit of a 500-page document would be enormously wasteful.' Strategy: (1) every edit logged as tiny Yjs update (delta) in document_updates table, (2) periodic snapshots every 100 updates or every hour in document_snapshots, (3) reconstruct any point by finding nearest snapshot and replaying updates forward. Compared to 'how databases use WAL + checkpoints.' SQL schema includes document_updates (yjs_update BYTEA per edit) and document_snapshots (periodic full state)."
+      "expectation": "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
+      "verdict": "PASS",
+      "justification": "Offline Support (Phase 2) section explains: edits made offline are applied to local Yjs document, WebSocket provider reconnects and 'automatically syncs -- the CRDT merge handles conflicts by design. No special conflict resolution logic needed. Two users can type in the same paragraph simultaneously (online or offline), and the CRDT guarantees convergence.' Also acknowledges semantic conflicts: 'two users rewrote the same paragraph with different intent -- the CRDT merges the characters, but the meaning might be garbled.'"
     },
     {
-      "text": "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
-      "passed": true,
-      "evidence": "The 'Sub-100ms Latency' section specifies four mechanisms: (1) WebSocket transport (no HTTP overhead, persistent connection), (2) Yjs delta encoding (~30-50 bytes per keystroke), (3) No server transformation (receive bytes -> broadcast bytes, sub-millisecond on server), (4) Server proximity (deploy in nearest region, per-region WebSocket servers with Yjs sync). Latency Budget table breaks down: client encode <1ms, network 10-40ms, server broadcast <1ms, return network 10-40ms, client apply <1ms = total ~20-80ms."
+      "expectation": "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
+      "verdict": "PASS",
+      "justification": "Strategy section opens: 'Storing full document snapshots for every edit of a 500-page document would be enormously wasteful. Instead:' Describes operation log (tiny deltas per edit) + periodic snapshots (every 100 updates or every hour). Reconstruction via nearest snapshot + forward replay. Compared to database WAL + checkpoints analogy."
     },
     {
-      "text": "At least one investigated question redirects — the investigation reveals the real decision is different from the originally framed question",
-      "passed": false,
-      "evidence": "No investigated questions exist in the document, so no redirect pattern is possible. The document does reframe the overall problem (from 'how to build all features' to 'what to cut'), which could be considered a redirect, but it's not structured as an investigated question whose investigation revealed a different real decision."
+      "expectation": "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
+      "verdict": "PASS",
+      "justification": "Dedicated 'Sub-100ms Latency' section with 4 strategies: WebSocket transport (no HTTP overhead), Yjs delta encoding (~30-50 bytes per keystroke), no server transformation (receive -> broadcast, sub-millisecond), server proximity (deploy in closest region). Latency budget table shows total ~20-80ms for same-region. Notes cross-region would be 100-200ms."
     },
     {
-      "text": "Design presentation is broken into sections with opportunity for user feedback between sections",
-      "passed": false,
-      "evidence": "The document is a continuous design document without explicit feedback checkpoints. While it has clear section headers, there are no 'Speak up if you disagree' or 'Does this approach work for you?' prompts between sections. The design is presented as a complete document, not as an incremental presentation with pause points."
+      "expectation": "At least one investigated question redirects -- the investigation reveals the real decision is different from the originally framed question",
+      "verdict": "FAIL",
+      "justification": "No investigation process with question redirection is used. The document presents direct analysis without the investigation framework that would support question redirection."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "Document is saved as skills/design-workspace/iteration-1/contradictory-constraints/without_skill/outputs/design-doc.md, not in docs/plans/ with YYYY-MM-DD naming."
+      "expectation": "Design presentation is broken into sections with opportunity for user feedback between sections",
+      "verdict": "FAIL",
+      "justification": "The document is presented as a continuous design spec without explicit pause points for user feedback. There are no 'speak up if you disagree' prompts or section-by-section feedback opportunities."
     },
     {
-      "text": "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy",
-      "passed": false,
-      "evidence": "No gap scan section exists. The document ends with a Summary and Risks section. While the Risks section covers three specific risks (Yjs performance, Hocuspocus stability, scope creep), it is not a structured gap scan checking acceptance criteria, testing strategy, failure modes, and edge cases."
+      "expectation": "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy",
+      "verdict": "FAIL",
+      "justification": "No gap scan is performed. The document ends with a Summary section and a Risks section (3 items: Yjs performance, Hocuspocus stability, scope creep), but this is not a systematic gap scan checking acceptance criteria, testing strategy, failure modes, and edge cases."
     }
   ],
-  "summary": {
-    "passed": 6,
-    "failed": 5,
-    "total": 11,
-    "pass_rate": 0.55
-  },
-  "claims": [
-    {
-      "claim": "Total estimated effort for all features is 16-25 engineer-months, available is 6",
-      "type": "factual",
-      "verified": true,
-      "evidence": "The estimates are reasonable: real-time collaboration (8-12 months) aligns with industry experience building OT/CRDT systems from scratch (though using Yjs reduces this significantly). The total 16-25 range and the 6 available engineer-months (2 engineers x 3 months) are correct math."
-    },
-    {
-      "claim": "Yjs is used in production by Notion, JupyterLab, and others",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Yjs is indeed used by these products. JupyterLab uses Yjs for real-time collaboration. Notion has publicly discussed using CRDTs though their specific implementation details vary."
-    },
-    {
-      "claim": "A single keystroke is ~30-50 bytes on the wire with Yjs",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Yjs uses compact binary encoding for updates. A single character insertion typically encodes to approximately 30-50 bytes including metadata. This is a reasonable estimate."
-    },
-    {
-      "claim": "Yjs document with millions of edits can be stored in kilobytes",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Yjs uses state vector compression that makes the internal encoding very compact. The claim about 'kilobytes' may be slightly optimistic for truly millions of edits on large documents, but Yjs's garbage collection of tombstones and compact encoding do achieve remarkably small document sizes."
-    },
-    {
-      "claim": "The phased approach delivers a viable product in 3 months",
-      "type": "quality",
-      "verified": true,
-      "evidence": "The 3-month project plan with month-by-month engineer allocation is realistic: Month 1 (foundation/infra), Month 2 (features/polish), Month 3 (hardening). Using Yjs+TipTap+Hocuspocus eliminates building collaboration infrastructure from scratch, making the timeline feasible for real-time collab on 50-page docs."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "At least one investigated question redirects — the investigation reveals the real decision is different from the originally framed question",
-        "reason": "This is a sophisticated process assertion that tests whether the skill discovers non-obvious reframings during investigation. Without the skill's investigation process, a traditional design document is unlikely to exhibit this pattern even if the designer does reframe problems (as this document does with scope reduction). The assertion is well-designed for skill differentiation but may need a broader definition of 'redirect' to catch informal reframings."
-      },
-      {
-        "assertion": "Design presentation is broken into sections with opportunity for user feedback between sections",
-        "reason": "This assertion tests an interactive delivery pattern that is inherently a skill/process feature. A static design document will never pass this unless it explicitly includes feedback prompts. Consider whether this assertion should only apply to with_skill runs, or whether it should be reframed to test document structure quality for without_skill runs."
-      }
-    ],
-    "overall": "Good eval set for the contradictory-constraints scenario. The scope-vs-constraints tension assertion is the most distinctive and important one — it tests whether the design confronts impossible requirements honestly rather than promising to deliver everything. Both the with_skill (had it produced output) and without_skill versions should pass this. The CRDT/OT trade-off assertion is well-targeted. The offline merge assertion is appropriately nuanced (requiring specificity beyond generic sync). The version history scaling assertion correctly demands non-naive approaches. The question-redirect assertion is the most ambitious and creative — it tests for emergent insight during the investigation process. Gap: no assertion checks whether the design considers what happens when Phase 1 ships but Phase 2 is cancelled (a common real-world scenario)."
-  }
+  "score": "7/11",
+  "eval_feedback": [
+    "The without_skill version handles the core design challenge well: it identifies the scope-constraint tension, recommends aggressive scope reduction, and makes sound technical choices (Yjs, TipTap, Hocuspocus).",
+    "The new expectation about recommending existing CRDT/OT library is met: Yjs is explicitly recommended and the design is built around leveraging existing libraries (Yjs, Hocuspocus, TipTap, y-prosemirror).",
+    "The Risks section provides some value (Yjs performance, Hocuspocus stability, scope creep) but falls short of a systematic gap scan.",
+    "The 4-point gap from the with_skill version comes entirely from process expectations (hypotheses, question redirection, feedback opportunities, gap scan) rather than substance."
+  ]
 }

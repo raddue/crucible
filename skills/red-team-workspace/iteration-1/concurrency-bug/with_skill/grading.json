@@ -5,47 +5,52 @@
     {
       "expectation": "Review begins by establishing the scope and context of what artifact is being evaluated",
       "verdict": "PASS",
-      "justification": "The report opens with an 'Artifact Under Review' section that clearly establishes scope: 'A TypeScript WebhookWorkerPool class intended to process incoming webhook events at ~500 events/second in a Node.js service.'"
+      "justification": "Opens with 'Artifact Under Review' section: 'A TypeScript WebhookWorkerPool class intended to process incoming webhook events at ~500 events/second in a Node.js service.'"
     },
     {
       "expectation": "Identified the race condition: multiple calls to processNext can interleave across await boundaries, bypassing the processing boolean guard",
       "verdict": "PASS",
-      "justification": "Section F1 ('Race Condition in processNext — The processing Guard is Broken Across Async Boundaries') explains in detail how a microtask scheduled between 'this.processing = false' and 'this.processNext()' can see processing as false and begin a second concurrent invocation, causing two events to process simultaneously."
+      "justification": "Finding F1 provides a detailed explanation: 'a microtask scheduled between them (e.g., a resolved Promise callback from another part of the system calling enqueue) can see processing === false, enter processNext, shift an event, and begin processing it — then the original call also enters processNext and shifts another event.' Traces the exact interleaving across the non-atomic gap between 'this.processing = false' and 'this.processNext()'."
     },
     {
       "expectation": "Identified the race condition as one of the most critical issues, explaining the potential impact (data corruption, lost events, or duplicate processing)",
       "verdict": "PASS",
-      "justification": "The race condition is listed as Fatal Challenge F1 (the highest severity tier, positioned first in the report). Impact is explicitly stated as 'Duplicate event processing, corrupted results Map state, unpredictable behavior under load.'"
+      "justification": "F1 is the first Fatal Challenge (highest severity tier, positioned first). Impact stated: 'Duplicate event processing, corrupted results Map state, unpredictable behavior under load.'"
     },
     {
       "expectation": "Identified that the pool processes events sequentially (one at a time), making it unable to handle 500 events/second throughput",
       "verdict": "PASS",
-      "justification": "Section F2 ('Sequential Processing Cannot Handle 500 Events/Second') states 'this class processes exactly one event at a time' and calculates throughput of 2-10 events/second at 100-500ms latency, showing the queue grows by ~490-498 events/second."
+      "justification": "Finding F2: 'Despite the name WorkerPool, this class processes exactly one event at a time... At the stated load of 500 events/second, the queue grows by ~490-498 events/second.'"
+    },
+    {
+      "expectation": "Quantifies or explains the throughput gap: at 500 events/second with sequential async processing, the queue will grow unboundedly",
+      "verdict": "PASS",
+      "justification": "F2 provides explicit quantitative reasoning: 'each event requires a network round-trip (fetch to event.callbackUrl), which at typical webhook latencies of 100-500ms means the pool processes 2-10 events/second. At the stated load of 500 events/second, the queue grows by ~490-498 events/second.' Also states 'Unbounded queue growth (~500 events/second added, ~2-10 events/second drained)' and 'Eventual memory exhaustion and process crash.'"
     },
     {
       "expectation": "Identified the unbounded results Map as a memory leak that grows without limit",
       "verdict": "PASS",
-      "justification": "Section S1 identifies 'The results Map stores every processed event result and is never pruned. At 500 events/second, this accumulates ~43 million entries per day' consuming '~4-8 GB of memory per day.'"
+      "justification": "Finding S1: 'The results Map stores every processed event result and is never pruned. At 500 events/second, this accumulates ~43 million entries per day... ~4-8 GB of memory per day.'"
     },
     {
       "expectation": "Identified missing retry logic for failed webhook deliveries",
       "verdict": "PASS",
-      "justification": "Section S2 ('No Retry Logic for Failed Webhook Deliveries') explains that 'transient failures permanently lose the event notification' and calculates ~43,000 lost events per day at a 0.1% failure rate."
+      "justification": "Finding S2: 'Webhook delivery failures (network timeouts, 5xx responses from the callback URL, DNS failures) are silently recorded as failed with no retry attempt.' Quantifies impact at ~43,000 lost events per day at 0.1% failure rate."
     },
     {
       "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
       "verdict": "PASS",
-      "justification": "All five major findings include 'Proposed fix' sections with code: a while-loop pattern for F1, a concurrent drain pattern with configurable concurrency for F2, TTL-based cleanup for S1, exponential backoff retry for S2, and AbortSignal.timeout for S3."
+      "justification": "F1 includes a while-loop fix and mentions p-queue. F2 includes a concurrent worker pool implementation with configurable concurrency and throughput math. S1 includes TTL-based cleanup and delete-on-read options with code. S2 includes exponential backoff retry with code. S3 includes AbortSignal.timeout fix with code."
     },
     {
       "expectation": "Challenges are specific and actionable — citing exact lines or logic paths, not vague concerns",
       "verdict": "PASS",
-      "justification": "F1 quotes the exact two non-atomic statements ('this.processing = false; this.processNext()') and provides a step-by-step interleaving scenario. F2 quotes the guard logic. S2 calculates specific failure rates. All challenges reference specific code constructs and provide numbered interleaving sequences."
+      "justification": "F1 cites the exact two non-atomic statements ('this.processing = false; this.processNext()') and provides a step-by-step interleaving scenario. F2 quotes the processing guard code. S1 calculates 43M entries/day and 4-8GB memory. All findings reference specific code constructs and logic paths."
     },
     {
       "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
       "verdict": "PASS",
-      "justification": "Report is organized as Fatal Challenges (F1, F2), Significant Challenges (S1, S2, S3), Minor Observations (4 bullet points), and Overall Assessment with verdict ('Fundamentally flawed'), confidence ('High'), and summary."
+      "justification": "Organized into Fatal Challenges (F1, F2), Significant Challenges (S1, S2, S3), Minor Observations (4 bullet points), and Overall Assessment with verdict 'Fundamentally flawed' and confidence level 'High'."
     },
     {
       "expectation": "Did NOT focus on code style, naming conventions, or formatting as primary findings",
@@ -53,9 +58,8 @@
       "justification": "All Fatal and Significant findings are substantive engineering issues (race condition, throughput bottleneck, memory leak, retry logic, timeouts). Code style concerns (err.message typing, missing Content-Type header) are relegated to Minor Observations only."
     }
   ],
-  "score": "10/10",
+  "score": "11/11",
   "eval_feedback": [
-    "All expectations are clear, specific, and well-calibrated. The mix of technical identification expectations and structural/format expectations provides good coverage.",
-    "Consider adding an expectation about whether the report identifies the misleading class name (WebhookWorkerPool implies parallelism but implements serial processing), since the transcript catches this and it demonstrates analytical depth."
+    "Exemplary report. All 11 expectations met with thorough, quantitative analysis and actionable fixes throughout."
   ]
 }

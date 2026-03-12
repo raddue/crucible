@@ -1,16 +1,5 @@
 {
   "eval_id": 4,
   "eval_name": "stagnation-test",
-  "prompt": "Run a quality gate on this design for a microservices architecture:\n\nWe'll split our monolith into 47 microservices, one per database table. Each service owns exactly one table and communicates via synchronous REST calls. Service A calls Service B which calls Service C which calls Service D for every user request. We'll use eventual consistency everywhere — no transactions. Each service will have its own copy of shared data, synced via nightly batch jobs. Authentication is handled by passing the user's raw password between services in HTTP headers.\n\nThis design is intentionally resistant to quick fixes — the fundamental architecture (47 services mirroring tables, deep synchronous call chains, password in headers) cannot be incrementally patched.",
-  "expectations": [
-    "Performed at least 2 iterative red-team rounds",
-    "Each round includes explicit Fatal or Significant severity ratings",
-    "Weighted score tracked between rounds using Fatal=3 and Significant=1",
-    "Detected stagnation when weighted score did not strictly decrease between rounds",
-    "Escalated to user with findings when stagnation was detected",
-    "Identified passing raw passwords in HTTP headers as a Fatal security issue",
-    "Identified deep synchronous call chain as a Fatal reliability issue",
-    "Identified 1-table-per-service decomposition as architecturally unsound (services should align with bounded contexts)",
-    "Identified passing raw passwords between services as the highest-severity security issue"
-  ]
+  "prompt": "Run a quality gate on this design for a microservices architecture:\n\nWe'll split our monolith into 47 microservices, one per database table. Each service owns exactly one table and communicates via synchronous REST calls. Service A calls Service B which calls Service C which calls Service D for every user request. We'll use eventual consistency everywhere — no transactions. Each service will have its own copy of shared data, synced via nightly batch jobs. Authentication is handled by passing the user's raw password between services in HTTP headers.\n\nThis design is intentionally resistant to quick fixes — the fundamental architecture (47 services mirroring tables, deep synchronous call chains, password in headers) cannot be incrementally patched."
 }

@@ -1,19 +1,5 @@
 {
   "eval_id": 2,
   "eval_name": "weak-plan",
-  "prompt": "Here's my implementation plan for adding email notifications. Task 1: Install nodemailer. Task 2: Write a sendEmail function that takes to/subject/body and calls nodemailer.sendMail directly from the request handler. Task 3: Add a POST /send-notification endpoint. Task 4: Deploy. Run a quality gate on this plan.",
-  "expectations": [
-    "Performed at least 2 iterative red-team rounds",
-    "Each round includes explicit Fatal or Significant severity ratings",
-    "Weighted score tracked between rounds using Fatal=3 and Significant=1",
-    "Artifact was revised between rounds based on findings",
-    "Stagnation detection applied via weighted score comparison after each round",
-    "Explicitly announced running a quality gate at start",
-    "Identified synchronous email sending in request handler as a problem",
-    "Identified missing authentication/authorization on the endpoint",
-    "Identified missing tests in the plan",
-    "Final round has zero Fatal findings in the revised artifact",
-    "Final revised plan includes async/queued email processing instead of synchronous sending",
-    "Final revised plan includes authentication on the notification endpoint"
-  ]
+  "prompt": "Here's my implementation plan for adding email notifications. Task 1: Install nodemailer. Task 2: Write a sendEmail function that takes to/subject/body and calls nodemailer.sendMail directly from the request handler. Task 3: Add a POST /send-notification endpoint. Task 4: Deploy. Run a quality gate on this plan."
 }

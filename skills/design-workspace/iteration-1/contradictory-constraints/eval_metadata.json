@@ -1,17 +1,5 @@
 {
   "eval_id": 4,
   "eval_name": "contradictory-constraints",
-  "prompt": "Design a real-time collaborative document editor (like Google Docs) that must also work offline, support documents up to 500 pages, and maintain a complete version history. The target is sub-100ms latency for keystroke propagation between collaborators. We're a team of 2 engineers with 3 months. Use TypeScript for both frontend and backend.",
-  "expectations": [
-    "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-    "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
-    "Design recommends scoping down or phasing the requirements rather than promising to deliver everything — YAGNI principle is applied",
-    "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
-    "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
-    "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
-    "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
-    "At least one investigated question redirects — the investigation reveals the real decision is different from the originally framed question",
-    "Design presentation is broken into sections with opportunity for user feedback between sections",
-    "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy"
-  ]
+  "prompt": "Design a real-time collaborative document editor (like Google Docs) that must also work offline, support documents up to 500 pages, and maintain a complete version history. The target is sub-100ms latency for keystroke propagation between collaborators. We're a team of 2 engineers with 3 months. Use TypeScript for both frontend and backend."
 }

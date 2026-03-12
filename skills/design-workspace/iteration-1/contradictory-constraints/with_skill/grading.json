@@ -1,116 +1,68 @@
 {
+  "eval_name": "contradictory-constraints",
+  "condition": "with_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": true,
-      "evidence": "Five design dimensions are investigated, each with an explicit hypothesis: (1) Scope Assessment — hypothesis that requirements are 10-20x more than achievable, expects aggressive scope reduction. (2) OT vs CRDT — hypothesis that CRDTs (Yjs) will be the clear winner due to offline merge and 2-engineer team. (3) Sub-100ms Latency — hypothesis that the real question may be what could PREVENT sub-100ms rather than how to achieve it. (4) Version History Storage — hypothesis about hybrid snapshots + operation log segments. (5) System Architecture — hypothesis about standard React/Node.js/PostgreSQL/S3 stack."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "PASS",
+      "justification": "Five design dimensions investigated, each with explicit hypotheses. Examples: 'I expect that real-time collaboration + offline + 500-page docs + version history is approximately 10-20x more work than 2 engineers can deliver in 3 months', 'I expect CRDTs (specifically Yjs) to be the clear winner over Operational Transforms', 'I initially framed this as how to achieve sub-100ms latency but investigation may reveal that...the question is actually about what could PREVENT sub-100ms latency'."
     },
     {
-      "text": "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
-      "passed": true,
-      "evidence": "Phase 1 Context Gathering opens with 'This project has a fundamental tension between scope and constraints that must be surfaced immediately' and compares the scope to Google Docs (100+ engineers) and Notion (50+ engineers). Dimension 1 calculates total estimated effort at 22-32 engineer-weeks against 26 available engineer-weeks, concluding 'leaves zero margin for bugs, testing, deployment, or the inevitable CRDT edge cases.' The tension is the central framing of the entire design."
+      "expectation": "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
+      "verdict": "PASS",
+      "justification": "The design opens with an explicit 'Understanding the Tension' section: 'This project has a fundamental tension between scope and constraints that must be surfaced immediately.' It notes each requirement is individually significant and combined they represent 'years of engineering effort by large teams (Google Docs: 100+ engineers, Notion: 50+ engineers).' Dimension 1 quantifies: '11-16 weeks for 2 engineers = 22-32 engineer-weeks. With a 3-month window (26 engineer-weeks), this is theoretically possible but leaves zero margin.'"
     },
     {
-      "text": "Design recommends scoping down or phasing the requirements rather than promising to deliver everything — YAGNI principle is applied",
-      "passed": true,
-      "evidence": "Aggressive scope reduction is the primary output of Dimension 1. v1 explicitly cuts: deliberate offline mode (reduced to 'network resilience'), 500-page optimization (functional but unoptimized, optimized for 100 pages), version diff view, comments, access control, cross-region latency, mobile, import/export, search. A 'What Does NOT Get Built' section explicitly lists 9 deferred items. YAGNI is mentioned by name: 'Apply YAGNI aggressively.' Stakeholder conversation flagged as required before development starts."
+      "expectation": "Design recommends scoping down or phasing the requirements rather than promising to deliver everything -- YAGNI principle is applied",
+      "verdict": "PASS",
+      "justification": "Explicit YAGNI application in Dimension 1: 'Apply YAGNI aggressively.' v1 scope reduced to real-time collaboration + network resilience + basic version history + 100-page optimization. Deliberately deferred: offline mode, 500-page virtualization, version diff view, comments, access control, cross-region, mobile, import/export. States: 'The prompt's requirements cannot all be delivered at production quality by 2 engineers in 3 months.'"
     },
     {
-      "text": "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
-      "passed": true,
-      "evidence": "Dimension 2 provides detailed OT vs CRDT comparison. OT (ShareDB): central server dependency, poor offline, complex transformation functions. CRDT (Yjs): inherent offline support, no central transform server, mature TypeScript ecosystem. Comparison table covers 9 criteria. Decision: Yjs (CRDT) with explicit 5-point rationale tied to constraints: offline merge for free, no complex server, excellent TypeScript ecosystem, active community, acceptable memory overhead. Memory overhead calculated: 250,000 chars x 50B = 12.5MB — deemed manageable."
+      "expectation": "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
+      "verdict": "PASS",
+      "justification": "Dimension 2 provides a thorough OT vs CRDT comparison with a detailed table across 10 criteria (offline support, complexity, TypeScript support, rich text, memory, server dependency, learning curve, 500-page docs, production readiness). CRDT (Yjs) selected with 5-point rationale specifically tied to the constraints (offline merge free, no transform server needed, 2-engineer team, TypeScript ecosystem, acceptable overhead)."
     },
     {
-      "text": "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
-      "passed": true,
-      "evidence": "The design distinguishes between two types of offline: (1) 'network resilience' — brief disconnection where CRDT handles merge automatically via Yjs sync protocol on reconnect, and (2) 'deliberate offline mode' — prolonged disconnection requiring local persistence and large merge handling. The challenger notes that long offline periods can produce 'surprising results (e.g., two users restructure the same section differently).' v1 scopes to network resilience (IndexedDB persistence via y-indexeddb, automatic CRDT merge on reconnect). The gap scan edge case covers 'two users type in the exact same position simultaneously — CRDT guarantees deterministic ordering (user with lower client ID wins position — both edits preserved).' The failure mode for WebSocket crash describes: 'clients detect disconnect, continue editing locally (IndexedDB), reconnect with exponential backoff, Yjs merges on reconnect.'"
+      "expectation": "Design recommends using an existing CRDT/OT library (e.g., Yjs, Automerge) rather than building from scratch, given the 2-engineer 3-month constraint",
+      "verdict": "PASS",
+      "justification": "Dimension 1 explicitly states: 'Estimated effort with an existing library (Yjs, Automerge): 4-6 weeks for 2 engineers. Estimated effort from scratch: 6-12 months (this is a PhD-thesis-level problem). Verdict: Achievable in 3 months ONLY if using an existing CRDT/OT library.' Dimension 2 recommends Yjs specifically, names Automerge as an alternative ('more academic, heavier'). The decision is Yjs with TipTap and y-websocket."
     },
     {
-      "text": "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
-      "passed": true,
-      "evidence": "Dimension 4 evaluates three approaches: (1) full operation log — rejected due to unbounded growth and linear reconstruction time, (2) periodic snapshots only — rejected due to lossy granularity, (3) hybrid snapshots + operation log segments — chosen for bounded reconstruction time with full fidelity. Decision: operation-based snapshots (every 1,000 ops, not time-based — per challenger feedback to avoid idle waste). Storage model detailed: S3 for binary snapshots (gzip compressed), PostgreSQL for metadata. Storage estimate: 500-page doc = ~500KB-1.25MB per snapshot. Restore flow defined: load nearest snapshot, replay operations, create as new version (non-destructive)."
+      "expectation": "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
+      "verdict": "PASS",
+      "justification": "The design distinguishes 'network resilience' (short disconnections, CRDT handles automatically) from 'deliberate offline mode' (significant work, deferred to v2). For v1's network resilience: 'if connection drops, local edits continue and merge when reconnected (CRDT handles this).' The challenger notes: 'for long offline periods, the merge can produce surprising results (e.g., two users restructure the same section differently).' IndexedDB (y-indexeddb) provides local persistence for page reloads."
     },
     {
-      "text": "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
-      "passed": true,
-      "evidence": "Dimension 3 provides a latency budget breakdown: client operation creation (<1ms) + serialize+send (<1ms) + network client-to-server (1-5ms) + server process+broadcast (<1ms) + network server-to-clients (1-5ms) + client apply operation (<1ms) + TipTap re-render (5-20ms) = total 8-33ms. Four architectural rules to maintain this: (1) broadcast before persist (async persistence avoids 5-20ms DB write on sync path), (2) single-region deployment for v1, (3) lazy initial sync for large documents, (4) auth on connection establishment only, not per message. Cross-region collaboration explicitly deferred to v2 since US-East-to-Europe roundtrip is ~160ms."
+      "expectation": "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
+      "verdict": "PASS",
+      "justification": "Dimension 4 explicitly rejects naive full-document snapshots ('Grows unboundedly... loading version from 3 months ago requires replaying millions of operations'). Recommends hybrid: operation-based snapshots (every 1,000 ops) + retained operation log segments. Compression with gzip. Stored in S3. Quantifies storage: '500-page document (~250,000 chars) = ~500KB-1.25MB per snapshot.' Non-destructive restore (creates new version)."
     },
     {
-      "text": "At least one investigated question redirects — the investigation reveals the real decision is different from the originally framed question",
-      "passed": true,
-      "evidence": "Dimension 3 (Sub-100ms Latency) explicitly redirects: 'Was going to ask: What architecture choices are needed for sub-100ms keystroke propagation? Investigation revealed the real question is: What could break the sub-100ms latency that Yjs + WebSocket already provides, and how do we avoid those pitfalls? Why the redirect: Yjs operations are tiny... WebSocket is persistent connection with no HTTP overhead... The latency target is achievable by default — the question is what to avoid.' The section is titled 'Investigation — Question Redirected' and the decision is marked 'Auto-Resolved: Default Architecture is Sufficient.'"
+      "expectation": "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",
+      "verdict": "PASS",
+      "justification": "Dimension 3 provides a detailed latency budget table showing total 8-33ms for same-region. Specific architectural rules: broadcast before persist, single-region deployment, lazy initial sync, no synchronous middleware on WebSocket path. Auth on connection establishment not per message."
     },
     {
-      "text": "Design presentation is broken into sections with opportunity for user feedback between sections",
-      "passed": true,
-      "evidence": "The design follows a phased structure: Phase 1 (Context Gathering), Phase 2 (Investigated Questions with 5 dimensions), Phase 3 (Design Presentation). Two decision points include 'Speak up if you disagree' — after the system architecture diagram in Dimension 5 and after the auto-resolved latency decision in Dimension 3. The Phase 3 presentation is broken into: What Gets Built (weekly breakdown), What Does NOT Get Built, Key Technical Decisions Summary, Data Model, Server WebSocket Handler, and Gap Scan — each providing natural feedback points."
+      "expectation": "At least one investigated question redirects -- the investigation reveals the real decision is different from the originally framed question",
+      "verdict": "PASS",
+      "justification": "Dimension 3 explicitly redirects: 'Was going to ask: What architecture choices are needed for sub-100ms keystroke propagation? Investigation revealed the real question is: What could break the sub-100ms latency that Yjs + WebSocket already provides, and how do we avoid those pitfalls?' This is labeled 'Investigation -- Question Redirected.'"
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "The output file is at outputs/design-doc.md, not in a docs/plans/ directory. While the document header includes 'Date: 2026-03-11', the file itself is not saved to docs/plans/ with a YYYY-MM-DD prefix in the filename."
+      "expectation": "Design presentation is broken into sections with opportunity for user feedback between sections",
+      "verdict": "PASS",
+      "justification": "Auto-resolved sections end with 'Speak up if you disagree.' (Dimensions 3, 4, and 5). The Phase 3 design presentation is broken into week-by-week sections. The scope reduction decision includes 'Stakeholder conversation required: This phased approach must be agreed upon before development starts.'"
     },
     {
-      "text": "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy",
-      "passed": true,
-      "evidence": "A comprehensive gap scan appears at the end of the document, checking: (1) Acceptance criteria — 4 measurable criteria including sub-100ms latency, 30-second disconnect resilience, version restore, and 100-page performance at >30fps. (2) Testing strategy — unit tests (Yjs operations, snapshot/restore, auth), integration tests (WebSocket lifecycle, S3 persistence, version CRUD), E2E tests (two-browser Playwright collaboration, disconnect/reconnect), performance tests (latency measurement, document size stress test at 50/100/200/500 pages), manual tests (3G throttle, packet loss). (3) Integration impact — S3, Redis, PostgreSQL, sticky sessions. (4) Failure modes — 5 scenarios with recovery strategies. (5) Edge cases — 5 scenarios with CRDT-specific handling."
+      "expectation": "Gap scan is performed before saving, checking at least acceptance criteria and testing strategy",
+      "verdict": "PASS",
+      "justification": "Gap scan covers acceptance criteria (measurable: sub-100ms latency, 30fps at 100 pages, disconnect/reconnect test), testing strategy (unit, integration, E2E with Playwright two-browser, performance tests at 50/100/200/500 pages, manual testing on 3G), integration impact (S3, Redis, PostgreSQL, sticky sessions), failure modes (WebSocket crash, S3 failure, Redis down, PostgreSQL down, browser crash), and edge cases (simultaneous same-position typing, version restore during active editing, document size exceeding 500 pages, snapshot failure, clock skew)."
     }
   ],
-  "summary": {
-    "passed": 10,
-    "failed": 1,
-    "total": 11,
-    "pass_rate": 0.91
-  },
-  "claims": [
-    {
-      "claim": "CRDT (Yjs) is the correct algorithm choice for the constraints",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Detailed OT vs CRDT comparison with 9-criterion table. Yjs selected for: inherent offline merge, no central transform server needed, mature TypeScript library, active community. Memory overhead calculated and deemed acceptable (12.5MB for 500-page doc)."
-    },
-    {
-      "claim": "Sub-100ms latency is achievable with default Yjs + WebSocket architecture",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Latency budget shows 8-33ms total for same-region collaboration. Key pitfalls identified and addressed: broadcast-before-persist, single-region deployment, lazy initial sync, auth on connection only."
-    },
-    {
-      "claim": "Scope reduction is necessary and YAGNI is applied",
-      "type": "process",
-      "verified": true,
-      "evidence": "Effort estimated at 22-32 engineer-weeks against 26 available. v1 scope cut to core collaboration + network resilience. 9 features explicitly deferred. Stakeholder conversation flagged as required."
-    },
-    {
-      "claim": "Version history uses operation-based snapshots, not naive full-document snapshots",
-      "type": "quality",
-      "verified": true,
-      "evidence": "Three approaches evaluated (full op log, periodic snapshots, hybrid). Hybrid chosen with 1,000-operation threshold. Storage in S3 with gzip compression. Non-destructive restore creates new version."
-    },
-    {
-      "claim": "The question redirect pattern is used meaningfully",
-      "type": "process",
-      "verified": true,
-      "evidence": "Dimension 3 redirects from 'how to achieve sub-100ms' to 'what could break it' — a genuine insight that changed the investigation direction and produced actionable architectural rules rather than over-engineering."
-    },
-    {
-      "claim": "Offline merge is addressed with CRDT-specific mechanisms",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Design distinguishes network resilience (CRDT handles automatically) from deliberate offline mode (deferred). IndexedDB via y-indexeddb provides local persistence. CRDT deterministic merge handles concurrent edits. Edge cases address same-position typing and version restore during active editing."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-        "reason": "Same as monolith-to-services: this assertion tests file system behavior rather than design quality. Both eval runs fail on this same mechanical expectation. Consider verifying whether the skill instructs the agent to save to docs/plans/ or whether this is an unimplemented step."
-      },
-      {
-        "assertion": "Design presentation is broken into sections with opportunity for user feedback between sections",
-        "reason": "This is difficult to evaluate strictly in a single output document. The 'Speak up if you disagree' prompts appear in only 2 of 5 dimensions. In a real interactive session, the phased structure would naturally create feedback opportunities, but in a static document it is hard to verify. Consider rephrasing to 'design is structured in phases that could support incremental feedback.'"
-      }
-    ],
-    "overall": "This is an excellent design that directly confronts the core tension of the prompt — the scope-vs-constraints mismatch. The YAGNI application is rigorous and honest, with 9 features explicitly deferred and a stakeholder conversation flagged. The CRDT vs OT analysis is thorough and well-suited to the constraints. The question redirect in Dimension 3 is a genuinely useful pattern that avoided over-engineering. Version history strategy is thoughtful (operation-based snapshots, not naive). The gap scan is comprehensive with measurable acceptance criteria and a multi-level testing strategy. The only failure is the file path convention, which is a mechanical issue consistent across both eval runs."
-  }
+  "score": "11/11",
+  "eval_feedback": [
+    "Outstanding design that confronts the scope-constraint tension head-on. The YAGNI application is genuine and specific, not just lip service.",
+    "The new expectation about recommending an existing CRDT/OT library is strongly met: Yjs is explicitly recommended with a direct comparison of 'with library (4-6 weeks)' vs 'from scratch (6-12 months)' and the conclusion that it's 'achievable ONLY if using an existing CRDT/OT library.'",
+    "The question redirection in Dimension 3 (from 'how to achieve latency' to 'what could break latency') is a genuinely insightful reframe.",
+    "The distinction between 'network resilience' (free with CRDT) and 'deliberate offline mode' (significant work) is precise and important."
+  ]
 }

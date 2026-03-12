@@ -8,34 +8,34 @@
       "justification": "Opens with 'The plan covers the basic flow — upload, store, retrieve, and test' and notes 'significant security and operational gaps that need to be addressed before this is implemented.'"
     },
     {
-      "expectation": "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
+      "expectation": "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path allows '../' sequences to read files outside the uploads directory",
       "verdict": "PASS",
       "justification": "First finding: 'an attacker could craft a filename like ../../etc/passwd or ../../../app/.env to read arbitrary files from the server.' Correctly traces the vulnerability through both the upload path (Task 1 storing unsanitized filenames) and the download path (Task 2 using res.sendFile)."
     },
     {
       "expectation": "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
       "verdict": "PASS",
-      "justification": "Second finding: 'There's no mention of checking whether the requesting user owns that file. Any authenticated user could enumerate file IDs and download other users' files.'"
+      "justification": "Second finding: 'There's no mention of checking whether the requesting user owns that file. Any authenticated user could enumerate file IDs and download other users' files.' Proposes WHERE user_id clause fix."
     },
     {
       "expectation": "Identified path traversal or missing download authorization as the most critical security issues, explaining the attack scenario",
       "verdict": "PASS",
-      "justification": "These are the first two findings listed, and the summary explicitly states: 'The path traversal vulnerability and missing download authorization are the most serious — either one could lead to unauthorized data access.' Attack scenarios are explained for both (crafted filenames for traversal, ID enumeration for auth bypass)."
+      "justification": "These are the first two findings listed, and the summary explicitly states: 'The path traversal vulnerability and missing download authorization are the most serious — either one could lead to unauthorized data access.' Attack scenarios explained for both."
     },
     {
       "expectation": "Identified missing file type validation (no restriction on what file types can be uploaded)",
       "verdict": "PASS",
-      "justification": "Dedicated 'No File Type Validation' section: 'nothing enforces this. Users could upload executable files, HTML files (which could lead to stored XSS if served with the wrong content type), or other dangerous content.'"
+      "justification": "Dedicated 'No File Type Validation' section: 'nothing enforces this. Users could upload executable files, HTML files (which could lead to stored XSS if served with the wrong content type), or other dangerous content.' Proposes extension and MIME type allowlist."
     },
     {
       "expectation": "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
       "verdict": "PASS",
-      "justification": "Dedicated 'Local Filesystem Storage' section listing three specific risks: files lost on redeploy/container replacement/disk failure, can't scale horizontally with multiple instances, and finite disk space."
+      "justification": "Dedicated 'Local Filesystem Storage' section listing three risks: files lost on redeploy/container replacement/disk failure, can't scale horizontally with multiple instances, and finite disk space. Proposes S3/GCS/Azure Blob."
     },
     {
       "expectation": "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
       "verdict": "PASS",
-      "justification": "Dedicated section: 'The plan mentions files \"up to 50MB each\" but doesn't include server-side enforcement. Without a size limit in the Express middleware... a user could upload arbitrarily large files and exhaust disk space or memory.'"
+      "justification": "Dedicated section: 'The plan mentions files \"up to 50MB each\" but doesn't include server-side enforcement. Without a size limit in the Express middleware... a user could upload arbitrarily large files and exhaust disk space or memory.' Proposes multer fileSize limit."
     },
     {
       "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
@@ -45,18 +45,16 @@
     {
       "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
       "verdict": "PASS",
-      "justification": "Path traversal and authorization (most critical security issues) come first, followed by validation, size limits, storage, and scanning in decreasing severity. Summary provides a clear verdict: 'I'd recommend going back and adding security tasks before writing any code.'"
+      "justification": "Path traversal and authorization (most critical) come first, followed by validation, size limits, storage, and scanning in decreasing severity. Summary provides verdict: 'I'd recommend going back and adding security tasks before writing any code.'"
     },
     {
       "expectation": "Security issues were prioritized over structural or stylistic concerns in the findings",
       "verdict": "PASS",
-      "justification": "All findings are security or operational concerns. The first four are pure security vulnerabilities. No code style, naming, or formatting issues are raised anywhere in the review."
+      "justification": "All findings are security or operational concerns. The first four are security vulnerabilities. No code style, naming, or formatting issues raised anywhere in the review."
     }
   ],
   "score": "10/10",
   "eval_feedback": [
-    "This eval is well-constructed with clear, measurable expectations that form a natural hierarchy: identify the bugs, rank them correctly, provide fixes, organize by severity.",
-    "The 'security issues prioritized over structural concerns' expectation partially overlaps with the severity-ordering expectation — consider whether both are needed or if they test meaningfully different reviewer behaviors.",
-    "Consider adding an expectation about whether the review identifies missing virus/malware scanning, since the transcript does cover this and it represents deeper security thinking beyond the obvious issues."
+    "All 10 expectations met. Both with_skill and without_skill conditions achieve perfect scores on this eval, indicating the security issues are readily identifiable without the skill."
   ]
 }

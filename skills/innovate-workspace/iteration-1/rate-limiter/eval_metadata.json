@@ -1,14 +1,5 @@
 {
   "eval_id": 3,
   "eval_name": "rate-limiter",
-  "prompt": "Use the innovate skill on this finalized design doc:\n\n## Design: Rate Limiter Middleware\n\n**Context:** Our public API is getting hammered by a few aggressive clients. Need rate limiting.\n\n**Architecture:**\n- Express middleware using Redis for distributed counting\n- Sliding window algorithm (vs fixed window to prevent burst-at-boundary)\n- Rate limits: 100 req/min for authenticated users, 20 req/min for anonymous\n- Response headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset\n- 429 Too Many Requests response with Retry-After header when exceeded\n\n**Implementation:**\n- Redis MULTI/EXEC for atomic increment + expiry\n- Lua script for sliding window calculation\n- Per-IP for anonymous, per-API-key for authenticated\n- Configurable limits per endpoint group (e.g., /api/search gets lower limit)\n- Graceful degradation: if Redis is down, allow requests through (fail-open)\n\n**Constraints:** Solo developer, 1-week timeline. Must not add latency > 5ms per request.\n\n**Testing:** Unit tests with Redis mock, integration tests with Redis testcontainer, load test with k6.\n\n**Already decided:** Redis (already in stack for sessions), sliding window (not token bucket — simpler mental model for API consumers), fail-open (availability > protection).",
-  "expectations": [
-    "Proposes exactly ONE addition, not a feature wishlist",
-    "Proposal fits within the 1-week solo developer constraint",
-    "Proposal does NOT add more than 5ms latency (respects the stated constraint)",
-    "Proposal addresses a gap that the existing design doesn't cover",
-    "Proposal includes why this over alternatives",
-    "Proposal states impact and cost",
-    "Proposal is proportionate to the project scope — not overengineering for a 1-week middleware"
-  ]
+  "prompt": "Use the innovate skill on this finalized design doc:\n\n## Design: Rate Limiter Middleware\n\n**Context:** Our public API is getting hammered by a few aggressive clients. Need rate limiting.\n\n**Architecture:**\n- Express middleware using Redis for distributed counting\n- Sliding window algorithm (vs fixed window to prevent burst-at-boundary)\n- Rate limits: 100 req/min for authenticated users, 20 req/min for anonymous\n- Response headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset\n- 429 Too Many Requests response with Retry-After header when exceeded\n\n**Implementation:**\n- Redis MULTI/EXEC for atomic increment + expiry\n- Lua script for sliding window calculation\n- Per-IP for anonymous, per-API-key for authenticated\n- Configurable limits per endpoint group (e.g., /api/search gets lower limit)\n- Graceful degradation: if Redis is down, allow requests through (fail-open)\n\n**Constraints:** Solo developer, 1-week timeline. Must not add latency > 5ms per request.\n\n**Testing:** Unit tests with Redis mock, integration tests with Redis testcontainer, load test with k6.\n\n**Already decided:** Redis (already in stack for sessions), sliding window (not token bucket — simpler mental model for API consumers), fail-open (availability > protection)."
 }

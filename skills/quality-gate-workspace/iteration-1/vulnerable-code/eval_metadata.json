@@ -1,19 +1,5 @@
 {
   "eval_id": 3,
   "eval_name": "vulnerable-code",
-  "prompt": "I wrote a utility function and I think it's ready. Can you quality gate this code?\n\n```python\ndef process_user_data(data):\n    name = data['name']\n    email = data['email']\n    age = int(data['age'])\n    query = f\"INSERT INTO users VALUES ('{name}', '{email}', {age})\"\n    db.execute(query)\n    return {'status': 'ok', 'message': f'Added {name}'}\n```",
-  "expectations": [
-    "Performed at least 2 iterative red-team rounds",
-    "Each round includes explicit Fatal or Significant severity ratings",
-    "Weighted score tracked between rounds using Fatal=3 and Significant=1",
-    "Artifact was revised between rounds based on findings",
-    "Stagnation detection applied via weighted score comparison after each round",
-    "Explicitly announced running a quality gate at start",
-    "Identified SQL injection as a Fatal-severity issue",
-    "Identified missing input validation as a problem",
-    "Identified missing error handling as a problem",
-    "Final revised code uses parameterized queries instead of f-string SQL",
-    "Final revised code includes input validation for name, email, and age fields",
-    "Final revised code includes error handling with try/catch or equivalent"
-  ]
+  "prompt": "I wrote a utility function and I think it's ready. Can you quality gate this code?\n\n```python\ndef process_user_data(data):\n    name = data['name']\n    email = data['email']\n    age = int(data['age'])\n    query = f\"INSERT INTO users VALUES ('{name}', '{email}', {age})\"\n    db.execute(query)\n    return {'status': 'ok', 'message': f'Added {name}'}\n```"
 }

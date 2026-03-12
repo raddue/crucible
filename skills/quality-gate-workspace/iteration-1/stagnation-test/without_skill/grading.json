@@ -1,0 +1,60 @@
+{
+  "eval_name": "stagnation-test",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Performed at least 2 iterative red-team rounds",
+      "verdict": "FAIL",
+      "justification": "The transcript is a single-pass review. There are no rounds, no iteration, and no revisiting of findings. The output is structured as a linear essay with sections for each concern, not as iterative red-team rounds."
+    },
+    {
+      "expectation": "Each round includes explicit Fatal or Significant severity ratings",
+      "verdict": "FAIL",
+      "justification": "No severity ratings are used anywhere in the transcript. Issues are described in prose without any formal severity classification. The words 'Fatal' and 'Significant' do not appear as severity labels. The closest is the phrase 'critical security vulnerability' for the password issue, but this is informal description, not a structured severity rating."
+    },
+    {
+      "expectation": "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+      "verdict": "FAIL",
+      "justification": "No weighted scoring system is present. No numerical scores are computed. No score tables appear. The concepts of Fatal=3 and Significant=1 weighting are entirely absent."
+    },
+    {
+      "expectation": "Detected stagnation when weighted score did not strictly decrease between rounds",
+      "verdict": "FAIL",
+      "justification": "There are no rounds, no scores, and therefore no stagnation detection mechanism. The concept of score comparison across rounds is completely absent."
+    },
+    {
+      "expectation": "Escalated to user with findings when stagnation was detected",
+      "verdict": "FAIL",
+      "justification": "No stagnation was detected (no iterative process exists), so no escalation occurred. The transcript ends with a summary of recommendations, but this is a standard review conclusion, not a stagnation-triggered escalation."
+    },
+    {
+      "expectation": "Identified passing raw passwords in HTTP headers as a Fatal security issue",
+      "verdict": "FAIL",
+      "justification": "The transcript does identify passing raw passwords in HTTP headers as a serious problem (section: 'Passing Raw Passwords in HTTP Headers Is a Critical Security Vulnerability') with detailed analysis. However, it does not rate it as 'Fatal' severity -- it uses the informal term 'critical security vulnerability' in the heading but applies no formal severity classification. Graded strictly per expectation wording which requires Fatal severity rating."
+    },
+    {
+      "expectation": "Identified deep synchronous call chain as a Fatal reliability issue",
+      "verdict": "FAIL",
+      "justification": "The transcript identifies deep synchronous call chains as a 'Reliability Killer' with detailed analysis of availability math and cascade failures. However, no Fatal severity rating is applied. The section heading uses the informal phrase 'Reliability Killer' but the structured Fatal classification required by the expectation is absent."
+    },
+    {
+      "expectation": "Identified 1-table-per-service decomposition as architecturally unsound (services should align with bounded contexts)",
+      "verdict": "PASS",
+      "justification": "The transcript's first section ('Splitting by Database Table is the Wrong Decomposition') explicitly identifies the 1:1 table-to-service mapping as a 'fundamental misunderstanding of what microservices are for' and recommends 'identify 5-10 bounded contexts in the domain (e.g., User Management, Order Processing, Inventory) and let each service own the cluster of tables relevant to its domain.' This matches the expectation exactly."
+    },
+    {
+      "expectation": "Identified passing raw passwords between services as the highest-severity security issue",
+      "verdict": "PASS",
+      "justification": "The transcript describes the password issue as 'the most urgent issue in the entire design' and dedicates the most detailed section to it, covering transit exposure, at-rest exposure, least privilege violations, and compliance failures. While no formal severity ranking is used, the explicit statement that it is the most urgent issue in the entire design satisfies the 'highest-severity' requirement."
+    }
+  ],
+  "score": "2/9",
+  "eval_feedback": [
+    "The without_skill transcript produces a competent architectural review that correctly identifies all the substantive domain problems (table decomposition, call chains, eventual consistency, batch sync, raw passwords).",
+    "However, it completely lacks the quality gate process: no iterative rounds, no severity ratings, no weighted scoring, no stagnation detection, and no escalation mechanism.",
+    "This confirms the eval's design intent: without the quality gate skill, Claude provides good domain analysis but does not follow the structured iterative red-team process.",
+    "The 2 passing expectations are both domain-knowledge assertions that do not require the quality gate process -- they test whether Claude can identify architectural problems, which baseline Claude handles well.",
+    "The 7 failing expectations are all process assertions tied to the quality gate skill's iterative methodology. This clean split (all process assertions fail, domain assertions pass) is the expected outcome for the without_skill condition.",
+    "Notably, expectations 6 and 7 (Fatal severity for passwords and call chains) fail on a technicality: the transcript identifies these issues with equivalent urgency language but does not use the formal 'Fatal' severity label. This is a correct strict grading -- the quality gate process requires structured severity ratings, not informal adjectives."
+  ]
+}

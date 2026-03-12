@@ -1,105 +1,63 @@
 {
+  "eval_name": "monolith-to-services",
+  "condition": "without_skill",
   "expectations": [
     {
-      "text": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-      "passed": false,
-      "evidence": "The document does not include investigated questions or hypotheses. It is structured as a traditional design specification with sections (Current State Assessment, Bounded Contexts, Phased Migration, Data Ownership, etc.) where decisions are presented directly. No hypothesis-investigation-decision pattern is used."
+      "expectation": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
+      "verdict": "FAIL",
+      "justification": "No investigated-questions workflow is used. The document presents design decisions directly as recommendations without hypotheses, investigation steps, or surprise documentation."
     },
     {
-      "text": "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
-      "passed": false,
-      "evidence": "No challenger step or assumption-attacking pattern exists. Decisions are presented as conclusions. The document implicitly addresses some counter-arguments (e.g., why Orders + Payments stay together) but does not use a formal challenger role."
+      "expectation": "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
+      "verdict": "FAIL",
+      "justification": "No challenger or deep-dive investigation pattern is used. Decisions are presented as final recommendations without adversarial review."
     },
     {
-      "text": "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
-      "passed": true,
-      "evidence": "The Bounded Context Identification section explicitly groups functionality by business capability, not by table. Orders + Payments are kept together: 'An order isn't complete without payment. Splitting them into separate services would require distributed transactions (sagas) for the most critical business flow — checkout. The complexity isn't worth it at this scale.' Seven bounded contexts defined: Identity, Catalog, Inventory, Order Management, Fulfillment, Notifications, Recommendations. Key grouping decisions section explains why Inventory is separate from Orders and why Notifications is its own service."
+      "expectation": "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
+      "verdict": "PASS",
+      "justification": "Seven bounded contexts identified based on business capabilities (Identity, Catalog, Inventory, Order Management, Fulfillment, Notifications, Recommendations). Orders + Payments are explicitly grouped together with justification: 'An order isn't complete without payment. Splitting them into separate services would require distributed transactions (sagas) for the most critical business flow -- checkout.'"
     },
     {
-      "text": "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
-      "passed": true,
-      "evidence": "Six phases are defined with explicit ordering and rationale: Phase 1 Notifications (lowest risk, establishes event infrastructure), Phase 2 Recommendations (compute-heavy, different scaling profile, frees DB resources), Phase 3 Catalog (read-heavy, natural boundary), Phase 4 Fulfillment (naturally async, external APIs), Phase 5 Inventory (tightly coupled to orders, needs mature event infrastructure), Phase 6 Order Management (most critical, extracted last when team has maximum experience). Each phase includes 'Why first/second/etc' explanation."
+      "expectation": "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
+      "verdict": "PASS",
+      "justification": "Six-phase plan over 9-12 months: Phase 1 (Notifications - lowest risk, establishes event infrastructure), Phase 2 (Recommendations - compute-heavy, read-only), Phase 3 (Catalog - read-heavy, caching benefit), Phase 4 (Fulfillment - naturally async), Phase 5 (Inventory - tightly coupled to orders), Phase 6 (Order Management - most critical, extracted last). Each phase has explicit 'Why' rationale."
     },
     {
-      "text": "Design addresses data ownership — each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
-      "passed": true,
-      "evidence": "Data Ownership Strategy section has two subsections: 'During Transition: Shared Database with Schema Separation' — schema namespacing per bounded context, access boundaries with restricted DB users, read-only replicated views for cross-service reads. 'After Transition: Database per Service' — logical replication or CDC (Debezium) during migration, old tables made read-only then deprecated, FK constraints replaced with application-level references. Also covers cross-service references (product snapshots in orders, user_id with JWT claims)."
+      "expectation": "First service(s) extracted are low-coupling candidates (e.g., notifications, recommendations, email) -- not core coupled services like orders or payments",
+      "verdict": "PASS",
+      "justification": "Phase 1 extracts Notifications ('lowest-risk extraction. Notifications are fire-and-forget side effects. No other service depends on notifications -- it only consumes events.') Phase 2 extracts Recommendations ('compute-heavy and has a completely different scaling profile... reads product and user data but doesn't write to core transactional tables.'). Orders + Payments are explicitly last (Phase 6)."
     },
     {
-      "text": "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
-      "passed": true,
-      "evidence": "Inter-Service Communication section has three subsections: Synchronous (REST/HTTP) for checkout flow (user waiting), product page (parallel calls), and user authentication. Asynchronous (RabbitMQ) for notifications, recommendations, fulfillment, and inventory updates. Decision Rationale: 'Synchronous for operations where the user is actively waiting... Asynchronous for everything else — it decouples services temporally.' Also explains choosing RabbitMQ over Kafka: '50K DAU doesn't require Kafka's throughput, and RabbitMQ is simpler to operate for a small team.'"
+      "expectation": "Design addresses data ownership -- each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
+      "verdict": "PASS",
+      "justification": "Two-step data strategy: during transition, shared database with schema namespacing per bounded context and restricted database user permissions. After transition, database-per-service using logical replication or CDC (Debezium) to migrate. Foreign keys across service boundaries replaced with application-level references."
     },
     {
-      "text": "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
-      "passed": true,
-      "evidence": "Zero-Downtime Migration Strategies section covers four approaches: (1) Strangler Fig Pattern with 5-step process (build alongside, route traffic, migrate gradually, run in parallel/shadow mode, remove old code), (2) Feature Flags (LaunchDarkly/Flipper, roll out 1%->10%->50%->100%, instant rollback), (3) Database Migration (logical replication, writes to new DB first, cut reads when stable), (4) Blue-Green for service deployments (health checks before routing)."
+      "expectation": "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
+      "verdict": "PASS",
+      "justification": "Synchronous REST for checkout flow (user waiting) and product page (parallel calls). Asynchronous via RabbitMQ for notifications, recommendations, fulfillment, inventory updates. Explicit rationale: 'Synchronous for operations where the user is actively waiting... Asynchronous for everything else.' RabbitMQ chosen over Kafka due to simpler operations at 50K DAU scale."
     },
     {
-      "text": "Design considers the 6-engineer team constraint — does not propose extracting all services simultaneously or an unrealistic timeline",
-      "passed": true,
-      "evidence": "Team Capacity Considerations section explicitly addresses this: 'Never more than 2 active extractions at once. Each extraction needs at least 2 engineers for code review, on-call, and knowledge sharing.' Each phase specifies team allocation (2-3 engineers per phase). Timeline is 9-12 months total. Dedicated rotating infrastructure engineer. Weekly architecture sync for knowledge sharing. Realistic Timeline table shows overlapping phases with risk levels. Acknowledges 'reduced velocity during active extraction phases.'"
+      "expectation": "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
+      "verdict": "PASS",
+      "justification": "Strangler Fig pattern with 5-step process (build new, route traffic, migrate gradually, run in parallel/shadow mode, remove old code). Feature flags for per-endpoint rollout (1% -> 10% -> 50% -> 100%) with instant rollback. Blue-green deployment for each service. Database migration via logical replication."
     },
     {
-      "text": "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
-      "passed": true,
-      "evidence": "Cross-Service Data Consistency section describes an orchestrated saga for checkout: Order Service creates pending order -> calls Inventory Service to reserve -> processes Stripe payment -> confirms order -> publishes event. Failure compensation: payment fails after inventory reserved -> explicitly calls POST /inventory/release. Fallback: background reconciliation job detects orphaned reservations after 15-minute timeout. Eventual consistency for non-critical paths (notifications, recommendations, fulfillment) with explanation of why delays are acceptable."
+      "expectation": "Design considers the 6-engineer team constraint -- does not propose extracting all services simultaneously or an unrealistic timeline",
+      "verdict": "PASS",
+      "justification": "Explicit section on team capacity: 'Never more than 2 active extractions at once', dedicated rotating infrastructure engineer, weekly architecture sync. Phase allocation ranges from 1-2 to 3 engineers per extraction. Total timeline 9-12 months described as realistic."
     },
     {
-      "text": "Design document is saved to docs/plans/ with the YYYY-MM-DD naming convention",
-      "passed": false,
-      "evidence": "Document is saved as skills/design-workspace/iteration-1/monolith-to-services/without_skill/outputs/design-doc.md, not in docs/plans/ with YYYY-MM-DD naming."
+      "expectation": "Design addresses cross-service data consistency for operations that span multiple services (e.g., saga pattern, eventual consistency with compensation)",
+      "verdict": "PASS",
+      "justification": "Orchestrated saga for checkout: Order Service creates pending order -> calls Inventory to reserve -> calls Stripe -> confirms order -> publishes event. Compensation defined: if payment fails, release inventory. Background reconciliation for orphaned reservations (15-minute timeout). Eventual consistency explicitly accepted for non-critical flows (notifications, recommendations, fulfillment)."
     }
   ],
-  "summary": {
-    "passed": 7,
-    "failed": 3,
-    "total": 10,
-    "pass_rate": 0.7
-  },
-  "claims": [
-    {
-      "claim": "Orders and payments should not be split into separate services at this scale due to distributed transaction complexity",
-      "type": "factual",
-      "verified": true,
-      "evidence": "At 50K DAU, the operational complexity of distributed transactions (sagas) for the checkout critical path outweighs the benefits of service separation. This is a sound engineering judgment widely shared in the microservices community."
-    },
-    {
-      "claim": "RabbitMQ is simpler to operate than Kafka for a small team at 50K DAU scale",
-      "type": "factual",
-      "verified": true,
-      "evidence": "RabbitMQ has simpler operational requirements than Kafka (no ZooKeeper/KRaft, simpler topic management). At 50K DAU the event volume doesn't require Kafka's throughput characteristics. This is a reasonable assessment."
-    },
-    {
-      "claim": "Strangler Fig pattern with 1% -> 10% -> 50% -> 100% rollout enables zero-downtime migration",
-      "type": "factual",
-      "verified": true,
-      "evidence": "The Strangler Fig pattern is the canonical approach for zero-downtime monolith-to-services migration, described by Martin Fowler. Progressive rollout percentages are standard practice for risk reduction."
-    },
-    {
-      "claim": "9-12 months is realistic for 6 engineers to extract 7 bounded contexts",
-      "type": "quality",
-      "verified": true,
-      "evidence": "With 6 engineers doing 2 extractions at a time, each taking 2-3 months, 6 phases over 9-12 months is geometrically consistent. The timeline accounts for overlap and increasing team experience."
-    },
-    {
-      "claim": "Debezium can be used for change data capture during database migration",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Debezium is a widely used open-source CDC platform that works with PostgreSQL (via logical decoding). This is a correct and appropriate technology recommendation."
-    }
-  ],
-  "eval_feedback": {
-    "suggestions": [
-      {
-        "assertion": "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-        "reason": "This is a process-compliance assertion testing the design skill's methodology. The without_skill output makes good design decisions but does so in a traditional document format. This assertion functions correctly as a skill differentiator."
-      },
-      {
-        "assertion": "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
-        "reason": "Similarly tests skill methodology. The without_skill output does implicitly address counter-arguments (e.g., why not split orders and payments) but not through a formal challenger pattern. This is working as intended for comparison purposes."
-      }
-    ],
-    "overall": "The without_skill output is an impressive design document that passes 7 out of 10 expectations, failing only on process-oriented assertions (hypotheses, challenger step) and the file-naming convention. Every domain-correctness assertion passes with substantial evidence. The design covers bounded contexts, phased migration, data ownership, inter-service communication, zero-downtime strategies, team constraints, and cross-service consistency with genuine depth and practical specificity. The only technical gaps are things like: no discussion of observability during migration (though an Observability section exists at the end), and no mention of testing strategy for the migration itself. Overall, this is a high-quality design that a senior engineer would produce."
-  }
+  "score": "8/10",
+  "eval_feedback": [
+    "Strong technical design that covers all substantive requirements well. The without_skill version handles bounded contexts, phased migration, data ownership, communication patterns, and cross-service consistency competently.",
+    "The new expectation about low-coupling first extraction is clearly met: Notifications and Recommendations are phases 1 and 2.",
+    "The Orders + Payments grouping decision is well-reasoned in this version (avoiding distributed transaction complexity for the most critical flow), though the with_skill version's argument for separating them is also valid.",
+    "Missing the structured investigation process (hypotheses, agents, challengers, gap scan) accounts for the 2-point gap from the with_skill version."
+  ]
 }

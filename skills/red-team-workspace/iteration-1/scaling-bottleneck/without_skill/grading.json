@@ -10,53 +10,56 @@
     {
       "expectation": "Identified single Kafka partition with single consumer as the most critical scaling bottleneck, explaining why it cannot handle the 1M events/day growth target",
       "verdict": "PASS",
-      "justification": "First finding identifies this clearly: 'a single NotificationRouter instance consuming from a single Kafka partition. Kafka's parallelism model is based on partitions — one consumer per partition. With a single partition, you cannot add more consumers.' Explains the ceiling and calls it the most pressing concern in the summary. Does note 'you'll probably be fine initially' at 1M/day, slightly softening severity, but still identifies it as the primary bottleneck."
+      "justification": "First finding identifies: 'a single NotificationRouter instance consuming from a single Kafka partition. Kafka's parallelism model is based on partitions — one consumer per partition. With a single partition, you cannot add more consumers to share the load.' Called the most pressing concern in the summary. Does note 'you'll probably be fine initially' at 1M/day which slightly softens severity, but the bottleneck is unambiguously identified."
     },
     {
       "expectation": "Identified missing retry mechanism and dead-letter queue for failed notifications as a major reliability risk",
       "verdict": "PASS",
-      "justification": "Second finding: 'If a channel fails... you log the error and move on. The notification is permanently lost. This is a poor user experience.' Proposes retries with exponential backoff, dead-letter queue, and alerting on DLQ growth."
+      "justification": "Second finding: 'If a channel fails... you log the error and move on. The notification is permanently lost.' Proposes retries with exponential backoff, dead-letter queue, and alerting on DLQ growth."
     },
     {
       "expectation": "Identified synchronous fan-out (email, push, SMS in same process) as a risk for latency and cascading failures",
       "verdict": "PASS",
-      "justification": "Third finding identifies three specific risks: high-latency provider blocks subsequent event processing, a crash in any handler brings down the entire service, and channels can't scale independently. Recommends separate channel-specific queues or workers."
+      "justification": "Third finding: 'All three channel handlers (email, push, SMS) run as function calls within the same NotificationRouter process.' Identifies three risks: high-latency provider blocks subsequent events, a crash brings down the entire service, and channels can't scale independently."
+    },
+    {
+      "expectation": "Identifies that a slow or failing channel (e.g., Twilio SMS timeout) blocks processing of all subsequent events in the queue",
+      "verdict": "PASS",
+      "justification": "The synchronous fan-out section explicitly states: 'If Twilio has high latency, it blocks email and push processing for subsequent events.' This directly identifies the blocking/cascading effect — a slow channel blocks all subsequent event processing."
     },
     {
       "expectation": "Identified missing rate limiting or backpressure for external providers (SES, Firebase, Twilio) at scale",
       "verdict": "PASS",
-      "justification": "Fourth finding: 'SES, Firebase, and Twilio all have rate limits. At 1M events/day, if even a fraction of users have all three channels enabled, you could hit provider throttling. The design doesn't mention any rate limiting or backpressure mechanism.' Recommends per-provider rate limiting and HTTP 429 handling."
+      "justification": "Fourth finding: 'SES, Firebase, and Twilio all have rate limits. At 1M events/day, if even a fraction of users have all three channels enabled, you could hit provider throttling. The design doesn't mention any rate limiting or backpressure mechanism.'"
     },
     {
       "expectation": "Flagged the 'scale up' strategy as inadequate for the stated growth from 10k to 1M events/day",
       "verdict": "PASS",
-      "justification": "In the scaling section: 'You're limited to vertical scaling (\"scale up\"), which has hard limits and is expensive.' Directly challenges the design's stated scaling strategy and recommends horizontal scaling with multiple partitions and consumer groups."
+      "justification": "In the scaling section: 'You're limited to vertical scaling (\"scale up\"), which has hard limits and is expensive.' Directly challenges the design's stated strategy and recommends horizontal scaling with multiple partitions."
     },
     {
       "expectation": "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
       "verdict": "PASS",
-      "justification": "All major findings include concrete fixes: multiple partitions + consumer groups for scaling, retry with exponential backoff + DLQ + alerting for reliability, separate channel queues/workers for fan-out, per-provider rate limiting + 429 backoff for throttling."
+      "justification": "All major findings include concrete fixes: multiple partitions + consumer groups for scaling, retry with exponential backoff + DLQ + alerting for reliability, separate channel queues/workers for fan-out isolation, per-provider rate limiting + 429 backoff for throttling."
     },
     {
       "expectation": "Challenges reference specific parts of the design (e.g., 'single instance', 'single Kafka partition', 'no retries') rather than making generic criticisms",
       "verdict": "PASS",
-      "justification": "Directly references: 'single NotificationRouter instance consuming from a single Kafka partition', 'vertical scaling (\"scale up\")', 'log the error and move on', 'function calls within the same NotificationRouter process', specific provider names (SES, Firebase, Twilio). All challenges are anchored to concrete design elements."
+      "justification": "References: 'single NotificationRouter instance consuming from a single Kafka partition', 'vertical scaling (\"scale up\")', 'log the error and move on', 'function calls within the same NotificationRouter process', specific provider names (SES, Firebase, Twilio). All challenges anchored to concrete design elements."
     },
     {
       "expectation": "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
       "verdict": "PASS",
-      "justification": "Scaling bottleneck (most critical) first, then reliability (retries/DLQ), then architecture (synchronous fan-out), then operational (rate limiting), then secondary concerns (data model, idempotency). Summary provides clear verdict recommending redesign before building."
+      "justification": "Scaling bottleneck (most critical) first, then reliability (retries/DLQ), then architecture (synchronous fan-out), then operational (rate limiting), then secondary concerns (data model, idempotency). Summary provides clear verdict recommending redesign."
     },
     {
       "expectation": "Overall assessment reflects that the design has fundamental issues that must be addressed before implementation",
       "verdict": "PASS",
-      "justification": "Summary states: 'the design has fundamental scaling and reliability issues that need to be addressed before you can grow to 1M events/day' and 'I'd recommend redesigning with multiple partitions, independent channel workers, retry logic, and rate limiting before building this out.' Unambiguously signals the design is not implementation-ready."
+      "justification": "Summary: 'the design has fundamental scaling and reliability issues that need to be addressed before you can grow to 1M events/day' and 'I'd recommend redesigning with multiple partitions, independent channel workers, retry logic, and rate limiting before building this out.' Unambiguously signals the design is not implementation-ready."
     }
   ],
-  "score": "10/10",
+  "score": "11/11",
   "eval_feedback": [
-    "The transcript somewhat softens the scaling bottleneck severity by saying 'you'll probably be fine initially' at 1M/day. The expectation says 'explaining why it cannot handle the 1M events/day growth target' — consider whether the expectation should account for nuanced assessments where the bottleneck is more about architectural inflexibility than raw throughput failure.",
-    "Consider adding an expectation about whether the review identifies missing idempotency/deduplication, since the transcript catches this (Kafka offset commit vs. notification send) and it represents deeper architectural thinking.",
-    "The expectations provide excellent coverage across scaling, reliability, architecture, and operations. The eval effectively tests whether the reviewer catches the multi-layered nature of the design's problems."
+    "All 11 expectations met. The new blocking-channel expectation is satisfied by the explicit statement 'If Twilio has high latency, it blocks email and push processing for subsequent events.' Both with_skill and without_skill conditions pass this expectation."
   ]
 }

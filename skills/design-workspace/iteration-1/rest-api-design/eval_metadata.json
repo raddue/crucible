@@ -1,17 +1,5 @@
 {
   "eval_id": 1,
   "eval_name": "rest-api-design",
-  "prompt": "Design a REST API for an event ticketing platform. The platform needs to handle events (concerts, conferences, sports), venues with seating maps, ticket purchasing with seat selection, and waitlists when events sell out. We're using Node.js with Express and PostgreSQL. The API will serve both a web frontend and a mobile app. We expect up to 10,000 concurrent users during popular event on-sales.",
-  "expectations": [
-    "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-    "Investigation findings include surprises or confirmations compared to the stated hypotheses",
-    "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
-    "Design decisions are presented with 2-3 informed options and a recommendation",
-    "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
-    "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
-    "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
-    "Design specifies error response format with consistent structure (status codes, error codes, messages)",
-    "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
-    "Gap scan is performed before saving, checking at least acceptance criteria and failure modes"
-  ]
+  "prompt": "Design a REST API for an event ticketing platform. The platform needs to handle events (concerts, conferences, sports), venues with seating maps, ticket purchasing with seat selection, and waitlists when events sell out. We're using Node.js with Express and PostgreSQL. The API will serve both a web frontend and a mobile app. We expect up to 10,000 concurrent users during popular event on-sales."
 }

@@ -1,17 +1,5 @@
 {
   "eval_id": 3,
   "eval_name": "missing-security",
-  "prompt": "Red-team this implementation plan for adding a file upload feature to our web app:\n\n## Plan: User File Upload\n\n**Task 1:** Add a POST /api/files endpoint that accepts multipart form data. Save the uploaded file to the local filesystem under /uploads/{userId}/{filename}.\n\n**Task 2:** Add a GET /api/files/{fileId} endpoint that returns the file. Look up the file path from the database and use `res.sendFile(path)`.\n\n**Task 3:** Add a files table: id, user_id, filename, path, uploaded_at.\n\n**Task 4:** Add a UI component with a drag-and-drop zone that calls the upload endpoint.\n\n**Task 5:** Write integration tests for upload and download.\n\nThe app uses Express.js, PostgreSQL, and React. We use JWT auth middleware on all /api routes. Expected usage: ~200 users uploading documents (PDFs, spreadsheets) up to 50MB each.",
-  "expectations": [
-    "Review begins by establishing the scope and context of what artifact is being evaluated",
-    "Identified path traversal vulnerability in the download endpoint (Task 2) — sendFile with user-influenced path is exploitable",
-    "Identified missing authorization on file downloads — any authenticated user can access any other user's files via fileId",
-    "Identified path traversal or missing download authorization as the most critical security issues, explaining the attack scenario",
-    "Identified missing file type validation (no restriction on what file types can be uploaded)",
-    "Identified local filesystem storage as a scaling and durability risk (files lost on redeploy, can't scale horizontally)",
-    "Identified missing file size enforcement at the server level (relying on client-side limits is insufficient)",
-    "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
-    "Findings are organized by severity with the most critical issues first and an overall assessment with verdict",
-    "Security issues were prioritized over structural or stylistic concerns in the findings"
-  ]
+  "prompt": "Red-team this implementation plan for adding a file upload feature to our web app:\n\n## Plan: User File Upload\n\n**Task 1:** Add a POST /api/files endpoint that accepts multipart form data. Save the uploaded file to the local filesystem under /uploads/{userId}/{filename}.\n\n**Task 2:** Add a GET /api/files/{fileId} endpoint that returns the file. Look up the file path from the database and use `res.sendFile(path)`.\n\n**Task 3:** Add a files table: id, user_id, filename, path, uploaded_at.\n\n**Task 4:** Add a UI component with a drag-and-drop zone that calls the upload endpoint.\n\n**Task 5:** Write integration tests for upload and download.\n\nThe app uses Express.js, PostgreSQL, and React. We use JWT auth middleware on all /api routes. Expected usage: ~200 users uploading documents (PDFs, spreadsheets) up to 50MB each."
 }

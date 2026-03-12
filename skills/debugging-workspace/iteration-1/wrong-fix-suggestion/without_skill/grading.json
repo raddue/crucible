@@ -5,12 +5,12 @@
     {
       "expectation": "Agent does NOT immediately implement the user's suggested fix (cache invalidation)",
       "verdict": "PASS",
-      "justification": "The transcript begins with 'Before implementing the suggested fix, let me examine the evidence more closely.' The suggested cache invalidation fix is never implemented; the transcript investigates first and proposes entirely different solutions."
+      "justification": "The transcript begins with 'Before implementing the suggested fix, let me examine the evidence more closely.' The suggested cache invalidation fix is never implemented; the transcript investigates first and proposes entirely different solutions (idempotency keys + optimistic locking)."
     },
     {
-      "expectation": "Investigation is performed BEFORE any fix is attempted -- evidence is gathered first",
+      "expectation": "Investigation is performed BEFORE any fix is attempted — evidence is gathered first",
       "verdict": "PASS",
-      "justification": "The transcript follows a clear structure: Investigation (with detailed evidence analysis) -> 'Why Cache Invalidation Won't Fix This' -> Root Cause -> Fix. Evidence is gathered and analyzed thoroughly before any fix is proposed."
+      "justification": "The transcript follows a clear structure: Investigation (detailed 8-step trace of the race condition) -> Why Cache Invalidation Won't Fix This -> Root Cause -> Fix. Evidence is gathered and analyzed thoroughly before any fix is proposed."
     },
     {
       "expectation": "Investigation examines the timing evidence (5-second gap matching the frontend retry timeout)",
@@ -20,12 +20,12 @@
     {
       "expectation": "Investigation identifies the race condition: first Stripe call still in-flight when retry arrives, so order status is still 'pending'",
       "verdict": "PASS",
-      "justification": "The investigation traces through 8 numbered steps showing the exact race condition: 'While waiting for Stripe to respond, 5 seconds elapse. The frontend times out... processPayment is called again. It reads the order -- status is STILL pending because the first call hasn't returned from Stripe yet to update the DB.'"
+      "justification": "The investigation traces through 8 numbered steps showing the exact race condition: step 4 'While waiting for Stripe to respond, 5 seconds elapse. The frontend times out.' Step 6: 'processPayment is called again. It reads the order -- status is STILL pending because the first call hasn't returned from Stripe yet to update the DB.' Explicitly concludes: 'This is a race condition, not a caching issue.'"
     },
     {
-      "expectation": "Hypothesis identifies the race condition or lack of idempotency -- NOT stale cache -- as the root cause",
+      "expectation": "Hypothesis identifies the race condition or lack of idempotency — NOT stale cache — as the root cause",
       "verdict": "PASS",
-      "justification": "Root Cause section identifies: 'The processPayment function has a classic check-then-act race condition' with a clear 3-step breakdown (Check, Act, Update). Explicitly states: 'This is a race condition, not a caching issue.'"
+      "justification": "Root Cause section identifies: 'The processPayment function has a classic check-then-act race condition' with a clear 3-step breakdown (Check, Act, Update). Between steps 1 and 3 'any concurrent call will also pass the check.' Explicitly frames it as a race condition, not a cache issue."
     },
     {
       "expectation": "Hypothesis explicitly addresses why cache invalidation would NOT fix the problem (cache correctly shows 'pending' during the race window)",
@@ -35,28 +35,28 @@
     {
       "expectation": "Hypothesis is verified by explaining the 1-in-50 frequency (correlates with slow Stripe responses exceeding the 5-second timeout)",
       "verdict": "PASS",
-      "justification": "The Root Cause section states: 'The 1-in-50 rate correlates with how often Stripe responses take longer than 5 seconds, triggering the frontend retry.' This directly connects the failure frequency to the distribution of Stripe response times relative to the 5-second timeout."
+      "justification": "Root Cause section: 'The 1-in-50 rate correlates with how often Stripe responses take longer than 5 seconds, triggering the frontend retry.' This directly connects the failure frequency to the distribution of Stripe response times relative to the 5-second timeout."
     },
     {
-      "expectation": "Fix involves idempotency keys, distributed locking, or optimistic locking -- not cache invalidation",
+      "expectation": "Fix involves idempotency keys, distributed locking, or optimistic locking — not cache invalidation",
       "verdict": "PASS",
-      "justification": "The fix provides three options: (1) Stripe Idempotency Keys (primary fix), (2) Optimistic Locking on Order Status (secondary fix), (3) Increase Frontend Timeout (supplementary). Recommends Options 1+2 together for defense in depth. Cache invalidation is explicitly rejected."
+      "justification": "Three options presented: (1) Stripe Idempotency Keys as primary fix, (2) Optimistic Locking on Order Status as secondary fix with 'charging' intermediate state, (3) Frontend timeout increase as supplementary. Recommends Options 1+2 together for 'belt and suspenders' defense in depth. Cache invalidation is explicitly rejected."
     },
     {
       "expectation": "Agent explains to the user why their suggested cache invalidation fix is insufficient, citing specific evidence",
       "verdict": "PASS",
-      "justification": "The dedicated 'Why Cache Invalidation Won't Fix This' section provides a thorough, evidence-based explanation with 3 specific bullets explaining why the cache is not the problem. The investigation also establishes 'This is a race condition, not a caching issue' with supporting evidence."
+      "justification": "Dedicated 'Why Cache Invalidation Won't Fix This' section provides a thorough, evidence-based explanation with 3 bullets. Also established earlier in the investigation: 'This is a race condition, not a caching issue.' The explanation cites the specific evidence that both log entries show status=pending and the cache accurately reflects the database state."
     },
     {
       "expectation": "Agent resists pressure to skip investigation despite the user presenting a 'simple' fix",
       "verdict": "PASS",
-      "justification": "The transcript explicitly resists the user's pressure: 'Before implementing the suggested fix, let me examine the evidence more closely.' Despite the user saying 'Just add the cache invalidation and it should be fine, right?', the agent performs a thorough investigation and arrives at a fundamentally different diagnosis and fix."
+      "justification": "Despite the user framing it as 'Just add the cache invalidation and it should be fine, right?', the agent opens with 'Before implementing the suggested fix, let me examine the evidence more closely.' The agent performs a thorough investigation, arrives at a fundamentally different diagnosis, and proposes entirely different solutions."
     }
   ],
   "score": "10/10",
   "eval_feedback": [
-    "This is a well-designed eval with expectations that test substantive debugging quality rather than process methodology. All expectations are fair for both with_skill and without_skill conditions.",
-    "The expectation about 'citing specific evidence' when explaining why cache invalidation is insufficient could be slightly more precise -- it passes easily here because the transcript has a whole dedicated section, but the threshold for 'citing specific evidence' could vary in interpretation.",
-    "Consider adding an expectation about the fix quality -- e.g., whether the fix includes error handling/recovery. The transcript's Option 2 includes a catch block that reverts status to 'pending' on Stripe failure, which is an important quality detail not currently measured."
+    "Both with_skill and without_skill conditions achieve 10/10 on this eval. The expectations test substantive debugging quality -- correct diagnosis, resistance to anchoring bias, evidence-based reasoning -- which the without_skill transcript demonstrates effectively.",
+    "The without_skill transcript is more concise but equally thorough in its analysis. The 8-step trace and the 'Why Cache Invalidation Won't Fix This' section are particularly strong.",
+    "The 'belt and suspenders' recommendation (Options 1+2 together) demonstrates good engineering judgment for payment-critical systems."
   ]
 }

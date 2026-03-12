@@ -10,7 +10,7 @@
     {
       "expectation": "Did NOT characterize any issues as showstoppers or blockers — the plan has no fatal flaws",
       "verdict": "PASS",
-      "justification": "Explicitly states 'I have a few minor observations but nothing that should block this.' All findings are under the 'Minor Observations' heading. No language suggesting showstoppers, blockers, or fatal flaws anywhere."
+      "justification": "Explicitly states 'I have a few minor observations but nothing that should block this.' All findings under 'Minor Observations' heading. No language suggesting showstoppers, blockers, or fatal flaws anywhere."
     },
     {
       "expectation": "Correctly assessed the plan as fundamentally sound in the overall assessment",
@@ -25,12 +25,12 @@
     {
       "expectation": "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
       "verdict": "PASS",
-      "justification": "Second observation: 'SQLite and PostgreSQL have subtle differences in type coercion, collation, and query behavior. For example, string comparison of cursor values might behave differently between the two.' Suggests testcontainers as an alternative while acknowledging the tradeoff."
+      "justification": "Second observation: 'SQLite and PostgreSQL have subtle differences in type coercion, collation, and query behavior.' Suggests testcontainers as alternative while acknowledging the tradeoff."
     },
     {
       "expectation": "Did NOT manufacture severity inflation — minor concerns are not exaggerated into major issues",
       "verdict": "PASS",
-      "justification": "All findings are labeled 'Minor Observations.' Appropriate hedging throughout: 'This is unlikely to be a problem if...', 'This is fine for now — premature generalization would be worse', 'Minor, but worth a type guard.' No alarmist language or disproportionate urgency."
+      "justification": "All findings labeled 'Minor Observations.' Appropriate hedging: 'This is unlikely to be a problem if...', 'This is fine for now — premature generalization would be worse', no alarmist language or disproportionate urgency."
     },
     {
       "expectation": "Overall assessment verdict is positive ('plan is solid', 'ship it', or equivalent)",
@@ -40,18 +40,16 @@
     {
       "expectation": "Findings are organized by severity with an overall assessment and verdict",
       "verdict": "PASS",
-      "justification": "Structure has Overall Impression at top, all findings grouped under Minor Observations (appropriate since there are no major issues), and a Summary section with verdict. Organization reflects the reality that all findings are minor."
+      "justification": "Overall Impression at top, all findings grouped under Minor Observations (appropriate since there are no major issues), and Summary section with verdict. Organization reflects the reality that all findings are minor."
     },
     {
       "expectation": "Overall assessment conveys a clear confidence level in the review's conclusions",
       "verdict": "PASS",
-      "justification": "High confidence conveyed through decisive language: 'This plan is solid. The approach is correct, the task breakdown is logical, and testing is baked in at every step. The minor items above are worth considering but none of them are blockers. Ship it.' No waffling or excessive caveats in the verdict."
+      "justification": "Decisive language conveys high confidence: 'This plan is solid. The approach is correct, the task breakdown is logical, and testing is baked in at every step. The minor items above are worth considering but none of them are blockers. Ship it.' No waffling or excessive caveats."
     }
   ],
   "score": "9/9",
   "eval_feedback": [
-    "This eval effectively tests the hardest red-team calibration skill: restraint when the artifact is actually good. The expectations correctly check for absence of false positives and severity inflation.",
-    "The 'clear confidence level' expectation is somewhat subjective — 'Ship it' clearly conveys confidence, but a more hedged positive assessment might be harder to grade. Consider specifying what would constitute a FAIL (e.g., 'expressed significant uncertainty about whether the plan should proceed').",
-    "Consider adding an expectation that the review does NOT recommend a 'substantial redesign' or 'going back to the drawing board,' which would further test for inappropriate severity escalation."
+    "All 9 expectations met. Both with_skill and without_skill demonstrate appropriate restraint on a well-designed plan, correctly avoiding manufactured severity."
   ]
 }

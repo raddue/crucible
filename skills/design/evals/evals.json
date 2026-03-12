@@ -14,6 +14,7 @@
         "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
         "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",
         "Design includes a concurrency control mechanism for seat selection (e.g., optimistic locking, reservation holds, or distributed locks) to prevent double-booking",
+        "Design addresses the seat hold lifecycle: temporary reservation with timeout → confirmed purchase → release on expiry, not just locking",
         "Design specifies error response format with consistent structure (status codes, error codes, messages)",
         "Design addresses the 10,000 concurrent users constraint with specific strategies (connection pooling, caching, queue-based ticket purchasing, or rate limiting)",
         "Gap scan is performed before saving, checking at least acceptance criteria and failure modes"
@@ -47,6 +48,7 @@
         "At least one deep-dive investigation includes a challenger step that attacks the recommendation's assumptions",
         "Design groups functionality into bounded contexts rather than mirroring database tables (e.g., Order context includes orders + payments, not separate services per table)",
         "Design includes a phased migration plan with explicit ordering of which services to extract first and why",
+        "First service(s) extracted are low-coupling candidates (e.g., notifications, recommendations, email) — not core coupled services like orders or payments",
         "Design addresses data ownership — each service owns its data, with a strategy for the shared PostgreSQL database during transition (e.g., database-per-service migration, schema separation, or strangler fig pattern)",
         "Design specifies inter-service communication patterns (synchronous REST/gRPC vs asynchronous events/messages) with rationale for which interactions use which pattern",
         "Design addresses the zero-downtime constraint with specific migration strategies (e.g., strangler fig, parallel running, feature flags, blue-green deployment)",
@@ -64,6 +66,7 @@
         "Design identifies the tension between scope (real-time + offline + version history + 500-page docs) and constraints (2 engineers, 3 months)",
         "Design recommends scoping down or phasing the requirements rather than promising to deliver everything — YAGNI principle is applied",
         "Design chooses a specific real-time collaboration algorithm (OT or CRDT) with trade-off analysis appropriate to the constraints",
+        "Design recommends using an existing CRDT/OT library (e.g., Yjs, Automerge) rather than building from scratch, given the 2-engineer 3-month constraint",
         "Design addresses how offline edits merge back with concurrent online edits from other collaborators (not just generic sync)",
         "Design addresses version history storage strategy that scales with 500-page documents (not naive full-document snapshots)",
         "Design addresses the sub-100ms latency requirement with specific architectural choices (WebSocket transport, server proximity, delta-only updates)",

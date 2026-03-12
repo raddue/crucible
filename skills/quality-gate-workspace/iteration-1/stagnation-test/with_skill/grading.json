@@ -1,0 +1,59 @@
+{
+  "eval_name": "stagnation-test",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Performed at least 2 iterative red-team rounds",
+      "verdict": "PASS",
+      "justification": "The transcript contains 3 explicit rounds (Round 1, Round 2, Round 3), each labeled as 'Fresh Red-Team Review' with distinct findings."
+    },
+    {
+      "expectation": "Each round includes explicit Fatal or Significant severity ratings",
+      "verdict": "PASS",
+      "justification": "Every round uses explicit severity labels: Round 1 has Fatal (F1-F4) and Significant (S1-S3) sections. Round 2 has 'Fatal Challenges: None' and Significant (S1-S3). Round 3 has 'Fatal Challenges: None' and Significant (S1-S3). Each finding is explicitly tagged with '**Severity:** Fatal' or '**Severity:** Significant'."
+    },
+    {
+      "expectation": "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+      "verdict": "PASS",
+      "justification": "Each round ends with a score table showing Fatal count x3 and Significant count x1. Round 1: 4*3 + 3*1 = 15. Round 2: 0*3 + 3*1 = 3. Round 3: 0*3 + 3*1 = 3. The Score Progression table at the end confirms the series 15 -> 3 -> 3."
+    },
+    {
+      "expectation": "Detected stagnation when weighted score did not strictly decrease between rounds",
+      "verdict": "PASS",
+      "justification": "After Round 3, the transcript explicitly states: 'Score comparison: 3 -> 3. Score did not strictly decrease. Stagnation detected.' The Score Progression table marks Round 3 status as '**Stagnation**'. Final Disposition reads 'ESCALATED -- Stagnation detected at Round 3.'"
+    },
+    {
+      "expectation": "Escalated to user with findings when stagnation was detected",
+      "verdict": "PASS",
+      "justification": "A dedicated 'Stagnation Escalation' section appears after Round 3. It is headed '### Escalating to User' and provides: a summary of what was fixed in Rounds 1-2, the three outstanding Significant issues from Round 3, an explanation of why stagnation occurred, and a concrete recommendation for next steps. Final Disposition confirms 'ESCALATED -- Stagnation detected at Round 3. Findings escalated to user for decision.'"
+    },
+    {
+      "expectation": "Identified passing raw passwords in HTTP headers as a Fatal security issue",
+      "verdict": "PASS",
+      "justification": "Round 1 finding F1 is titled 'Raw user passwords transmitted between services in HTTP headers' and is rated '**Severity:** Fatal'. The description details why HTTP headers expose passwords (logging by proxies, network sniffing) and prescribes token-based authentication as the fix."
+    },
+    {
+      "expectation": "Identified deep synchronous call chain as a Fatal reliability issue",
+      "verdict": "PASS",
+      "justification": "Round 1 finding F3 is titled 'Deep synchronous call chains (A -> B -> C -> D) for every user request' and is rated '**Severity:** Fatal'. It explains the multiplicative availability impact and latency accumulation, calling it a structural problem that 'cannot be fixed by adding retries or timeouts'."
+    },
+    {
+      "expectation": "Identified 1-table-per-service decomposition as architecturally unsound (services should align with bounded contexts)",
+      "verdict": "PASS",
+      "justification": "Round 1 finding F2 is titled '47 microservices decomposed by database table, not by business domain' and is rated Fatal. It explicitly states: 'The decomposition must be rebuilt around bounded contexts' and the fix prescribes 'Re-decompose services around bounded contexts (e.g., Order Management, User Identity, Inventory).'"
+    },
+    {
+      "expectation": "Identified passing raw passwords between services as the highest-severity security issue",
+      "verdict": "PASS",
+      "justification": "The raw passwords finding (F1) is listed first among all Fatal issues in Round 1, and is the only security-specific Fatal finding. All other Fatal findings relate to architecture and reliability. The fix applied after Round 1 replaces password passing with JWT-based authentication, confirming it was treated as the top security priority."
+    }
+  ],
+  "score": "9/9",
+  "eval_feedback": [
+    "The with_skill transcript is a strong demonstration of the quality gate process. All 9 expectations are met clearly and explicitly.",
+    "The stagnation detection mechanism works exactly as designed: the score plateau at 3 -> 3 between Rounds 2 and 3 triggers escalation rather than infinite looping.",
+    "The escalation is well-structured: it distinguishes between what was fixed, what remains, why stagnation occurred, and what the user should do next.",
+    "The Score Progression table at the end provides excellent traceability of the iterative process.",
+    "The transcript correctly identifies that the original design is fundamentally broken (not incrementally patchable) and explains why stagnation is expected for such artifacts."
+  ]
+}

@@ -1,17 +1,5 @@
 {
   "eval_id": 2,
   "eval_name": "offline-sync-app",
-  "prompt": "Design an offline-first mobile app for field inspectors who visit construction sites without reliable internet. They need to fill out inspection forms with photos, get signatures, and sync everything when back online. The backend is a Django REST API with PostgreSQL. Multiple inspectors might visit the same site and edit overlapping data. We're building with React Native.",
-  "expectations": [
-    "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
-    "Cascading context is maintained — later design questions reference and build on earlier decisions",
-    "At least one question is auto-resolved with explanation when only one viable path exists",
-    "Design specifies a local storage strategy for offline data (e.g., SQLite, WatermelonDB, or Realm with explicit rationale)",
-    "Design includes a concrete conflict resolution strategy for overlapping edits (e.g., last-write-wins, field-level merge, operational transforms, or CRDTs — with trade-off analysis)",
-    "Design addresses sync protocol with specific mechanism (e.g., change tracking with timestamps/version vectors, event sourcing, or delta sync)",
-    "Design handles large binary data (photos) separately from form data during sync to avoid blocking",
-    "Design addresses what happens when sync fails partway (partial sync recovery, idempotent operations, or transaction boundaries)",
-    "Design includes offline signature capture with legal validity considerations (timestamp, device ID, or audit trail)",
-    "Gap scan is performed before saving, checking at least failure modes and edge cases"
-  ]
+  "prompt": "Design an offline-first mobile app for field inspectors who visit construction sites without reliable internet. They need to fill out inspection forms with photos, get signatures, and sync everything when back online. The backend is a Django REST API with PostgreSQL. Multiple inspectors might visit the same site and edit overlapping data. We're building with React Native."
 }

@@ -10,58 +10,58 @@
     {
       "expectation": "Investigation examines at least 2 distinct dimensions of the problem (error analysis, change history, code review) before forming a hypothesis",
       "verdict": "PASS",
-      "justification": "Phase 1 dispatches 3 parallel investigators covering 3 distinct dimensions: Error Analysis (error message deconstruction, call chain tracing), Change Analysis (what was introduced 2 weeks ago, query construction pattern), and Deep Dive on SQL Construction (reproduction with various special characters). All report back before the synthesis and hypothesis formation."
+      "justification": "Phase 1 dispatches 3 parallel investigators covering 3 distinct dimensions: (1) Error Analysis -- error message deconstruction, call chain tracing, security observation; (2) Change Analysis -- what was introduced 2 weeks ago, query construction pattern, database module analysis; (3) Deep Dive on SQL Construction -- reproduction with single quotes, ampersands, semicolons, backslashes. All three report back before synthesis and hypothesis formation."
     },
     {
       "expectation": "Findings from different investigation angles are consolidated before forming a hypothesis — not jumping from a single clue to a fix",
       "verdict": "PASS",
-      "justification": "A dedicated 'Synthesis Report' section consolidates findings from all 3 agents, providing ranked causes, cross-references between agents, and identified unknowns before proceeding to Phase 3 hypothesis formation."
+      "justification": "A dedicated Synthesis Report consolidates findings from all 3 agents, providing ranked causes with confidence levels, cross-references between agents (e.g., 'Error Analysis and Deep Dive agree on the exact mechanism'), and identified unknowns (ampersand question), before proceeding to Phase 3 hypothesis formation."
     },
     {
       "expectation": "Hypothesis specifically identifies string interpolation in SQL as the root cause — not just 'SQL error' or 'special characters'",
       "verdict": "PASS",
-      "justification": "The hypothesis explicitly states: 'The 500 errors on the feedback form are caused by direct string interpolation of user input into SQL queries in src/routes/feedback.js. When user input contains single quotes (or other SQL-significant characters), the interpolated string produces syntactically invalid SQL, causing MySQL ER_PARSE_ERROR.'"
+      "justification": "The hypothesis explicitly states: 'The 500 errors on the feedback form are caused by direct string interpolation of user input into SQL queries in src/routes/feedback.js.' It further identifies 'the root cause is the absence of parameterized queries' -- specific and technically precise."
     },
     {
       "expectation": "Hypothesis is challenged or verified against evidence before implementation begins",
       "verdict": "PASS",
-      "justification": "Phase 3.5 'Hypothesis Red-Team' poses 4 adversarial challenges: (1) does it explain ALL symptoms including ampersands, (2) could the cause be upstream, (3) what other symptoms should we expect, (4) has this been tried before. The hypothesis survives all challenges before proceeding to Phase 4 implementation."
+      "justification": "Phase 3.5 Hypothesis Red-Team poses 4 adversarial challenges: (1) does it explain ALL symptoms including ampersands, (2) could the cause be upstream (client-side, DB config, Express), (3) what other symptoms should we expect, (4) has this been tried before. Each challenge receives a specific evidence-based response. The hypothesis survives and implementation begins in Phase 4."
     },
     {
       "expectation": "A failing test is written before the fix is implemented",
       "verdict": "PASS",
-      "justification": "Phase 4 Step 1 writes 3 test cases (special chars, SQL injection, data integrity) with expected failure explanation: 'FAIL -- the first test will produce ER_PARSE_ERROR due to the single quote in It's, returning a 500 status instead of 200.' This appears before Step 2 which implements the fix."
+      "justification": "Phase 4 Step 1 writes 3 test cases (special chars, SQL injection, data integrity) with explicit expected failure explanation: 'FAIL -- the first test will produce ER_PARSE_ERROR due to the single quote in It's, returning a 500 status instead of 200.' Step 2 then implements the fix."
     },
     {
       "expectation": "The fix uses parameterized queries or prepared statements — not string escaping as a band-aid",
       "verdict": "PASS",
-      "justification": "The fix uses parameterized queries with '?' placeholders: \"const query = 'INSERT INTO feedback (name, email, comment) VALUES (?, ?, ?)'; await db.query(query, [name, email, comment]);\". The transcript explicitly states: 'Parameterized queries, not string escaping. We did NOT use mysql.escape() or manual escaping -- those are band-aids.'"
+      "justification": "The fix uses parameterized queries with ? placeholders: \"const query = 'INSERT INTO feedback (name, email, comment) VALUES (?, ?, ?)'; await db.query(query, [name, email, comment]);\". The transcript explicitly states: 'Parameterized queries, not string escaping. We did NOT use mysql.escape() or manual escaping -- those are band-aids.'"
     },
     {
       "expectation": "The fix addresses the root cause (SQL injection vulnerability) not just the symptom (500 error on special characters)",
       "verdict": "PASS",
-      "justification": "The transcript explicitly states: 'Addresses root cause, not symptom. The 500 error was the visible symptom. The root cause is the SQL injection vulnerability created by string interpolation. Parameterized queries eliminate the entire vulnerability class.' The security dimension is identified by Agent 1's 'Security observation' and carried through to the fix and quality review."
+      "justification": "The transcript explicitly distinguishes root cause from symptom: 'The 500 error was the visible symptom. The root cause is the SQL injection vulnerability created by string interpolation. Parameterized queries eliminate the entire vulnerability class.' Agent 1 identified the security dimension early ('This is not just a parse error -- this is a classic SQL injection vulnerability')."
     },
     {
       "expectation": "The fix also handles the ampersand case mentioned in the bug report, not just the single-quote case shown in the stack trace",
       "verdict": "PASS",
-      "justification": "Agent 3 (Deep Dive) explicitly tests the ampersand case and notes that '& is not a SQL special character -- this would NOT cause a parse error in MySQL.' The failing test uses the input \"It's a great product & we love it\" which includes both single quote and ampersand. The fix (parameterized queries) handles all special characters uniformly. The synthesis notes the ampersand as a minor unknown but the fix covers it by design."
+      "justification": "The first test case includes both single quote and ampersand in input: \"It's a great product & we love it\". Agent 3 specifically investigated the ampersand case and noted it is not SQL-special in MySQL but may be a client-side issue. The parameterized query fix handles all special characters uniformly at the protocol level, including ampersands."
     },
     {
       "expectation": "Quality review is performed on the fix before declaring it complete",
       "verdict": "PASS",
-      "justification": "Phase 5 includes both a 'Red-Team Review of Fix' examining edge cases (missing fields, long input, non-string input, new failure modes, regression risks) and a 'Code Review of Fix' examining correctness, test coverage, and backward compatibility, concluding with 'Quality Gate Verdict: PASS'."
+      "justification": "Phase 5 includes both a Red-Team Review (examining edge cases: missing fields, long input, non-string input; new failure modes: none; regression risks: backward-compatible) and a Code Review (correctness, test coverage, backward compatibility, recommendations). Concludes with 'Quality Gate Verdict: PASS'."
     },
     {
       "expectation": "Agent communicates reasoning progression clearly, showing how evidence led to the hypothesis",
       "verdict": "PASS",
-      "justification": "The transcript follows a clear progression: Phase 0 (context loading) -> Phase 1 (3 investigation agents with detailed findings) -> Synthesis (consolidation with ranked causes and cross-references) -> Phase 3 (hypothesis formation citing specific agent findings) -> Phase 3.5 (red-team) -> Phase 4 (implementation). Each phase transition includes status updates showing current phase, what completed, and what's next. The hypothesis log explicitly cites evidence from each agent."
+      "justification": "The transcript follows an explicit phase progression with status headers at each transition stating current phase, hypothesis status, what completed, and what's next. The hypothesis log cites specific evidence from each agent. Each phase builds on the previous one's findings. The reasoning chain from error message fragment to string interpolation to SQL injection to parameterized query fix is clearly traceable."
     }
   ],
   "score": "11/11",
   "eval_feedback": [
-    "The 'fix also handles the ampersand case' expectation is somewhat ambiguous: Agent 3 correctly identifies that ampersands are NOT a SQL issue, yet the expectation implies the fix should 'handle' them. The transcript addresses this well by noting it may be a client-side issue, but the expectation could be clearer about whether 'handling' means fixing vs. investigating and explaining.",
-    "The 'failing test is written before the fix' expectation cannot be verified as actually executed in a transcript-based eval -- only that it appears before the fix in the document. Consider clarifying this is about ordering in the reasoning process.",
-    "The 'at least 2 distinct dimensions' expectation is easily met (3 agents). Consider raising the bar or being more specific about what counts as a 'distinct dimension' to differentiate strong from adequate performance."
+    "Exemplary structured debugging with clear phase progression, explicit reasoning at each step, and thorough coverage of all expectations.",
+    "The ampersand investigation by Agent 3 is a strength -- it correctly identifies that ampersands are not SQL-special in MySQL and flags the discrepancy as a potential secondary issue rather than dismissing it.",
+    "The synthesis report's cross-referencing between agents demonstrates genuine consolidation rather than repetition of individual agent findings."
   ]
 }
