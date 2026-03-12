@@ -106,6 +106,35 @@ The **forge** and **cartographer** skills are recommended (not required) knowled
 
 Individual skills can also be used standalone (e.g., `crucible:test-driven-development` for any implementation work, `crucible:debugging` for any bug).
 
+## Eval Results
+
+Every skill is evaluated with a with/without A/B test: the same prompt is run once following the skill's methodology and once with vanilla Claude (no skill instructions). A grader scores both outputs against the same expectations, and the delta measures the skill's added value.
+
+Expectations test two things:
+- **Process assertions** — did the output follow the right methodology? (e.g., "iterates until clean or stagnation", "red-green-refactor cycles visible")
+- **Domain-correctness assertions** — is the output actually correct? (e.g., "fix uses parameterized queries", "plan includes database migration for roles")
+
+### Iteration 1 — Skill-Value Deltas (Claude Opus)
+
+| Skill | With | Without | Delta | Notes |
+|-------|------|---------|-------|-------|
+| quality-gate | 91% | 9% | **82%** | Iterative red-teaming is almost entirely skill-driven |
+| innovate | 83% | 17% | **67%** | Structured divergent thinking produces richer output |
+| planning | 74% | 26% | **49%** | Task decomposition and quality gates add significant value |
+| design | 67% | 33% | **33%** | Investigation-driven design surfaces more options |
+| TDD | 67% | 33% | **33%** | Red-green-refactor discipline vs write-code-then-test |
+| verify | 63% | 37% | **26%** | Evidence-before-claims catches false confidence |
+| review-feedback | 62% | 38% | **24%** | Technical rigor vs blind agreement |
+| debugging | 57% | 43% | **15%** | Hypothesis red-teaming catches subtle bugs |
+| inquisitor | 53% | 47% | **7%** | Cross-component analysis finds a few extra issues |
+| red-team | 51% | 49% | **2%** | Claude already red-teams well without structure |
+
+**Key finding:** Domain-correctness assertions pass at similar rates for both conditions. Claude has the domain knowledge — skills add methodology and process discipline. The delta is almost entirely process-driven, which means skill value increases on weaker models where that methodology scaffolding matters more.
+
+### Running Evals
+
+Eval definitions live in `skills/<skill>/evals/evals.json`. Workspace outputs and grading results are in `skills/<skill>-workspace/`. See `skills/skill-creator/SKILL.md` for the eval/iterate workflow.
+
 ## Origin
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged.
