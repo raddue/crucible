@@ -18,8 +18,6 @@ Superpowers is a great starting point — crucible started there. But if you're 
 
 **Adversarial testing at every level.** Crucible doesn't just review code — it actively tries to break it. The adversarial-tester writes tests designed to expose unknown failure modes. The inquisitor attacks the full feature diff across 5 dimensions (wiring, integration, edge cases, state/lifecycle, regression). The quality gate dispatches fresh Devil's Advocate reviewers each round to avoid anchoring bias.
 
-**Cross-platform.** Skills follow the Agent Skills specification and work across Claude Code, Cursor, and OpenAI Codex. Superpowers is Claude Code-only.
-
 ## Installation
 
 ### Claude Code
