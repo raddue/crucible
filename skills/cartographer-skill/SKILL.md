@@ -1,6 +1,6 @@
 ---
 name: cartographer
-description: Use when exploring unfamiliar code and want to persist what you learn, when starting a task and want to consult known codebase structure, or when a subagent needs module-specific context for implementation or review
+description: Use when exploring unfamiliar code and want to persist what you learn, when starting a task and want to consult known codebase structure, or when collaborators need module-specific context for implementation or review
 ---
 
 # Cartographer
