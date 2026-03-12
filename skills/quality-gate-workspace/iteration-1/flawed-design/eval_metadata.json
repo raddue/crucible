@@ -1,5 +1,0 @@
-{
-  "eval_id": 1,
-  "eval_name": "flawed-design",
-  "prompt": "I just finished writing a design doc for adding a caching layer to our REST API. The design says we'll use Redis for everything — session data, query caches, rate limiting counters, and as the primary data store for user preferences. We'll run a single Redis instance with no replication. The cache invalidation strategy is 'clear everything on deploy'. Please run a quality gate on this design."
-}

@@ -1,5 +1,0 @@
-{
-  "eval_id": 3,
-  "eval_name": "vulnerable-code",
-  "prompt": "I wrote a utility function and I think it's ready. Can you quality gate this code?\n\n```python\ndef process_user_data(data):\n    name = data['name']\n    email = data['email']\n    age = int(data['age'])\n    query = f\"INSERT INTO users VALUES ('{name}', '{email}', {age})\"\n    db.execute(query)\n    return {'status': 'ok', 'message': f'Added {name}'}\n```"
-}

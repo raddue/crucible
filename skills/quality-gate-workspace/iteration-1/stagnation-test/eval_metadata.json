@@ -1,5 +1,0 @@
-{
-  "eval_id": 4,
-  "eval_name": "stagnation-test",
-  "prompt": "Run a quality gate on this design for a microservices architecture:\n\nWe'll split our monolith into 47 microservices, one per database table. Each service owns exactly one table and communicates via synchronous REST calls. Service A calls Service B which calls Service C which calls Service D for every user request. We'll use eventual consistency everywhere — no transactions. Each service will have its own copy of shared data, synced via nightly batch jobs. Authentication is handled by passing the user's raw password between services in HTTP headers.\n\nThis design is intentionally resistant to quick fixes — the fundamental architecture (47 services mirroring tables, deep synchronous call chains, password in headers) cannot be incrementally patched."
-}

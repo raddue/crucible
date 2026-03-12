@@ -1,5 +1,0 @@
-{
-  "eval_id": 3,
-  "eval_name": "missing-security",
-  "prompt": "Red-team this implementation plan for adding a file upload feature to our web app:\n\n## Plan: User File Upload\n\n**Task 1:** Add a POST /api/files endpoint that accepts multipart form data. Save the uploaded file to the local filesystem under /uploads/{userId}/{filename}.\n\n**Task 2:** Add a GET /api/files/{fileId} endpoint that returns the file. Look up the file path from the database and use `res.sendFile(path)`.\n\n**Task 3:** Add a files table: id, user_id, filename, path, uploaded_at.\n\n**Task 4:** Add a UI component with a drag-and-drop zone that calls the upload endpoint.\n\n**Task 5:** Write integration tests for upload and download.\n\nThe app uses Express.js, PostgreSQL, and React. We use JWT auth middleware on all /api routes. Expected usage: ~200 users uploading documents (PDFs, spreadsheets) up to 50MB each."
-}

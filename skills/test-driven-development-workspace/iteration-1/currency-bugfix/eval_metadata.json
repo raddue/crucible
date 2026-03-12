@@ -1,5 +1,0 @@
-{
-  "eval_id": 2,
-  "eval_name": "currency-bugfix",
-  "prompt": "There's a bug where our formatCurrency function returns '$1,00' instead of '$1.00' for input 1. Can you fix it? The function is in src/utils/format.ts."
-}

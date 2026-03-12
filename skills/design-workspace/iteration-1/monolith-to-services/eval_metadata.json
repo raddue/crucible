@@ -1,5 +1,0 @@
-{
-  "eval_id": 3,
-  "eval_name": "monolith-to-services",
-  "prompt": "Design the migration of our e-commerce monolith into services. The monolith handles: user accounts, product catalog, inventory, orders, payments (via Stripe), shipping label generation, email notifications, and a recommendation engine. It's a Rails app with a single PostgreSQL database. We have 50,000 daily active users and zero downtime tolerance. The team has 6 backend engineers."
-}

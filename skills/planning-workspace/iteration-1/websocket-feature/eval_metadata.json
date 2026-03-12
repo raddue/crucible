@@ -1,5 +1,0 @@
-{
-  "eval_id": 1,
-  "eval_name": "websocket-feature",
-  "prompt": "We need to add WebSocket support to our Express API for real-time notifications. Users should be able to subscribe to events for specific resources (like 'order:123:status'). The server is in src/server.ts, routes are in src/routes/, and we use PostgreSQL. Write an implementation plan."
-}

@@ -1,5 +1,0 @@
-{
-  "eval_id": 4,
-  "eval_name": "contradictory-constraints",
-  "prompt": "Design a real-time collaborative document editor (like Google Docs) that must also work offline, support documents up to 500 pages, and maintain a complete version history. The target is sub-100ms latency for keystroke propagation between collaborators. We're a team of 2 engineers with 3 months. Use TypeScript for both frontend and backend."
-}

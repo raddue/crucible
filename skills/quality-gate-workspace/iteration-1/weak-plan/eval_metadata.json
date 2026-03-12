@@ -1,5 +1,0 @@
-{
-  "eval_id": 2,
-  "eval_name": "weak-plan",
-  "prompt": "Here's my implementation plan for adding email notifications. Task 1: Install nodemailer. Task 2: Write a sendEmail function that takes to/subject/body and calls nodemailer.sendMail directly from the request handler. Task 3: Add a POST /send-notification endpoint. Task 4: Deploy. Run a quality gate on this plan."
-}

@@ -1,5 +1,0 @@
-{
-  "eval_id": 1,
-  "eval_name": "password-validator",
-  "prompt": "Add a password strength validator to our auth module. It should check minimum 8 characters, at least one uppercase, one lowercase, one digit, and one special character. Return a score from 0-4 based on how many criteria are met. The file is at src/auth/validators.ts and tests go in tests/auth/validators.test.ts."
-}

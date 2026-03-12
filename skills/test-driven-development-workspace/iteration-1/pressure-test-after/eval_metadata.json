@@ -1,5 +1,0 @@
-{
-  "eval_id": 3,
-  "eval_name": "pressure-test-after",
-  "prompt": "I already wrote a working retry utility with exponential backoff (src/utils/retry.ts) and manually tested it — it handles all the edge cases. I just need you to add some unit tests for it so we have coverage. Don't rewrite anything, the code is solid."
-}

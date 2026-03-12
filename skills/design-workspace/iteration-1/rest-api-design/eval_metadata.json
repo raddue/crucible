@@ -1,5 +1,0 @@
-{
-  "eval_id": 1,
-  "eval_name": "rest-api-design",
-  "prompt": "Design a REST API for an event ticketing platform. The platform needs to handle events (concerts, conferences, sports), venues with seating maps, ticket purchasing with seat selection, and waitlists when events sell out. We're using Node.js with Express and PostgreSQL. The API will serve both a web frontend and a mobile app. We expect up to 10,000 concurrent users during popular event on-sales."
-}

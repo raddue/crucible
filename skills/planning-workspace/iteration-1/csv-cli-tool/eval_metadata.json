@@ -1,5 +1,0 @@
-{
-  "eval_id": 2,
-  "eval_name": "csv-cli-tool",
-  "prompt": "We need a CLI tool that reads a CSV file, validates the data against a JSON schema, and outputs a report of validation errors. It should support custom validators via a plugin directory. Write a plan."
-}
