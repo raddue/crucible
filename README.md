@@ -1,6 +1,6 @@
 # Crucible
 
-A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), and [OpenAI Codex](https://openai.com/codex/) — any platform that supports the [Agent Skills specification](https://developers.openai.com/codex/skills/).
+A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), [OpenAI Codex](https://openai.com/codex/), [Amp](https://amp.dev), [Cline](https://cline.bot), and any platform that supports the SKILL.md format.
 
 Covers the full development lifecycle: design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. Every skill is [eval-tested](#eval-results) with measured A/B deltas.
 
@@ -11,9 +11,11 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 | Platform | Status |
 |----------|--------|
 | Claude Code | Pending review |
-| Cursor | Planned |
-| OpenAI Codex | Planned |
-| [skills.sh](https://skills.sh) | Planned |
+| [skills.sh](https://skills.sh) | `npx skills add raddue/crucible` |
+| Cursor | Compatible |
+| OpenAI Codex | Compatible |
+| Amp | Compatible |
+| Cline | Compatible |
 
 ## Why Crucible?
 
