@@ -108,13 +108,30 @@ Individual skills can also be used standalone (e.g., `crucible:test-driven-devel
 
 ## Eval Results
 
-Every skill is evaluated with a with/without A/B test: the same prompt is run once following the skill's methodology and once with vanilla Claude (no skill instructions). A grader scores both outputs against the same expectations, and the delta measures the skill's added value.
+Every crucible skill is evaluated using [Anthropic's official skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator) (`skill-creator`). This is the same eval methodology Anthropic built for measuring whether Claude Code skills actually improve output quality — we use it here to prove that crucible's skills deliver measurable value, not just vibes.
 
-Expectations test two things:
-- **Process assertions** — did the output follow the right methodology? (e.g., "iterates until clean or stagnation", "red-green-refactor cycles visible")
-- **Domain-correctness assertions** — is the output actually correct? (e.g., "fix uses parameterized queries", "plan includes database migration for roles")
+### How It Works
 
-### Iteration 1 — Skill-Value Deltas (Claude Opus)
+The framework runs a **blind A/B test** for each skill:
+
+1. **With skill** — the prompt is executed following the skill's full methodology
+2. **Without skill** — the same prompt is given to vanilla Claude with no skill instructions
+3. **Grading** — an independent grader agent scores both outputs against identical expectations, with no knowledge of which condition it's grading
+
+This isolates the skill's contribution. If both conditions score the same, the skill isn't adding value. If the skill condition scores higher, the delta quantifies exactly how much the methodology helps.
+
+### What Gets Measured
+
+Expectations are a mix of **process assertions** and **domain-correctness assertions**:
+
+- **Process** — did the output follow the right methodology? (e.g., "iterates until clean or stagnation", "red-green-refactor cycles visible")
+- **Domain correctness** — is the output actually *right*? (e.g., "fix uses parameterized queries", "plan includes database migration for roles")
+
+This dual approach prevents skills from gaming the eval by producing well-formatted garbage. The process has to be right *and* the output has to be correct.
+
+### Iteration 1 — Skill-Value Deltas (Claude Opus 4)
+
+10 skills, 34 evals, graded blind.
 
 | Skill | With | Without | Delta | Notes |
 |-------|------|---------|-------|-------|
@@ -129,11 +146,17 @@ Expectations test two things:
 | inquisitor | 53% | 47% | **7%** | Cross-component analysis finds a few extra issues |
 | red-team | 51% | 49% | **2%** | Claude already red-teams well without structure |
 
-**Key finding:** Domain-correctness assertions pass at similar rates for both conditions. Claude has the domain knowledge — skills add methodology and process discipline. The delta is almost entirely process-driven, which means skill value increases on weaker models where that methodology scaffolding matters more.
+### Key Findings
+
+**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. Claude already knows the right answers — skills add the methodology and discipline to consistently surface them. A quality gate that iterates three rounds of red-teaming catches issues that a single-pass review misses, even though the model *could* have found them on the first pass.
+
+**Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 2% delta on Opus could be a 20%+ delta on a model that doesn't naturally red-team well.
+
+**Process-heavy skills show the largest deltas.** Skills that encode multi-step iterative workflows (quality-gate at 82%, innovate at 67%) benefit most from structure. Skills where Claude's baseline behavior already approximates the methodology (red-team at 2%) show minimal lift.
 
 ### Running Evals
 
-Eval definitions live in `skills/<skill>/evals/evals.json`. Workspace outputs and grading results are in `skills/<skill>-workspace/`. See `skills/skill-creator/SKILL.md` for the eval/iterate workflow.
+Eval definitions live in `skills/<skill>/evals/evals.json`. Workspace outputs and grading results are in `skills/<skill>-workspace/`. To run evals yourself, use the `skill-creator` skill — it handles execution, grading, benchmarking, and iteration. See [Anthropic's skill-creator docs](https://github.com/anthropics/skills/tree/main/skills/skill-creator) for details.
 
 ## Origin
 
