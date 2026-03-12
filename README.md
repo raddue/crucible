@@ -8,15 +8,13 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Why Crucible?
 
-Superpowers is a great starting point — crucible started there. But if you're looking for skills that go beyond prompt templates, here's what's different:
-
 **Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against identical prompts, graded by an independent agent that doesn't know which condition it's scoring. The result is a measured delta — not "we think this helps" but "this skill improves output quality by 49% on planning tasks." See the [full scoreboard](#iteration-1--skill-value-deltas-claude-opus-4).
 
-**Iterative quality gates, not single-pass review.** Superpowers skills typically run once and return a result. Crucible's quality-gate skill loops — it red-teams an artifact, the author revises, a fresh reviewer attacks again, and it continues until clean or until weighted stagnation detection determines further iteration won't help. This alone accounts for an 82% delta over unstructured review.
+**Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, the author revises, a fresh reviewer attacks again, and it continues until clean or until weighted stagnation detection determines further iteration won't help. This alone accounts for an 82% delta over unstructured review.
 
-**Full pipeline orchestration.** The build skill chains design, planning, execution, and completion into a single autonomous pipeline. It dispatches parallel implementers, runs two-pass code review per task, fills test coverage gaps, writes adversarial tests designed to break the implementation, and runs a 5-dimension cross-component inquisitor before the final quality gate. Superpowers doesn't have an equivalent orchestrator.
+**Full pipeline orchestration.** The build skill chains design, planning, execution, and completion into a single autonomous pipeline. It dispatches parallel implementers, runs two-pass code review per task, fills test coverage gaps, writes adversarial tests designed to break the implementation, and runs a 5-dimension cross-component inquisitor before the final quality gate.
 
-**Adversarial testing at every level.** Crucible doesn't just review code — it actively tries to break it. The adversarial-tester writes tests designed to expose unknown failure modes. The inquisitor attacks the full feature diff across 5 dimensions (wiring, integration, edge cases, state/lifecycle, regression). The quality gate dispatches fresh Devil's Advocate reviewers each round to avoid anchoring bias.
+**Adversarial testing at every level.** Crucible doesn't just review code, it actively tries to break it. The adversarial-tester writes tests designed to expose unknown failure modes. The inquisitor attacks the full feature diff across 5 dimensions (wiring, integration, edge cases, state/lifecycle, regression). The quality gate dispatches fresh Devil's Advocate reviewers each round to avoid anchoring bias.
 
 ## Installation
 
