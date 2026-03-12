@@ -1,7 +1,7 @@
 {
   "name": "crucible",
   "version": "1.0.0",
-  "description": "24 agent skills for systematic software development. Covers design, planning, TDD, code review, debugging, quality gates, and adversarial testing. Every skill is eval-tested with measured A/B deltas using Anthropic's skill evaluation framework.",
+  "description": "23 agent skills for systematic software development. Covers design, planning, TDD, code review, debugging, quality gates, and adversarial testing. Every skill is eval-tested with measured A/B deltas using Anthropic's skill evaluation framework.",
   "author": {
     "name": "raddue",
     "url": "https://github.com/raddue"

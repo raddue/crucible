@@ -129,7 +129,6 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 |-------|-------------|
 | **stocktake** | Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan or full evaluation modes. |
 | **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. |
-| **skill-creator** | Create new skills, modify and improve existing skills, and measure skill performance. Structured eval/iterate loop with grading, benchmarking, blind A/B comparison, and description optimization. From [anthropics/skills](https://github.com/anthropics/skills) (Apache 2.0). |
 
 ### Unity UI (Domain-Specific)
 
@@ -204,10 +203,4 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Running Evals
 
-Eval definitions live in `skills/<skill>/evals/evals.json`. Workspace outputs and grading results are in `skills/<skill>-workspace/`. To run evals yourself, use the `skill-creator` skill — it handles execution, grading, benchmarking, and iteration. See [Anthropic's skill-creator docs](https://github.com/anthropics/skills/tree/main/skills/skill-creator) for details.
-
-## Third-Party Skills
-
-| Skill | Source | License |
-|-------|--------|---------|
-| **skill-creator** | [anthropics/skills](https://github.com/anthropics/skills/tree/main/skills/skill-creator) | Apache 2.0 |
+Eval definitions live in `skills/<skill>/evals/evals.json`. To run evals yourself, use Anthropic's [skill-creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) — it handles execution, grading, benchmarking, and iteration.
