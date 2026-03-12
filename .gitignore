@@ -1,6 +1,7 @@
 node_modules/
 docs/plans/
 skills/*-workspace/
+skills/skill-creator/
 src/
 tests/
 package.json
