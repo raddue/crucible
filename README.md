@@ -176,7 +176,7 @@ Expectations are a mix of **process assertions** and **domain-correctness assert
 
 This dual approach prevents skills from gaming the eval by producing well-formatted garbage. The process has to be right *and* the output has to be correct.
 
-### Iteration 1 — Skill-Value Deltas (Claude Opus 4)
+### Iteration 1 — Skill-Value Deltas (Claude Opus 4.6)
 
 10 skills, 35 evals, graded blind.
 
