@@ -168,7 +168,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Iteration 1 — Skill-Value Deltas (Claude Opus 4)
 
-10 skills, 34 evals, graded blind.
+10 skills, 35 evals, graded blind.
 
 | Skill | With | Without | Delta | Notes |
 |-------|------|---------|-------|-------|

@@ -6,7 +6,7 @@ Crucible skills use the SKILL.md format published by Anthropic and adopted by Cl
 
 ### Tier 1 — Fully Portable
 
-These skills contain methodology instructions only. No platform-specific tool references in their workflow. They work identically on any platform that reads SKILL.md files.
+These skills contain methodology instructions only. No platform-specific tool references in their workflow. They work identically on any platform that reads SKILL.md files. Some reference other crucible skills by name (e.g., `crucible:quality-gate`) — these are inter-skill dependencies, not platform coupling. If the referenced skill is installed, it works; if not, the agent skips it.
 
 | Skill | What It Does |
 |-------|-------------|
