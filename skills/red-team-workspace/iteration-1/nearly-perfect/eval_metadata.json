@@ -1,5 +1,0 @@
-{
-  "eval_id": 4,
-  "eval_name": "nearly-perfect",
-  "prompt": "Red-team this implementation plan for adding pagination to our API:\n\n## Plan: Cursor-based Pagination\n\n**Task 1:** Create a `PaginationParams` type with `cursor?: string` and `limit: number` (default 20, max 100). Write unit tests for parameter validation.\n\n**Task 2:** Implement a `paginate<T>` helper that takes a Knex query builder, applies `WHERE id > cursor ORDER BY id ASC LIMIT limit+1`, returns `{ data: T[], nextCursor: string | null }`. The +1 trick determines if there's a next page. Write tests with an in-memory SQLite database.\n\n**Task 3:** Apply `paginate` to GET /api/users and GET /api/orders endpoints. Each endpoint already has integration tests — extend them with pagination test cases.\n\n**Task 4:** Update the React frontend to use `nextCursor` for infinite scroll. Add a `useInfiniteQuery` hook wrapping React Query.\n\n**Task 5:** Update API documentation with cursor pagination examples.\n\n**Task 6:** Run the full test suite and verify all existing tests still pass.\n\nTech stack: Express, PostgreSQL, Knex, React, React Query, Vitest."
-}

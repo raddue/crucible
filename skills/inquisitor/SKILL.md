@@ -1,6 +1,6 @@
 ---
 name: inquisitor
-description: "Use when a full feature is assembled and you want to hunt cross-component bugs before final quality gate. Dispatches 5 parallel adversarial dimensions against the complete implementation diff. Triggers on 'inquisitor', 'hunt bugs', 'cross-component test', 'find integration issues', or automatically in build pipeline Phase 4."
+description: "Use when a full feature is assembled and you want to hunt cross-component bugs before final quality gate. Runs 5 parallel adversarial dimensions against the complete implementation diff. Triggers on 'inquisitor', 'hunt bugs', 'cross-component test', 'find integration issues', or automatically in build pipeline Phase 4."
 ---
 
 # Inquisitor

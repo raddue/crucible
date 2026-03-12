@@ -1,5 +1,0 @@
-{
-  "eval_id": 3,
-  "eval_name": "rbac-feature",
-  "prompt": "Add role-based access control to our existing API. We have users in a PostgreSQL database and JWT auth already working. Need three roles: admin, editor, viewer. Admins can do everything, editors can create/edit but not delete, viewers are read-only. The auth middleware is at src/middleware/auth.ts."
-}

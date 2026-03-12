@@ -1,5 +1,0 @@
-{
-  "eval_id": 2,
-  "eval_name": "offline-sync-app",
-  "prompt": "Design an offline-first mobile app for field inspectors who visit construction sites without reliable internet. They need to fill out inspection forms with photos, get signatures, and sync everything when back online. The backend is a Django REST API with PostgreSQL. Multiple inspectors might visit the same site and edit overlapping data. We're building with React Native."
-}

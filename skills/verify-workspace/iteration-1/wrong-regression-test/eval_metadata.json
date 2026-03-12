@@ -1,5 +1,0 @@
-{
-  "eval_id": 2,
-  "eval_name": "wrong-regression-test",
-  "prompt": "I fixed the currency formatting bug where formatCurrency(0.1) was returning '$0.1' instead of '$0.10'. Here's my regression test and it passes:\n\n```javascript\n// tests/currency.test.js\ndescribe('formatCurrency', () => {\n  // ... existing tests ...\n  \n  test('regression: should format small decimals correctly', () => {\n    expect(formatCurrency(1000)).toBe('$1,000.00');\n    expect(formatCurrency(99.99)).toBe('$99.99');\n    expect(formatCurrency(0)).toBe('$0.00');\n  });\n});\n```\n\n```\nRUNNING tests/currency.test.js\n✓ should format whole numbers (2ms)\n✓ should format with comma separators (1ms)\n✓ should handle negative numbers (1ms)\n✓ regression: should format small decimals correctly (1ms)\n\n4 tests passed, 0 failed\n```\n\nRegression test passes. Ready to commit the fix?"
-}
