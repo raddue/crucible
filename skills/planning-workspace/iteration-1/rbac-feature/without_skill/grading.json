@@ -1,0 +1,67 @@
+{
+  "eval_name": "rbac-feature",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+      "verdict": "FAIL",
+      "justification": "The plan has '## Overview' (one paragraph covering the goal) and '## Assumptions' (mentioning PostgreSQL, JWT, Express) but no sections explicitly labeled 'Goal', 'Architecture', or 'Tech Stack'. Architectural details emerge across Phases 1-4 rather than being consolidated in a header. Technology choices are scattered throughout assumptions and phase descriptions rather than in a dedicated section."
+    },
+    {
+      "expectation": "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+      "verdict": "FAIL",
+      "justification": "The plan is organized into 7 phases. Phase 1 bundles migration plus admin seed. Phase 3 bundles JWT payload changes, request type augmentation, and auth middleware modification. Phase 4 bundles creating authorize middleware AND applying it to all routes (two strategies discussed). Phase 6 encompasses all testing: unit tests, middleware integration tests, and end-to-end API tests. These are phase-sized blocks spanning hours, not 2-5 minute tasks."
+    },
+    {
+      "expectation": "Every task specifies exact file paths for files to Create, Modify, and Test",
+      "verdict": "PASS",
+      "justification": "The File Change Summary table lists 10 files with exact paths and actions: 'src/migrations/<ts>_add_role_to_users.sql (Create)', 'src/auth/roles.ts (Create)', 'src/middleware/auth.ts (Modify)', 'src/middleware/authorize.ts (Create)', 'src/types/express.d.ts (Modify)', 'src/controllers/userRole.ts (Create)', 'tests/auth/roles.test.ts (Create)', 'tests/middleware/authorize.test.ts (Create)'. Individual phases also reference specific paths like 'File to modify: src/middleware/auth.ts'."
+    },
+    {
+      "expectation": "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+      "verdict": "FAIL",
+      "justification": "Mixed code completeness. Phase 1.1 provides complete SQL migration. Phase 2.1 provides substantial roles.ts with Role const, ROLE_PERMISSIONS, and roleCanPerform. Phase 4.1 provides a mostly complete authorize.ts. However, Phase 3.3 says only 'ensure the decoded role claim is also set on req.user.role' without implementation code. Phase 5.1 admin endpoint is just comments: '// PATCH /users/:id/role // Body: { \"role\": \"editor\" } // Restricted to admin only.' Phase 6 lists test scenarios in prose without any runnable test code."
+    },
+    {
+      "expectation": "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+      "verdict": "FAIL",
+      "justification": "The plan follows implement-then-test ordering. The Implementation Order section explicitly sequences: steps 2-7 build all code, step 8 is 'Write and run tests (unit, integration, e2e)'. Phase 6 'Testing' comes after all implementation phases (1-5). No mention of writing tests first, no red-green-refactor cycle, no verify-fail step. TDD is never referenced."
+    },
+    {
+      "expectation": "Exact test commands with expected output are included",
+      "verdict": "FAIL",
+      "justification": "No test commands appear anywhere. Phase 6 describes test scenarios in prose (e.g., 'roleCanPerform(\"viewer\", \"GET\") returns true', 'Viewer making a POST request returns 403', 'Admin making a DELETE request returns 200') but provides no runnable commands or expected command-line output. No 'npx jest', 'npm test', or any test runner invocation."
+    },
+    {
+      "expectation": "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+      "verdict": "FAIL",
+      "justification": "No explicit verification gate. The Risks table mentions 'run full test suite before enabling' and 'Deploy behind a feature flag' as deployment mitigations, but these are risk management strategies, not a quality gate or review step in the implementation plan. Phase 6 describes testing as a development activity, not a verification gate. No definition of done, manual review checklist, or quality gate invocation."
+    },
+    {
+      "expectation": "Plan defines exactly three roles: admin, editor, viewer",
+      "verdict": "PASS",
+      "justification": "Phase 2.1 defines: 'Role = { ADMIN: \"admin\", EDITOR: \"editor\", VIEWER: \"viewer\" } as const' with 'type RoleName = (typeof Role)[keyof typeof Role]'. ROLE_PERMISSIONS maps exactly these three roles. The Overview states 'three roles (admin, editor, viewer)'. Phase 1.1 constrains the database: 'CHECK (role IN (\"admin\", \"editor\", \"viewer\"))'. Consistent use of exactly three roles throughout."
+    },
+    {
+      "expectation": "Plan's permission model gives admin full access, editor create+edit but not delete, viewer read-only",
+      "verdict": "PASS",
+      "justification": "Phase 2.1 ROLE_PERMISSIONS maps roles to HTTP methods: 'admin: Set([\"GET\",\"POST\",\"PUT\",\"PATCH\",\"DELETE\"]), editor: Set([\"GET\",\"POST\",\"PUT\",\"PATCH\"]), viewer: Set([\"GET\"])'. The table shows admin=Y for all methods, editor=Y for GET/POST/PUT/PATCH but N for DELETE, viewer=Y only for GET. Phase 6.1 test scenarios confirm: 'roleCanPerform(\"editor\", \"DELETE\") returns false', 'roleCanPerform(\"viewer\", \"POST\") returns false'."
+    },
+    {
+      "expectation": "Plan includes a database migration for roles (new table or column)",
+      "verdict": "PASS",
+      "justification": "Phase 1.1 provides a complete SQL migration: 'ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT \"viewer\" CONSTRAINT valid_role CHECK (role IN (\"admin\", \"editor\", \"viewer\"))' with a down migration: 'ALTER TABLE users DROP COLUMN role'. The migration file is 'src/migrations/<timestamp>_add_role_to_users.sql'. Phase 1.2 includes seeding an initial admin user. The design rationale explains choosing CHECK constraint over a separate roles table."
+    },
+    {
+      "expectation": "Plan modifies or extends the existing auth middleware at src/middleware/auth.ts",
+      "verdict": "PASS",
+      "justification": "Phase 3.3 is titled 'Update existing auth middleware to extract role' and states: 'File to modify: src/middleware/auth.ts'. It describes: 'After verifying the JWT and attaching req.user, ensure the decoded role claim is also set on req.user.role. No new middleware file is needed for this step; the existing middleware just needs to pass through the additional claim.' The File Change Summary confirms 'src/middleware/auth.ts | Modify | Pass role from decoded JWT onto req.user'."
+    }
+  ],
+  "score": "5/11",
+  "eval_feedback": [
+    "The without_skill plan passes all 4 domain-specific expectations (three roles, permission model, DB migration, auth middleware modification) but fails 6 of 7 structural expectations, passing only file paths.",
+    "The plan demonstrates solid RBAC domain knowledge with a correct permission model, CHECK constraint at the DB level, admin seed for bootstrap, and a unique Phase 7 addressing stale JWT after role changes -- a production concern the with_skill plan does not address.",
+    "The structural gap (5/11 vs 11/11 for with_skill) shows the skill adds significant implementation-readiness: TDD, complete code, test commands, bite-sized tasks, and explicit verification gates."
+  ]
+}

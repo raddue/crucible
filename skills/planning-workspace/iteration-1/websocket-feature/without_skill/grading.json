@@ -1,0 +1,62 @@
+{
+  "eval_name": "websocket-feature",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+      "verdict": "FAIL",
+      "justification": "The plan does not have a consolidated header with Goal, Architecture, and Tech Stack labels. It uses separate numbered sections: '1. Overview' (goal-like content), '3. Technical Design' with '3.2 Architecture Diagram' (architecture), and '3.1 Library Choice' (tech stack as a table). These are spread across distinct sections rather than presented as a unified header. No section is explicitly labeled 'Goal', 'Architecture', or 'Tech Stack'."
+    },
+    {
+      "expectation": "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+      "verdict": "FAIL",
+      "justification": "Section 5 organizes work into 4 phases with time estimates of '1-2 days' (Phases 1 and 3) and '1 day' (Phases 2 and 4). Phase 1 alone bundles 7 sub-items: install deps, create message schema, create constants, create WebSocketManager with 6 sub-bullets (upgrade handling, auth, ping/pong, subscription tracking, broadcast, wildcard matching), create index, modify server.ts, and write unit tests. These are multi-hour blocks, not 2-5 minute tasks."
+    },
+    {
+      "expectation": "Every task specifies exact file paths for files to Create, Modify, and Test",
+      "verdict": "PASS",
+      "justification": "Section 4.1 provides a complete directory tree with exact paths for all new files (src/websocket/index.ts, WebSocketManager.ts, pgListener.ts, pubsubAdapter.ts, messageSchema.ts, authorize.ts, constants.ts, and __tests__/ files). Section 4.2 lists modified files in a table with descriptions (src/server.ts, src/routes/*.ts, package.json, database migrations). Section 4.3 provides the migration file path. The file structure is thoroughly documented."
+    },
+    {
+      "expectation": "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+      "verdict": "FAIL",
+      "justification": "Implementation steps in Section 5 are prose descriptions, not code. Step 2 says 'Define Zod schemas for subscribe, unsubscribe, ping messages'. Step 4 describes WebSocketManager in 6 bullets like 'Implement broadcast(topic, payload) that iterates matching subscriptions and sends' and 'Implement wildcard matching for topics ending in :*'. Some code appears in design sections (SQL migration in 4.3, route example in Section 6, wire protocol JSON in 3.4) but implementation steps contain no fenced code blocks."
+    },
+    {
+      "expectation": "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+      "verdict": "FAIL",
+      "justification": "The plan follows implement-first ordering. Steps 2-6 in Phase 1 are all implementation, then Step 7 says 'Write unit tests for WebSocketManager (mock ws and PG)'. Steps 8-11 in Phase 2 are implementation, then Step 12 says 'Write unit tests for pgListener (mock pg client)'. No mention of writing tests first, no red-green-refactor cycle, no 'verify fail' step anywhere. TDD is never mentioned."
+    },
+    {
+      "expectation": "Exact test commands with expected output are included",
+      "verdict": "FAIL",
+      "justification": "No test commands appear anywhere in the plan. Step 18 mentions 'Use a tool like ws-benchmark or artillery' for load testing but provides no actual command. Testing steps (7, 12, 16, 17) describe what to test in prose but include no 'Run:' commands or expected output predictions."
+    },
+    {
+      "expectation": "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+      "verdict": "PASS",
+      "justification": "Section 9 'Definition of Done' provides a 9-item checklist: 'WebSocket connections are authenticated during HTTP upgrade using existing JWT auth', 'Clients can subscribe/unsubscribe to topics and receive JSON event frames', 'Wildcard subscriptions work correctly', 'Authorization prevents unauthorized subscriptions', 'Events published from any API process are delivered to all matching subscribers across all processes', 'Unit tests cover message parsing, subscription management, authorization, and PG listener reconnection', 'Integration test demonstrates end-to-end flow', 'Graceful shutdown closes all connections cleanly', 'No degradation to existing REST API performance'. This constitutes an explicit manual review checklist."
+    },
+    {
+      "expectation": "Plan includes a subscription mechanism for resource-specific events (e.g., 'order:123:status' pattern)",
+      "verdict": "PASS",
+      "justification": "Section 3.3 'Topic Format Convention' defines the pattern '<resource>:<id>:<aspect>' with examples: 'order:123:status', 'order:123:*', 'user:456:messages'. Wildcard matching via prefix match is described. Section 3.4 shows the subscribe wire protocol: '{\"type\": \"subscribe\", \"topics\": [\"order:123:status\"]}'. Step 4 describes the in-memory subscription map 'Map<string, Set<WebSocket>>'. The subscription mechanism is thoroughly designed."
+    },
+    {
+      "expectation": "Plan addresses WebSocket authentication/authorization",
+      "verdict": "PASS",
+      "justification": "Section 3.5 'Authentication' describes JWT extraction from the Authorization header or token query parameter during the HTTP upgrade handshake, verification using the same middleware/logic as REST routes, rejection with HTTP 401 on failure, and attaching decoded user context to the socket. Section 3.6 'Authorization' describes per-topic access checks: 'subscribing to order:123:status requires that the user owns order 123 or has an admin role'. Steps 13-14 cover implementing src/websocket/authorize.ts and integrating it into WebSocketManager."
+    },
+    {
+      "expectation": "Plan includes PostgreSQL integration for event persistence or LISTEN/NOTIFY",
+      "verdict": "PASS",
+      "justification": "Section 3.7 details PG LISTEN/NOTIFY: dedicated long-lived connection per process issuing 'LISTEN events', publishing via 'SELECT pg_notify(\"events\", ...)', and receiving events to fan out to local WebSocket clients. Section 4.3 provides a SQL migration creating a notify_event helper function. Steps 8-12 in Phase 2 cover implementing PgPubSubAdapter and pgListener.ts with exponential-backoff reconnect. Section 3.9 discusses scaling considerations including the 8 KB payload limit."
+    }
+  ],
+  "score": "5/10",
+  "eval_feedback": [
+    "The without_skill plan excels at domain correctness with thorough coverage of auth, authorization, LISTEN/NOTIFY, wire protocol, connection lifecycle, and scaling. It passes all 3 domain-specific expectations plus the file paths and verification checklist expectations.",
+    "It fails all structural/methodology expectations: no TDD, no test commands, no complete runnable code, and multi-day phase blocks instead of bite-sized tasks. This is the classic architecture-doc-vs-implementation-plan gap.",
+    "Notably, the without_skill plan outperforms the with_skill plan on domain correctness (passes auth, which with_skill fails) but underperforms on structural quality (5/10 vs 9/10)."
+  ]
+}

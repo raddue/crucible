@@ -1,0 +1,38 @@
+{
+  "eval_name": "currency-bugfix",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "A failing test that reproduces the bug is written BEFORE touching the implementation",
+      "verdict": "PASS",
+      "justification": "The RED step adds a targeted regression test to src/utils/__tests__/format.test.ts: 'it(\"uses a period (not comma) as the decimal separator\", () => { const result = formatCurrency(1); expect(result).toBe(\"$1.00\"); expect(result).not.toContain(\",\"); })'. This test is written and run BEFORE any changes to src/utils/format.ts. The implementation is only modified in the GREEN step."
+    },
+    {
+      "expectation": "The test is run and verified to fail with the current broken behavior",
+      "verdict": "PASS",
+      "justification": "The 'Verify RED' step shows: 'npx vitest run src/utils/__tests__/format.test.ts -t \"uses a period\"' producing 'FAIL' with 'AssertionError: expected '$1,00' to be '$1.00''. The test fails for exactly the bug-related reason: the function returns '$1,00' (comma as decimal separator) instead of '$1.00' (period)."
+    },
+    {
+      "expectation": "The fix is minimal — only the bug-causing code is changed, not a rewrite",
+      "verdict": "PASS",
+      "justification": "The fix is a single-character change shown as a diff: '- return `$${withCommas},${decimal}`;' changed to '+ return `$${withCommas}.${decimal}`;'. The transcript states: 'Changed one character on line 9 of src/utils/format.ts.' No other code was modified. The REFACTOR section explicitly states: 'No refactoring needed. The fix was a single-character change.'"
+    },
+    {
+      "expectation": "Tests run again and verified to pass after the fix",
+      "verdict": "PASS",
+      "justification": "The 'Verify GREEN' step shows: 'npx vitest run src/utils/__tests__/format.test.ts' producing 'Test Files: 1 passed (1), Tests: 7 passed (7)'. All 7 tests pass (6 pre-existing + 1 new regression test). The transcript confirms: 'Output is pristine -- no errors, no warnings.'"
+    },
+    {
+      "expectation": "The regression test specifically asserts formatCurrency(1) returns '$1.00'",
+      "verdict": "PASS",
+      "justification": "The regression test contains the exact assertion: 'const result = formatCurrency(1); expect(result).toBe(\"$1.00\");'. This directly asserts formatCurrency(1) returns '$1.00'. The test additionally asserts 'expect(result).not.toContain(\",\")' as a belt-and-suspenders check. The test name is 'uses a period (not comma) as the decimal separator'."
+    },
+    {
+      "expectation": "All pre-existing tests still pass after the fix (no regressions)",
+      "verdict": "PASS",
+      "justification": "The Investigation section identifies 'Existing test file at src/utils/__tests__/format.test.ts has 6 tests covering various inputs, all expecting period-separated decimals.' The final test run shows 7 tests passing -- the 6 pre-existing tests plus the 1 new regression test. The final test file listing confirms all 7 tests by name: format 1 as $1.00, format 0 as $0.00, format 1234.5 as $1,234.50, format 1000000 as $1,000,000.00, format 99.99 as $99.99, format 0.5 as $0.50, and the new regression test. All pre-existing tests are preserved and pass."
+    }
+  ],
+  "score": "6/6",
+  "eval_feedback": ["Textbook TDD bugfix: reproduce the bug with a failing test, make the minimal one-character fix, verify all tests pass including pre-existing ones. The agent correctly identified and preserved 6 pre-existing tests. The only minor note is that the RED verification used a test-name filter (-t \"uses a period\") which skipped the other 6 tests, but the GREEN verification ran all 7 without a filter, confirming no regressions."]
+}

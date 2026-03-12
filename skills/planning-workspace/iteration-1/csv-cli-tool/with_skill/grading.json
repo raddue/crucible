@@ -1,0 +1,62 @@
+{
+  "eval_name": "csv-cli-tool",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+      "verdict": "PASS",
+      "justification": "The plan opens with three bolded header fields: '**Goal:** Build a CLI tool that reads a CSV file, validates each row against a JSON schema, supports custom validator plugins, and outputs a structured validation error report.', '**Architecture:** Python CLI using argparse for argument parsing, csv (stdlib) for CSV reading, jsonschema for JSON Schema validation, and a plugin system that dynamically loads custom validators from a user-specified directory via importlib...', '**Tech Stack:** Python 3.10+, jsonschema, pytest, argparse, importlib, csv (stdlib)'."
+    },
+    {
+      "expectation": "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+      "verdict": "PASS",
+      "justification": "The plan has 6 tasks, each narrowly scoped to a single module: Task 1 (CSV reader, ~20 lines), Task 2 (schema validator, ~50 lines), Task 3 (plugin system, ~40 lines), Task 4 (report formatter, ~40 lines), Task 5 (CLI entry point, ~40 lines), Task 6 (integration tests, test fixtures only). Each task creates 1-2 source files and 1 test file. A dependency graph shows parallel-safe execution waves."
+    },
+    {
+      "expectation": "Every task specifies exact file paths for files to Create, Modify, and Test",
+      "verdict": "PASS",
+      "justification": "Each task has a 'Files:' block with labeled actions and paths. Task 1: 'Create: src/csv_validator/__init__.py, Create: src/csv_validator/reader.py, Test: tests/test_reader.py, Create: tests/fixtures/valid.csv, tests/fixtures/empty.csv, tests/fixtures/headers_only.csv'. Task 3: 'Create: src/csv_validator/plugins.py, Test: tests/test_plugins.py, Create: tests/fixtures/plugins/check_email_domain.py, check_age_range.py, not_a_plugin.txt'. All paths are fully specified across all 6 tasks."
+    },
+    {
+      "expectation": "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+      "verdict": "PASS",
+      "justification": "All 6 tasks contain complete Python implementations. Task 1: full read_csv function with csv.DictReader and line-number tracking. Task 2: full validate_rows with _coerce_row type coercion and jsonschema.Draft7Validator.iter_errors(). Task 3: full load_plugins with importlib.util dynamic loading and run_plugins with try/except. Task 4: full format_report with JSON and text output modes. Task 5: complete CLI with argparse. All test files have complete runnable test functions. No TODO or placeholder comments."
+    },
+    {
+      "expectation": "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+      "verdict": "PASS",
+      "justification": "Every task follows explicit TDD. Example from Task 2: 'Step 2: Write the failing tests' (10 complete test functions), 'Step 3: Run tests to verify they fail / Run: pytest tests/test_validator.py -v / Expected: FAIL with ModuleNotFoundError or ImportError', 'Step 4: Write minimal implementation' (complete source), 'Step 5: Run tests to verify they pass / Expected: All 10 tests PASS'. All 6 tasks follow this red-green pattern."
+    },
+    {
+      "expectation": "Exact test commands with expected output are included",
+      "verdict": "PASS",
+      "justification": "Every task includes specific pytest commands with predictions. Task 1: 'Run: pytest tests/test_reader.py -v / Expected: FAIL with ModuleNotFoundError: No module named \"csv_validator\"' then 'Expected: All 4 tests PASS'. Task 3: 'Run: pytest tests/test_plugins.py -v / Expected: All 9 tests PASS'. Task 6: 'Run: pytest tests/ -v / Expected: All tests PASS across all test files'. The Verification Checklist also includes CLI commands with expected output."
+    },
+    {
+      "expectation": "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+      "verdict": "PASS",
+      "justification": "The plan includes both: (1) Task 6 is a dedicated integration test suite with 6 e2e test cases covering bad data, mixed data, plugins, broken plugins, text output, and valid CSV exit codes. (2) A 'Verification Checklist' section with 5 numbered checks: full test suite, CLI end-to-end (two specific commands with expected outputs), plugin system verification (specific command), clean package install, and correct file structure."
+    },
+    {
+      "expectation": "Plan includes CSV parsing with configurable delimiters or at minimum comma support",
+      "verdict": "FAIL",
+      "justification": "The plan uses csv.DictReader for CSV parsing (Task 1) which defaults to comma delimiter, providing comma support. However, the expectation asks for 'configurable delimiters' as the primary criterion. The read_csv function signature is read_csv(file_path: str) with no delimiter parameter. The CLI in Task 5 has no --delimiter flag. There is no mention of delimiter configuration anywhere in the plan. Under strict interpretation, 'configurable delimiters' is not met, and 'at minimum comma support' is ambiguous -- the plan does parse CSV with commas but never explicitly discusses or configures delimiter behavior."
+    },
+    {
+      "expectation": "Plan includes JSON Schema validation of CSV row data",
+      "verdict": "PASS",
+      "justification": "Task 2 is entirely dedicated to JSON Schema validation. It creates schema_basic.json with type/properties/required constraints, implements validate_rows using jsonschema.Draft7Validator with iter_errors(), includes type coercion from CSV strings via _coerce_row (int/float/boolean), and has 10 test cases covering valid rows, missing required fields, invalid values, type coercion, non-numeric ages, and multi-row multi-error scenarios. The jsonschema library is a dependency in pyproject.toml."
+    },
+    {
+      "expectation": "Plan includes a plugin loading mechanism for custom validators",
+      "verdict": "PASS",
+      "justification": "Task 3 implements a complete plugin system. load_plugins scans a directory for .py files using os.listdir, dynamically loads them via importlib.util.spec_from_file_location / module_from_spec / spec.loader.exec_module, checks for a callable 'validate' attribute, and returns a list of {name, validate} dicts. run_plugins iterates plugins over rows with try/except error handling. Two working plugins (check_email_domain, check_age_range) and one non-plugin file (not_a_plugin.txt) are provided as fixtures. Nine tests cover loading, filtering, execution, and edge cases."
+    }
+  ],
+  "score": "9/10",
+  "eval_feedback": [
+    "The with_skill plan is excellent with complete TDD, runnable code, and thorough testing (44 total tests across 6 files). The only failure is configurable delimiter support.",
+    "The delimiter expectation wording 'configurable delimiters or at minimum comma support' creates grading ambiguity. Under strict interpretation, 'configurable' means the user can specify a delimiter, which this plan does not support. The plan does use csv.DictReader which parses comma-delimited CSV correctly, satisfying 'at minimum comma support'. Graded FAIL because the instructions say to be strict and the primary criterion is 'configurable delimiters'.",
+    "The plan includes a nice dependency graph with wave-based execution and a self-correcting moment where test_cli_with_plugins expectations are fixed mid-task."
+  ]
+}

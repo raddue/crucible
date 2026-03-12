@@ -1,0 +1,62 @@
+{
+  "eval_name": "websocket-feature",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Plan includes a header with Goal, Architecture, and Tech Stack sections",
+      "verdict": "PASS",
+      "justification": "The plan opens with three bolded header fields: '**Goal:** Add WebSocket support to the Express API so clients can subscribe to resource-specific event channels...', '**Architecture:** The Express HTTP server is upgraded to support WebSocket connections via the `ws` library, sharing the same underlying HTTP server. A SubscriptionManager singleton tracks which clients are subscribed to which channels...', '**Tech Stack:** TypeScript, Express, `ws` (WebSocket library), `pg` (PostgreSQL client for LISTEN/NOTIFY), Jest (testing), `ws` client (for integration tests)'."
+    },
+    {
+      "expectation": "Tasks are bite-sized (2-5 minute implementation steps), not large multi-hour blocks",
+      "verdict": "PASS",
+      "justification": "The plan has 12 tasks, each narrowly scoped: Task 1 (install deps), Task 2 (types/interfaces, ~30 lines of code), Task 3 (SubscriptionManager, ~40 lines), Task 4 (message handler, ~30 lines), Task 5 (PG notify bridge, ~50 lines), Task 6 (WS server, ~40 lines), Task 7 (barrel export, ~6 lines), Task 8 (server.ts integration, ~20 lines), Task 9 (wire bridge, ~30 lines), Task 10 (notify helper, ~15 lines), Task 11 (route handler, ~5 lines), Task 12 (e2e test). Each task creates or modifies 1-3 files."
+    },
+    {
+      "expectation": "Every task specifies exact file paths for files to Create, Modify, and Test",
+      "verdict": "PASS",
+      "justification": "Each task includes a 'Files:' block with labeled actions. Examples: Task 2: 'Create: src/websocket/types.ts, Test: tests/websocket/types.test.ts'. Task 5: 'Create: src/websocket/pg-notify-bridge.ts, Test: tests/websocket/pg-notify-bridge.test.ts'. Task 8: 'Modify: src/server.ts'. Task 9: 'Modify: src/websocket/ws-server.ts, Modify: src/server.ts, Test: tests/websocket/ws-server-bridge.test.ts'. A summary table at the end lists all 17 files with their actions."
+    },
+    {
+      "expectation": "Tasks include complete runnable code — not placeholders like 'add validation logic'",
+      "verdict": "PASS",
+      "justification": "Tasks 2-6 and 9-12 contain complete TypeScript implementations and test code. For example, Task 3 provides the full SubscriptionManager class with subscribe/unsubscribe/removeClient/getSubscribers using two-way Map<string, Set<string>> structures. Task 5 provides the complete PgNotifyBridge class with start/stop/onNotification methods. Task 10 provides the full buildNotifyQuery function. No TODO comments or placeholder logic found."
+    },
+    {
+      "expectation": "Tasks follow TDD structure: write test, verify fail, implement, verify pass",
+      "verdict": "PASS",
+      "justification": "Tasks 2-6, 9, 10, and 12 follow explicit TDD: 'Step 1: Write the failing test' with full test code, 'Step 2: Run test to verify it fails' with expected failure message (e.g., 'FAIL with Cannot find module'), 'Step 3: Write minimal implementation' with full source, 'Step 4: Run test to verify it passes' (e.g., 'Expected: PASS (all 7 tests)'). Tasks 1, 7, 8, 11 are infrastructure steps with verification but not TDD, which is appropriate."
+    },
+    {
+      "expectation": "Exact test commands with expected output are included",
+      "verdict": "PASS",
+      "justification": "Every task includes specific test commands with predicted outcomes. Examples: Task 1: 'Run: npm ls ws / Expected: ws@x.x.x appears in the output'. Task 2: 'Run: npx jest tests/websocket/types.test.ts --verbose / Expected: FAIL with \"Cannot find module\"'. Task 3: 'Expected: PASS (all 7 tests)'. Task 7: 'Run: npx tsc --noEmit / Expected: No errors.' Task 12: 'Run: npx jest tests/websocket/e2e.test.ts --verbose / Expected: PASS (all 2 tests)' plus full suite regression run."
+    },
+    {
+      "expectation": "Includes an explicit verification or review step (quality gate, integration test suite, or manual review checklist)",
+      "verdict": "PASS",
+      "justification": "Task 12 is a dedicated end-to-end integration test that boots an Express server with WebSocket and PgNotifyBridge, connects a WS client, subscribes to a channel, simulates a PG notification, and asserts the client receives the correct event. It also includes a negative test verifying no notification is delivered for unsubscribed channels. Task 12 Step 3 runs the full test suite: 'Run: npx jest --verbose / Expected: ALL tests PASS'. The plan functions as a built-in quality gate through its e2e task."
+    },
+    {
+      "expectation": "Plan includes a subscription mechanism for resource-specific events (e.g., 'order:123:status' pattern)",
+      "verdict": "PASS",
+      "justification": "Task 2 defines the channel format 'resource:id:event' with CHANNEL_REGEX = /^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$/. The parseChannel function parses 'order:123:status' into {resource: 'order', id: '123', event: 'status'}. Task 3 implements SubscriptionManager with subscribe(clientId, channel) and getSubscribers(channel) using Map<string, Set<string>>. Tests use 'order:123:status' and 'user:456:profile' as concrete examples."
+    },
+    {
+      "expectation": "Plan addresses WebSocket authentication/authorization",
+      "verdict": "FAIL",
+      "justification": "The plan contains no mention of authentication, authorization, JWT, tokens, or any auth-related concept. The createWebSocketServer function in Task 6 accepts all incoming WebSocket connections unconditionally with no verification during the HTTP upgrade handshake. No task addresses user identity or per-topic access control. A grep for 'auth' across the entire document returns zero matches."
+    },
+    {
+      "expectation": "Plan includes PostgreSQL integration for event persistence or LISTEN/NOTIFY",
+      "verdict": "PASS",
+      "justification": "Task 5 implements PgNotifyBridge using 'LISTEN ws_events' via a dedicated PG client connection. The class parses notification payloads and fans out to subscribed clients via a sendToClient callback. The emitNotification helper function issues 'NOTIFY ws_events, $payload'. Task 10 provides buildNotifyQuery using 'SELECT pg_notify($1, $2)'. Task 8 wires a dedicated PG client into server.ts. Task 11 shows integration in a route handler within a database transaction."
+    }
+  ],
+  "score": "9/10",
+  "eval_feedback": [
+    "The with_skill plan is exceptionally thorough with 12 TDD tasks, complete runnable code, and an e2e integration test. The only gap is the complete absence of WebSocket authentication/authorization, which is a significant domain omission for a production system.",
+    "The auth expectation effectively discriminates: the plan excels at structural quality (TDD, file paths, test commands, complete code) but misses a critical domain requirement.",
+    "Consider adding an expectation for connection lifecycle management (heartbeat/ping, graceful shutdown) since the plan addresses graceful shutdown in server.ts but has no WebSocket-level heartbeat."
+  ]
+}

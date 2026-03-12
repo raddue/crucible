@@ -1,0 +1,72 @@
+{
+  "eval_name": "flawed-design",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Performed at least 2 iterative red-team rounds",
+      "verdict": "FAIL",
+      "justification": "The transcript has 3 sections labeled 'Round 1', 'Round 2', 'Round 3', but these are thematic review passes (Architectural Risk, Operational/Production Readiness, Security/Compliance), not iterative red-team rounds. No artifact revision occurs between them. The same original design is reviewed throughout."
+    },
+    {
+      "expectation": "Each round includes explicit Fatal or Significant severity ratings",
+      "verdict": "FAIL",
+      "justification": "The transcript uses 'Critical', 'High', 'Medium', and 'Low' severity labels. The Fatal/Significant taxonomy is never used. Round 1 has 2 Critical and 2 High findings; Round 2 has 3 Medium and 1 Low; Round 3 has 1 Medium and 1 Low."
+    },
+    {
+      "expectation": "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+      "verdict": "FAIL",
+      "justification": "No weighted scoring appears anywhere. No score tables, no Fatal=3/Significant=1 weighting, no numeric score tracking."
+    },
+    {
+      "expectation": "Artifact was revised between rounds based on findings",
+      "verdict": "FAIL",
+      "justification": "No artifact revision occurs at any point. No 'Fixes Applied' sections exist. All three rounds review the original unmodified design."
+    },
+    {
+      "expectation": "Stagnation detection applied via weighted score comparison after each round",
+      "verdict": "FAIL",
+      "justification": "No stagnation detection mechanism exists. No weighted scores are computed, so no score comparison is possible."
+    },
+    {
+      "expectation": "First output message explicitly states this is a quality gate review",
+      "verdict": "FAIL",
+      "justification": "The title is '# Quality Gate Review: Redis Caching Layer for REST API', which contains the words 'quality gate'. However, the document does not execute a quality gate process (no iterative rounds, no scoring, no convergence). It is a standard multi-angle review with a 'quality gate' label. The expectation requires announcing and running the quality gate process, not merely using the term in a title."
+    },
+    {
+      "expectation": "Identified single point of failure as a Fatal-severity issue",
+      "verdict": "FAIL",
+      "justification": "Finding 1.2 identifies 'Single Instance with No Replication' as a SPOF but rates it 'Severity: Critical', not 'Fatal'. The expectation requires Fatal-severity specifically."
+    },
+    {
+      "expectation": "Identified using Redis as primary data store as a Fatal-severity issue",
+      "verdict": "FAIL",
+      "justification": "Finding 1.1 identifies 'Redis as Primary Data Store for User Preferences' but rates it 'Severity: Critical', not 'Fatal'. The expectation requires Fatal-severity specifically."
+    },
+    {
+      "expectation": "Identified naive cache invalidation strategy as a problem",
+      "verdict": "PASS",
+      "justification": "Finding 1.3: '\"Clear Everything on Deploy\" Invalidation Strategy' is identified at High severity with detailed analysis covering session destruction, thundering herd, rate limiting reset, and preference loss."
+    },
+    {
+      "expectation": "Final round has zero Fatal findings in the revised artifact",
+      "verdict": "FAIL",
+      "justification": "There is no revised artifact. The transcript ends with a 'FAIL' verdict on the original design with 2 Critical and 2 High issues unresolved. No Fatal/Significant taxonomy is used."
+    },
+    {
+      "expectation": "Final revised design no longer uses Redis as primary data store",
+      "verdict": "FAIL",
+      "justification": "No revised design is produced. The transcript recommends a fix ('User preferences must be persisted in a durable data store') but never revises the design. The final summary still lists 'Using Redis as a primary data store' as an unresolved critical issue."
+    },
+    {
+      "expectation": "Final revised design addresses single point of failure with replication or failover",
+      "verdict": "FAIL",
+      "justification": "No revised design is produced. The transcript recommends 'deploy a Redis replica (Redis Sentinel or Redis Cluster)' but never applies this fix. The final summary lists 'Single point of failure architecture with no redundancy' as unresolved."
+    }
+  ],
+  "score": "1/12",
+  "eval_feedback": [
+    "The without_skill baseline produces a thorough single-pass review identifying most of the same problems, but critically fails to iterate: no revisions, no weighted scoring, no stagnation detection, no convergence toward a clean artifact.",
+    "The review uses Critical/High/Medium/Low severity instead of the Fatal/Significant taxonomy, causing severity-specific expectations to fail.",
+    "This demonstrates the skill's core value: driving iterative improvement until the artifact passes, whereas vanilla Claude flags problems and stops."
+  ]
+}

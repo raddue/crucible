@@ -1,0 +1,53 @@
+{
+  "eval_name": "password-validator",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Test written BEFORE implementation code — a test file exists before the validator function is implemented",
+      "verdict": "PASS",
+      "justification": "In Cycle 1, tests/auth/validators.test.ts is created with an import and test case ('returns score 0 for empty password') BEFORE src/auth/validators.ts exists. The RED step runs the test and gets 'Cannot find module ../../src/auth/validators'. Only in the GREEN step is the implementation file created. This test-first pattern repeats across all 7 genuine TDD cycles (1, 2, 3, 4, 5, 7, 13)."
+    },
+    {
+      "expectation": "Test is run and verified to fail before any implementation is written",
+      "verdict": "PASS",
+      "justification": "Every genuine cycle includes a 'Verify RED' step with explicit test runner output. Cycle 1: 'FAIL ... Cannot find module'. Cycle 2: 'Expected: 1, Received: 0'. Cycle 3: 'Expected: 1, Received: 0'. Cycle 4 (revised to digits): 'Expected: 1, Received: 0'. Cycle 5: 'Expected: 1, Received: 0'. Cycle 7: 'Expected: false, Received: undefined'. Cycle 13: 'Expected: {\"hasDigit\": true, ...}, Received: undefined'. All seven cycles show verified failing tests before implementation."
+    },
+    {
+      "expectation": "The initial failure is for the right reason (missing function/module, not a syntax error)",
+      "verdict": "PASS",
+      "justification": "Cycle 1 RED output shows 'Cannot find module ../../src/auth/validators from tests/auth/validators.test.ts' -- a missing-module error, not a syntax error. The transcript explicitly notes: 'The test fails because the module does not exist yet. This is a legitimate failure -- the feature is missing.' Subsequent cycles fail with assertion mismatches (Expected: 1, Received: 0; Expected: false, Received: undefined), which are also correct reasons -- missing feature behavior, not syntax errors."
+    },
+    {
+      "expectation": "Minimal implementation written to make failing tests pass — no over-engineering beyond what tests require",
+      "verdict": "PASS",
+      "justification": "Cycle 1: hardcoded 'return { score: 0 }'. Cycle 2: adds only /[a-z]/ check. Cycle 3: adds only /[A-Z]/ check. Cycle 4: adds only /[0-9]/ check. Cycle 5: adds only /[^a-zA-Z0-9]/ check. Cycle 7: adds only meetsMinLength boolean. Cycle 13: adds criteria object. The agent also self-corrects in Cycle 4, recognizing that a combined upper+lower test would pass immediately and pivoting to the digit criterion instead, saying 'Test passes? You're testing existing behavior. Fix test.' This demonstrates active minimalism."
+    },
+    {
+      "expectation": "Tests run again and verified to pass after implementation",
+      "verdict": "PASS",
+      "justification": "Every GREEN step includes a 'Verify GREEN' run with PASS output: Cycle 1 (1 passed), Cycle 2 (2 passed), Cycle 3 (3 passed), Cycle 4 (4 passed), Cycle 5 (5 passed), Cycle 7 (7 passed), Cycle 13 (12 passed). Refactoring steps in Cycles 5 and 13 also re-run tests to confirm nothing broke."
+    },
+    {
+      "expectation": "At least 3 separate red-green cycles visible (not one big batch of tests then one big implementation)",
+      "verdict": "PASS",
+      "justification": "Seven complete RED-GREEN cycles are visible: Cycle 1 (empty string -> score 0), Cycle 2 (lowercase -> score 1), Cycle 3 (uppercase -> score 1), Cycle 4 (digits -> score 1), Cycle 5 (special chars -> score 1), Cycle 7 (meetsMinLength field), Cycle 13 (criteria detail object). Each cycle has separate RED/Verify RED/GREEN/Verify GREEN phases with one test added and minimal code written per cycle. This far exceeds the 3-cycle minimum."
+    },
+    {
+      "expectation": "Final implementation correctly returns score 0 for empty string",
+      "verdict": "PASS",
+      "justification": "The final implementation computes score as 'Object.values(criteria).filter(Boolean).length' where criteria checks /[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/ against the password. For an empty string, none of these regex tests match, so all four booleans are false and filter(Boolean).length yields 0. The test 'returns score 0 for empty password' with 'expect(result.score).toBe(0)' passes in the final run (14 passed, 14 total). Additionally, the characterization test 'reports all criteria as false for empty password' explicitly asserts all four criteria are false for empty string."
+    },
+    {
+      "expectation": "Final implementation correctly returns score 4 for a password meeting all criteria",
+      "verdict": "PASS",
+      "justification": "The test 'returns score 4 when password meets all criteria' uses validatePasswordStrength('Abc1!xyz') and expects score 4. The password has lowercase (b,c,x,y,z), uppercase (A), digit (1), and special char (!), so all four regex checks match, yielding score 4. This test passes in the final run. The characterization test 'returns which criteria are met in detail' also confirms all four criteria are true for the same password."
+    },
+    {
+      "expectation": "Tests cover all 5 criteria: min length, uppercase, lowercase, digit, special character",
+      "verdict": "PASS",
+      "justification": "Min length: Tested in Cycles 7-9 with tests for < 8 chars ('Ab1!' -> meetsMinLength false), exactly 8 chars ('abcdefgh' -> meetsMinLength true), and 7 chars ('Ab1!efg' -> meetsMinLength false). Uppercase: Tested in Cycle 3 ('returns score 1 when password has only uppercase letters' with 'ABCDEFGH'). Lowercase: Tested in Cycle 2 ('returns score 1 when password has only lowercase letters' with 'abcdefgh'). Digit: Tested in Cycle 4 ('returns score 1 when password has only digits' with '12345678'). Special character: Tested in Cycle 5 ('returns score 1 when password has only special characters' with '!@#$%^&*'). All 5 criteria have dedicated tests."
+    }
+  ],
+  "score": "9/9",
+  "eval_feedback": ["Exemplary TDD discipline with 7 genuine RED-GREEN cycles. The agent self-corrected when a test would pass immediately (Cycle 4 pivot from combined upper+lower to digit), demonstrating active understanding of the TDD process rather than mechanical compliance. All domain-correctness assertions verified through both test assertions and implementation logic."]
+}

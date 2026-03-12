@@ -1,0 +1,72 @@
+{
+  "eval_name": "weak-plan",
+  "condition": "with_skill",
+  "expectations": [
+    {
+      "expectation": "Performed at least 2 iterative red-team rounds",
+      "verdict": "PASS",
+      "justification": "Transcript shows 4 rounds (Round 1 through Round 4), each labeled 'Fresh Devil's Advocate Review'. Revised plans (v2, v3, v4) are produced between rounds."
+    },
+    {
+      "expectation": "Each round includes explicit Fatal or Significant severity ratings",
+      "verdict": "PASS",
+      "justification": "Round 1: 3 Fatal (F1-F3) and 4 Significant (S1-S4) with explicit severity labels. Round 2: 1 Fatal (F1) and 2 Significant (S1-S2). Round 3: 0 Fatal, 2 Significant (S1-S2). Round 4: 0 Fatal, 0 Significant."
+    },
+    {
+      "expectation": "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+      "verdict": "PASS",
+      "justification": "Explicit weighted score formulas appear: Round 1 'Fatal(3) x 3 + Significant(1) x 4 = 13'. Round 2 'Fatal(3) x 1 + Significant(1) x 2 = 5'. Round 3 'Fatal(3) x 0 + Significant(1) x 2 = 2'. Round 4 'Fatal(3) x 0 + Significant(1) x 0 = 0'."
+    },
+    {
+      "expectation": "Artifact was revised between rounds based on findings",
+      "verdict": "PASS",
+      "justification": "Three explicit revision sections: 'Revised Plan (v2)' after Round 1 adds auth, validation, retry, tests. 'Revised Plan (v3)' after Round 2 introduces queue and per-recipient rate limiting. 'Revised Plan (v4 -- Final)' after Round 3 specifies database-backed queue and explicit infrastructure choices."
+    },
+    {
+      "expectation": "Stagnation detection applied via weighted score comparison after each round",
+      "verdict": "PASS",
+      "justification": "After Round 2: 'Score comparison: 13 -> 5 (strictly lower = progress, continue)'. After Round 3: 'Score comparison: 5 -> 2 (strictly lower = progress, continue)'. After Round 4: 'Score comparison: 2 -> 0 (strictly lower = clean pass)'."
+    },
+    {
+      "expectation": "Explicitly announced running a quality gate at start",
+      "verdict": "PASS",
+      "justification": "Title: '# Quality Gate Transcript: Email Notification Plan'. Opens with 'Gate trigger: User-submitted implementation plan for email notifications'."
+    },
+    {
+      "expectation": "Identified synchronous email sending in request handler as a problem",
+      "verdict": "PASS",
+      "justification": "Round 1 F1 identifies 'synchronous coupling of an HTTP request to an external SMTP dependency.' Round 2 F1 further escalates: 'Synchronous email sending still blocks the request handler' -- rated Fatal, noting the handler still awaits SMTP I/O even after v2 added retry logic."
+    },
+    {
+      "expectation": "Identified missing authentication/authorization on the endpoint",
+      "verdict": "PASS",
+      "justification": "Round 1 F2: 'No authentication or authorization on the endpoint' -- rated Fatal. States 'Anyone who discovers this endpoint can use your server as an open email relay to send arbitrary emails.'"
+    },
+    {
+      "expectation": "Identified missing tests in the plan",
+      "verdict": "PASS",
+      "justification": "Round 1 S3: 'No testing strategy' -- rated Significant. States 'There are zero tests mentioned. You cannot verify the endpoint works, that validation catches bad input, or that failures are handled.'"
+    },
+    {
+      "expectation": "Final round has zero Fatal findings in the revised artifact",
+      "verdict": "PASS",
+      "justification": "Round 4 states 'Fatal Challenges: (None found.)' and 'Significant Challenges: (None found.)'. Weighted score is 0."
+    },
+    {
+      "expectation": "Final revised plan includes async/queued email processing instead of synchronous sending",
+      "verdict": "PASS",
+      "justification": "Revised Plan v4 Task 2: 'Create a database-backed email queue table... writes to queue table with status pending, returns immediately. Background worker (configurable poll interval, default 5s) processes pending emails via nodemailer.' This is explicit async/queued processing replacing the original synchronous sendMail call."
+    },
+    {
+      "expectation": "Final revised plan includes authentication on the notification endpoint",
+      "verdict": "PASS",
+      "justification": "Revised Plan v4 Task 3: 'Auth via reusable API key middleware.' Also includes per-caller and per-recipient rate limiting. Auth was introduced in v2 and persists through all subsequent revisions."
+    }
+  ],
+  "score": "12/12",
+  "eval_feedback": [
+    "All 12 expectations pass. The transcript shows a complete quality gate cycle from a fundamentally flawed plan to a production-ready plan in 4 rounds.",
+    "The iterative depth is notable: Round 2 caught that v2 still had synchronous sending despite adding retry logic, demonstrating genuine adversarial re-examination rather than rubber-stamping.",
+    "Consider adding an assertion about error handling/dead-letter queue in the final plan, since the skill addressed this organically."
+  ]
+}

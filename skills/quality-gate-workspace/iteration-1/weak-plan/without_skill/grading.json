@@ -1,0 +1,72 @@
+{
+  "eval_name": "weak-plan",
+  "condition": "without_skill",
+  "expectations": [
+    {
+      "expectation": "Performed at least 2 iterative red-team rounds",
+      "verdict": "FAIL",
+      "justification": "The transcript is a single-pass review. There is one review listing 9 issues sequentially. No iterative rounds, no re-examination of a revised artifact."
+    },
+    {
+      "expectation": "Each round includes explicit Fatal or Significant severity ratings",
+      "verdict": "FAIL",
+      "justification": "The transcript uses 'High', 'Medium', 'Low-Medium', and 'Low' severity labels. The Fatal/Significant taxonomy is never used."
+    },
+    {
+      "expectation": "Weighted score tracked between rounds using Fatal=3 and Significant=1",
+      "verdict": "FAIL",
+      "justification": "No weighted scoring appears anywhere. No score tables, no Fatal=3/Significant=1 weights, no numeric scores."
+    },
+    {
+      "expectation": "Artifact was revised between rounds based on findings",
+      "verdict": "FAIL",
+      "justification": "No artifact revision occurs. The transcript lists issues and recommendations but never produces a revised plan."
+    },
+    {
+      "expectation": "Stagnation detection applied via weighted score comparison after each round",
+      "verdict": "FAIL",
+      "justification": "No stagnation detection mechanism. No weighted scores exist to compare. Single-pass review."
+    },
+    {
+      "expectation": "Explicitly announced running a quality gate at start",
+      "verdict": "FAIL",
+      "justification": "Title is '# Review of Email Notification Implementation Plan'. The phrase 'quality gate' does not appear anywhere in the transcript. It is framed as a standard review."
+    },
+    {
+      "expectation": "Identified synchronous email sending in request handler as a problem",
+      "verdict": "PASS",
+      "justification": "Issue 1: 'Synchronous email sending in the request handler (Severity: High)'. Notes 'the HTTP response is blocked until the SMTP transaction completes' and recommends a background job queue."
+    },
+    {
+      "expectation": "Identified missing authentication/authorization on the endpoint",
+      "verdict": "PASS",
+      "justification": "Issue 3: 'No input validation or authentication on the endpoint (Severity: High)'. States the endpoint 'is an open email relay. Anyone who discovers the endpoint can use it to send arbitrary emails.'"
+    },
+    {
+      "expectation": "Identified missing tests in the plan",
+      "verdict": "PASS",
+      "justification": "Issue 6: 'No testing step (Severity: Medium)'. States 'The plan goes directly from implementation to deployment with no testing phase.'"
+    },
+    {
+      "expectation": "Final round has zero Fatal findings in the revised artifact",
+      "verdict": "FAIL",
+      "justification": "There is no revised artifact and no iterative rounds. The transcript ends listing 3 critical unresolved issues and recommending 'a revised plan should add' multiple changes."
+    },
+    {
+      "expectation": "Final revised plan includes async/queued email processing instead of synchronous sending",
+      "verdict": "FAIL",
+      "justification": "No revised plan is produced. The transcript recommends 'Use a background job queue... so the endpoint can return immediately' but never creates a revised plan with this fix applied."
+    },
+    {
+      "expectation": "Final revised plan includes authentication on the notification endpoint",
+      "verdict": "FAIL",
+      "justification": "No revised plan is produced. The transcript recommends 'Add authentication (API key, JWT, or session-based auth)' but never creates a revised plan incorporating this."
+    }
+  ],
+  "score": "3/12",
+  "eval_feedback": [
+    "The without_skill baseline identifies the core problems (sync sending, missing auth, missing tests) but does not iterate or produce a revised artifact.",
+    "It scores 3/12, all from problem-identification expectations that do not require a specific severity label or a revised artifact.",
+    "The 3/12 vs 12/12 gap demonstrates the skill's value in driving iterative convergence, not just initial problem identification."
+  ]
+}
