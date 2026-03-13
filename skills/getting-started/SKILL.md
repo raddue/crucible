@@ -31,6 +31,7 @@ These actions ALWAYS have a matching skill — invoke it, no exceptions:
 | Writing implementation code | test-driven-development |
 | Claiming work is done | verify → finish |
 | Receiving code review feedback | review-feedback |
+| Onboarding to an unfamiliar codebase | project-init |
 
 ## When Skills Don't Apply (Respond Directly)
 

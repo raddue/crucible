@@ -124,6 +124,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 |-------|-------------|
 | **forge** | Self-improving retrospective system. Post-task retrospectives classify deviations and extract lessons. Pre-task feed-forward surfaces relevant warnings. Periodic mutation analysis proposes concrete skill edits for human review. |
 | **cartographer** | Living architectural map that accumulates across sessions. Records codebase structure, conventions, and landmines after exploration. Surfaces structural context before tasks. |
+| **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
 
 ### Maintenance & Meta
 
@@ -152,6 +153,8 @@ The **build** skill is the main entry point for feature development. It chains t
 4. **Phase 4: Complete** (autonomous) — Code review on full implementation, inquisitor (5 parallel adversarial dimensions against the full feature diff), quality gate, session metrics, full test suite, Forge retrospective, Cartographer recording, branch completion.
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom). Both accumulate across sessions.
+
+The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
 
 Individual skills can also be used standalone (e.g., `test-driven-development` for any implementation work, `debugging` for any bug).
 
