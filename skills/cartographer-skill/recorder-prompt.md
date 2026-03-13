@@ -107,4 +107,33 @@ Task tool (general-purpose, model: sonnet):
     - Keep module files under 100 lines. If you're exceeding that, the
       module should be split or entries should be compressed.
     - Include "Last Updated" with today's date on every file you touch.
+
+    ## Structural Tag Handling
+
+    Some cartographer files may contain content tagged with
+    `<!-- project-init:structural -->`. This tag marks breadth-first
+    structural scans produced by the project-init skill — scaffolding
+    that has NOT been verified by real task execution.
+
+    When you encounter structural-tagged content and have task-verified
+    information for the same module or section:
+
+    - **REPLACE** the structural version with your task-verified content
+    - **REMOVE** the `<!-- project-init:structural -->` tag from the
+      replaced section — your content is now the ground truth
+    - If your findings CONFIRM the structural content (same info, just
+      verified), remove the tag but keep the content
+    - If your findings CONTRADICT the structural content, replace it
+      and flag the contradiction to the user as usual
+
+    When you encounter structural-tagged content but have NO new
+    information for that section:
+    - **LEAVE IT** — structural content is better than no content
+    - Do NOT remove the tag — it hasn't been verified yet
+
+    Structural tags apply per-file (first line) or per-section.
+    Per-section syntax: place `<!-- project-init:structural -->` on the
+    line immediately before a `##` heading — the tag covers everything
+    from that heading to the next heading of equal or higher level.
+    When replacing, match the granularity of what you're replacing.
 ```
