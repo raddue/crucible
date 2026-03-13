@@ -303,14 +303,14 @@ The orchestrator appends accepted content to the project's CLAUDE.md (creating t
 
 ## Subagent Dispatch Summary
 
-| Agent | Model | subagent_type | Prompt Template |
-|-------|-------|---------------|-----------------|
-| Partition Explorer | Sonnet | Explore | `./partition-explorer-prompt.md` |
-| Init Recorder | Sonnet | general-purpose | `./init-recorder-prompt.md` |
-| Neighbor Scanner | Sonnet | Explore | `./neighbor-scanner-prompt.md` |
-| Topology Recorder | Sonnet | general-purpose | `./topology-recorder-prompt.md` |
+| Agent | Model | Dispatch | Prompt Template |
+|-------|-------|----------|-----------------|
+| Partition Explorer | Sonnet | Agent tool (Explore) | `./partition-explorer-prompt.md` |
+| Init Recorder | Sonnet | Task tool (general-purpose) | `./init-recorder-prompt.md` |
+| Neighbor Scanner | Sonnet | Agent tool (Explore) | `./neighbor-scanner-prompt.md` |
+| Topology Recorder | Sonnet | Task tool (general-purpose) | `./topology-recorder-prompt.md` |
 
-All subagents are dispatched via the Agent tool with the specified `subagent_type`. Use the prompt templates verbatim, filling in only the bracketed template variables.
+Explorers are dispatched via the Agent tool with the specified `subagent_type`. Recorders are dispatched via the Task tool (general-purpose). Use the prompt templates verbatim, filling in only the bracketed template variables.
 
 ---
 

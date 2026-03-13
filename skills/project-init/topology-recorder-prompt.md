@@ -137,7 +137,15 @@ Task tool (general-purpose, model: sonnet):
       file import, shared DB, docker-compose, etc.)
     - Record OBSERVED FACTS from the neighbor scans. Not speculation,
       not "this might connect to..."
-    - Keep topology.md under 200 lines and detail files under 100 lines.
-      If exceeding limits, compress entries — do not split files
+    - Target 70% of line caps — leave room for task-verified additions.
+      topology.md: target 140 lines, hard cap 200. Detail files: target
+      70 lines, hard cap 100
+    - If exceeding limits, compress entries — do not split files
     - Include "Last Updated" with today's date on every file you produce
+
+    ## Context Self-Monitoring
+
+    If you reach 50%+ context utilization with scan results remaining,
+    write what you have to disk and report which neighbors still need
+    processing.
 ```
