@@ -222,15 +222,61 @@ Task tool (general-purpose, model: sonnet):
 
     When existing cartographer data is provided:
 
-    1. Lines tagged `<!-- project-init:structural -->` in existing files:
-       **overwrite** with fresh data from this scan.
-    2. Lines WITHOUT the structural tag (task-verified content):
+    1. **Per-file structural tag** (line 1 is
+       `<!-- project-init:structural -->`, no per-section tags):
+       **overwrite** the entire file with fresh data from this scan.
+    2. **Per-section structural tags** (some `##` headings preceded by
+       `<!-- project-init:structural -->`, others not): only overwrite
+       structural-tagged sections. **PRESERVE** untagged sections
+       (task-verified content) exactly as they are — splice your fresh
+       structural sections around the preserved content.
+    3. Lines WITHOUT any structural tag (task-verified content):
        **PRESERVE** — do not modify or remove.
-    3. New modules not in existing data: **add** with structural tag.
-    4. Modules in existing data but absent from this scan: add
+    4. New modules not in existing data: **add** with per-file
+       structural tag.
+    5. Modules in existing data but absent from this scan: add
        `[STALE?]` marker — do NOT remove them.
-    5. If map.md would exceed 200 lines after merge: prioritize
+    6. If map.md would exceed 200 lines after merge: prioritize
        task-verified modules, compress structural-only modules.
+
+    **How to detect tag granularity:** If line 1 of an existing file is
+    `<!-- project-init:structural -->` AND no `##` headings have their
+    own `<!-- project-init:structural -->` on the preceding line, the
+    tag is per-file. If any `##` heading has its own tag, treat the
+    file as per-section — even if line 1 also has a tag (line 1 tag
+    is then cosmetic; per-section rules apply).
+
+    ## Batching Mode
+
+    When this recorder is dispatched as a BATCH pass (the orchestrator
+    will say "batch mode" in the description), produce a SINGLE
+    consolidated file in explorer format instead of cartographer files:
+
+    ```
+    ## Modules Found
+    [merged modules from all input partition reports]
+
+    ## Conventions Observed
+    [merged, deduplicated conventions]
+
+    ## Gotchas Noted
+    [merged, deduplicated gotchas]
+
+    ## Entry Points
+    [merged entry points]
+
+    ## Dependencies
+    [merged cross-partition dependencies]
+
+    ## Operational Observations
+    [merged operational observations]
+    ```
+
+    Write this to the output path specified by the orchestrator (e.g.,
+    `/tmp/crucible-project-init/batch-1.md`). Do NOT produce map.md,
+    conventions.md, modules/, or other cartographer files in batch mode.
+
+    Only the FINAL recorder pass (non-batch) produces cartographer files.
 
     ## Rules
 

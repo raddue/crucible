@@ -71,6 +71,10 @@ Scan the repository to determine:
   - `Package.swift` → Swift
 - **Config/doc directories** — directories with no source files (docs, config, assets)
 
+### Small Repo Shortcut
+
+If the entire repository has fewer than 20 source files (across all directories), skip the partition/fan-out/fan-in pipeline. Instead, dispatch a single Partition Explorer for the repo root and pass its output directly to the Init Recorder as a single partition report. This avoids unnecessary overhead for small codebases.
+
 ### Step 2: Partition
 
 Split the repository into partitions for parallel exploration:
@@ -114,32 +118,34 @@ Use the prompt template at `./init-recorder-prompt.md`. Fill in the template var
 
 **Batching for large repos (6+ partitions):** When there are 6 or more partition reports:
 1. Group reports into batches of 5
-2. Dispatch one Init Recorder per batch — each writes its merged output to `/tmp/crucible-project-init/batch-N.md`
-3. Dispatch a final Init Recorder that receives the batch output file paths and produces the definitive cartographer files
+2. Dispatch one Init Recorder per batch with "batch mode" in the description — each writes its merged output to `/tmp/crucible-project-init/batch-N.md` in **explorer format** (the same `## Modules Found`, `## Conventions Observed`, etc. sections used by partition explorers), NOT cartographer format. This is a consolidation pass, not a formatting pass. Set the Output Directory to `/tmp/crucible-project-init/batch-N.md`.
+3. Dispatch a final Init Recorder (without "batch mode") that receives the batch output file paths and produces the definitive cartographer files. The final recorder treats batch files exactly like partition reports — same input format, same processing steps.
 4. The final pass handles deduplication and conflict resolution across batches
 
-The orchestrator passes **file paths, not content** to the Init Recorder. The recorder reads the files itself.
+The orchestrator passes **file paths, not content** for partition reports to the Init Recorder — the recorder reads the partition reports itself. Existing cartographer data (for re-invocation merge) is pasted directly into the template since it's small and needed for merge decisions.
 
 ### Step 5: Validation Gate
 
 After the Init Recorder completes, run a three-way check:
 
-**(a) Partition completeness** — Verify each partition explorer returned a non-empty result. Check that temp files exist at `/tmp/crucible-project-init/<partition-name>.md` and contain non-trivial content (more than 3 lines).
+**(a) Partition completeness** — Verify each partition explorer returned a non-empty result. Check that temp files exist at `/tmp/crucible-project-init/<partition-name>.md` and contain non-trivial content (more than 3 lines). Also check for the completion sentinel: `<!-- partition-explorer:complete -->` means full scan, `<!-- partition-explorer:partial -->` means some directories were unscanned (flag these in `map.md` Unmapped Areas).
 
 **(b) Map representation** — Verify every partition that returned results is REPRESENTED in `map.md` — either as individual modules OR as a collapsed group in "Other" (collapsed partitions count as represented). Unrepresented partitions trigger focused re-recording: dispatch the Init Recorder again with just the missing partition reports.
 
-**(c) Module field completeness** — Verify module entries have required fields populated: Path, Responsibility, Key Components must all be non-empty.
+**(c) Module field completeness** — Verify module entries have required fields populated: Path, Responsibility, Key Components must all be non-empty. Also verify that a `modules/<name>.md` file exists for each module listed in `map.md` with `Mapped Detail = Yes`.
 
 Partitions that returned empty results are flagged as "unmapped" in `map.md` under the Unmapped Areas section.
 
 ### Step 6: Context Scan
 
-Read the following files if they exist and store relevant context as memories:
+Read the following files if they exist:
 - `README.md` — project purpose, setup instructions
 - `CONTRIBUTING.md` — contribution guidelines, review process
 - `CLAUDE.md` — existing agent instructions
 
-This is a direct read by the orchestrator, not a subagent dispatch. Extract project-level context that informs future task work.
+This is a direct read by the orchestrator, not a subagent dispatch. The orchestrator uses the extracted context for two purposes:
+1. **CLAUDE.md proposal filtering** (Step 7) — avoid proposing content that duplicates existing CLAUDE.md
+2. **Memory creation** — if README reveals project purpose, team conventions, or setup requirements not already in memory, save as `project` type memories via the auto-memory system
 
 ### Step 7: CLAUDE.md Proposal (Non-blocking)
 
