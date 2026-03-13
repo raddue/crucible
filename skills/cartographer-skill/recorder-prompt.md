@@ -136,4 +136,16 @@ Task tool (general-purpose, model: sonnet):
     line immediately before a `##` heading — the tag covers everything
     from that heading to the next heading of equal or higher level.
     When replacing, match the granularity of what you're replacing.
+
+    **Tag granularity migration:** If a file has a per-file structural
+    tag (line 1 only, no per-section tags) and you are ADDING
+    task-verified content to it (not replacing everything), you must
+    migrate the tagging:
+    1. Remove the per-file tag from line 1
+    2. Add `<!-- project-init:structural -->` before each `##` heading
+       whose content is still structural (i.e., you have no task-verified
+       replacement for it)
+    3. Do NOT tag your new task-verified sections
+    This ensures that a future project-init re-invocation only overwrites
+    the sections that are still structural, preserving your additions.
 ```

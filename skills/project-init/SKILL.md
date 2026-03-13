@@ -153,7 +153,8 @@ If the Init Recorder produced `/tmp/crucible-project-init/claude-md-proposal.md`
 
 1. Read the existing project `CLAUDE.md` (if any) to identify already-configured content
 2. Filter out proposals that duplicate existing CLAUDE.md content
-3. **Do not present proposals yet** — continue to Tier 2. Proposals are presented at the END of the full run (after both tiers complete)
+3. Write the filtered proposal to `/tmp/crucible-project-init/claude-md-proposal-filtered.md` — this survives context compaction during Tier 2
+4. **Do not present proposals yet** — continue to Tier 2. Proposals are presented at the END of the full run (after both tiers complete)
 
 This step does NOT block Tier 2 — the pipeline continues autonomously.
 
@@ -292,7 +293,7 @@ After both tiers complete, the following structure exists:
 
 ## Completion: CLAUDE.md Proposal
 
-After BOTH tiers complete (or after Tier 1 if Tier 2 was skipped), present the CLAUDE.md proposal if one was generated:
+After BOTH tiers complete (or after Tier 1 if Tier 2 was skipped), present the CLAUDE.md proposal if one was generated. Read from `/tmp/crucible-project-init/claude-md-proposal-filtered.md` (the filtered version from Step 7):
 
 > "Structural mapping complete. Also generated CLAUDE.md proposals based on what I found. Review below — merge what's useful."
 >
