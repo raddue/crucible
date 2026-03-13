@@ -97,9 +97,20 @@ Agent tool (subagent_type: Explore, model: sonnet):
     modules than fit in 200 lines, apply triage: include 3+ file modules,
     collapse single-file modules into a summary, group by subsystem.
 
+    ## Completion Sentinel
+
+    Your LAST line of output must be exactly:
+    `<!-- partition-explorer:complete -->`
+
+    If you hit context pressure or output cap and could not scan
+    everything, your last line must instead be:
+    `<!-- partition-explorer:partial — unscanned: [list of directories] -->`
+
+    The orchestrator uses this sentinel to detect truncated output.
+
     ## Context Self-Monitoring
 
     If you reach 50%+ context utilization with significant partition area
     unexplored, write what you have so far and report which subdirectories
-    remain unscanned.
+    remain unscanned. Use the partial sentinel (see above).
 ```
