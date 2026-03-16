@@ -88,10 +88,22 @@ You: [Fix the exception type]
 Clean — proceed to Task 3.
 ```
 
+## Test Alignment
+
+After code review passes, consider invoking `crucible:test-coverage` (if available) to audit whether existing tests are still aligned with the reviewed changes. Code review checks implementation quality; test-coverage checks whether the test suite accurately documents the current behavior.
+
+This is especially valuable when:
+- The review identified behavioral changes that might affect existing tests
+- The diff modifies functions/methods that have dedicated test files
+- The review noted "tests should be updated" without specifying which ones
+
+When called from build or debugging, test-coverage is invoked automatically at the appropriate pipeline step. For standalone code review, the caller decides.
+
 ## Integration with Workflows
 
 **Build Pipeline:**
 - Review after EACH task
+- Test-coverage audit after review (handled by build pipeline)
 - Catch issues before they compound
 - Fix before moving to next task
 
@@ -102,6 +114,7 @@ Clean — proceed to Task 3.
 **Ad-Hoc Development:**
 - Review before merge
 - Review when stuck
+- Consider `crucible:test-coverage` after review if behavioral changes were made
 
 ## Red Flags
 

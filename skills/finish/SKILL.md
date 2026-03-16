@@ -70,7 +70,15 @@ git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD ma
 
 **Do NOT skip this step.** The orchestrator did lightweight review during execution -- this is the comprehensive review before integration.
 
-### Step 2.5: Forge Retrospective
+### Step 2.5: Test Alignment Audit
+
+**RECOMMENDED SUB-SKILL:** Use crucible:test-coverage (if available) — audit whether existing tests are still aligned with the changes on this branch. Invoke with:
+- Code diff: `git diff <base-branch>..HEAD`
+- Context: "Finish pre-merge audit for [branch description]"
+
+The test-coverage skill handles its own fix dispatch and revert-on-failure logic. If not available, skip this step.
+
+### Step 2.75: Forge Retrospective
 
 **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned while execution context is still fresh. Run this BEFORE red-team so the retrospective has access to the full execution state.
 
@@ -262,4 +270,5 @@ git worktree remove <worktree-path>
 - **crucible:red-team** — Adversarial review before presenting options. Note: finish uses `crucible:red-team` directly rather than `crucible:quality-gate` because it doesn't produce a typed artifact — it's a pre-completion sanity check, not an iterative gate.
 
 **Recommended:**
-- **crucible:forge** — Retrospective between code review and red-team (Step 2.5)
+- **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)
+- **crucible:forge** — Retrospective between test audit and red-team (Step 2.75)

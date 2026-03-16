@@ -197,9 +197,10 @@ digraph review {
   "Implementer builds + tests" -> "De-sloppify cleanup";
   "De-sloppify cleanup" -> "Pass 1: Code Review";
   "Pass 1: Code Review" -> "Implementer fixes code findings";
-  "Implementer fixes code findings" -> "Pass 2: Test Review";
-  "Pass 2: Test Review" -> "Implementer fixes test findings";
-  "Implementer fixes test findings" -> "Test Gap Writer";
+  "Implementer fixes code findings" -> "Pass 2: Test Quality Review";
+  "Pass 2: Test Quality Review" -> "Implementer fixes test findings";
+  "Implementer fixes test findings" -> "Test Alignment Audit (crucible:test-coverage)";
+  "Test Alignment Audit (crucible:test-coverage)" -> "Test Gap Writer";
   "Test Gap Writer" -> "Adversarial Tester";
   "Adversarial Tester" -> "Task complete";
 }
@@ -207,11 +208,22 @@ digraph review {
 
 **Pass 1 — Code Review:** Architecture, patterns, correctness, wiring (actually connected, not just existing?)
 
-**Pass 2 — Test Review:** Stale tests? Missing coverage? Tests need updating? Dead tests to delete? Edge cases untested?
+**Pass 2 — Test Quality Review:** Test independence? Determinism? Edge cases? Integration tests where mocks are masking real behavior? AAA pattern? Correct test level? (Staleness and alignment checks are handled by the test-coverage dispatch below.)
+
+#### Test Alignment Audit
+
+After the implementer addresses Pass 2 findings, invoke `crucible:test-coverage` against the task's changes:
+- Code diff: `git diff <pre-task-sha>..HEAD`
+- Affected test files: test files touched or related to the task
+- Context: "Build task N: [task description]"
+
+The test-coverage skill audits existing tests for staleness (wrong assertions, misleading descriptions, dead tests, coincidence tests) and handles its own fix dispatch and revert-on-failure logic. It returns a structured report.
+
+**Skip this step if** the task made no behavioral source changes (only `.md`, `.json`, config files).
 
 #### Test Gap Writer
 
-After the implementer addresses Pass 2 findings, dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
+After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
 
 1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes
 2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep
@@ -408,6 +420,7 @@ Code review (`crucible:code-review`) and inquisitor (`crucible:inquisitor`) rema
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
+- **crucible:test-coverage** — Phase 3 test alignment audit (staleness, dead tests, coincidence tests) after each task's test quality review
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task

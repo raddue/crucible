@@ -197,7 +197,6 @@ Invoke crucible:test-coverage with:
 
 ## Integration
 
-- **Called by:** `crucible:debugging` (Phase 5 Step 2.5), standalone invocation
-- **Future callers:** `crucible:build` (Phase 3 Pass 2 replacement — not yet wired)
+- **Called by:** `crucible:debugging` (Phase 5 Step 2.5), `crucible:build` (Phase 3, after test quality review), `crucible:finish` (Step 2.5, pre-merge audit), standalone invocation
 - **Distinct from:** `crucible:test-driven-development` (writes tests during implementation), test-gap-writer (adds missing coverage for new behavior)
 - **Does NOT use:** `crucible:quality-gate` (this is a single-pass audit, not an iterative loop)

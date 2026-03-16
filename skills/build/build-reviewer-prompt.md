@@ -78,26 +78,16 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
 
     Report Pass 1 findings before proceeding to Pass 2.
 
-    ### Pass 2: Test Review
+    ### Pass 2: Test Quality Review
 
-    Now review the TESTS specifically. Check:
-
-    **Stale Tests:**
-    - Are there existing tests that now test the wrong thing due to changes?
-    - Do test names still match what they verify?
+    Now review the TESTS for quality. Note: staleness checks (stale tests,
+    tests to update, dead tests) are handled by crucible:test-coverage after
+    this review. Focus on test QUALITY here:
 
     **Missing Coverage:**
     - Are there new code paths without test coverage?
     - Are edge cases visible in the implementation but untested?
     - Are error paths tested?
-
-    **Test Updates Needed:**
-    - Do existing tests need updating for changed behavior?
-    - Are test assertions still valid after the implementation changes?
-
-    **Dead Tests:**
-    - Should any tests be deleted because the code they tested was removed?
-    - Are there tests for deprecated behavior?
 
     **Test Quality:**
     - Tests actually test behavior (not just mock interactions)?
@@ -151,13 +141,11 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - **Issues:** [Specific findings with file:line references]
     - **Architectural concerns:** [If any — immediate escalation]
 
-    ### Pass 2: Test Review
+    ### Pass 2: Test Quality Review
     - **Verdict:** Clean | Issues found
     - **TDD process:** Verified | Incomplete log | No evidence
-    - **Stale tests:** [List]
     - **Missing coverage:** [List with specific code paths]
-    - **Tests to update:** [List]
-    - **Tests to delete:** [List]
+    - **Test quality issues:** [List — independence, determinism, mock overuse, wrong test level]
 
     ### Overall
     - **Combined verdict:** Approved | Needs fixes (list them) | Escalate
