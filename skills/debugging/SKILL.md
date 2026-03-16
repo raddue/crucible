@@ -372,15 +372,14 @@ Quality-gate handles iteration tracking, stagnation detection, compaction recove
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 
-**Step 2.5: Test suite audit** — Invoke `crucible:test-coverage` (if available) against the changed code and affected test files. This audits whether existing tests need updating, removal, or modification after the fix. Specifically checks for:
-- **Stale tests** — existing tests that assert on the pre-fix (incorrect) behavior
-- **Tests to update** — tests whose assertions are now wrong or misleading given the fix
+**Step 2.5: Test suite audit** — Invoke `crucible:test-coverage` (if available) against the changed code and affected test files. This audits whether existing tests need updating, removal, or modification after the fix. Three categories:
+- **Tests to update** — assertions, descriptions, or setup now wrong or misleading given the fix (includes stale assertions expecting old values)
 - **Tests to delete** — tests for removed code paths
-- **Tests that pass by coincidence** — tests whose assertions are unaffected but whose setup exercises the changed code path
+- **Coincidence tests** — tests whose setup exercises changed code but assertions verify unrelated properties (flagged for judgment, not auto-fixed)
 
 If `crucible:test-coverage` is not available, skip this step. The test gap writer (Step 3) handles missing coverage but NOT stale/misleading existing tests — this step fills that gap.
 
-If findings exist, dispatch a fix agent to make the changes, then re-run affected tests.
+The test-coverage skill handles its own fix dispatch and revert-on-failure logic internally. It returns a structured report with actions taken.
 
 **Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. The agent writes tests only for gaps specifically flagged in the review — no scope creep. Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
