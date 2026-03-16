@@ -19,9 +19,9 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Why Crucible?
 
-**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against identical prompts, graded by an independent agent that doesn't know which condition it's scoring. The result is a measured delta — not "we think this helps" but "this skill improves output quality by 49% on planning tasks." See the [full scoreboard](#iteration-1--skill-value-deltas-claude-opus-4).
+**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against identical prompts, graded by an independent agent that doesn't know which condition it's scoring. The result is a measured delta — not "we think this helps" but "this skill improves output quality by 68% on quality-gate tasks." See the [full scoreboard](#eval-results).
 
-**Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This alone accounts for an 82% delta over unstructured review.
+**Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This accounts for a **68% delta** over unstructured review — the model scores 88% with the skill vs 19% without. Process expectations (iterative rounds, severity tracking, stagnation detection) are **0% without the skill**.
 
 **Full pipeline orchestration.** The build skill chains design, planning, execution, and completion into a single autonomous pipeline. It dispatches parallel implementers, runs two-pass code review per task, fills test coverage gaps, writes adversarial tests designed to break the implementation, and runs a 5-dimension cross-component inquisitor before the final quality gate.
 
@@ -183,9 +183,20 @@ Expectations are a mix of **process assertions** and **domain-correctness assert
 
 This dual approach prevents skills from gaming the eval by producing well-formatted garbage. The process has to be right *and* the output has to be correct.
 
-### Iteration 1 — Skill-Value Deltas (Claude Opus 4.6)
+### Iteration 3 — Skill-Value Deltas (Claude Opus 4.6)
 
-10 skills, 35 evals, graded blind.
+12 skills evaluated across two iterations. Iteration 3 uses neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition.
+
+**Iteration 3 — Hardened skills with neutral baselines (4 skills, 22 evals)**
+
+| Skill | With | Without | Delta | Notes |
+|-------|------|---------|-------|-------|
+| quality-gate | 88% | 19% | **68%** | Process expectations 0/42 without skill. Iterative red-teaming is entirely skill-driven |
+| test-coverage | 95% | 62% | **32%** | Coincidence test detection is entirely absent from baseline behavior |
+| audit | 95% | 64% | **31%** | Multi-lens methodology and no-fix discipline are clear differentiators |
+| debugging | 97% | 83% | **14%** | With-skill jumped from 57% (Iter 1) to 97% after skill hardening |
+
+**Iteration 1 — Original skill evaluation (10 skills, 35 evals)**
 
 | Skill | With | Without | Delta | Notes |
 |-------|------|---------|-------|-------|
@@ -202,11 +213,15 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Key Findings
 
-**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. The model already knows the right answers — skills add the methodology and discipline to consistently surface them. A quality gate that iterates three rounds of red-teaming catches issues that a single-pass review misses, even though the model *could* have found them on the first pass.
+**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. The model already knows the right answers — skills add the methodology and discipline to consistently surface them. In Iteration 3, quality-gate's without-skill baseline scored 0/42 on process expectations (iterative rounds, severity tracking, stagnation detection, fix journals) while passing most domain-correctness expectations. The model finds the issues but never iterates.
 
-**Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 2% delta on Opus could be a 20%+ delta on a model that doesn't naturally red-team well.
+**Skill hardening produces measurable improvement.** The debugging skill went from 57% with-skill (Iteration 1) to 97% with-skill (Iteration 3) after adding session state management, commit strategy, hypothesis red-teaming, and test-coverage integration. The methodology got better, and the eval proves it.
 
-**Process-heavy skills show the largest deltas.** Skills that encode multi-step iterative workflows (quality-gate at 82%, innovate at 67%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (red-team at 2%) show minimal lift.
+**Prompt contamination inflates baselines.** Iteration 2 (not shown) used prompts containing methodology-specific language ("run a quality gate"). The without-skill baseline scored 61% because the model naturally iterated when prompted with methodology names. Iteration 3 replaced these with neutral prompts ("review this thoroughly"), dropping the baseline to 19%. Eval design matters — contaminated prompts produce false confidence in baseline capability.
+
+**Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 14% delta on Opus could be a 40%+ delta on a model that doesn't naturally investigate before fixing.
+
+**Process-heavy skills show the largest deltas.** Skills that encode multi-step iterative workflows (quality-gate at 68%, test-coverage at 32%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (debugging at 14% — model already investigates before fixing) show smaller but consistent lift.
 
 ### Running Evals
 
