@@ -21,7 +21,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 **Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against identical prompts, graded by an independent agent that doesn't know which condition it's scoring. The result is a measured delta — not "we think this helps" but "this skill improves output quality by 49% on planning tasks." See the [full scoreboard](#iteration-1--skill-value-deltas-claude-opus-4).
 
-**Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, the author revises, a fresh reviewer attacks again, and it continues until clean or until weighted stagnation detection determines further iteration won't help. This alone accounts for an 82% delta over unstructured review.
+**Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This alone accounts for an 82% delta over unstructured review.
 
 **Full pipeline orchestration.** The build skill chains design, planning, execution, and completion into a single autonomous pipeline. It dispatches parallel implementers, runs two-pass code review per task, fills test coverage gaps, writes adversarial tests designed to break the implementation, and runs a 5-dimension cross-component inquisitor before the final quality gate.
 
@@ -104,20 +104,21 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 | Skill | Description |
 |-------|-------------|
-| **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture), synthesizes findings, cross-references existing issues, and offers to file in the user's tracker (GitHub, Jira, Linear, etc.). Find-and-report only. |
-| **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Loops until clean or stagnation (weighted scoring: Fatal=3, Significant=1). 15-round safety limit. Invoked by artifact-producing skills. |
-| **red-team** | Adversarial review engine. Dispatches fresh Devil's Advocate reviewers per round with stagnation detection. Used by quality-gate internally. |
-| **code-review** | Dispatch code review with shared canonical review checklist. |
+| **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture) plus a Phase 2.5 blind-spots agent that hunts cross-cutting concerns the lenses missed (security, performance, concurrency). Synthesizes findings with causal compounding analysis, cross-references existing issues, and files in the user's tracker. Find-and-report only. |
+| **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Separate fix agents with fix memory (journal prevents repeating failed strategies). Enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation/regression detection). Compaction recovery with persistent scratch directories. User checkpoint at round 6, 15-round safety limit. |
+| **red-team** | Adversarial review engine. Dispatches fresh Devil's Advocate reviewers per round. Dual-mode: single-pass when called by quality-gate (quality-gate owns the loop), full iterative loop when called directly. |
+| **test-coverage** | Post-change test suite audit. Checks whether existing tests need updating (stale assertions, misleading descriptions), deletion (removed code paths), or flagging (coincidence tests that pass by luck). Audit agent + fix agent with revert-on-failure. Split audit for large scopes. Technology-agnostic. |
+| **code-review** | Dispatch code review with shared canonical review checklist. Recommends test-coverage audit after behavioral changes. |
 | **review-feedback** | Process code review feedback with technical rigor. Requires verification, not blind implementation. |
 | **verify** | Verify work before claiming completion. Evidence-before-claims discipline — run verification commands and confirm output before making success claims. |
-| **finish** | Branch completion workflow — merge, PR, or cleanup. Guides completion of development work with comprehensive review. |
+| **finish** | Branch completion workflow — merge, PR, or cleanup. Runs test alignment audit and red-team before presenting options. |
 | **innovate** | Divergent creativity injection. Proposes the single most impactful addition before quality gate review. |
 
 ### Debugging
 
 | Skill | Description |
 |-------|-------------|
-| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, strategic context preservation, and post-fix quality gate with test gap writer (auto-retry on failures). |
+| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, and post-fix quality gate with test gap writer (dedup-aware, auto-retry on failures). |
 
 ### Knowledge & Learning
 
@@ -150,7 +151,7 @@ The **build** skill is the main entry point for feature development. It chains t
 
 1. **Phase 1: Design** (interactive) — Refine the idea with the user, produce a design doc. Forge feed-forward and Cartographer consult run at start. Design passes through a quality gate.
 2. **Phase 2: Plan** (autonomous) — Write implementation plan, review, then quality gate on the plan. Innovate proposes enhancements before the gate.
-3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup, code review per task, test gap writer (fills coverage gaps with auto-retry), and adversarial tester (writes tests designed to break the implementation).
+3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup, two-pass code review (code quality + test quality), test alignment audit (crucible:test-coverage audits existing tests for staleness), test gap writer (fills coverage gaps with dedup-aware auto-retry), and adversarial tester (writes tests designed to break the implementation).
 4. **Phase 4: Complete** (autonomous) — Code review on full implementation, inquisitor (5 parallel adversarial dimensions against the full feature diff), quality gate, session metrics, full test suite, Forge retrospective, Cartographer recording, branch completion.
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom). Both accumulate across sessions.
