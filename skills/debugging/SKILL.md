@@ -24,13 +24,36 @@ Every status update must include:
 4. **What's being dispatched next** — What you're about to do and why
 5. **Cycle count** — Which hypothesis cycle you're on (cycle 1, cycle 2, etc.)
 
-**After compaction:** Re-read the hypothesis log from disk and output current status before continuing.
+**After compaction:** Re-read the session state from the scratch directory (see Session State below) and output current status before continuing.
 
 **This requirement exists because:** Debugging sessions can involve multiple investigation rounds and fix attempts. Without narration, the user has no visibility into which hypotheses have been tried, what evidence was found, or why the orchestrator is pursuing a particular path.
 
 **Execution model:** The orchestrator dispatches all investigation and implementation to subagents. The orchestrator NEVER reads code, edits files, or runs tests directly. It forms hypotheses, dispatches work, and makes decisions based on subagent reports.
 
 **Depth principle:** When in doubt, dispatch MORE investigation agents, not fewer. A bug that looks simple from the surface often has a complex root cause. Spinning up 4-6 focused investigators in parallel costs minutes; missing the root cause costs hours.
+
+## Session State and Compaction Recovery
+
+The debugging skill writes session state to disk at **every phase transition**, not just on failure. This ensures compaction recovery works regardless of when it occurs.
+
+**Scratch directory:** `/tmp/crucible-debug-<session-id>/` where `<session-id>` is a timestamp generated at the start of the debugging session.
+
+**Write at each phase transition:**
+- `phase-state.md`: current phase, cycle count, current hypothesis (if formed)
+- `hypothesis-log.md`: running hypothesis log (updated at Phase 3, after Phase 4 results)
+- `synthesis-report.md`: latest synthesis report (written after Synthesis completes)
+- `implementation-details.md`: cumulative record of implementation attempts — what was tried, which files changed, regressions encountered, why it failed (appended after each Phase 4)
+
+**Context hygiene:** After synthesis completes, raw Phase 1 investigation reports are superseded by the synthesis report. The orchestrator should rely on the synthesis report going forward, not the raw reports. After Phase 4 completes (success or failure), the Phase 2 pattern analysis report is superseded by the implementation results. This keeps the orchestrator lean across long sessions.
+
+**Compaction recovery:**
+1. Read `phase-state.md` to determine current phase and cycle.
+2. Read `hypothesis-log.md` for hypothesis history.
+3. Read `synthesis-report.md` for latest investigation findings.
+4. Read `implementation-details.md` for prior fix attempts.
+5. Output status to user and continue from the current phase.
+
+**Cleanup:** Delete scratch directory after debugging completes (Phase 5 passes clean or escalation to user).
 
 ## The Iron Law
 
@@ -77,7 +100,7 @@ All investigation and implementation is delegated to subagents via the Agent too
 | Phase 1 | Evidence Gathering | Opus | Multi-component data flow tracing |
 | Phase 1 | Reproduction | Opus | Complex reproduction requires reasoning |
 | Phase 1 | Deep Dive (any) | Opus | Specialized investigation |
-| Synthesis | Consolidation | Sonnet | Summarization of existing findings |
+| Synthesis | Consolidation | Opus | Cross-referencing, contradiction detection, and causal reasoning — not just summarization |
 | Phase 2 | Pattern Analysis | Opus | Exhaustive comparison requires depth |
 | Phase 4 | Implementation | Opus | TDD + root cause fix |
 | Phase 5 | Red-team | Opus | Adversarial analysis |
@@ -213,7 +236,7 @@ Every investigation subagent prompt MUST include the context self-monitoring blo
 
 **Prompt template:** `./synthesis-prompt.md`
 
-After all Phase 1 agents report back, dispatch a single Synthesis agent (model: sonnet) that receives all Phase 1 reports verbatim.
+After all Phase 1 agents report back, dispatch a single Synthesis agent (model: opus) that receives all Phase 1 reports verbatim.
 
 **Trust-but-verify:** The synthesis agent does NOT take investigator claims at face value. It cross-references findings between agents, flags contradictions, and identifies claims that lack concrete evidence (file paths, line numbers, stack traces). Speculative findings are downgraded. Concrete artifacts outrank plausible theories.
 
@@ -301,7 +324,8 @@ Dispatch a single Implementation agent that receives:
 - The hypothesis (verbatim)
 - Relevant file paths identified during investigation
 - Project conventions and test standards
-- The hypothesis log (so it knows what was already tried)
+- The hypothesis log (so it knows what hypotheses were already tried)
+- The implementation details log from prior cycles (so it knows what code-level approaches were tried, which files were changed, and why they failed — see `implementation-details.md` in the scratch directory)
 
 **The Implementation agent follows strict TDD:**
 1. Write a failing test that reproduces the bug per the hypothesis
@@ -319,9 +343,22 @@ Dispatch a single Implementation agent that receives:
 
 ---
 
+### Commit Strategy
+
+**After Phase 4 completes**, if the implementer modified any files, create a WIP commit regardless of outcome:
+
+```
+git commit -m "fix(wip): [hypothesis summary]"        # on success
+git commit -m "fix(wip-failed): [hypothesis summary]"  # on failure or regressions
+```
+
+This gives every outcome path a clean revert target (`git revert <sha>`), gives Phase 5 code review a real diff, and isolates Phase 5 test modifications from the core fix. If the full pipeline succeeds, the final commit message is amended to drop the `(wip)` prefix. If Phase 5 requires changes (test audit updates, gap test additions), those are committed as separate follow-up commits.
+
+On loop-back (failed fix or user-requested revert), `git revert <wip-sha>` cleanly undoes all Phase 4 changes including new files.
+
 ### Phase 5: Red-Team and Code Review (Post-Fix Quality Gate)
 
-After Phase 4 succeeds (fix works, tests pass, no regressions), the orchestrator runs two quality gates before declaring done:
+After Phase 4 succeeds and the WIP commit is created, the orchestrator runs quality gates before declaring done:
 
 **Step 1: Quality-gate the fix** — Invoke `crucible:quality-gate` with artifact type "code" against the changed code. Quality-gate dispatches fresh red-team reviewers to adversarially review the fix for:
 - Edge cases the fix doesn't handle
@@ -334,6 +371,16 @@ Quality-gate handles iteration tracking, stagnation detection, compaction recove
 **Step 2: Code review** — After red-teaming passes clean, invoke `crucible:code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
+
+**Step 2.5: Test suite audit** — Invoke `crucible:test-coverage` (if available) against the changed code and affected test files. This audits whether existing tests need updating, removal, or modification after the fix. Specifically checks for:
+- **Stale tests** — existing tests that assert on the pre-fix (incorrect) behavior
+- **Tests to update** — tests whose assertions are now wrong or misleading given the fix
+- **Tests to delete** — tests for removed code paths
+- **Tests that pass by coincidence** — tests whose assertions are unaffected but whose setup exercises the changed code path
+
+If `crucible:test-coverage` is not available, skip this step. The test gap writer (Step 3) handles missing coverage but NOT stale/misleading existing tests — this step fills that gap.
+
+If findings exist, dispatch a fix agent to make the changes, then re-run affected tests.
 
 **Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. The agent writes tests only for gaps specifically flagged in the review — no scope creep. Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
@@ -349,6 +396,13 @@ If code review finds Critical or Important issues, fix them and re-review per th
    - Which test gaps were detected by reviewers
    - What the retry implementer attempted
    - Which tests still fail and their current failure messages
+
+**If Phase 5 quality-gate escalates** (stagnation or round limit): Present the quality-gate findings to the user alongside the fix. The user decides:
+- **(a) Accept the fix** with known issues noted
+- **(b) Revert and loop back** — revert the WIP commit and loop back to Phase 1 with the quality-gate findings as new investigation context
+- **(c) Stop debugging** — end the session with the current state
+
+This is user-gated, not automatic. The orchestrator does not decide whether to loop back from Phase 5 on its own.
 
 **Only after all gates pass clean (and any test gaps are filled or escalated) is the debugging workflow complete.**
 
@@ -380,6 +434,7 @@ Maintain a decision journal at `/tmp/crucible-decisions-<session-id>.log`:
 
 Decision types:
 - `investigator-count` — why N investigators dispatched
+- `skip-phase-2` — why Phase 2 was skipped (or not)
 - `gate-round` — hypothesis red-team results per round
 - `escalation` — why orchestrator escalated
 - `hypothesis-reform` — why hypothesis was reformed after red-team
@@ -388,24 +443,32 @@ Decision types:
 
 ### Loop-back, Cleanup, and Escalation
 
-After the Implementation agent reports back, the orchestrator evaluates:
+After the Implementation agent reports back, the orchestrator evaluates four possible outcomes:
 
-**Fix works, no regressions** -- Log the result in the hypothesis log. Use `crucible:verify` to confirm. Then:
+**Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 5. After Phase 5 passes clean:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
 - **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
-- Proceed to Phase 5.
 
-**Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug.
+**Test passes immediately (no fix applied)** -- The implementer's reproduction test passed before any fix was written. Two possibilities:
+1. **Bug was already resolved** (by investigation side effects, environment change, or prior cycle). Verify by running the original reproduction steps. If the original bug is gone: proceed to Phase 5 but **skip Step 1 (quality-gate on code)** since there is no code change. Go directly to Step 2 (code review) scoped to the reproduction test file only.
+2. **Test doesn't reproduce the bug** (hypothesis was wrong about the reproduction). Log the hypothesis as "wrong — test did not reproduce" in the hypothesis log. Revert the WIP commit (`git revert <wip-sha>`) to remove the non-reproducing test. Loop back to Phase 3 to reform the hypothesis, or Phase 1 if the root cause itself is in question.
+
+**Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug. **Critical:** Pass the original bug context (hypothesis, fix applied, original root cause) to the new investigation agents as background context, with the constraint: "The original fix must not be reverted. Investigate why the fix caused regressions and propose an additive solution."
 
 **Fix does not resolve the issue** -- Before looping back:
 1. Log the failure in the hypothesis log with metrics (see Stagnation Detection below)
-2. Decide on cleanup: keep the test if it validly reproduces the bug (even if the fix was wrong). Revert both test and fix only if the test was hypothesis-specific and not a valid reproduction.
-3. If reversion is needed, dispatch a cleanup subagent (`subagent_type="general-purpose"`) with instructions to: revert the specific files listed in the Implementation Report's "Files changed" field using `git checkout -- <file>`, then verify the test suite passes after revert. Tell the agent which files to revert and whether to keep or remove the test file.
-4. Loop back to Phase 1 with the new information from the failed attempt. On loop-back, dispatch MORE agents than the prior cycle, not fewer — widen the investigation.
+2. **Test triage:** Dispatch a quick Opus subagent to read the test and the hypothesis log, then decide: keep the test (if it validly reproduces the bug regardless of the failed fix) or remove it (if it was hypothesis-specific and doesn't reproduce the actual bug). The orchestrator does not make this judgment directly — it requires reading code.
+3. **Revert the WIP commit** using `git revert <wip-sha>` (see Commit Strategy above). This cleanly undoes all Phase 4 changes including any new files created during refactoring.
+   - If triage decided **"keep the test"**: dispatch a subagent to recover the test file from the reverted commit (`git checkout <wip-sha> -- <test-file-path>`) and commit it separately (`test: preserve reproduction test from cycle N`).
+   - If triage decided **"remove the test"**: no further action — the revert already removed it.
+4. Verify the working tree is clean: dispatch the cleanup agent to run `git status` and report any remaining modifications or untracked files. If any remain, clean them up before proceeding.
+5. Loop back to Phase 1 with the new information from the failed attempt. On loop-back, dispatch MORE agents than the prior cycle, not fewer — widen the investigation.
 
-**Context Preservation:** Before dispatching new investigation after a failed fix cycle, write the hypothesis log and investigation findings to a persistent file on disk (`/tmp/crucible-debug-<session-id>-hypothesis-log.md`). This preserves context across compaction events that occur after multiple investigation rounds and a failed implementation have accumulated in context. The trigger is deterministic (failed cycle → write to disk), not conditional on self-assessed context pressure.
+**Context Preservation:** Session state is written to disk at every phase transition (see Session State and Compaction Recovery above). On failed cycles, additionally append implementation details (fix attempted, files changed, regressions, why it failed) to `implementation-details.md` in the scratch directory. This gives the next Phase 4 implementer actionable context about what was tried at the code level, not just the hypothesis level.
 
 #### Stagnation Detection (from red-team pattern)
+
+**Stagnation ownership:** The debugging skill's stagnation detector owns **cycle-to-cycle** decisions (loop back vs escalate). Quality-gate's stagnation detector owns **within-gate** decisions (round-to-round within a single Phase 3.5 or Phase 5 invocation). When quality-gate escalates within a gate (e.g., hypothesis keeps getting torn apart), the debugging orchestrator counts that as a **failed cycle** and updates the hypothesis log accordingly before deciding whether to loop back. Quality-gate history from prior invocations does not carry over — each gate invocation starts fresh.
 
 Track a stagnation metric across cycles — the hypothesis specificity score:
 
@@ -444,13 +507,14 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 |-------|----------|---------------|------------------|
 | **0. Context** | Cartographer + optional Explore | Load module context for investigators | Codebase context ready for prompts |
 | **1. Investigation** | 3-6 parallel subagents (Opus) | Read errors, check changes, gather evidence, deep dive, reproduce | Raw findings collected |
-| **Synthesis** | 1 subagent (Sonnet) | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
+| **Synthesis** | 1 subagent (Opus) | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
 | **2. Pattern** | 1 subagent (Opus, skippable) | Find working examples, compare exhaustively | Differences identified |
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
 | **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
-| **5b. Test Gaps** | Test gap writer (Opus, conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
+| **5b. Test Audit** | Test coverage skill (conditional) | Audit existing tests for staleness after fix | Stale tests updated/removed |
+| **5c. Test Gaps** | Test gap writer (Opus, conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
 
 ---
 
@@ -547,6 +611,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:parallel`** -- Phase 1 parallel dispatch pattern
 - **`crucible:quality-gate`** -- Adversarial review in Phase 5 (iteration tracking, stagnation detection, compaction recovery)
 - **`crucible:red-team`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
+- **`crucible:test-coverage`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
 
 **Required skills:**
 - **`crucible:cartographer`** -- Phase 0: load module context for investigators. Phase 4 completion: record discoveries.
