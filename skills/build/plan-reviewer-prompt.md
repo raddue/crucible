@@ -31,6 +31,11 @@ Task tool (general-purpose, model: opus or sonnet — see build skill for decisi
     - Is code complete (not placeholder or "add X here")?
     - Are tasks sized appropriately (2-3 per subagent, ~10 files max)?
     - Do tasks follow TDD (test before implementation)?
+    - **Refactor mode:** GREEN-GREEN tasks do NOT have a RED phase. Do not flag the absence of a failing-test-first step as a deficiency on tasks marked `atomic: true` or `restructuring-only: true`. The success criterion for these tasks is "existing tests stay green," not "new test passes." Verify instead that:
+      - Each task lists which existing tests must remain passing ("Tests to verify")
+      - Atomic tasks bundle the interface change with all consumer updates
+      - Tasks have refactor metadata (Atomic, Restructuring-only, Safe-partial, Rollback, Tests to verify)
+      - The bite-sized step exception is respected (atomic tasks are not split into multiple tasks)
 
     **Dependencies:**
     - Is the dependency graph correct? (No missing edges, no cycles)
