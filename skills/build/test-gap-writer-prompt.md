@@ -16,6 +16,13 @@ Task tool (general-purpose, model: opus):
 
     [PASTE: The implementer's changes — git diff of the task's commits]
 
+    ## Test Alignment Audit Report
+
+    [PASTE: The test-coverage audit report from crucible:test-coverage,
+    if available. This shows which existing tests were updated, deleted,
+    or flagged as coincidence tests. If no audit was run, write
+    "Not available — no test-coverage audit was run for this task."]
+
     ## Project Test Conventions
 
     [PASTE: Project test conventions from CLAUDE.md or cartographer — naming patterns, test framework, AAA pattern, etc.]
@@ -32,7 +39,10 @@ Task tool (general-purpose, model: opus):
     ## Process
 
     1. Read the test reviewer's gap analysis
-    2. For each identified gap:
+    2. Check the test alignment audit report (if available). If the
+       test-coverage audit already updated an existing test to cover
+       a flagged gap, do NOT write a duplicate test for that path.
+    3. For each remaining gap:
        a. Write the test (RED — should fail if the behavior didn't exist)
        b. Run it — verify it PASSES (the behavior already exists from implementation)
        c. If it fails: the gap is real but the behavior wasn't actually implemented. Flag this for the implementer.

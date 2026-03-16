@@ -88,10 +88,20 @@ You: [Fix the exception type]
 Clean — proceed to Task 3.
 ```
 
+## Test Alignment
+
+When code-review is used standalone (not from build, debugging, or finish — those pipelines handle test-coverage automatically), the caller should consider dispatching `crucible:test-coverage` after code review completes if behavioral changes were made.
+
+This is especially valuable when:
+- The review identified behavioral changes that might affect existing tests
+- The diff modifies functions/methods that have dedicated test files
+- The review noted "tests should be updated" without specifying which ones
+
 ## Integration with Workflows
 
 **Build Pipeline:**
 - Review after EACH task
+- Test-coverage audit after review (handled by build pipeline)
 - Catch issues before they compound
 - Fix before moving to next task
 
@@ -102,6 +112,7 @@ Clean — proceed to Task 3.
 **Ad-Hoc Development:**
 - Review before merge
 - Review when stuck
+- Consider `crucible:test-coverage` after review if behavioral changes were made
 
 ## Red Flags
 

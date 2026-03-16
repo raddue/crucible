@@ -381,7 +381,7 @@ If `crucible:test-coverage` is not available, skip this step. The test gap write
 
 The test-coverage skill handles its own fix dispatch and revert-on-failure logic internally. It returns a structured report with actions taken.
 
-**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. The agent writes tests only for gaps specifically flagged in the review — no scope creep. Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
+**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. Input: reviewer gap findings + fix diff + test-coverage audit report (if available from Step 2.5). The agent writes tests only for gaps specifically flagged in the review — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit). Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
 **If all tests PASS:** Debugging workflow is complete.
 
