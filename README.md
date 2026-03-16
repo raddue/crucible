@@ -100,10 +100,11 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | **adversarial-tester** | Reads completed implementation and writes up to 5 tests designed to expose unknown failure modes. Targets edge cases, boundary conditions, and runtime behavior the implementer didn't anticipate. |
 | **inquisitor** | Full-feature cross-component adversarial testing. Runs 5 parallel adversarial dimensions (wiring, integration, edge cases, state/lifecycle, regression) against the complete implementation diff to find bugs that per-task testing misses. |
 
-### Quality
+### Quality & Audit
 
 | Skill | Description |
 |-------|-------------|
+| **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture), synthesizes findings, cross-references existing issues, and offers to file in the user's tracker (GitHub, Jira, Linear, etc.). Find-and-report only. |
 | **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Loops until clean or stagnation (weighted scoring: Fatal=3, Significant=1). 15-round safety limit. Invoked by artifact-producing skills. |
 | **red-team** | Adversarial review engine. Dispatches fresh Devil's Advocate reviewers per round with stagnation detection. Used by quality-gate internally. |
 | **code-review** | Dispatch code review with shared canonical review checklist. |
@@ -156,7 +157,7 @@ The **forge** and **cartographer** skills are recommended (not required) knowled
 
 The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
 
-Individual skills can also be used standalone (e.g., `test-driven-development` for any implementation work, `debugging` for any bug).
+Individual skills can also be used standalone (e.g., `test-driven-development` for any implementation work, `debugging` for any bug, `audit` for adversarial review of any existing subsystem).
 
 ## Eval Results
 
