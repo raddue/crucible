@@ -32,6 +32,36 @@ Every status update must include:
 
 **This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
 
+## Mode Detection
+
+Before dispatching the design skill, determine whether this build is:
+
+- **Feature mode** (default) — adding new capability. Success = new acceptance tests pass.
+- **Refactor mode** — restructuring existing code. Success = existing behavior preserved + structural goals met.
+
+**Detection:** If the user's intent is ambiguous, ask directly before proceeding:
+
+> "Is this adding new behavior, or restructuring existing code without changing what it does?"
+
+The user's answer sets the mode for the entire pipeline. No special syntax needed.
+
+### Mode Propagation
+
+Propagate refactor mode to subagents through:
+
+1. **New refactor-specific prompt templates** — `contract-test-writer-prompt.md` and `refactor-implementer-addendum.md` are standalone files used only in refactor mode. Select these instead of (or in addition to) the feature-mode equivalents.
+2. **Appended context blocks** — For existing prompts that serve both modes (`plan-writer-prompt.md`, `build-implementer-prompt.md`), append a "Refactor Mode Context" section when pasting the prompt. The templates remain flat markdown — the orchestrator decides what to paste.
+3. **Scratch file for compaction recovery** — Persist the current mode in `/tmp/crucible-build-mode.md` containing `mode: refactor` or `mode: feature` plus the baseline commit SHA. Only one build runs per session, so a well-known filename is sufficient.
+
+### Compaction Recovery
+
+Build's existing compaction step must read the mode file FIRST, before re-reading the task list or any other state. On resumption after compaction:
+
+1. **Read `/tmp/crucible-build-mode.md`** — first file read after compaction, before anything else.
+2. **If file is missing:** Default to feature mode and warn: "Mode file not found — defaulting to feature mode. If this was a refactoring session, please restart."
+3. **If mode is `refactor`:** Read the baseline commit SHA from the mode file and verify the commit exists (`git cat-file -t <SHA>`). If the SHA is missing or invalid, warn and halt — proceeding with refactor mode without a valid rollback target is unsafe.
+4. **After mode is recovered:** Proceed with normal compaction recovery flow.
+
 ## Phase 1: Design (Interactive)
 
 - **Model:** Opus (creative/architectural work needs the best model)
@@ -66,6 +96,74 @@ Before planning, define "done" with executable tests:
 3. Commit: `test: add acceptance tests for [feature] (RED)`
 
 These tests define the feature-level RED-GREEN cycle that wraps the entire pipeline. The pipeline is done when these tests pass.
+
+### Refactor Mode: Phase 1 Changes
+
+When in refactor mode, Phase 1 shifts from "what should we build?" to "what are we changing and what could break?"
+
+#### Blast Radius Analysis
+
+After the user describes the refactoring intent, the design phase:
+
+1. **Identify the target** — What code is being restructured? (module, interface, data representation, file organization, etc.)
+2. **Trace the blast radius** using cartographer (if available) or fallback exploration:
+   - **Direct consumers** — code that imports/calls/references the target
+   - **Indirect dependents** — code that depends on consumers (transitive)
+   - **Test coverage** — which tests exercise the target behavior
+   - **Configuration/wiring** — DI registrations, config files, build scripts that reference the target
+   - **Fallback when cartographer is unavailable:** Use language-aware symbol search via agent exploration. Grep for symbol references (imports, type annotations, function calls) using language-specific patterns. The impact manifest's confidence field reflects reduced precision.
+3. **Present an impact manifest** to the user:
+
+```
+### Impact Manifest
+
+**Target:** [what's being restructured]
+**Structural goal:** [what the code should look like after]
+
+**Direct consumers:** N files
+- path/to/consumer1.py (calls TargetClass.method)
+- path/to/consumer2.py (imports TargetClass)
+
+**Indirect dependents:** N files
+- path/to/dependent.py (depends on consumer1)
+
+**Test coverage:**
+- N tests directly exercise target behavior
+- N tests exercise consumers
+- Gap: no tests cover [specific seam]
+
+**Risk assessment:** [Low/Medium/High] based on consumer count and coverage gaps
+**Confidence:** [High/Medium/Low] — High if cartographer used, Medium/Low if fallback
+```
+
+**When confidence is Low**, require explicit user confirmation before proceeding. The user must review the impact manifest and confirm the blast radius is complete.
+
+4. **Design the structural goal** — what should the code look like after the refactoring? User validates the target state.
+
+#### Acceptance Tests (Refactor Mode)
+
+Instead of writing NEW acceptance tests (Step 3 above), the pipeline:
+
+1. **Dispatch the contract test writer** using `./contract-test-writer-prompt.md` — a single agent handles gap identification AND gap filling. Input: impact manifest + blast radius file list. The agent maps existing tests to behavioral seams, identifies untested seams, and writes contract tests for each gap.
+2. **Run all contract tests GREEN** — contract tests must pass before any refactoring begins.
+3. **If a contract test FAILS:** The contract test writer investigates:
+   - **Test defect** (wrong assertion, bad setup) — fix the test and re-run
+   - **Latent codebase bug** — report to user with options: (a) fix the bug first, (b) exclude this seam and accept the risk, (c) abort the refactoring. Never silently drop a failing contract test.
+4. **Commit:** `test: add contract tests for [target] refactoring (GREEN — locking existing behavior)`
+
+#### Proportionality Escape Valve
+
+Contract test writing must remain proportional to the refactoring scope. Trigger a scope check when **any** of these thresholds are hit:
+
+- **Count threshold:** More than 15 contract tests needed
+- **Effort threshold:** Contract test writer reports context pressure, or estimated total contract test LOC exceeds ~2x the estimated refactoring scope LOC
+
+When triggered:
+1. Present the full gap list to the user with estimated effort per gap
+2. User selects which gaps to fill and which to accept as uncovered risk
+3. Proceed with only user-selected contract tests
+
+The impact manifest records which gaps the user chose to leave uncovered.
 
 ## Phase 2: Plan (Autonomous)
 
@@ -280,6 +378,68 @@ After each wave completes:
 3. Failures → identify which task caused regression before fixing
 4. Clean → proceed to next wave
 
+#### Refactor Mode: Phase 3 Changes
+
+When in refactor mode, Phase 3 execution differs from feature mode in several ways.
+
+##### Pre-Execution Coverage Check
+
+Before the first task executes:
+1. Run all contract tests from Phase 1 — confirm GREEN
+2. Run the full test suite — confirm GREEN (pre-execution baseline)
+3. Record the "baseline commit" SHA in `/tmp/crucible-build-mode.md` — this is the rollback target
+
+##### Tiered Test Strategy
+
+Running the full test suite after every atomic step is prohibitively expensive. Instead:
+
+- **(a) After each atomic task:** Run blast-radius tests + direct consumer tests only (tests identified in the impact manifest)
+- **(b) After each execution wave:** Run the full test suite (matches existing verification gate between waves)
+- **(c) Full suite checkpoints:** Pre-execution baseline and Phase 4 final verification always run the full suite
+
+##### Coordinated-Atomic Execution
+
+When the executor encounters a task marked `atomic: true`:
+
+1. Record pre-task commit SHA
+2. Implementer makes ALL changes (multiple files) — dispatch with `./refactor-implementer-addendum.md` appended
+3. Run blast-radius tests + direct consumer tests (per tiered strategy)
+4. **If GREEN:** Commit all files together in a single commit
+5. **If FAIL:** Revert ALL files to pre-task SHA. Dispatch one retry with a fresh implementer that receives the failure context and test output. If second attempt also fails, revert to pre-task SHA and escalate to user (see Rollback Policy below).
+
+**Key difference from feature mode:** Feature mode does RED-GREEN-REFACTOR. Refactor mode for atomic steps does **GREEN-GREEN** — tests are green before, tests must be green after. No RED phase because no new behavior is being added.
+
+After a successful atomic commit (step 4), the rest of the per-task pipeline continues as normal: de-sloppify cleanup, two-pass review cycle, test alignment audit, test gap writer, and adversarial tester (unless skipped per restructuring-only annotation below).
+
+**Non-atomic refactoring tasks** follow normal execution — structural changes that don't break intermediate states (e.g., extracting a private method, adding a module nothing imports yet). These use standard TDD if they introduce new abstractions, or GREEN-GREEN if they are pure restructuring.
+
+##### Phase 3 Adaptations for Existing Steps
+
+- **Adversarial tester:** The planner annotates each task with `restructuring-only: true/false`. If `restructuring-only: true`, adversarial testing is skipped. Tasks with `restructuring-only: false` still get adversarial testing. When in doubt, default to `false`.
+  - `restructuring-only: true` examples: renames where all call sites are mechanically updated, file moves with updated paths, extract-method where the extracted method is private and preserves the original call signature
+  - `restructuring-only: false` examples: extract-class where callers must change call targets, splitting a module where consumers must update imports, any change where the consumer-facing API surface shifts
+- **De-sloppify cleanup:** Gains a new removal category: **dead compatibility shims.** After a refactoring task, look for leftover adapter code, re-export aliases, or compatibility layers introduced during migration but no longer referenced. Detection scope: code added after the baseline commit SHA that re-exports, aliases, or wraps symbols under old names, AND where no code outside the refactoring's changed files references the old names. **String-based references:** When the target was registered by name in a configuration system, flag the shim as UNCERTAIN and defer to the reviewer rather than removing it.
+
+##### Refactoring Rollback Policy
+
+###### Baseline Commit
+The orchestrator records the baseline commit SHA before the first refactoring task executes (during pre-execution coverage check). Persisted in `/tmp/crucible-build-mode.md`.
+
+###### Per-Task Rollback
+When a single task fails after the executor's retry attempt:
+1. Revert that task's changes to the pre-task commit SHA
+2. Escalate to user with failure context and test output
+3. User chooses: **skip this task and continue** (orchestrator also skips all tasks that depend on the skipped task, and informs the user which tasks were transitively skipped), **retry with guidance**, or **revert all tasks to baseline**
+
+###### Full Rollback to Baseline
+When the user chooses full rollback (or cascading failures make forward progress impossible):
+1. Perform `git reset --hard <baseline-SHA>` to restore pre-refactoring state
+2. Re-run all contract tests to confirm known-good state
+3. Report what was reverted and why
+
+###### Safe Partial States
+The planner annotates tasks with `safe-partial: true/false`. A task is `safe-partial: true` if the codebase is in a valid, shippable state after that task completes (all tests green, no dangling references). When a later task fails, the orchestrator can offer to keep changes through the last safe-partial task.
+
 #### Architectural Checkpoint
 
 For plans with 10+ tasks, at ~50% completion or after a major subsystem:
@@ -291,7 +451,8 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 ## Phase 4: Completion
 
 After all tasks complete:
-1. Run acceptance tests from Phase 1 Step 3 — verify they **PASS** (GREEN)
+
+1. **Feature mode:** Run acceptance tests from Phase 1 Step 3 — verify they **PASS** (GREEN). **Refactor mode:** Run all contract tests from Phase 1 — verify they **PASS** (GREEN).
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
@@ -386,6 +547,8 @@ Decision types to capture:
 - `./cleanup-prompt.md` — Phase 3 de-sloppify cleanup dispatch
 - `./test-gap-writer-prompt.md` — Phase 3 test gap writer dispatch
 - `./architecture-reviewer-prompt.md` — Mid-plan checkpoint
+- `./contract-test-writer-prompt.md` — Phase 1 refactor-mode contract test generation
+- `./refactor-implementer-addendum.md` — Phase 3 refactor-mode implementer addendum (appended to build-implementer-prompt)
 
 Red-team, innovate, adversarial tester, and inquisitor prompts live in their respective skills:
 - `crucible:red-team` — `skills/red-team/red-team-prompt.md`

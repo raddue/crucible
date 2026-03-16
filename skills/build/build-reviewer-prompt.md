@@ -108,6 +108,17 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - Does the git history show test-then-implementation ordering?
     - If the TDD log is missing or vague, flag it: "TDD log incomplete, cannot verify red-green process"
 
+    **Refactor Mode Evidence (when applicable):**
+    - If the task is marked `atomic: true` or annotated as pure restructuring, the implementer produces a **Refactoring Evidence Log** instead of a TDD Evidence Log. This is valid — do not flag it as "TDD log incomplete."
+    - The Refactoring Evidence Log must show:
+      - Pre-change test count and baseline commit SHA
+      - Description of structural changes made
+      - Post-change test count (same or higher — never lower)
+      - All blast-radius + direct consumer tests GREEN
+    - Verify that post-change test count >= pre-change test count
+    - If the task mixes restructuring with new abstractions, BOTH a Refactoring Evidence Log (for the restructuring) and TDD Evidence Log entries (for the new abstractions) should be present
+    - Do NOT flag the absence of a RED phase on GREEN-GREEN tasks
+
     Report Pass 2 findings.
 
     <!-- CANONICAL: shared/reviewer-common.md — Issue Classification -->

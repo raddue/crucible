@@ -58,6 +58,46 @@ Task tool (general-purpose, model: opus):
     5. Include per-task metadata (Files, Complexity, Dependencies)
     6. Save to: docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md
 
+    ## Refactor Mode Context
+    (This section is appended by the orchestrator ONLY in refactor mode. Omit in feature mode.)
+
+    This is a REFACTORING build. The user is restructuring existing code, not adding new behavior.
+    Success means: existing behavior preserved + structural goals met.
+
+    ### Input: Impact Manifest and Blast Radius
+
+    [FULL TEXT of the impact manifest from Phase 1 blast radius analysis]
+
+    ### Planning Constraints for Refactor Mode
+
+    **Preserve-behavior constraint:**
+    - Every task must list which existing tests exercise the code being changed (in a "Tests to verify" field)
+    - The success criterion for each step is "all existing tests still pass" — not "new test passes"
+    - Tasks that change an interface must specify which tests will need updating and why
+
+    **Atomic step detection:**
+    - When a task modifies a public interface (method signature, class name, module export, type definition), trace all consumers from the impact manifest
+    - Bundle the interface change + all consumer updates into a single task marked `atomic: true`
+    - Independent consumers can be split into parallel atomic tasks
+    - Mark each task with `restructuring-only: true/false` based on whether it changes signatures or control flow
+
+    **Consumer migration fan-out:**
+    - When an interface changes and consumers are independent, create parallel tasks
+    - Explicitly declare dependencies between consumer migrations
+    - Consumers that depend on each other get sequential tasks
+
+    **Task metadata (required for every refactoring task):**
+
+        - **Atomic:** true | false — [reason]
+        - **Restructuring-only:** true | false
+        - **Safe-partial:** true | false
+        - **Rollback:** git revert to pre-task commit
+        - **Tests to verify:** [list of test files/suites]
+
+    **Bite-sized step exception:** Atomic tasks are NOT split into multiple bite-sized tasks. The coordinated change is one commit-unit. Internal steps are execution guidance, not separate commit points.
+
+    **Rollback annotations:** Every task must include a rollback annotation. Mark tasks as `safe-partial: true` if the codebase is in a valid, shippable state after that task completes.
+
     ## Before Reporting Back
 
     Review your plan:
@@ -67,4 +107,8 @@ Task tool (general-purpose, model: opus):
     - Are tasks sized for 2-3 per subagent?
     - Does the dependency graph make sense?
     - Are there any circular dependencies?
+    - (Refactor mode) Does every task have refactor metadata (Atomic, Restructuring-only, Safe-partial, Rollback, Tests to verify)?
+    - (Refactor mode) Are interface-changing tasks marked atomic with all consumers bundled?
+    - (Refactor mode) Are independent consumer groups split into parallel tasks?
+    - (Refactor mode) Is the success criterion "existing tests green" (not "new test passes")?
 ```
