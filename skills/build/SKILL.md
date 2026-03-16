@@ -298,7 +298,7 @@ After all tasks complete:
 8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user
-11. **REQUIRED SUB-SKILL:** Use crucible:finish
+11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's Step 3 (red-team)** since quality-gate already ran at step 6 on the same artifact. Tell finish to skip its red-team pass.
 
 ### Session Metrics
 

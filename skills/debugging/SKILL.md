@@ -125,7 +125,7 @@ Orchestrator: Verify fix -> Success? Phase 5. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user.
     |
     v
-Phase 5: Red-team the fix (crucible:red-team) + Code review (crucible:code-review)
+Phase 5: Quality-gate the fix (crucible:quality-gate) + Code review (crucible:code-review)
     |
     v
 Test Gap Writer (if reviews flagged missing coverage)
@@ -323,13 +323,13 @@ Dispatch a single Implementation agent that receives:
 
 After Phase 4 succeeds (fix works, tests pass, no regressions), the orchestrator runs two quality gates before declaring done:
 
-**Step 1: Red-team the fix** — Invoke `crucible:red-team` against the changed code. The red-team skill dispatches a fresh Devil's Advocate to adversarially review the fix for:
+**Step 1: Quality-gate the fix** — Invoke `crucible:quality-gate` with artifact type "code" against the changed code. Quality-gate dispatches fresh red-team reviewers to adversarially review the fix for:
 - Edge cases the fix doesn't handle
 - New failure modes introduced by the fix
 - Assumptions that could break under different conditions
 - Regression risks not covered by the test
 
-If red-teaming finds Fatal or Significant issues, dispatch a fix agent to address them, then re-run red-team per the standard red-team loop. Do NOT skip this — a fix that introduces new risks is not done.
+Quality-gate handles iteration tracking, stagnation detection, compaction recovery, and user checkpoints. Do NOT invoke `crucible:red-team` directly — always go through quality-gate for iteration management.
 
 **Step 2: Code review** — After red-teaming passes clean, invoke `crucible:code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
 
@@ -545,7 +545,8 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:test-driven-development`** -- Implementation agent follows TDD for Phase 4
 - **`crucible:verify`** -- Verify fix worked before claiming success
 - **`crucible:parallel`** -- Phase 1 parallel dispatch pattern
-- **`crucible:red-team`** -- Adversarial review in Phase 5 (stagnation detection pattern also used in loop-back)
+- **`crucible:quality-gate`** -- Adversarial review in Phase 5 (iteration tracking, stagnation detection, compaction recovery)
+- **`crucible:red-team`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
 
 **Required skills:**
 - **`crucible:cartographer`** -- Phase 0: load module context for investigators. Phase 4 completion: record discoveries.

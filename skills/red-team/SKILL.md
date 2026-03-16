@@ -54,7 +54,11 @@ Stagnation uses **weighted scoring**, not raw issue counts. This prevents false 
 
 **Example:** Round 1 finds 2 Fatal + 1 Significant = score 7. Fixer eliminates both Fatals but surfaces 3 new Significants. Round 2 finds 0 Fatal + 3 Significant = score 3. That is progress (3 < 7), not stagnation.
 
-**If the weighted score is the same or higher than the prior round, that is stagnation.** Escalate to user with findings from both rounds.
+**Progress requires EITHER:**
+- Weighted score strictly lower than prior round, OR
+- Fatal count strictly lower AND weighted score same-or-lower
+
+**If neither condition is met, that is stagnation.** Escalate to user with findings from both rounds.
 
 ### Issue Classification
 
@@ -72,7 +76,7 @@ The Devil's Advocate MUST classify every challenge:
 | Design doc | Plan Writer subagent revises the doc |
 | Implementation plan | Plan Writer subagent revises the plan |
 | Code / implementation | Fix subagent (new, not the original implementer) |
-| Documentation | Fix subagent or orchestrator if trivial |
+| Documentation | Fix subagent |
 | Standalone invocation | Caller decides |
 
 ### 2. Dispatch Devil's Advocate
@@ -111,11 +115,19 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weig
 - Ignore Fatal issues
 - Proceed with unfixed Significant issues
 
+## Dual-Mode Operation
+
+Red-team operates in two modes depending on the caller:
+
+**When invoked by `crucible:quality-gate`:** Run **single-pass only**. Return findings for this round. Do NOT iterate, do NOT apply stagnation detection, do NOT dispatch fix agents. Quality-gate owns the loop, stagnation detection, and fix dispatch. You are a reviewer, not a coordinator.
+
+**When invoked directly** (e.g., by `crucible:finish` or standalone): Run the **full iterative loop** with stagnation detection, fix dispatch, and escalation as described above.
+
 ## Integration
 
 **Called by:**
-- **crucible:quality-gate** — at each gate point (design, plan, implementation). Build invokes quality-gate, which invokes red-team.
-- **crucible:finish** — before presenting options (directly, not via quality-gate)
+- **crucible:quality-gate** — at each gate point (single-pass mode). Build invokes quality-gate, which invokes red-team.
+- **crucible:finish** — before presenting options (full loop mode, directly, not via quality-gate)
 
 **Pairs with:**
 - **crucible:innovate** — innovate runs before red-team at each gate

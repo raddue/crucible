@@ -10,15 +10,171 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 **Announce at start:** "Running quality gate on [artifact type]."
 
+**Skill type:** Rigid -- follow exactly, no shortcuts.
+
+**Execution model:** When this skill is running, YOU are the orchestrator. You drive the loop, dispatch fix agents and reviewers as subagents, track scores, and make escalation decisions. All references to "the orchestrator" in this document refer to you.
+
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
-2. Invokes `crucible:red-team` on the artifact
-3. If red-team finds issues: revise the artifact, invoke a FRESH red-team (no anchoring)
-4. Track weighted score between rounds (Fatal=3, Significant=1):
+2. Prepares the artifact for review (see Artifact Preparation below)
+3. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
+4. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Write final artifact to scratch directory, output consolidated Minor observations from all rounds (see Minor Issue Handling), clean up, and return.
+5. If red-team finds Fatal or Significant issues: dispatch a **separate fix agent** (see Fix Mechanism below), then invoke a FRESH red-team on the revised artifact (no anchoring)
+6. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
-   - **Same or higher score** → stagnation, escalate to user
-5. **Global safety limit: 15 rounds.** Loop continues as long as progress is being made, up to a maximum of 15 rounds. This is a runaway protection circuit-breaker, not a quality target — if you hit 15, something has gone wrong. Escalate to user with full round history.
+   - **Same or higher score** → check for progress (see Stagnation Detection below)
+7. **User checkpoint at round 6.** After 6 rounds, report to user: "Quality gate has run 6 rounds with score progression [list]. Continue or accept current state?" Continue only with user approval.
+8. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
+
+## Fix Mechanism
+
+The orchestrator coordinates the loop but does NOT fix artifacts directly. Fixes are dispatched to a **separate subagent** to maintain separation of concerns between coordination, review, and remediation.
+
+| Artifact Type | Fix Agent |
+|---|---|
+| design | Plan Writer subagent revises the doc |
+| plan | Plan Writer subagent revises the plan |
+| code | Fix subagent (new, not the original implementer) |
+| hypothesis | Debugging skill's hypothesis refinement (see below) |
+| mockup | Fix subagent |
+| translation | Fix subagent revises the translation map |
+
+The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round.
+
+The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
+
+## Fix Memory
+
+Anti-anchoring is a property of **review**, not **remediation**. Reviewers need fresh eyes to avoid confirmation bias. Fix agents need institutional memory to avoid repeating failed strategies.
+
+The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch directory) that accumulates across rounds. After each fix agent completes, the orchestrator appends a structured entry:
+
+```
+## Round N Fix
+- **Findings addressed:** [list of Fatal/Significant findings from round N, summarized]
+- **Approach taken:** [1-2 sentence description of fix strategy]
+- **Files changed:** [list of files modified]
+- **Reasoning:** [why this approach was chosen over alternatives]
+```
+
+**On subsequent rounds, the fix agent receives the full fix journal.** This gives the fix agent critical context:
+- What approaches were already tried (avoid repeating failed strategies)
+- Which files were already modified (avoid unknowingly reverting prior fixes)
+- The reasoning chain across rounds (understand the trajectory of remediation)
+
+**Anti-anchoring is preserved.** The fix journal is NEVER passed to the red-team reviewer. Reviewers see only the clean artifact. The journal flows exclusively through the remediation path: fix agent writes it, next fix agent reads it, orchestrator maintains it.
+
+**Round 1 fix agents** receive an empty journal (no prior rounds). This is the only round where the fix agent works without remediation history.
+
+**Why this matters:** Without fix memory, the most common causes of stagnation and oscillation are fix agents repeating failed approaches or unknowingly reverting prior fixes while addressing new findings. Fix memory turns these escalation events into solvable problems -- the fix agent can see what was already tried and choose a genuinely different approach.
+
+**Compaction recovery:** The fix journal is written to `fix-journal.md` in the scratch directory alongside round scores and findings. It is recovered automatically when the orchestrator reads the scratch directory after compaction.
+
+## Stagnation Detection
+
+Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count tracking**.
+
+**Progress requires EITHER:**
+- Weighted score strictly lower than prior round, OR
+- Fatal count strictly lower AND weighted score same-or-lower
+
+This prevents false stagnation when a Fatal is genuinely fixed but enough new Significants are surfaced to maintain the same weighted score (e.g., 1 Fatal → 0 Fatal + 3 Significant = score 3 → 3, but Fatal count 1 → 0 = progress).
+
+**Stagnation:** If neither condition is met, escalate to user with findings from both rounds.
+
+**Oscillation detection:** If the weighted score *increases* in any round (not just stays the same), flag it explicitly as a **regression**, not just stagnation. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
+
+## Artifact Preparation
+
+### Small artifacts (design docs, plans, hypotheses, mockups, translations)
+
+Pass the full artifact content to the red-team subagent. No preparation needed.
+
+### Code artifacts
+
+Code artifacts vary in size. The orchestrator prepares the artifact based on scope:
+
+- **Small implementations (<500 lines diff):** Pass the full diff + any new files in full.
+- **Medium implementations (500-2000 lines):** Pass full source of high-risk files (new files, files with complex logic changes) + summaries of routine changes (imports, wiring, boilerplate). Include a change manifest listing all files with 1-line descriptions.
+- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. Normal stagnation detection, round 6 checkpoint, and round 15 safety limit apply to **total rounds across all chunks**, not per chunk. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
+
+The red-team subagent receives the **prepared artifact**, not raw diff. This mirrors audit's Tier 1/Tier 2 context management approach.
+
+### Hypothesis artifacts
+
+Hypotheses are 1-2 sentence statements, not plans or designs. The red-team prompt template is plan-centric and does not map well to hypothesis testing. For hypothesis artifacts, the orchestrator frames the red-team dispatch with hypothesis-specific attack vectors:
+
+- Does this hypothesis explain ALL observed symptoms?
+- What evidence would disprove it?
+- Are there simpler alternative explanations?
+- What assumptions does this hypothesis make that could be wrong?
+
+Include these in the dispatch prompt alongside the standard red-team template. The debugging skill's Phase 3.5 defines these questions -- the quality-gate orchestrator should use them.
+
+## Minor Issue Handling
+
+Minor issues do not trigger fix rounds and do not count toward stagnation. However, they accumulate across rounds and contain useful information. Do not silently discard them.
+
+**After the gate completes** (artifact approved or stagnation escalated):
+
+1. **Consolidate:** Collect all Minor observations from all rounds, deduplicate.
+2. **Quick-fix pass:** Dispatch a fix subagent with the consolidated minors and the final artifact. The fix agent addresses easy wins only — changes that are simple, low-risk, and unambiguous (typos, naming inconsistencies, missing edge-case guards, trivial cleanup). It skips anything requiring judgment or design decisions.
+3. **Present remainder:** Output any minors the fix agent skipped as "Remaining minor observations" so the user can decide whether to address them. No further red-team round on the quick fixes — the gate is already complete.
+
+## Anti-Anchoring Rules
+
+The iterative loop's value depends on each reviewer seeing the artifact with fresh eyes. To prevent information leaking between rounds:
+
+1. **Clean artifact only.** The artifact passed to each round's reviewer must be the current version with no revision marks, "Fixed:" annotations, or comments about prior reviews. If the fix agent left review-response comments in the artifact, strip them before the next round.
+2. **Standardized framing.** The orchestrator's dispatch prompt must use the **same framing** for every round. Do not mention that prior review rounds occurred, what was fixed, or how many rounds have run. The reviewer sees the artifact as if it is the first review.
+3. **No findings forwarding.** Never pass prior round findings to the next reviewer. This is already specified in `crucible:red-team` but is restated here because the quality-gate orchestrator is the most likely point of accidental leakage.
+
+## Round History and Compaction Recovery
+
+Quality gate writes round state to disk for compaction recovery.
+
+**Scratch directory:** `~/.claude/projects/<project-hash>/memory/quality-gate/scratch/<run-id>/` where `<run-id>` is a timestamp generated at the start of the gate. This path is persistent and discoverable (matching the audit skill's pattern), so it survives compaction even if the run-id is lost from context — the orchestrator can list the directory to find active runs.
+
+**Tool constraint:** All scratch directory operations (create, read, list, delete) must use Write, Read, and Glob tools — NOT Bash. Safety hooks block Bash commands referencing `.claude/` paths.
+
+**Active run marker:** At the start of the gate, write `~/.claude/projects/<project-hash>/memory/quality-gate/active-run-<run-id>.md` containing the run-id and scratch directory path. Delete only your own marker when the gate completes. After compaction, glob for `active-run-*.md` files to locate active runs — recover the one whose run-id matches context, or the most recent if context is lost.
+
+**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker.
+
+**After each round, write:**
+- `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count
+- `round-N-findings.md`: the red-team findings for this round
+- `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
+- `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
+
+**Compaction recovery:**
+1. Glob for `active-run-*.md` markers to locate the scratch directory.
+2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
+3. Read the latest `artifact-N.md` as the current artifact state.
+4. Read all `round-N-score.md` files to reconstruct the score progression.
+5. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
+6. Dispatch the next red-team round.
+
+**Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
+
+## Invocation Convention
+
+Quality gate is invoked by the **outermost orchestrator only** — not self-invoked by child skills. This avoids double-gating.
+
+**Rule: Skills NEVER self-invoke quality-gate.** They only document that their output is gateable. The outermost orchestrator (build, the user session, or another pipeline) always handles gating. This eliminates the ambiguity of skills trying to detect whether they are running standalone or as a sub-skill.
+
+### When Used Standalone (user invokes directly)
+
+The user's session is the outermost orchestrator. When a user runs `/design` directly, the design skill produces the doc and documents it as gateable. The user's session (following the design skill's instructions) invokes quality-gate.
+
+### When Used as a Sub-Skill of Build
+
+Build is the outermost orchestrator and controls all quality gates:
+
+- **Phase 1 (after design):** Quality gate on design doc (artifact type: design)
+- **Phase 2 (after plan review):** Quality gate on plan (artifact type: plan)
+- **Phase 4 (after implementation):** Quality gate on full implementation (artifact type: code)
 
 ### Artifact Types
 
@@ -31,53 +187,39 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 | mockup | `crucible:mockup-builder` | After mockup is created |
 | translation | `crucible:mock-to-unity` | After self-verification |
 
-## Invocation Convention
-
-Quality gate is invoked by the **outermost orchestrator only** — not self-invoked by child skills. This avoids double-gating that arises because subagents have isolated contexts.
-
-### When Used Standalone
-
-The skill itself is the outermost orchestrator. It invokes quality gate at the end.
-
-Example: User runs `/design` directly → design skill creates the doc → design skill invokes quality gate.
-
-### When Used as a Sub-Skill of Build
-
-Build is the outermost orchestrator and controls all quality gates:
-
-- **Phase 1 (after design):** Quality gate on design doc (artifact type: design)
-- **Phase 2 (after plan review):** Quality gate on plan (artifact type: plan)
-- **Phase 4 (after implementation):** Quality gate on full implementation (artifact type: code)
-
-Child skills (`crucible:design`, `crucible:planning`) document that they produce gateable artifacts but do NOT self-invoke quality gate when called by build.
-
 ### Documentation Convention
 
 Each artifact-producing skill's SKILL.md documents:
 
-> "This skill produces **[artifact type]**. When used standalone, invoke `crucible:quality-gate` after [trigger]. When used as a sub-skill of build, the parent orchestrator handles gating."
+> "This skill produces **[artifact type]**. The outermost orchestrator invokes `crucible:quality-gate` after [trigger]."
 
 ## Escalation
 
-- Stagnation (weighted score same or higher) → escalate to user with findings from both rounds
+- Stagnation (see Stagnation Detection above) → escalate to user with findings from both rounds
+- Regression (score increased) → escalate immediately with regression flag
 - Global safety limit reached (15 rounds) → escalate to user with full round history
+- User checkpoint at round 6 → user decides whether to continue
 - Architectural concerns → escalate immediately (bypass loop)
 - User can interrupt at any time to skip the gate
 
 ## Red Flags
 
+- Orchestrator fixing artifacts directly instead of dispatching a fix agent
 - Rationalizing away red-team findings instead of addressing them
 - Skipping the gate without user approval
 - Exceeding the 15-round safety limit without escalating
 - Using the same red-team agent across rounds (always dispatch fresh)
 - Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
+- Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY)
+- Leaving review-response artifacts (comments, annotations) in the artifact between rounds
+- Dispatching a fix agent without the fix journal on round 2+ (fix agents need remediation history)
 
 ## Integration
 
-- **crucible:red-team** — The engine that performs each review round
-- **crucible:design** — Produces design docs (standalone: gates itself)
-- **crucible:planning** — Produces plans (standalone: gates itself)
-- **crucible:debugging** — Produces hypotheses and fixes
-- **crucible:mockup-builder** — Produces mockups
-- **crucible:mock-to-unity** — Produces translation maps and implementations
+- **crucible:red-team** — The engine that performs each review round. **Loop ownership:** Quality-gate uses red-team as a single-pass reviewer only (one dispatch = one review round, findings returned). Quality-gate owns the iteration loop, stagnation detection, and round tracking. Red-team does NOT run its own stagnation loop when invoked by quality-gate. Red-team's stagnation rules apply only when red-team is invoked directly (e.g., by `crucible:finish`).
+- **crucible:design** — Produces design docs (gateable artifact)
+- **crucible:planning** — Produces plans (gateable artifact)
+- **crucible:debugging** — Produces hypotheses and fixes (gateable artifacts). **Note:** Debugging's Phase 5 must invoke `crucible:quality-gate` for fix review, not `crucible:red-team` directly. This ensures fixes get iteration tracking, compaction recovery, and user checkpoints.
+- **crucible:mockup-builder** — Produces mockups (gateable artifact)
+- **crucible:mock-to-unity** — Produces translation maps and implementations (gateable artifacts)
 - **crucible:build** — Outermost orchestrator, controls all gates in pipeline
