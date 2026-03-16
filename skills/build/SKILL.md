@@ -217,7 +217,7 @@ After the implementer addresses Pass 2 findings, invoke `crucible:test-coverage`
 - Affected test files: test files touched or related to the task
 - Context: "Build task N: [task description]"
 
-The test-coverage skill audits existing tests for staleness (wrong assertions, misleading descriptions, dead tests, coincidence tests) and handles its own fix dispatch and revert-on-failure logic. It returns a structured report.
+The test-coverage skill audits existing tests for staleness (wrong assertions, misleading descriptions, dead tests, coincidence tests) and handles its own fix dispatch and revert-on-failure logic. It returns a structured report. Note: the diff includes review fix commits — the audit agent should focus on behavioral changes to source files, not changes that only touch test files.
 
 **Skip this step if** the task made no behavioral source changes (only `.md`, `.json`, config files).
 
@@ -225,8 +225,8 @@ The test-coverage skill audits existing tests for staleness (wrong assertions, m
 
 After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
 
-1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes
-2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep
+1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes + test-coverage audit report (if available)
+2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit).
 3. Tests should pass immediately (the behavior already exists from implementation)
 4. The test gap writer reports per-test PASS/FAIL results (see prompt template for report format)
 5. Commits new tests: `test: fill coverage gaps for task N`
@@ -310,7 +310,7 @@ After all tasks complete:
 8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user
-11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's Step 3 (red-team)** since quality-gate already ran at step 6 on the same artifact. Tell finish to skip its red-team pass.
+11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's Step 2.5 (test-coverage)** since test-coverage ran per-task in Phase 3, and **skip finish's Step 3 (red-team)** since quality-gate already ran at step 6. Tell finish to skip both.
 
 ### Session Metrics
 
@@ -420,7 +420,9 @@ Code review (`crucible:code-review`) and inquisitor (`crucible:inquisitor`) rema
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
-- **crucible:test-coverage** — Phase 3 test alignment audit (staleness, dead tests, coincidence tests) after each task's test quality review
+
+**Phase 3 sub-skills (dispatched per-task):**
+- **crucible:test-coverage** — Test alignment audit after each task's test quality review (staleness, dead tests, coincidence tests)
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task

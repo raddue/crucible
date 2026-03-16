@@ -72,11 +72,16 @@ git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD ma
 
 ### Step 2.5: Test Alignment Audit
 
-**RECOMMENDED SUB-SKILL:** Use crucible:test-coverage (if available) — audit whether existing tests are still aligned with the changes on this branch. Invoke with:
+**RECOMMENDED SUB-SKILL:** Use crucible:test-coverage — audit whether existing tests are still aligned with the changes on this branch. Invoke with:
 - Code diff: `git diff <base-branch>..HEAD`
+- Affected test files: test files in the diff or test files that import changed modules
 - Context: "Finish pre-merge audit for [branch description]"
 
-The test-coverage skill handles its own fix dispatch and revert-on-failure logic. If not available, skip this step.
+The test-coverage skill handles its own fix dispatch and revert-on-failure logic.
+
+**Skip this step when:**
+- The branch diff contains no behavioral source changes (only `.md`, `.json`, `.yaml`, config files)
+- Build told finish to skip Step 2.5 (test-coverage already ran per-task in Phase 3)
 
 ### Step 2.75: Forge Retrospective
 

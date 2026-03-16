@@ -28,7 +28,7 @@ Test-gap-writer handles a fourth category (missing tests for new behavior). This
 ## When to Use
 
 - **After debugging fixes** (debugging Phase 5 Step 2.5)
-- **After build task implementation** (potential replacement for build Phase 3 Pass 2 staleness checks)
+- **After build task implementation** (build Phase 3 delegates staleness checks here)
 - **After any code modification** where test suite health matters
 - **Before merging** as a final test alignment check
 - Anytime you want to verify tests still accurately document behavior
@@ -149,7 +149,7 @@ Invoke crucible:test-coverage with:
 - Context: "Debugging fix for [hypothesis summary]"
 ```
 
-### From build (Phase 3 — potential future integration)
+### From build (Phase 3, after test quality review)
 
 ```
 Invoke crucible:test-coverage with:
@@ -158,7 +158,18 @@ Invoke crucible:test-coverage with:
 - Context: "Build task N: [task description]"
 ```
 
-Build's reviewer Pass 2 currently checks test health inline. A future integration could replace the staleness-detection portion of Pass 2 with this skill, letting the reviewer focus on test quality (independence, determinism, edge cases). This integration is not yet wired — the build skill would need to be updated to dispatch this skill.
+Build's reviewer Pass 2 focuses on test quality (independence, determinism, edge cases, test level). Staleness detection is delegated to this skill, dispatched after the implementer addresses Pass 2 findings.
+
+### From finish (Step 2.5, pre-merge audit)
+
+```
+Invoke crucible:test-coverage with:
+- Code diff: git diff <base-branch>..HEAD
+- Affected test files: test files in the diff or test files that import changed modules
+- Context: "Finish pre-merge audit for [branch description]"
+```
+
+When finish is called by build, build tells finish to skip Step 2.5 (test-coverage already ran per-task in Phase 3). This step only runs when finish is invoked standalone.
 
 ### Standalone
 
