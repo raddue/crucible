@@ -20,6 +20,13 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     [PASTE: Original bug description, root cause hypothesis, and hypothesis log]
 
+    ## Test Alignment Audit Report
+
+    [PASTE: The test-coverage audit report from crucible:test-coverage
+    (Step 2.5), if available. This shows which existing tests were
+    updated, deleted, or flagged as coincidence tests. If no audit was
+    run, write "Not available — no test-coverage audit was run."]
+
     ## Project Test Conventions
 
     [PASTE: Project test conventions from CLAUDE.md or cartographer — naming patterns, test framework, AAA pattern, etc.]
@@ -36,7 +43,10 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     ## Process
 
     1. Read the reviewer gap analysis (from both red-team and code review)
-    2. For each identified gap:
+    2. Check the test alignment audit report (if available). If the
+       test-coverage audit already updated an existing test to cover
+       a flagged gap, do NOT write a duplicate test for that path.
+    3. For each remaining gap:
        a. Write the test (RED — should fail if the fix didn't exist)
        b. Run it — verify it PASSES (the fix already exists)
        c. If it fails: the gap is real but the fix doesn't fully cover it. Flag this for the implementer.
