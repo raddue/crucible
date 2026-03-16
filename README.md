@@ -19,7 +19,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Why Crucible?
 
-**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against identical prompts, graded by an independent agent that doesn't know which condition it's scoring. The result is a measured delta — not "we think this helps" but "this skill improves output quality by 68% on quality-gate tasks." See the [full scoreboard](#eval-results).
+**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 12 skills, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. See the [full scoreboard](#eval-results).
 
 **Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This accounts for a **68% delta** over unstructured review — the model scores 88% with the skill vs 19% without. Process expectations (iterative rounds, severity tracking, stagnation detection) are **0% without the skill**.
 
@@ -183,45 +183,32 @@ Expectations are a mix of **process assertions** and **domain-correctness assert
 
 This dual approach prevents skills from gaming the eval by producing well-formatted garbage. The process has to be right *and* the output has to be correct.
 
-### Iteration 3 — Skill-Value Deltas (Claude Opus 4.6)
+### Skill-Value Deltas (Claude Opus 4.6)
 
-12 skills evaluated across two iterations. Iteration 3 uses neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition.
-
-**Iteration 3 — Hardened skills with neutral baselines (4 skills, 22 evals)**
+12 skills, 49 evals, graded blind. Neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition. Overall: **96% with skill vs 67% without, +29% average delta.**
 
 | Skill | With | Without | Delta | Notes |
 |-------|------|---------|-------|-------|
 | quality-gate | 88% | 19% | **68%** | Process expectations 0/42 without skill. Iterative red-teaming is entirely skill-driven |
+| TDD | 100% | 47% | **53%** | Red-green-refactor discipline. Without the skill, agents skip "write failing test first" entirely |
+| planning | 100% | 61% | **39%** | Bite-sized TDD tasks with exact file paths, commands, and expected output |
+| design | 98% | 64% | **33%** | Investigated questions with hypotheses, multi-agent deep dives, and challengers |
 | test-coverage | 95% | 62% | **32%** | Coincidence test detection is entirely absent from baseline behavior |
 | audit | 95% | 64% | **31%** | Multi-lens methodology and no-fix discipline are clear differentiators |
-| debugging | 97% | 83% | **14%** | With-skill jumped from 57% (Iter 1) to 97% after skill hardening |
-
-**Iteration 1 — Original skill evaluation (10 skills, 35 evals)**
-
-| Skill | With | Without | Delta | Notes |
-|-------|------|---------|-------|-------|
-| quality-gate | 91% | 9% | **82%** | Iterative red-teaming is almost entirely skill-driven |
-| innovate | 83% | 17% | **67%** | Structured divergent thinking produces richer output |
-| planning | 74% | 26% | **49%** | Task decomposition and quality gates add significant value |
-| design | 67% | 33% | **33%** | Investigation-driven design surfaces more options |
-| TDD | 67% | 33% | **33%** | Red-green-refactor discipline vs write-code-then-test |
-| verify | 63% | 37% | **26%** | Evidence-before-claims catches false confidence |
-| review-feedback | 62% | 38% | **24%** | Technical rigor vs blind agreement |
-| debugging | 57% | 43% | **15%** | Hypothesis red-teaming catches subtle bugs |
-| inquisitor | 53% | 47% | **7%** | Cross-component analysis finds a few extra issues |
-| red-team | 51% | 49% | **2%** | Model already red-teams well without structure |
+| review-feedback | 100% | 81% | **19%** | Technical rigor over performative agreement. Rejects wrong suggestions with evidence |
+| debugging | 97% | 83% | **14%** | Multi-phase investigation with hypothesis red-teaming and TDD discipline |
+| inquisitor | 100% | 89% | **11%** | 5-dimension cross-component analysis catches subtle integration bugs |
+| innovate | 95% | 86% | **10%** | Structured divergent thinking with alternatives comparison and cost/impact analysis |
+| red-team | 98% | 95% | **2%** | Model already red-teams well without structure |
+| verify | 100% | 100% | **0%** | Model already catches false confidence claims without the skill |
 
 ### Key Findings
 
-**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. The model already knows the right answers — skills add the methodology and discipline to consistently surface them. In Iteration 3, quality-gate's without-skill baseline scored 0/42 on process expectations (iterative rounds, severity tracking, stagnation detection, fix journals) while passing most domain-correctness expectations. The model finds the issues but never iterates.
+**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. The model already knows the right answers — skills add the methodology and discipline to consistently surface them. Quality-gate's without-skill baseline scored 0/42 on process expectations (iterative rounds, severity tracking, stagnation detection, fix journals) while passing most domain-correctness expectations. The model finds the issues but never iterates.
 
-**Skill hardening produces measurable improvement.** The debugging skill went from 57% with-skill (Iteration 1) to 97% with-skill (Iteration 3) after adding session state management, commit strategy, hypothesis red-teaming, and test-coverage integration. The methodology got better, and the eval proves it.
-
-**Prompt contamination inflates baselines.** Iteration 2 (not shown) used prompts containing methodology-specific language ("run a quality gate"). The without-skill baseline scored 61% because the model naturally iterated when prompted with methodology names. Iteration 3 replaced these with neutral prompts ("review this thoroughly"), dropping the baseline to 19%. Eval design matters — contaminated prompts produce false confidence in baseline capability.
+**Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +68%, TDD +53%, planning +39%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (red-team +2%, verify +0%) show minimal lift. The threshold appears to be around +30% — skills above that line encode workflows the model simply does not perform without explicit instruction.
 
 **Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 14% delta on Opus could be a 40%+ delta on a model that doesn't naturally investigate before fixing.
-
-**Process-heavy skills show the largest deltas.** Skills that encode multi-step iterative workflows (quality-gate at 68%, test-coverage at 32%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (debugging at 14% — model already investigates before fixing) show smaller but consistent lift.
 
 ### Running Evals
 
