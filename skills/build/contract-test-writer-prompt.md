@@ -95,8 +95,6 @@ Task tool (general-purpose, model: opus):
     Before writing tests, count the gaps. If any of the following are true,
     STOP and report to the orchestrator before writing tests:
     - More than 15 contract tests would be needed
-    - The number of contract tests would exceed the number of planned
-      refactoring tasks
     - You are approaching context limits
     - Estimated total contract test LOC exceeds ~2x the estimated
       refactoring scope LOC

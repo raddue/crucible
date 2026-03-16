@@ -93,7 +93,7 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     - **Ask questions rather than guessing** — it's always OK to pause and clarify
 
     ## Refactor Mode
-    ## (The orchestrator appends refactor-implementer-addendum.md here in refactor mode.)
+    (The orchestrator appends refactor-implementer-addendum.md here in refactor mode.)
 
     If a "Refactor Mode" addendum is present below this point, it OVERRIDES the TDD
     discipline above for tasks marked `atomic: true` or annotated as pure restructuring.
@@ -117,7 +117,7 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
 
     ### TDD Evidence Log
 
-    The TDD Evidence Log is REQUIRED. For each test you wrote, you MUST record:
+    The TDD Evidence Log is REQUIRED (in refactor mode, the Refactoring Evidence Log replaces this — see Refactor Mode section above). For each test you wrote, you MUST record:
     - The test name
     - The exact failure message you saw during RED
     - Whether there were test errors (setup issues) before the correct failure

@@ -155,7 +155,7 @@ Instead of writing NEW acceptance tests (Step 3 above), the pipeline:
 
 Contract test writing must remain proportional to the refactoring scope. Trigger a scope check when **any** of these thresholds are hit:
 
-- **Count threshold:** More than 15 contract tests needed, or the number of contract tests would exceed the number of refactoring tasks
+- **Count threshold:** More than 15 contract tests needed
 - **Effort threshold:** Contract test writer reports context pressure, or estimated total contract test LOC exceeds ~2x the estimated refactoring scope LOC
 
 When triggered:
@@ -450,9 +450,7 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 
 After all tasks complete:
 
-**Refactor mode:** In step 1 below, verify all contract tests from Phase 1 still pass GREEN (these replace acceptance tests in refactor mode). All other completion steps are unchanged.
-
-1. Run acceptance tests from Phase 1 Step 3 — verify they **PASS** (GREEN)
+1. **Feature mode:** Run acceptance tests from Phase 1 Step 3 — verify they **PASS** (GREEN). **Refactor mode:** Run all contract tests from Phase 1 — verify they **PASS** (GREEN).
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
