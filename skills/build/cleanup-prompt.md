@@ -23,17 +23,18 @@ Task tool (general-purpose, model: opus):
     3. **Redundant type checks the type system already enforces** — Runtime checks that duplicate compile-time guarantees
     4. **Commented-out code** — Dead code left in comments
     5. **Debug logging** — Console.log, Debug.Log, print statements added during development
+    6. **Dead compatibility shims (refactor mode only)** — Adapter code, re-export aliases, or temporary compatibility layers introduced during refactoring that are no longer referenced. Detection scope: code added after the baseline commit SHA (provided by orchestrator) that re-exports, aliases, or wraps symbols under old names, AND where no code outside the refactoring's changed files references the old names. **String-based references:** If the refactoring target was registered by name in any configuration system (DI containers, serialization configs, URL routing tables, reflection lookups), flag the shim as UNCERTAIN and defer to the reviewer rather than removing it. The baseline commit SHA is: [PROVIDED BY ORCHESTRATOR — only present in refactor mode]
 
     ## Paired Removal Rule
 
     You CAN remove test+code pairs together. This is critical — unnecessary code often has unnecessary tests guarding it. But you MUST:
     - Justify each paired removal specifically in the removal log
     - Explain why BOTH the code AND its test are unnecessary
-    - Categorize the removal into one of the 5 categories above
+    - Categorize the removal into one of the 6 categories above
 
     ## When in Doubt
 
-    If a removal doesn't clearly fit one of the 5 categories, do NOT remove it. Instead, flag it in the removal log for the reviewer to decide:
+    If a removal doesn't clearly fit one of the 6 categories, do NOT remove it. Instead, flag it in the removal log for the reviewer to decide:
     ```
     FLAGGED: [file:line] — [what you'd remove] — [why you think it's unnecessary] — [why you're not sure]
     ```
@@ -54,8 +55,8 @@ Task tool (general-purpose, model: opus):
     ===========
 
     Removed:
-    - [file:line] — [what was removed] — Category: [1-5] — [one-line justification]
-    - [file:line + test_file:line] — [paired removal] — Category: [1-5] — [justification for both]
+    - [file:line] — [what was removed] — Category: [1-6] — [one-line justification]
+    - [file:line + test_file:line] — [paired removal] — Category: [1-6] — [justification for both]
 
     Flagged for reviewer:
     - [file:line] — [description] — [uncertainty reason]
