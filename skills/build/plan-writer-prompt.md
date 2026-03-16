@@ -59,7 +59,7 @@ Task tool (general-purpose, model: opus):
     6. Save to: docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md
 
     ## Refactor Mode Context
-    ## (This section is appended by the orchestrator ONLY in refactor mode. Omit in feature mode.)
+    (This section is appended by the orchestrator ONLY in refactor mode. Omit in feature mode.)
 
     This is a REFACTORING build. The user is restructuring existing code, not adding new behavior.
     Success means: existing behavior preserved + structural goals met.
