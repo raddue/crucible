@@ -86,8 +86,10 @@ After context compaction, the orchestrator must:
 1. Read `scratch/<run-id>/` to determine current state:
    - `manifest.md` exists → Phase 1 scoping is complete
    - `gate-approved.md` exists → user confirmed scope, Phase 2 can proceed
+   - `<lens>-partition.md` files → those lenses' Tier 2 source partitions are recorded
    - `<lens>-findings.md` files → those lenses have reported
    - `consistency-a-findings.md` without `consistency-b-findings.md` → Agent B still needed
+   - `blindspots-findings.md` exists → Phase 2.5 is complete
    - `report.md` exists → Phase 3 synthesis is complete, proceed to Phase 4
 2. Re-read relevant files from disk based on current phase
 3. Output current status to user before continuing
@@ -96,7 +98,8 @@ After context compaction, the orchestrator must:
 **Phase-specific recovery:**
 - **Phase 1:** If `manifest.md` exists but `gate-approved.md` does not, re-present the manifest to the user for confirmation.
 - **Phase 2:** Check which lenses have findings files. Dispatch any remaining lenses.
-- **Phase 3:** If compaction occurs during synthesis, re-read all findings files and re-run synthesis. This is safe — synthesis is idempotent.
+- **Phase 2.5:** If all four lens findings files exist but `blindspots-findings.md` does not, rebuild the coverage map from partition records and findings files (see Coverage Map Construction), then dispatch the blind-spots agent. If `blindspots-findings.md` exists, Phase 2.5 is complete.
+- **Phase 3:** If compaction occurs during synthesis, re-read all findings files (including blindspots) and re-run synthesis. This is safe — synthesis is idempotent.
 - **Phase 4:** If `report.md` exists, re-read it and continue with cross-referencing/filing.
 
 ## Phase 1: Scoping
@@ -119,6 +122,10 @@ Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel (matc
 
 **Write-on-complete:** As each agent completes, immediately write its findings to `scratch/<run-id>/<lens>-findings.md`. Do not wait for Phase 3. For the Consistency lens, use distinct filenames: `consistency-a-findings.md` for Agent A's triage output, `consistency-b-findings.md` for Agent B's confirmed findings.
 
+**Write partition records:** Before dispatching each lens, write the list of files sent as **full source** (not overflow summaries) to `scratch/<run-id>/<lens>-partition.md` (one file path per line). For Consistency, write only `consistency-b-partition.md` (Agent A receives the Tier 1 overview, not a Tier 2 source partition, so no partition record is needed for Agent A). These records are used by Phase 2.5 to build the coverage map and must survive compaction. Files sent as 2-3 line overflow summaries are NOT included in partition records -- those files count as never-examined for blind-spots purposes.
+
+**Note on Consistency Agent A triage:** Agent A reads the Tier 1 overview and triages all manifest files, flagging some for Agent B. Files Agent A did not flag appear as "never-examined" in the coverage map. This is intentional -- overview-level triage (reading a 1-line role description) is categorically different from source-level examination. The blind-spots agent examining those files for security, performance, and concurrency issues is valuable regardless of Consistency triage.
+
 ### Context Management
 
 **Tier 1 -- Overview:** The orchestrator builds a condensed summary of the subsystem: file manifest with role descriptions, key public interfaces/contracts, dependency graph. **Target: 500 lines. Flexible up to 800 lines for subsystems with complex API surfaces.** If the subsystem exceeds what can be summarized in 800 lines, chunk the subsystem (see Chunking below).
@@ -131,7 +138,7 @@ If the subsystem is too large to summarize within the 800-line Tier 1 cap:
 
 - Split by dependency subgraph -- files that call each other stay together. Prefer natural boundaries (directories, modules, namespaces).
 - **Soft cap: 4 chunks maximum.** If more than 4 chunks would be needed, advise the user to narrow the subsystem scope instead.
-- Present the chunking plan at the Phase 1 user gate: "This subsystem is large. I'll audit it in N chunks (~5N analysis agents including Consistency two-phase). Chunk descriptions: [list]. Approve?"
+- Present the chunking plan at the Phase 1 user gate: "This subsystem is large. I'll audit it in N chunks (~6N+1 agents: 5 analysis + 1 blind-spots per chunk, plus 1 cross-chunk blind-spots). Chunk descriptions: [list]. Approve?"
 - Each chunk gets its own set of analysis agents.
 - Synthesis (Phase 3) merges findings across all chunks.
 - Cross-chunk concerns: the Tier 1 overview for each chunk includes a "cross-chunk interface" section describing how this chunk interacts with others. All lenses receive this section and should consider cross-chunk issues within their domain.
@@ -177,14 +184,101 @@ All lenses output structured findings with these common fields: `{severity, file
 **Gets:** Tier 1 overview + public API surfaces.
 **Dispatch:** Single agent.
 
+## Phase 2.5: Blind Spots
+
+Dispatch: `Task tool (general-purpose, model: opus)` using `audit-blindspots-prompt.md`. Runs AFTER all Phase 2 lenses have reported (including Consistency Agent B), BEFORE Phase 3 synthesis.
+
+**Purpose:** The four lenses share structural blind spots -- issues that fall between lenses, emerge from combinations of findings, or belong to categories no single lens covers (security, performance, concurrency, silent failures). A fresh agent hunts specifically in those gaps.
+
+**Write-on-complete:** Write findings to `scratch/<run-id>/blindspots-findings.md`.
+
+### Coverage Map (not raw findings)
+
+The blind-spots agent does NOT receive raw findings from the other lenses. Instead, the orchestrator builds a **coverage map** -- a condensed summary of where the other lenses looked, without the evidence details that cause anchoring. This preserves independent judgment while directing attention to uncovered areas.
+
+**Coverage map format** (orchestrator generates this from the lens findings files and Tier 2 partition records):
+
+```
+## Coverage Map
+
+### Files Examined by Lens (included in Tier 2 source)
+- path/to/file.ext: Correctness (2 findings), Architecture (1 finding)
+- path/to/other.ext: Robustness (1 finding), Correctness (0 findings)
+- path/to/examined-clean.ext: Architecture (0 findings)
+
+### Files Never Examined (in manifest but not in any Tier 2 source)
+- path/to/genuinely-unseen.ext
+- path/to/another-unseen.ext
+```
+
+**Target: 30-50 lines.** No finding summaries, no concern category descriptions (the agent already knows the four lenses' domains from its prompt). Just the file-to-lens mapping and the examined/never-examined distinction. This maximizes source code budget.
+
+### Coverage Map Construction (Orchestrator)
+
+To build the coverage map:
+1. Read all partition records from disk: `correctness-partition.md`, `robustness-partition.md`, `consistency-b-partition.md`, `architecture-partition.md`. These list the files each lens received as full source (written during Phase 2). Union of all partition files = the **examined set**.
+2. Read the Phase 1 manifest. Any manifest file NOT in the examined set = **never examined**.
+3. Read all findings files: correctness, robustness, consistency-b, architecture. Do NOT include consistency-a (triage only). Extract finding counts per lens per file.
+4. Overlay finding counts onto the examined set. Files in the examined set with no findings get "(0 findings)" for the lenses that examined them.
+5. List examined files with lens names and finding counts. List never-examined files separately.
+6. If the map exceeds 50 lines, abbreviate by grouping never-examined files by directory instead of listing individually.
+
+### Input
+
+The blind-spots agent receives:
+- Tier 1 overview (same as other lenses)
+- Coverage map (see above, ~30-50 lines)
+- Targeted source files. Subject to the same 1500-line hard cap as other lenses.
+
+### Source File Selection
+
+**Priority order (strict -- not a judgment call):**
+1. **At least 60% of source file budget** goes to **never-examined** files (not in any lens's Tier 2 source partition). These are the genuine blind spots -- code no lens read.
+2. **Remaining budget** goes to files flagged by multiple lenses (interaction points where cross-cutting concerns are likeliest).
+
+If there are no never-examined files (every manifest file was in at least one Tier 2 partition), allocate the full budget to multi-lens interaction points.
+
+**Narration:** Status update when dispatching ("Phase 2.5: All 4 lenses complete. Dispatching blind-spots agent to hunt cross-cutting concerns.") and when it completes ("Phase 2.5 complete. Blind-spots agent found N additional findings. Moving to Phase 3 synthesis.").
+
+### Follow-Up Dispatches
+
+If the blind-spots agent lists files in "Files Needing Deeper Inspection" AND the audit is under the ~20 agent budget, dispatch one follow-up blind-spots agent with those files at full source. The follow-up receives the same coverage map but new source files. Write follow-up findings to `scratch/<run-id>/blindspots-followup-findings.md`. Phase 3 synthesis reads this file if it exists.
+
+If the audit is at or near the agent budget, skip the follow-up and include the "Files Needing Deeper Inspection" list in the Phase 3 report as "Areas not fully covered."
+
+### Chunked Audits
+
+For chunked subsystems, the blind-spots agent runs **once per chunk** (not once for all chunks), receiving that chunk's coverage map + cross-chunk interface section. This keeps each dispatch within the 1500-line hard cap.
+
+**Cross-chunk blind spots:** After all per-chunk blind-spots agents complete, dispatch one additional **cross-chunk blind-spots agent**. This agent receives a purpose-built cross-chunk overview (NOT all individual coverage maps stacked):
+- A single merged view (~50-80 lines) listing only boundary files (files that appear in multiple chunks' interface sections) with their lens coverage across chunks
+- Source files from those cross-chunk boundaries
+- Subject to the same 1500-line hard cap
+
+Per-chunk interior coverage is irrelevant to cross-chunk analysis -- keep it out. This agent targets issues that span chunk boundaries (e.g., one chunk deserializes input, another trusts it without validation). Write findings to `scratch/<run-id>/blindspots-crosschunk-findings.md`. Skip this dispatch if the subsystem is single-chunk.
+
+**Cross-chunk boundary overview construction (orchestrator):**
+1. Identify boundary files: files that appear in 2+ chunks' Tier 1 "cross-chunk interface" sections.
+2. For each boundary file, collect lens coverage from all chunks' partition records + finding counts from all chunks' findings files.
+3. Format as: `path/file.ext: Chunk A [Correctness (1), Robustness (0)], Chunk B [Architecture (2)]`
+4. List only boundary files. Interior files are irrelevant to cross-chunk analysis.
+5. If >80 lines, group by chunk boundary pair (e.g., "Chunk A <-> Chunk B boundary files").
+
+After all blind-spots agents complete, findings from all chunks (including cross-chunk) flow into Phase 3 synthesis.
+
+### Compounding Risk Analysis
+
+The blind-spots agent does NOT analyze compounding risks from existing findings. That responsibility belongs to Phase 3 synthesis, which already reads all findings and deduplicates. Adding a synthesis step for compounding is natural and costs zero additional agents. See Phase 3 below.
+
 ## Phase 3: Synthesis
 
-Orchestrator reads all confirmed findings from `scratch/<run-id>/` on disk. Read `correctness-findings.md`, `robustness-findings.md`, `consistency-b-findings.md`, and `architecture-findings.md`. Do NOT read `consistency-a-findings.md` (triage data, not confirmed findings).
+Orchestrator reads all confirmed findings from `scratch/<run-id>/` on disk. Read `correctness-findings.md`, `robustness-findings.md`, `consistency-b-findings.md`, `architecture-findings.md`, `blindspots-findings.md`, and if they exist: `blindspots-followup-findings.md`, `blindspots-crosschunk-findings.md`. Do NOT read `consistency-a-findings.md` (triage data, not confirmed findings).
 
 1. **Deduplicate:** When two findings reference overlapping file + line_range and describe the same underlying concern (using common fields: severity, file, line_range, evidence, description), merge into one finding noting both lenses. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
-2. **Severity-rank:** Fatal first, then Significant, then Minor.
-3. **Group by theme** (e.g., "Error Handling," "State Management," "API Contracts").
-4. **Write report** to `scratch/<run-id>/report.md`.
+2. **Compounding risks:** After dedup, scan pairs of findings from different lenses that touch the same file or related files. Flag as compounding ONLY when you can articulate the specific mechanism by which the two findings combine into a worse problem (e.g., "this robustness gap means malformed input reaches this code path, where this correctness edge case causes data corruption"). File proximity alone is not compounding -- the findings must be causally related. Add a "Compounding" tag with the mechanism description to the grouped output.
+3. **Severity-rank:** Fatal first, then Significant, then Minor.
+4. **Group by theme** (e.g., "Error Handling," "State Management," "API Contracts").
+5. **Write report** to `scratch/<run-id>/report.md`.
 
 ## Phase 4: Reporting
 
@@ -214,6 +308,9 @@ Analysis lens templates (all use `Task tool, general-purpose, model: opus`):
 - `audit-consistency-prompt.md` -- Consistency lens dispatch (documents two-agent protocol)
 - `audit-architecture-prompt.md` -- Architecture lens dispatch
 
+Blind-spots template (`Task tool, general-purpose, model: opus`):
+- `audit-blindspots-prompt.md` -- Phase 2.5 gap-hunting dispatch (receives all prior findings)
+
 Each analysis template includes:
 - Dispatch metadata (for orchestrator reference): `Task tool (general-purpose, model: opus)`
 - The lens definition and what to look for
@@ -228,7 +325,7 @@ Each analysis template includes:
 - Modify any code (audit is read-only)
 - Flag issues without specific code evidence (no speculation)
 - Overlap with another lens's findings (if borderline, the more specific lens owns it)
-- Exceed 5 findings per lens without strong justification (focus on highest-impact issues)
+- Exceed 5 findings per lens without strong justification (focus on highest-impact issues). Exception: blind-spots lens cap is 8 findings due to its multi-category scope.
 
 **The orchestrator must NOT:**
 - Proceed to Phase 2 without user-confirmed scoping manifest
@@ -249,7 +346,7 @@ Each analysis template includes:
 
 ## Integration
 
-- **Dispatches:** Audit-specific prompt templates (scoping, correctness, robustness, consistency [2 agents], architecture)
+- **Dispatches:** Audit-specific prompt templates (scoping, correctness, robustness, consistency [2 agents], architecture, blind-spots)
 - **Consults:** `crucible:cartographer` (Mode 2: consult map) for subsystem scoping and conventions
 - **Records to:** `crucible:cartographer` (Mode 1: record discovery) -- Phase 1 manifest only
 - **Pairs with:** `crucible:forge` -- audit findings could inform retrospective if they reveal systemic patterns
