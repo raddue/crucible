@@ -409,6 +409,8 @@ When the executor encounters a task marked `atomic: true`:
 
 **Key difference from feature mode:** Feature mode does RED-GREEN-REFACTOR. Refactor mode for atomic steps does **GREEN-GREEN** — tests are green before, tests must be green after. No RED phase because no new behavior is being added.
 
+After a successful atomic commit (step 4), the rest of the per-task pipeline continues as normal: de-sloppify cleanup, two-pass review cycle, test alignment audit, test gap writer, and adversarial tester (unless skipped per restructuring-only annotation below).
+
 **Non-atomic refactoring tasks** follow normal execution — structural changes that don't break intermediate states (e.g., extracting a private method, adding a module nothing imports yet). These use standard TDD if they introduce new abstractions, or GREEN-GREEN if they are pure restructuring.
 
 ##### Phase 3 Adaptations for Existing Steps
@@ -427,7 +429,7 @@ The orchestrator records the baseline commit SHA before the first refactoring ta
 When a single task fails after the executor's retry attempt:
 1. Revert that task's changes to the pre-task commit SHA
 2. Escalate to user with failure context and test output
-3. User chooses: **skip this task and continue**, **retry with guidance**, or **revert all tasks to baseline**
+3. User chooses: **skip this task and continue** (orchestrator also skips all tasks that depend on the skipped task, and informs the user which tasks were transitively skipped), **retry with guidance**, or **revert all tasks to baseline**
 
 ###### Full Rollback to Baseline
 When the user chooses full rollback (or cascading failures make forward progress impossible):

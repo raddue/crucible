@@ -114,7 +114,7 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
       - Pre-change test count and baseline commit SHA
       - Description of structural changes made
       - Post-change test count (same or higher — never lower)
-      - All contract tests GREEN, all blast-radius tests GREEN
+      - All blast-radius + direct consumer tests GREEN
     - Verify that post-change test count >= pre-change test count
     - If the task mixes restructuring with new abstractions, BOTH a Refactoring Evidence Log (for the restructuring) and TDD Evidence Log entries (for the new abstractions) should be present
     - Do NOT flag the absence of a RED phase on GREEN-GREEN tasks

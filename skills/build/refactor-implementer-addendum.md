@@ -63,8 +63,7 @@ For GREEN-GREEN tasks, the standard TDD Evidence Log does not apply — there is
 
 **Post-change state:**
 - Test count: N tests passing (same or higher — never lower)
-- All contract tests: GREEN
-- All blast-radius tests: GREEN
+- All blast-radius + direct consumer tests: GREEN
 
 **No RED phase required** — this is a GREEN-GREEN restructuring task.
 ```
@@ -84,7 +83,7 @@ For tasks that mix restructuring with new internal abstractions, produce BOTH:
 
 In addition to the standard self-review checklist, verify:
 - Did I change ONLY what the task specified? (No opportunistic refactoring of nearby code)
-- Are all pre-existing tests still passing? (Not just the blast-radius tests — ALL tests)
+- Are all blast-radius + direct consumer tests still passing? (The full suite runs at wave boundaries.)
 - For atomic tasks: did I commit all files together in a single commit?
 - Is the test count the same or higher after my changes? (Never lower)
 - Did I produce a Refactoring Evidence Log (not a TDD Evidence Log) for GREEN-GREEN tasks?

@@ -50,6 +50,17 @@ Task tool (general-purpose, model: opus):
     - Which consumers depend on this behavior
     - Why it matters for the refactoring (what could break)
 
+    ### Proportionality Check
+
+    Before writing tests, count the gaps. If any of the following are true,
+    STOP and report to the orchestrator before writing tests:
+    - More than 15 contract tests would be needed
+    - You are approaching context limits
+    - Estimated total contract test LOC exceeds ~2x the estimated
+      refactoring scope LOC
+
+    The orchestrator will present the gap list to the user for prioritization.
+
     ### Step 3: Write Contract Tests for Gaps
 
     For each identified gap, write a contract test that locks the CURRENT
@@ -89,17 +100,6 @@ Task tool (general-purpose, model: opus):
          (c) Abort the refactoring entirely
        - NEVER silently drop a failing contract test or adjust its assertion
          to match unexpected behavior without reporting to the user.
-
-    ### Proportionality Check
-
-    Before writing tests, count the gaps. If any of the following are true,
-    STOP and report to the orchestrator before writing tests:
-    - More than 15 contract tests would be needed
-    - You are approaching context limits
-    - Estimated total contract test LOC exceeds ~2x the estimated
-      refactoring scope LOC
-
-    The orchestrator will present the gap list to the user for prioritization.
 
     ## Output
 
