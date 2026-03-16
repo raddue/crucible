@@ -5,7 +5,7 @@ Use this template when dispatching a synthesis subagent to consolidate Phase 1 i
 The orchestrator pastes ALL Phase 1 agent reports verbatim into the prompt below. The synthesis agent distills them into a concise root-cause analysis so the orchestrator only reads a short summary.
 
 ```
-Agent tool (subagent_type: "general-purpose", model: sonnet):
+Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Synthesize Phase 1 investigation findings into root-cause analysis"
   prompt: |
     You are a synthesis agent. Your job is to consolidate multiple investigation
