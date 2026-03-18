@@ -127,7 +127,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | **forge** | Self-improving retrospective system. Post-task retrospectives classify deviations and extract lessons. Pre-task feed-forward surfaces relevant warnings. Periodic mutation analysis proposes concrete skill edits for human review. |
 | **cartographer** | Living architectural map that accumulates across sessions. Records codebase structure, conventions, and landmines after exploration. Surfaces structural context before tasks. |
 | **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
-| **pathfinder** | Maps GitHub org service topology — enumerates repos, classifies services, detects inter-service dependencies (HTTP, gRPC, Kafka, shared DBs, shared packages). Produces Mermaid diagrams, JSON topology, and markdown reports. Query mode provides blast-radius analysis from persisted data. |
+| **pathfinder** | Maps GitHub org service topology — enumerates repos, classifies services, detects inter-service dependencies (HTTP, gRPC, Kafka, shared DBs, shared packages). Produces Mermaid diagrams, JSON topology, and markdown reports. Crawl mode starts from a seed repo and discovers connected services bidirectionally (forward fan-out + reverse fan-in) with frontier prioritization and adaptive depth. Query mode provides blast-radius analysis from persisted data. |
 
 ### Maintenance & Meta
 
