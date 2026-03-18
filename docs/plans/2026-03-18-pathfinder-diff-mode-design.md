@@ -35,8 +35,9 @@ Diff mode's rescan is optimized for speed — it doesn't re-analyze the entire o
 ### Full-Scan Diff Rescan
 
 1. **Discovery:** `gh repo list <org>` to get current repo metadata including `pushedAt` timestamps
-2. **Delta detection:** Compare `pushedAt` against baseline topology's `metadata.last_push` per service. Repos unchanged since last scan skip Tier 1 — reuse cached per-repo JSON from `/tmp/pathfinder/<org>/repos/`.
+2. **Delta detection:** Compare `pushedAt` (full ISO 8601 timestamp) against baseline topology's `metadata.last_push` per service. A repo is "changed" if its `pushedAt > baseline_service.metadata.last_push`. Unchanged repos reuse persisted per-repo JSON from `~/.claude/memory/pathfinder/<org>/repos/<repo>.json` (see Per-Repo Persistence below).
 3. **Selective Tier 1:** Only re-analyze repos that were pushed since the baseline scan, plus any newly discovered repos. Clone only new/changed repos.
+4. **Fallback:** If persisted per-repo JSON is missing for an unchanged repo (e.g., first diff run after upgrading from a pre-diff pathfinder version), re-analyze that repo anyway. Log as "cache miss" in diff-log.json.
 4. **Synthesis:** Merge reused + fresh per-repo results into a new topology.
 5. **Diff:** Compare new topology against baseline.
 
@@ -53,6 +54,26 @@ Same `pushedAt` optimization applies. Re-crawl from seed, but skip Tier 1 for un
 
 The rescan updates the persisted `topology.json` as a side effect — running diff keeps your topology fresh. The diff artifacts are the delta between old and new.
 
+**Tier 2 opt-in:** The `--tier 2` CLI flag triggers the Tier 2 rescan phase. There is no interactive Tier 1 checkpoint in diff mode — the flag replaces the checkpoint.
+
+### Per-Repo Persistence
+
+To support the smart rescan optimization across sessions (weekly cadence means `/tmp` is long gone), per-repo JSON results are persisted alongside topology.json:
+
+- **Path:** `~/.claude/memory/pathfinder/<org>/repos/<repo-name>.json`
+- **Written by:** All pathfinder modes (full scan, crawl, diff) — after each Tier 1/Tier 2 analysis completes, write the per-repo result to both `/tmp/pathfinder/<org>/repos/` (scratch, for current session) and the persistence path (durable, for future diffs)
+- **Read by:** Diff mode's smart rescan — unchanged repos load from persistence path instead of re-analyzing
+- **Note:** This is a change to the existing full-scan and crawl modes — they must also write per-repo results to the persistence path. This is a prerequisite for diff mode's core optimization.
+
+### Crawl Diff Baseline
+
+Crawl diffs need a crawl-specific baseline to compare crawl metadata (importance, depth, discovery paths). The unified `topology.json` merges crawl data with full-scan data, making crawl-specific comparisons unreliable.
+
+- **Crawl snapshot path:** `~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json` — written after each crawl completes, contains the crawl-specific topology with full `crawl_metadata`
+- **Crawl diff baseline:** Diff mode reads the crawl snapshot (not the merged topology.json) as its baseline for crawl-specific change categories
+- **Standard edge/service diff:** Still compares against the unified topology.json for service/edge/cluster changes — the crawl snapshot is only used for crawl-specific metadata comparisons
+- **Note:** This requires crawl mode to write the snapshot as a new persistence step. This is a prerequisite for crawl diff mode.
+
 ## Diff Algorithm & Change Categories
 
 The diff agent receives baseline and current topology JSON and produces a structured change report.
@@ -63,8 +84,11 @@ The diff agent receives baseline and current topology JSON and produces a struct
 |--------|-----------|
 | Added | In current, not in baseline |
 | Removed | In baseline, not in current |
+| Likely renamed | A "removed" and "added" service share the same language, framework, and >50% edge target overlap — flagged as probable rename rather than add+remove |
 | Reclassified | Same name, different `type` |
 | Confidence changed | Same name, different `confidence` |
+
+**Rename detection heuristic:** When a service appears as both "removed" (old name) and "added" (new name), check: same `language`? same `framework`? Do >50% of the old service's edge targets also appear in the new service's edges? If all three match, classify as `likely_renamed` with `old_name` and `new_name` fields. This prevents highly-connected service renames from flooding the diff with noise.
 
 ### Edge Changes (matched by identity: `source + target + type + label`)
 
@@ -114,7 +138,7 @@ git log --since="{baseline_timestamp}" --format="%H %ae %s" -- {evidence_file}
 on the already-cloned repo, returning commits that modified that file since the last scan. Cross-reference with merged PRs:
 
 ```bash
-gh pr list --repo {org}/{repo} --state merged --search "merged:>{baseline_date}" --json number,title,author,mergedAt
+gh search prs --repo {org}/{repo} --merged-at ">={baseline_date}" --json number,title,author,mergedAt
 ```
 
 **Cost:** Only runs on repos in the `repos_rescanned` set, scoped to evidence files only. For a typical weekly diff with 9 changed repos and ~20 structural changes, this is ~20-50 additional API calls — trivial against the rate budget.
@@ -158,9 +182,9 @@ gh pr list --repo {org}/{repo} --state merged --search "merged:>{baseline_date}"
     "current_timestamp": "2026-03-18T14:30:00Z",
     "mode": "full-scan",
     "org": "acme-platform",
-    "repos_rescanned": 47,
+    "repos_total": 47,
     "repos_reused": 38,
-    "repos_changed": 9
+    "repos_rescanned": 9
   },
   "services": {
     "added": [{ "name": "acme/new-gateway", "type": "API" }],
@@ -218,7 +242,7 @@ gh pr list --repo {org}/{repo} --state merged --search "merged:>{baseline_date}"
   "baseline_path": "~/.claude/memory/pathfinder/acme-platform/topology.json",
   "baseline_timestamp": "2026-03-11T14:30:00Z",
   "repos_total": 47,
-  "repos_rescanned": ["acme/orders-api", "acme/new-gateway"],
+  "repos_to_rescan": ["acme/orders-api", "acme/new-gateway"],
   "repos_reused": ["acme/auth-service"],
   "repos_remaining": ["acme/payments-service"],
   "clone_paths": {}
@@ -241,6 +265,7 @@ Crawl diff state adds `seed`, `orgs`, `max_depth`, `current_depth`, `frontier` �
 | All repos unchanged (zero delta) | Report "No structural changes detected since [baseline timestamp]." Still produce artifacts (empty diff). |
 | Partial rescan failure (some repos error) | Skip errored repos, flag in diff-log.json, note in report: "N repos could not be rescanned — changes in those repos may be missed" |
 | File comparison with mismatched orgs | Warn: "Baseline covers orgs [A, B], current covers [A, C]. Diff will only cover overlapping org [A]." |
+| File comparison with mismatched modes | If baseline is full-scan topology and current has `crawl_metadata` (or vice versa), skip crawl-specific change categories. Warn: "Baseline is [full-scan/crawl], current is [crawl/full-scan]. Crawl-specific changes will not be computed." |
 
 ## Integration with Consuming Skills
 
@@ -298,6 +323,14 @@ The Diff Analyzer is lightweight — it receives two JSON objects and computes s
 34. Timestamped output directories accumulate diff history across multiple runs
 35. For rescan-based diffs, each structural change includes `caused_by` attribution linking to commits and PRs
 36. Causal attribution is skipped for file-comparison mode (`--baseline`/`--current`)
+37. Per-repo JSON results are persisted at `~/.claude/memory/pathfinder/<org>/repos/` by all pathfinder modes (prerequisite for smart rescan)
+38. Crawl snapshots are persisted at `~/.claude/memory/pathfinder/<org>/crawl-<seed>/snapshot.json` (prerequisite for crawl diff)
+39. Service renames are detected (same language + framework + >50% edge overlap) and reported as `likely_renamed` rather than add+remove
+40. File comparison with mismatched modes (full-scan vs crawl) skips crawl-specific changes with a warning
+
+**Prerequisite note:** Acceptance criteria 37-38 require changes to existing full-scan and crawl modes (persisting per-repo JSON and crawl snapshots). These are implementation prerequisites, not new features — they extend existing persistence to support diff mode's optimizations.
+
+**Timestamp standardization note:** The `metadata.last_push` field in topology.json services must be a full ISO 8601 timestamp (matching GitHub API's `pushedAt` format), not a date-only string. If the existing Tier 1 analyzer produces date-only strings, it must be updated to emit full timestamps. The diff's delta detection compares `pushedAt > last_push` — format mismatch would produce incorrect results.
 
 ## Future Enhancements
 
