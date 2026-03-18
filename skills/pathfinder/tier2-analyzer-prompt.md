@@ -39,7 +39,7 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     ### Step 1: Identify Source Files
 
-    Find source files to scan: `src/**/*.{ts,js,py,go,java,rb,cs}`
+    Find source files to scan: `{src,cmd,pkg,internal,lib,app}/**/*.{ts,js,py,go,java,rb,cs}` and `*.{ts,js,py,go,java,rb,cs}` at the repo root
 
     **Per-repo limits:** Max 200 source files. Prioritize recently modified files
     (use filesystem timestamps).

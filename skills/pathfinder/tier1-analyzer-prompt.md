@@ -129,6 +129,7 @@ Output valid JSON to stdout:
       "direction": "unidirectional",
       "confidence": "HIGH",
       "label": "PAYMENTS_SERVICE_URL",
+      "tier": 1,
       "evidence": [
         { "file": ".env.example", "line": 12, "match": "PAYMENTS_SERVICE_URL=http://payments:8080" }
       ]
