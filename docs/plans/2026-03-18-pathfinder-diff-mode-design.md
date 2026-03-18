@@ -167,6 +167,26 @@ gh search prs --repo {org}/{repo} --merged-at ">={baseline_date}" --json number,
 
 **File comparison mode:** Attribution is skipped when using `--baseline`/`--current` flags (no cloned repos available to query).
 
+## Impact Ranking
+
+After attribution, rank each structural change by its transitive downstream footprint using BFS on the current topology graph. This reuses query mode's existing blast-radius traversal — no new subagent needed, no API calls.
+
+For each change, the orchestrator runs BFS from the affected service, following outbound edges to count transitive downstream services. Each change entry gains an `impact` field:
+
+```json
+{
+  "impact": {
+    "downstream_count": 23,
+    "affected_services": ["org/svc-a", "org/svc-b"],
+    "severity": "high"
+  }
+}
+```
+
+**Severity thresholds:** high (10+ downstream), medium (3-9), low (0-2 leaf nodes).
+
+**Value:** Transforms the weekly diff from a flat change list into prioritized triage. "3 high-impact changes affecting 40+ services, 12 low-impact leaf-node changes." Consuming skills get severity context — build's blast radius can focus on high-impact drift first.
+
 ## Output Artifacts
 
 **Full-scan diff output:** `docs/pathfinder/<org>/diffs/YYYY-MM-DD/`
@@ -261,7 +281,7 @@ gh search prs --repo {org}/{repo} --merged-at ">={baseline_date}" --json number,
 
 Crawl diff state adds `seed`, `orgs`, `max_depth`, `current_depth`, `frontier` — same fields as crawl mode, nested under `"diff_type": "crawl"`.
 
-**Phases:** `pre-flight` -> `discovery` -> `rescan-tier1` -> `rescan-tier2` (if --tier 2) -> `synthesis` -> `diff` -> `attribution` -> `report`
+**Phases:** `pre-flight` -> `discovery` -> `rescan-tier1` -> `rescan-tier2` (if --tier 2) -> `synthesis` -> `diff` -> `attribution` -> `impact-ranking` -> `report`
 
 **Compaction recovery:** Read state file, branch on `mode: "diff"`. Resume from current phase. Per-repo results on disk survive compaction. The baseline topology is always available at the persistence path (never modified mid-run — only updated after synthesis completes).
 
@@ -313,7 +333,7 @@ Diff mode adds one new agent and reuses existing ones:
 
 The Diff Analyzer is lightweight — it receives two JSON objects and computes set differences. Sonnet is sufficient; no codebase exploration needed. Single dispatch, no parallelism.
 
-**Execution order:** Pre-flight -> Discovery -> Selective Tier 1 (parallel waves) -> Synthesis -> Diff Analyzer -> Causal Attribution (enrichment) -> Report
+**Execution order:** Pre-flight -> Discovery -> Selective Tier 1 (parallel waves) -> Synthesis -> Diff Analyzer -> Causal Attribution (enrichment) -> Impact Ranking (BFS) -> Report
 
 ## Acceptance Criteria
 

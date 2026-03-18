@@ -198,7 +198,7 @@ Common diff options:
 
   Crawl diff state adds `seed`, `orgs`, `max_depth`, `current_depth`, `frontier` — same fields as crawl mode, nested under `"diff_type": "crawl"`.
 
-  **Diff mode phases:** `pre-flight` -> `discovery` -> `rescan-tier1` -> `rescan-tier2` (if --tier 2) -> `synthesis` -> `diff` -> `attribution` -> `report`
+  **Diff mode phases:** `pre-flight` -> `discovery` -> `rescan-tier1` -> `rescan-tier2` (if --tier 2) -> `synthesis` -> `diff` -> `attribution` -> `impact-ranking` -> `report`
 ```
 
 Also update the state file discriminator description (around line 61) to include `"mode": "diff"` as a third option.
@@ -662,9 +662,42 @@ After the Diff Analyzer produces the structured diff, enrich edge-level changes 
 **Cost:** Only runs on repos in `repos_rescanned`, scoped to evidence files. For a typical weekly diff with ~10 changed repos and ~20 structural changes, this is ~20-50 API calls.
 ```
 
+### Subsection: Impact Ranking
+
+```
+### Impact Ranking
+
+After attribution, rank each structural change by its transitive downstream footprint in the current topology. This reuses query mode's existing blast-radius BFS traversal — no new subagent needed.
+
+**Performed by the orchestrator directly on the current topology.json:**
+
+1. For each **edge change** (added, removed, confidence upgraded/degraded): identify the `target` service. Run BFS from that service following outbound edges to count transitive downstream services.
+2. For each **service change** (added, removed, renamed): run BFS from that service to count transitive downstream services.
+3. For each **cluster change** (membership changed): run BFS from the changed services to compute aggregate downstream impact.
+4. Inject an `impact` field into each change entry in the diff JSON:
+   ```json
+   {
+     "impact": {
+       "downstream_count": 23,
+       "affected_services": ["org/svc-a", "org/svc-b", "..."],
+       "severity": "high"
+     }
+   }
+   ```
+5. **Severity classification** based on downstream_count:
+   - **high:** 10+ downstream services
+   - **medium:** 3-9 downstream services
+   - **low:** 0-2 downstream services (leaf nodes)
+
+**Cost:** BFS on an in-memory JSON graph. For 30 changes across a 200-service topology, this is sub-second computation. No API calls, no subagents.
+
+**Impact on summary:**
+The diff summary gains severity breakdown: "3 high-impact changes (affecting 40+ downstream services), 12 low-impact changes (leaf nodes only)." This transforms the weekly drift check from a flat change list into prioritized triage.
+```
+
 ### Verification
 
-After this task, SKILL.md contains the complete rescan, synthesis, diff dispatch, and attribution procedures. Combined with Task 6, the entire diff pipeline (pre-flight through attribution) is documented.
+After this task, SKILL.md contains the complete rescan, synthesis, diff dispatch, attribution, and impact ranking procedures. Combined with Task 6, the entire diff pipeline (pre-flight through impact ranking) is documented.
 
 ---
 
@@ -706,6 +739,8 @@ Human-readable report with:
   - Unchanged edges: default gray
   - New services: green node fill
   - Removed services: red node fill with dashed border
+  - **Impact sizing:** High-impact changes get thicker edges and larger nodes; low-impact use default sizing
+- **Impact-ranked change list** — changes sorted by severity (high first), showing downstream count and affected service names
 - **Per-change detail** with evidence (which file changed, old/new value)
 - **Causal attribution section** — for each change with a `caused_by` field, show the commits and PRs that caused it
 - **Crawl diffs: discovery tree comparison** showing which repos appeared/disappeared at each depth level
@@ -726,6 +761,7 @@ Scan metadata:
 > - Services: +N added, -M removed, K renamed, J reclassified
 > - Edges: +N added, -M removed, K confidence changes
 > - Clusters: +N new, -M dissolved, K membership changes
+> - Impact: H high-impact changes, M medium, L low
 > - Rescanned N repos (M reused from cache)
 > Output: [output directory path]"
 
