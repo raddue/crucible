@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-17
 **Status:** Design approved
-**Branch:** feat/repo-hopper-skill
+**Branch:** feat/pathfinder-skill
 **Issue:** #39
 
 ## Overview
@@ -20,19 +20,23 @@ Pathfinder is a crucible skill that maps an entire GitHub organization's (or mul
 - Fetches metadata: name, description, language, topics, archived status, disk usage, push date
 - Classifies each repo as: API / Worker / Frontend / Serverless / Library / Infrastructure / Tool / Unknown
 - Presents summary to user for confirmation before proceeding
+- **Pre-flight rate budget:** Before scanning, call `gh api rate_limit` and estimate API calls needed (repos / 30 pages + clone count). Warn user if budget is insufficient.
 
 **Phase 2: Analysis** (parallel shallow clones)
-- **Local-first resolution:** Check configurable search paths (default `../`) for existing clones before shallow-cloning to `/tmp/pathfinder/<org>/`
-- **Parallel agents:** One per repo, scanning manifest + config files
+- **Local-first resolution:** Check `../` (hardcoded default) for existing clones before shallow-cloning to `/tmp/pathfinder/<org>/<repo>/`. Configurable search paths are a future enhancement.
+- **Orchestrator-managed cloning:** The orchestrator performs all cloning sequentially (or in controlled batches) before dispatching subagents. Each subagent receives a pre-existing path to analyze — subagents never clone.
+- **Parallel analysis agents:** Dispatched via Agent tool (`subagent_type: Explore`, model: Sonnet). Max 10 concurrent agents. For orgs with 50+ repos, batch into waves of 10.
 - **Two-tier detection with interactive checkpoint:**
   - **Tier 1 (automatic):** Manifest + config scanning — package deps, env vars, docker-compose, proto files, Dockerfiles, k8s manifests
   - **Tier 1 Checkpoint:** Present initial findings to user — "Found N services, M edges. Would you like me to run a deep code scan for additional edges?"
-  - **Tier 2 (opt-in):** Deep code scanning — grep source for HTTP client calls, topic names, connection strings. Merges with Tier 1.
+  - **Tier 2 (opt-in):** Deep code scanning — grep source for HTTP client calls, topic names, connection strings. Merges with Tier 1. Per-repo limits: max 200 source files scanned, max 50 grep matches retained. Prioritize recently modified files. Agents report at 50% context usage.
+- **Per-repo results:** Each agent writes findings to `/tmp/pathfinder/<org>/repos/<repo-name>.json` immediately on completion.
 
 **Phase 3: Synthesis** (single agent)
+- Dispatched via Agent tool (`subagent_type: general-purpose`, model: Opus)
 - Cross-references all per-repo findings
 - Resolves dependency edges via producer→consumer matching
-- Detects service clusters (by shared infrastructure, communication patterns, monorepo membership)
+- Detects service clusters (algorithm defined below)
 - Generates all output artifacts
 
 ### Multi-Org Support
@@ -77,14 +81,38 @@ Each repo is classified based on metadata and manifest signals:
 ### Edge Data Model
 
 Each edge records:
-- **Source** → **Target** (repo or shared resource)
+- **Source** → **Target** (using qualified `org/repo` identifiers to avoid cross-org name collisions)
 - **Type:** HTTP, Kafka, gRPC, shared-db, shared-package, infrastructure
 - **Direction:** Unidirectional (calls/events) or bidirectional (shared resources)
 - **Confidence:** HIGH / MEDIUM / LOW
 - **Evidence:** File path, line, matched pattern that produced this edge
 - **Label:** Topic name, endpoint path, package name — the specific identifier
 
+**Edge identity:** Two edges are the same if they share the same `source + target + type + label`. On merge, confidence takes the max, evidence is unioned, direction is flagged if contradictory.
+
 **Deduplication:** Multiple evidence points for the same logical edge merge into one edge with accumulated evidence. More evidence = higher confidence.
+
+### Internal Package Detection
+
+A package is considered "internal" (org-owned) if:
+- Its scope matches an org name (e.g., `@acme-platform/shared-types` when scanning `acme-platform`)
+- It is published by a repo within the scanned orgs (detected by checking if any scanned repo's name matches the package name)
+- It uses `file:../` or `workspace:` references (local workspace dependency)
+
+External packages (e.g., `express`, `lodash`) are ignored for edge detection.
+
+### Env Var URL Matching
+
+To match env var hostnames to repos:
+1. **Exact match:** hostname equals a repo name (`auth-service` → repo `auth-service`)
+2. **Prefix match:** hostname is a prefix of a repo name (`auth` → repo `auth-service`)
+3. **Denylist:** Skip known infrastructure vars: `DATABASE_URL`, `REDIS_URL`, `CACHE_URL`, `MONGO_URI`, `ELASTICSEARCH_URL` — these map to shared-infrastructure edges, not service edges
+
+Unresolvable references are flagged as "unresolved" in the report.
+
+### Shared Database Limitation
+
+Database connection strings are typically in secrets managers, not committed config. Detection is limited to cases where DB names appear in docker-compose files, config templates, `.env.example` files, or migration configs. Real production connection strings are unlikely to be in source.
 
 ### Detection Patterns
 
@@ -100,7 +128,7 @@ Each edge records:
 
 **Matching logic:**
 - Internal package imports → search for repos publishing that package
-- Env var URLs → extract hostname, match to repo names
+- Env var URLs → extract hostname, match to repo names (see matching rules above)
 - Proto imports → match to repos containing the referenced .proto
 - Docker-compose service references → match to repo service definitions
 - Kafka/RabbitMQ/SQS topic/queue names → match producers to consumers across repos
@@ -110,6 +138,7 @@ Each edge records:
 **Additional files scanned:**
 - `src/**/*.{ts,js,py,go,java,rb,cs}` — source files
 - Focus on: HTTP client instantiation, queue producer/consumer calls, gRPC channel creation
+- **Per-repo limits:** Max 200 source files (prioritize by recency), max 50 grep matches retained
 
 **Grep patterns by edge type:**
 - HTTP clients: `requests.get`, `fetch(`, `axios.`, `http.Get`, `HttpClient`
@@ -131,6 +160,10 @@ Each edge records:
 - Multiple Dockerfiles in subdirectories
 - Multiple independent CI/CD pipelines per subdirectory
 
+**Sub-service enumeration:** Each directory containing a Dockerfile (or listed as a workspace member) is treated as a separate service node.
+
+**Naming convention:** Sub-services are named `<repo>/<subdir>` (e.g., `platform/services/auth`) to avoid collisions with standalone repos.
+
 **Treatment:**
 - Each service within a monorepo becomes its own node in the graph
 - Repo name used as grouping label (Mermaid `subgraph`)
@@ -138,7 +171,7 @@ Each edge records:
 
 ## Output Artifacts
 
-All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combined-name>/` for multi-org).
+All output written to the current working directory at `docs/pathfinder/<org-name>/` (single org) or `docs/pathfinder/<combined-name>/` (multi-org, where `<combined-name>` is alpha-sorted org names joined by `+`, e.g., `acme-infra+acme-platform`).
 
 ### 1. `topology.json` — Source of Truth
 
@@ -151,24 +184,26 @@ All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combin
     "repo_count": 47,
     "service_count": 28,
     "edge_count": 41,
-    "coverage": { "high_confidence": 34, "medium": 7, "low": 0 }
+    "service_coverage": { "high": 22, "medium": 5, "low": 1 },
+    "edge_coverage": { "high": 34, "medium": 7, "low": 0 }
   },
   "services": [
     {
-      "name": "orders-api",
+      "name": "acme-platform/orders-api",
       "repo": "acme-platform/orders-api",
       "org": "acme-platform",
       "type": "API",
       "language": "TypeScript",
       "framework": "Express",
       "confidence": "HIGH",
+      "status": "active",
       "metadata": { "topics": ["orders"], "last_push": "2026-03-15" }
     }
   ],
   "edges": [
     {
-      "source": "orders-api",
-      "target": "payments-service",
+      "source": "acme-platform/orders-api",
+      "target": "acme-platform/payments-service",
       "type": "HTTP",
       "direction": "unidirectional",
       "confidence": "HIGH",
@@ -181,7 +216,7 @@ All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combin
   "clusters": [
     {
       "name": "orders-cluster",
-      "services": ["orders-api", "orders-worker", "orders-common"],
+      "services": ["acme-platform/orders-api", "acme-platform/orders-worker", "acme-platform/orders-common"],
       "description": "Core order processing pipeline"
     }
   ]
@@ -192,9 +227,11 @@ All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combin
 
 Full overview with all services and edges. Nodes shaped by type, edges labeled by communication type. Monorepo services grouped in subgraphs. Line style indicates confidence (solid = HIGH, dashed = MEDIUM, dotted = LOW).
 
+**For orgs with 30+ services:** The full graph renders at cluster level (one node per cluster, edges between clusters with multiplicity). Per-cluster diagrams provide service-level detail.
+
 ### 3. `clusters/` — Per-Cluster Sub-Diagrams
 
-One Mermaid file per detected cluster (e.g., `clusters/funding-cluster.mermaid.md`). Focused view of tightly-coupled service groups with their internal and external edges.
+One Mermaid file per detected cluster (e.g., `clusters/orders-cluster.mermaid.md`). Focused view of tightly-coupled service groups with their internal and external edges.
 
 ### 4. `report.md` — Human-Readable Summary
 
@@ -210,24 +247,37 @@ Per-repo timing, errors, skipped repos, rate limit usage. Supports incremental r
 
 ## Execution Flow
 
-1. **Pre-flight** — Verify `gh auth`, check rate limit budget, confirm org access for each provided org. Stop early with clear message if issues.
+1. **Pre-flight** — Verify `gh auth`, check rate limit budget via `gh api rate_limit`, confirm org access for each provided org. Estimate API budget needed (repo count / page size + clone count). Stop early with clear message if issues.
 
 2. **Discovery** — Enumerate all repos across all provided orgs. Present summary:
    > "Found 147 repos across 2 orgs. 68 look like services, 22 libraries, 12 infrastructure, 45 unknown. 8 archived (excluded). Proceed?"
 
-3. **Local Resolution** — Check configurable search paths for existing clones. Report:
+3. **Local Resolution** — Check `../` for existing clones matching repo names. Report:
    > "Found 23 repos locally. Will shallow-clone the remaining 45 to /tmp/pathfinder/."
 
-4. **Tier 1 Analysis** — Parallel agents scan each repo (manifest + config). Per-repo findings written to `/tmp/pathfinder/<org>/repos/<repo-name>.json`. Status updates as agents complete.
+4. **Orchestrator Cloning** — Clone repos sequentially to `/tmp/pathfinder/<org>/<repo>/` using `gh repo clone <org>/<repo> -- --depth=1`. Write progress to state file.
 
-5. **Tier 1 Checkpoint** — Present initial map:
+5. **Tier 1 Analysis** — Dispatch analysis agents in waves of max 10. Each agent receives a pre-cloned repo path. Per-repo findings written to `/tmp/pathfinder/<org>/repos/<repo-name>.json`. Status updates as agents complete.
+
+6. **Tier 1 Checkpoint** — Present initial map:
    > "Tier 1 complete. Found 68 services, 94 edges (79 HIGH, 15 MEDIUM). Here's the overview. Would you like me to run a deep code scan for additional edges?"
 
-6. **Tier 2 Analysis** (if opted in) — Parallel agents grep source files. Merge with Tier 1.
+7. **Tier 2 Analysis** (if opted in) — Dispatch analysis agents in waves of max 10 for deep code scan. Merge with Tier 1 findings.
 
-7. **Synthesis** — Cross-reference findings, resolve edges, detect clusters, generate all artifacts.
+8. **Synthesis** — Dispatch Opus agent. Cross-reference findings, resolve edges, detect clusters, generate all artifacts.
 
-8. **Report** — Present results, commit to `docs/pathfinder/<org-name>/`.
+9. **Report** — Present results, commit to `docs/pathfinder/<org-name>/`.
+
+## Cluster Detection Algorithm
+
+Services are grouped into clusters using the following algorithm:
+
+1. **Monorepo clusters:** Services within the same monorepo always form a cluster, named after the repo.
+2. **Affinity clusters:** Services that share 2+ edges of any type form a candidate cluster. Use connected components on the subgraph of services with 2+ shared edges.
+3. **Naming:** Clusters are named after their most-connected service or shared resource (e.g., "orders-cluster" if `orders-api` has the most edges).
+4. **Singletons:** Services with no cluster affinity appear as standalone nodes.
+
+Clusters are always recomputed from scratch on the full edge set (not incrementally).
 
 ## Query Mode — Blast Radius Oracle
 
@@ -235,7 +285,7 @@ After an initial scan, pathfinder's topology becomes a persistent, queryable dat
 
 ### Storage
 
-`topology.json` is persisted to `~/.claude/projects/<org-hash>/memory/pathfinder/topology.json` (org-level, not repo-level), following the cartographer storage pattern. Any crucible session in any repo under that org can read it.
+`topology.json` is persisted to `~/.claude/memory/pathfinder/<org-name>/topology.json` (well-known absolute path, outside the project-hash system). For multi-org scans, stored under the combined name (e.g., `~/.claude/memory/pathfinder/acme-infra+acme-platform/topology.json`). This allows any crucible session in any repo to access the topology regardless of working directory.
 
 ### Query Types
 
@@ -243,9 +293,11 @@ After an initial scan, pathfinder's topology becomes a persistent, queryable dat
 |-------|-------------|---------|
 | `upstream <service>` | Who calls this service? (consumers) | "What services depend on auth-api?" |
 | `downstream <service>` | What does this service call? (dependencies) | "What does orders-api talk to?" |
-| `blast-radius <service>` | If this service changes, what breaks? (transitive) | "What's the blast radius of changing payments-service?" |
+| `blast-radius <service>` | If this service changes, what breaks? (transitive, with cycle detection) | "What's the blast radius of changing payments-service?" |
 | `shared-infra <resource>` | Which services share this resource? | "Who else uses the shared-redis instance?" |
 | `path <service-A> <service-B>` | How do these services communicate? (direct or transitive) | "How does the frontend reach the billing service?" |
+
+**Cycle detection:** Blast-radius and path queries use BFS with a visited set. Cycles are detected and reported: "Circular dependency detected: A -> B -> A."
 
 ### Integration with Other Skills
 
@@ -257,7 +309,7 @@ Query mode is RECOMMENDED (not required) — skills check for pathfinder data an
 
 ### Invocation
 
-- **Automatic:** Other skills read `topology.json` directly when they need cross-repo context.
+- **Automatic:** Other skills read `topology.json` from the well-known path when they need cross-repo context.
 - **Explicit:** User invokes `crucible:pathfinder query upstream auth-api` for direct queries. Returns structured results with service names, edge types, and confidence.
 
 ### Cold Start
@@ -266,10 +318,33 @@ If no topology.json exists, query mode returns empty results and suggests runnin
 
 ## Persistence & Incremental Runs
 
-- Each scan writes results to both `docs/pathfinder/<org>/` (committed artifacts) and `~/.claude/projects/<org-hash>/memory/pathfinder/` (queryable store)
-- Subsequent runs merge: new repos added, removed repos flagged, changed edges updated
+- Each scan writes results to both `docs/pathfinder/<org>/` (committed artifacts) and `~/.claude/memory/pathfinder/<org>/` (queryable store)
+- Subsequent runs merge with existing data:
+  - **New repos:** Added with `status: "active"`
+  - **Removed repos:** `status` set to `"stale"`, kept in topology for one more run, then removed
+  - **Existing repos:** Classification and edges updated; confidence takes max of old/new
+  - **Edge merge:** Edges matched by `source + target + type + label`. Confidence: take max. Evidence: union. Direction: flag if contradictory.
+  - **Clusters:** Always recomputed from scratch on the merged edge set
 - Mermaid diagrams regenerate from merged JSON
 - Separate orgs (or org combinations) maintain separate output directories
+
+## Compaction Recovery
+
+Pathfinder's Phase 2 with many parallel agents is compaction-prone. State persistence:
+
+1. **State file:** `/tmp/pathfinder-state.json` — written by orchestrator, updated after each repo completes:
+   ```json
+   {
+     "orgs": ["acme-platform"],
+     "phase": "analysis-tier1",
+     "repos_total": 45,
+     "repos_completed": ["orders-api", "auth-service", "..."],
+     "repos_remaining": ["payments-service", "..."],
+     "clone_paths": { "orders-api": "/tmp/pathfinder/acme-platform/orders-api/" }
+   }
+   ```
+2. **Per-repo results:** Already written to `/tmp/pathfinder/<org>/repos/<repo-name>.json` on completion — these survive compaction.
+3. **On compaction:** Read state file first. Skip completed repos. Resume from remaining list.
 
 ## Estimated Runtime
 
@@ -283,28 +358,32 @@ If no topology.json exists, query mode returns empty results and suggests runnin
 
 1. Given one or more GitHub org names, pathfinder enumerates all repos and classifies each by type
 2. Given repos with known inter-service dependencies, pathfinder detects edges with correct type and direction
-3. Given a monorepo with multiple services, pathfinder identifies each service as a separate node
+3. Given a monorepo with multiple services, pathfinder identifies each service as a separate node with `<repo>/<subdir>` naming
 4. Output Mermaid renders correctly and matches the JSON topology data
 5. Local repos are detected and used instead of cloning when available
 6. Tier 1 completes and presents checkpoint before offering Tier 2
-7. Incremental re-runs merge with existing data rather than overwriting
-8. Multi-org scanning produces a unified graph spanning org boundaries
+7. Incremental re-runs merge with existing data (edge identity: source+target+type+label)
+8. Multi-org scanning produces a unified graph spanning org boundaries with qualified service names
 9. Query mode returns correct upstream/downstream/blast-radius results from persisted topology
 10. Query mode gracefully returns empty results when no topology data exists
+11. Blast-radius queries detect and report cycles
 
 ## Error Handling
 
 - `gh auth` failure → stop with clear message
 - Rate limit hit → pause, report remaining budget, offer to continue with reduced parallelism
+- Rate budget insufficient at pre-flight → warn user with estimate before starting
 - Clone failure (single repo) → skip, log to scan-log.json, continue with remaining repos
 - Unresolvable edge references → flag in report as "unresolved", don't silently drop
 - Large repos (>1GB disk usage) → manifest-only scan, skip clone
 - Org membership limitations → warn that only visible repos are scanned (private repos require org membership)
+- Service name collision across orgs → prevented by qualified `org/repo` identifiers
 
 ## Future Enhancements
 
 - **Crawl mode** (issue #40): Seed-based discovery — start from one repo, fan out by tracing dependencies. Useful for exploring a specific service's neighborhood without scanning entire orgs.
 - **Contract sync verification** (issue #41): Extract API contracts on both sides of every edge (proto, OpenAPI, GraphQL schemas) and detect mismatches — version skew, phantom dependencies, schema drift.
+- **Configurable search paths:** Allow users to specify custom local clone directories via `.pathfinder.yml` or CLI flags.
 - **Figma API integration:** Push topology data to Figma for visual editing and annotation.
 - **Live dashboard:** Watch mode that re-scans periodically and diffs against previous topology.
 - **Dependency health scoring:** Flag stale dependencies, unused edges, orphaned services.
