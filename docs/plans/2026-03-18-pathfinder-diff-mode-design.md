@@ -99,6 +99,48 @@ The diff agent receives baseline and current topology JSON and produces a struct
 - Coverage distribution shifts (HIGH/MEDIUM/LOW)
 - Crawl diffs: total importance score shift, frontier expansion/contraction
 
+## Causal Commit Attribution
+
+After the Diff Analyzer produces the structured diff and before report generation, an enrichment step traces each structural change back to the specific commits and PRs that caused it.
+
+**How it works:**
+
+For each change in the diff, the evidence field points to a specific file. For each evidence file in a rescanned repo, the orchestrator runs:
+
+```bash
+git log --since="{baseline_timestamp}" --format="%H %ae %s" -- {evidence_file}
+```
+
+on the already-cloned repo, returning commits that modified that file since the last scan. Cross-reference with merged PRs:
+
+```bash
+gh pr list --repo {org}/{repo} --state merged --search "merged:>{baseline_date}" --json number,title,author,mergedAt
+```
+
+**Cost:** Only runs on repos in the `repos_rescanned` set, scoped to evidence files only. For a typical weekly diff with 9 changed repos and ~20 structural changes, this is ~20-50 additional API calls — trivial against the rate budget.
+
+**Enriched output:** Every entry in topology-diff.json gains a `caused_by` field:
+
+```json
+{
+  "caused_by": {
+    "repo": "acme/orders-api",
+    "commits": [{"sha": "abc123", "author": "alice", "message": "Add gateway integration", "date": "2026-03-16"}],
+    "pull_requests": [{"number": 247, "title": "Integrate new API gateway", "author": "alice", "merged_at": "2026-03-16"}]
+  }
+}
+```
+
+**No new subagent needed.** The orchestrator runs `git log` and `gh pr list` directly, then injects results into the diff JSON before report generation.
+
+**Value:**
+- Weekly drift reports become accountability reports — "here's what changed and who changed it"
+- Consuming skills get causal context — build's blast radius can say "coordinate with @alice who rewired these edges in PR #247"
+- Separates intentional changes (attributed to PRs) from accidental drift (no attribution = evidence file deleted or config changed without PR)
+- Foundation for "who owns this edge?" queries
+
+**File comparison mode:** Attribution is skipped when using `--baseline`/`--current` flags (no cloned repos available to query).
+
 ## Output Artifacts
 
 **Full-scan diff output:** `docs/pathfinder/<org>/diffs/YYYY-MM-DD/`
@@ -236,7 +278,7 @@ Diff mode adds one new agent and reuses existing ones:
 
 The Diff Analyzer is lightweight — it receives two JSON objects and computes set differences. Sonnet is sufficient; no codebase exploration needed. Single dispatch, no parallelism.
 
-**Execution order:** Pre-flight -> Discovery -> Selective Tier 1 (parallel waves) -> Synthesis -> Diff Analyzer -> Report
+**Execution order:** Pre-flight -> Discovery -> Selective Tier 1 (parallel waves) -> Synthesis -> Diff Analyzer -> Causal Attribution (enrichment) -> Report
 
 ## Acceptance Criteria
 
@@ -254,6 +296,8 @@ The Diff Analyzer is lightweight — it receives two JSON objects and computes s
 32. Diff state survives compaction and resumes correctly from the current phase
 33. Crawl diffs respect depth checkpoints and do not stale-mark repos absent from the re-crawl
 34. Timestamped output directories accumulate diff history across multiple runs
+35. For rescan-based diffs, each structural change includes `caused_by` attribution linking to commits and PRs
+36. Causal attribution is skipped for file-comparison mode (`--baseline`/`--current`)
 
 ## Future Enhancements
 
