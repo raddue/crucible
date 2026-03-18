@@ -56,7 +56,7 @@ Search identity signals in priority order. Stop when the per-repo search budget 
 For each signal, execute a GitHub code search across each org:
 
 ```bash
-gh api search/code -X GET -f q="<signal> org:<org>" --paginate
+gh api search/code -X GET -f q="<signal> org:<org>" --jq '.items'
 ```
 
 ### 3. Compound Query Batching

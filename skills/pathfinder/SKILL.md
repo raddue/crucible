@@ -417,7 +417,7 @@ User options: all repos, selected repos, or skip.
 
 - Dispatch Opus synthesis agent using `./synthesis-prompt.md` with crawl-specific augmentation
 - Standard inputs same as full scan plus: `"mode": "crawl"`, `"seed": "<org>/<repo>"`, `crawl_metadata` map
-- **Per-repo JSON augmentation:** Before dispatching synthesis, the orchestrator annotates each per-repo JSON file with a `"crawl"` metadata block containing `depth`, `found_via`, `importance`, and `signal_sources` from the state file's discovered map. This keeps the Tier 1 analyzer unchanged — crawl metadata is added by the orchestrator after analysis.
+- **Per-repo JSON augmentation:** Before dispatching synthesis, the orchestrator annotates each per-repo JSON file with a `"crawl_metadata"` block containing `depth`, `found_via`, `importance`, and `signal_sources` from the state file's discovered map. This keeps the Tier 1 analyzer unchanged — crawl metadata is added by the orchestrator after analysis.
 - Produces discovery path section in report.md, uses importance scores for cluster weighting and Mermaid node sizing
 
 ### Merge Rules (Crawl)
