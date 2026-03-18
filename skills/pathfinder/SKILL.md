@@ -263,6 +263,11 @@ Highlight flagged items:
 
 Crawl mode starts from a seed repo and discovers connected services by tracing dependencies bidirectionally. Unlike full scan (which enumerates an entire org top-down), crawl mode follows dependency threads from a known starting point. Use for large orgs (100+ repos) where full enumeration is impractical.
 
+**Parameters:**
+- `<org>/<repo>` — the seed repo to start from
+- `--depth N` — max hop count from seed (default: 3, max: 10)
+- `--orgs org1,org2` — which orgs to search for reverse references. If omitted, uses only the seed repo's org.
+
 Named phases: **Pre-flight** → **Seed** → **Crawl** → **Tier 2 (opt-in)** → **Synthesis** → **Report**
 
 ### Pre-flight
