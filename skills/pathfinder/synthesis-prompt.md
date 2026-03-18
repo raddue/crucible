@@ -60,6 +60,12 @@ Agent tool (subagent_type: general-purpose, model: opus):
     classifications. Every service name must be qualified as `org/repo`
     to avoid cross-org collisions.
 
+    **Timestamp preservation:** When building the service inventory, preserve
+    the `metadata.last_push` field exactly as provided by the Tier 1 analyzer.
+    This must be a full ISO 8601 timestamp (e.g., `"2026-03-15T10:30:00Z"`).
+    Do not truncate to date-only format. Downstream diff mode depends on
+    timestamp precision for change detection.
+
     ### Step 2: Edge Resolution — Producer/Consumer Matching
 
     For each edge found in the per-repo results:
@@ -167,7 +173,7 @@ Agent tool (subagent_type: general-purpose, model: opus):
           "framework": "Express",
           "confidence": "HIGH",
           "status": "active",
-          "metadata": { "topics": [], "last_push": "2026-03-15" }
+          "metadata": { "topics": [], "last_push": "2026-03-15T10:30:00Z" }
         }
       ],
       "edges": [

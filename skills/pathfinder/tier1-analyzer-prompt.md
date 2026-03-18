@@ -131,7 +131,7 @@ Output valid JSON to stdout:
     "framework": "Express",
     "confidence": "HIGH",
     "status": "active",
-    "metadata": { "topics": [], "last_push": "2026-03-15" },
+    "metadata": { "topics": [], "last_push": "2026-03-15T10:30:00Z" },
     "sub_services": []
   },
   "edges": [
@@ -178,6 +178,7 @@ Output valid JSON to stdout:
 - If a manifest is malformed, log the error and continue scanning other files
 - For monorepos, each sub-service is a separate entry in `sub_services`
 - The `identity_signals` array must always contain at least the repo name. If no other signals are found, that is acceptable — the repo name alone is the minimum.
+- **Timestamp format:** The `last_push` field MUST be a full ISO 8601 timestamp (e.g., `"2026-03-15T10:30:00Z"`), NOT a date-only string. Use the repo's `pushedAt` value from the GitHub API metadata passed in your classification input. If `pushedAt` is not available in the classification, run `gh api repos/{org}/{repo} --jq '.pushed_at'` to retrieve it.
 
 ---
 
