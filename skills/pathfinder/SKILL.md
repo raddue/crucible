@@ -506,6 +506,7 @@ Pathfinder's Phase 2 with many parallel agents is compaction-prone. State is per
 **State schema:**
 ```json
 {
+  "mode": "full-scan",
   "orgs": ["acme-platform"],
   "phase": "analysis-tier1",
   "repos_total": 45,
@@ -625,4 +626,4 @@ Separate orgs (or org combinations) maintain separate output directories and per
 - `./tier2-analyzer-prompt.md` -- Phase 2 Tier 2 deep code scanning
 - `./synthesis-prompt.md` -- Phase 3 cross-reference, edge resolution, cluster detection, output generation
 - `./query-handler-prompt.md` -- Query mode graph traversal and blast-radius computation
-- `./reverse-search-prompt.md` — Crawl mode reverse search across orgs for fan-in dependencies
+- `./reverse-search-prompt.md` -- Crawl mode reverse search across orgs for fan-in dependencies
