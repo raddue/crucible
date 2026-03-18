@@ -37,7 +37,7 @@ Pathfinder is a crucible skill that maps an entire GitHub organization's (or mul
 
 ### Multi-Org Support
 
-Pathfinder accepts one or more org names. All orgs are enumerated and analyzed together. The dependency graph spans org boundaries — a service in `sawbridge` calling a service in `loanpal-engineering` shows as a cross-org edge.
+Pathfinder accepts one or more org names. All orgs are enumerated and analyzed together. The dependency graph spans org boundaries — a service in one org calling a service in another org shows as a cross-org edge.
 
 **Invocation:** `crucible:pathfinder <org1> [org2] [org3...]`
 
@@ -145,7 +145,7 @@ All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combin
 ```json
 {
   "meta": {
-    "orgs": ["sawbridge", "loanpal-engineering"],
+    "orgs": ["acme-platform", "acme-infrastructure"],
     "scan_timestamp": "2026-03-17T14:30:00Z",
     "tier_depth": 1,
     "repo_count": 47,
@@ -155,19 +155,19 @@ All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combin
   },
   "services": [
     {
-      "name": "funding-api",
-      "repo": "sawbridge/funding-api",
-      "org": "sawbridge",
+      "name": "orders-api",
+      "repo": "acme-platform/orders-api",
+      "org": "acme-platform",
       "type": "API",
       "language": "TypeScript",
       "framework": "Express",
       "confidence": "HIGH",
-      "metadata": { "topics": ["funding"], "last_push": "2026-03-15" }
+      "metadata": { "topics": ["orders"], "last_push": "2026-03-15" }
     }
   ],
   "edges": [
     {
-      "source": "funding-api",
+      "source": "orders-api",
       "target": "payments-service",
       "type": "HTTP",
       "direction": "unidirectional",
@@ -180,9 +180,9 @@ All output written to `docs/pathfinder/<org-name>/` (or `docs/pathfinder/<combin
   ],
   "clusters": [
     {
-      "name": "funding-cluster",
-      "services": ["funding-api", "funding-worker", "funding-common"],
-      "description": "Core funding pipeline"
+      "name": "orders-cluster",
+      "services": ["orders-api", "orders-worker", "orders-common"],
+      "description": "Core order processing pipeline"
     }
   ]
 }
@@ -229,9 +229,44 @@ Per-repo timing, errors, skipped repos, rate limit usage. Supports incremental r
 
 8. **Report** — Present results, commit to `docs/pathfinder/<org-name>/`.
 
+## Query Mode — Blast Radius Oracle
+
+After an initial scan, pathfinder's topology becomes a persistent, queryable data source. Other crucible skills (or the user directly) can interrogate the graph without re-scanning.
+
+### Storage
+
+`topology.json` is persisted to `~/.claude/projects/<org-hash>/memory/pathfinder/topology.json` (org-level, not repo-level), following the cartographer storage pattern. Any crucible session in any repo under that org can read it.
+
+### Query Types
+
+| Query | Description | Example |
+|-------|-------------|---------|
+| `upstream <service>` | Who calls this service? (consumers) | "What services depend on auth-api?" |
+| `downstream <service>` | What does this service call? (dependencies) | "What does orders-api talk to?" |
+| `blast-radius <service>` | If this service changes, what breaks? (transitive) | "What's the blast radius of changing payments-service?" |
+| `shared-infra <resource>` | Which services share this resource? | "Who else uses the shared-redis instance?" |
+| `path <service-A> <service-B>` | How do these services communicate? (direct or transitive) | "How does the frontend reach the billing service?" |
+
+### Integration with Other Skills
+
+Query mode is RECOMMENDED (not required) — skills check for pathfinder data and use it if available, gracefully degrade if not.
+
+- **crucible:build** — Phase 1 blast radius analysis extends across repos when pathfinder data exists. "This API change also affects 3 services in other repos: [list]."
+- **crucible:design** — Investigation agents consult pathfinder to understand cross-service impact before asking the user.
+- **crucible:audit** — Subsystem audit scope can include immediate upstream/downstream neighbors, catching contract violations at service boundaries.
+
+### Invocation
+
+- **Automatic:** Other skills read `topology.json` directly when they need cross-repo context.
+- **Explicit:** User invokes `crucible:pathfinder query upstream auth-api` for direct queries. Returns structured results with service names, edge types, and confidence.
+
+### Cold Start
+
+If no topology.json exists, query mode returns empty results and suggests running a full scan. No errors, no blocking — graceful degradation.
+
 ## Persistence & Incremental Runs
 
-- Each run writes timestamped results to `docs/pathfinder/<org>/`
+- Each scan writes results to both `docs/pathfinder/<org>/` (committed artifacts) and `~/.claude/projects/<org-hash>/memory/pathfinder/` (queryable store)
 - Subsequent runs merge: new repos added, removed repos flagged, changed edges updated
 - Mermaid diagrams regenerate from merged JSON
 - Separate orgs (or org combinations) maintain separate output directories
@@ -254,6 +289,8 @@ Per-repo timing, errors, skipped repos, rate limit usage. Supports incremental r
 6. Tier 1 completes and presents checkpoint before offering Tier 2
 7. Incremental re-runs merge with existing data rather than overwriting
 8. Multi-org scanning produces a unified graph spanning org boundaries
+9. Query mode returns correct upstream/downstream/blast-radius results from persisted topology
+10. Query mode gracefully returns empty results when no topology data exists
 
 ## Error Handling
 
@@ -266,7 +303,8 @@ Per-repo timing, errors, skipped repos, rate limit usage. Supports incremental r
 
 ## Future Enhancements
 
-- **Crawl mode:** Seed-based discovery — start from one repo, fan out by tracing dependencies. Useful for exploring a specific service's neighborhood without scanning entire orgs.
+- **Crawl mode** (issue #40): Seed-based discovery — start from one repo, fan out by tracing dependencies. Useful for exploring a specific service's neighborhood without scanning entire orgs.
+- **Contract sync verification** (issue #41): Extract API contracts on both sides of every edge (proto, OpenAPI, GraphQL schemas) and detect mismatches — version skew, phantom dependencies, schema drift.
 - **Figma API integration:** Push topology data to Figma for visual editing and annotation.
 - **Live dashboard:** Watch mode that re-scans periodically and diffs against previous topology.
 - **Dependency health scoring:** Flag stale dependencies, unused edges, orphaned services.
