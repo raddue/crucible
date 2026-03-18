@@ -472,7 +472,7 @@ Diff mode compares a current topology scan against a baseline to surface structu
 - **Crawl diff** (`crucible:pathfinder diff <org>/<repo> [--depth N] [--orgs org1,org2]`): Re-crawl from seed, compare against persisted crawl topology. The distinction is natural: org name only = full-scan diff, org/repo = crawl diff.
 - **File comparison** (`crucible:pathfinder diff --baseline path/old.json --current path/new.json`): Compare any two topology files directly. No rescanning.
 
-Named phases: **Pre-flight** -> **Discovery** -> **Rescan Tier 1** -> **Rescan Tier 2 (if --tier 2)** -> **Synthesis** -> **Diff** -> **Attribution** -> **Report**
+Named phases: **Pre-flight** -> **Discovery** -> **Rescan Tier 1** -> **Rescan Tier 2 (if --tier 2)** -> **Synthesis** -> **Diff** -> **Attribution** -> **Impact Ranking** -> **Report**
 ```
 
 ### Subsection: Pre-flight (Diff)
