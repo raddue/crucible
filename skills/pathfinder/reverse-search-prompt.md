@@ -78,10 +78,11 @@ Apply ALL of the following filters to every result:
 3. **Exclude test/mock/example directories** — matches in `test/`, `mock/`, `example/`, `__tests__/`, `spec/`, `fixtures/`, `testdata/` directories are not real dependencies
 4. **Require 2+ distinct references** — a repo must contain 2 or more distinct references to count as a real edge. A single mention gets `confidence: "LOW"`, noted in output but not auto-followed by the orchestrator
 5. **Exclude well-known external service names** — if the target repo has a generic name that collides with well-known external services (e.g., a repo named `redis`, `postgres`, `kafka`), skip signal matches that are clearly external service client configs rather than references to the target repo
+6. **Exclude already-discovered repos** — repos listed in the Already-Discovered Repos input are already part of the crawl. Skip them entirely; do not include them in `reverse_refs`
 
 ### 5. Rate Limit Awareness
 
-Budget: **15 searches per target repo.** Track every API call against this budget.
+Budget: **15 API calls per target repo.** Track every API call against this budget. Note: `--paginate` auto-issues one call per page of results — each page counts separately against the budget. Prefer omitting `--paginate` and using `--jq '.items'` to get the first page only, unless you specifically need more results.
 
 - If the budget is exhausted before all signals are searched, stop searching and report partial results
 - List all unsearched signals in `signals_skipped`

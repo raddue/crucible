@@ -285,6 +285,7 @@ Named phases: **Pre-flight** → **Seed** → **Crawl** → **Tier 2 (opt-in)** 
 - Run full Tier 1 analysis on seed using `./tier1-analyzer-prompt.md` — outputs both standard edge data AND identity signals
 - Extract all outbound references (forward edges) and identity signals from Tier 1 output
 - **Seed with no manifests fallback:** If Tier 1 returns zero outbound edges and no identity signals beyond the repo name, inform user: "Seed repo has no detectable dependencies or identity signals beyond its name. Reverse search will use repo name only. Results may be limited." Proceed with repo-name-only reverse search.
+- **Present seed findings** to user before proceeding: "Seed repo is a [type] service ([language]). Found N outbound references and M identity signals. Proceeding to discover neighbors."
 
 ### Cloning
 
@@ -298,15 +299,21 @@ Crawl mode inherits all full scan cloning rules:
 ### Crawl (Iterative Discovery)
 
 ```
-frontier = [seed_repo]
-discovered = {}
-depth = 0
+# Seed is already analyzed in the Seed phase — use its results directly
+discovered = {seed_repo: {depth: 0, found_via: "seed", status: "analyzed", importance: 10}}
 
-while frontier is not empty AND depth < max_depth:
+# Depth 1 frontier comes from seed's forward refs + reverse search results
+seed_forward_refs = seed_tier1_results.edges  # from Seed phase
+seed_identity = seed_tier1_results.identity_signals
+seed_reverse_refs = search_orgs_for_references(seed_identity, orgs)
+frontier = resolve_references(seed_forward_refs + seed_reverse_refs)
+depth = 1
+
+while frontier is not empty AND depth <= max_depth:
     next_frontier = []
     for each repo in frontier:
         # Forward: what does this repo call?
-        forward_refs = analyze_outbound(repo)  # Tier 1 analysis (reused)
+        forward_refs = analyze_outbound(repo)  # Tier 1 analysis
 
         # Reverse: who calls this repo? (inline, not a separate phase)
         identity = repo.identity_signals  # from Tier 1 output
@@ -422,7 +429,7 @@ User options: all repos, selected repos, or skip.
 
 ### Output Directories (Crawl)
 
-- **Single-org crawl:** `docs/pathfinder/<org-name>/crawl-<seed-repo>/`
+- **Single-org crawl:** `docs/pathfinder/<org-name>/crawl-<seed-repo>/` where `<seed-repo>` is the short repo name (e.g., `crawl-funding-api`, NOT `crawl-acme/funding-api`)
 - **Multi-org crawl:** `docs/pathfinder/<combined-orgs>/crawl-<seed-repo>/` (alpha-sorted, `+`-joined)
 - **Persistence path:** `~/.claude/memory/pathfinder/<org-name>/topology.json` (same as full scan — crawl results merge into unified topology)
 
@@ -533,6 +540,8 @@ All repo names must use qualified `org/repo` format for multi-org disambiguation
 
 **After recovery:** Output a status update to the user before continuing:
 > "Recovered from compaction. Phase 2 (Tier 1): 23/45 repos complete. Resuming from repo 24."
+
+> "Recovered from compaction. Crawl depth 2: 6/9 repos analyzed. Resuming from pending repos."
 
 ## Error Handling
 

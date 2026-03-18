@@ -98,6 +98,21 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     Clusters are always recomputed from scratch on the full edge set.
 
+    **Crawl mode cluster weighting (only when crawl_metadata is provided):**
+    When importance scores are available from crawl_metadata, use them to
+    influence cluster detection: high-importance repos (score 7+) that share
+    even a single edge should be considered for clustering (lower the 2-edge
+    threshold to 1 for high-importance pairs). Name clusters after the
+    highest-importance service rather than most-connected, since importance
+    reflects structural significance in the discovered subgraph.
+
+    **Crawl mode Mermaid styling (only when crawl_metadata is provided):**
+    In the Mermaid diagram, indicate importance visually: high-importance
+    repos (score 7+) get bold node borders using `style` directives,
+    medium-importance (3-6) get normal borders, and low-importance (1-2)
+    get dashed borders. Include the depth level in node labels (e.g.,
+    `orders-api [d1]` for depth 1).
+
     ### Step 4: Incremental Merge (if existing topology provided)
 
     If existing topology data was provided above, merge as follows:
