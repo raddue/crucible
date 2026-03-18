@@ -222,6 +222,168 @@ Highlight flagged items:
 
 **Offer to commit output** to `docs/pathfinder/<org>/` (or combined directory for multi-org).
 
+## Crawl Mode
+
+Crawl mode starts from a seed repo and discovers connected services by tracing dependencies bidirectionally. Unlike full scan (which enumerates an entire org top-down), crawl mode follows dependency threads from a known starting point. Use for large orgs (100+ repos) where full enumeration is impractical.
+
+Named phases: **Pre-flight** → **Seed** → **Crawl** → **Tier 2 (opt-in)** → **Synthesis** → **Report**
+
+### Pre-flight
+
+- Same pre-flight checks as full scan: `gh auth status`, rate limit check, org access verification for seed org + all `--orgs`
+- Verify seed repo exists: `gh repo view <org>/<repo>`. If not found, stop with clear message: "Seed repo `<org>/<repo>` not found or inaccessible."
+- **Code search availability check:** For each org in `--orgs`, test code search with `gh api search/code -f q="test org:<org>" --jq '.total_count'`. If 403/422, warn: "Code search unavailable for `<org>`. Reverse search will not cover this org." Offer to continue with forward-only crawl.
+- **Single-org notice:** If `--orgs` is omitted, display: "Reverse search will only cover the `<seed-org>` org. To discover cross-org callers, add `--orgs org1,org2`. Continue with single-org reverse search?"
+- **Reverse search time estimate:** Based on org repo count and estimated signals per repo, display: "Estimated reverse search: ~N API calls across M orgs. At GitHub's code search rate (10 req/min), this may take ~X minutes."
+- Initialize state file at `/tmp/pathfinder-state.json` with `"mode": "crawl"`
+
+### Seed
+
+- Clone seed repo following full scan cloning rules (local resolution in `../`, large repo handling, clone to `/tmp/pathfinder/<org>/<repo>/`)
+- Run full Tier 1 analysis on seed using `./tier1-analyzer-prompt.md` — outputs both standard edge data AND identity signals
+- Extract all outbound references (forward edges) and identity signals from Tier 1 output
+- **Seed with no manifests fallback:** If Tier 1 returns zero outbound edges and no identity signals beyond the repo name, inform user: "Seed repo has no detectable dependencies or identity signals beyond its name. Reverse search will use repo name only. Results may be limited." Proceed with repo-name-only reverse search.
+
+### Cloning
+
+Crawl mode inherits all full scan cloning rules:
+- **Local resolution:** Check `../` for existing clones matching repo names before cloning
+- **Large repos (>1GB disk usage):** Skip clone, manifest-only scan. Inform user.
+- **Clone path:** `/tmp/pathfinder/<org>/<repo>/` — same convention as full scan
+- **Clone persistence:** Clones are NOT cleaned up between depth levels. The `clone_paths` map in the state file tracks all cloned repos. When a repo appears in the frontier that's already in `clone_paths`, skip cloning.
+- **Clone failure:** Skip repo, log error, continue with remaining repos. Report to user.
+
+### Crawl (Iterative Discovery)
+
+```
+frontier = [seed_repo]
+discovered = {}
+depth = 0
+
+while frontier is not empty AND depth < max_depth:
+    next_frontier = []
+    for each repo in frontier:
+        # Forward: what does this repo call?
+        forward_refs = analyze_outbound(repo)  # Tier 1 analysis (reused)
+
+        # Reverse: who calls this repo? (inline, not a separate phase)
+        identity = repo.identity_signals  # from Tier 1 output
+        reverse_refs = search_orgs_for_references(identity, orgs)
+
+        # Resolve references to actual repos
+        resolved = resolve_references(forward_refs + reverse_refs)
+
+        for each new_repo in resolved:
+            if new_repo not in discovered:
+                score = compute_importance(new_repo, signal_sources)
+                discovered[new_repo] = {depth: depth+1, found_via: ..., importance: score}
+                next_frontier.append(new_repo)
+
+    # Sort frontier by importance — structurally important repos analyzed first
+    frontier = sort_by_importance(next_frontier)
+    depth += 1
+
+    # Adaptive depth: if all new candidates score below LOW_THRESHOLD, recommend termination
+    if max(score for repo in next_frontier) < LOW_THRESHOLD:
+        "All new repos at depth N are low-confidence single-signal matches. Recommend synthesis. Continue anyway?"
+
+    # Checkpoint: present discoveries + batched unresolved references to user
+    "Depth 2 complete: discovered 8 new repos (total: 14). Continue to depth 3?"
+```
+
+**Key details:**
+- Each depth level is a wave — clone all new repos, analyze in parallel (max 10 concurrent, same as full scan)
+- **User checkpoint after each depth level** — user can stop, exclude repos, or continue
+- Forward analysis reuses the existing Tier 1 analyzer agents unchanged
+- **Reverse search happens inline** during each crawl iteration (not as a separate phase) — dispatched via `./reverse-search-prompt.md`
+- State file updated after each repo completes (compaction-safe)
+- Clones persist across depth levels — `clone_paths` in state file prevents re-cloning
+
+### Bidirectional Analysis
+
+Each discovered repo gets two types of analysis:
+
+- **Fan-out (forward):** Analyze the repo's manifests/code to find what it calls — same as existing Tier 1/Tier 2 analysis
+- **Fan-in (reverse):** Search across specified orgs for repos that reference this repo — uses identity signals from Tier 1 output
+
+**Why bidirectional matters:** If Service A calls Service B, but Service B has no reference back to Service A, a forward-only crawl seeded from Service B would never discover Service A. Fan-in fixes this by searching the org for references TO each discovered repo.
+
+### Reference Resolution
+
+Layered confidence strategy for mapping references to actual repos:
+
+| Strategy | Confidence |
+|----------|-----------|
+| Exact package match (go.mod, package.json) | HIGH |
+| Docker image match | HIGH |
+| Proto import match | HIGH |
+| Env var hostname = repo name | MEDIUM |
+| Env var hostname prefix match | LOW |
+| Code search string match | LOW |
+
+### Cross-Org Resolution
+
+When `--orgs` includes multiple orgs, resolution searches all of them. A reference to `payments-service` checks `org1/payments-service`, `org2/payments-service`, etc. If found in exactly one org, auto-resolve. If found in multiple, add to the ambiguous queue.
+
+### False Positive Mitigation for Reverse Search
+
+- Exclude archived repos
+- Exclude the repo being searched for (self-references)
+- Exclude test/mock/example directories
+- Require 2+ distinct references in a repo to count as a real edge (single mention = LOW confidence, noted but not auto-followed)
+- Exclude well-known external service names (e.g., a repo named `redis` shouldn't match every Redis client config)
+
+### Frontier Prioritization
+
+**Scoring function (orchestrator logic, no additional API calls):**
+- **Signal density:** How many distinct signals point to this candidate? (1 signal = 1pt, 2-3 = 3pts, 4+ = 5pts)
+- **Signal diversity:** Discovered via multiple independent signal types? (bonus 2pts) vs single type (0pts)
+- **Cross-cluster bridging:** Candidate's referrers span different already-identified clusters? (bonus 3pts)
+
+**Score ranges:** Minimum 1pt, maximum 10pts.
+
+**LOW_THRESHOLD = 2** — A repo scoring 2 or below was discovered by a single signal with no diversity or bridging bonus.
+
+- Frontier sorted by score — high-importance repos analyzed first within each wave
+- Score breakdown logged in state file and visible at checkpoints for transparency
+- **Adaptive depth termination:** If the highest-scored candidate in a wave falls below LOW_THRESHOLD, recommend termination at the user checkpoint. Adaptive termination is always a recommendation, never automatic.
+
+### Ambiguous Reference Handling
+
+When a reference cannot be auto-resolved or has LOW confidence, queue for user input.
+
+- Batched at end of each depth level and presented together at checkpoint
+- User options per reference: skip, enter repo name, search orgs, pick from candidates
+- **Resolution persistence:** User decisions stored in state file's `unresolved` array with `resolution` field — survives compaction
+
+### Tier 2 (Opt-in)
+
+Tier 2 deep code scanning is offered after all crawl depth levels complete, before synthesis:
+
+> "Crawl complete. Discovered N repos across M depth levels with K edges. Would you like to run a deep code scan on all/selected repos for additional edges?"
+
+User options: all repos, selected repos, or skip.
+
+### Synthesis (Crawl)
+
+- Dispatch Opus synthesis agent using `./synthesis-prompt.md` with crawl-specific augmentation
+- Standard inputs same as full scan plus: `"mode": "crawl"`, `"seed": "<org>/<repo>"`, `crawl_metadata` map
+- **Per-repo JSON augmentation:** Before dispatching synthesis, the orchestrator annotates each per-repo JSON file with a `"crawl"` metadata block containing `depth`, `found_via`, `importance`, and `signal_sources` from the state file's discovered map. This keeps the Tier 1 analyzer unchanged — crawl metadata is added by the orchestrator after analysis.
+- Produces discovery path section in report.md, uses importance scores for cluster weighting and Mermaid node sizing
+
+### Merge Rules (Crawl)
+
+- Edge identity matching same as full scan: `source + target + type + label`, confidence takes max, evidence unions
+- **No stale-marking** for crawl merges — crawl results are intentionally partial. Stale-marking only applies to full scan mode.
+- Crawl provenance preserved in topology.json's `crawl_metadata` section
+- Reverse-search edges are new edge types that full scan doesn't produce; they merge normally
+
+### Output Directories (Crawl)
+
+- **Single-org crawl:** `docs/pathfinder/<org-name>/crawl-<seed-repo>/`
+- **Multi-org crawl:** `docs/pathfinder/<combined-orgs>/crawl-<seed-repo>/` (alpha-sorted, `+`-joined)
+- **Persistence path:** `~/.claude/memory/pathfinder/<org-name>/topology.json` (same as full scan — crawl results merge into unified topology)
+
 ## Query Mode
 
 Triggered by `crucible:pathfinder query <type> <target>`.
