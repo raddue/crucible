@@ -261,7 +261,7 @@ gh search prs --repo {org}/{repo} --merged-at ">={baseline_date}" --json number,
 
 Crawl diff state adds `seed`, `orgs`, `max_depth`, `current_depth`, `frontier` — same fields as crawl mode, nested under `"diff_type": "crawl"`.
 
-**Phases:** `pre-flight` -> `discovery` -> `rescan-tier1` -> `rescan-tier2` (if opted in) -> `synthesis` -> `diff` -> `report`
+**Phases:** `pre-flight` -> `discovery` -> `rescan-tier1` -> `rescan-tier2` (if --tier 2) -> `synthesis` -> `diff` -> `attribution` -> `report`
 
 **Compaction recovery:** Read state file, branch on `mode: "diff"`. Resume from current phase. Per-repo results on disk survive compaction. The baseline topology is always available at the persistence path (never modified mid-run — only updated after synthesis completes).
 

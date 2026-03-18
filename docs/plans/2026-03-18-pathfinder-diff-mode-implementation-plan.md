@@ -139,7 +139,7 @@ After this task, crawl mode instructions include writing the snapshot. The snaps
 **Complexity:** Medium
 **Files:** 1 file
 - `skills/pathfinder/SKILL.md`
-**Dependencies:** Task 2, Task 3
+**Dependencies:** Task 2, Task 3 (sequencing only — avoids concurrent edits to SKILL.md, not a logical dependency)
 
 This task adds the top-level diff mode declaration to SKILL.md. It does NOT add the full diff procedure — that comes in later tasks. This task establishes the mode, invocation syntax, model assignments, and state schema so later tasks can reference them.
 
@@ -280,6 +280,12 @@ confidence shifts, cluster restructuring, and rename detection.
 `[PASTE: If diff_type is "crawl", paste the crawl snapshot JSON from
 ~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json.
 If not crawl diff, paste "N/A — not a crawl diff."]`
+
+### Scan Metadata (Rescan Modes Only)
+
+`[PASTE: JSON with repos_total, repos_reused, repos_rescanned counts
+from the orchestrator's discovery phase. For file-comparison mode,
+paste "N/A".]`
 
 ---
 
@@ -426,6 +432,7 @@ services in the current topology.
   with a summary noting "Both topologies are empty"
 - Every array in the output must be present even if empty (use `[]`)
 - Do not invent changes — only report differences that exist in the data
+- Do NOT include `caused_by` fields — causal attribution is performed by the orchestrator after your output
 
 ---
 
@@ -561,6 +568,8 @@ Add after the Discovery subsection:
 
 Only repos in `repos_to_rescan` (changed + new) are cloned and analyzed. This reuses the existing Tier 1 analysis infrastructure.
 
+**If `repos_to_rescan` is empty** (all repos unchanged): skip the entire rescan phase. Proceed directly to synthesis with all results loaded from the persistence path. The diff will compare the baseline against the reconstructed topology (which should be identical, producing an empty diff).
+
 1. **Local resolution:** Check `../` for existing local clones of repos to rescan (same as full scan).
 2. **Clone repos to rescan:** Clone changed/new repos to `/tmp/pathfinder/<org>/<repo>/` using the same cloning rules as full scan (large repo handling, sequential cloning, state file updates).
 3. **Dispatch Tier 1 agents** in waves of max 10 concurrent, using `./tier1-analyzer-prompt.md` (unchanged). Each agent receives the same inputs as full scan Tier 1.
@@ -587,7 +596,7 @@ After rescan completes, merge reused + fresh per-repo results into a new topolog
 
 1. **Collect all per-repo JSON:** For reused repos, load from `~/.claude/memory/pathfinder/<org>/repos/<repo-name>.json`. For rescanned repos, load from `/tmp/pathfinder/<org>/repos/<repo-name>.json`.
 2. **Dispatch synthesis agent** using `./synthesis-prompt.md` (unchanged) with the collected per-repo results. Pass the existing topology.json as the incremental merge baseline.
-3. **For crawl diffs:** Pass crawl metadata (seed, depth, importance) same as regular crawl synthesis.
+3. **For crawl diffs:** Pass crawl metadata (seed, depth, importance) same as regular crawl synthesis. **Crawl diff synthesis inherits crawl mode's merge rules: no stale-marking of repos absent from the re-crawl.** Crawl results are intentionally partial — only repos discovered during the crawl are present. Do NOT mark missing repos as stale.
 4. **Synthesis produces a new topology.json** written to both the output directory and the persistence path. This updates the persisted topology — running diff keeps your topology fresh.
 5. **For crawl diffs:** Also write an updated crawl snapshot to `~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json`.
 6. The new topology.json becomes the "current" topology for the diff phase.
@@ -620,7 +629,8 @@ After the Diff Analyzer produces the structured diff, enrich edge-level changes 
 **Skip this step entirely for file-comparison mode** (`--baseline`/`--current`) — no cloned repos are available.
 
 **Scope:** Attribution applies to:
-- **Edge additions:** Each added edge's evidence points to a file in a rescanned repo.
+- **Edge-level changes** (additions, confidence upgrades, confidence degrades, evidence changes): Each edge's evidence points to a file in a rescanned repo.
+- **Removed edges in rescanned repos:** Run git log on the removed edge's evidence file — the log shows commits that deleted or modified the reference. For removed edges in repos NOT rescanned (or repos removed entirely), set `caused_by` to `null`.
 - **Service additions:** Attributed to the repo's recent commits overall.
 - **Does NOT apply to:** Service reclassifications, confidence changes, cluster changes, crawl-specific metadata changes (these are derived computations, not file-level changes).
 
