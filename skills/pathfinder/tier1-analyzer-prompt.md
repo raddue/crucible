@@ -79,13 +79,26 @@ Scan: `Dockerfile`, `k8s/**/*.yaml`, `helm/**/*.yaml`, `serverless.yml`, `templa
 - Extract exposed ports, base images, resource requests
 - Kafka/RabbitMQ/SQS topic/queue names — note whether producer or consumer
 
-### 5. Monorepo Sub-Services
+### 5. Identity Signals (for Crawl Mode Reverse Search)
+
+Extract identity signals that other repos might use to reference this repo. These are used by crawl mode's reverse search to find fan-in dependencies. Collect ALL of the following that are present:
+
+1. **Repo name** — the repo's short name (always present)
+2. **Package names** — from package.json `name` field, go.mod `module` path, pyproject.toml `[project] name`, Cargo.toml `[package] name`
+3. **Proto service names** — from `service` declarations in `.proto` files
+4. **Docker image names** — from Dockerfile metadata, docker-compose service names, or CI/CD build configs
+5. **Kafka topics produced** — topic names where this repo is a producer (from infrastructure scan above)
+6. **API base paths** — from OpenAPI/Swagger specs (e.g., `/api/v1/payments`)
+
+Each signal should include a `type` and `value` field.
+
+### 6. Monorepo Sub-Services
 
 If monorepo detected, enumerate sub-services:
 
 - Each directory containing a Dockerfile or listed as a workspace member = separate service node
 - Name as `<repo>/<subdir>` (e.g., `platform/services/auth`)
-- Run the above scans (steps 1-4) per sub-service directory
+- Run the above scans (steps 1-5) per sub-service directory
 
 ---
 
@@ -138,6 +151,14 @@ Output valid JSON to stdout:
   "unresolved": [
     { "reference": "UNKNOWN_SERVICE_URL", "file": ".env.example", "line": 15, "reason": "No matching repo found" }
   ],
+  "identity_signals": [
+    { "type": "repo_name", "value": "payments-service" },
+    { "type": "package_name", "value": "@acme/payments-client" },
+    { "type": "docker_image", "value": "acme/payments-service" },
+    { "type": "proto_service", "value": "acme.payments.v1.PaymentsService" },
+    { "type": "kafka_topic", "value": "payment-events" },
+    { "type": "api_base_path", "value": "/api/v1/payments" }
+  ],
   "scan_metadata": {
     "files_scanned": 8,
     "duration_estimate": "fast",
@@ -156,6 +177,7 @@ Output valid JSON to stdout:
 - External packages (express, lodash, etc.) are ignored for edge detection
 - If a manifest is malformed, log the error and continue scanning other files
 - For monorepos, each sub-service is a separate entry in `sub_services`
+- The `identity_signals` array must always contain at least the repo name. If no other signals are found, that is acceptable — the repo name alone is the minimum.
 
 ---
 

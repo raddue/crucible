@@ -35,6 +35,20 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     [PASTE: Existing topology.json if incremental run — or "No prior topology data."]
 
+    ## Crawl Metadata (Crawl Mode Only)
+
+    [PASTE: If mode is "crawl", paste the following. If mode is "full-scan", paste "N/A — full scan mode."]
+
+    - `"mode": "crawl"` — indicates this synthesis is for crawl mode results
+    - `"seed": "<org>/<repo>"` — the starting repo for the crawl
+    - `"crawl_metadata"` — a JSON map of `repo -> {depth, found_via, importance, signal_sources}` extracted from the state file's discovered map. Example:
+      ```json
+      {
+        "acme/funding-api": { "depth": 0, "found_via": "seed", "importance": 10, "signal_sources": [] },
+        "acme/payments-service": { "depth": 1, "found_via": "forward:env_var:PAYMENTS_SERVICE_URL", "importance": 8, "signal_sources": [{"type": "env_var", "source_repo": "acme/funding-api"}] }
+      }
+      ```
+
     ## Your Job
 
     Read all per-repo result files from the provided paths, then execute
@@ -84,6 +98,21 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     Clusters are always recomputed from scratch on the full edge set.
 
+    **Crawl mode cluster weighting (only when crawl_metadata is provided):**
+    When importance scores are available from crawl_metadata, use them to
+    influence cluster detection: high-importance repos (score 7+) that share
+    even a single edge should be considered for clustering (lower the 2-edge
+    threshold to 1 for high-importance pairs). Name clusters after the
+    highest-importance service rather than most-connected, since importance
+    reflects structural significance in the discovered subgraph.
+
+    **Crawl mode Mermaid styling (only when crawl_metadata is provided):**
+    In the Mermaid diagram, indicate importance visually: high-importance
+    repos (score 7+) get bold node borders using `style` directives,
+    medium-importance (3-6) get normal borders, and low-importance (1-2)
+    get dashed borders. Include the depth level in node labels (e.g.,
+    `orders-api [d1]` for depth 1).
+
     ### Step 4: Incremental Merge (if existing topology provided)
 
     If existing topology data was provided above, merge as follows:
@@ -97,6 +126,12 @@ Agent tool (subagent_type: general-purpose, model: opus):
       confidence takes max, evidence is unioned, direction flagged if
       contradictory
     - **Clusters:** Always recomputed from scratch on the merged edge set
+
+    **Crawl-mode merge exception:** When the mode is "crawl", do NOT mark repos
+    absent from the crawl results as "stale". Crawl results are intentionally
+    partial (only discovered repos). Stale-marking only applies when mode is
+    "full-scan" (which is comprehensive). Crawl provenance is preserved as a
+    `crawl_metadata` section in topology.json that coexists with full scan data.
 
     If the existing topology field says "No prior topology data.", skip
     this step entirely.
@@ -158,6 +193,9 @@ Agent tool (subagent_type: general-purpose, model: opus):
     }
     ```
 
+    **Crawl mode addition to topology.json (only when crawl_metadata is provided):**
+    Add a `"crawl_metadata"` top-level field to topology.json preserving the seed, depth, found_via, importance, and signal_sources for each discovered repo. This section is additive and does not conflict with full scan data.
+
     Write topology.json to BOTH the output directory AND the persistence
     path.
 
@@ -209,6 +247,11 @@ Agent tool (subagent_type: general-purpose, model: opus):
       edges from per-repo results, scan errors
     - **Recommendations** — Suggestions for further investigation
       (unknown services, low-confidence edges, unresolved references)
+
+    **Crawl mode additions to report.md (only when mode is "crawl"):**
+    - **Discovery Path** — a tree visualization showing: seed -> depth 1 repos -> depth 2 repos, with the discovery signal that led to each repo (e.g., "found via forward:env_var:PAYMENTS_SERVICE_URL")
+    - **Importance Heatmap** — repos listed by importance score, used to weight cluster detection and size Mermaid nodes proportionally
+    - **Reverse Search Coverage** — which orgs were searched, which had code search available, how many signals were searched per repo
 
     #### File: `scan-log.json` — Scan Metadata
 
