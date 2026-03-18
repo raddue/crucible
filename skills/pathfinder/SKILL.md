@@ -99,6 +99,8 @@ Every status update must include:
   All repo names in `repos_completed`, `repos_remaining`, and `clone_paths` must use qualified `org/repo` format for multi-org disambiguation.
 
 - **Per-repo results:** `/tmp/pathfinder/<org>/repos/<repo-name>.json` -- written immediately on agent completion, survives compaction.
+- **Per-repo persistence:** `~/.claude/memory/pathfinder/<org>/repos/<repo-name>.json` -- durable copy of per-repo results. Written alongside the `/tmp/` copy after each Tier 1/Tier 2 analysis completes. Used by diff mode's smart rescan to skip re-analysis of unchanged repos across sessions.
+- **Crawl snapshot:** `~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json` -- written after each crawl completes. Contains the crawl-specific topology with full `crawl_metadata` (importance scores, discovery paths, depth info). `<seed-repo>` is the short repo name only (e.g., `crawl-funding-api`, NOT `crawl-acme/funding-api`). Used as the baseline for crawl diff mode's crawl-specific change categories.
 - **Clone directory:** `/tmp/pathfinder/<org>/<repo>/` -- shallow clones performed by orchestrator.
 - **Output directory:** `docs/pathfinder/<org-name>/` (single org) or `docs/pathfinder/<combined-name>/` (multi-org, alpha-sorted org names joined by `+`, e.g., `acme-infra+acme-platform`).
 - **Persistence path:** `~/.claude/memory/pathfinder/<org-name>/topology.json` -- well-known absolute path, outside project-hash system. Multi-org stored under combined name.
@@ -179,6 +181,8 @@ Each agent receives:
 
 **Per-repo results:** Written to `/tmp/pathfinder/<org>/repos/<repo-name>.json` immediately on agent completion.
 
+**Per-repo persistence:** After writing to `/tmp/`, also copy each per-repo result to `~/.claude/memory/pathfinder/<org>/repos/<repo-name>.json`. This durable copy survives across sessions and is read by diff mode's smart rescan. The orchestrator performs this copy — subagents are unaware of the persistence path.
+
 **State updates:** After each agent completes, update the state file (move repo from `repos_remaining` to `repos_completed`).
 
 **Batching:** For orgs with 50+ repos, batch into waves of 10. Complete one wave before starting the next. Output a status update after each wave completes.
@@ -219,6 +223,7 @@ Each agent receives:
 - New edges added to the per-repo JSON
 - Existing edges upgraded if code evidence confirms config evidence (confidence boost)
 - Updated per-repo JSON files written to disk
+- **Per-repo persistence:** After Tier 2 merging updates the per-repo JSON in `/tmp/`, also copy the updated file to `~/.claude/memory/pathfinder/<org>/repos/<repo-name>.json`.
 
 ## Phase 3: Synthesis
 
@@ -346,6 +351,7 @@ while frontier is not empty AND depth <= max_depth:
 - Forward analysis reuses the existing Tier 1 analyzer agents unchanged
 - **Reverse search happens inline** during each crawl iteration (not as a separate phase) — dispatched via `./reverse-search-prompt.md`
 - State file updated after each repo completes (compaction-safe)
+- Per-repo persistence follows the same rule as full scan: after each Tier 1 analysis completes during crawl, copy the result to `~/.claude/memory/pathfinder/<org>/repos/<repo-name>.json`.
 - Clones persist across depth levels — `clone_paths` in state file prevents re-cloning
 
 ### Bidirectional Analysis
@@ -419,6 +425,7 @@ User options: all repos, selected repos, or skip.
 - Standard inputs same as full scan plus: `"mode": "crawl"`, `"seed": "<org>/<repo>"`, `crawl_metadata` map
 - **Per-repo JSON augmentation:** Before dispatching synthesis, the orchestrator annotates each per-repo JSON file with a `"crawl_metadata"` block containing `depth`, `found_via`, `importance`, and `signal_sources` from the state file's discovered map. This keeps the Tier 1 analyzer unchanged — crawl metadata is added by the orchestrator after analysis.
 - Produces discovery path section in report.md, uses importance scores for cluster weighting and Mermaid node sizing
+- **Crawl snapshot persistence:** After synthesis completes, write a crawl-specific snapshot to `~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json`. This file contains the full topology.json output from this crawl (including `crawl_metadata`) BEFORE merging with existing full-scan topology. The snapshot preserves crawl-specific data (importance, discovery paths, depth) that gets diluted in the merged topology.json. The `<seed-repo>` uses the short repo name (e.g., `funding-api`).
 
 ### Merge Rules (Crawl)
 
@@ -432,6 +439,7 @@ User options: all repos, selected repos, or skip.
 - **Single-org crawl:** `docs/pathfinder/<org-name>/crawl-<seed-repo>/` where `<seed-repo>` is the short repo name (e.g., `crawl-funding-api`, NOT `crawl-acme/funding-api`)
 - **Multi-org crawl:** `docs/pathfinder/<combined-orgs>/crawl-<seed-repo>/` (alpha-sorted, `+`-joined)
 - **Persistence path:** `~/.claude/memory/pathfinder/<org-name>/topology.json` (same as full scan — crawl results merge into unified topology)
+- **Crawl snapshot path:** `~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json` (durable, for crawl diff baselines)
 
 ## Query Mode
 
