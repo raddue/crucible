@@ -11,13 +11,15 @@ Maps an entire GitHub org's (or multiple orgs') service topology — what repos 
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Two modes:**
+**Three modes:**
 - **Full scan** — Three-phase execution: discover repos, analyze dependencies, synthesize topology.
 - **Query mode** — Graph traversal on persisted topology data. Answers upstream/downstream/blast-radius questions without re-scanning.
+- **Crawl mode** — Seed-based bidirectional discovery: start from one repo, trace dependencies forward and reverse to discover connected services. For large orgs where full enumeration is impractical.
 
 **Invocation:**
 - Full scan: `crucible:pathfinder <org1> [org2] [org3...]`
 - Query mode: `crucible:pathfinder query <type> <target>`
+- Crawl mode: `crucible:pathfinder crawl <org>/<repo> [--depth N] [--orgs org1,org2]`
 
 ## Model
 
@@ -26,6 +28,7 @@ Maps an entire GitHub org's (or multiple orgs') service topology — what repos 
 - **Analysis agents (Phase 2):** Sonnet via Agent tool (subagent_type: Explore)
 - **Synthesis agent (Phase 3):** Opus via Agent tool (subagent_type: general-purpose)
 - **Query handler:** Sonnet via Task tool (general-purpose)
+- **Reverse Searcher (Crawl mode):** Sonnet via Agent tool (subagent_type: general-purpose)
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -46,11 +49,22 @@ Every status update must include:
 
 > "Phase 3: Synthesis agent dispatched. Processing 45 per-repo result files to build unified topology."
 
+> "Crawl (Seed): Seed analysis complete — TypeScript API, 5 outbound refs, 3 identity signals. Dispatching reverse search + depth 1 forward analysis."
+
+> "Crawl (Depth 2): Wave complete — discovered 8 new repos (total: 14), 31 edges. Top-scored: acme/event-bus (importance: 9). Presenting checkpoint."
+
 ## Scratch and State
 
-- **State file:** `/tmp/pathfinder-state.json` -- written by orchestrator, updated after each repo completes. Schema:
+- **State file:** `/tmp/pathfinder-state.json` -- written by orchestrator, updated after each repo completes.
+
+  The state file uses a `"mode"` field to discriminate between full scan and crawl schemas:
+  - `"mode": "full-scan"` — existing full scan schema (unchanged)
+  - `"mode": "crawl"` — crawl mode schema (see Crawl Mode section below)
+
+  **Full scan state schema:**
   ```json
   {
+    "mode": "full-scan",
     "orgs": ["acme-platform"],
     "phase": "analysis-tier1",
     "repos_total": 45,
@@ -59,6 +73,29 @@ Every status update must include:
     "clone_paths": { "acme-platform/orders-api": "/tmp/pathfinder/acme-platform/orders-api/" }
   }
   ```
+
+  **Crawl mode state schema:**
+  ```json
+  {
+    "mode": "crawl",
+    "seed": "acme/funding-api",
+    "orgs": ["acme", "acme-infra"],
+    "max_depth": 3,
+    "current_depth": 2,
+    "current_phase": "crawl",
+    "discovered": {
+      "acme/funding-api": { "depth": 0, "found_via": "seed", "status": "analyzed", "importance": 10, "signal_sources": [] },
+      "acme/payments-service": { "depth": 1, "found_via": "forward:env_var:PAYMENTS_SERVICE_URL", "status": "analyzed", "importance": 8, "signal_sources": [{"type": "env_var", "source_repo": "acme/funding-api"}] }
+    },
+    "frontier": ["acme/billing-worker"],
+    "unresolved": [
+      { "signal": "NOTIFICATION_URL=http://notify:3000", "source_repo": "acme/payments-service", "type": "env_var", "resolution": "pending" }
+    ],
+    "clone_paths": { "acme/funding-api": "../funding-api", "acme/payments-service": "/tmp/pathfinder/acme/payments-service/" },
+    "edges_found": 12
+  }
+  ```
+
   All repo names in `repos_completed`, `repos_remaining`, and `clone_paths` must use qualified `org/repo` format for multi-org disambiguation.
 
 - **Per-repo results:** `/tmp/pathfinder/<org>/repos/<repo-name>.json` -- written immediately on agent completion, survives compaction.
@@ -484,6 +521,10 @@ All repo names must use qualified `org/repo` format for multi-org disambiguation
 3. **If Phase 3 (synthesis):** Re-dispatch synthesis with all available per-repo result files from `/tmp/pathfinder/<org>/repos/`.
 4. **If query mode:** No state needed -- read `topology.json` from persistence path and re-dispatch the query handler.
 
+**Crawl mode recovery:** The compaction recovery logic reads `/tmp/pathfinder-state.json` and branches on the `mode` field:
+- If `mode: "crawl"`: Read `current_phase` to determine resume point (seed, crawl, tier2, synthesis). Read `current_depth` and `frontier` for crawl progress. Skip repos with `status: "analyzed"` — resume from `status: "pending"`. Re-present only `unresolved` entries with `"resolution": "pending"`.
+- If `mode: "full-scan"`: Existing recovery logic (unchanged).
+
 **After recovery:** Output a status update to the user before continuing:
 > "Recovered from compaction. Phase 2 (Tier 1): 23/45 repos complete. Resuming from repo 24."
 
@@ -501,6 +542,13 @@ All repo names must use qualified `org/repo` format for multi-org disambiguation
 | Service name collision across orgs | Prevented by qualified `org/repo` identifiers -- no action needed. |
 | Malformed manifest file | Log the parse error, continue scanning other files in the repo. |
 | Agent context exhaustion | Agent reports partial results with `partial: true` flag. Orchestrator logs which repos need re-scanning. |
+| Seed repo not found | Stop with clear message: "Seed repo `<org>/<repo>` not found or inaccessible." |
+| Seed repo has no manifests | Warn user, proceed with repo-name-only reverse search |
+| Code search unavailable (403/422) | Warn: "Code search unavailable for `<org>`. Reverse search will not cover this org." Offer forward-only crawl. |
+| Code search rate limit hit | Pause reverse search, present partial results, offer to continue with forward-only crawl |
+| Code search returns 1000+ results | Signal too generic — skip it, log as "too broad", continue with other signals |
+| No new repos discovered at depth level | Natural termination — proceed to synthesis |
+| All references at a depth level are ambiguous | Present full unresolved list to user, don't auto-follow any |
 
 ## Persistence and Incremental Runs
 
@@ -530,6 +578,9 @@ Separate orgs (or org combinations) maintain separate output directories and per
 - Run more than 10 concurrent analysis agents
 - Skip narration between agent dispatches (Communication Requirement)
 - Clone repos larger than 1GB (use manifest-only scan instead)
+- Proceed past a crawl depth checkpoint without user confirmation
+- Auto-follow ambiguous references — always present to user at checkpoint
+- Mark non-crawled repos as stale when merging crawl results
 
 ## Red Flags
 
@@ -539,6 +590,9 @@ Separate orgs (or org combinations) maintain separate output directories and per
 - Running synthesis before all analysis agents complete
 - Exceeding 10 concurrent agents in any wave
 - Proceeding past any user gate without confirmation
+- Marking repos as stale during crawl mode merge (crawl is partial by design)
+- Skipping user checkpoints between crawl depth levels
+- Auto-resolving ambiguous references without user input
 
 ## Integration
 
@@ -557,6 +611,7 @@ Separate orgs (or org combinations) maintain separate output directories and per
 | Tier 2 Analyzer | Sonnet | Agent tool (Explore) | `./tier2-analyzer-prompt.md` |
 | Synthesis Agent | Opus | Agent tool (general-purpose) | `./synthesis-prompt.md` |
 | Query Handler | Sonnet | Task tool (general-purpose) | `./query-handler-prompt.md` |
+| Reverse Searcher | Sonnet | Agent tool (general-purpose) | `./reverse-search-prompt.md` |
 
 ## Prompt Templates
 
@@ -565,3 +620,4 @@ Separate orgs (or org combinations) maintain separate output directories and per
 - `./tier2-analyzer-prompt.md` -- Phase 2 Tier 2 deep code scanning
 - `./synthesis-prompt.md` -- Phase 3 cross-reference, edge resolution, cluster detection, output generation
 - `./query-handler-prompt.md` -- Query mode graph traversal and blast-radius computation
+- `./reverse-search-prompt.md` — Crawl mode reverse search across orgs for fan-in dependencies
