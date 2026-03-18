@@ -38,8 +38,8 @@ Diff mode's rescan is optimized for speed — it doesn't re-analyze the entire o
 2. **Delta detection:** Compare `pushedAt` (full ISO 8601 timestamp) against baseline topology's `metadata.last_push` per service. A repo is "changed" if its `pushedAt > baseline_service.metadata.last_push`. Unchanged repos reuse persisted per-repo JSON from `~/.claude/memory/pathfinder/<org>/repos/<repo>.json` (see Per-Repo Persistence below).
 3. **Selective Tier 1:** Only re-analyze repos that were pushed since the baseline scan, plus any newly discovered repos. Clone only new/changed repos.
 4. **Fallback:** If persisted per-repo JSON is missing for an unchanged repo (e.g., first diff run after upgrading from a pre-diff pathfinder version), re-analyze that repo anyway. Log as "cache miss" in diff-log.json.
-4. **Synthesis:** Merge reused + fresh per-repo results into a new topology.
-5. **Diff:** Compare new topology against baseline.
+5. **Synthesis:** Merge reused + fresh per-repo results into a new topology.
+6. **Diff:** Compare new topology against baseline.
 
 ### Crawl Diff Rescan
 
@@ -155,7 +155,9 @@ gh search prs --repo {org}/{repo} --merged-at ">={baseline_date}" --json number,
 }
 ```
 
-**No new subagent needed.** The orchestrator runs `git log` and `gh pr list` directly, then injects results into the diff JSON before report generation.
+**No new subagent needed.** The orchestrator runs `git log` and `gh search prs` directly, then injects results into the diff JSON before report generation.
+
+**Scope:** Attribution applies to **edge-level changes** (which carry evidence files) and **service additions** (attributed to the repo's recent commits). Service reclassifications, confidence changes, cluster changes, and crawl-specific metadata changes do NOT receive `caused_by` — these are derived computations, not file-level changes.
 
 **Value:**
 - Weekly drift reports become accountability reports — "here's what changed and who changed it"
@@ -188,12 +190,20 @@ gh search prs --repo {org}/{repo} --merged-at ">={baseline_date}" --json number,
   },
   "services": {
     "added": [{ "name": "acme/new-gateway", "type": "API" }],
-    "removed": [{ "name": "acme/old-proxy", "type": "API" }],
+    "removed": [],
+    "likely_renamed": [{ "old_name": "acme/old-proxy", "new_name": "acme/new-gateway", "type": "API" }],
     "reclassified": [{ "name": "acme/jobs-runner", "old_type": "Unknown", "new_type": "Worker" }],
     "confidence_changed": [{ "name": "acme/alerts-api", "old": "MEDIUM", "new": "HIGH" }]
   },
   "edges": {
-    "added": [{ "source": "...", "target": "...", "type": "HTTP" }],
+    "added": [{
+      "source": "acme/orders-api", "target": "acme/new-gateway", "type": "HTTP",
+      "caused_by": {
+        "repo": "acme/orders-api",
+        "commits": [{"sha": "abc123", "author": "alice", "message": "Add gateway integration", "date": "2026-03-16T14:22:00Z"}],
+        "pull_requests": [{"number": 247, "title": "Integrate new API gateway", "author": "alice", "merged_at": "2026-03-16T15:00:00Z"}]
+      }
+    }],
     "removed": [],
     "confidence_upgraded": [{ "edge": {}, "old": "MEDIUM", "new": "HIGH" }],
     "confidence_degraded": [],
@@ -321,16 +331,18 @@ The Diff Analyzer is lightweight — it receives two JSON objects and computes s
 32. Diff state survives compaction and resumes correctly from the current phase
 33. Crawl diffs respect depth checkpoints and do not stale-mark repos absent from the re-crawl
 34. Timestamped output directories accumulate diff history across multiple runs
-35. For rescan-based diffs, each structural change includes `caused_by` attribution linking to commits and PRs
+35. For rescan-based diffs, edge-level changes and service additions include `caused_by` attribution linking to commits and PRs. Service reclassifications, confidence changes, and cluster changes do not receive attribution.
 36. Causal attribution is skipped for file-comparison mode (`--baseline`/`--current`)
 37. Per-repo JSON results are persisted at `~/.claude/memory/pathfinder/<org>/repos/` by all pathfinder modes (prerequisite for smart rescan)
-38. Crawl snapshots are persisted at `~/.claude/memory/pathfinder/<org>/crawl-<seed>/snapshot.json` (prerequisite for crawl diff)
+38. Crawl snapshots are persisted at `~/.claude/memory/pathfinder/<org>/crawl-<seed-repo>/snapshot.json` (short repo name, e.g., `crawl-funding-api`) — prerequisite for crawl diff
 39. Service renames are detected (same language + framework + >50% edge overlap) and reported as `likely_renamed` rather than add+remove
 40. File comparison with mismatched modes (full-scan vs crawl) skips crawl-specific changes with a warning
 
 **Prerequisite note:** Acceptance criteria 37-38 require changes to existing full-scan and crawl modes (persisting per-repo JSON and crawl snapshots). These are implementation prerequisites, not new features — they extend existing persistence to support diff mode's optimizations.
 
 **Timestamp standardization note:** The `metadata.last_push` field in topology.json services must be a full ISO 8601 timestamp (matching GitHub API's `pushedAt` format), not a date-only string. If the existing Tier 1 analyzer produces date-only strings, it must be updated to emit full timestamps. The diff's delta detection compares `pushedAt > last_push` — format mismatch would produce incorrect results.
+
+**Implementation prerequisite:** The example JSON schemas in `tier1-analyzer-prompt.md` and `synthesis-prompt.md` currently show date-only strings for `last_push` (e.g., `"2026-03-15"`). These must be updated to show full ISO 8601 timestamps (e.g., `"2026-03-15T10:30:00Z"`) with explicit instructions to agents to emit timestamps, not dates. This is a prerequisite task in the implementation plan.
 
 ## Future Enhancements
 
