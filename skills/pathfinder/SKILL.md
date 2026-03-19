@@ -212,6 +212,7 @@ Each agent receives:
 - Classification from Phase 1 (type, language, confidence, monorepo status)
 - All repo names in this scan (for internal package detection)
 - Org names being scanned (for scope matching)
+- Contract Extraction setting ("enabled" — always, since Tier 1 extraction is zero extra cost)
 
 **Per-repo results:** Written to `/tmp/pathfinder/<org>/repos/<repo-name>.json` immediately on agent completion.
 
@@ -225,7 +226,7 @@ Each agent receives:
 
 After all Tier 1 agents complete, present initial findings to the user:
 
-> "Tier 1 complete. Found 68 services, 94 edges (79 HIGH, 15 MEDIUM). Here's the overview. Would you like me to run a deep code scan for additional edges?"
+> "Tier 1 complete. Found 68 services, 94 edges (79 HIGH, 15 MEDIUM). 42 services have parseable contracts (28 OpenAPI, 10 Proto, 4 GraphQL). Here's the overview."
 
 Include a summary table:
 - Edge types found (HTTP: N, Kafka: N, gRPC: N, shared-db: N, shared-package: N, infrastructure: N)
@@ -233,11 +234,14 @@ Include a summary table:
 - Monorepos with sub-service counts
 
 **User options:**
-- **Proceed to Tier 2** -- deep code scan for additional edges
-- **Skip to synthesis** -- generate topology from Tier 1 findings only
-- **Abort** -- stop without generating output
+1. **Proceed to synthesis** -- topology with provider contract inventory (already extracted), but no consumer-side verification
+2. **Run Tier 2 deep scan** -- discover additional edges from source code, no contract verification
+3. **Run Tier 2 + contract verification** -- deep scan AND cross-reference provider/consumer contracts
+4. **Abort** -- stop without generating output
 
-**Do NOT proceed to Tier 2 without explicit user opt-in.**
+Provider contracts from Tier 1 are always extracted when contract files are found (zero extra cost — Tier 1 already reads these files). Options 1 and 2 include provider contract data in topology.json but do not run consumer-side matching or mismatch detection. Consumer verification requires Tier 2 (option 3).
+
+**Do NOT proceed to Tier 2 or contract verification without explicit user opt-in at the checkpoint.**
 
 ### Tier 2 Analysis (Opt-in)
 
@@ -248,6 +252,7 @@ Each agent receives:
 - Tier 1 findings JSON for that repo (so it knows what edges were already found)
 - All repo and service names in this scan
 - Org names being scanned
+- Contract Extraction setting ("enabled" when user selects option 3, "disabled" otherwise)
 
 **Per-repo limits:** Max 200 source files scanned, max 50 grep matches retained. Prioritize recently modified files (by filesystem timestamps).
 
@@ -269,6 +274,7 @@ Dispatch a single synthesis agent via Agent tool (subagent_type: general-purpose
 - Output directory path
 - Persistence path
 - Existing topology.json contents (if incremental run, otherwise "No prior topology data.")
+- Contract Verification setting ("enabled" when user selected option 3, "disabled" otherwise)
 
 **The synthesis agent produces all output artifacts:**
 
@@ -277,6 +283,7 @@ Dispatch a single synthesis agent via Agent tool (subagent_type: general-purpose
 3. **`clusters/<cluster-name>.mermaid.md`** -- One Mermaid file per detected cluster with internal and external edges.
 4. **`report.md`** -- Human-readable summary: service inventory, dependency matrix, cluster descriptions, flagged items, recommendations.
 5. **`scan-log.json`** -- Scan metadata: per-repo timing, errors, skipped repos, rate limit usage.
+6. **`contract-risks.md`** -- Contract verification report: risk summary, ranked mismatch list, per-edge contract status table, contract inventory, and recommendations. Only generated when contract verification is enabled (Tier 2 + contract verification option).
 
 **Orchestrator verification:** After the synthesis agent completes, verify:
 - `topology.json` exists and is valid JSON
@@ -449,9 +456,9 @@ When a reference cannot be auto-resolved or has LOW confidence, queue for user i
 
 Tier 2 deep code scanning is offered after all crawl depth levels complete, before synthesis:
 
-> "Crawl complete. Discovered N repos across M depth levels with K edges. Would you like to run a deep code scan on all/selected repos for additional edges?"
+> "Crawl complete. Discovered N repos across M depth levels with K edges. Would you like to run a deep code scan on all/selected repos for additional edges? Add contract verification? (options: Tier 2 only, Tier 2 + contracts, skip)."
 
-User options: all repos, selected repos, or skip.
+User options: Tier 2 only, Tier 2 + contracts, or skip.
 
 ### Synthesis (Crawl)
 
@@ -762,6 +769,8 @@ Read topology data from `~/.claude/memory/pathfinder/<org-name>/topology.json` -
 | `blast-radius <service>` | If this service changes, what breaks? (transitive) | "What's the blast radius of changing payments-service?" |
 | `shared-infra <resource>` | Which services share this resource? | "Who else uses the shared-redis instance?" |
 | `path <service-A> <service-B>` | How do these services communicate? | "How does the frontend reach billing?" |
+| `consumers <provider> <endpoint\|rpc>` | List all services consuming a specific contract element | "Who calls POST /api/v1/payments on payments-api?" |
+| `safe-to-change <provider> <endpoint\|rpc>` | Compute blast radius of modifying/removing a contract element | "Is it safe to remove GET /api/v1/payments/legacy?" |
 
 ### Integration with Other Skills
 
@@ -890,6 +899,11 @@ All repo names must use qualified `org/repo` format for multi-org disambiguation
 | Partial rescan failure (some repos error) | Skip errored repos, flag in diff-log.json, note in report: "N repos could not be rescanned — changes in those repos may be missed" |
 | File comparison with mismatched orgs | Warn about overlap, diff only covers overlapping orgs |
 | File comparison with mismatched modes | Skip crawl-specific changes with warning |
+| OpenAPI spec has invalid YAML/JSON | Log parse error, skip contract, `contract_sync: "UNKNOWN"` |
+| Proto file has syntax errors | Log parse error, skip contract, `contract_sync: "UNKNOWN"` |
+| GraphQL schema has syntax errors | Log parse error, skip contract, `contract_sync: "UNKNOWN"` |
+| Contract file too large (>5000 lines) | Extract first 500 endpoints/RPCs, note truncation |
+| Consumer calls >100 endpoints on single provider | Retain all, but note in scan log |
 
 ## Persistence and Incremental Runs
 
@@ -925,6 +939,8 @@ Separate orgs (or org combinations) maintain separate output directories and per
 - Modify the baseline topology during a diff run (it is read-only until synthesis produces a new topology)
 - Skip causal attribution for rescan-based diffs (only skip for file-comparison mode)
 - Run reverse search for full-scan diffs (reverse search is crawl-only)
+- Run contract verification without explicit user opt-in (option 3 at Tier 1 checkpoint)
+- Set Contract Extraction to "enabled" in Tier 2 prompts unless the user selected option 3
 
 ## Red Flags
 
@@ -941,6 +957,9 @@ Separate orgs (or org combinations) maintain separate output directories and per
 - Skipping delta detection and re-analyzing all repos (defeats the smart rescan optimization)
 - Running attribution on file-comparison diffs (no cloned repos available)
 - Producing diff output without the visual Mermaid diagram
+- Running contract mismatch detection without Tier 2 data (consumer contracts require Tier 2)
+- Silently dropping phantom endpoint or deprecated usage mismatches instead of reporting them
+- Reporting schema drift for untyped consumers (too noisy — skip these)
 
 ## Integration
 
