@@ -32,7 +32,7 @@ crucible:pathfinder crawl <org>/<repo>     # same — opt-in at checkpoint
 | **GraphQL** | `schema.graphql`, `type Query/Mutation` | GraphQL client library calls (`useQuery`, `gql`, `graphql-request`) |
 | **TypeScript types** | Published `@org/shared-types` package | `import` from that package |
 
-Database migrations / shared-DB contracts are deferred to a future enhancement.
+Database migrations / shared-DB contracts are deferred to a future enhancement. TypeScript types covers npm-published shared type packages only. Shared type packages in other ecosystems (Go modules, Python pydantic models, Rust crates) are deferred.
 
 ## Tier 1 Extension — Provider Contract Extraction
 
@@ -93,7 +93,7 @@ Tier 1 already scans proto files and OpenAPI specs in Step 3 ("Proto and API Def
 
 **No contract files found** → `provider_contracts: []` — graceful, no error.
 
-**Rule added to Rules section:** "If contract verification is not enabled (orchestrator passes `contracts_enabled: false`), skip provider contract extraction entirely — do not add the `provider_contracts` field."
+**Contracts enabled flag:** The orchestrator adds a new input field to the Tier 1 prompt: `### Contract Extraction` with value `"enabled"` or `"disabled"`. When `"disabled"`, the agent skips provider contract extraction entirely and omits the `provider_contracts` field. The orchestrator sets this to `"enabled"` when the user selects option 3 at the Tier 1 checkpoint. Provider contracts are always extracted at zero extra cost (Tier 1 already reads these files), so `"enabled"` is the default even for options 1 and 2 — the data is collected but consumer verification only runs with Tier 2.
 
 ## Tier 2 Extension — Consumer Contract Extraction
 
@@ -157,7 +157,7 @@ This enables synthesis to match consumer contracts against the correct provider 
 
 **No consumer contracts detected** → `consumer_contracts: []` — graceful, no error.
 
-**Rule added:** "If contract verification is not enabled (orchestrator passes `contracts_enabled: false`), skip consumer contract extraction entirely."
+**Contracts enabled flag:** Same mechanism as Tier 1 — the orchestrator adds `### Contract Extraction` with value `"enabled"` to the Tier 2 prompt inputs when contract verification is selected. When absent or `"disabled"`, the agent skips consumer contract extraction.
 
 ## Synthesis Extension — Contract Verification
 
@@ -234,7 +234,7 @@ Extends query mode with two new query types that operate on persisted contract d
 
 ### `consumers` Query
 
-Traverses `contract_mismatches` and per-service `consumer_contracts` to find every service that calls the specified endpoint/RPC. Returns:
+Traverses edges in topology.json, checking each edge's persisted `consumed_contracts` field for the specified endpoint/RPC. Also checks `contract_mismatches` for mismatch detail. Returns:
 - List of consuming services with file/line evidence
 - Current `contract_sync` status for each consumer's edge
 - Whether the endpoint is marked deprecated
@@ -245,6 +245,8 @@ Combines `consumers` with blast-radius BFS:
 1. Find all direct consumers of the endpoint/RPC
 2. For each consumer, run transitive downstream BFS (same as existing blast-radius query)
 3. Return: direct consumer count, transitive impact count, severity assessment
+
+**Severity derivation:** 1-2 direct consumers = MEDIUM, 3+ direct consumers = HIGH.
 
 Example output:
 > "POST /api/v1/payments on acme/payments-api:
@@ -277,15 +279,24 @@ Add the two new query types to the query handler's routing logic. The handler re
 }
 ```
 
-**Edges gain optional `contract_sync` field:**
+**Edges gain optional `contract_sync` and `consumed_contracts` fields:**
 ```json
 {
   "source": "acme/orders-api",
   "target": "acme/payments-api",
   "type": "HTTP",
-  "contract_sync": "MISMATCH"
+  "contract_sync": "MISMATCH",
+  "consumed_contracts": {
+    "contract_type": "OpenAPI",
+    "endpoints": [
+      { "method": "POST", "path": "/api/v1/payments" },
+      { "method": "POST", "path": "/api/v1/payments/refund" }
+    ]
+  }
 }
 ```
+
+The `consumed_contracts` field persists the consumer-side contract data on each edge so that query mode can find all consumers of a given endpoint without re-reading per-repo files. Synthesis copies this from the Tier 2 `consumer_contracts` output during contract verification.
 
 **New top-level `contract_mismatches` array:**
 ```json
@@ -315,7 +326,7 @@ Add the two new query types to the query handler's routing logic. The handler re
 
 New output artifact alongside existing `report.md`:
 - **Risk summary** — total mismatches by category and severity
-- **Ranked mismatch list** — ordered by severity: phantom endpoints (HIGH) first, then version skew and deprecated usage (MEDIUM), then schema drift (MEDIUM)
+- **Ranked mismatch list** — ordered by severity: phantom endpoints (HIGH) first, then within MEDIUM: schema drift, version skew, deprecated usage
 - **Per-edge contract status table** — every edge with `contract_sync` status
 - **Contract inventory** — which services have contracts, which don't
 - **Recommendations** — "Add OpenAPI spec to acme/orders-worker (no contract found)"
@@ -338,11 +349,11 @@ At the existing Tier 1 checkpoint, the options expand:
 > "Tier 1 complete. Found 68 services, 94 edges (79 HIGH, 15 MEDIUM). 42 services have parseable contracts (28 OpenAPI, 10 Proto, 4 GraphQL).
 >
 > Options:
-> 1. **Proceed to synthesis** — topology only, no contract verification
-> 2. **Run Tier 2 deep scan** — discover additional edges from source code
-> 3. **Run Tier 2 + contract verification** — deep scan AND cross-reference contracts"
+> 1. **Proceed to synthesis** — topology with provider contract inventory (already extracted), but no consumer-side verification
+> 2. **Run Tier 2 deep scan** — discover additional edges from source code, no contract verification
+> 3. **Run Tier 2 + contract verification** — deep scan AND cross-reference provider/consumer contracts"
 
-Contract verification requires Tier 2 data for consumer-side extraction, so it is only available alongside Tier 2 (option 3). Provider contracts from Tier 1 are always extracted when contract files are found (zero extra cost — Tier 1 already reads these files), but consumer matching and mismatch detection require Tier 2.
+Provider contracts from Tier 1 are always extracted when contract files are found (zero extra cost — Tier 1 already reads these files). Options 1 and 2 include provider contract data in topology.json but do not run consumer-side matching or mismatch detection. Consumer verification requires Tier 2 (option 3).
 
 ## Crawl Mode Compatibility
 
@@ -391,6 +402,18 @@ Contract verification works transparently with crawl mode:
 54. Query mode `consumers <provider> <endpoint>` returns all services consuming the specified endpoint with evidence
 55. Query mode `safe-to-change <provider> <endpoint>` returns consumer count + transitive blast radius
 56. A provider with both OpenAPI and Proto contracts matches consumer contracts by the consumer's `contract_type` field, not by edge type alone
+
+## Implementation Checklist
+
+This design describes the feature architecture. The following prompt templates must be modified during implementation (not part of this design deliverable):
+
+| Template | Changes Required |
+|----------|-----------------|
+| `tier1-analyzer-prompt.md` | Add GraphQL file scanning, `provider_contracts` output field, contract extraction instructions in Step 3, `Contract Extraction` input field |
+| `tier2-analyzer-prompt.md` | Add GraphQL client grep patterns, `consumer_contracts` output field, method/path extraction from existing HTTP/gRPC matches, `Contract Extraction` input field |
+| `synthesis-prompt.md` | Add Step 2.5 (Contract Verification) between edge resolution and cluster detection, `consumed_contracts` on edges, `contract_mismatches` top-level array, `contract-risks.md` artifact |
+| `query-handler-prompt.md` | Add `consumers` and `safe-to-change` query types |
+| `SKILL.md` | Update Tier 1 checkpoint options, add contract verification documentation |
 
 ## Future Enhancements
 
