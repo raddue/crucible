@@ -49,6 +49,10 @@ Agent tool (subagent_type: general-purpose, model: opus):
       }
       ```
 
+    ## Contract Verification
+
+    [PASTE: "enabled" or "disabled" — when "enabled", run contract verification (Step 2.5) and generate contract-risks.md. When "disabled" or absent, skip contract verification entirely. Contract verification requires Tier 2 data (consumer contracts). If tier_depth is 1, only provider contract inventory is available — add contracts to services but skip mismatch detection.]
+
     ## Your Job
 
     Read all per-repo result files from the provided paths, then execute
@@ -83,6 +87,159 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     3. **Deduplicate.** Multiple evidence points for the same logical
        edge merge into one edge with accumulated evidence.
+
+    ### Step 2.5: Contract Verification (when Contract Verification input is "enabled")
+
+    Cross-reference provider and consumer contract data to detect mismatches.
+    Skip this step entirely if Contract Verification is "disabled" or absent.
+
+    #### Service Contract Inventory
+
+    For each service in the inventory, collect its `provider_contracts` from the
+    per-repo Tier 1 results. Add an optional `contracts` field to each service
+    in topology.json:
+
+    ```json
+    {
+      "name": "acme/payments-api",
+      "type": "API",
+      "contracts": [
+        {
+          "type": "OpenAPI",
+          "file": "docs/openapi.yaml",
+          "version": "2.1.0",
+          "endpoint_count": 12,
+          "deprecated_count": 1
+        }
+      ]
+    }
+    ```
+
+    If a service has no provider contracts, set `"contracts": []`. This field
+    is added even when tier_depth is 1 (provider inventory without mismatch
+    detection).
+
+    #### Edge Contract Matching (requires Tier 2 data)
+
+    For each resolved edge in the topology:
+
+    1. **Look up the provider** (target service) `provider_contracts` from its
+       per-repo Tier 1 results.
+    2. **Look up the consumer** (source service) `consumer_contracts` from its
+       per-repo Tier 2 results.
+    3. **Match by contract type** using this table:
+
+       | Consumer `contract_type` | Match against provider | Comparison |
+       |-------------------------|----------------------|------------|
+       | `OpenAPI` | Provider's `type: "OpenAPI"` contract | Compare consumed HTTP paths against OpenAPI spec endpoints |
+       | `Proto` | Provider's `type: "Proto"` contract | Compare consumed RPCs against proto service definitions |
+       | `GraphQL` | Provider's `type: "GraphQL"` contract | Compare consumed operations against schema Query/Mutation fields |
+       | `TypeScript` | Provider's `type: "TypeScript"` contract | Compare imported type names against exported types |
+
+       If no matching provider contract exists for the consumer's contract type,
+       set `contract_sync: "UNKNOWN"` with note "Provider has no [type] contract."
+
+    4. **Add fields to each edge** in topology.json:
+       - `contract_sync`: One of `"IN_SYNC"`, `"MISMATCH"`, `"UNKNOWN"`, `"NO_CONTRACT"`
+         - `IN_SYNC` — provider contract exists, consumer expectations match
+         - `MISMATCH` — one or more mismatches detected
+         - `UNKNOWN` — no contract data on one/both sides, or consumer uses only dynamic paths
+         - `NO_CONTRACT` — edge type has no parseable contract format (e.g., shared-infrastructure)
+       - `consumed_contracts`: Persists the consumer-side contract data on the edge so query mode can find all consumers of a given endpoint without re-reading per-repo files. Copy from the Tier 2 `consumer_contracts` entry for this edge's source-target pair.
+
+       Edge schema addition:
+       ```json
+       {
+         "source": "acme/orders-api",
+         "target": "acme/payments-api",
+         "type": "HTTP",
+         "contract_sync": "MISMATCH",
+         "consumed_contracts": {
+           "contract_type": "OpenAPI",
+           "endpoints": [
+             { "method": "POST", "path": "/api/v1/payments" },
+             { "method": "POST", "path": "/api/v1/payments/refund" }
+           ]
+         }
+       }
+       ```
+
+    #### Mismatch Detection
+
+    For each matched contract pair, detect these four categories of mismatch:
+
+    | Category | Severity | Detection |
+    |----------|----------|-----------|
+    | **Phantom endpoint/RPC** | HIGH | Consumer calls an endpoint/RPC not in the provider's contract definition |
+    | **Deprecated usage** | MEDIUM | Consumer calls an endpoint/RPC marked `deprecated: true` in the provider's contract |
+    | **Version skew** | MEDIUM | Consumer's imported package version doesn't match provider's published version. Annotate "may be benign — check changelog" |
+    | **Schema drift (typed only)** | MEDIUM | Consumer's generated types (`.d.ts`, `.pb.ts`) reference fields absent from provider's current schema. Only for repos with generated type definitions. |
+
+    **Skip (too noisy):** Schema drift for untyped consumers (JavaScript/Python
+    without type definitions), breaking change inference without schema diffing,
+    dynamic route inference.
+
+    Record each mismatch in a top-level `contract_mismatches` array in topology.json:
+
+    ```json
+    {
+      "contract_mismatches": [
+        {
+          "edge": { "source": "acme/orders-api", "target": "acme/payments-api", "type": "HTTP" },
+          "category": "phantom_endpoint",
+          "severity": "HIGH",
+          "detail": "Consumer calls POST /api/v1/payments/refund — endpoint not in provider's OpenAPI spec",
+          "provider": { "file": "docs/openapi.yaml", "version": "2.1.0" },
+          "consumer": { "file": "src/returns.ts", "line": 87 }
+        },
+        {
+          "edge": { "source": "acme/orders-api", "target": "acme/payments-api", "type": "HTTP" },
+          "category": "deprecated_usage",
+          "severity": "MEDIUM",
+          "detail": "Consumer calls GET /api/v1/payments/legacy — endpoint marked deprecated in provider's OpenAPI spec",
+          "provider": { "file": "docs/openapi.yaml" },
+          "consumer": { "file": "src/legacy-compat.ts", "line": 23 }
+        }
+      ]
+    }
+    ```
+
+    #### Contract Delta Propagation (incremental runs only)
+
+    If existing topology is provided (incremental run) and it contains
+    `contracts` and `consumed_contracts` data, compute a contract delta
+    between the prior and current contract surfaces. The delta produces
+    four lists:
+
+    - **Added endpoints/RPCs** — in current provider contracts but not in baseline
+    - **Removed endpoints/RPCs** — in baseline but not in current
+    - **Newly deprecated** — not deprecated in baseline, deprecated in current
+    - **New consumers** — edges in current `consumed_contracts` that weren't in baseline
+
+    Add a `contract_delta` field to topology.json:
+
+    ```json
+    {
+      "contract_delta": {
+        "added_endpoints": [{ "service": "acme/payments-api", "endpoint": "POST /api/v1/refunds", "type": "OpenAPI" }],
+        "removed_endpoints": [{ "service": "acme/payments-api", "endpoint": "GET /api/v1/payments/v1-legacy", "type": "OpenAPI" }],
+        "newly_deprecated": [{ "service": "acme/payments-api", "endpoint": "GET /api/v1/payments/legacy", "type": "OpenAPI" }],
+        "new_consumers": [{ "service": "acme/checkout", "endpoint": "POST /api/v1/payments", "provider": "acme/payments-api" }]
+      }
+    }
+    ```
+
+    If no prior topology exists or prior topology has no contract data,
+    skip delta computation — set `contract_delta: null`.
+
+    #### Graceful Degradation
+
+    - No contract files found -> `contracts: []`, edge gets `contract_sync: "NO_CONTRACT"`
+    - Contract file malformed/unparseable -> error already logged by Tier 1, `contract_sync: "UNKNOWN"`
+    - Consumer is untyped -> skip schema drift, still check phantom endpoints via URL matching
+    - Only one side of edge has contract data -> partial analysis, note which side is missing, `contract_sync: "UNKNOWN"`
+    - Dynamic consumer paths (`"path": "DYNAMIC"`) -> `contract_sync: "UNKNOWN"` with evidence logged
+    - Edge type has no contract format (shared-infra, shared-package) -> `contract_sync: "NO_CONTRACT"`
 
     ### Step 3: Cluster Detection
 
@@ -173,7 +330,16 @@ Agent tool (subagent_type: general-purpose, model: opus):
           "framework": "Express",
           "confidence": "HIGH",
           "status": "active",
-          "metadata": { "topics": [], "last_push": "2026-03-15T10:30:00Z" }
+          "metadata": { "topics": [], "last_push": "2026-03-15T10:30:00Z" },
+          "contracts": [
+            {
+              "type": "OpenAPI",
+              "file": "docs/openapi.yaml",
+              "version": "2.1.0",
+              "endpoint_count": 12,
+              "deprecated_count": 1
+            }
+          ]
         }
       ],
       "edges": [
@@ -186,7 +352,14 @@ Agent tool (subagent_type: general-purpose, model: opus):
           "label": "PAYMENTS_SERVICE_URL",
           "evidence": [
             { "file": ".env.example", "line": 12, "match": "PAYMENTS_SERVICE_URL=http://payments:8080" }
-          ]
+          ],
+          "contract_sync": "IN_SYNC",
+          "consumed_contracts": {
+            "contract_type": "OpenAPI",
+            "endpoints": [
+              { "method": "POST", "path": "/api/v1/payments" }
+            ]
+          }
         }
       ],
       "clusters": [
@@ -195,7 +368,9 @@ Agent tool (subagent_type: general-purpose, model: opus):
           "services": ["org/orders-api", "org/orders-worker", "org/orders-common"],
           "description": "Core order processing pipeline"
         }
-      ]
+      ],
+      "contract_mismatches": [],
+      "contract_delta": null
     }
     ```
 
@@ -264,6 +439,42 @@ Agent tool (subagent_type: general-purpose, model: opus):
     Include: per-repo timing, errors encountered, skipped repos, rate
     limit usage during the scan.
 
+    #### File: `contract-risks.md` — Contract Verification Report (when Contract Verification is "enabled")
+
+    Generate this file only when contract verification was enabled and at least
+    one edge has contract data. Include these sections:
+
+    - **Risk Summary** — Total mismatches by category and severity. Example:
+      "2 HIGH (phantom endpoints), 3 MEDIUM (1 deprecated usage, 1 version skew, 1 schema drift)"
+
+    - **Ranked Mismatch List** — Every mismatch ordered by severity: phantom
+      endpoints (HIGH) first, then within MEDIUM: schema drift, version skew,
+      deprecated usage. Each entry includes the edge (source -> target), category,
+      detail, provider file, and consumer file/line.
+
+    - **Per-Edge Contract Status Table** — Every edge with its `contract_sync`
+      status. Columns: Source, Target, Edge Type, Contract Sync, Detail.
+
+    - **Contract Inventory** — Which services have contracts (by type), which
+      don't. Example: "28 services have OpenAPI specs, 10 have Proto definitions,
+      4 have GraphQL schemas. 15 services have no parseable contracts."
+
+    - **Recommendations** — Actionable suggestions. Examples:
+      - "Add OpenAPI spec to acme/orders-worker (no contract found, 3 consumers detected)"
+      - "Update acme/checkout-service to stop calling deprecated GET /api/v1/payments/legacy"
+      - "Investigate phantom endpoint POST /api/v1/payments/refund called by acme/orders-api"
+
+    #### File: `contract-delta.md` — Contract Delta Report (incremental runs with prior contract data)
+
+    Generate this file only when contract delta data exists (incremental run
+    with prior contract data that contains `contracts` and `consumed_contracts`).
+    Include these sections:
+
+    - **Added Endpoints/RPCs** — New contract elements in current provider contracts not present in baseline
+    - **Removed Endpoints/RPCs** — Contract elements in baseline but absent from current provider contracts
+    - **Newly Deprecated** — Endpoints/RPCs not deprecated in baseline, now deprecated in current
+    - **New Consumers** — Edges in current `consumed_contracts` that were not in the prior topology
+
     ## Rules
 
     - Every service name must be qualified as `org/repo` to avoid
@@ -284,7 +495,8 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     1. `topology.json` first (source of truth — most critical)
     2. `report.md` second (human-readable findings)
-    3. Mermaid diagrams last (visual aids)
+    3. `contract-risks.md` third (contract verification findings)
+    4. Mermaid diagrams last (visual aids)
 
     Write each artifact to disk as soon as it is completed. Do not
     buffer all artifacts in memory — write incrementally so that
