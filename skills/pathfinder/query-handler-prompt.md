@@ -13,7 +13,7 @@ Task tool (general-purpose, model: sonnet):
     ## Query
 
     [PASTE: Query type -- one of: upstream, downstream, blast-radius,
-    shared-infra, path]
+    shared-infra, path, consumers, safe-to-change]
 
     ## Target
 
@@ -95,6 +95,68 @@ Task tool (general-purpose, model: sonnet):
     - If no path exists, report: "No communication path found between
       A and B."
 
+    ### 6. consumers <provider> <endpoint|rpc>
+
+    Find all services that consume a specific contract element (endpoint, RPC,
+    or GraphQL operation) from a provider service. Operates on the persisted
+    `consumed_contracts` field on edges and the `contract_mismatches` array in
+    topology.json — no re-scanning needed.
+
+    - Walk the edges array and collect every edge where `target` matches the
+      provider service AND `consumed_contracts` is present.
+    - For each matching edge, check the `consumed_contracts` field:
+      - For `contract_type: "OpenAPI"`: search `endpoints` array for a match
+        on both `method` and `path` against the queried endpoint.
+      - For `contract_type: "Proto"`: search `consumed_rpcs` array for a match
+        on `service` and `rpc` against the queried RPC.
+      - For `contract_type: "GraphQL"`: search `consumed_operations` array for
+        a match on `name` against the queried operation.
+    - For each matching consumer, also check the `contract_mismatches` array
+      for any mismatches on that edge related to the queried element.
+    - Return for each consumer:
+      - Service name (qualified `org/repo`)
+      - File and line evidence from `consumed_contracts`
+      - Current `contract_sync` status for the edge
+      - Any mismatches specific to the queried endpoint/RPC
+      - Whether the endpoint is marked deprecated in the provider's contract
+        (check the provider service's `contracts` field)
+    - If no consumers are found, return: "No consumers found for [endpoint]
+      on [provider]. This endpoint may be unused or consumers may not have
+      been scanned."
+
+    ### 7. safe-to-change <provider> <endpoint|rpc>
+
+    Compute the blast radius of modifying or removing a specific contract
+    element. Combines `consumers` lookup with transitive downstream BFS.
+
+    1. **Find all direct consumers** of the endpoint/RPC using the same
+       traversal as the `consumers` query above.
+    2. **For each direct consumer**, run transitive downstream BFS — same
+       algorithm as the existing `blast-radius` query (follow edges where the
+       consumer is the `target`, using a visited set for cycle detection).
+    3. **Compute severity:**
+       - 0 direct consumers = "Safe to change — no consumers detected"
+       - 1-2 direct consumers = MEDIUM risk
+       - 3+ direct consumers = HIGH risk
+    4. **Return:**
+       - Direct consumer count and list (with file/line evidence)
+       - Transitive downstream service count
+       - Severity assessment with rationale
+       - Whether the endpoint is already marked deprecated
+       - Recommendation: if deprecated and 0 consumers, "Safe to remove."
+         If not deprecated and has consumers, "Mark as deprecated first,
+         then coordinate with N consuming teams."
+
+    **Cycle detection is mandatory** for the transitive BFS portion. Use
+    a visited set. Report cycles explicitly.
+
+    Example output format:
+    > "POST /api/v1/payments on acme/payments-api:
+    > - 4 direct consumers: orders-api, checkout-service, billing-worker, admin-portal
+    > - 23 transitive downstream services affected
+    > - Severity: HIGH — removing this endpoint would break 4 services
+    > - Recommendation: Mark as deprecated first, then coordinate with 4 consuming teams."
+
     ## Rules
 
     - **Cycle detection is mandatory** for blast-radius and path queries.
@@ -113,6 +175,11 @@ Task tool (general-purpose, model: sonnet):
     - Service names are always qualified as `org/repo`. Match query
       targets against both the full qualified name and the short repo
       name (for convenience), but report results using qualified names.
+    - For `consumers` and `safe-to-change` queries, if the topology.json has no
+      `consumed_contracts` data on edges (contract verification was never run),
+      return: "No contract data available. Run pathfinder with contract
+      verification enabled (Tier 2 + contract verification option) to populate
+      contract data."
 
     ## Output Format
 
@@ -143,4 +210,29 @@ Task tool (general-purpose, model: sonnet):
     ### Raw Data
     [JSON array of relevant edges for programmatic consumption, copied
     verbatim from the topology data -- do not fabricate or modify]
+
+    **For `consumers` and `safe-to-change` queries**, use this adapted structure:
+
+    ### Results
+
+    [For `consumers`: list of consuming services with evidence.
+     For `safe-to-change`: direct consumers + transitive impact + severity.]
+
+    ### Details
+
+    | Service | Contract Type | Endpoint/RPC | File | Line | Contract Sync |
+    |---------|--------------|--------------|------|------|---------------|
+    | org/repo-name | OpenAPI | POST /api/v1/payments | src/checkout.ts | 42 | IN_SYNC |
+
+    ### Blast Radius (safe-to-change only)
+
+    | Metric | Value |
+    |--------|-------|
+    | Direct consumers | N |
+    | Transitive downstream | N |
+    | Severity | HIGH/MEDIUM/LOW |
+
+    ### Warnings
+    [Any of: endpoint is deprecated, contract_sync is UNKNOWN for some consumers,
+    stale services in the consumer list, cycles detected in transitive BFS]
 ```
