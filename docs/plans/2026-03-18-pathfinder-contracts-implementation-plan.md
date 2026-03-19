@@ -463,6 +463,28 @@ Add a new "Step 2.5: Contract Verification" to the synthesis prompt, between edg
    4. Mermaid diagrams last (visual aids)
    ```
 
+6. **Add Contract Delta Propagation** (innovation addition). After the mismatch detection logic in Step 2.5, add a sub-step: "If existing topology is provided (incremental run) and it contains `contracts` and `consumed_contracts` data, compute a contract delta between the prior and current contract surfaces." The delta produces four lists:
+   - **Added endpoints/RPCs** — in current provider contracts but not in baseline
+   - **Removed endpoints/RPCs** — in baseline but not in current
+   - **Newly deprecated** — not deprecated in baseline, deprecated in current
+   - **New consumers** — edges in current `consumed_contracts` that weren't in baseline
+
+   Add a `contract_delta` field to topology.json:
+   ```json
+   {
+     "contract_delta": {
+       "added_endpoints": [{ "service": "acme/payments-api", "endpoint": "POST /api/v1/refunds", "type": "OpenAPI" }],
+       "removed_endpoints": [{ "service": "acme/payments-api", "endpoint": "GET /api/v1/payments/v1-legacy", "type": "OpenAPI" }],
+       "newly_deprecated": [{ "service": "acme/payments-api", "endpoint": "GET /api/v1/payments/legacy", "type": "OpenAPI" }],
+       "new_consumers": [{ "service": "acme/checkout", "endpoint": "POST /api/v1/payments", "provider": "acme/payments-api" }]
+     }
+   }
+   ```
+
+   Add a **`contract-delta.md`** artifact alongside `contract-risks.md`, generated only when delta data exists (incremental run with prior contract data). Sections: added endpoints, removed endpoints, newly deprecated, new consumers.
+
+   If no prior topology exists or prior topology has no contract data, skip delta computation — set `contract_delta: null`.
+
 **Commit:** `feat: add contract verification step to synthesis prompt`
 
 ---
@@ -643,7 +665,13 @@ Update SKILL.md to document the contract verification feature: expanded Tier 1 c
    Provider contracts from Tier 1 are always extracted when contract files are found (zero extra cost — Tier 1 already reads these files). Options 1 and 2 include provider contract data in topology.json but do not run consumer-side matching or mismatch detection. Consumer verification requires Tier 2 (option 3).
    ```
 
-3. **Add contract error handling rows.** In the Error Handling table, add these rows:
+3. **Update orchestrator dispatch descriptions** to wire the contract flags. In the Tier 1 Analysis section (around line 172), under "Each agent receives:", add: `Contract Extraction setting ("enabled" — always, since Tier 1 extraction is zero extra cost)`. In the Tier 2 Analysis section (around line 207), under "Each agent receives:", add: `Contract Extraction setting ("enabled" when user selects option 3, "disabled" otherwise)`. In the Phase 3 Synthesis section (around line 225), under "Input:", add: `Contract Verification setting ("enabled" when user selected option 3, "disabled" otherwise)`.
+
+4. **Preserve the existing guardrail line** `"Do NOT proceed to Tier 2 without explicit user opt-in."` when replacing the checkpoint options. Update it to: `"Do NOT proceed to Tier 2 or contract verification without explicit user opt-in at the checkpoint."`.
+
+5. **Update crawl mode Tier 2 opt-in** (around line 410-414). The crawl mode Tier 2 checkpoint currently offers "all repos / selected repos / skip." Add the contract verification option: "Would you like to run a deep code scan on all/selected repos for additional edges? Add contract verification? (options: Tier 2 only, Tier 2 + contracts, skip)."
+
+6. **Add contract error handling rows.** In the Error Handling table, add these rows:
 
    | Error | Response |
    |-------|----------|
@@ -653,27 +681,27 @@ Update SKILL.md to document the contract verification feature: expanded Tier 1 c
    | Contract file too large (>5000 lines) | Extract first 500 endpoints/RPCs, note truncation |
    | Consumer calls >100 endpoints on single provider | Retain all, but note in scan log |
 
-4. **Add contract query types to the Query Mode section.** In the Query Types table (around line 447-453), add two new rows:
+7. **Add contract query types to the Query Mode section.** In the Query Types table (around line 447-453), add two new rows:
 
    | Query | Description | Example |
    |-------|-------------|---------|
    | `consumers <provider> <endpoint\|rpc>` | List all services consuming a specific contract element | "Who calls POST /api/v1/payments on payments-api?" |
    | `safe-to-change <provider> <endpoint\|rpc>` | Compute blast radius of modifying/removing a contract element | "Is it safe to remove GET /api/v1/payments/legacy?" |
 
-5. **Add contract output artifacts documentation.** After the existing output artifact descriptions in the Phase 3 Synthesis section (around line 241, after the `scan-log.json` bullet), add:
+8. **Add contract output artifacts documentation.** After the existing output artifact descriptions in the Phase 3 Synthesis section (around line 241, after the `scan-log.json` bullet), add:
 
    ```markdown
    6. **`contract-risks.md`** -- Contract verification report: risk summary, ranked mismatch list, per-edge contract status table, contract inventory, and recommendations. Only generated when contract verification is enabled (Tier 2 + contract verification option).
    ```
 
-6. **Add contract guardrails.** In the Guardrails section under "The orchestrator must NOT", add:
+9. **Add contract guardrails.** In the Guardrails section under "The orchestrator must NOT", add:
 
    ```markdown
    - Run contract verification without explicit user opt-in (option 3 at Tier 1 checkpoint)
    - Set Contract Extraction to "enabled" in Tier 2 prompts unless the user selected option 3
    ```
 
-7. **Add contract red flags.** In the Red Flags section, add:
+10. **Add contract red flags.** In the Red Flags section, add:
 
    ```markdown
    - Running contract mismatch detection without Tier 2 data (consumer contracts require Tier 2)
