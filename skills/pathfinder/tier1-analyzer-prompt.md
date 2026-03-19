@@ -34,6 +34,10 @@ You are a Tier 1 repo analyzer. Your job is to scan manifest files and configura
 
 `[PASTE: Org names being scanned — needed for internal package scope matching]`
 
+### Contract Extraction
+
+`[PASTE: "enabled" or "disabled" — when enabled, extract provider contract surfaces from files scanned in Step 3. Default: "enabled" for Tier 1 since contract files are already read at zero extra cost.]`
+
 ---
 
 ## Process
@@ -67,10 +71,23 @@ Scan: `*.env*`, `.env.example`, `docker-compose.yml`, `docker-compose*.yml`
 
 ### 3. Proto and API Definitions
 
-Scan: `**/*.proto` (excluding `**/node_modules/**`, `**/vendor/**`), `openapi.yaml`, `swagger.json`
+Scan: `**/*.proto` (excluding `**/node_modules/**`, `**/vendor/**`), `openapi.yaml`, `openapi.json`, `swagger.json`, `swagger.yaml`, `**/*.graphql`, `schema.graphql`, `schema.gql`
 
 - Extract proto imports — match to repos containing referenced .proto files
 - Extract API endpoint definitions
+
+**Provider Contract Extraction (when Contract Extraction input is "enabled"):**
+
+In addition to the existing edge-detection scanning above, extract the full contract surface from each file type:
+
+- **Proto files:** Extract the full service surface — all `service` names, every `rpc` method with its input and output message types, and whether `[deprecated = true]` is set on each RPC. Record the `package` declaration.
+- **OpenAPI/Swagger specs:** Parse the full spec — all paths with their HTTP methods, the `deprecated` flag on each operation, and the `info.version` field from the spec root.
+- **GraphQL schema files** (`.graphql`, `.gql`): Extract all fields from `type Query`, `type Mutation`, and `type Subscription` blocks — each field's name, argument types, return type, and whether `@deprecated` is present.
+- **TypeScript type packages:** If the repo's `package.json` contains a `types` or `typings` field, this repo publishes a type package. Extract all exported `type` and `interface` names from the file(s) referenced by that field.
+
+If Contract Extraction is "disabled", skip this extraction entirely and omit the `provider_contracts` field from output. If no contract files are found, output `"provider_contracts": []`.
+
+**Contract file errors:** If a contract file is malformed or unparseable (invalid YAML/JSON, proto syntax errors, GraphQL syntax errors), log the parse error in `scan_metadata.errors` and skip that file. Do not fail the entire scan. If a contract file exceeds 5000 lines, extract only the first 500 endpoints/RPCs/fields and note the truncation in `scan_metadata.errors`.
 
 ### 4. Infrastructure
 
@@ -159,6 +176,48 @@ Output valid JSON to stdout:
     { "type": "kafka_topic", "value": "payment-events" },
     { "type": "api_base_path", "value": "/api/v1/payments" }
   ],
+  "provider_contracts": [
+    {
+      "type": "OpenAPI",
+      "file": "docs/openapi.yaml",
+      "version": "2.1.0",
+      "endpoints": [
+        { "method": "POST", "path": "/api/v1/payments", "deprecated": false },
+        { "method": "GET", "path": "/api/v1/payments/{id}", "deprecated": false },
+        { "method": "GET", "path": "/api/v1/payments/legacy", "deprecated": true }
+      ]
+    },
+    {
+      "type": "Proto",
+      "file": "proto/payments/v1/payments.proto",
+      "package": "acme.payments.v1",
+      "services": [
+        {
+          "name": "PaymentsService",
+          "rpcs": [
+            { "name": "CreatePayment", "input": "CreatePaymentRequest", "output": "CreatePaymentResponse", "deprecated": false },
+            { "name": "GetPayment", "input": "GetPaymentRequest", "output": "PaymentResponse", "deprecated": false }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "GraphQL",
+      "file": "schema.graphql",
+      "queries": [
+        { "name": "payment", "args": ["id: ID!"], "return_type": "Payment", "deprecated": false }
+      ],
+      "mutations": [
+        { "name": "createPayment", "args": ["input: CreatePaymentInput!"], "return_type": "Payment", "deprecated": false }
+      ]
+    },
+    {
+      "type": "TypeScript",
+      "file": "dist/index.d.ts",
+      "package_name": "@acme/shared-types",
+      "exported_types": ["PaymentRequest", "PaymentResponse", "OrderStatus"]
+    }
+  ],
   "scan_metadata": {
     "files_scanned": 8,
     "duration_estimate": "fast",
@@ -179,6 +238,7 @@ Output valid JSON to stdout:
 - For monorepos, each sub-service is a separate entry in `sub_services`
 - The `identity_signals` array must always contain at least the repo name. If no other signals are found, that is acceptable — the repo name alone is the minimum.
 - **Timestamp format:** The `last_push` field MUST be a full ISO 8601 timestamp (e.g., `"2026-03-15T10:30:00Z"`), NOT a date-only string. Use the repo's `pushedAt` value from the GitHub API metadata passed in your classification input. If `pushedAt` is not available in the classification, run `gh api repos/{org}/{repo} --jq '.pushed_at'` to retrieve it.
+- When Contract Extraction is "enabled", the `provider_contracts` array must be present in the output (empty array if no contract files found). When "disabled", omit the field entirely.
 
 ---
 

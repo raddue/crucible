@@ -33,6 +33,10 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     [PASTE: Org names being scanned]
 
+    ### Contract Extraction
+
+    [PASTE: "enabled" or "disabled" — when enabled, extract consumer contract details (specific endpoints, RPCs, operations called) from pattern matches. When absent or "disabled", skip consumer contract extraction.]
+
     ## Process
 
     Follow these steps in order:
@@ -80,6 +84,13 @@ Agent tool (subagent_type: Explore, model: sonnet):
     - `grpc.insecure_channel`
     - `@GrpcClient`
 
+    **GraphQL clients:**
+    - `gql\`` (tagged template literals)
+    - `useQuery(`, `useMutation(`, `useSubscription(` (React hooks — Apollo, urql)
+    - `graphql(` (generic GraphQL client)
+    - `graphql-request` (library import)
+    - `ApolloClient`, `createClient` (client instantiation in GraphQL context)
+
     **Redis:**
     - `redis.StrictRedis`
     - `RedisClient`
@@ -98,6 +109,25 @@ Agent tool (subagent_type: Explore, model: sonnet):
     - `s3.getObject`
     - `S3Client`
     - Bucket name strings
+
+    **Consumer Contract Extraction (when Contract Extraction input is "enabled"):**
+
+    For each pattern match found above, extract the specific contract element being consumed:
+
+    - **HTTP client matches:** Extract the HTTP method and URL path from the match. Record as a consumed endpoint with `method`, `path`, `file`, and `line`. If the URL is dynamically constructed (template literals, string concatenation with variables), record `"path": "DYNAMIC"`.
+    - **gRPC client matches:** Extract the service name and RPC method name from client instantiation patterns (e.g., `NewPaymentsServiceClient(` -> service: `PaymentsService`; `client.CreatePayment(` -> rpc: `CreatePayment`). Record as a consumed RPC with `service`, `rpc`, `file`, and `line`.
+    - **GraphQL client matches:** Extract the operation name from the query/mutation string. For `useQuery`/`useMutation` hooks, parse the GraphQL string argument. For `gql` tagged templates, extract the operation name and type (query/mutation/subscription). Record with `type`, `name`, `file`, and `line`.
+    - **Package version checks:** For imported contract packages (packages matching org-scoped patterns like `@org/shared-types`), record the version from the manifest.
+
+    **Consumer contract type inference:** Assign `contract_type` based on the detection pattern:
+    - HTTP call patterns (`fetch`, `axios`, `http.Get`, etc.) -> `"OpenAPI"`
+    - gRPC patterns (`NewServiceClient`, `ServiceStub`) -> `"Proto"`
+    - GraphQL patterns (`useQuery`, `gql`) -> `"GraphQL"`
+    - Package import patterns -> `"TypeScript"`
+
+    **Key constraint:** Only capture literal/static references. Dynamic route construction is logged with `"path": "DYNAMIC"`. Do not attempt to resolve runtime variables.
+
+    Group consumed contract elements by target service. If no consumer contracts are detected, output `"consumer_contracts": []`.
 
     ### Step 3: Extract Context for Each Match
 
@@ -131,6 +161,11 @@ Agent tool (subagent_type: Explore, model: sonnet):
     - Unresolvable references go in `unresolved`, not silently dropped.
     - If a source file is too large to read (>500 lines), scan only the import
       section and first 200 lines.
+    - When Contract Extraction is "enabled", the `consumer_contracts` array must
+      be present in the output (empty array if none detected). When "disabled"
+      or absent, omit the field entirely.
+    - Only capture literal/static references for consumer contracts. Dynamic paths
+      get `"path": "DYNAMIC"` — do not attempt to resolve runtime variables.
 
     ## Output Format
 
@@ -177,6 +212,30 @@ Agent tool (subagent_type: Explore, model: sonnet):
           "reason": "Hostname does not match any scanned repo"
         }
       ],
+      "consumer_contracts": [
+        {
+          "target": "acme/payments-api",
+          "contract_type": "OpenAPI",
+          "consumed_endpoints": [
+            { "method": "POST", "path": "/api/v1/payments", "file": "src/checkout.ts", "line": 42 },
+            { "method": "POST", "path": "/api/v1/payments/refund", "file": "src/returns.ts", "line": 87 }
+          ]
+        },
+        {
+          "target": "acme/auth-service",
+          "contract_type": "Proto",
+          "consumed_rpcs": [
+            { "service": "AuthService", "rpc": "ValidateToken", "file": "src/middleware/auth.ts", "line": 15 }
+          ]
+        },
+        {
+          "target": "acme/gateway",
+          "contract_type": "GraphQL",
+          "consumed_operations": [
+            { "type": "query", "name": "getPayment", "file": "src/queries/payments.ts", "line": 8 }
+          ]
+        }
+      ],
       "scan_metadata": {
         "source_files_scanned": 142,
         "source_files_skipped": 58,
@@ -204,6 +263,15 @@ Agent tool (subagent_type: Explore, model: sonnet):
       - `new_confidence`: The upgraded confidence level (typically HIGH)
     - `unresolved` — References to services or resources that cannot be matched
       to any known repo or service name.
+    - `consumer_contracts` — Contract elements consumed from target services.
+      Only present when Contract Extraction is "enabled".
+      - `target`: Qualified `org/repo` of the service being called
+      - `contract_type`: One of `OpenAPI`, `Proto`, `GraphQL`, `TypeScript` —
+        inferred from the detection pattern, used by synthesis to match against
+        the correct provider contract format
+      - `consumed_endpoints`: Array of HTTP endpoints called (for OpenAPI type)
+      - `consumed_rpcs`: Array of gRPC RPCs called (for Proto type)
+      - `consumed_operations`: Array of GraphQL operations called (for GraphQL type)
     - `scan_metadata` — Statistics about the scan for the orchestrator.
       - `source_files_scanned`: Number of source files actually read
       - `source_files_skipped`: Number of source files excluded or over limits
