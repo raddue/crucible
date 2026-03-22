@@ -217,6 +217,21 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     - [TestName] — RED: "[exact failure message]" → GREEN: pass
     ```
 
+    ### Analogous Locations
+
+    While fixing this bug, report any locations you noticed that may have the same pattern/omission:
+
+    ```
+    Analogous Locations:
+    - [file:path] — [brief description of why this might be a sibling]
+    - [file:path] — [brief description]
+    - (If none observed: "No analogous locations observed during the fix.")
+    ```
+
+    This information feeds Phase 4.5's "Where Else?" scan. You are NOT expected
+    to fix these locations — just note them if you happen to see them while
+    working on the fix.
+
     ## What NOT To Do
 
     - Do NOT investigate the bug — that was done in earlier phases
