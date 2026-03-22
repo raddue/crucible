@@ -64,6 +64,31 @@ Build's existing compaction step must read the mode file FIRST, before re-readin
 
 ## Phase 1: Design (Interactive)
 
+### Step 0: Pre-Existing Doc Detection
+
+Before running interactive design, check whether `/spec` (or a prior `/build` run) already produced design artifacts for this ticket.
+
+1. **Scan for pre-existing spec docs:** Search `docs/plans/` for design docs (`*-design.md`) with a matching `ticket` field in YAML frontmatter. Also check for corresponding `*-implementation-plan.md` and `*-contract.yaml` files with the same ticket field.
+
+2. **Conflict detection:** If multiple design docs match the same `ticket` field, escalate to user: "Found multiple design docs for ticket #NNN: [list files]. Which should I use?" Do not proceed until the user resolves the conflict.
+
+3. **Full match (design doc + implementation plan + contract all present):**
+   - Skip interactive design (the Phase 1 design sub-skill below) — design doc already exists
+   - Quality-gate the existing design doc with staleness context: "This design doc is pre-existing from /spec and may be stale — verify against current codebase state before proceeding"
+   - **Staleness rejection:** If the quality gate finds that the design doc references files, interfaces, or modules that no longer exist in the codebase, reject the doc as fundamentally stale. Fall back to running Phase 1 interactively. Inform user: "Pre-existing design doc for #NNN is fundamentally stale (references [specific items] that no longer exist). Running interactive design instead."
+   - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + innovate + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.
+   - If quality gate fails (non-staleness issues): fix or escalate
+   - Proceed to Phase 3 when the plan passes review
+
+4. **Partial match (design doc present but implementation plan or contract missing):**
+   - Use the existing design doc (quality-gate it as above, including staleness rejection)
+   - Run the missing phases normally: if no implementation plan, run Plan Writer in Phase 2; if no contract, proceed without contract awareness for this ticket
+   - Inform user which artifacts were found and which are being generated fresh: "Found pre-existing design doc for #NNN. Implementation plan is missing — will generate in Phase 2." (or similar)
+
+5. **Not found:** Proceed with normal Phase 1 (interactive design below).
+
+---
+
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
 - **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
@@ -260,10 +285,23 @@ For each task (or wave of parallel tasks):
 2. Spawn **Implementer** teammate (Opus) via Task tool with `team_name` and `subagent_type="general-purpose"`
    - Use `./build-implementer-prompt.md` template
    - Pass full task text, file paths, project conventions
+   - **Contract-aware dispatch (when a contract exists for this ticket):** Include the contract YAML alongside the design doc and task description. See "Contract-Aware Implementer Guidance" below.
    - Implementer follows TDD, writes tests, runs tests, commits, self-reviews
 3. When Implementer reports completion, run **De-Sloppify Cleanup** (see below)
 4. After cleanup completes, spawn **Reviewer** teammate
    - Use `./build-reviewer-prompt.md` template
+
+#### Contract-Aware Implementer Guidance
+
+When a contract YAML exists for the current ticket (detected during Step 0 or produced by `/spec`), the implementer receives the contract alongside the design doc and task description. The contract uses the schema defined in `crucible:spec` (version `1.0`). Implementers must treat contract elements as follows:
+
+1. **`api_surface` declarations are binding.** The implementer must match the declared function signatures, class interfaces, endpoint shapes, parameter names, types, and return types exactly. Deviations from the contract's API surface are implementation errors.
+
+2. **`checkable` invariants are binding.** The implementer must satisfy all declared constraints (e.g., "must not import X", "must be idempotent"). The `check_method` field (`grep`, `code-inspection`, `file-structure`) indicates how the quality gate will verify compliance — the implementer should self-check against these before committing.
+
+3. **`testable` invariants require tagged tests.** For each `testable` invariant, the implementer must write a test tagged with the declared `test_tag` (pattern: `contract:<category>:<id>`) that validates the invariant. These tests are checked by the quality gate and reviewers — they must exist and pass.
+
+4. **`integration_points` are informational.** These indicate which other components and contracts this ticket interacts with. The implementer should be aware of referenced components and ensure compatibility, but integration points are not binding constraints — they provide context for making good implementation decisions.
 
 #### De-Sloppify Cleanup
 
@@ -307,6 +345,24 @@ digraph review {
 **Pass 1 — Code Review:** Architecture, patterns, correctness, wiring (actually connected, not just existing?)
 
 **Pass 2 — Test Quality Review:** Test independence? Determinism? Edge cases? Integration tests where mocks are masking real behavior? AAA pattern? Correct test level? (Staleness and alignment checks are handled by the test-coverage dispatch below.)
+
+#### Contract-Aware Reviewer Guidance
+
+When a contract YAML exists for the current ticket, reviewers receive the contract alongside the implementation and must add the following checks to both review passes:
+
+1. **API surface compliance:** Do the implemented public interfaces match the `api_surface` declarations in the contract? Check function signatures, class interfaces, endpoint shapes, parameter names/types, and return types. Any deviation from the contract's declared API surface is a blocking finding.
+
+2. **Checkable invariant satisfaction:** Are all `checkable` invariants satisfied per their declared `check_method`?
+   - `grep`: verify the pattern match (or absence) in production code
+   - `code-inspection`: read and reason about code to confirm the invariant holds
+   - `file-structure`: check file existence/organization matches the constraint
+   Any unsatisfied checkable invariant is a blocking finding.
+
+3. **Testable invariant test existence:** Does a test exist for each `testable` invariant, tagged with the correct `test_tag` (pattern: `contract:<category>:<id>`)? A missing tagged test is a blocking finding.
+
+4. **Test correctness:** Do the tagged tests actually validate the invariant they claim to cover? A test that exists but does not meaningfully exercise the invariant (e.g., a trivially passing assertion, a test that tests something unrelated despite having the right tag) is a blocking finding.
+
+**Severity:** All contract-related review findings are classified as **blocking** — the same severity as contract violations in the quality gate. Contract findings must be resolved before the task is marked complete.
 
 #### Test Alignment Audit
 
@@ -570,6 +626,24 @@ Build is the outermost orchestrator and controls all quality gates via `crucible
 
 Code review (`crucible:code-review`) and inquisitor (`crucible:inquisitor`) remain separate from the quality gate — code-review does structured quality checks, inquisitor writes cross-component adversarial tests, and the quality gate does adversarial artifact review. All three serve distinct purposes.
 
+### Contract-Aware Quality Gate
+
+When a contract YAML exists for the current ticket, the quality gate adds contract verification to its checks. This applies at all gate points (design, plan, and code), though most contract checks are only meaningful at the code gate (Phase 4, Step 6).
+
+1. **Version check:** Before processing a contract, verify the `version` field is `"1.0"`. If the version is missing or unrecognized, reject the contract with a clear error: "Contract version [X] is not supported. Expected version 1.0." Do not proceed with contract-aware checks — fall back to standard quality gate behavior without contract awareness.
+
+2. **Checkable invariant verification:** For each `checkable` invariant in the contract, verify satisfaction using the declared `check_method`:
+   - `grep` — pattern match (or absence) in production code. Run the grep and confirm the result matches the invariant's `verification` description.
+   - `code-inspection` — read and reason about the relevant code to confirm the invariant holds (e.g., idempotency, no side effects).
+   - `file-structure` — check that file existence, location, or organization matches the constraint.
+
+3. **Testable invariant verification:** For each `testable` invariant in the contract:
+   - Verify that a test tagged with the declared `test_tag` (pattern: `contract:<category>:<id>`) exists in the test suite.
+   - Verify that the tagged test passes when run.
+   - A missing or failing tagged test is a contract violation.
+
+4. **Contract violations are blocking issues.** Contract violations are NOT warnings — they have the same severity as architectural concerns and must be resolved before the gate passes. The quality gate's iterative fix loop applies: dispatch fixes, re-check, track progress/stagnation as normal.
+
 ## Integration
 
 **Required sub-skills:**
@@ -589,3 +663,6 @@ Code review (`crucible:code-review`) and inquisitor (`crucible:inquisitor`) rema
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task
+
+**Contract consumption:**
+- **crucible:spec** — Consumes contract YAML files produced by `/spec` (schema version 1.0). Contracts are read from `docs/plans/*-contract.yaml` and feed into pre-existing doc detection (Phase 1 Step 0), implementer dispatch (Phase 3), reviewer checks (Phase 3), and quality gate verification (all gate points). See the contract schema in `crucible:spec` for field definitions.
