@@ -43,6 +43,7 @@ The debugging skill writes session state to disk at **every phase transition**, 
 - `hypothesis-log.md`: running hypothesis log (updated at Phase 3, after Phase 4 results)
 - `synthesis-report.md`: latest synthesis report (written after Synthesis completes)
 - `implementation-details.md`: cumulative record of implementation attempts — what was tried, which files changed, regressions encountered, why it failed (appended after each Phase 4)
+- `where-else-state.md`: Phase 4.5 state — pre-Phase-4.5 SHA, generalized pattern, siblings found/fixed/remaining (written during Phase 4.5, read during compaction recovery)
 
 **Context hygiene:** After synthesis completes, raw Phase 1 investigation reports are superseded by the synthesis report. The orchestrator should rely on the synthesis report going forward, not the raw reports. After Phase 4 completes (success or failure), the Phase 2 pattern analysis report is superseded by the implementation results. This keeps the orchestrator lean across long sessions.
 
@@ -51,7 +52,8 @@ The debugging skill writes session state to disk at **every phase transition**, 
 2. Read `hypothesis-log.md` for hypothesis history.
 3. Read `synthesis-report.md` for latest investigation findings.
 4. Read `implementation-details.md` for prior fix attempts.
-5. Output status to user and continue from the current phase.
+5. Read `where-else-state.md` (if exists) for Phase 4.5 progress — which siblings have been fixed, which remain.
+6. Output status to user and continue from the current phase.
 
 **Cleanup:** Delete scratch directory after debugging completes (Phase 5 passes clean or escalation to user).
 
@@ -103,6 +105,7 @@ All investigation and implementation is delegated to subagents via the Agent too
 | Synthesis | Consolidation | Opus | Cross-referencing, contradiction detection, and causal reasoning — not just summarization |
 | Phase 2 | Pattern Analysis | Opus | Exhaustive comparison requires depth |
 | Phase 4 | Implementation | Opus | TDD + root cause fix |
+| Phase 4.5 | "Where Else?" scan | Opus | Cross-codebase pattern matching and sibling fixing |
 | Phase 5 | Red-team | Opus | Adversarial analysis |
 | Phase 5 | Code review | Opus or Sonnet | Lead decides by fix complexity |
 | Phase 5 | Test gap writer | Opus | Test authoring requires reasoning |
@@ -144,8 +147,11 @@ Phase 3.5: Hypothesis Red-Team (crucible:quality-gate on hypothesis)
 Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
-Orchestrator: Verify fix -> Success? Phase 5. Failed? Cleanup, log, loop back.
+Orchestrator: Verify fix -> Success? Phase 4.5. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user.
+    |
+    v
+Phase 4.5: "Where Else?" scan — find and fix sibling locations
     |
     v
 Phase 5: Quality-gate the fix (crucible:quality-gate) + Code review (crucible:code-review)
@@ -356,9 +362,84 @@ This gives every outcome path a clean revert target (`git revert <sha>`), gives 
 
 On loop-back (failed fix or user-requested revert), `git revert <wip-sha>` cleanly undoes all Phase 4 changes including new files.
 
+If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha>`. This reverts all sibling commits plus the original WIP commit in one operation. See Phase 4.5 below.
+
+**Phase 4.5 sibling commits:** Each sibling fix uses the prefix `fix(sibling):` with a descriptive message. Example: `fix(sibling): add icon initialization to StashScreen.OnEnable`
+
+---
+
+### Phase 4.5: "Where Else?" Blast Radius Scan
+
+After Phase 4 succeeds and the WIP commit is created, dispatch the "Where Else?" scan agent to find and fix analogous locations in the codebase that have the same bug pattern. Phase 4.5 does NOT run on loop-back paths (fix failed, regressions found).
+
+**Prompt template:** `./where-else-prompt.md`
+
+**Pre-Phase-4.5 SHA:** Immediately after the Phase 4 WIP commit succeeds, record its SHA. This is the last commit before any sibling work begins. Store it in `where-else-state.md` in the scratch directory.
+
+#### Three Input Signals
+
+The scan agent receives three sources of information:
+
+1. **The fix diff** — `git diff <pre-fix-sha>..HEAD`. The structural pattern of what changed: what was missing, what was added, and what makes a location "analogous."
+2. **Cartographer module context** — If cartographer data is available from Phase 0, structurally similar modules (other screens, panels, managers, handlers that follow the same architectural pattern as the fixed code).
+3. **Implementer's "Analogous Locations" report** — The Phase 4 implementer's observations about locations they noticed during the fix that may have the same pattern. This is the highest-quality signal — the implementer was already reading the code.
+
+#### Scan Agent Behavior
+
+1. **Analyze the fix pattern.** Read the diff. Extract the structural pattern. Produce a 2-3 sentence generalized pattern description.
+2. **Build candidate list.** Combine all three input signals, deduplicate candidates.
+3. **Evaluate each candidate.** Read the code at that location. Determine if the same pattern/omission exists. If yes: write a justification explaining WHY this location matches semantically (not just structurally). If no: record as skipped with reason.
+4. **Fix confirmed siblings.** For each confirmed sibling:
+   - Apply the same fix pattern
+   - Run tests
+   - If tests pass: commit with `fix(sibling): <description>`
+   - If tests fail: revert that single commit, record as "reverted — test failure", continue with remaining candidates
+   - After each fix (or revert), update `where-else-state.md` in the scratch directory
+5. **Report back.** Structured report:
+
+```
+## Where Else? Scan Report
+
+### Generalized Pattern
+[2-3 sentence pattern description]
+
+### Candidates Evaluated: N
+
+### Siblings Fixed: N
+- [file:path] — [commit SHA] — Justification: [why this matches]
+- ...
+
+### Siblings Skipped: N
+- [file:path] — Reason: [why this doesn't match]
+- ...
+
+### Siblings Reverted: N
+- [file:path] — Test failure: [summary of what failed]
+- ...
+```
+
+#### Compaction Recovery
+
+Phase 4.5 maintains state in `<scratch-dir>/where-else-state.md` to survive session compaction. The file is updated after each sibling fix. On compaction recovery, the agent reads this file to:
+- Skip siblings already fixed
+- Resume from where it left off with remaining siblings
+- Recover the pre-Phase-4.5 SHA (needed for revert mechanics)
+- Recover the generalized pattern (avoids re-deriving from the diff)
+
+#### Rules
+
+- Apply the SAME fix pattern — do not invent new approaches for siblings
+- One commit per sibling — clean revert granularity
+- If tests fail for a sibling, revert and continue — do not debug the sibling
+- Do not modify the original fix
+- If no candidates are found, report "No analogous locations found" and proceed to Phase 5
+- No cap on sibling count — fix all confirmed siblings
+
+---
+
 ### Phase 5: Red-Team and Code Review (Post-Fix Quality Gate)
 
-After Phase 4 succeeds and the WIP commit is created, the orchestrator runs quality gates before declaring done:
+After Phase 4.5 completes (or Phase 4 succeeds if no Phase 4.5 ran), the orchestrator runs quality gates before declaring done:
 
 **Step 1: Quality-gate the fix** — Invoke `crucible:quality-gate` with artifact type "code" against the changed code. Quality-gate dispatches fresh red-team reviewers to adversarially review the fix for:
 - Edge cases the fix doesn't handle
@@ -398,7 +479,7 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 
 **If Phase 5 quality-gate escalates** (stagnation or round limit): Present the quality-gate findings to the user alongside the fix. The user decides:
 - **(a) Accept the fix** with known issues noted
-- **(b) Revert and loop back** — revert the WIP commit and loop back to Phase 1 with the quality-gate findings as new investigation context
+- **(b) Revert and loop back** — revert the WIP commit (or range revert `<pre-4.5-sha>..HEAD` if Phase 4.5 ran) and loop back to Phase 1 with the quality-gate findings as new investigation context
 - **(c) Stop debugging** — end the session with the current state
 
 This is user-gated, not automatic. The orchestrator does not decide whether to loop back from Phase 5 on its own.
@@ -444,7 +525,7 @@ Decision types:
 
 After the Implementation agent reports back, the orchestrator evaluates four possible outcomes:
 
-**Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 5. After Phase 5 passes clean:
+**Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 4.5 ("Where Else?" blast radius scan). After Phase 4.5 completes, proceed to Phase 5. After Phase 5 passes clean:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
 - **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
 
@@ -457,7 +538,7 @@ After the Implementation agent reports back, the orchestrator evaluates four pos
 **Fix does not resolve the issue** -- Before looping back:
 1. Log the failure in the hypothesis log with metrics (see Stagnation Detection below)
 2. **Test triage:** Dispatch a quick Opus subagent to read the test and the hypothesis log, then decide: keep the test (if it validly reproduces the bug regardless of the failed fix) or remove it (if it was hypothesis-specific and doesn't reproduce the actual bug). The orchestrator does not make this judgment directly — it requires reading code.
-3. **Revert the WIP commit** using `git revert <wip-sha>` (see Commit Strategy above). This cleanly undoes all Phase 4 changes including any new files created during refactoring.
+3. **Revert the WIP commit** using `git revert <wip-sha>` (see Commit Strategy above). This cleanly undoes all Phase 4 changes including any new files created during refactoring. If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha>` to revert all sibling commits plus the original WIP commit.
    - If triage decided **"keep the test"**: dispatch a subagent to recover the test file from the reverted commit (`git checkout <wip-sha> -- <test-file-path>`) and commit it separately (`test: preserve reproduction test from cycle N`).
    - If triage decided **"remove the test"**: no further action — the revert already removed it.
 4. Verify the working tree is clean: dispatch the cleanup agent to run `git status` and report any remaining modifications or untracked files. If any remain, clean them up before proceeding.
@@ -511,6 +592,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
 | **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
+| **4.5. Where Else?** | 1 subagent (Opus) | Find and fix sibling locations | Siblings fixed or confirmed none exist |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
 | **5b. Test Audit** | Test coverage skill (conditional) | Audit existing tests for staleness after fix | Stale tests updated/removed |
 | **5c. Test Gaps** | Test gap writer (Opus, conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
@@ -597,6 +679,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`./synthesis-prompt.md`** -- Synthesis agent prompt
 - **`./pattern-analyst-prompt.md`** -- Phase 2 pattern analysis agent prompt
 - **`./implementer-prompt.md`** -- Phase 4 implementation agent prompt
+- **`./where-else-prompt.md`** -- Phase 4.5 "Where Else?" scan agent prompt
 - **`./test-gap-writer-prompt.md`** -- Phase 5 test gap writer prompt (when reviews flag missing coverage)
 
 **Supporting techniques** (available in this directory):
