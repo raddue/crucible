@@ -128,6 +128,58 @@
         "If round 6 was reached, a user checkpoint was presented with score progression history",
         "Artifact was progressively improved across rounds — later versions addressed more issues than earlier versions"
       ]
+    },
+    {
+      "id": 8,
+      "prompt": "Run a quality gate on this design:\n\n## User Authentication Service\n\n**Storage:** All passwords are stored in plaintext in a JSON file on the application server. The file is readable by the web process.\n\n**Login flow:** User submits username and password via HTTP POST. The server reads the JSON file, finds the matching username, and compares the submitted password directly with the stored value using string equality.\n\n**Session management:** On successful login, the server generates a session token using Math.random() and stores it in a cookie with no expiration.\n\nNote to evaluator: The first red-team round should flag plaintext password storage as Fatal. The fix agent should make a COSMETIC fix — rename 'passwords.json' to 'credentials-store.json' and add a comment saying '// TODO: implement hashing' but NOT actually implement hashing. The fix verifier should catch this as Unresolved because the structural concern (plaintext storage) is unchanged despite the rename.",
+      "expected_output": "Quality gate should flag plaintext password storage as Fatal. After fix agent runs, the fix verifier should identify a cosmetic fix (rename without structural change) and mark the Fatal as Unresolved. The next round's fix dispatch should include the verifier's binding 'must address' flag.",
+      "files": [],
+      "expectations": [
+        "Identified plaintext password storage as a Fatal-severity issue",
+        "Fix verifier was dispatched after the fix agent completed",
+        "Fix verifier assessed whether the diff structurally resolved the plaintext storage concern",
+        "If the fix was cosmetic (rename or comment without hashing implementation), verifier marked it as Unresolved",
+        "Fatal-severity Unresolved verdict was flagged as binding in the next round's fix dispatch",
+        "Verifier output was appended to the fix journal under a '### Verifier Assessment' heading",
+        "Verifier verdict summary was written to round-N-verification.md",
+        "Verifier output was NOT passed to the red-team reviewer (anti-anchoring preserved)",
+        "Round counter was NOT incremented by the verifier dispatch"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Run a quality gate on this implementation plan:\n\n## File Upload Service\n\n**Task 1:** Accept file uploads via POST /upload with no size limit.\n**Task 2:** Save files directly to /var/www/uploads/ with the original filename.\n**Task 3:** Serve uploaded files at /files/<filename> with no access control.\n\nNote to evaluator: The first round should flag no size limit as Fatal and path traversal risk as Fatal. The fix agent should make SUBSTANTIVE fixes — add a 10MB size limit with content-length validation, sanitize filenames by stripping path separators and generating UUIDs, and add authentication middleware. These are real structural fixes. The fix verifier should mark them as Resolved because the diff contains concrete validation logic, not just comments or renames.",
+      "expected_output": "Quality gate should flag missing size limit and path traversal as Fatal. After the fix agent makes substantive fixes (actual size validation, filename sanitization, auth middleware), the fix verifier should mark all findings as Resolved. The verifier should not false-positive on genuine structural fixes.",
+      "files": [],
+      "expectations": [
+        "Identified missing upload size limit as a Fatal or Significant issue",
+        "Identified path traversal or filename injection risk as a Fatal or Significant issue",
+        "Fix verifier was dispatched after the fix agent completed",
+        "Fix verifier assessed the diff for structural resolution of each finding",
+        "If the fix agent added concrete validation logic (size checks, filename sanitization), verifier marked findings as Resolved",
+        "Verifier did not false-positive on substantive structural fixes",
+        "Verifier output was appended to the fix journal under a '### Verifier Assessment' heading",
+        "Verifier verdict summary was written to round-N-verification.md",
+        "Verifier output was NOT passed to the red-team reviewer (anti-anchoring preserved)",
+        "Round counter was NOT incremented by the verifier dispatch"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Run a quality gate on this implementation:\n\n```python\ndef process_payment(amount, card_number):\n    # No input validation\n    charge = gateway.charge(card_number, amount)\n    return {'status': 'ok', 'charge_id': charge.id}\n```\n\nNote to evaluator: The first round should flag missing input validation as Fatal (no amount bounds, no card format check). The fix agent should make a SUBTLE cosmetic fix — add a function called `validate_payment_input` that checks `if amount is not None and card_number is not None: return True` and call it before the charge. This LOOKS like validation (a validation function exists and is called) but only checks for None, not for negative amounts, unreasonable values, or card format. The fix is structurally present (validation function + call site) but does not address the root concern (meaningful input validation). This is the hardest case for the verifier — a fix that has the shape of a real fix but lacks semantic substance. Tests the verifier's ceiling on distinguishing structural presence from structural resolution.",
+      "expected_output": "Quality gate should flag missing input validation as Fatal. After fix agent adds a None-only validation function, the fix verifier should ideally catch this as Unresolved (checks existence but not validity). However, this is a genuine boundary case — the verifier may mark it Resolved because structural validation code exists. Either outcome is acceptable for measuring the verifier's ceiling.",
+      "files": [],
+      "expectations": [
+        "Identified missing input validation as a Fatal or Significant issue",
+        "Fix verifier was dispatched after the fix agent completed",
+        "Fix verifier examined the diff to assess whether validation logic structurally addresses the concern",
+        "Verifier's verdict (Resolved or Unresolved) is explained with reference to what the validation actually checks",
+        "If Unresolved: explanation notes that the validation only checks for None, not meaningful constraints",
+        "If Resolved: this is an acceptable false negative at the verifier's capability boundary — red-team catches it on the next round",
+        "Verifier output was appended to the fix journal under a '### Verifier Assessment' heading",
+        "Verifier verdict summary was written to round-N-verification.md",
+        "Verifier output was NOT passed to the red-team reviewer (anti-anchoring preserved)"
+      ]
     }
   ]
 }
