@@ -70,10 +70,11 @@ Agent tool (subagent_type: general-purpose, model: opus):
     - Do NOT propose changes without showing caller-side impact (usage examples are mandatory)
     - Do NOT ignore the dependency category in your testing strategy
     - If genealogy data shows an Incomplete Migration, your design should finish or redirect the migration, not start fresh
+    - Do NOT ignore root cause analysis when available — your design must engage with the surviving hypothesis, not just rearrange code around the symptom
 
     ## Context Self-Monitoring
 
-    If you reach 50%+ context utilization, ensure interface signature and usage example are complete before moving to trade-offs. A concrete interface with incomplete trade-off analysis is more useful than the reverse.
+    If you reach 50%+ context utilization, ensure interface signature, usage example, and root cause coverage are complete before moving to trade-offs. A concrete interface with incomplete trade-off analysis is more useful than the reverse.
 
     ## Output Format
 

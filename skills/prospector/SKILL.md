@@ -60,7 +60,7 @@ Every status update must include:
 
 **Concurrency:** Maximum 5 concurrent agents. Genealogy and root cause agents share this budget during their parallel execution window. The orchestrator dispatches them in round-robin fashion (e.g., 3 genealogy + 2 root cause, then backfill as each completes). Once both tracks complete, analysis agents use the full concurrency budget.
 
-The explorer's output cap of 8 friction points enforces the overall budget. If the user requests exploration of a second candidate after completing the first, the budget resets for the new design cycle (Phases 5-8 only), reusing existing exploration and analysis results.
+The explorer's output cap of 8 friction points enforces the overall budget. If the user requests exploration of a second candidate after completing the first, the budget resets for the new design cycle (Phases 5-7 only), reusing existing exploration and analysis results.
 
 ## Scratch Directory
 
@@ -76,11 +76,11 @@ Files:
 - `root-cause-<n>.md` — Phase 2 root cause output per High-severity friction point
 - `convergence-draft.md` — Phase 2.5 proposed groupings with confidence ratings (checkpoint before user confirmation)
 - `convergence.md` — Phase 2.5 root cause convergence output after user confirmation (clusters + standalones)
-- `analysis-<n>.md` — Phase 2 structured analysis per friction point
+- `analysis-<n>.md` — Phase 3 structured analysis per friction point
 - `candidates.md` — Synthesized candidate list (after analysis)
-- `problem-frame.md` — Phase 4 problem space framing
-- `design-<n>.md` — Phase 5 competing design outputs
-- `decision.md` — Phase 6 user's design choice
+- `problem-frame.md` — Phase 5 problem space framing
+- `design-<n>.md` — Phase 6 competing design outputs
+- `decision.md` — Phase 7 user's design choice
 
 **Stale cleanup:** Delete scratch directories older than 24 hours at run start. Prospector runs include unbounded user interaction gaps, so do not delete directories that lack a `decision.md` file and are less than 24 hours old — they may be paused runs.
 
@@ -393,7 +393,7 @@ Each analysis agent outputs:
 - **Top caller patterns** — 3-5 most common usage patterns
 - **Structural summary** — module boundaries, data flow direction, dependency graph fragment
 
-The last three fields form the **design brief** consumed by Phase 5 competing design agents.
+The last three fields form the **design brief** consumed by Phase 6 competing design agents.
 
 **Write-on-complete:** The orchestrator writes each analysis agent's output to `scratch/<run-id>/analysis-<n>.md` immediately upon agent completion. (Analysis agents are Task tool dispatches — they return text to the orchestrator, who persists it.)
 
@@ -413,16 +413,16 @@ The orchestrator reads all analysis results from disk and synthesizes into a ran
    - Comprehension: High | Modification: High | Leverage: High
    - Framework check: None identified
    - Cost of inaction: Modified weekly, 4 bug-fix commits in 6 months. Not defensible.
-   - Trajectory: NEW | STABLE (3 runs) | ACCELERATING (change freq: monthly->weekly->daily) | DECLINING
+   - Trajectory: STABLE (2 runs)
 
 2. **[Score: 6] [Effort: Low] [Limited -- no root cause] Auth middleware duplication**
    - Friction: Auth checks duplicated across 4 route handlers
    - Root cause: Root cause not analyzed -- severity below threshold
-   - Origin: Organic Growth (no single commit)
+   - Origin: Accretion (no single commit)
    - Comprehension: Medium | Modification: High | Leverage: Medium
    - Framework check: Express middleware pattern (framework hint only -- pattern usage not verified)
    - Cost of inaction: Modified weekly, 2 bug-fix commits in 6 months. Not defensible.
-   - Trajectory: NEW | STABLE (3 runs) | ACCELERATING (change freq: monthly->weekly->daily) | DECLINING
+   - Trajectory: NEW
 
 ---
 
@@ -434,7 +434,7 @@ The orchestrator reads all analysis results from disk and synthesizes into a ran
    - Comprehension: High | Modification: Low | Leverage: Low
    - Framework check: VContainer IInitializable would solve this (framework hint only -- pattern usage not verified)
    - Cost of inaction: Modified monthly, 0 bug-fix commits. Defensible -- rarely modified, clear patterns.
-   - Trajectory: NEW | STABLE (3 runs) | ACCELERATING (change freq: monthly->weekly->daily) | DECLINING
+   - Trajectory: STABLE (4 runs)
 ```
 
 ### Data Quality Indicators
@@ -466,13 +466,13 @@ Before spawning competing design agents, write a user-facing explanation:
 
 Write to `scratch/<run-id>/problem-frame.md`.
 
-**USER GATE:** Present the problem framing to the user and wait for confirmation before dispatching design agents. The framing directly determines the constraint selection in Phase 5 — dispatching 3 Opus agents with wrong inputs is expensive. User may adjust constraints, dependencies, or dependency category before proceeding.
+**USER GATE:** Present the problem framing to the user and wait for confirmation before dispatching design agents. The framing directly determines the constraint selection in Phase 6 — dispatching 3 Opus agents with wrong inputs is expensive. User may adjust constraints, dependencies, or dependency category before proceeding.
 
 ## Phase 6: Competing Designs (Contextual Constraints)
 
 ### Constraint Selection
 
-The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](REFERENCE.md). The mapping is keyed by friction type classification (from Phase 2 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
+The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](REFERENCE.md). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
 
 **Friction-type-to-constraint mapping (canonical, in REFERENCE.md):**
 
@@ -616,15 +616,15 @@ After saving the design doc, ask the user:
 
 **Option (c):** Done. Design doc is committed and available for future reference.
 
-**Option (d):** Return to Phase 3 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 4-6 only (3 Opus design agents). New candidate's design doc saved alongside the first.
+**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (3 Opus design agents). New candidate's design doc saved alongside the first.
 
 ### End-of-Run Cleanup
 
-Delete `scratch/<run-id>/` after all Phase 7 actions are complete (design doc saved, issue filed if requested, or build handoff initiated).
+Delete `scratch/<run-id>/` after all Phase 8 actions are complete (design doc saved, issue filed if requested, or build handoff initiated).
 
 ### Cartographer Recording
 
-After Phase 7, dispatch `crucible:cartographer` (record mode) with the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
+After Phase 8, dispatch `crucible:cartographer` (record mode) with the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
 
 ## Dependency Categories
 
@@ -691,7 +691,7 @@ After context compaction:
 - All three competing designs converging on the same solution (constraints weren't different enough)
 - Design agents ignoring dependency category in their testing strategy
 - Orchestrator hardcoding tracker-specific commands
-- Skipping the problem-framing step (Phase 4)
+- Skipping the problem-framing step (Phase 5)
 - Root cause agent restating the symptom instead of identifying an architectural cause
 - Convergence merging friction points that share a root cause type but describe different architectural decisions
 - All three competing designs ignoring the surviving root cause hypothesis
