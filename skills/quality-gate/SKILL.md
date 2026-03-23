@@ -23,8 +23,8 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 5. If red-team finds Fatal or Significant issues: dispatch a **separate fix agent** (see Fix Mechanism below), then invoke a FRESH red-team on the revised artifact (no anchoring)
 6. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
-   - **Same or higher score** → check for progress (see Stagnation Detection below)
-7. **User checkpoint at round 6.** After 6 rounds, report to user: "Quality gate has run 6 rounds with score progression [list]. Continue or accept current state?" Continue only with user approval.
+   - **Same or higher score** → run first-pass score/Fatal check, then semantic comparison if needed, before declaring stagnation (see Stagnation Detection below)
+7. **Progress notification (non-blocking).** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), the orchestrator emits a status line: "Quality gate round [N]: score progression [list], [X] recurring / [Y] new findings this round." This is informational only — it does not pause or require user input.
 8. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
 
 ## Fix Mechanism
@@ -145,7 +145,7 @@ Code artifacts vary in size. The orchestrator prepares the artifact based on sco
 
 - **Small implementations (<500 lines diff):** Pass the full diff + any new files in full.
 - **Medium implementations (500-2000 lines):** Pass full source of high-risk files (new files, files with complex logic changes) + summaries of routine changes (imports, wiring, boilerplate). Include a change manifest listing all files with 1-line descriptions.
-- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. Normal stagnation detection, round 6 checkpoint, and round 15 safety limit apply to **total rounds across all chunks**, not per chunk. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
+- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. Normal stagnation detection, progress notifications, and round 15 safety limit apply to **total rounds across all chunks**, not per chunk. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
 
 The red-team subagent receives the **prepared artifact**, not raw diff. This mirrors audit's Tier 1/Tier 2 context management approach.
 
@@ -195,16 +195,19 @@ Quality gate writes round state to disk for compaction recovery.
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
+- `round-N-comparison.md`: semantic comparison table (written only on rounds where semantic comparison ran; see Stagnation Detection)
 
 **Compaction recovery:**
 1. Glob for `active-run-*.md` markers to locate the scratch directory.
 2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
 3. Read the latest `artifact-N.md` as the current artifact state.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
-5. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
-6. Dispatch the next red-team round.
+5. Read all `round-N-comparison.md` files to determine: (a) whether semantic comparison already ran for the current round, (b) the consecutive-round state needed for diminishing returns detection (2 consecutive all-new-all-Structural rounds) and stuck-Significant tracking (same Significant recurring across 2 consecutive rounds).
+6. Read the last 2-3 `round-N-comparison.md` files to reconstruct whether the current round is the first or second consecutive all-new-all-Structural round, and whether any Significant has recurred across consecutive rounds.
+7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
+8. Dispatch the next red-team round.
 
-**Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
+**Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (approved, stagnation, or diminishing returns).
 
 ## Invocation Convention
 
@@ -243,11 +246,12 @@ Each artifact-producing skill's SKILL.md documents:
 
 ## Escalation
 
-- Stagnation (see Stagnation Detection above) → escalate to user with findings from both rounds
-- Regression (score increased) → escalate immediately with regression flag
-- Global safety limit reached (15 rounds) → escalate to user with full round history
-- User checkpoint at round 6 → user decides whether to continue
-- Architectural concerns → escalate immediately (bypass loop)
+- **Stagnation** (recurring issues confirmed by semantic comparison) → escalate to user: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating."
+- **Diminishing returns** (2 consecutive rounds of all-new, all-Structural findings) → escalate to user: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list with proposed fixes]. Presenting for user judgment."
+- **Regression** (score increased) → escalate immediately with regression flag
+- **Global safety limit reached** (15 rounds) → escalate to user with full round history
+- **Progress notification** (after round 5, then every 3 rounds) → non-blocking status line, no user action required
+- **Architectural concerns** → escalate immediately (bypass loop)
 - User can interrupt at any time to skip the gate
 
 ## Red Flags
@@ -261,6 +265,7 @@ Each artifact-producing skill's SKILL.md documents:
 - Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY)
 - Leaving review-response artifacts (comments, annotations) in the artifact between rounds
 - Dispatching a fix agent without the fix journal on round 2+ (fix agents need remediation history)
+- Declaring stagnation based on score alone without running semantic comparison of findings when score triggers stagnation
 
 ## Integration
 
