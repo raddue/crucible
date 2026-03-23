@@ -31,6 +31,16 @@ Agent tool (subagent_type: general-purpose, model: sonnet):
        how the friction developed.
     4. Classify the friction's origin using the origin type definitions
        below.
+    5. Compute change metrics for each file in the friction point's
+       file list:
+       - Count total commits touching the file in the last 6 months
+         using `git log --oneline --since="6 months ago" -- <file>`
+       - Count bug-fix commits (commits with "fix", "bug", or "hotfix"
+         in the commit message) touching the file in the last 6 months
+         using `git log --oneline --since="6 months ago" --grep="fix\|bug\|hotfix" -- <file>`
+       - Classify the rate: daily (>60 commits/6mo), weekly (12-60),
+         monthly (2-11), or rarely (0-1)
+       Report per-file metrics for each file.
 
     ## Origin Type Classification
 
@@ -84,4 +94,8 @@ Agent tool (subagent_type: general-purpose, model: sonnet):
     ### Effort Implication
     [1-2 sentences: What does this origin type mean for remediation
     effort?]
+
+    ### Change Metrics
+    - **Change frequency:** [Number of commits touching this file in the last 6 months] ([monthly/weekly/daily] rate)
+    - **Bug-fix commit count:** [Number of commits with bug-fix indicators (e.g., "fix", "bug", "hotfix" in message, or linked to bug tracker issues) touching this file in the last 6 months]
 ```
