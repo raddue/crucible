@@ -179,6 +179,18 @@ After the user approves the design and before starting Phase 2:
 3. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 4. Design doc is now finalized — proceed to acceptance tests.
 
+### Step 2.5: Generate PRD
+
+After the design doc is finalized (Step 2 complete), generate a stakeholder-facing PRD:
+
+1. Dispatch a **PRD Writer** subagent (Sonnet) using `./prd-writer-prompt.md`
+   - Input: finalized design doc
+   - Output: PRD in standard format (problem statement, user stories, requirements, scope, out-of-scope, success metrics, technical notes, dependencies)
+2. Save to `docs/prds/YYYY-MM-DD-<topic>-prd.md`
+3. Commit: `docs: add PRD for [feature]`
+
+This step runs by default. The PRD is a reformatting of the design doc for non-technical stakeholders — it does not introduce new decisions or requirements. Skip only in refactor mode (refactoring has no stakeholder-facing PRD).
+
 ### Step 3: Generate Acceptance Tests (RED)
 
 Before planning, define "done" with executable tests:
@@ -682,6 +694,7 @@ Decision types to capture:
 ## Prompt Templates
 
 - `./acceptance-test-writer-prompt.md` — Phase 1 acceptance test generation
+- `./prd-writer-prompt.md` — Phase 1 PRD generation from design doc
 - `./plan-writer-prompt.md` — Phase 2 plan writer dispatch
 - `./plan-reviewer-prompt.md` — Phase 2 plan reviewer dispatch
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch
