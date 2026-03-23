@@ -20,7 +20,13 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 2. Prepares the artifact for review (see Artifact Preparation below)
 3. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
 4. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Write final artifact to scratch directory, output consolidated Minor observations from all rounds (see Minor Issue Handling), clean up, and return.
-5. If red-team finds Fatal or Significant issues: dispatch a **separate fix agent** (see Fix Mechanism below), then invoke a FRESH red-team on the revised artifact (no anchoring)
+5. If red-team finds Fatal or Significant issues:
+   a. Dispatch a **separate fix agent** (see Fix Mechanism below) — receive revised artifact, append to fix journal
+   b. Dispatch **Fix Verifier** (see Fix Verification below) — one Sonnet check per fix round
+   c. Append verifier output to fix journal under `### Verifier Assessment` heading; write verdict summary to `round-N-verification.md`
+   d. If Fatal-severity Unresolved: flag as "prior unresolved Fatal — must address" in next round's fix dispatch (binding, one-round grace)
+   e. If Significant-severity Unresolved: appended to fix journal as informational context
+   f. Invoke a FRESH red-team on the revised artifact (no anchoring)
 6. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
@@ -71,6 +77,33 @@ The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch di
 **Why this matters:** Without fix memory, the most common causes of stagnation and oscillation are fix agents repeating failed approaches or unknowingly reverting prior fixes while addressing new findings. Fix memory turns these escalation events into solvable problems -- the fix agent can see what was already tried and choose a genuinely different approach.
 
 **Compaction recovery:** The fix journal is written to `fix-journal.md` in the scratch directory alongside round scores and findings. It is recovered automatically when the orchestrator reads the scratch directory after compaction.
+
+## Fix Verification
+
+After each fix agent completes and before the next red-team round, dispatch a **Fix Verifier** — a dedicated Sonnet agent that checks whether each fix actually resolves its stated finding. No re-fix sub-loop; the verifier checks once, and its output feeds into the fix journal for the next round.
+
+**Dispatch method:** Task tool (model: Sonnet), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator pastes all input directly.
+
+**Input the orchestrator provides:**
+1. Round N findings (the findings the fix agent was asked to address)
+2. The current round's fix journal entry only — the `## Round N Fix` section just appended (not the full journal)
+3. Prepared artifact:
+   - Non-code (design docs, plans, hypotheses, mockups, translations): post-fix version in full
+   - Code: diff + full post-fix source of files touched by the diff. For large implementations (>2000 lines), dispatch one verifier call per finding if context exceeds limits.
+4. The full content of `fix-verifier-prompt.md` as the agent's instructions
+
+**Reading the verdict:** The verifier returns a per-finding Resolved/Unresolved table and an overall PASS/FAIL.
+
+**Handling Unresolved findings:**
+- **Fatal-severity Unresolved:** Flagged as "prior unresolved Fatal — must address" in the next round's fix dispatch. This is binding with one-round grace: if the fix agent addresses it and the next red-team round does NOT re-raise the finding, the binding expires. If the verifier marks the same Fatal as Unresolved again (persistent disagreement), the verdict downgrades to informational. Sonnet should not permanently override Opus.
+- **Significant-severity Unresolved:** Appended to the fix journal as informational context. The next round's fix agent may address, disagree with, or deprioritize.
+- **All Resolved (PASS):** Proceed to next red-team round normally.
+
+**Fix journal integration:** The verifier's output is appended under a `### Verifier Assessment` heading in the fix journal, distinct from the `## Round N Fix` entry format. This keeps verifier assessments on the remediation path (fix agents see them) without contaminating the review path (red-team never sees them).
+
+**Anti-anchoring preserved:** The verifier is on the remediation path — its output flows to fix agents only, never to the red-team reviewer. Same isolation as the fix journal itself.
+
+**Round counter unchanged:** The verifier dispatch does not increment the round counter. It is part of the fix step, not a separate review round.
 
 ## Stagnation Detection
 
@@ -171,6 +204,7 @@ Quality gate writes round state to disk for compaction recovery.
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
 - `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error)
+- `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes)
 
 **Compaction recovery:**
 1. Glob for `active-run-*.md` markers to locate the scratch directory.
@@ -178,8 +212,9 @@ Quality gate writes round state to disk for compaction recovery.
 3. Read the latest `artifact-N.md` as the current artifact state.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
 5. Read all `round-N-comparison.md` files to reconstruct consecutive-round state for the stagnation judge. Absence of comparison files is expected on clean-progress rounds.
-6. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
-7. Dispatch the next red-team round.
+6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch.
+7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
+8. Dispatch the next red-team round.
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
 
@@ -243,6 +278,9 @@ Three exit modes beyond clean approval:
 - Orchestrator performing semantic comparison inline instead of dispatching the stagnation judge
 - Dispatching the judge when the score is strictly improving (waste — score alone is sufficient)
 - Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking)
+- Skipping the fix verifier dispatch after a fix agent completes (every fix round gets verified)
+- Passing verifier output to the red-team reviewer (verifier is on the remediation path only)
+- Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round)
 
 ## Integration
 
