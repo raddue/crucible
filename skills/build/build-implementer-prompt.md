@@ -55,6 +55,7 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
       If any pattern applies to code you are writing or modifying, write a
       failing test for it first — treat it as a pre-existing bug you are
       responsible for not reintroducing.
+
     1. Read and understand the task requirements
     2. If anything is unclear, message the lead to ask BEFORE starting
     3. For each behavior you need to implement, follow this cycle:

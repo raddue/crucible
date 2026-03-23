@@ -98,7 +98,9 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     ### Step 2: Build Candidate List
 
-    Combine three signals to build a deduplicated list of candidate locations:
+    Combine all available signals to build a deduplicated list of candidate locations.
+    If existing defect signatures are present above, also incorporate them
+    as Signal 4 (see instructions in the Existing Defect Signatures section).
 
     **Signal 1 — Fix diff (structural search):**
     Search the codebase for code that follows the same structural pattern as
