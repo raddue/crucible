@@ -1,0 +1,186 @@
+{
+  "evaluated_at": "2026-03-23T18:30:00Z",
+  "mode": "quick",
+  "skills": {
+    "adversarial-tester": {
+      "path": "skills/adversarial-tester/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Distinct failure-mode test generation for build Phase 3. Produces 3-5 targeted tests per mode. No overlap with red-team (single artifact) or audit (existing code).",
+      "mtime": "2026-03-09T10:47:07Z"
+    },
+    "audit": {
+      "path": "skills/audit/SKILL.md",
+      "verdict": "Keep",
+      "reason": "4 parallel analysis lenses (correctness, robustness, consistency, architecture) on existing code. Distinct from red-team, inquisitor, and prospector.",
+      "mtime": "2026-03-16T10:05:26Z"
+    },
+    "build": {
+      "path": "skills/build/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Core 4-phase orchestrator with contract-aware dispatch (/spec consumption), defect signature loading from cartographer, and refactor mode. Dispatches 11+ sub-skills. All cross-references resolve.",
+      "mtime": "2026-03-23T11:02:44Z"
+    },
+    "cartographer-skill": {
+      "path": "skills/cartographer-skill/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Living codebase knowledge store with defect-signatures subsystem. 3 modes (record/consult/load) plus defect signature recording. Tight integration with debugging Phase 4.5 and build Phase 3. Distinct from project-init and forge.",
+      "mtime": "2026-03-23T11:02:44Z"
+    },
+    "code-review": {
+      "path": "skills/code-review/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Post-implementation weighted review (Fatal=3, Significant=1) with iterative fix loop. Fresh reviewer each round. Distinct from red-team and quality-gate.",
+      "mtime": "2026-03-16T12:14:00Z"
+    },
+    "debugging": {
+      "path": "skills/debugging/SKILL.md",
+      "verdict": "Keep",
+      "reason": "5+ phase investigation pipeline with Phase 4.5 'Where Else?' blast radius scan and defect signature persistence via cartographer recorder. Cross-references to cartographer and quality-gate all resolve.",
+      "mtime": "2026-03-23T11:02:44Z"
+    },
+    "design": {
+      "path": "skills/design/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Pre-implementation exploration with contract emission, cartographer consult, forge feed-forward. Related skills list now includes crucible:build. Distinct from planning and build.",
+      "mtime": "2026-03-23T18:30:00Z"
+    },
+    "finish": {
+      "path": "skills/finish/SKILL.md",
+      "verdict": "Keep",
+      "reason": "7-step completion workflow with 4 merge options. Unique decision-gate for work completion. Distinct from code-review (pre-completion) and build (orchestrator).",
+      "mtime": "2026-03-16T12:14:00Z"
+    },
+    "forge-skill": {
+      "path": "skills/forge-skill/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Retrospective/feed-forward pattern tracking. 3 modes (retrospective, feed-forward, mutation). Deviation pattern pruning. Unique learning loop across tasks.",
+      "mtime": "2026-03-08T23:19:30Z"
+    },
+    "getting-started": {
+      "path": "skills/getting-started/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Skill ecosystem entry point mapping user actions to skill invocation. Priority guidance. Distinct from project-init (repo onboarding).",
+      "mtime": "2026-03-15T22:04:17Z"
+    },
+    "innovate": {
+      "path": "skills/innovate/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Single-shot divergent creativity injection on finalized designs/plans. Always followed by quality-gate. Distinct from design (exploratory).",
+      "mtime": "2026-03-08T23:19:30Z"
+    },
+    "inquisitor": {
+      "path": "skills/inquisitor/SKILL.md",
+      "verdict": "Keep",
+      "reason": "5 parallel adversarial dimensions (wiring, integration, edge cases, state/lifecycle, regression) against full feature diff. Cross-component focus. Build Phase 4.",
+      "mtime": "2026-03-12T14:45:28Z"
+    },
+    "mock-to-unity": {
+      "path": "skills/mock-to-unity/SKILL.md",
+      "verdict": "Keep",
+      "reason": "5-layer UI Toolkit implementation (structure, USS, C# workarounds, behavior, verification). Mandatory translation map checkpoint. Distinct from mockup-builder and ui-verify.",
+      "mtime": "2026-03-09T10:47:07Z"
+    },
+    "mockup-builder": {
+      "path": "skills/mockup-builder/SKILL.md",
+      "verdict": "Keep",
+      "reason": "HTML/CSS visual reference with rigid Unity constraints (CSS variables only, flexbox, BEM). Translation Notes section. Distinct from mock-to-unity (implementation) and ui-verify (verification).",
+      "mtime": "2026-03-09T10:47:07Z"
+    },
+    "parallel": {
+      "path": "skills/parallel/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Coordination pattern for independent parallel work. Each agent scoped with goal, constraints, output. Verification step. Distinct from build (sequential phases).",
+      "mtime": "2026-03-08T23:19:30Z"
+    },
+    "pathfinder": {
+      "path": "skills/pathfinder/SKILL.md",
+      "verdict": "Keep",
+      "reason": "4 modes (full-scan, query, crawl, diff) for cross-repo dependency analysis. Contract extraction/verification. Extensive compaction recovery. Unique scope: codebase topology mapping.",
+      "mtime": "2026-03-19T14:49:23Z"
+    },
+    "planning": {
+      "path": "skills/planning/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Bite-sized TDD task structure with exact file paths. Refactoring tasks with atomic metadata and consumer migration. Distinct from design (exploration) and build (execution).",
+      "mtime": "2026-03-16T16:36:25Z"
+    },
+    "project-init": {
+      "path": "skills/project-init/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Tier 1 single-repo deep scan with partition explorers. Tier 2 cross-repo discovery. CLAUDE.md proposal filtering. Distinct from cartographer (persists exploration) and pathfinder (traces dependencies).",
+      "mtime": "2026-03-15T22:04:17Z"
+    },
+    "prospector": {
+      "path": "skills/prospector/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Root cause analysis with ROI scoring, friction genealogy, and 3 competing design agents. Trajectory tracking across runs. Clear distinction from audit (bugs vs structural improvements). Build refactor handoff correctly referenced.",
+      "mtime": "2026-03-23T09:43:07Z"
+    },
+    "quality-gate": {
+      "path": "skills/quality-gate/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Two-layer stagnation: orchestrator scoring (Fatal=3, Significant=1) plus dedicated Sonnet judge for semantic comparison. Three judge verdicts (PROGRESS, STAGNATION, DIMINISHING_RETURNS). Fix memory with anti-anchoring. Progress notifications at rounds 5/8/11/14, 15-round safety limit. Judge prompt file verified on disk.",
+      "mtime": "2026-03-23T10:48:06Z"
+    },
+    "red-team": {
+      "path": "skills/red-team/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Devil's Advocate dispatch with fresh reviewer each round. Dual mode (single-pass vs full loop). Stagnation criteria: Fatal strictly lower OR weighted lower AND Fatal lower-or-equal. Distinct from quality-gate (loop manager).",
+      "mtime": "2026-03-16T10:05:26Z"
+    },
+    "review-feedback": {
+      "path": "skills/review-feedback/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Pre-implementation feedback verification (technical correctness, test impact, legacy reasons). No performative agreement. YAGNI check. Distinct from code-review (writes review).",
+      "mtime": "2026-03-08T23:19:30Z"
+    },
+    "skill-creator": {
+      "path": "skills/skill-creator/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Skill lifecycle management (draft, test, evaluate, improve). 4 test case org. eval_metadata.json with grading. Benchmark aggregation. Orthogonal to all other skills.",
+      "mtime": "2026-03-11T10:59:19Z"
+    },
+    "spec": {
+      "path": "skills/spec/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Autonomous epic-to-spec pipeline producing design docs, implementation plans, and machine-readable contracts per ticket. No overlap with /design (interactive, single-ticket) or /build (consumer). All cross-references resolve. Both prompt templates exist on disk.",
+      "mtime": "2026-03-23T09:43:07Z"
+    },
+    "stocktake": {
+      "path": "skills/stocktake/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Ecosystem health assessment with overlap, scope, actionability, cross-reference checks. Quick scan and full modes. Results cached. Orthogonal to all other skills.",
+      "mtime": "2026-03-08T23:19:30Z"
+    },
+    "test-coverage": {
+      "path": "skills/test-coverage/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Post-change test staleness audit (update, delete, coincidence categories). Multi-batch dispatch. Revert-on-failure. Distinct from adversarial-tester (new tests) and TDD (process).",
+      "mtime": "2026-03-16T12:14:00Z"
+    },
+    "test-driven-development": {
+      "path": "skills/test-driven-development/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Red-green-refactor discipline enforcement. Mandatory verify red/green. Rationalization prevention. Foundational practice applied by other skills.",
+      "mtime": "2026-03-18T14:23:57Z"
+    },
+    "ui-verify": {
+      "path": "skills/ui-verify/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Mockup-vs-implementation verification with 3 checklist categories. Step-by-step comparison (capture, visual diff, code audit, delta report). Distinct from mockup-builder and mock-to-unity.",
+      "mtime": "2026-02-26T15:25:17Z"
+    },
+    "verify": {
+      "path": "skills/verify/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Evidence-before-claims enforcement. Gate function (identify, run, read, verify). Red flags for rationalization. Foundational integrity practice across all skills.",
+      "mtime": "2026-03-18T14:23:57Z"
+    },
+    "worktree": {
+      "path": "skills/worktree/SKILL.md",
+      "verdict": "Keep",
+      "reason": "Isolated workspace creation with directory priority, safety verification, auto-detected setup. Called by design, build, and any skill needing isolation.",
+      "mtime": "2026-03-08T23:19:30Z"
+    }
+  }
+}

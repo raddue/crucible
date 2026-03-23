@@ -174,7 +174,7 @@ This skill produces **design docs**. When used standalone, invoke `crucible:qual
 
 ## Integration
 
-**Related skills:** crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate, crucible:spec
+**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate, crucible:spec
 
 **Contract schema:** Shared with `/spec` — see `skills/spec/SKILL.md` for the canonical contract YAML schema (version 1.0). Both `/design` and `/spec` emit contracts that `/build` consumes.
 
