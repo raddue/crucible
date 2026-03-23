@@ -326,6 +326,18 @@ After context compaction:
 
 **[11] End-of-run quality gate:** Two phases -- per-document gates on each design doc and plan, then cross-ticket integration check on contracts and dependency graph. See End-of-Run Quality Gate section.
 
+### Decision Extraction (After All Waves Complete)
+
+After all waves complete and before branch/PR operations:
+1. Read `scratch/<run-id>/decisions.md` (shared decision log)
+2. For each ticket in committed status, read `tickets/<ticket-number>/decisions.md`
+3. Collect all file paths from committed design docs (the `Path:` or file references within each design doc's Current State Analysis)
+4. Map decisions to cartographer modules using file path prefix matching
+5. Dispatch cartographer recorder with directive "Extract decisions for cartographer"
+   Input: collected decisions, module mapping, existing module files, existing decisions.md
+6. Write recorder output to cartographer storage
+7. This step is RECOMMENDED, not REQUIRED -- failure does not block the spec run
+
 **[12] Summary report:** Output a final report with: tickets completed, tickets failed (with reasons), tickets blocked (with decision context), alerts emitted, contracts produced, and the branch/PR URL.
 
 ## Parallel Execution via Agent Teams

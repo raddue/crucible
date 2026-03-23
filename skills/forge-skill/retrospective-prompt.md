@@ -81,6 +81,17 @@ Task tool (general-purpose, model: sonnet):
     - Format: "When [situation], [do X] instead of [Y] because [reason]"
     - Must be applicable to future tasks in this codebase
 
+    **7. Substantive Design Decisions (build sessions only):**
+    - Extract from the decision journal any entries where the decision type
+      is NOT one of: reviewer-model, gate-round, escalation, task-grouping,
+      cleanup-removal.
+    - Also extract from the "Actual Execution Summary" any design choices
+      described in prose (technology selections, API design decisions,
+      architecture trade-offs).
+    - For each extracted decision, note: what was chosen, what was rejected,
+      and why.
+    - Output these as a structured list for cartographer persistence.
+
     ## Output Format
 
     Return a complete retrospective entry in this exact format:

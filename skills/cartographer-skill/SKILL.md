@@ -48,6 +48,7 @@ All data lives in the project memory directory:
   map.md                # High-level module map (max 200 lines)
   conventions.md        # Codebase patterns and conventions (max 150 lines)
   landmines.md          # Non-obvious things that break (max 100 lines)
+  decisions.md          # Cross-cutting design decisions with rationale (max 200 lines)
   modules/              # Per-module detail files (max 100 lines each)
     funding.md
     auth.md
@@ -65,6 +66,7 @@ All data lives in the project memory directory:
 | `map.md` | 200 | Orchestrator | Consult mode (every task start) |
 | `conventions.md` | 150 | Implementer subagents | Pasted into dispatch prompt |
 | `landmines.md` | 100 | Reviewer/red-team subagents | Pasted into dispatch prompt |
+| `decisions.md` | 200 | Implementer, Reviewer, Red-team subagents | Pasted into dispatch prompt |
 | `modules/<name>.md` | 100 each | Subagents working in that area | Pasted into dispatch prompt |
 | `defect-signatures/<name>.md` | 30 sibling entries | Implementer, Investigator, Where Else? subagents | Matched by module name at load time |
 | `defect-signatures/<name>.non-matches.md` | 100 entries (soft cap) | Investigator (truncated to 50), Where Else? (paths only) | Loaded alongside parent signature |
@@ -96,6 +98,8 @@ After any significant exploration — the agent read 5+ files, traced a call cha
 
 **Module files (`modules/<name>.md`):**
 
+Key Decisions should contain 1-5 entries, each 2-3 lines, consuming no more than 15 lines of the 100-line cap.
+
 ```markdown
 # <Module Name>
 
@@ -117,6 +121,10 @@ After any significant exploration — the agent read 5+ files, traced a call cha
 
 - [Implicit or explicit contracts: "processEvent() must be idempotent"]
 - [API constraints: "lender API supports single lookups only, no batch"]
+
+## Key Decisions
+
+- **[Decision title]** ([ISO date], [ticket], [confidence if non-high]): [Why this choice was made]. Alternatives: [Alt 1] (rejected: [reason]), [Alt 2] (rejected: [reason]). Evidence: [what drove the choice].
 
 ## Gotchas
 
@@ -171,6 +179,23 @@ Things that break non-obviously. Subagents reviewing or red-teaming should check
 ## Resolved Landmines
 
 - ~~[Short title]~~ — [Resolved in session YYYY-MM-DD. How it was fixed.]
+
+## Last Updated
+
+[ISO date]
+```
+
+**Decisions file (`decisions.md`):**
+
+```markdown
+# Cross-Cutting Decisions
+
+Decisions that span multiple modules or are architectural in nature.
+Loaded by implementer and reviewer/red-team subagents alongside module context.
+
+## Decisions
+
+- **[Decision title]** ([ISO date], [ticket], modules: [list], [confidence if non-high]): [Why this choice was made]. Alternatives: [Alt 1] (rejected: [reason]), [Alt 2] (rejected: [reason]). Evidence: [what drove the choice].
 
 ## Last Updated
 
@@ -334,24 +359,26 @@ When dispatching an implementer, reviewer, investigator, or any subagent that wi
 3. If yes: read the module file(s) and paste into the subagent's dispatch prompt
 4. Also paste `conventions.md` into implementer prompts
 5. Also paste `landmines.md` into reviewer and red-team prompts
-6. Also load matching defect signatures from `defect-signatures/` into implementer and investigator prompts:
+6. Also paste `decisions.md` into implementer, reviewer, and red-team prompts.
+   This provides cross-cutting decision rationale alongside module-specific context.
+7. Also load matching defect signatures from `defect-signatures/` into implementer and investigator prompts:
    - **Module matching:** Read each cartographer module file's `Path:` field. A task's file is in a module if the file path starts with the module's `Path:` value. When a task spans multiple modules, load signatures for all matched modules. When no cartographer modules exist, fall back to directory prefix matching against the signature's `Modules` field.
    - **Path staleness:** Before injecting, validate all file paths still exist. Drop stale entries silently.
    - **What to load per subagent type:** See the subagent loading table below.
    - **`Last loaded` update:** Loading is a pure-read operation. After all subagent dispatches for the current phase complete, the orchestrator batch-updates the `Last loaded` field on all signatures that were loaded during that phase.
-7. If no module file exists: dispatch without it (subagent explores normally, record afterwards)
-8. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing
+8. If no module file exists: dispatch without it (subagent explores normally, record afterwards)
+9. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing
 
 ### What Each Subagent Type Gets
 
-| Subagent Type | `conventions.md` | `landmines.md` | `modules/*.md` | `defect-signatures/*.md` | `*.non-matches.md` |
-|---------------|:-:|:-:|:-:|:-:|:-:|
-| Implementer | Yes | No | Yes | Yes (matching modules) | No |
-| Code Reviewer | No | Yes | Yes | No | No |
-| Red-Team | No | Yes | Yes | No | No |
-| Investigator (debug) | No | No | Yes | Yes (matching modules) | Yes (truncated to 50) |
-| Where Else? scan | No | No | Yes | Yes (max 3, matching modules) | Yes (paths only) |
-| Plan Writer | No | No | No | No | No |
+| Subagent Type | `conventions.md` | `landmines.md` | `decisions.md` | `modules/*.md` | `defect-signatures/*.md` | `*.non-matches.md` |
+|---------------|:-:|:-:|:-:|:-:|:-:|:-:|
+| Implementer | Yes | No | Yes | Yes | Yes (matching modules) | No |
+| Code Reviewer | No | Yes | Yes | Yes | No | No |
+| Red-Team | No | Yes | Yes | Yes | No | No |
+| Investigator (debug) | No | No | No | Yes | Yes (matching modules) | Yes (truncated to 50) |
+| Where Else? scan | No | No | No | Yes | Yes (max 3, matching modules) | Yes (paths only) |
+| Plan Writer | No | No | No | No | No | No |
 
 ---
 
@@ -399,6 +426,8 @@ During retrospective, Forge captures whether the Cartographer's information was 
 - Record speculative information ("I think this might...") — only record observed facts
 - Load `landmines.md` into implementers (biases toward fear, not action)
 - Load `conventions.md` into reviewers (they should judge what IS, not what SHOULD be)
+- Record speculative decisions ("we might switch to X later") -- only record decisions actually made with evidence
+- Put operational routing decisions (model selection, gate rounds) in Key Decisions -- those belong in forge
 
 **Always:**
 - Read existing file before updating (merge, don't replace)
@@ -406,6 +435,8 @@ During retrospective, Forge captures whether the Cartographer's information was 
 - Record discoveries after significant exploration
 - Check for module files before dispatching subagents
 - Enforce line caps — compress or split if approaching limits
+- Include at least one rejected alternative with reason for every decision entry
+- Include date and source ticket for every decision entry
 
 ## Rationalization Prevention
 
@@ -417,6 +448,8 @@ During retrospective, Forge captures whether the Cartographer's information was 
 | "Map is stale, ignore it" | Stale maps with a flag are better than no map. Note what's wrong. |
 | "Too many modules to map" | Map what you touch. Coverage grows naturally. |
 | "Subagent doesn't need module context" | Wrong assumptions are the #1 deviation type. Context prevents them. |
+| "That decision is obvious, no need to record it" | Obvious to you now. Not obvious in 10 sessions when context is gone. Record it. |
+| "Too many decisions to persist" | Persist the ones with rejected alternatives. If the choice was unanimous, it doesn't need archaeology. |
 
 ## Common Mistakes
 

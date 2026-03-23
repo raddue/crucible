@@ -72,6 +72,14 @@ After any skill that completes a significant task reports success. The calling s
 4. Write entry to `~/.claude/projects/<project-hash>/memory/forge/retrospectives/YYYY-MM-DD-HHMMSS-<slug>.md`
 5. Update `patterns.md` — read current file, merge new findings, rewrite
 6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent (Opus). Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer` (record mode) with `dead_ends` and `diagnostic_path` fields.
+7. For build sessions with a decision journal, the retrospective also extracts
+   substantive design decisions. The retrospective analyst identifies decisions
+   that are NOT operational routing (reviewer-model, gate-round, task-grouping,
+   cleanup-removal types from the journal) but are substantive design choices
+   (technology selection, API design, architecture, constraint trade-offs).
+   These are passed to a cartographer recorder dispatch with the
+   "Extract decisions for cartographer" directive, alongside the module
+   mapping from the build session's task list and design doc.
 
 ### Update Rules for patterns.md
 
@@ -152,6 +160,7 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | `crucible:debugging` | Retrospective (diagnostic extraction) | After fix verified | Session artifacts → cartographer landmines with `dead_ends` + `diagnostic_path` |
 | `crucible:finish` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
 | `crucible:design` | Feed-Forward | Before first question | Topic description |
+| `crucible:build` | Retrospective (decision extraction) | After fix verified | Decision journal + task list → cartographer decisions via recorder |
 
 **Forge is RECOMMENDED, not REQUIRED.** It is a learning accelerator, not a quality gate. Skipping it does not produce broken output — it misses an opportunity to learn.
 

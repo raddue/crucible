@@ -76,6 +76,10 @@ Task tool (general-purpose, model: sonnet):
 
     - [Implicit or explicit contracts this module maintains]
 
+    ## Key Decisions
+
+    - **[Decision title]** ([date], [ticket]): [Reasoning]. Alternatives: [rejected options]. Evidence: [observable facts].
+
     ## Gotchas
 
     - [Non-obvious behavior, historical context, things that surprise]
@@ -85,6 +89,9 @@ Task tool (general-purpose, model: sonnet):
     [Today's date]
 
     ## Rules
+
+    - Key Decisions entries must be 2-3 lines each, max 15 lines total per module.
+      If exceeding, move oldest to decisions.md or compress.
 
     - Record OBSERVED FACTS only. Not "I think this might..." but "This
       function calls X which triggers Y."
@@ -247,4 +254,74 @@ Task tool (general-purpose, model: sonnet):
       "Siblings Skipped" entries
     - Do NOT add entries that are not in the scan report
     - Do NOT evaluate or re-judge the scan report's classifications
+
+    ## Decision Extraction Recording
+
+    When the orchestrator dispatches you with decision source data and
+    the directive "Extract decisions for cartographer", follow these instructions
+    instead of the standard module/convention/landmine recording flow.
+
+    ### Input You Receive
+
+    - Decision source: either the contents of a spec scratch `decisions.md` or
+      a build decision journal, annotated with file paths from design docs
+    - Module mapping: cartographer module names with their `Path:` fields
+    - Existing module files: current content of relevant module files
+    - Existing `decisions.md`: current content (if it exists)
+
+    ### Your Job
+
+    Extract substantive design decisions and write them into the appropriate
+    cartographer files. You do NOT extract operational decisions (model selection,
+    gate rounds, task grouping).
+
+    ### Extraction Criteria
+
+    Persist a decision if ANY of these are true:
+    - Confidence is medium or low (uncertainty worth preserving)
+    - Decision affects module-level architecture or cross-ticket interfaces
+    - Decision records why a viable alternative was rejected
+    - Decision references a constraint that is non-obvious from the code
+
+    Do NOT persist:
+    - High-confidence implementation details (loop style, variable naming)
+    - Decisions fully captured in contract `ambiguity_resolutions` (avoid duplication)
+    - Routing/operational decisions (reviewer model, gate round counts)
+
+    ### Module Mapping Rules
+
+    1. Read each decision's associated file paths (from design doc or ticket)
+    2. Match file paths to cartographer modules using `Path:` prefix matching
+    3. If a decision maps to exactly one module: write to that module's `## Key Decisions`
+    4. If a decision maps to 2+ modules: write to `decisions.md` with `modules:` tag
+    5. If a decision maps to no module (new area): write to `decisions.md`
+
+    ### Output Format
+
+    For each module file update, output:
+
+    ### File: modules/<name>.md
+    ### Action: UPDATE
+    ### Section: Key Decisions
+
+    - **[title]** ([date], [ticket]): [reasoning]. Alternatives: [list]. Evidence: [evidence].
+
+    For cross-cutting decisions, output:
+
+    ### File: decisions.md
+    ### Action: CREATE | UPDATE
+
+    [Entry in cross-cutting format]
+
+    ### Rules
+
+    - Compress each decision to 2-3 lines. No paragraphs.
+    - Include date and source ticket for every entry.
+    - Include confidence level only if non-high.
+    - Always include at least one rejected alternative with reason.
+    - Evidence must reference specific, observable facts (test results, API docs, load test numbers), not opinions.
+    - If a module file would exceed 100 lines with the new entries, move the oldest or lowest-value existing decisions to `decisions.md` before adding new ones.
+    - If `decisions.md` would exceed 200 lines, compress oldest entries (remove evidence detail, keep decision + alternative + date) or prune entries older than 20 sessions.
+    - MERGE with existing Key Decisions entries. Do not drop existing entries unless they are demonstrably obsolete (the constraint they reference no longer exists).
+    - When an existing decision contradicts a new one, flag to user: "Prior decision [X] conflicts with new decision [Y]. Which is current?"
 ```
