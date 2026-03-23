@@ -24,7 +24,7 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 6. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
    - **Same or higher score** → run first-pass score/Fatal check, then semantic comparison if needed, before declaring stagnation (see Stagnation Detection below)
-7. **Progress notification (non-blocking).** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), the orchestrator emits a status line: "Quality gate round [N]: score progression [list], [X] recurring / [Y] new findings this round." This is informational only — it does not pause or require user input.
+7. **Progress notification (non-blocking).** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), the orchestrator emits a status line: "Quality gate round [N]: score progression [list]." If semantic comparison ran on the current round, append: "[X] recurring / [Y] new findings." This is informational only — it does not pause or require user input.
 8. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
 
 ## Fix Mechanism
@@ -131,7 +131,7 @@ The orchestrator determines the class by examining whether each finding's propos
 
 **Decision rule:** Diminishing returns triggers only after **2 consecutive rounds** where all findings are new AND all are classified as Structural. The first all-new-all-Structural round is treated as progress (continue loop) — this confirms the classification is stable and not a one-round artifact. The second consecutive all-new-all-Structural round triggers **diminishing returns**, escalating with a distinct message (see Escalation below). This is NOT stagnation and NOT a failure — it is the gate recognizing it has extracted all the value iteration can provide.
 
-**Three-way exit:** The gate now has three exit modes: **approved** (zero Fatal/Significant) | **stagnation** (recurring issues) | **diminishing returns** (all-new but all-Structural for 2 consecutive rounds).
+**Three-way exit:** The gate has three exit modes: **approved** (zero Fatal/Significant) | **stagnation** (recurring issues) | **diminishing returns** (all-new but all-Structural for 2 consecutive rounds).
 
 ## Artifact Preparation
 
@@ -202,7 +202,7 @@ Quality gate writes round state to disk for compaction recovery.
 2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
 3. Read the latest `artifact-N.md` as the current artifact state.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
-5. Read all `round-N-comparison.md` files to determine: (a) whether semantic comparison already ran for the current round, (b) the consecutive-round state needed for diminishing returns detection (2 consecutive all-new-all-Structural rounds) and stuck-Significant tracking (same Significant recurring across 2 consecutive rounds).
+5. Read all `round-N-comparison.md` files (if any exist — comparison files are only written on rounds where semantic comparison ran; absence is expected on clean-progress rounds, not an error). Determine: (a) whether semantic comparison already ran for the current round, (b) the consecutive-round state needed for diminishing returns detection (2 consecutive all-new-all-Structural rounds) and stuck-Significant tracking (same Significant recurring across 2 consecutive rounds).
 6. Read the last 2-3 `round-N-comparison.md` files to reconstruct whether the current round is the first or second consecutive all-new-all-Structural round, and whether any Significant has recurred across consecutive rounds.
 7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
 8. Dispatch the next red-team round.
