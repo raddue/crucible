@@ -31,6 +31,17 @@ Agent tool (subagent_type: Explore, model: opus):
     [PASTE: Directory scope if user-specified, otherwise "Entire
     codebase"]
 
+    ## Framework Context
+
+    [PASTE: Framework context block from Phase 0.5 — language, runtime
+    version, DI framework, test framework, UI/web framework, other
+    domain-relevant frameworks with versions. If Phase 0.5 did not
+    detect any frameworks: "No framework context available."]
+
+    Use this context to inform your exploration — framework knowledge
+    helps you recognize when code is fighting the framework vs using
+    it idiomatically. This is orientation, not a constraint.
+
     ## Guiding Friction Examples
 
     These are the kinds of friction you are looking for. Use them as

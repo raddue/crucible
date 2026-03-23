@@ -10,7 +10,7 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     ## Input: Technical Brief
 
-    [PASTE: Technical brief from analysis output — file paths, coupling details, dependency category, interface surface summary, top caller patterns, structural summary. Subject to 1500-line hard cap.]
+    [PASTE: Technical brief from analysis output — file paths, coupling details, dependency category, interface surface summary, top caller patterns, structural summary. Subject to 2000-line hard cap.]
 
     ## Input: Genealogy Context
 
@@ -24,6 +24,14 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     [PASTE: The applicable architectural philosophy and why it applies]
 
+    ## Input: Root Cause Analysis
+
+    [PASTE: Full competing hypotheses output from Phase 2 root cause analysis — all hypotheses with their causal claims, falsification criteria, test results, and verdicts. Plus the surviving hypothesis, root cause classification (type + statement + symptom-vs-root-cause), framework pattern investigation, and remediation direction. If no root cause analysis was performed: "No root cause analysis available."]
+
+    ## Input: Framework Context
+
+    [PASTE: Framework context block from Phase 0.5 — language, runtime version, DI framework, test framework, UI/web framework, other domain-relevant frameworks with versions. If no frameworks detected: "No framework context available."]
+
     ## Your Job
 
     1. **Read the analysis brief thoroughly.** Understand the current interface, caller patterns, and structural layout before proposing anything.
@@ -32,21 +40,28 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     3. **If genealogy data is available, address the root cause directly.** An Incomplete Migration means your design should finish or redirect the migration — not start fresh. A Vestigial Structure means your design should delete, not redesign. A Forced Marriage means your design should separate the two concerns, not paper over them.
 
-    4. **Design a new interface that satisfies the constraint.** Define the types, methods, and parameters that callers will use. Be concrete — show actual signatures, not abstractions of abstractions.
+    4. **If root cause analysis is available, your proposal must address
+       the surviving root cause hypothesis, not just the symptom
+       identified by the explorer.** Review the falsified hypotheses to
+       understand what the root cause is NOT. If your design reorganizes
+       code without changing the architectural pattern identified by the
+       surviving hypothesis, explain why reorganization is still valuable.
 
-    5. **Show how callers would use it.** Transform the top caller patterns from the analysis brief into new usage examples under your proposed interface. If callers have to change, show exactly how. If callers don't change, explain why the redesign still matters.
+    5. **Design a new interface that satisfies the constraint.** Define the types, methods, and parameters that callers will use. Be concrete — show actual signatures, not abstractions of abstractions.
 
-    6. **Identify what complexity gets hidden internally.** What was previously visible to callers that your design moves behind the interface? What decisions do callers no longer have to make?
+    6. **Show how callers would use it.** Transform the top caller patterns from the analysis brief into new usage examples under your proposed interface. If callers have to change, show exactly how. If callers don't change, explain why the redesign still matters.
 
-    7. **Map your dependency strategy to the dependency category from the analysis.** The dependency category determines what testing strategies are valid:
+    7. **Identify what complexity gets hidden internally.** What was previously visible to callers that your design moves behind the interface? What decisions do callers no longer have to make?
+
+    8. **Map your dependency strategy to the dependency category from the analysis.** The dependency category determines what testing strategies are valid:
        - In-process: no mocks required, call directly
        - Local-substitutable: use a local stand-in (SQLite, in-memory filesystem) — not a mock
        - Remote-but-owned: use an in-memory adapter implementing the same port
        - True external: mock at the boundary only
 
-    8. **Describe what tests look like at the new boundary.** What do tests assert? What inputs trigger what observable outputs? Do not describe tests that couple to internal structure — tests should survive internal refactors.
+    9. **Describe what tests look like at the new boundary.** What do tests assert? What inputs trigger what observable outputs? Do not describe tests that couple to internal structure — tests should survive internal refactors.
 
-    9. **Honestly assess trade-offs.** What does your design make easier? What does it make harder? What are its failure modes? Do not present only benefits.
+    10. **Honestly assess trade-offs.** What does your design make easier? What does it make harder? What are its failure modes? Do not present only benefits.
 
     ## What You Must NOT Do
 
@@ -55,10 +70,11 @@ Agent tool (subagent_type: general-purpose, model: opus):
     - Do NOT propose changes without showing caller-side impact (usage examples are mandatory)
     - Do NOT ignore the dependency category in your testing strategy
     - If genealogy data shows an Incomplete Migration, your design should finish or redirect the migration, not start fresh
+    - Do NOT ignore root cause analysis when available — your design must engage with the surviving hypothesis, not just rearrange code around the symptom
 
     ## Context Self-Monitoring
 
-    If you reach 50%+ context utilization, ensure interface signature and usage example are complete before moving to trade-offs. A concrete interface with incomplete trade-off analysis is more useful than the reverse.
+    If you reach 50%+ context utilization, ensure interface signature, usage example, and root cause coverage are complete before moving to trade-offs. A concrete interface with incomplete trade-off analysis is more useful than the reverse.
 
     ## Output Format
 
@@ -83,4 +99,8 @@ Agent tool (subagent_type: general-purpose, model: opus):
 
     ### 6. Trade-offs
     [What you gain and what you give up — be honest about costs]
+
+    ### 7. Root Cause Coverage
+    - **Does this design address the root cause?** Yes/Partially/No
+    - **Explanation:** [How specifically does this design change the architectural pattern identified by the surviving hypothesis? If it doesn't, what does it improve instead?]
 ```

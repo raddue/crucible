@@ -289,3 +289,188 @@ When a restructured module has boundary tests that verify behavior through its p
 **Corollary:** Tests should survive internal refactors. If restructuring a module's internals requires rewriting its tests, those tests were coupled to implementation details rather than behavior. The goal of the "replace, don't layer" principle is to produce a test suite that is stable under refactoring — a suite that proves behavior is preserved, not that a specific internal structure exists.
 
 **Practical application:** When design agents propose a new interface, their testing strategy should describe what the boundary tests assert — the inputs and the expected observable outputs — not which internal functions to call. The dependency category determines what test infrastructure is required (direct call, local stand-in, in-memory adapter, or mock at boundary), but the assertion logic should always target observable outcomes.
+
+---
+
+## Root Cause Type Taxonomy
+
+The five root cause types used by the root cause analysis agent (Phase 2) to classify the underlying architectural decision or missing pattern that produces observed friction. These are distinct from the genealogy origin types (which classify HOW friction developed over time) — root cause types classify WHAT the architectural problem is.
+
+### Missing or Underused Pattern
+
+**Description:** A known pattern exists in the ecosystem (or even in the codebase) that would solve this friction, but the affected code uses a manual or inferior approach instead.
+
+**Detection signals:**
+- The project's framework documentation describes a pattern that addresses the friction point
+- Other parts of the codebase use the pattern, but the friction area does not
+- The manual approach replicates functionality that the framework provides natively
+
+**Examples:** VContainer's IInitializable for self-registration when the project uses manual wiring; built-in middleware pattern when the project hand-rolls auth checks in each route handler.
+
+**Design implication:** One constraint slot is replaced with "Adopt framework-native pattern: [specific pattern]" — a specific adoption constraint naming the exact pattern to adopt.
+
+---
+
+### Wrong Abstraction
+
+**Description:** An abstraction exists but it models the wrong concept. The friction arises not from the absence of abstraction but from the abstraction modeling something other than the actual domain concern.
+
+**Detection signals:**
+- The abstraction's name does not match what callers actually use it for
+- Callers routinely work around the abstraction rather than through it
+- The abstraction was created for a different purpose and repurposed
+
+**Examples:** Extracting "initializers" as an abstraction when the problem is centralized wiring; creating a "BaseService" when the shared concern is actually data validation.
+
+**Design implication:** One constraint slot is replaced with "Replace abstraction with correct domain model: [domain concept from surviving hypothesis]."
+
+---
+
+### Absent Boundary
+
+**Description:** No module boundary exists where one should. Business rules, orchestration logic, and implementation details are intermixed in the same location with no separation.
+
+**Detection signals:**
+- A single file or class handles multiple unrelated concerns
+- Business rules are embedded in infrastructure code (controllers, handlers, adapters)
+- No clear interface separates "what" from "how"
+
+**Examples:** Business rules scattered across controllers with no domain layer; orchestration logic and policy logic intermixed in a god-class.
+
+**Design implication:** One constraint slot is replaced with "Introduce boundary at [identified seam from surviving hypothesis]."
+
+---
+
+### Misaligned Ownership
+
+**Description:** A module boundary exists, but the wrong module owns the concept. The friction arises from responsibility being assigned to the wrong location, causing callers to reach across boundaries to get what they need.
+
+**Detection signals:**
+- Callers frequently access internals of module B to perform operations that should be module A's responsibility
+- A concept is "owned" by a module that doesn't actually understand it
+- Cross-module calls that should be intra-module calls
+
+**Examples:** Auth checks in route handlers instead of middleware; validation logic in the persistence layer instead of the domain layer.
+
+**Design implication:** No automatic constraint override — too context-dependent. Standard friction-type mapping applies.
+
+---
+
+### Other / Constraint-Driven
+
+**Description:** The root cause is an external constraint, not an internal design flaw. The friction is produced by forces outside the team's design authority — performance requirements, backward compatibility mandates, organizational boundaries, regulatory requirements.
+
+**Detection signals:**
+- The friction exists because of a deliberate trade-off that was correct at the time
+- Changing the design would violate an external constraint
+- The "fix" requires changing something the team does not control
+
+**Examples:** Performance requirement forcing denormalization; backward compatibility preventing API cleanup; organizational boundary requiring code duplication between teams.
+
+**Design implication:** No automatic constraint override. When this type is selected, the root cause agent must provide a freeform root cause statement explaining the constraint. Candidate presentation includes a warning: "Root cause is an external constraint — designs address symptoms, not the underlying cause."
+
+---
+
+## ROI and Leverage Scoring
+
+Definitions and scoring rules for the ROI assessment performed by analysis agents in Phase 3.
+
+### Leverage vs Impact
+
+- **Impact** = How much does fixing this improve the area where the friction exists?
+- **Leverage** = How much does fixing this improve everything else? How many future changes does it unblock or simplify?
+
+Test infrastructure is high-leverage (force multiplier for all future work). God-class decomposition is high-impact but may be low-leverage (improves the god-class area but doesn't unblock other work).
+
+### Scoring Table
+
+| Level | Score |
+|---|---|
+| High | 3 |
+| Medium | 2 |
+| Low | 1 |
+
+### Candidate Ranking Formula
+
+**Formula:** `Score = leverage_score x modification_friction_score`
+
+- Leverage and modification friction are each mapped to their numeric score (High=3, Medium=2, Low=1).
+- Effort is NOT included in the formula. Effort is presented separately as a cost indicator in candidate presentation. This prevents effort from dominating the ranking signal — easy wins should not automatically outrank hard necessities.
+- Ties are broken by comprehension friction score (higher comprehension friction ranks first among tied candidates).
+- Each candidate includes its numeric score and effort level: e.g., `[Score: 9] [Effort: Medium]`.
+- **"Do nothing" is not scored.** The formula applies only to active candidates. "Do nothing" is evaluated via the inaction decision rules. Candidates where inaction is defensible are moved to the "Track Only" section — a separate section below the ranked list, not a low-scoring position within it.
+
+---
+
+## Framework Check Guidance
+
+Guidance for analysis agents performing the framework-native solution check in Phase 3.
+
+### What to Check
+
+Determine whether the project's DI framework, language features, or test framework has built-in patterns that address the friction point. The framework context block (from Phase 0.5) provides framework names and versions. The root cause agent's output (for High-severity findings) provides code-level pattern investigation.
+
+### Evidence Source Tiers
+
+- **Root cause investigation (High-severity):** The root cause agent has already investigated which framework patterns are used vs available in the actual code. Use this as the authoritative source. Tag as `[Root cause investigation (High-severity)]`.
+- **Framework hint only (Medium/Low-severity):** No root cause agent was dispatched. The analysis agent works from the Phase 0.5 framework name + version only. Pattern-level usage has NOT been verified against code. Tag as `[Framework hint only (Medium/Low-severity -- pattern usage not verified)]`.
+
+### Applicability Assessment
+
+For each identified framework pattern, assess: would the pattern actually solve the root cause, or just the symptom? A framework pattern that addresses the symptom but not the root cause is still worth noting but should not be presented as a full solution.
+
+---
+
+## Cost of Inaction Criteria
+
+Decision rules for determining whether "do nothing" is a defensible option for a given friction point. Applied by analysis agents in Phase 3.
+
+### Git Metrics Aggregation
+
+When a friction point spans multiple files, the genealogist reports per-file metrics. The orchestrator aggregates them as follows:
+
+- **Headline metric:** The hottest file's change frequency and bug-fix commit count (e.g., "Change frequency: 14 commits/6mo (weekly) -- `src/services/PaymentProcessor.ts`").
+- **Range summary:** A one-line range: "Range across N files: [lowest]-[highest] commits/6mo, [lowest]-[highest] bug-fix commits."
+- **Inaction rules key on the hottest file.** A single hot file within a friction point's scope makes inaction indefensible — the cost is being paid regardless of whether other files are stable.
+
+### Decision Rules
+
+1. **Defensible — low-activity code:** Modification friction is Low AND hottest file's change frequency is monthly-or-less AND zero bug-fix commits for the hottest file in the analysis window. The code causes friction but nobody is paying the cost frequently enough to justify investment.
+
+2. **Defensible — comprehension-only friction in stable code:** Primary friction dimension is Comprehension (not Modification) AND the hottest file has fewer than 2 modifications per quarter. The code is hard to read but rarely needs to be read.
+
+3. **Not defensible (override):** If the code is blocking known planned work, inaction is never defensible regardless of the above rules.
+
+### Track Only Tier
+
+When inaction is defensible, the finding still proceeds through all analysis steps and appears in candidate selection — but is demoted to a "Track Only" section. This is a separate section below the ranked active candidates, not a low-scoring position within the ranked list. The user can still select a Track Only candidate if they choose.
+
+---
+
+## Friction Trajectory
+
+Cross-run tracking of friction point metrics over time. Prospector persists a fingerprint for each approved friction point after every run. On subsequent runs, matching fingerprints are compared to detect trends.
+
+### Trajectory Statuses
+
+| Status | Definition | Implication |
+|--------|-----------|-------------|
+| NEW | No prior observations | Neutral — insufficient data for trend |
+| STABLE (N runs) | Observed N times with similar metrics | Persistent friction, not self-resolving |
+| ACCELERATING | Change frequency or modification friction increasing | Urgent — deferral becoming increasingly costly |
+| DECLINING | Metrics decreasing over time | Positive — prior intervention or organic improvement |
+
+### Fingerprint Matching
+
+A friction point matches a prior observation when:
+- Same friction type classification (from the taxonomy)
+- >50% overlap in primary file paths (sorted, normalized)
+
+Root cause type is included in the fingerprint for context but is not required to match — root cause classification may evolve as the codebase changes or as Prospector's analysis improves across runs.
+
+### Impact on Cost-of-Inaction
+
+Trajectory status directly informs the cost-of-inaction assessment:
+- ACCELERATING overrides the "Defensible — low-activity code" inaction rule if the acceleration trend shows the code becoming high-activity
+- STABLE across 3+ runs suggests the friction is permanent without intervention
+- DECLINING may make a finding eligible for Track Only even if current metrics are above the threshold
