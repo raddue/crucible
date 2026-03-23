@@ -23,9 +23,10 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 5. If red-team finds Fatal or Significant issues: dispatch a **separate fix agent** (see Fix Mechanism below), then invoke a FRESH red-team on the revised artifact (no anchoring)
 6. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
-   - **Same or higher score** → check for progress (see Stagnation Detection below)
-7. **User checkpoint at round 6.** After 6 rounds, report to user: "Quality gate has run 6 rounds with score progression [list]. Continue or accept current state?" Continue only with user approval.
-8. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
+   - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
+7. Read the judge's verdict and act on it (see Stagnation Detection below)
+8. **Progress notification.** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause.
+9. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
 
 ## Fix Mechanism
 
@@ -73,17 +74,39 @@ The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch di
 
 ## Stagnation Detection
 
+Two-layer system: the orchestrator handles scoring; a dedicated judge agent handles semantic analysis.
+
+### First-Pass Check (orchestrator — runs every round)
+
 Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count tracking**.
 
 **Progress requires EITHER:**
 - Weighted score strictly lower than prior round, OR
 - Fatal count strictly lower AND weighted score same-or-lower
 
-This prevents false stagnation when a Fatal is genuinely fixed but enough new Significants are surfaced to maintain the same weighted score (e.g., 1 Fatal → 0 Fatal + 3 Significant = score 3 → 3, but Fatal count 1 → 0 = progress).
+If either condition is met → progress, loop again. No judge needed.
 
-**Stagnation:** If neither condition is met, escalate to user with findings from both rounds.
+**Oscillation detection:** If the weighted score *increases* (not just stays the same), escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
 
-**Oscillation detection:** If the weighted score *increases* in any round (not just stays the same), flag it explicitly as a **regression**, not just stagnation. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
+### Judge Dispatch (only when first-pass check would trigger stagnation)
+
+If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds.
+
+**Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator pastes all input directly.
+
+**Input the orchestrator provides:**
+1. The content of `round-N-findings.md` (current round)
+2. The content of `round-(N-1)-findings.md` (prior round)
+3. The latest fix journal entry only — extract the last `## Round N Fix` section from `fix-journal.md` (not the full journal)
+4. The content of any prior `round-*-comparison.md` files (for consecutive-round state tracking)
+5. The full content of `stagnation-judge-prompt.md` as the agent's instructions
+
+**Reading the verdict:** The judge returns a structured verdict: **PROGRESS**, **STAGNATION**, or **DIMINISHING_RETURNS**.
+- **PROGRESS** → loop again
+- **STAGNATION** → escalate: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list from judge]. Escalating."
+- **DIMINISHING_RETURNS** → escalate: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list from judge]. Presenting for user judgment."
+
+**The judge also writes:** a `round-N-comparison.md` file. The orchestrator saves the judge's full output as `round-N-comparison.md` in the scratch directory. This file is used by future judge dispatches for consecutive-round tracking.
 
 ## Artifact Preparation
 
@@ -147,14 +170,16 @@ Quality gate writes round state to disk for compaction recovery.
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
+- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error)
 
 **Compaction recovery:**
 1. Glob for `active-run-*.md` markers to locate the scratch directory.
 2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
 3. Read the latest `artifact-N.md` as the current artifact state.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
-5. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
-6. Dispatch the next red-team round.
+5. Read all `round-N-comparison.md` files to reconstruct consecutive-round state for the stagnation judge. Absence of comparison files is expected on clean-progress rounds.
+6. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
+7. Dispatch the next red-team round.
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
 
@@ -195,10 +220,12 @@ Each artifact-producing skill's SKILL.md documents:
 
 ## Escalation
 
-- Stagnation (see Stagnation Detection above) → escalate to user with findings from both rounds
-- Regression (score increased) → escalate immediately with regression flag
+Three exit modes beyond clean approval:
+
+- **Stagnation** → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating."
+- **Diminishing returns** → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
+- **Regression** (score increased) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
 - Global safety limit reached (15 rounds) → escalate to user with full round history
-- User checkpoint at round 6 → user decides whether to continue
 - Architectural concerns → escalate immediately (bypass loop)
 - User can interrupt at any time to skip the gate
 
@@ -213,6 +240,9 @@ Each artifact-producing skill's SKILL.md documents:
 - Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY)
 - Leaving review-response artifacts (comments, annotations) in the artifact between rounds
 - Dispatching a fix agent without the fix journal on round 2+ (fix agents need remediation history)
+- Orchestrator performing semantic comparison inline instead of dispatching the stagnation judge
+- Dispatching the judge when the score is strictly improving (waste — score alone is sufficient)
+- Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking)
 
 ## Integration
 
