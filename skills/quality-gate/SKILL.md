@@ -73,7 +73,9 @@ The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch di
 
 ## Stagnation Detection
 
-Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count tracking**.
+Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count tracking** as a first-pass check. When the first-pass check would trigger stagnation, a **semantic comparison** of findings runs before escalating.
+
+### First-Pass Check (Score-Based)
 
 **Progress requires EITHER:**
 - Weighted score strictly lower than prior round, OR
@@ -81,9 +83,55 @@ Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count 
 
 This prevents false stagnation when a Fatal is genuinely fixed but enough new Significants are surfaced to maintain the same weighted score (e.g., 1 Fatal → 0 Fatal + 3 Significant = score 3 → 3, but Fatal count 1 → 0 = progress).
 
-**Stagnation:** If neither condition is met, escalate to user with findings from both rounds.
+**Oscillation detection:** If the weighted score *increases* in any round (not just stays the same), flag it explicitly as a **regression**, not just stagnation. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." Oscillation bypasses semantic comparison — it is always an immediate escalation.
 
-**Oscillation detection:** If the weighted score *increases* in any round (not just stays the same), flag it explicitly as a **regression**, not just stagnation. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
+If the first-pass check shows progress (score decreased or Fatal count decreased), continue the loop. No semantic comparison needed.
+
+If the first-pass check would trigger stagnation (neither progress condition met, and no oscillation), proceed to semantic comparison.
+
+### Semantic Comparison (Second-Pass)
+
+The semantic comparison only runs when the score-based first-pass check would trigger stagnation — not every round. Round 1 has no prior round, so semantic comparison cannot trigger on round 1. Stagnation detection begins at round 2 at the earliest.
+
+**Procedure:**
+
+1. Read `round-N-findings.md` and `round-(N-1)-findings.md` from the scratch directory.
+2. For each finding in round N, determine if it is the same core concern as any finding in round N-1 (semantic match — same section of the artifact, same type of problem, even if worded differently).
+3. Classify each round N finding as **Recurring** (appeared in both rounds) or **New** (only in current round).
+4. When the match is uncertain, default to **New** (fail-open — err toward declaring progress rather than falsely declaring stagnation).
+5. Write the result to `round-N-comparison.md` in the scratch directory as a structured table:
+
+| Round N-1 Finding | Round N Finding | Match Judgment | Reasoning |
+|---|---|---|---|
+| (prior finding summary) | (current finding summary) | Recurring / New | (why matched or not) |
+
+**Anti-anchoring preserved:** The comparison is orchestrator-internal only. Prior findings are never passed to the reviewer. The comparison uses findings files already on disk (compaction recovery compatible).
+
+### Decision Rules (After Semantic Comparison)
+
+**All New:** All round N findings are new (none recurring). The fix cycle resolved all prior issues; the fresh reviewer found new attack surfaces. This is **progress** — continue loop, then check for diminishing returns (see below).
+
+**All Recurring:** All round N findings appeared in round N-1. This is **stagnation** — escalate.
+
+**Mixed (recurring + new):**
+- Any recurring **Fatal** exists: **stagnation** — escalate. A Fatal that survives a fix attempt is genuinely stuck.
+- Only recurring **Significants** (no recurring Fatals) AND at least one new finding exists: **progress** — continue. The fix cycle is making headway. However, if the same Significant has recurred for 2 consecutive rounds (appeared in rounds N-2, N-1, AND N), treat it as stuck and escalate. The first recurrence gets benefit of the doubt; the second consecutive recurrence proves iteration cannot resolve it.
+- Only recurring **Significants**, no new findings: **stagnation** — escalate. Nothing new was found and the recurring issues were not fixed.
+
+### Diminishing Returns Detection
+
+When the semantic comparison determines all findings are new (progress), the orchestrator performs one additional check: **difficulty-class tagging**.
+
+Each new finding is classified based on its proposed fix:
+
+- **Surface:** The finding's proposed fix is a targeted change to the artifact (missing section, unclear language, wrong assumption, omitted edge case). The fix agent can resolve this.
+- **Structural:** The finding's proposed fix requires rethinking a design decision, changing scope, or accepting a known trade-off (architectural tension, inherent complexity, out-of-scope dependency). Iteration cannot resolve this — it needs user judgment.
+
+The orchestrator determines the class by examining whether each finding's proposed fix targets the artifact directly (Surface) or requires scope/design reconsideration (Structural). When in doubt, classify as **Surface** (fail-safe toward continued iteration rather than premature escalation).
+
+**Decision rule:** Diminishing returns triggers only after **2 consecutive rounds** where all findings are new AND all are classified as Structural. The first all-new-all-Structural round is treated as progress (continue loop) — this confirms the classification is stable and not a one-round artifact. The second consecutive all-new-all-Structural round triggers **diminishing returns**, escalating with a distinct message (see Escalation below). This is NOT stagnation and NOT a failure — it is the gate recognizing it has extracted all the value iteration can provide.
+
+**Three-way exit:** The gate now has three exit modes: **approved** (zero Fatal/Significant) | **stagnation** (recurring issues) | **diminishing returns** (all-new but all-Structural for 2 consecutive rounds).
 
 ## Artifact Preparation
 
