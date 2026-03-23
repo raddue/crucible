@@ -56,6 +56,27 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     If no cartographer data exists, write "No cartographer data available —
     agent must discover codebase structure independently."]
 
+    ## Known Defect Patterns in This Area
+
+    The following defect patterns have previously been identified in modules
+    related to this investigation. They may help accelerate hypothesis formation.
+
+    [DEFECT_SIGNATURES]
+
+    [If no matching defect signatures exist, the orchestrator omits this section entirely.
+    When present, each signature block follows this format:
+
+    ### Pattern: <short title> (YYYY-MM-DD)
+    <generalized pattern>
+    Previously found in: <confirmed sibling list>
+    UNRESOLVED DEFECTS (fix was reverted): <unresolved sibling list, if any>
+    Previously cleared: <non-match list, truncated to 50 entries>
+
+    Before beginning your standard investigation, check whether any listed
+    pattern explains the current bug. If the bug's file path appears in any
+    signature's Unresolved Siblings list, report that match as your first
+    finding with High confidence.]
+
     ## Domain Context (if detected)
 
     [If the debugging orchestrator detected a domain match in Phase 0,

@@ -53,6 +53,9 @@ All data lives in the project memory directory:
     auth.md
     events.md
     ...
+  defect-signatures/    # Per-pattern defect signatures (max 20 files)
+    YYYY-MM-DD-<slug>.md
+    YYYY-MM-DD-<slug>.non-matches.md
 ```
 
 ### File Size Caps
@@ -63,6 +66,9 @@ All data lives in the project memory directory:
 | `conventions.md` | 150 | Implementer subagents | Pasted into dispatch prompt |
 | `landmines.md` | 100 | Reviewer/red-team subagents | Pasted into dispatch prompt |
 | `modules/<name>.md` | 100 each | Subagents working in that area | Pasted into dispatch prompt |
+| `defect-signatures/<name>.md` | 30 sibling entries | Implementer, Investigator, Where Else? subagents | Matched by module name at load time |
+| `defect-signatures/<name>.non-matches.md` | 100 entries (soft cap) | Investigator (truncated to 50), Where Else? (paths only) | Loaded alongside parent signature |
+| Total defect signatures | 20 files | N/A | LRU pruning with 30-day age protection |
 
 **The orchestrator only ever loads `map.md`.** Everything else stays in subagent contexts.
 
@@ -217,6 +223,76 @@ digraph deps {
 5. Mark resolved landmines with strikethrough, prune after 10 sessions
 6. Update `map.md` module table whenever a new module file is created
 
+### Defect Signature Recording
+
+**Trigger:** After debugging Phase 4.5 "Where Else?" scan completes with 1+ candidates evaluated. The debugging orchestrator dispatches a Sonnet cartographer recorder agent.
+
+**Skip condition:** Do not write a signature when Phase 4.5 reports "No analogous locations found" (0 candidates evaluated).
+
+**Responsibility split:**
+- **Orchestrator (debugging skill):** Owns dedup detection, pruning, count enforcement, post-recorder validation, and `update_path` file rename. See `crucible:debugging` Phase 4.5 for full orchestrator flow.
+- **Recorder agent (Sonnet):** Writes exactly one signature file and one companion non-match file. Enforces per-file caps (30-entry sibling cap, 100-entry non-match cap). Does NOT manage count, pruning, dedup, or cross-file validation.
+
+**Input to recorder:**
+- Phase 4.5 scan report (generalized pattern, confirmed siblings with justifications, reverted siblings with revert reasons, confirmed non-matches with reasons)
+- Original fix metadata (file path, commit SHA, commit message summary, issue number)
+- Cartographer module names (the names matching `modules/<name>.md` files used during Phase 4.5; if no cartographer modules exist, fall back to file path directory prefix groupings)
+- Optional: `update_path` — existing signature file to update instead of creating new
+
+**Signature file format:**
+
+```markdown
+# Defect Signature: <short title>
+
+**Date:** YYYY-MM-DD
+**Source:** <issue number or bug description>
+**Modules:** <comma-separated cartographer module names (e.g., funding, auth)>
+**Last loaded:** never
+**Original fix:** <file:path> — <commit SHA> — <one-line commit message summary>
+
+## Generalized Pattern
+
+<2-3 sentence pattern description from Phase 4.5 Step 1>
+
+## Confirmed Siblings
+
+- <file:path> — <one-line semantic justification>
+- ...
+
+## Unresolved Siblings
+
+- <file:path> — <reason fix was reverted (test failure summary)>
+- ...
+```
+
+**Non-match companion file format (`YYYY-MM-DD-<slug>.non-matches.md`):**
+
+```markdown
+# Non-Matches: <short title>
+
+- <file:path> — <one-line reason why pattern does not apply>
+- ...
+```
+
+**Slug generation:** First 8 hex characters of a SHA-256 hash of the generalized pattern text.
+
+**Per-file caps:**
+- Signature file: 30 sibling entries (Confirmed + Unresolved combined). If entries exceed 30, truncate Confirmed Siblings from the bottom. Never truncate Unresolved Siblings.
+- Non-match companion: 100 entries (soft cap). On merge exceeding 100, drop oldest entries from top of list.
+
+**Pruning rules (enforced by orchestrator, not recorder):**
+
+When writing a new signature and count exceeds 20:
+1. Build the pruning-eligible set: exclude signatures where `Last loaded: never` AND `Date` is less than 30 days old
+2. Within the pruning-eligible set, sort by `Last loaded` date ascending; signatures with `Last loaded: never` sort oldest
+3. Among ties, prune the oldest by `Date` field
+4. Delete the pruned signature file and its companion non-match file (if one exists)
+5. Write-before-delete ordering: always write the new file before deleting any pruned file
+
+If no signatures are pruning-eligible, the count temporarily exceeds 20 until the next invocation.
+
+**Path staleness:** At load time, validate that all file paths in both signatures and non-match companion files still exist on disk. Drop entries for files that no longer exist. Do NOT attempt to resolve renames.
+
 ---
 
 ## Mode 2: Consult Map
@@ -258,18 +334,24 @@ When dispatching an implementer, reviewer, investigator, or any subagent that wi
 3. If yes: read the module file(s) and paste into the subagent's dispatch prompt
 4. Also paste `conventions.md` into implementer prompts
 5. Also paste `landmines.md` into reviewer and red-team prompts
-6. If no module file exists: dispatch without it (subagent explores normally, record afterwards)
-7. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing
+6. Also load matching defect signatures from `defect-signatures/` into implementer and investigator prompts:
+   - **Module matching:** Read each cartographer module file's `Path:` field. A task's file is in a module if the file path starts with the module's `Path:` value. When a task spans multiple modules, load signatures for all matched modules. When no cartographer modules exist, fall back to directory prefix matching against the signature's `Modules` field.
+   - **Path staleness:** Before injecting, validate all file paths still exist. Drop stale entries silently.
+   - **What to load per subagent type:** See the subagent loading table below.
+   - **`Last loaded` update:** Loading is a pure-read operation. After all subagent dispatches for the current phase complete, the orchestrator batch-updates the `Last loaded` field on all signatures that were loaded during that phase.
+7. If no module file exists: dispatch without it (subagent explores normally, record afterwards)
+8. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing
 
 ### What Each Subagent Type Gets
 
-| Subagent Type | Gets `conventions.md` | Gets `landmines.md` | Gets `modules/*.md` |
-|---------------|----------------------|---------------------|---------------------|
-| Implementer | Yes | No | Yes (relevant modules) |
-| Code Reviewer | No | Yes | Yes (relevant modules) |
-| Red-Team | No | Yes | Yes (relevant modules) |
-| Investigator (debug) | No | No | Yes (relevant modules) |
-| Plan Writer | No | No | No (uses map.md via orchestrator) |
+| Subagent Type | `conventions.md` | `landmines.md` | `modules/*.md` | `defect-signatures/*.md` | `*.non-matches.md` |
+|---------------|:-:|:-:|:-:|:-:|:-:|
+| Implementer | Yes | No | Yes | Yes (matching modules) | No |
+| Code Reviewer | No | Yes | Yes | No | No |
+| Red-Team | No | Yes | Yes | No | No |
+| Investigator (debug) | No | No | Yes | Yes (matching modules) | Yes (truncated to 50) |
+| Where Else? scan | No | No | Yes | Yes (max 3, matching modules) | Yes (paths only) |
+| Plan Writer | No | No | No | No | No |
 
 ---
 

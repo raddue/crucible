@@ -36,6 +36,29 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     [IMPLEMENTER_OBSERVATIONS]
 
+    ## Existing Defect Signatures
+
+    [DEFECT_SIGNATURES]
+
+    [If no matching defect signatures exist, the orchestrator omits this section entirely.
+    When present, up to 3 matching signatures are injected. Each block follows this format:
+
+    ### Pattern: <short title> (YYYY-MM-DD)
+    <generalized pattern>
+    Previously found in: <confirmed sibling list>
+    UNRESOLVED DEFECTS (fix was reverted): <unresolved sibling list, if any>
+    Previously cleared (paths only): <list of file paths from non-match companion>
+
+    Prioritize evaluating candidates NOT listed as previously cleared.
+    You may still evaluate cleared locations if context budget allows.
+    If a previously-cleared location now has the defect, note it as a
+    "stale non-match" in your report.
+
+    Signal 4 — Existing defect signatures: Add any Unresolved Siblings
+    from injected signatures as pre-confirmed candidates (skip evaluation
+    — these are known live defects). Add Confirmed Siblings' files as
+    high-priority candidates for re-evaluation (code may have drifted).]
+
     ## Session Info
 
     - Scratch directory: [SCRATCH_DIR]
@@ -75,7 +98,9 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     ### Step 2: Build Candidate List
 
-    Combine three signals to build a deduplicated list of candidate locations:
+    Combine all available signals to build a deduplicated list of candidate locations.
+    If existing defect signatures are present above, also incorporate them
+    as Signal 4 (see instructions in the Existing Defect Signatures section).
 
     **Signal 1 — Fix diff (structural search):**
     Search the codebase for code that follows the same structural pattern as
