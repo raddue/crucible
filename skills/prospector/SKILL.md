@@ -35,20 +35,32 @@ Every status update must include:
 1. **Current phase** -- Which phase you're in
 2. **What just completed** -- What the last agent reported
 3. **What's being dispatched next** -- What you're about to do and why
-4. **Agent status** -- During parallel phases (1.5, 2, 5): which agents have reported vs. still in flight, finding counts so far
+4. **Agent status** -- During parallel phases (1.5+2, 3, 6): which agents have reported vs. still in flight, finding counts so far
 
 **After compaction:** Re-read the scratch directory and current state before continuing. See Compaction Recovery below.
 
 **Examples of GOOD narration:**
-> "Phase 1 complete. Explorer found 6 friction points. Presenting for your review before committing genealogy + analysis dispatches."
+> "Phase 1 complete. Explorer found 6 friction points (3 High, 2 Medium, 1 Low). Presenting for your review before committing genealogy + root cause dispatches."
 
-> "Phase 1.5: Genealogy 4/6 complete. 3 Incomplete Migrations, 1 Accretion so far. 2 agents still running."
+> "Phase 1.5+2: Genealogy 4/6 complete, Root cause 2/3 complete. 3 Incomplete Migrations, 1 Accretion so far. 4 agents still running."
 
-> "Phase 5: All 3 competing designs complete. Presenting sequentially with comparison."
+> "Phase 2.5: Convergence found 2 clusters (friction points #2+#5, #3+#7). Presenting draft for confirmation."
+
+> "Phase 6: All 3 competing designs complete. Presenting sequentially with comparison including 'Do Nothing' option."
 
 ## Agent Budget
 
-**Total budget: ~20 agents.** Worst case with 8 friction points: 1 explorer + 8 genealogists + 8 analysis + 3 design = 20. The explorer's output cap of 8 friction points enforces this budget. If the user requests exploration of a second candidate after completing the first, the budget resets for the new design cycle (Phases 4-6 only: 3 Opus design agents), reusing existing exploration and analysis results.
+**Total budget: ~24 agents.** Worst case with 8 friction points (typically 3-4 High-severity):
+- 1 explorer (Opus)
+- 8 genealogists (Sonnet) — enhanced with change metrics
+- 3-4 root cause agents (Sonnet) — NEW, parallel with genealogists, High-severity findings only
+- 8 analysis agents (Sonnet) — enhanced, 2000-line hard cap
+- 3 design agents (Opus) — enhanced with root cause integration
+- 0-1 just-in-time root cause agent (Sonnet) — dispatched only if user selects a Limited candidate
+
+**Concurrency:** Maximum 5 concurrent agents. Genealogy and root cause agents share this budget during their parallel execution window. The orchestrator dispatches them in round-robin fashion (e.g., 3 genealogy + 2 root cause, then backfill as each completes). Once both tracks complete, analysis agents use the full concurrency budget.
+
+The explorer's output cap of 8 friction points enforces the overall budget. If the user requests exploration of a second candidate after completing the first, the budget resets for the new design cycle (Phases 5-8 only), reusing existing exploration and analysis results.
 
 ## Scratch Directory
 
@@ -61,6 +73,9 @@ Files:
 - `explorer-findings.md` — Phase 1 organic explorer output
 - `exploration-approved.md` — Phase 1 user gate confirmation
 - `genealogy-<n>.md` — Phase 1.5 genealogy per friction point
+- `root-cause-<n>.md` — Phase 2 root cause output per High-severity friction point
+- `convergence-draft.md` — Phase 2.5 proposed groupings with confidence ratings (checkpoint before user confirmation)
+- `convergence.md` — Phase 2.5 root cause convergence output after user confirmation (clusters + standalones)
 - `analysis-<n>.md` — Phase 2 structured analysis per friction point
 - `candidates.md` — Synthesized candidate list (after analysis)
 - `problem-frame.md` — Phase 4 problem space framing
@@ -312,15 +327,38 @@ Before writing the draft, the orchestrator also checks whether any Medium/Low-se
 - Candidate list (Phase 4) shows clusters as single candidates with combined leverage scores
 - Agent budget is reduced in practice — fewer analysis agents and design cycles for merged clusters
 
-## Phase 2: Present Candidates (Structured Analysis)
+## Phase 3: Structured Analysis (Enhanced)
 
-The orchestrator reads explorer findings and genealogy results from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./analysis-prompt.md`. One agent per friction point, dispatched in parallel (max 5 concurrent).
+The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
 
 Each analysis agent receives:
-- The friction point description and file locations
+- The friction point description and file locations (or cluster of merged friction points with combined scope)
 - Genealogy classification and key commits (if available)
-- Relevant source files (subject to 1500-line hard cap — ~200 lines reserved for REFERENCE.md content)
+- Root cause summary (max 10 lines, mechanically extracted — see below)
+- Framework context block (from Phase 0.5)
+- Change metrics from genealogy (change frequency and bug-fix commit counts, aggregated per Git Metrics Aggregation rules)
+- Relevant source files (subject to 2000-line hard cap — increased from 1500 to accommodate four new output sections)
 - The relevant REFERENCE.md section for the friction type being analyzed
+
+### Root Cause Summary Extraction
+
+The orchestrator produces the root cause summary by extracting four fields **verbatim** from the root cause agent's output — no summarization, no paraphrasing:
+
+1. **Root cause type** (1 line) — copied verbatim from "Type:" field
+2. **Root cause statement** (1 line) — copied verbatim from "Root cause statement:" field
+3. **Pattern-level fix** (1-2 lines) — copied verbatim from "Pattern-level fix:" field
+4. **Framework-native solution** (1-2 lines) — copied verbatim from "Framework-native solution:" field
+
+For convergence clusters, append: "Cluster scope: merged from friction points #X, #Y, #Z — addresses shared root cause as a unit."
+
+For Medium/Low-severity findings without a dedicated root cause agent: use either a one-line note from a neighboring High-severity finding (if applicable) or "Root cause not analyzed -- severity below threshold."
+
+### Source Prioritization for Convergence Clusters
+
+When an analysis agent processes a convergence cluster:
+1. **Full source** for the highest-severity constituent finding's files
+2. **Interface-only excerpts** (function signatures, class declarations, public API surfaces) for other constituent findings' files
+3. If the cluster still exceeds the 2000-line cap after prioritization, the orchestrator **splits the cluster** into sub-clusters that each fit. The orchestrator warns the user: "Cluster [X] exceeds context budget and was split into sub-clusters. This partially reduces the convergence benefit." The decision journal logs the split and rationale. Sub-cluster analysis results are re-merged in the Phase 4 candidate presentation.
 
 Each analysis agent outputs:
 - **Friction type classification** — which category from the reference doc
@@ -331,7 +369,11 @@ Each analysis agent outputs:
 - **Dependency category:** In-process, local-substitutable, remote-but-owned, or true external
 - **Estimated improvement impact:** High/Medium/Low
 - **Estimated effort:** High/Medium/Low — refined by genealogy
-- **Interface surface summary** — current public API: key type definitions, public method/function signatures
+- **Friction dimensions** — comprehension friction (High/Medium/Low), modification friction (High/Medium/Low), primary dimension
+- **ROI assessment** — leverage score with justification, change frequency, bug correlation
+- **Framework check** — framework patterns available, pattern evidence source, applicability
+- **Cost of inaction** — change frequency (hottest file + range), bug origin rate, blocking planned work, inaction assessment
+- **Interface surface summary** — current public API
 - **Top caller patterns** — 3-5 most common usage patterns
 - **Structural summary** — module boundaries, data flow direction, dependency graph fragment
 
@@ -339,34 +381,62 @@ The last three fields form the **design brief** consumed by Phase 5 competing de
 
 **Write-on-complete:** The orchestrator writes each analysis agent's output to `scratch/<run-id>/analysis-<n>.md` immediately upon agent completion. (Analysis agents are Task tool dispatches — they return text to the orchestrator, who persists it.)
 
-The orchestrator reads all analysis results from disk and synthesizes into a numbered candidate list, ranked by impact-to-effort ratio (high impact + low effort first). Writes to `scratch/<run-id>/candidates.md`.
+The orchestrator reads all analysis results from disk and synthesizes into a ranked candidate list using the formula `leverage_score x modification_friction_score` (High=3, Medium=2, Low=1). Ties are broken by comprehension friction score. Effort is shown separately as a cost indicator, not included in the ranking formula. Candidates where inaction is defensible are demoted to a "Track Only" section. Writes to `scratch/<run-id>/candidates.md`.
 
 **USER GATE: Candidate Selection** — Present candidates to the user. Do not proceed until user picks one:
 
 ```
 ### Prospector Candidates
 
-1. **[High Impact / Low Effort] Payment processing cluster**
+#### Active Candidates (ranked by leverage x modification_friction)
+
+1. **[Score: 9] [Effort: Medium] [Full analysis] Payment processing cluster**
    - Friction: Understanding payment flow requires reading 8 files across 3 directories
-   - Origin: Incomplete Migration — payments refactor stopped halfway (commit abc123)
-   - Framework: Deep modules (Ousterhout) — consolidate shallow modules
-   - Modules: PaymentValidator, PaymentProcessor, PaymentGateway, PaymentResult, ...
-   - Dependency: In-process (pure computation, no I/O boundary)
+   - Root cause: Missing or underused pattern -- no aggregate module, each concern handled individually
+   - Origin: Incomplete Migration (commit abc123)
+   - Comprehension: High | Modification: High | Leverage: High
+   - Framework check: None identified
+   - Cost of inaction: Modified weekly, 4 bug-fix commits in 6 months. Not defensible.
 
-2. **[High Impact / Medium Effort] Auth middleware coupling**
-   - Friction: Any auth change requires shotgun surgery across 12 route handlers
-   - Origin: Accretion — each new route added its own auth check
-   - Framework: Coupling/cohesion (Martin) — realign boundaries
-   - ...
+2. **[Score: 6] [Effort: Low] [Limited -- no root cause] Auth middleware duplication**
+   - Friction: Auth checks duplicated across 4 route handlers
+   - Root cause: Root cause not analyzed -- severity below threshold
+   - Origin: Organic Growth (no single commit)
+   - Comprehension: Medium | Modification: High | Leverage: Medium
+   - Framework check: Express middleware pattern (framework hint only -- pattern usage not verified)
+   - Cost of inaction: Modified weekly, 2 bug-fix commits in 6 months. Not defensible.
 
-Which would you like to explore?
+---
+
+#### Track Only (inaction defensible -- low modification friction or low leverage)
+
+3. **[Score: 3] [Effort: Low] [Limited -- no root cause] GameBootstrap god-class**
+   - Friction: Hard to read (2,393 lines) but modification pattern is clear (~5 lines per change)
+   - Root cause: Missing or underused pattern -- no self-registration, but modification cost is low
+   - Comprehension: High | Modification: Low | Leverage: Low
+   - Framework check: VContainer IInitializable would solve this (framework hint only -- pattern usage not verified)
+   - Cost of inaction: Modified monthly, 0 bug-fix commits. Defensible -- rarely modified, clear patterns.
 ```
 
-## Phase 3: User Picks a Candidate
+### Data Quality Indicators
+
+Each candidate is tagged with:
+- **`[Full analysis]`** — High-severity finding that received a dedicated root cause agent. Framework check is based on code-level investigation.
+- **`[Limited -- no root cause]`** — Medium/Low-severity finding that did not receive a root cause agent. Framework check is based on Phase 0.5 hint only.
+
+### Constraint-Driven Root Cause Warning
+
+When a candidate's root cause type is "Other / Constraint-driven," the candidate presentation includes a warning: "Root cause is an external constraint -- designs address symptoms, not the underlying cause." The orchestrator does NOT auto-demote these.
+
+### Just-in-Time Root Cause for Limited Candidates
+
+If the user selects a `[Limited -- no root cause]` candidate for design, the orchestrator dispatches a just-in-time root cause agent for that finding before proceeding to design agent dispatch. This single Sonnet dispatch is cheap compared to dispatching three Opus design agents without root cause data.
+
+After the JIT root cause agent completes, the orchestrator compares its output against existing root-cause files and convergence clusters. If the JIT root cause matches an existing cluster's shared root cause, the orchestrator warns the user: "This finding appears to share a root cause with [cluster X]. Continue separately, merge into cluster X, or skip?" The user decides before design agents are dispatched.
 
 User selects by number. Orchestrator proceeds to problem framing for that candidate.
 
-## Phase 4: Frame the Problem Space
+## Phase 5: Frame the Problem Space
 
 Before spawning competing design agents, write a user-facing explanation:
 
@@ -379,7 +449,7 @@ Write to `scratch/<run-id>/problem-frame.md`.
 
 **USER GATE:** Present the problem framing to the user and wait for confirmation before dispatching design agents. The framing directly determines the constraint selection in Phase 5 — dispatching 3 Opus agents with wrong inputs is expensive. User may adjust constraints, dependencies, or dependency category before proceeding.
 
-## Phase 5: Competing Designs (Contextual Constraints)
+## Phase 6: Competing Designs (Contextual Constraints)
 
 ### Constraint Selection
 
@@ -397,13 +467,45 @@ The orchestrator selects 3 design constraints from a deterministic mapping in [R
 
 If a friction point doesn't match any defined type, the orchestrator falls back to a generic set: "Minimize interface," "Maximize flexibility," "Optimize for most common caller." The decision journal must log which constraint set was selected and why.
 
+### Dynamic Constraint Overrides
+
+The constraint table above is the default. The following overrides apply when root cause analysis provides additional signal:
+
+#### Root-Cause-Aware Framework Override
+
+When the root cause type is "Missing or underused pattern" AND a framework-native solution was identified in Phase 3:
+- **Slot 1:** "Adopt framework-native pattern: [specific pattern from Phase 3 framework check]"
+- **Slot 2:** From friction-type mapping (custom approach)
+- **Slot 3:** From friction-type mapping (custom approach)
+
+#### Root-Cause-Type-Derived Override
+
+When the root cause type suggests a specific design direction:
+- **"Wrong abstraction":** One slot becomes "Replace abstraction with correct domain model: [domain concept from surviving hypothesis]"
+- **"Absent boundary":** One slot becomes "Introduce boundary at [identified seam from surviving hypothesis]"
+
+These overrides apply to Slot 3. If a framework-native override already occupies Slot 1, the root-cause-type override replaces Slot 3 — both can coexist. Root cause types "Misaligned ownership" and "Other / Constraint-driven" do not trigger this override.
+
+#### Standard Framework-Native Slot
+
+When Phase 3 identified a framework-native solution BUT root cause type is NOT "Missing or underused pattern":
+- **Slot 1:** From friction-type mapping
+- **Slot 2:** From friction-type mapping
+- **Slot 3:** "Framework-native solution" — design agent's constraint is to use only existing framework/language features
+
+When no framework-native solution was identified: all 3 slots from friction-type mapping (unchanged).
+
+The decision journal must log which constraint set was selected and which overrides applied.
+
 ### Design Agent Dispatch
 
 Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose, model: Opus)` using `./design-competitor-prompt.md`.
 
-Each agent receives (subject to 1500-line hard cap):
+Each agent receives (subject to 2000-line hard cap):
 - Technical brief from the analysis output (interface surface, caller patterns, structural summary)
 - Genealogy context: causal origin classification and key commits (if available)
+- Full competing hypotheses output from Phase 2 root cause analysis (all hypotheses with verdicts, surviving hypothesis, root cause classification, framework investigation, remediation direction)
+- Framework context block (from Phase 0.5)
 - Its assigned design constraint
 - The applicable architectural philosophy and why it applies
 
@@ -416,16 +518,36 @@ Each agent outputs:
 4. **Dependency strategy** — how deps are handled (mapped to the dependency category)
 5. **Testing strategy** — what tests look like at the new boundary
 6. **Trade-offs** — what you gain and what you give up
+7. **Root cause coverage** — Does this design address the root cause? Yes/Partially/No, with explanation
+
+Design agents are instructed: "Your proposal must address the surviving root cause hypothesis, not just the symptom identified by the explorer. Review the falsified hypotheses to understand what the root cause is NOT."
 
 ### Presentation
 
 Present designs sequentially, then compare in prose. Give an opinionated recommendation: which design is strongest and why. If elements from different designs combine well, propose a hybrid. The user wants a strong read, not just a menu.
 
-## Phase 6: User Picks a Design
+### "Do Nothing" Comparison
+
+After all designs are presented, include a mandatory comparison table with a "Do Nothing" column:
+
+```
+| Dimension | Design A | Design B | Design C | Do Nothing |
+|---|---|---|---|---|
+| Root cause addressed? | Yes | Partially | Yes | No |
+| Effort | Medium | Low | High | None |
+| Leverage | High | Medium | High | N/A |
+| Risk | Medium | Low | High | None |
+| Lines changed (est.) | ~200 | ~80 | ~500 | 0 |
+| Cost of inaction | -- | -- | -- | [from analysis] |
+```
+
+The orchestrator still gives an opinionated recommendation, but "do nothing" is explicitly on the table.
+
+## Phase 7: User Picks a Design
 
 User selects a design, accepts the recommendation, or requests a hybrid. Orchestrator records the decision to `scratch/<run-id>/decision.md`.
 
-## Phase 7: Output
+## Phase 8: Output
 
 ### Design Doc
 
@@ -486,12 +608,18 @@ After context compaction:
 2. Read remaining `scratch/<run-id>/` files to determine current state
 3. `explorer-findings.md` exists → Phase 1 exploration complete
 4. `exploration-approved.md` exists → user gate passed. If missing but `explorer-findings.md` exists, re-present friction points for confirmation.
-5. `genealogy-*.md` files → read `explorer-findings.md` for total count, dispatch remaining genealogists
-6. `candidates.md` exists → Phase 2 complete, re-present to user if no selection recorded
-7. `problem-frame.md` exists → Phase 4 complete
-8. `design-*.md` files → count competing designs, dispatch remaining if incomplete
-9. `decision.md` exists → Phase 6 complete, proceed to output
-10. Output status update before continuing
+5. Check completion state of BOTH parallel tracks before advancing:
+   a. Read `explorer-findings.md` to determine expected count N (total) and H (High-severity count)
+   b. Count existing `genealogy-<n>.md` files. If fewer than N, dispatch remaining genealogy agents
+   c. Count existing `root-cause-<n>.md` files. If fewer than H, dispatch remaining root cause agents (High-severity findings only)
+   d. Wait for ALL dispatched agents from BOTH tracks to complete before proceeding
+6. `convergence-draft.md` exists but `convergence.md` does not → re-read draft and present to user for confirmation (skip grouping analysis)
+7. `convergence.md` exists → Phase 2.5 complete. If neither convergence file exists but all root-cause and genealogy files are complete, re-run convergence from scratch (orchestrator-local, cheap).
+8. `candidates.md` exists → Phase 3 complete, re-present to user if no selection recorded
+9. `problem-frame.md` exists → Phase 5 complete
+10. `design-*.md` files → count competing designs, dispatch remaining if incomplete
+11. `decision.md` exists → Phase 7 complete, proceed to output
+12. Output status update before continuing
 
 ## Guardrails
 
@@ -501,7 +629,7 @@ After context compaction:
 - Report friction without specific file/location evidence
 
 **Analysis agents must NOT:**
-- Exceed 1500 lines of total prompt content
+- Exceed 2000 lines of total prompt content
 - Classify friction without evidence from the source code provided in their prompt (analysis agents are Task tool dispatches — they receive pasted source, not file access)
 - Speculate about problems they can't point to evidence for
 
@@ -523,6 +651,10 @@ After context compaction:
 - Design agents ignoring dependency category in their testing strategy
 - Orchestrator hardcoding tracker-specific commands
 - Skipping the problem-framing step (Phase 4)
+- Root cause agent restating the symptom instead of identifying an architectural cause
+- Convergence merging friction points that share a root cause type but describe different architectural decisions
+- All three competing designs ignoring the surviving root cause hypothesis
+- Inaction assessment missing when change metrics show weekly+ modification frequency
 
 ## Integration
 
@@ -539,13 +671,15 @@ After context compaction:
 |-------|-------|----------|-----------------|
 | Organic Explorer | Opus | Agent tool (Explore) | `./explorer-prompt.md` |
 | Genealogist (per friction point) | Sonnet | Agent tool (general-purpose) | `./genealogist-prompt.md` |
-| Structured Analysis (per friction point) | Sonnet | Task tool (general-purpose) | `./analysis-prompt.md` |
+| Root Cause (per High-severity friction point) | Sonnet | Agent tool (general-purpose) | `./root-cause-prompt.md` |
+| Structured Analysis (per friction point or cluster) | Sonnet | Task tool (general-purpose) | `./analysis-prompt.md` |
 | Competing Design Agents (x3) | Opus | Agent tool (general-purpose) | `./design-competitor-prompt.md` |
 
 ## Prompt Templates
 
 - `./explorer-prompt.md` — Phase 1 organic exploration dispatch
-- `./genealogist-prompt.md` — Phase 1.5 git archaeology and causal origin classification
-- `./analysis-prompt.md` — Phase 2 structured friction analysis dispatch
-- `./design-competitor-prompt.md` — Phase 5 competing design agent dispatch
-- `./REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions
+- `./genealogist-prompt.md` — Phase 1.5 git archaeology, causal origin classification, and change metrics
+- `./root-cause-prompt.md` — Phase 2 competing causal hypotheses agent dispatch
+- `./analysis-prompt.md` — Phase 3 structured friction analysis dispatch (enhanced with ROI, friction dimensions, framework check, cost of inaction)
+- `./design-competitor-prompt.md` — Phase 6 competing design agent dispatch (enhanced with root cause integration)
+- `./REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria
