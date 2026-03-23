@@ -331,6 +331,22 @@ Before writing the draft, the orchestrator also checks whether any Medium/Low-se
 
 The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
 
+### Trajectory Context Loading
+
+Before dispatching analysis agents, the orchestrator reads `~/.claude/projects/<project-hash>/memory/prospector/trajectory.jsonl` (if it exists). For each friction point about to enter analysis, the orchestrator checks for fingerprint matches in the trajectory file (same friction type + >50% file path overlap).
+
+If matches are found, the orchestrator computes the trajectory status:
+- **NEW:** No prior observations.
+- **STABLE (N runs):** Observed in N prior runs with similar metrics.
+- **ACCELERATING:** Change frequency or modification friction has increased across observations (e.g., monthly→weekly→daily, or Medium→High).
+- **DECLINING:** Metrics have decreased (the friction is getting better, possibly from a prior fix).
+
+The trajectory status and a one-line metric summary ("change freq: monthly→weekly→daily over 3 runs") are included in the analysis agent's input alongside the root cause summary and genealogy data. This costs ~2-3 lines of prompt budget per friction point.
+
+**Fingerprint matching degradation:** If files are renamed or moved (common after acting on Prospector recommendations), path overlap drops below 50% and the match breaks. This is a known limitation — trajectory degrades gracefully to "NEW" for refactored code. The trajectory file retains the old entries for auditability. A future enhancement could add semantic similarity matching on friction descriptions, but for v2, structural fingerprinting is sufficient.
+
+**Track Only resurfacing:** If a friction point was previously `track-only` but its trajectory is now ACCELERATING, the orchestrator flags it for the user at the exploration review gate: "Friction point [X] was Track Only in the last run but is now accelerating. Recommend upgrading to High severity for root cause analysis."
+
 Each analysis agent receives:
 - The friction point description and file locations (or cluster of merged friction points with combined scope)
 - Genealogy classification and key commits (if available)
@@ -397,6 +413,7 @@ The orchestrator reads all analysis results from disk and synthesizes into a ran
    - Comprehension: High | Modification: High | Leverage: High
    - Framework check: None identified
    - Cost of inaction: Modified weekly, 4 bug-fix commits in 6 months. Not defensible.
+   - Trajectory: NEW | STABLE (3 runs) | ACCELERATING (change freq: monthly->weekly->daily) | DECLINING
 
 2. **[Score: 6] [Effort: Low] [Limited -- no root cause] Auth middleware duplication**
    - Friction: Auth checks duplicated across 4 route handlers
@@ -405,6 +422,7 @@ The orchestrator reads all analysis results from disk and synthesizes into a ran
    - Comprehension: Medium | Modification: High | Leverage: Medium
    - Framework check: Express middleware pattern (framework hint only -- pattern usage not verified)
    - Cost of inaction: Modified weekly, 2 bug-fix commits in 6 months. Not defensible.
+   - Trajectory: NEW | STABLE (3 runs) | ACCELERATING (change freq: monthly->weekly->daily) | DECLINING
 
 ---
 
@@ -416,6 +434,7 @@ The orchestrator reads all analysis results from disk and synthesizes into a ran
    - Comprehension: High | Modification: Low | Leverage: Low
    - Framework check: VContainer IInitializable would solve this (framework hint only -- pattern usage not verified)
    - Cost of inaction: Modified monthly, 0 bug-fix commits. Defensible -- rarely modified, clear patterns.
+   - Trajectory: NEW | STABLE (3 runs) | ACCELERATING (change freq: monthly->weekly->daily) | DECLINING
 ```
 
 ### Data Quality Indicators
@@ -558,6 +577,28 @@ Write a design doc to `docs/plans/YYYY-MM-DD-prospector-<topic>-design.md` where
 - **Chosen design** — interface, usage, hidden complexity, dependency strategy, testing strategy
 - **Competing designs summary** — what was considered and why the winner was chosen
 - **Implementation recommendations** — durable architectural guidance not coupled to current file paths
+
+### Trajectory Snapshot
+
+At the end of every run — regardless of whether the user proceeds to build, files an issue, or keeps the design doc — the orchestrator writes a friction trajectory snapshot to persistent storage.
+
+**File:** `~/.claude/projects/<project-hash>/memory/prospector/trajectory.jsonl`
+
+Each approved friction point (from the exploration review gate) becomes one JSONL line:
+
+~~~json
+{"timestamp": "2026-03-23T14:30:00", "fingerprint": {"files": ["src/GameBootstrap.cs", "src/Services/"], "friction_type": "Coupling / shotgun surgery", "root_cause_type": "Missing or underused pattern"}, "metrics": {"change_freq": "weekly", "bug_fix_count": 4, "modification_friction": "High", "leverage": "High"}, "disposition": "selected-for-design", "run_id": "2026-03-23T14-30-00"}
+~~~
+
+Fields:
+- **fingerprint:** Primary file paths (sorted, normalized) + friction type + root cause type. Used for cross-run matching.
+- **metrics:** Change frequency, bug-fix count, modification friction, leverage — from Phase 3 analysis.
+- **disposition:** `selected-for-design` | `track-only` | `pruned-by-user` — what happened to this finding.
+- **run_id:** Links back to the scratch directory for full details.
+
+Fingerprint matching across runs uses: same friction type AND overlapping file paths (>50% overlap). Root cause type is included for context but not required to match (root cause classification may evolve as the codebase changes).
+
+The trajectory file is append-only. Each run appends N lines (one per approved finding). Reading the file is a single file read at the start of Phase 3.
 
 ### User Choice
 

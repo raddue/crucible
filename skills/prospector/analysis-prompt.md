@@ -34,6 +34,12 @@ Task tool (general-purpose, model: sonnet):
     For convergence clusters, append: "Cluster scope: merged from friction points #X, #Y, #Z — addresses shared root cause as a unit."
     For Medium/Low-severity findings without root cause analysis: "Root cause not analyzed -- severity below threshold." or a one-line note from a neighboring High-severity finding if applicable.]
 
+    ## Input: Trajectory Data
+
+    [PASTE: Trajectory data if available. Contains trajectory status
+    (NEW, STABLE, ACCELERATING, DECLINING) and metric history from
+    prior runs. If no prior runs: "No trajectory data available."]
+
     ## Input: Framework Context
 
     [PASTE: Framework context block from Phase 0.5 — language, runtime version, DI framework, test framework, UI/web framework, other domain-relevant frameworks with versions. If no frameworks detected: "No framework context available."]
@@ -97,6 +103,15 @@ Task tool (general-purpose, model: sonnet):
        - Interface surface: the current public API — key type definitions and public method/function signatures verbatim from source
        - Caller patterns: the 3-5 most common ways callers currently invoke the target — concrete code snippets
        - Structural summary: module boundaries, data flow direction, dependency graph fragment
+
+    12. **Incorporate trajectory data** (if available): If the friction
+        point is ACCELERATING, flag this in the ROI Assessment as
+        additional evidence for high leverage. If DECLINING, note that
+        prior interventions may be working. If STABLE across multiple
+        runs, note that the friction is persistent and not self-resolving.
+        Trajectory data should inform the cost-of-inaction assessment —
+        an ACCELERATING friction point is harder to justify as defensible
+        inaction.
 
     ## What You Must NOT Do
 

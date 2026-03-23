@@ -444,3 +444,33 @@ When a friction point spans multiple files, the genealogist reports per-file met
 ### Track Only Tier
 
 When inaction is defensible, the finding still proceeds through all analysis steps and appears in candidate selection — but is demoted to a "Track Only" section. This is a separate section below the ranked active candidates, not a low-scoring position within the ranked list. The user can still select a Track Only candidate if they choose.
+
+---
+
+## Friction Trajectory
+
+Cross-run tracking of friction point metrics over time. Prospector persists a fingerprint for each approved friction point after every run. On subsequent runs, matching fingerprints are compared to detect trends.
+
+### Trajectory Statuses
+
+| Status | Definition | Implication |
+|--------|-----------|-------------|
+| NEW | No prior observations | Neutral — insufficient data for trend |
+| STABLE (N runs) | Observed N times with similar metrics | Persistent friction, not self-resolving |
+| ACCELERATING | Change frequency or modification friction increasing | Urgent — deferral becoming increasingly costly |
+| DECLINING | Metrics decreasing over time | Positive — prior intervention or organic improvement |
+
+### Fingerprint Matching
+
+A friction point matches a prior observation when:
+- Same friction type classification (from the taxonomy)
+- >50% overlap in primary file paths (sorted, normalized)
+
+Root cause type is included in the fingerprint for context but is not required to match — root cause classification may evolve as the codebase changes or as Prospector's analysis improves across runs.
+
+### Impact on Cost-of-Inaction
+
+Trajectory status directly informs the cost-of-inaction assessment:
+- ACCELERATING overrides the "Defensible — low-activity code" inaction rule if the acceleration trend shows the code becoming high-activity
+- STABLE across 3+ runs suggests the friction is permanent without intervention
+- DECLINING may make a finding eligible for Track Only even if current metrics are above the threshold
