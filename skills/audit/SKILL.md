@@ -44,6 +44,72 @@ Every status update must include:
 
 > "Phase 2 complete. All 4 lenses reported: 14 total findings. Moving to Phase 3 synthesis."
 
+## Pipeline Status
+
+Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
+
+### Write Triggers
+
+Write the status file at every point where the Communication Requirement mandates narration: before dispatch, after completion, phase transitions, health changes, escalations, and after compaction recovery.
+
+### Status File Format
+
+The status file uses this structure (overwritten in full each time):
+
+```
+# Pipeline Status
+**Updated:** <current timestamp>
+**Started:** <timestamp from first write — persisted across compaction>
+**Skill:** audit
+**Phase:** <current phase, e.g. "2 — Analysis">
+**Health:** <GREEN|YELLOW|RED>
+**Suggested Action:** <omit when GREEN; concrete one-sentence action when YELLOW/RED>
+**Elapsed:** <computed from Started>
+
+## Recent Events
+- [HH:MM] <most recent event>
+- [HH:MM] <previous event>
+(last 5 events, newest first)
+```
+
+### Skill-Specific Body
+
+Append after the shared header:
+
+```
+## Lenses
+- Correctness: DONE (4 findings)
+- Robustness: DONE (2 findings)
+- Architecture: IN PROGRESS
+- Consistency: PENDING
+- Blind-spots: PENDING
+```
+
+### Health State Machine
+
+Health transitions are one-directional within a phase: GREEN -> YELLOW -> RED. Phase boundaries reset to GREEN.
+
+- **Phase boundaries** (reset to GREEN): Phase 1->2, 2->2.5, 2.5->3, 3->4
+- **YELLOW:** lens agent running longer than 10 minutes, blind-spots agent finds significant gap
+- **RED:** multiple lens agents fail, user gate timeout
+
+When health is YELLOW or RED, include `**Suggested Action:**` with a concrete, context-specific sentence (e.g., "Architecture lens running >10 minutes. May be processing a large subsystem — check if scope needs narrowing.").
+
+### Inline CLI Format
+
+Output concise inline status alongside the status file write:
+- **Minor transitions** (dispatch, completion): one-liner, e.g. `Phase 2 [3/5 lenses] Robustness complete (2 findings) | GREEN | 22m`
+- **Phase changes and escalations**: expanded block with `---` separators
+- **Health transitions**: always expanded with old -> new health
+
+### Compaction Recovery
+
+After compaction, before re-writing the status file:
+1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
+2. Reconstruct phase, health, and skill-specific body from internal state files
+3. Write the updated status file
+4. Output inline status to CLI
+
 ## Design Decisions
 
 1. **Find and report only** -- no fixing. Audit surfaces issues; user decides what to act on.

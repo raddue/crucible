@@ -34,6 +34,70 @@ Every status update must include:
 **Example of GOOD narration:**
 > "Wave 2 complete. 3/3 tickets committed. 1 medium-confidence alert on #45 (chose Redis over Postgres for session store). #67 re-queued to Wave 3 (new dependency on #45 discovered). Overall: 7/12 tickets done, 5 remaining across 2 waves."
 
+## Pipeline Status
+
+Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
+
+### Write Triggers
+
+Write the status file at every point where the Communication Requirement mandates narration: before dispatch, after completion, phase transitions, health changes, escalations, and after compaction recovery.
+
+### Status File Format
+
+The status file uses this structure (overwritten in full each time):
+
+```
+# Pipeline Status
+**Updated:** <current timestamp>
+**Started:** <timestamp from first write — persisted across compaction>
+**Skill:** spec
+**Phase:** <current phase, e.g. "Wave 2 (3/4 tickets in progress)">
+**Health:** <GREEN|YELLOW|RED>
+**Suggested Action:** <omit when GREEN; concrete one-sentence action when YELLOW/RED>
+**Elapsed:** <computed from Started>
+
+## Recent Events
+- [HH:MM] <most recent event>
+- [HH:MM] <previous event>
+(last 5 events, newest first)
+```
+
+### Skill-Specific Body
+
+Append after the shared header:
+
+```
+## Tickets
+- Wave 1: 3/3 complete
+- Wave 2: 2/4 in progress (#45 writing, #67 investigating)
+- Alerts: 1 medium-confidence on #45
+```
+
+### Health State Machine
+
+Health transitions are one-directional within a phase: GREEN -> YELLOW -> RED. Phase boundaries reset to GREEN.
+
+- **Phase boundaries** (reset to GREEN): each new wave
+- **YELLOW:** ticket re-queued more than once, teammate failure on a ticket, medium-confidence alert
+- **RED:** 2+ tickets failed in same wave, unresolvable dependency cycle, block-confidence alert
+
+When health is YELLOW or RED, include `**Suggested Action:**` with a concrete, context-specific sentence (e.g., "Ticket #45 re-queued twice — may have an unresolvable dependency. Check dependency graph.").
+
+### Inline CLI Format
+
+Output concise inline status alongside the status file write:
+- **Minor transitions** (dispatch, completion): one-liner, e.g. `Wave 2 [7/12] #45 spec committed | GREEN | 45m`
+- **Phase changes and escalations**: expanded block with `---` separators
+- **Health transitions**: always expanded with old -> new health
+
+### Compaction Recovery
+
+After compaction, before re-writing the status file:
+1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
+2. Reconstruct phase, health, and skill-specific body from internal state files
+3. Write the updated status file
+4. Output inline status to CLI
+
 ## Epic Extraction
 
 GitHub has no first-class "epic with child tickets" API. Use a fallback chain to extract scope units from the provided issue:
