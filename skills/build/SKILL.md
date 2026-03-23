@@ -241,6 +241,21 @@ The quality gate handles the iterative red-team loop — fresh review each round
 
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (load mode) — when dispatching implementers and reviewers, paste relevant module files, conventions.md, and landmines.md into their prompts
 
+- **Defect signature loading (for implementers only):**
+  1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory
+  2. For each signature, read its `Modules` field and match against the task's target modules:
+     - Read each cartographer module file's `Path:` field
+     - A task's file is in a module if the file path starts with the module's `Path:` value
+     - When a task spans multiple modules, load signatures for all matched modules
+     - **Directory prefix fallback:** When no cartographer modules exist, match if any target file path starts with any of the signature's `Modules` directory prefixes
+  3. For matching signatures, validate all file paths still exist on disk — drop stale entries silently
+  4. Inject into the `[DEFECT_SIGNATURES]` section of `build-implementer-prompt.md`:
+     - Generalized pattern (always)
+     - Confirmed siblings list (always)
+     - Unresolved siblings list (always — these are known live defects; produces a stronger warning)
+     - Non-match companion files are NOT loaded for implementers
+  5. **`Last loaded` update:** Loading is pure-read. After all implementer dispatches for the current phase complete, batch-update the `Last loaded` field to today on all signatures that were loaded. Do NOT update during dispatch — defer to after all subagents are dispatched.
+
 ### Step 1: Create Team and Task List
 
 Create a team using `TeamCreate`:

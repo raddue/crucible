@@ -148,4 +148,103 @@ Task tool (general-purpose, model: sonnet):
     3. Do NOT tag your new task-verified sections
     This ensures that a future project-init re-invocation only overwrites
     the sections that are still structural, preserving your additions.
+
+    ## Defect Signature Recording
+
+    When the orchestrator dispatches you with Phase 4.5 scan report data and
+    the directive "Record defect signature", follow these instructions instead
+    of the standard module/convention/landmine recording flow above.
+
+    ### Input You Receive
+
+    - Phase 4.5 scan report: generalized pattern, "Siblings Fixed" list
+      (with justifications), "Siblings Reverted" list (with revert reasons),
+      "Siblings Skipped" list (with skip reasons)
+    - Original fix metadata: file path, commit SHA, commit message summary,
+      issue number or bug description
+    - Cartographer module names (or directory prefix fallbacks)
+    - Optional: `update_path` — an existing signature file to merge into
+
+    ### Your Job
+
+    Produce exactly ONE signature file and optionally ONE non-match companion
+    file. You do NOT manage count enforcement, pruning, dedup detection, or
+    cross-file validation — the orchestrator handles all of that.
+
+    **If `update_path` is provided (merge into existing):**
+    1. Read the existing signature file at `update_path`
+    2. Merge new siblings into the existing file:
+       - Add new Confirmed Siblings entries (from "Siblings Fixed")
+       - Add new Unresolved Siblings entries (from "Siblings Reverted")
+       - Preserve all existing entries
+       - Deduplicate by file path (if a path appears in both old and new, keep
+         the newer entry)
+    3. Update the `Date` field to today
+    4. Set `Last loaded` to today
+    5. Enforce the 30-entry sibling cap (Confirmed + Unresolved combined):
+       if entries exceed 30, truncate Confirmed Siblings from the bottom;
+       never truncate Unresolved Siblings
+    6. If a companion non-match file exists alongside the existing signature,
+       merge new non-match entries (from "Siblings Skipped") into it.
+       Enforce the 100-entry cap: if entries exceed 100 after merge, drop
+       oldest entries from the top of the list
+    7. Report back: updated signature file path, companion file path (if any)
+       — the orchestrator will rename the file to use today's date prefix
+
+    **If no `update_path` (new signature):**
+    1. Generate slug: first 8 hex characters of a SHA-256 hash of the
+       generalized pattern text
+    2. Write signature file to `defect-signatures/YYYY-MM-DD-<slug>.md`
+    3. Write non-match companion file to
+       `defect-signatures/YYYY-MM-DD-<slug>.non-matches.md`
+       (only if "Siblings Skipped" entries exist in the scan report)
+    4. Map scan report fields to signature sections:
+       - "Siblings Fixed" -> `## Confirmed Siblings`
+       - "Siblings Reverted" -> `## Unresolved Siblings`
+       - "Siblings Skipped" -> non-match companion file entries
+    5. Enforce the 30-entry sibling cap (same rules as merge)
+    6. Enforce the 100-entry non-match companion cap
+    7. Set `Last loaded` to `never`
+    8. Report back: signature file path, companion file path
+
+    ### Signature File Format
+
+    # Defect Signature: <short title derived from the pattern>
+
+    **Date:** YYYY-MM-DD
+    **Source:** <issue number or bug description>
+    **Modules:** <comma-separated cartographer module names>
+    **Last loaded:** never
+    **Original fix:** <file:path> — <commit SHA> — <one-line commit message summary>
+
+    ## Generalized Pattern
+
+    <2-3 sentence pattern description from Phase 4.5 Step 1>
+
+    ## Confirmed Siblings
+
+    - <file:path> — <one-line semantic justification>
+
+    ## Unresolved Siblings
+
+    - <file:path> — <reason fix was reverted (test failure summary)>
+
+    ### Non-Match Companion File Format
+
+    # Non-Matches: <same short title>
+
+    - <file:path> — <one-line reason why pattern does not apply>
+
+    ### Rules
+
+    - Record OBSERVED FACTS only — the scan report is your source of truth
+    - Short title: derive from the generalized pattern, max ~8 words
+    - Confirmed Siblings justifications come from the scan report's
+      justification text for "Siblings Fixed" entries
+    - Unresolved Siblings reasons come from the scan report's test failure
+      summaries for "Siblings Reverted" entries
+    - Non-match reasons come from the scan report's skip reasons for
+      "Siblings Skipped" entries
+    - Do NOT add entries that are not in the scan report
+    - Do NOT evaluate or re-judge the scan report's classifications
 ```

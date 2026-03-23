@@ -169,6 +169,21 @@ Done.
 
 **Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, paste them into every investigator's prompt so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
+**Defect signature loading (for investigators):**
+1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory
+2. For each signature, read its `Modules` field and match against the investigation area's modules:
+   - Read each cartographer module file's `Path:` field
+   - A file is in a module if the file path starts with the module's `Path:` value
+   - When the investigation spans multiple modules, load signatures for all matched modules
+   - **Directory prefix fallback:** When no cartographer modules exist, match if any target file path starts with any of the signature's `Modules` directory prefixes
+3. For matching signatures, validate all file paths still exist on disk — drop stale entries silently
+4. Inject into the `[DEFECT_SIGNATURES]` section of `investigator-prompt.md`:
+   - Generalized pattern (always)
+   - Confirmed siblings list (always)
+   - Unresolved siblings list (always)
+   - Non-match companion file IS loaded for investigators, truncated to 50 entries at load time with note "(list truncated to 50 most recent entries)"
+5. **`Last loaded` update:** Loading is pure-read. After all investigator dispatches complete, batch-update the `Last loaded` field to today on all signatures that were loaded.
+
 If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
 
 ### Domain Detection
@@ -384,6 +399,14 @@ The scan agent receives three sources of information:
 2. **Cartographer module context** — If cartographer data is available from Phase 0, structurally similar modules (other screens, panels, managers, handlers that follow the same architectural pattern as the fixed code).
 3. **Implementer's "Analogous Locations" report** — The Phase 4 implementer's observations about locations they noticed during the fix that may have the same pattern. This is the highest-quality signal — the implementer was already reading the code.
 
+#### Existing Defect Signatures (Fourth Input Signal)
+
+When dispatching the Phase 4.5 scan agent, load matching defect signatures from cartographer as additional context:
+- **Selection:** Load at most 3 matching signatures. Treat `Last loaded: never` as oldest. Sort by `Last loaded` descending. Tiebreak by `Date` descending.
+- **Module matching:** Same as build/debug load — read each cartographer module file's `Path:` field; match if any target file path starts with the module's `Path:` value. Fall back to directory prefix matching if no cartographer modules exist.
+- **What to load:** Signature file (generalized pattern, confirmed siblings, unresolved siblings) plus non-match companion file paths only (without full reason text). The scan agent can read individual companion files on demand if it needs the reasoning.
+- **Guidance to scan agent:** Prioritize evaluating candidates NOT listed as confirmed non-matches in existing signatures, but may still evaluate non-match locations if context budget allows. If the new scan confirms the same pattern still exists in a previously-cleared location, note this as a "stale non-match" in the report.
+
 #### Scan Agent Behavior
 
 1. **Analyze the fix pattern.** Read the diff. Extract the structural pattern. Produce a 2-3 sentence generalized pattern description.
@@ -434,6 +457,50 @@ Phase 4.5 maintains state in `<scratch-dir>/where-else-state.md` to survive sess
 - Do not modify the original fix
 - If no candidates are found, report "No analogous locations found" and proceed to Phase 5
 - No cap on sibling count — fix all confirmed siblings
+
+#### Defect Signature Persistence
+
+After the Phase 4.5 scan agent reports back, persist the scan results as a cartographer defect signature. This is orchestrator-managed — the recorder only writes files.
+
+**Skip condition:** Do not write a signature when Phase 4.5 reports "No analogous locations found" (0 candidates evaluated). A pattern with no siblings and no non-matches has no evaluation ledger worth persisting.
+
+**Step 1: Dedup check (orchestrator)**
+1. Glob `~/.claude/projects/<hash>/memory/cartographer/defect-signatures/*.md` (excluding `*.non-matches.md`)
+2. Read each file's `## Generalized Pattern` section only (each is 2-3 sentences; 20 patterns is ~1000-1500 tokens)
+3. Compare semantically with the new scan report's generalized pattern
+4. **Dedup rubric:** Two patterns are duplicates if they describe the same root cause in the same codebase area. Different areas or different root causes = distinct signatures. When in doubt, treat as distinct — a near-duplicate is recoverable via pruning, a false merge is not.
+5. If a match is found, set `update_path` to the existing file path (the recorder will merge into it rather than creating new)
+6. If no match, the recorder creates a new file using the content hash slug
+
+**Step 2: Pre-write pruning (orchestrator)**
+When count of existing signatures would exceed 20 after writing:
+1. Build the pruning-eligible set: exclude signatures where `Last loaded: never` AND `Date` is less than 30 days old
+2. Sort by `Last loaded` date ascending; `Last loaded: never` sorts oldest
+3. Among ties, prune the oldest by `Date` field
+4. Write-before-delete ordering: dispatch the recorder first, then delete pruned files after the recorder succeeds
+
+**Step 3: Dispatch recorder (orchestrator)**
+Dispatch a Sonnet cartographer recorder agent using `crucible:cartographer` recorder-prompt.md with the "Record defect signature" directive. Provide:
+- Phase 4.5 scan report (generalized pattern, confirmed siblings, reverted siblings, skipped siblings)
+- Original fix metadata (file path, commit SHA, commit message summary, issue number)
+- Cartographer module names from Phase 0 (or directory prefix fallbacks)
+- `update_path` if dedup found a match (from Step 1)
+
+**Step 4: Post-recorder validation (orchestrator)**
+After the recorder returns, validate:
+1. The signature file exists on disk
+2. Sibling entries are within the 30-entry cap
+3. The `Modules` field contains valid cartographer module names or directory prefixes
+If validation fails, log the failure — the signature is not surfaced to consumers.
+
+**Step 5: Rename on merge (orchestrator)**
+If `update_path` was provided (merge case): rename the file to use today's date prefix while keeping the original slug. `YYYY-MM-DD-<slug>.md` becomes `<today>-<slug>.md`. If a companion non-match file exists, rename it to match. This ensures merged signatures do not lose age protection.
+
+**Ordering:** Dispatch the recorder and wait for completion, then perform the `Last loaded` batch update (see below). This prevents write races between the recorder and the batch update targeting the same file.
+
+**`Last loaded` batch update:** After all subagent dispatches for the current phase complete (including the recorder), batch-update the `Last loaded` field on all defect signatures that were loaded during Phase 0 or Phase 4.5. The recorder sets `Last loaded` to today on `update_path` writes, so skip those files during the batch update.
+
+**Over-count recovery:** If count exceeds 20 after a failed prune (e.g., all signatures are age-protected), the next invocation's pre-recorder pruning pass cleans up before writing.
 
 ---
 
@@ -592,7 +659,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
 | **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
-| **4.5. Where Else?** | 1 subagent (Opus) | Find and fix sibling locations | Siblings fixed or confirmed none exist |
+| **4.5. Where Else?** | 1 subagent (Opus) + 1 recorder (Sonnet) | Find and fix sibling locations; persist defect signature | Siblings fixed, signature written (if 1+ candidates) |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
 | **5b. Test Audit** | Test coverage skill (conditional) | Audit existing tests for staleness after fix | Stale tests updated/removed |
 | **5c. Test Gaps** | Test gap writer (Opus, conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
@@ -696,7 +763,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:test-coverage`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
 
 **Required skills:**
-- **`crucible:cartographer`** -- Phase 0: load module context for investigators. Phase 4 completion: record discoveries.
+- **`crucible:cartographer`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
 
 **Recommended skills:**
 - **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)

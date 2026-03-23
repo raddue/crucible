@@ -26,11 +26,35 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
 
     [DI framework, naming conventions, test style, etc.]
 
+    ## Known Defect Patterns in This Area
+
+    [DEFECT_SIGNATURES]
+
+    [If no matching defect signatures exist, the orchestrator omits this section entirely.
+    When present, each signature block follows this format:
+
+    ### Pattern: <short title> (YYYY-MM-DD)
+    <generalized pattern>
+    Previously found in: <confirmed sibling list>
+    UNRESOLVED DEFECTS (fix was reverted): <unresolved sibling list, if any>
+
+    When creating or modifying code in these modules, check whether these
+    patterns apply to your changes.
+
+    If any UNRESOLVED DEFECTS entry names a file you are modifying, treat
+    fixing that defect as part of your task scope — write a RED test for
+    it, then fix it alongside your primary work.]
+
     ## Your Job
 
     <!-- CANONICAL: shared/implementer-common.md — TDD Discipline -->
     **REQUIRED SUB-SKILL:** Use `crucible:test-driven-development`
 
+    - If a "Known Defect Patterns" section is present above, before writing
+      your first test, scan your task's target files for each listed pattern.
+      If any pattern applies to code you are writing or modifying, write a
+      failing test for it first — treat it as a pre-existing bug you are
+      responsible for not reintroducing.
     1. Read and understand the task requirements
     2. If anything is unclear, message the lead to ask BEFORE starting
     3. For each behavior you need to implement, follow this cycle:
