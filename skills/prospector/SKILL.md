@@ -86,6 +86,37 @@ Stored in `~/.claude/projects/<project-hash>/memory/prospector/preferences.md`:
 
 First run: ask if user wants to file issues and which tracker. Persist for future runs.
 
+## Phase 0.5: Framework Detection
+
+Framework detection is a deterministic orchestrator step that runs BEFORE explorer dispatch. The orchestrator reads dependency manifests directly — this is orchestrator-local work requiring 1-3 file reads, not an agent dispatch.
+
+Phase 0.5 identifies **which frameworks are declared** (name + version). It does NOT determine which framework patterns are used, unused, or available — that requires code-level investigation and is handled by root cause agents in Phase 2 and analysis agents in Phase 3.
+
+### Dependency Manifests Checked
+
+The orchestrator reads whichever of the following exist in the repository root (or known locations):
+- `package.json` (Node.js / JavaScript / TypeScript)
+- `*.csproj` (C# / .NET)
+- `Cargo.toml` (Rust)
+- `go.mod` (Go)
+- `requirements.txt`, `pyproject.toml`, `setup.cfg` (Python)
+- `build.gradle`, `pom.xml` (Java / Kotlin)
+- `Gemfile` (Ruby)
+- `composer.json` (PHP)
+
+### Output
+
+A "Framework context" block (~5-10 lines) containing:
+- Language and runtime version
+- DI framework name and version (if any)
+- Test framework name and version
+- UI/web framework name and version
+- Any other domain-relevant frameworks (ORM, messaging, etc.) with versions
+
+This block is a hint for downstream agents, not a definitive reference. Pattern-level investigation (which patterns are available and whether they are used or unused) is the responsibility of root cause agents (Phase 2) who have file access to the actual code.
+
+This block is passed to the explorer agent, all root cause agents, all analysis agents, and all design agents.
+
 ## Phase 1: Explore (Organic Discovery)
 
 ### Pre-Exploration Context
@@ -106,6 +137,7 @@ Dispatch: `Agent tool (subagent_type: Explore, model: Opus)` using `./explorer-p
 The explorer receives:
 - Cartographer data (if available) — module map, conventions, landmines
 - Forge signals (if available) — known pain points from past work
+- Framework context block (from Phase 0.5) — language, framework names and versions
 - The guiding friction examples (full set or focus-specific subset)
 - Instruction: "You're a senior developer joining this codebase for the first time. Navigate it naturally. Note where you experience friction."
 
@@ -160,6 +192,7 @@ If the explorer produces fewer than 3 friction points, report to the user and of
 **USER GATE:** Present the explorer's friction points to the user before committing genealogy and analysis agent dispatches (~16 agents). The user may:
 - **Prune:** Remove friction points that aren't interesting or are already known
 - **Reorder:** Adjust priority ranking
+- **Adjust severity:** Upgrade a finding to High (triggers root cause analysis in Phase 2) or downgrade a High finding (skips root cause analysis)
 - **Refocus:** Ask the explorer to re-run with a different `--focus` or in a different area
 - **Proceed:** Approve the friction points for genealogy and analysis
 
@@ -167,11 +200,28 @@ Write `scratch/<run-id>/exploration-approved.md` when user confirms.
 
 ## Phase 1.5: Friction Genealogy
 
-After user approves exploration results, trace the causal origin of each approved friction point using git archaeology.
+After user approves exploration results, trace the causal origin of each approved friction point using git archaeology. Root cause analysis agents (Phase 2) run in parallel with genealogy — both investigate the same friction points independently.
 
 ### Genealogist Agents
 
 Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
+
+### Enhanced Output: Change Metrics
+
+In addition to the standard genealogy data (origin classification, key commits, narrative), the genealogist agent's output now includes two structured numeric fields per friction point file:
+
+- **Change frequency:** Number of commits touching this file in the last 6 months, with rate classification (monthly/weekly/daily)
+- **Bug-fix commit count:** Number of commits with bug-fix indicators (e.g., "fix", "bug", "hotfix" in message) touching this file in the last 6 months
+
+The genealogist already runs `git log` and `git blame` on friction point files. These metrics are derived from the same data — no additional tool access is needed.
+
+### Git Metrics Aggregation
+
+When a friction point spans multiple files, the genealogist reports per-file metrics for each file. The orchestrator aggregates these into the analysis agent's prompt as follows:
+
+- **Headline metric:** The hottest file's change frequency and bug-fix commit count are reported as the headline values (e.g., "Change frequency: 14 commits/6mo (weekly) -- `src/services/PaymentProcessor.ts`").
+- **Range summary:** A one-line range summary follows: "Range across N files: [lowest]-[highest] commits/6mo, [lowest]-[highest] bug-fix commits."
+- **Inaction rules key on the hottest file.** A single hot file within a friction point's scope makes inaction indefensible — the cost is being paid regardless of whether other files are stable.
 
 Each agent classifies the friction's origin:
 
@@ -187,6 +237,80 @@ Each agent classifies the friction's origin:
 **Graceful degradation:** Genealogy enriches when available but is never required. If git history is too shallow or all results are Indeterminate, downstream phases proceed without genealogy data.
 
 **Write-on-complete:** The orchestrator writes each genealogist's output to `scratch/<run-id>/genealogy-<n>.md` immediately upon agent completion.
+
+## Phase 2: Root Cause Analysis
+
+Root cause analysis runs in parallel with genealogy. Root cause looks at code structure ("why is this designed this way?"), genealogy traces git history ("how did it get this way?"). Both feed into Phase 2.5 convergence, then Phase 3.
+
+### Dispatch Criteria
+
+Root cause agents are dispatched only for **High-severity** friction points. In a typical run with 8 friction points, 3-4 are High-severity.
+
+- **High-severity findings:** Full root cause analysis via competing causal hypotheses (agent dispatch).
+- **Medium/Low-severity findings:** No dedicated root cause agent. These findings receive a lightweight root cause signal: if a neighboring High-severity finding's surviving hypothesis covers the same code area or pattern, the orchestrator extracts a one-line root cause note from it. Otherwise, the finding proceeds with "Root cause not analyzed -- severity below threshold."
+
+### Agent Spec
+
+Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./root-cause-prompt.md`.
+
+Each agent receives:
+- Friction point description and file locations
+- Framework context block (from Phase 0.5, as a hint — agent investigates which patterns are actually used)
+- Genealogy data (if available; otherwise runs without it)
+
+Each agent uses the competing causal hypotheses method: generates 2-3 plausible causal hypotheses, defines a falsification criterion for each, tests the criteria against the code, and reports which hypotheses survived.
+
+### Root Cause Types
+
+| Type | Description |
+|---|---|
+| **Missing or underused pattern** | A known pattern exists in the ecosystem that would solve this, but the code uses a manual approach |
+| **Wrong abstraction** | An abstraction exists but it models the wrong concept |
+| **Absent boundary** | No module boundary exists where one should |
+| **Misaligned ownership** | The boundary exists but the wrong module owns the concept |
+| **Other / Constraint-driven** | Root cause is an external constraint, not an internal design flaw |
+
+### Scope and Termination
+
+- **File read budget:** Maximum 15 file reads per agent. Maximum 100 lines per targeted read. After reading 10 files, begin synthesizing regardless of investigation state.
+- **Read strategy:** Prefer targeted reads (specific functions/classes, 100-line windows) over full-file reads for large files.
+- **Codebase boundary:** If hypothesis testing leads outside the codebase (into framework internals, language runtime, or third-party library code), stop at the codebase boundary. Record the external dependency as the terminal cause.
+- **Hypothesis count:** 2-3 hypotheses per friction point. Stop when one hypothesis survives falsification, or when all hypotheses have been tested.
+
+**Write-on-complete:** The orchestrator writes each root cause agent's output to `scratch/<run-id>/root-cause-<n>.md` immediately upon agent completion.
+
+## Phase 2.5: Root Cause Convergence
+
+After all root cause agents and genealogy agents complete, the orchestrator checks whether multiple friction points share the same root cause. When they do, it collapses them into a single "friction cluster" with a unified remediation scope. This prevents producing interfering partial fixes for what is really a single architectural problem.
+
+**No agent dispatch** — this is orchestrator-local work (Opus reads N root-cause files, groups them, writes one file).
+
+### How It Works
+
+1. Read all `root-cause-<n>.md` outputs
+2. Group by: same root cause type AND surviving hypothesis root cause statements describe the same architectural decision (semantic match, not string equality)
+3. **Merge threshold:** Two friction points merge only when they share the same root cause type AND their root cause statements describe the same underlying architectural decision or missing pattern. Overlapping symptoms or co-located files alone are not sufficient.
+4. **Split criterion:** Before merging, ask: "Would a single design change plausibly fix BOTH friction points?" If no, do not merge even if root cause type and statement match.
+
+### Merge Confidence
+
+- **High confidence:** Same root cause type, same architectural decision, AND a single design change would plausibly fix both. High-confidence merges auto-approve (no user confirmation needed).
+- **Low confidence:** Same root cause type and similar statements, but unclear whether a single design change covers both (e.g., similar root causes in different subsystems). Low-confidence merges require explicit user confirmation.
+
+### Medium/Low Finding Overlap Check
+
+Before writing the draft, the orchestrator also checks whether any Medium/Low-severity finding (which did not receive a root cause agent) has symptom descriptions and file locations that overlap with a High-severity finding's root cause scope. Overlaps are flagged as Low-confidence potential merges for user confirmation.
+
+### Two-Step Convergence (Compaction-Safe)
+
+1. **Draft step:** Write proposed groupings to `scratch/<run-id>/convergence-draft.md`. Each proposed merge includes its confidence rating (High/Low) and the split criterion assessment. This is a checkpoint — if compaction occurs, the draft survives.
+2. **Confirmation step:** Present the draft to the user. High-confidence merges auto-approve; the user decides on Low-confidence merges (approve or split). The user may also split any auto-approved merge or force-merge missed connections. After confirmation, write the final `scratch/<run-id>/convergence.md`.
+
+### Downstream Impact
+
+- Analysis agents (Phase 3) receive merged clusters instead of individual findings
+- Candidate list (Phase 4) shows clusters as single candidates with combined leverage scores
+- Agent budget is reduced in practice — fewer analysis agents and design cycles for merged clusters
 
 ## Phase 2: Present Candidates (Structured Analysis)
 
