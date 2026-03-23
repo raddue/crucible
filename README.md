@@ -19,7 +19,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Why Crucible?
 
-**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 12 skills, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. See the [full scoreboard](#eval-results).
+**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 13 skills, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. See the [full scoreboard](#eval-results).
 
 **Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This accounts for a **68% delta** over unstructured review — the model scores 88% with the skill vs 19% without. Process expectations (iterative rounds, severity tracking, stagnation detection) are **0% without the skill**.
 
@@ -87,6 +87,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | Skill | Description |
 |-------|-------------|
 | **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. One command, idea to completion. |
+| **spec** | Autonomous epic-to-spec pipeline. Takes a GitHub epic with child tickets and produces design docs, implementation plans, and machine-readable contracts (API surface, checkable/testable invariants) for each ticket without human interaction. Contract-based handoff to build. |
 | **design** | Interactive design refinement with quality gate on completed designs. Explores intent, requirements, and design before implementation. Produces a design doc. |
 | **planning** | Implementation plan writing with quality gate on completed plans. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
 
@@ -105,8 +106,8 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | Skill | Description |
 |-------|-------------|
 | **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture) plus a Phase 2.5 blind-spots agent that hunts cross-cutting concerns the lenses missed (security, performance, concurrency). Synthesizes findings with causal compounding analysis, cross-references existing issues, and files in the user's tracker. Find-and-report only. |
-| **prospector** | Explores a codebase organically for architectural friction, surfaces structural improvement opportunities, and proposes competing redesigns. Hybrid exploration model: organic discovery (Opus explorer guided by friction examples) followed by structured analysis (friction classification, genealogy tracing via git archaeology, deterministic philosophy-to-friction mapping). Spawns 3 parallel design agents with contextual constraints to produce radically different interface proposals. Output feeds into build (refactor mode) or files as tracker issues. |
-| **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Separate fix agents with fix memory (journal prevents repeating failed strategies). Enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation/regression detection). Compaction recovery with persistent scratch directories. User checkpoint at round 6, 15-round safety limit. |
+| **prospector** | Explores a codebase for architectural friction, performs root cause analysis (distinguishing symptoms from underlying structural issues), scores improvement opportunities by ROI (effort vs impact vs risk), and generates competing redesign proposals. Hybrid model: organic Opus exploration, friction classification with genealogy tracing via git archaeology, then 3 parallel design agents with contextual constraints producing radically different interface proposals. Output feeds into build (refactor mode) or files as tracker issues. |
+| **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Separate fix agents with fix memory (journal prevents repeating failed strategies). Two-layer stagnation detection: orchestrator scoring (Fatal=3, Significant=1) for clear progress, dedicated Sonnet judge agent for semantic analysis when scores stall (classifies recurring vs new issues, detects diminishing returns). Compaction recovery with persistent scratch directories. Progress notifications at rounds 5/8/11/14, 15-round safety limit. |
 | **red-team** | Adversarial review engine. Dispatches fresh Devil's Advocate reviewers per round. Dual-mode: single-pass when called by quality-gate (quality-gate owns the loop), full iterative loop when called directly. |
 | **test-coverage** | Post-change test suite audit. Checks whether existing tests need updating (stale assertions, misleading descriptions), deletion (removed code paths), or flagging (coincidence tests that pass by luck). Audit agent + fix agent with revert-on-failure. Split audit for large scopes. Technology-agnostic. |
 | **code-review** | Dispatch code review with shared canonical review checklist. Recommends test-coverage audit after behavioral changes. |
@@ -119,14 +120,14 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 | Skill | Description |
 |-------|-------------|
-| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, and post-fix quality gate with test gap writer (dedup-aware, auto-retry on failures). |
+| **debugging** | Orchestrated debugging with hypothesis red-teaming, domain detection, persistent session state with compaction recovery, commit strategy (WIP commits on all outcomes), stagnation ownership split with quality-gate, test suite audit, and post-fix quality gate with test gap writer (dedup-aware, auto-retry on failures). Phase 4.5 "Where Else?" blast radius scan finds and fixes sibling locations with the same bug pattern, then persists the defect signature in cartographer for future proactive prevention. |
 
 ### Knowledge & Learning
 
 | Skill | Description |
 |-------|-------------|
 | **forge** | Self-improving retrospective system. Post-task retrospectives classify deviations and extract lessons. Pre-task feed-forward surfaces relevant warnings. Periodic mutation analysis proposes concrete skill edits for human review. |
-| **cartographer** | Living architectural map that accumulates across sessions. Records codebase structure, conventions, and landmines after exploration. Surfaces structural context before tasks. |
+| **cartographer** | Living architectural map that accumulates across sessions. Records codebase structure, conventions, landmines, and defect signatures after exploration. Surfaces structural context and known defect patterns before tasks. Defect signatures persist Phase 4.5 "Where Else?" scan results — build implementers and debugging investigators receive matching patterns proactively. |
 | **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
 | **pathfinder** | Maps GitHub org service topology — enumerates repos, classifies services, detects inter-service dependencies (HTTP, gRPC, Kafka, shared DBs, shared packages). Produces Mermaid diagrams, JSON topology, and markdown reports. Crawl mode starts from a seed repo and discovers connected services bidirectionally (forward fan-out + reverse fan-in) with frontier prioritization and adaptive depth. Query mode provides blast-radius analysis from persisted data. |
 
@@ -135,6 +136,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | Skill | Description |
 |-------|-------------|
 | **stocktake** | Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan or full evaluation modes. |
+| **skill-creator** | Create, edit, and evaluate skills. Run A/B evals to measure skill performance with variance analysis. Optimize skill descriptions for better triggering accuracy. |
 | **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. |
 
 ### Unity UI (Domain-Specific)
@@ -156,7 +158,9 @@ The **build** skill is the main entry point for feature development. It chains t
 3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup, two-pass code review (code quality + test quality), test alignment audit (crucible:test-coverage audits existing tests for staleness), test gap writer (fills coverage gaps with dedup-aware auto-retry), and adversarial tester (writes tests designed to break the implementation).
 4. **Phase 4: Complete** (autonomous) — Code review on full implementation, inquisitor (5 parallel adversarial dimensions against the full feature diff), quality gate, session metrics, full test suite, Forge retrospective, Cartographer recording, branch completion.
 
-The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom). Both accumulate across sessions.
+The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom — including defect signatures that surface known bug patterns proactively). Both accumulate across sessions.
+
+The **spec** skill produces design docs, implementation plans, and machine-readable contracts from a GitHub epic — feeding directly into build for autonomous execution of an entire epic.
 
 The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
 
@@ -187,7 +191,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Skill-Value Deltas (Claude Opus 4.6)
 
-12 skills, 49 evals, graded blind. Neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition. Overall: **96% with skill vs 67% without, +29% average delta.**
+13 skills, 49 evals, graded blind. Neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition. Overall: **96% with skill vs 67% without, +29% average delta.**
 
 **Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 14% delta on Opus could be a 40%+ delta on a model that doesn't naturally investigate before fixing.
 
