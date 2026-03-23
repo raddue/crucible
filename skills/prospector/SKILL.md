@@ -53,7 +53,7 @@ Every status update must include:
 **Total budget: ~24 agents.** Worst case with 8 friction points (typically 3-4 High-severity):
 - 1 explorer (Opus)
 - 8 genealogists (Sonnet) — enhanced with change metrics
-- 3-4 root cause agents (Sonnet) — NEW, parallel with genealogists, High-severity findings only
+- 3-4 root cause agents (Sonnet) — parallel with genealogists, High-severity findings only
 - 8 analysis agents (Sonnet) — enhanced, 2000-line hard cap
 - 3 design agents (Opus) — enhanced with root cause integration
 - 0-1 just-in-time root cause agent (Sonnet) — dispatched only if user selects a Limited candidate
@@ -243,7 +243,7 @@ Each agent classifies the friction's origin:
 | Origin Type | Description | Effort Implication |
 |-------------|-------------|-------------------|
 | **Incomplete Migration** | A refactoring or migration started but never finished | Lower — finish the existing migration path |
-| **Accretion** | No single commit caused this; small additions over time | Medium — needs new boundaries |
+| **Accretion** | No single commit caused this; small additions over time | Higher — accumulated complexity must be disentangled |
 | **Forced Marriage** | Two unrelated concerns coupled in a single commit | Medium — separation path is clear |
 | **Vestigial Structure** | Old architecture replaced but scaffolding remains | Lower — fix may be deletion |
 | **Original Sin** | Friction present in initial implementation | Higher — no prior art |
