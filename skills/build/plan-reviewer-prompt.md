@@ -26,11 +26,18 @@ Task tool (general-purpose, model: opus or sonnet — see build skill for decisi
     - Are there tasks that don't trace back to a design requirement?
 
     **Task Quality:**
-    - Does every task have metadata (Files, Complexity, Dependencies)?
+    - Does every task have metadata (Files, Complexity, Review-Tier, Dependencies)?
     - Are file paths exact and correct?
     - Is code complete (not placeholder or "add X here")?
     - Are tasks sized appropriately (2-3 per subagent, ~10 files max)?
     - Do tasks follow TDD (test before implementation)?
+    - Does every task have a Review-Tier (1, 2, or 3)?
+    - Are Review-Tier assignments consistent with the classification rules?
+      - No task with High complexity or 6+ files at Tier 1 or 2
+      - No task with cross-system dependencies at Tier 1
+      - No task introducing a new public API at Tier 1
+      - Tasks near cartographer landmines must be Tier 3
+    - Are any tasks under-tiered? (err toward higher tier when uncertain)
     - **Refactor mode:** GREEN-GREEN tasks do NOT have a RED phase. Do not flag the absence of a failing-test-first step as a deficiency on tasks marked `atomic: true` or `restructuring-only: true`. The success criterion for these tasks is "existing tests stay green," not "new test passes." Verify instead that:
       - Each task lists which existing tests must remain passing ("Tests to verify")
       - Atomic tasks bundle the interface change with all consumer updates
@@ -55,6 +62,7 @@ Task tool (general-purpose, model: opus or sonnet — see build skill for decisi
     - **Missing requirements:** [List anything from design doc not covered]
     - **Unnecessary tasks:** [List anything not in design doc]
     - **Task quality issues:** [Specific findings with task numbers]
+    - **Tier classification issues:** [Tasks with incorrect or questionable tier assignments]
     - **Dependency issues:** [Specific findings]
     - **Architectural concerns:** [If any — these bypass revision loop]
     - **Suggestions:** [Optional improvements, clearly marked as non-blocking]

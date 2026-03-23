@@ -28,12 +28,23 @@ Task tool (general-purpose, model: opus):
     ### Task N: [Description]
     - **Files:** file1.cs, file2.cs (N files)
     - **Complexity:** Low | Medium | High
+    - **Review-Tier:** 1 | 2 | 3
     - **Dependencies:** Task X, Task Y (or "None")
 
     Complexity tiers:
     - **Low:** 1-3 files, straightforward changes, no cross-system interaction
     - **Medium:** 3-6 files, some inheritance or cross-system interaction
     - **High:** 6+ files, refactoring, deep inheritance chains, cross-system wiring
+
+    **Review tier classification (compute for every task):**
+    - **Tier 1 (Light):** Low complexity AND 1-3 files AND no cross-system dependencies AND no cartographer landmine proximity. Pipeline: implementer -> cleanup -> single-pass code review.
+    - **Tier 2 (Standard):** Medium complexity OR 3-6 files OR single-system behavioral changes. Not eligible if any Tier 3 trigger applies. Pipeline: implementer -> cleanup -> iterative code review -> single-pass test review -> adversarial tester.
+    - **Tier 3 (Heavy):** High complexity OR 6+ files OR cross-system dependencies OR new public API surface OR cartographer landmine proximity. Pipeline: full current review flow.
+
+    **Escalation rules (tier can only increase, never decrease):**
+    - Cross-system dependencies -> minimum Tier 2
+    - New public API (interface, endpoint, event) -> minimum Tier 2
+    - Cartographer landmine proximity (any task file in a landmine directory) -> Tier 3
 
     ### Task Sizing
 
@@ -55,7 +66,7 @@ Task tool (general-purpose, model: opus):
     2. Identify all components, data changes, and test changes needed
     3. Determine task dependencies and ordering
     4. Write the implementation plan with TDD steps for each task
-    5. Include per-task metadata (Files, Complexity, Dependencies)
+    5. Include per-task metadata (Files, Complexity, Review-Tier, Dependencies)
     6. Save to: docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md
 
     ## Refactor Mode Context
@@ -101,7 +112,9 @@ Task tool (general-purpose, model: opus):
     ## Before Reporting Back
 
     Review your plan:
-    - Does every task have metadata (Files, Complexity, Dependencies)?
+    - Does every task have metadata (Files, Complexity, Review-Tier, Dependencies)?
+    - Does every task have a Review-Tier computed from the classification rules?
+    - Are Review-Tier assignments consistent with the tier criteria (no High-complexity task at Tier 1)?
     - Are file paths exact (not "somewhere in src/")?
     - Is code complete (not "add validation here")?
     - Are tasks sized for 2-3 per subagent?

@@ -66,15 +66,16 @@ Append after the shared header:
 
 ```
 ## Task Progress
-| # | Task | Status | Duration |
-|---|------|--------|----------|
-| 1 | Auth middleware | DONE | 12m |
-| 2 | Route handlers | IN REVIEW (pass 2) | 18m+ |
-| 3 | Database layer | PENDING | — |
+| # | Task | Tier | Status | Duration |
+|---|------|------|--------|----------|
+| 1 | Auth middleware | T3 | DONE | 12m |
+| 2 | Route handlers | T2 | IN REVIEW (code, pass 1) | 18m+ |
+| 3 | Database layer | T1 | PENDING | — |
 
 ## Quality Gates
 - Design: PASSED (2 rounds)
 - Plan: PASSED (1 round)
+- Task tiers: 1x T1, 1x T2, 1x T3
 - Code: not yet reached
 ```
 
@@ -388,6 +389,10 @@ For each task (or wave of parallel tasks):
 3. When Implementer reports completion, run **De-Sloppify Cleanup** (see below)
 4. After cleanup completes, spawn **Reviewer** teammate
    - Use `./build-reviewer-prompt.md` template
+5. **Tier-aware review routing:** Read the task's `Review-Tier` from plan metadata.
+   - **Tier 1:** Dispatch single-pass code reviewer (Sonnet). If Clean or Minor-only: task complete. If Critical/Important: dispatch implementer fix, then task complete. If Architectural Concern: escalate.
+   - **Tier 2:** Dispatch iterative code review (per existing loop). Then dispatch single-pass test reviewer. If test review surfaces Critical findings, escalate to Tier 3. Then dispatch adversarial tester (per existing logic). Task complete.
+   - **Tier 3:** Follow current full pipeline (no changes to existing flow).
 
 #### Contract-Aware Implementer Guidance
 
@@ -443,6 +448,42 @@ digraph review {
 **Pass 1 — Code Review:** Architecture, patterns, correctness, wiring (actually connected, not just existing?)
 
 **Pass 2 — Test Quality Review:** Test independence? Determinism? Edge cases? Integration tests where mocks are masking real behavior? AAA pattern? Correct test level? (Staleness and alignment checks are handled by the test-coverage dispatch below.)
+
+#### Review Tier Routing
+
+Each task's `Review-Tier` (from the plan) determines which review steps execute. Phase 4 full-implementation gates are NOT affected by per-task tiers.
+
+| Step | Tier 1 | Tier 2 | Tier 3 |
+|------|--------|--------|--------|
+| Implementer | Yes | Yes | Yes |
+| De-sloppify cleanup | Yes | Yes | Yes |
+| Pass 1: Code review | Single pass | Iterative | Iterative |
+| Implementer fixes (code) | If findings | If findings | If findings |
+| Pass 2: Test quality review | SKIP | Single pass (non-iterative) | Iterative |
+| Implementer fixes (test) | SKIP | If critical findings only | If findings |
+| Test alignment audit | SKIP | SKIP | Yes |
+| Test gap writer | SKIP | SKIP | Yes |
+| Adversarial tester | SKIP | Yes | Yes |
+
+**Tier 1 "single pass" code review:** Dispatch one reviewer. If findings are Clean, task is complete. If findings include Critical or Important issues, dispatch implementer to fix, then the task is complete (no re-review). If findings include an Architectural Concern, escalate as normal.
+
+**Tier 2 "single pass" test review:** Dispatch one test quality reviewer. Report findings but do NOT enter the iterative review loop. If the single pass surfaces Critical findings, escalate the task to Tier 3 for full iterative treatment.
+
+**Tier 2 "iterative" code review:** Same as current behavior -- fresh reviewer each round, track issue count, loop until clean or stagnation.
+
+#### Runtime Tier Escalation
+
+The orchestrator may escalate a task's review tier during execution. Escalation is one-directional (up only).
+
+**Triggers:**
+- Implementer reports unexpected complexity or cross-system interaction not anticipated in the plan
+- Single-pass reviewer (Tier 1 code review or Tier 2 test review) reports Critical findings
+- Implementer touches significantly more files than the plan specified
+
+**Process:**
+1. Log escalation to decision journal: `[timestamp] DECISION: review-tier | choice=escalate T1->T2 | reason=<trigger> | alternatives=none`
+2. Execute the additional review steps for the new tier (from the point where the current tier's pipeline diverges)
+3. Update the task status display to show the escalated tier
 
 #### Contract-Aware Reviewer Guidance
 
@@ -639,6 +680,8 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
   Active work time:      2h 47m
   Wall clock time:       11h 13m
   Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
+  Task tiers:           3 Tier 1, 3 Tier 2, 2 Tier 3
+  Subagent savings:     ~21 dispatches skipped vs all-Tier-3
 -------------------------------------------------------------
 ```
 
@@ -658,6 +701,7 @@ Alongside the metrics log, maintain a decision journal at `/tmp/crucible-decisio
 
 Decision types to capture:
 - `reviewer-model` — why Opus vs Sonnet for this reviewer
+- `review-tier` -- tier assignment read from plan, runtime escalation reason if applicable
 - `gate-round` — issue count, severity shifts, progress/stagnation per round
 - `escalation` — why the orchestrator escalated to user (and user's decision)
 - `task-grouping` — parallelism decisions for wave execution
