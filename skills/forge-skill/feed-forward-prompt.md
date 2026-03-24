@@ -66,6 +66,19 @@ Task tool (general-purpose, model: sonnet):
 
     Only surface calibration data when there are 3+ data points. Do not speculate from a single session.
 
+    ## Positive Workflow Patterns
+
+    In addition to warnings about deviation patterns, also look for
+    skill-worthy positive patterns in the "Skill-Worthy Patterns" section
+    of patterns.md. If the upcoming task has similarities to a tracked
+    positive pattern, surface it as a REINFORCEMENT (not a warning):
+
+    > "Previous sessions found success with [pattern]. Consider applying
+    > the same approach here."
+
+    Reinforcements count toward the 3-5 targeted output limit alongside
+    warnings. Maximum 1 reinforcement per feed-forward output.
+
     ## Rules
 
     - Maximum 5 warnings. Prioritize by relevance to THIS task, not by frequency.
