@@ -71,6 +71,16 @@ Append after the shared header:
 - Wave 1: 3/3 complete
 - Wave 2: 2/4 in progress (#45 writing, #67 investigating)
 - Alerts: 1 medium-confidence on #45
+
+## Compression State
+Goal: [epic URL and description]
+Key Decisions:
+- [accumulated decisions, max 10]
+Active Constraints:
+- [dependency constraints, re-queued tickets]
+Next Steps:
+1. [immediate next action]
+2. [subsequent actions]
 ```
 
 ### Health State Machine
@@ -93,10 +103,12 @@ Output concise inline status alongside the status file write:
 ### Compaction Recovery
 
 After compaction, before re-writing the status file:
-1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
+0. Read the `## Compression State` section from `pipeline-status.md` — recover Goal, Key Decisions, Active Constraints, and Next Steps. If absent, skip to step 1.
+1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files
-3. Write the updated status file
-4. Output inline status to CLI
+3. Emit a Compression State Block into the conversation to seed the new context window
+4. Write the updated status file
+5. Output inline status to CLI
 
 ## Epic Extraction
 
@@ -209,9 +221,10 @@ The orchestrator triggers a planned save-and-compact cycle: **compact after ever
 
 When a checkpoint triggers:
 1. Persist all current state to the scratch directory (ticket statuses, dependency graph, wave schedule, decisions log).
-2. Trigger compaction explicitly between waves rather than hitting mid-ticket compaction.
-3. After compaction, recover state via the Compaction Recovery procedure below.
-4. Resume processing with the next wave.
+2. Emit a Compression State Block into the conversation capturing Goal, accumulated decisions, active constraints, and next steps.
+3. Trigger compaction explicitly between waves rather than hitting mid-ticket compaction.
+4. After compaction, recover state via the Compaction Recovery procedure below.
+5. Resume processing with the next wave.
 
 This prevents mid-ticket compaction, which wastes partial investigation work. The checkpoint always occurs at a clean boundary between waves.
 
@@ -232,13 +245,24 @@ Teammates run as sub-agents with their own context windows. Complex tickets can 
 ### Compaction Recovery
 
 After context compaction:
+0. Read `## Compression State` from pipeline-status.md — recover Goal, Key Decisions, Active Constraints, Next Steps. If absent, skip to step 1.
 1. Read `scratch/<run-id>/invocation.md` first -- recover epic URL, extraction method, and user preferences.
 2. Read `scratch/<run-id>/ticket-status.json` -- determine which tickets are complete, in-progress, or pending.
 3. Read `scratch/<run-id>/wave-schedule.json` -- recover the current wave schedule.
 4. Read `scratch/<run-id>/dependency-graph.json` -- recover the current dependency DAG.
 5. Read `scratch/<run-id>/decisions.md` -- recover the decision log for context cascading to remaining tickets.
-6. For any ticket with status `investigating`, `dependency-check`, `writing`, or `validating`: restart that ticket from the beginning of its current phase. Partial investigation results are not persisted -- the cost of re-running one ticket's investigation is low compared to the cost of corrupted state.
-7. Resume processing from the wave schedule, skipping completed/committed tickets.
+6. For any ticket with status `investigating`, `dependency-check`, `writing`, or `validating`: restart from the beginning of its current phase.
+7. Emit a Compression State Block into the conversation to seed the new context window.
+8. Resume processing from the wave schedule, skipping completed/committed tickets.
+
+### Checkpoint Timing
+
+Emit a Compression State Block at:
+- **Wave boundaries:** After each wave completes, before starting the next
+- **Preemptive context checkpoints:** After every 2 waves, or after any single wave with 4+ tickets
+- **Ticket re-queues:** When tickets are re-queued to later waves due to dependency discovery
+- **Escalations:** Before any escalation to user
+- **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
 ## Orchestration Flow
 
@@ -698,6 +722,13 @@ When `/spec` resolves an ambiguity or defines an API surface on ticket N that af
 | `invariants.testable[].test_tag` | Yes | Pattern: `contract:<category>:<id>` |
 | `integration_points` | No | May be empty if no cross-ticket deps |
 | `ambiguity_resolutions` | No | May be empty if all decisions were high-confidence |
+
+## Red Flags
+
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
+- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
 
 ## Integration
 

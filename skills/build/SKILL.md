@@ -82,7 +82,19 @@ Append after the shared header:
 - Last checkpoint: pre-wave-3 (12:45:30)
 - Total checkpoints: 7
 - Shadow repo: healthy
+
+## Compression State
+Goal: [original user request]
+Key Decisions:
+- [accumulated decisions, max 10]
+Active Constraints:
+- [constraints affecting remaining work]
+Next Steps:
+1. [immediate next action]
+2. [subsequent actions]
 ```
+
+The Compression State section is a semantic subset of the full Compression State Block emitted into the conversation. It omits Files Modified (recoverable from git) and Scratch State (fixed per skill). It is the first section read during compaction recovery.
 
 ### Health State Machine
 
@@ -104,11 +116,72 @@ Output concise inline status alongside the status file write:
 ### Compaction Recovery
 
 After compaction, before re-writing the status file:
-1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
+0. Read the `## Compression State` section from `pipeline-status.md` — recover Goal, Key Decisions, Active Constraints, and Next Steps. If the section is absent (pre-update pipeline), skip to step 1.
+1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files
 3. If crucible:checkpoint was used: verify checkpoint availability by checking for the shadow repo at the computed path. Log available checkpoint count. Do not restore — just confirm checkpoints are recoverable.
-4. Write the updated status file
-5. Output inline status to CLI
+4. Emit a Compression State Block into the conversation to seed the new context window with recovered state
+5. Write the updated status file
+6. Output inline status to CLI
+
+### Compression State Block
+
+At checkpoint boundaries (see Checkpoint Timing below), emit the following structured block into the conversation. This block signals to the auto-compactor which state is critical to preserve. Also persist the semantic subset (Goal, Key Decisions, Active Constraints, Next Steps) to the `## Compression State` section of pipeline-status.md.
+
+```
+===COMPRESSION_STATE===
+Goal: [original user request, one sentence]
+Skill: [skill name]
+Phase: [current phase identifier]
+Health: [GREEN|YELLOW|RED]
+Mode: [skill-specific mode if applicable, omit otherwise]
+
+Progress:
+- [completed milestone 1]
+- [completed milestone 2]
+- [current work in progress]
+
+Key Decisions (this session):
+- [DEC-1] [decision]: [reasoning, one line]
+- [DEC-2] [decision]: [reasoning, one line]
+
+Active Constraints:
+- [constraint that affects remaining work]
+- [constraint from prior phase that still applies]
+
+Files Modified:
+- [file path]: [what changed, one line]
+
+Scratch State:
+- Location: [scratch directory path]
+- Recovery: [which files to read first, in order]
+
+Next Steps:
+1. [immediate next action]
+2. [action after that]
+3. [remaining work summary]
+===END_COMPRESSION_STATE===
+```
+
+**Rules:**
+- Key Decisions list is capped at 10. When adding an 11th, compress the oldest low-impact decision into a single-line Progress entry annotated "[compressed from decisions]".
+- Each Compression State Block includes the FULL accumulated decision list, not just new decisions since the last block. Decisions accumulate across compressions.
+- Progress entries are cumulative — include all completed milestones, not just since the last block.
+- Files Modified lists only files changed since the last block emission. On first block of a session, list all files changed so far.
+- Goal must be the original user request verbatim or a faithful one-sentence paraphrase. Do not let it drift across compressions.
+
+### Checkpoint Timing
+
+Emit a Compression State Block into the conversation AND update the `## Compression State` section in pipeline-status.md at these points:
+
+- **Phase transitions:** 1->2, 2->3, 3->4
+- **Phase 3 progress:** After every 3 task completions
+- **Quality gate entry/exit:** Before first quality gate round dispatch and after gate completes (pass or escalation)
+- **Escalations:** Before any escalation to user
+- **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
+
+These triggers are a superset of the existing pipeline-status.md write triggers. The Compression State Block is emitted alongside (not instead of) the normal narration and status file write.
+>>>>>>> e113e69 (feat: add structured compression state block for pipeline resilience (#72))
 
 ## Mode Detection
 
@@ -133,12 +206,13 @@ Propagate refactor mode to subagents through:
 
 ### Compaction Recovery
 
-Build's existing compaction step must read the mode file FIRST, before re-reading the task list or any other state. On resumption after compaction:
+Build's existing compaction step must read the Compression State FIRST (step 0 from Pipeline Status Compaction Recovery), then the mode file, before re-reading the task list or any other state. On resumption after compaction:
 
-1. **Read `/tmp/crucible-build-mode.md`** — first file read after compaction, before anything else.
-2. **If file is missing:** Default to feature mode and warn: "Mode file not found — defaulting to feature mode. If this was a refactoring session, please restart."
-3. **If mode is `refactor`:** Read the baseline commit SHA from the mode file and verify the commit exists (`git cat-file -t <SHA>`). If the SHA is missing or invalid, warn and halt — proceeding with refactor mode without a valid rollback target is unsafe.
-4. **After mode is recovered:** Proceed with normal compaction recovery flow.
+0. **Read `## Compression State` from pipeline-status.md** — recover goal, decisions, constraints, next steps.
+1. **Read `/tmp/crucible-build-mode.md`** — recover mode and baseline commit SHA.
+2. **If file is missing:** Default to feature mode and warn.
+3. **If mode is `refactor`:** Verify baseline commit SHA exists.
+4. **After mode is recovered:** Proceed with general state reconstruction (task list, phase, health).
 
 ## Phase 1: Design (Interactive)
 
@@ -804,6 +878,13 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
    - A missing or failing tagged test is a contract violation.
 
 4. **Contract violations are blocking issues.** Contract violations are NOT warnings — they have the same severity as architectural concerns and must be resolved before the gate passes. The quality gate's iterative fix loop applies: dispatch fixes, re-check, track progress/stagnation as normal.
+
+## Red Flags
+
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
+- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
 
 ## Integration
 

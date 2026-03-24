@@ -78,7 +78,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 **`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`** — Required for build's team-based parallel execution. Skills degrade gracefully without it — independent tasks run sequentially instead of in parallel. This applies to all platforms where parallel subagent dispatch is not available.
 
-**`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50`** — Performance recommendation for long-running pipelines. Triggers compaction earlier to preserve context for complex multi-phase work.
+**`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50`** — Performance recommendation for long-running pipelines. Triggers compaction earlier to preserve context for complex multi-phase work. Pipeline skills emit structured Compression State Blocks at checkpoint boundaries to guide the compactor on what to preserve.
 
 ## Skills
 
