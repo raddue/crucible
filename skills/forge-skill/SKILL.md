@@ -56,6 +56,92 @@ All data lives in the project memory directory:
 
 **Context budget:** `patterns.md` MUST stay under 200 lines. It is loaded into context during feed-forward. Individual retrospective files are NOT loaded during feed-forward — only during mutation analysis.
 
+## Trajectory Capture (Opt-In)
+
+Trajectory capture records structured data about real skill invocations for eval
+generation. It is OFF by default and requires explicit opt-in.
+
+### Configuration
+
+Check for `~/.claude/projects/<hash>/memory/trajectory-config.json` before any
+trajectory operation. If the file does not exist or `enabled` is false, skip all
+trajectory recording silently.
+
+Config schema:
+
+```json
+{
+  "enabled": false,
+  "max_entries": 500,
+  "include_prompt_summary": true,
+  "additional_redact_patterns": []
+}
+```
+
+- `enabled`: Master switch. Default false.
+- `max_entries`: Maximum entries per JSONL file before oldest are pruned. Default 500.
+- `include_prompt_summary`: Whether to include the one-line redacted prompt summary. If false, `prompt_summary` is set to "[omitted]". Default true.
+- `additional_redact_patterns`: List of regex strings for project-specific secret patterns applied during the redaction pass.
+
+### Storage
+
+All trajectory data lives alongside other forge data:
+
+```
+~/.claude/projects/<hash>/memory/trajectories/
+  trajectory_samples.jsonl     # Successful completions
+  failed_trajectories.jsonl    # Failures, partial completions, aborts
+```
+
+### First-Enable Notification
+
+When trajectory capture is first enabled (config file is created or `enabled` transitions
+from false to true), output to the user:
+
+"Trajectory capture is now enabled. Here is what this means:
+- After each significant skill invocation, a structured record is appended to
+  ~/.claude/projects/<hash>/memory/trajectories/
+- Records include: skill name, duration, tool call count, outcome, and a redacted
+  task summary. Raw prompts are NEVER stored.
+- A redaction pass runs before every write to strip file paths, secrets, and
+  sensitive content.
+- You can inspect the JSONL files at any time. They are human-readable.
+- To disable, set enabled: false in trajectory-config.json or delete the file."
+
+### Redaction Rules
+
+Before writing ANY trajectory entry, apply these redaction steps in order:
+
+1. **Prompt summary generation**: Do NOT copy the user's prompt. Instead, generate
+   a one-line summary that captures the task TYPE without revealing specific content.
+   Good: "Add authentication middleware to REST API"
+   Bad: "Add JWT auth to the Acme Corp billing API at /srv/acme/billing/api.py"
+   If `include_prompt_summary` is false in config, set `prompt_summary` to "[omitted]".
+
+2. **File path normalization**: Replace absolute paths with project-relative paths.
+   Replace home directory segments with `~`. Replace username segments with `[user]`.
+   Example: `/home/alice/projects/myapp/src/auth.py` becomes `~/projects/myapp/src/auth.py`
+   or `src/auth.py` if within the project root.
+
+3. **Secret pattern matching**: Scan all string fields for patterns matching:
+   - API keys (strings matching `[A-Za-z0-9_-]{20,}` preceded by key/token/secret/api)
+   - Connection strings (containing `://` with credentials)
+   - Environment variable references with values (`KEY=value` patterns)
+   - Bearer tokens, JWT strings (three dot-separated base64 segments)
+   Replace matches with `[REDACTED]`.
+
+4. **Custom patterns**: Apply each regex in `additional_redact_patterns` from the
+   config file against all string fields. Replace matches with `[REDACTED]`.
+
+5. **Set `redacted` flag**: Only set `redacted: true` after steps 1-4 complete
+   successfully. If any step fails, do NOT write the entry.
+
+### Redaction Failure
+
+If the redaction pass cannot complete (e.g., malformed config, regex error), log a
+warning and skip trajectory recording for this invocation. Do NOT write an unredacted
+entry. Trajectory capture is a nice-to-have — it must never leak sensitive data.
+
 ---
 
 ## Mode 1: Post-Task Retrospective
@@ -65,6 +151,24 @@ All data lives in the project memory directory:
 After any skill that completes a significant task reports success. The calling skill (or orchestrator) invokes `crucible:forge` in retrospective mode.
 
 ### The Process
+
+0. **Capture raw execution metrics** (if trajectory capture is enabled):
+   Before dispatching the retrospective analyst, gather and hold in context:
+   - Skill name that just completed
+   - Start timestamp (from pipeline status "Started" field or session start)
+   - End timestamp (current time)
+   - Tool call count estimate (from execution summary or narration log)
+   - Error recovery event count (how many times an error was encountered and retried)
+   - User acceptance signal (did the user approve the output, request changes, or reject it?)
+   - Phases reached (for build: design/plan/execute/review; for debugging: investigate/hypothesize/fix/verify; etc.)
+   - Completion status (did the skill reach its natural end?)
+
+   These raw metrics are NOT written to disk yet. They are held in context for
+   step 8 (trajectory recording) after the retrospective completes, where they
+   are merged with the retrospective's analytical output (deviation type, outcome,
+   tags) to form the complete trajectory entry.
+
+   If trajectory capture is disabled, skip this step.
 
 1. Dispatch a **Retrospective Analyst** subagent (Sonnet) using `./retrospective-prompt.md`
 2. Provide: task description, the plan (if any), actual execution summary, skills used, duration estimate
@@ -80,6 +184,31 @@ After any skill that completes a significant task reports success. The calling s
    These are passed to a cartographer recorder dispatch with the
    "Extract decisions for cartographer" directive, alongside the module
    mapping from the build session's task list and design doc.
+8. **Trajectory recording** (if trajectory capture is enabled):
+   a. Check `~/.claude/projects/<hash>/memory/trajectory-config.json` — if missing
+      or `enabled: false`, skip this step entirely.
+   b. Construct the raw trajectory entry from execution data available in context:
+      - `trajectory_id`: Generate a UUID
+      - `timestamp`: ISO-8601 of when the skill invocation started
+      - `skill`: The Crucible skill that was invoked (build, debugging, audit, etc.)
+      - `completed`: Whether the skill ran to its natural completion
+      - `outcome`: Derived from the retrospective's `outcome` field (success/partial/failure)
+      - `duration_ms`: From pipeline status timestamps or session timing
+      - `tool_call_count`: Estimated from execution summary
+      - `error_recovery_events`: Count of error-then-retry sequences observed
+      - `user_acceptance`: Whether the user accepted the output (accepted/rejected/modified/unknown)
+      - `phases_reached`: For multi-phase skills, which phases completed
+      - `deviation_type`: From the retrospective entry
+      - `prompt_hash`: SHA-256 of the original user prompt
+      - `prompt_summary`: One-line redacted summary (if `include_prompt_summary` is true)
+      - `redacted`: Set to true only after step (c) completes
+      - `tags`: From the retrospective entry's tags
+   c. Run the redaction pass (see Redaction Rules above).
+   d. Append the entry as a single JSON line to the appropriate file:
+      - If `completed == true` AND `outcome == "success"`: append to `trajectory_samples.jsonl`
+      - Otherwise: append to `failed_trajectories.jsonl`
+   e. Check file size: if the target file exceeds `max_entries` lines, remove the
+      oldest entries (from the top of the file) to bring it back to `max_entries`.
 
 ### Update Rules for patterns.md
 
@@ -96,6 +225,27 @@ After any skill that completes a significant task reports success. The calling s
 If total retrospective count >= 10 AND any deviation type has 3+ occurrences, suggest to user:
 > "Forge has accumulated enough data for skill improvement proposals. Would you like to run mutation analysis?"
 
+### Trajectory Recording Without Retrospective
+
+Forge retrospective is RECOMMENDED but not REQUIRED. When a significant skill
+completes but no retrospective is triggered (user declines, session ending, quick
+task), trajectory data would be lost.
+
+To handle this, any skill that completes a significant task SHOULD write a
+minimal trajectory entry if:
+- Trajectory capture is enabled
+- No forge retrospective is expected to run in this session
+
+The minimal entry uses `deviation_type: "unknown"`, `tags: []`, and
+`outcome` based on the completion signal alone (success if the skill reported
+success, failure if it reported failure, partial otherwise). The entry still
+goes through the full redaction pass.
+
+This ensures trajectory data is captured even when forge does not run, at the
+cost of less-rich analytical fields. The skill-creator's eval generation pipeline
+handles entries with `deviation_type: "unknown"` by clustering on execution
+metrics alone.
+
 ---
 
 ## Mode 2: Pre-Task Feed-Forward
@@ -110,6 +260,15 @@ Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its co
 2. **Cold start (no file):** Report "No prior retrospective data for this project. Proceeding without feed-forward." Return immediately. No subagent needed.
 3. **Data exists:** Read `patterns.md` (under 200 lines — safe for context)
 4. Dispatch a **Feed-Forward Advisor** subagent (Sonnet) using `./feed-forward-prompt.md`
+4b. **Trajectory context** (if trajectory capture is enabled):
+    Also read `~/.claude/projects/<hash>/memory/trajectories/failed_trajectories.jsonl`
+    and extract the 5 most recent failure entries for the upcoming skill type.
+    Pass these to the Feed-Forward Advisor alongside patterns.md.
+    The advisor can surface trajectory-specific warnings like:
+    - "Last 3 build invocations failed at the execute phase with error recovery"
+    - "Debugging tasks on this project have a 40% failure rate — consider more
+      investigation before committing to a fix"
+    If no trajectory data exists, skip this addition.
 5. Provide: the patterns file content AND a brief description of the upcoming task
 6. Subagent returns 3-5 targeted warnings/adjustments relevant to THIS task
 7. Surface warnings to the calling skill's orchestrator as bias adjustments (not hard blockers)
@@ -161,6 +320,7 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | `crucible:finish` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
 | `crucible:design` | Feed-Forward | Before first question | Topic description |
 | `crucible:build` | Retrospective (decision extraction) | After fix verified | Decision journal + task list → cartographer decisions via recorder |
+| Any skill | Trajectory Record | After retrospective step 7 | Execution data + retrospective output (opt-in only) |
 
 **Forge is RECOMMENDED, not REQUIRED.** It is a learning accelerator, not a quality gate. Skipping it does not produce broken output — it misses an opportunity to learn.
 
@@ -181,12 +341,18 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 - Load individual retrospective files into feed-forward (context bloat)
 - Run mutation analysis with fewer than 10 retrospectives
 - Treat feed-forward warnings as hard blockers (they are advisories)
+- Store raw user prompts in trajectory files — only store prompt hashes and redacted summaries
+- Write a trajectory entry without completing the redaction pass
+- Auto-enable trajectory capture — it must be explicitly opted into via config file
 
 **Always:**
 - Run retrospective after significant tasks
 - Check for patterns.md before design/planning
 - Write mutation proposals to disk for human review
 - Handle cold start gracefully (no data = no feed-forward, just say so)
+- Check trajectory-config.json before any trajectory operation
+- Run the full redaction pass before writing any trajectory entry
+- Set `redacted: true` only after the redaction pass completes
 
 ## Rationalization Prevention
 
@@ -199,6 +365,10 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | "Only one data point, feed-forward is useless" | Even one warning is better than none. Report limited data. |
 | "I'll run the retrospective later" | Later never comes. Run it now, while context is fresh. |
 | "I already know what went wrong" | Knowing is not recording. Write it down so FUTURE sessions know too. |
+| "Trajectory data is too noisy to be useful" | Even noisy data reveals patterns at scale. 10 failed trajectories with the same deviation type IS a signal. |
+| "I'll enable trajectory capture later" | Later means no data for the current project. Enable it now if you want eval generation from real usage. |
+| "The redaction pass is too conservative" | Conservative redaction protects the user. A missed eval scenario is cheaper than a leaked secret. |
+| "This task is too small to record" | Small tasks reveal patterns too. The trajectory entry is one JSON line — the cost is negligible. |
 
 ## Common Mistakes
 
