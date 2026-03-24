@@ -47,6 +47,8 @@ The orchestrator coordinates the loop but does NOT fix artifacts directly. Fixes
 | mockup | Fix subagent |
 | translation | Fix subagent revises the translation map |
 
+**Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason "pre-qg-fix-round-N". Non-code artifacts (design, plan, hypothesis, mockup, translation) skip this step — they are fully captured by the existing artifact-N.md snapshots.
+
 The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round.
 
 The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
@@ -120,6 +122,8 @@ Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count 
 If either condition is met → progress, loop again. No judge needed.
 
 **Oscillation detection:** If the weighted score *increases* (not just stays the same), escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
+
+**Regression with checkpoint:** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
 
 ### Judge Dispatch (only when first-pass check would trigger stagnation)
 
@@ -291,3 +295,4 @@ Three exit modes beyond clean approval:
 - **crucible:mockup-builder** — Produces mockups (gateable artifact)
 - **crucible:mock-to-unity** — Produces translation maps and implementations (gateable artifacts)
 - **crucible:build** — Outermost orchestrator, controls all gates in pipeline
+- **crucible:checkpoint** — Shadow git checkpoints before code-artifact fix rounds (recommended). Provides rollback target when fix rounds introduce regressions.

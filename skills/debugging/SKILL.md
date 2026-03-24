@@ -212,7 +212,7 @@ Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
 Orchestrator: Verify fix -> Success? Phase 4.5. Failed? Cleanup, log, loop back.
-    -> 3 failures? Escalate to user.
+    -> 3 failures? Escalate to user. If checkpoints exist: "Checkpoints available from prior fix cycles. Restore to a known-good state before manual investigation?"
     |
     v
 Phase 4.5: "Where Else?" scan — find and fix sibling locations
@@ -403,6 +403,8 @@ The quality gate challenges:
 
 ### Phase 4: Implementation (Single Subagent -- TDD)
 
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-debug-fix-cycle-N" (where N is the hypothesis cycle count) before dispatching the implementation agent. If the fix attempt fails or introduces regressions, this checkpoint allows clean rollback without relying on WIP commit revert mechanics.
+
 **Prompt template:** `./implementer-prompt.md`
 
 Dispatch a single Implementation agent that receives:
@@ -448,6 +450,8 @@ If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` i
 ---
 
 ### Phase 4.5: "Where Else?" Blast Radius Scan
+
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-where-else" before dispatching the scan agent. This replaces the need to manually track the pre-Phase-4.5 SHA for revert mechanics — the checkpoint captures the full working directory state.
 
 After Phase 4 succeeds and the WIP commit is created, dispatch the "Where Else?" scan agent to find and fix analogous locations in the codebase that have the same bug pattern. Phase 4.5 does NOT run on loop-back paths (fix failed, regressions found).
 
@@ -569,6 +573,8 @@ If `update_path` was provided (merge case): rename the file to use today's date 
 ---
 
 ### Phase 5: Red-Team and Code Review (Post-Fix Quality Gate)
+
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-debug-gate" before invoking the quality gate. If gate fix rounds degrade the fix, this is the rollback target.
 
 After Phase 4.5 completes (or Phase 4 succeeds if no Phase 4.5 ran), the orchestrator runs quality gates before declaring done:
 
@@ -831,6 +837,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 
 **Recommended skills:**
 - **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)
+- **`crucible:checkpoint`** -- Shadow git checkpoints before implementation, sibling fixes, and quality gate (pre-debug-fix-cycle-N, pre-where-else, pre-debug-gate). Provides structured rollback for fix attempts and sibling work.
 
 ## Real-World Impact
 
