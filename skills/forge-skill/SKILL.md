@@ -52,9 +52,20 @@ All data lives in the project memory directory:
   patterns.md                       # Aggregated patterns (max 200 lines)
   mutation-proposals/
     YYYY-MM-DD-<topic>.md           # Skill mutation proposals
+  skill-proposals/
+    YYYY-MM-DD-<topic>.md           # Skill extraction proposals
 ```
 
 **Context budget:** `patterns.md` MUST stay under 200 lines. It is loaded into context during feed-forward. Individual retrospective files are NOT loaded during feed-forward — only during mutation analysis.
+
+**Skill-Worthy Patterns section format** (within `patterns.md`):
+
+```markdown
+## Skill-Worthy Patterns
+
+- **[Pattern name]** (count: N, last seen: YYYY-MM-DD): [Description]
+  - Status: none | proposed ([path]) | accepted | rejected
+```
 
 ## Trajectory Capture (Opt-In)
 
@@ -141,7 +152,6 @@ Before writing ANY trajectory entry, apply these redaction steps in order:
 If the redaction pass cannot complete (e.g., malformed config, regex error), log a
 warning and skip trajectory recording for this invocation. Do NOT write an unredacted
 entry. Trajectory capture is a nice-to-have — it must never leak sensitive data.
-
 ---
 
 ## Mode 1: Post-Task Retrospective
@@ -209,6 +219,41 @@ After any skill that completes a significant task reports success. The calling s
       - Otherwise: append to `failed_trajectories.jsonl`
    e. Check file size: if the target file exceeds `max_entries` lines, remove the
       oldest entries (from the top of the file) to bring it back to `max_entries`.
+9. **Skill extraction check (all sessions):** Evaluate the just-produced
+   retrospective entry against the following trigger heuristics. If ANY
+   trigger fires, dispatch a Skill Extraction Analyst subagent (Sonnet)
+   using `./extraction-analyst-prompt.md`.
+
+   **Trigger heuristics (ANY fires = dispatch analyst):**
+   - **Complexity**: Execution summary references 5+ distinct tool calls or
+     subagent dispatches in a non-trivial sequence (sequential steps with
+     dependencies, not parallel reads of unrelated files)
+   - **Error recovery**: "What Went Wrong" describes errors that were overcome
+     AND "What Worked" credits a specific approach for the recovery
+   - **User correction**: Execution summary notes user redirection that led
+     to a successful outcome different from the original approach
+   - **Novel workflow**: "What Worked" describes a pattern not present in any
+     existing skill's SKILL.md description frontmatter (check skill names
+     and descriptions against the pattern)
+   - **Recurrence**: The positive pattern in "What Worked" matches an existing
+     entry in patterns.md "Skill-Worthy Patterns" with count >= 2, AND no
+     proposal has been generated for it yet
+
+   **Dispatch input:** retrospective entry, execution summary, existing skill
+   names/descriptions, existing proposals in skill-proposals/ and
+   mutation-proposals/.
+
+   **Handle output:**
+   - "No proposal warranted" -> Record pattern name in patterns.md
+     Skill-Worthy Patterns section (increment count or add new entry)
+   - NEW SKILL proposal -> Write to skill-proposals/YYYY-MM-DD-<topic>.md,
+     update patterns.md entry with status: proposed
+   - EXTEND EXISTING proposal -> Write to mutation-proposals/YYYY-MM-DD-<topic>.md
+     with `source: extraction` tag, update patterns.md entry with status: proposed
+
+   This step is RECOMMENDED, not REQUIRED. Failure does not break the
+   retrospective. If the analyst cannot determine skill-worthiness, record
+   the pattern and move on.
 
 ### Update Rules for patterns.md
 
@@ -219,11 +264,23 @@ After any skill that completes a significant task reports success. The calling s
 5. Prune warnings that have not occurred in the last 10 retrospectives (pattern may be resolved)
 6. Keep total file **under 200 lines** — compress or remove stale entries
 7. Write the updated file
+8. Update the "Skill-Worthy Patterns" section:
+   - If the retrospective's "What Worked" section describes a reusable pattern, add or increment it
+   - Each entry: pattern name, occurrence count, last-seen date, proposal status (none|proposed|accepted|rejected)
+   - Maximum 10 entries, 2 lines each
+   - Prune patterns not seen in last 10 retrospectives (same rule as warnings)
+   - Mark patterns as "resolved" (compress to single line) when their proposal has been accepted or rejected
 
 ### After Writing
 
 If total retrospective count >= 10 AND any deviation type has 3+ occurrences, suggest to user:
 > "Forge has accumulated enough data for skill improvement proposals. Would you like to run mutation analysis?"
+
+If a skill extraction proposal was generated in step 9, notify the user:
+> "Forge detected a skill-worthy workflow: [proposed skill name or extension target]. Proposal written to [path]. When you're ready, you can use skill-creator with this proposal as a starting point."
+
+Do NOT prompt for immediate action. The notification is informational. The user
+decides when (or whether) to act on it.
 
 ### Trajectory Recording Without Retrospective
 
@@ -324,6 +381,11 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 
 **Forge is RECOMMENDED, not REQUIRED.** It is a learning accelerator, not a quality gate. Skipping it does not produce broken output — it misses an opportunity to learn.
 
+**Skill extraction** is an internal step within Mode 1 (Retrospective). It does
+not require any calling skill to pass additional data -- the retrospective entry
+itself provides the input. The extraction analyst may read existing skill
+descriptions from the skill directories to check for overlap.
+
 ## Quick Reference
 
 | Mode | Trigger | Model | Template | Output |
@@ -341,6 +403,10 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 - Load individual retrospective files into feed-forward (context bloat)
 - Run mutation analysis with fewer than 10 retrospectives
 - Treat feed-forward warnings as hard blockers (they are advisories)
+- Auto-create skills from extraction proposals (Iron Law applies to extraction too)
+- Dispatch skill-creator from within the forge pipeline
+- Generate skill proposals for trivial workflows (single-step, domain-specific)
+- Propose a new skill when an existing skill already covers the workflow
 - Store raw user prompts in trajectory files — only store prompt hashes and redacted summaries
 - Write a trajectory entry without completing the redaction pass
 - Auto-enable trajectory capture — it must be explicitly opted into via config file
@@ -350,6 +416,9 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 - Check for patterns.md before design/planning
 - Write mutation proposals to disk for human review
 - Handle cold start gracefully (no data = no feed-forward, just say so)
+- Check existing skill descriptions before flagging a workflow as "novel"
+- Include confidence level on every extraction proposal
+- Write proposals to disk before notifying the user
 - Check trajectory-config.json before any trajectory operation
 - Run the full redaction pass before writing any trajectory entry
 - Set `redacted: true` only after the redaction pass completes
@@ -365,6 +434,9 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | "Only one data point, feed-forward is useless" | Even one warning is better than none. Report limited data. |
 | "I'll run the retrospective later" | Later never comes. Run it now, while context is fresh. |
 | "I already know what went wrong" | Knowing is not recording. Write it down so FUTURE sessions know too. |
+| "This workflow is obviously worth a skill, just create it" | Iron Law: proposals only. Humans decide. Even the best-looking workflow may be a one-off. |
+| "Every session has a skill-worthy pattern" | If >30% of retrospectives trigger proposals, the heuristics are too loose. Tighten them. |
+| "The proposal is low-confidence, not worth writing" | Low-confidence proposals are seeds. They become medium when they recur. Write them down. |
 | "Trajectory data is too noisy to be useful" | Even noisy data reveals patterns at scale. 10 failed trajectories with the same deviation type IS a signal. |
 | "I'll enable trajectory capture later" | Later means no data for the current project. Enable it now if you want eval generation from real usage. |
 | "The redaction pass is too conservative" | Conservative redaction protects the user. A missed eval scenario is cheaper than a leaked secret. |
@@ -388,9 +460,22 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 - Problem: 3 retrospectives, agent proposes sweeping skill changes
 - Fix: Minimum 10 retrospectives. Below that, patterns are noise.
 
+**Proposing skills for domain-specific workflows**
+- Problem: Agent proposes a skill for "deploying to our specific Kubernetes cluster" -- a workflow only useful for this one project
+- Fix: The extraction analyst must assess generalizability. Workflows that reference project-specific infrastructure, APIs, or conventions are positive patterns, not skill candidates.
+
+**Ignoring extraction proposals**
+- Problem: Proposals accumulate in skill-proposals/ and are never reviewed
+- Fix: During feed-forward, the advisor can surface pending proposals as a reminder: "N skill proposals awaiting review." Users should periodically review and accept/reject.
+
+**Duplicate proposals from extraction and mutation**
+- Problem: Mode 3 mutation analysis recommends a new skill that extraction already proposed
+- Fix: Mutation analyst cross-references skill-proposals/ before recommending new skills. If a proposal exists, add evidence to it.
+
 ## Prompt Templates
 
 - `./retrospective-prompt.md` — Post-task retrospective analyst dispatch
 - `./feed-forward-prompt.md` — Pre-task feed-forward advisor dispatch
 - `./mutation-proposal-prompt.md` — Skill mutation analyst dispatch
 - `./diagnostic-extraction-prompt.md` — Debugging session diagnostic pattern extraction dispatch
+- `./extraction-analyst-prompt.md` -- Skill-worthy workflow detection and proposal generation dispatch

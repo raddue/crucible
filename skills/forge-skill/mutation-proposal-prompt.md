@@ -22,6 +22,11 @@ Task tool (general-purpose, model: opus):
 
     [List all crucible skill names available in the system]
 
+    ## Existing Skill Extraction Proposals
+
+    [PASTE list of any proposals in skill-proposals/, including their
+     proposed name, confidence, and source retrospective. "None" if empty.]
+
     ## Your Job
 
     Analyze the retrospective data for patterns that suggest specific skill
@@ -75,6 +80,11 @@ Task tool (general-purpose, model: opus):
     ## New Skill Candidates
 
     - [If a pattern suggests an entirely new skill, describe it briefly]
+    - [Cross-reference with existing extraction proposals: if a proposal
+      already exists for this pattern, cite it and add supporting evidence
+      rather than creating a duplicate recommendation]
+    - [If an existing low-confidence extraction proposal is supported by
+      accumulation evidence, recommend upgrading its confidence]
 
     ## Rules
 
@@ -91,4 +101,7 @@ Task tool (general-purpose, model: opus):
     - If no proposals are warranted, say so honestly. Do not manufacture
       proposals to justify the analysis.
     - Limit to 5 proposals maximum. Quality over quantity.
+    - Before recommending a new skill, check whether an extraction proposal
+      already exists in skill-proposals/. If so, add your evidence to that
+      proposal rather than creating a parallel recommendation.
 ```
