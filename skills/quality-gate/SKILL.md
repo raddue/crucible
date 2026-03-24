@@ -211,6 +211,7 @@ Quality gate writes round state to disk for compaction recovery.
 - `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes)
 
 **Compaction recovery:**
+0. Read `## Compression State` from `pipeline-status.md` — recover Goal, Key Decisions (including parent skill decisions that affect the gate), Active Constraints, and Next Steps. If absent, skip to step 1. Note: quality-gate is invoked by a parent skill (build, debugging, spec), so the Compression State reflects the parent's context. The quality-gate orchestrator inherits this context.
 1. Glob for `active-run-*.md` markers to locate the scratch directory.
 2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
 3. Read the latest `artifact-N.md` as the current artifact state.
@@ -218,7 +219,16 @@ Quality gate writes round state to disk for compaction recovery.
 5. Read all `round-N-comparison.md` files to reconstruct consecutive-round state for the stagnation judge. Absence of comparison files is expected on clean-progress rounds.
 6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch.
 7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
-8. Dispatch the next red-team round.
+8. Emit a Compression State Block into the conversation with gate-specific state: current round, score progression, artifact type under review. Inherit Goal and Key Decisions from the parent skill's last Compression State if available.
+9. Dispatch the next red-team round.
+
+### Checkpoint Timing
+
+Emit a Compression State Block at:
+- **Every 3 rounds:** After rounds 3, 6, 9, 12
+- **Before stagnation judge dispatch:** When the first-pass check would trigger stagnation
+- **Gate completion:** When the gate passes or escalates (before returning to parent skill)
+- **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
 
@@ -285,6 +295,10 @@ Three exit modes beyond clean approval:
 - Skipping the fix verifier dispatch after a fix agent completes (every fix round gets verified)
 - Passing verifier output to the red-team reviewer (verifier is on the remediation path only)
 - Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round)
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
+- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
 
 ## Integration
 

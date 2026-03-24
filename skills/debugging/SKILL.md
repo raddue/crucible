@@ -69,6 +69,16 @@ Append after the shared header:
 - Hypothesis: "Missing null check in event handler dispatch chain"
 - Cycle: 2 of 4 max
 - Phase 4 fix attempts: 1 (WIP commit pending verification)
+
+## Compression State
+Goal: [original user request / bug report]
+Key Decisions:
+- [accumulated decisions, max 10]
+Active Constraints:
+- [constraints affecting remaining investigation]
+Next Steps:
+1. [immediate next action]
+2. [subsequent actions]
 ```
 
 ### Health State Machine
@@ -91,10 +101,12 @@ Output concise inline status alongside the status file write:
 ### Compaction Recovery
 
 After compaction, before re-writing the status file:
-1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
-2. Reconstruct phase, health, and skill-specific body from internal state files
-3. Write the updated status file
-4. Output inline status to CLI
+0. Read the `## Compression State` section from `pipeline-status.md` — recover Goal, Key Decisions, Active Constraints, and Next Steps. If absent, skip to step 1.
+1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
+2. Reconstruct phase, health, and skill-specific body from internal state files (see Session State below)
+3. Emit a Compression State Block into the conversation to seed the new context window
+4. Write the updated status file
+5. Output inline status to CLI
 
 ## Session State and Compaction Recovery
 
@@ -108,6 +120,17 @@ The debugging skill writes session state to disk at **every phase transition**, 
 - `synthesis-report.md`: latest synthesis report (written after Synthesis completes)
 - `implementation-details.md`: cumulative record of implementation attempts — what was tried, which files changed, regressions encountered, why it failed (appended after each Phase 4)
 - `where-else-state.md`: Phase 4.5 state — pre-Phase-4.5 SHA, generalized pattern, siblings found/fixed/remaining (written during Phase 4.5, read during compaction recovery)
+
+At each phase transition, in addition to writing session state files, emit a Compression State Block into the conversation. The block captures the reasoning layer (goal, decisions, constraints, next steps) that the session state files do not.
+
+### Checkpoint Timing
+
+Emit a Compression State Block at:
+- **Phase transitions:** 0->1, 1->Synthesis, Synthesis->2, 2->3, 3->3.5, 3.5->4, 4->4.5, 4.5->5
+- **Hypothesis cycles:** After each hypothesis is formed or invalidated
+- **Fix attempts:** After each Phase 4 implementation attempt completes (success or failure)
+- **Escalations:** Before any escalation to user
+- **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
 **Context hygiene:** After synthesis completes, raw Phase 1 investigation reports are superseded by the synthesis report. The orchestrator should rely on the synthesis report going forward, not the raw reports. After Phase 4 completes (success or failure), the Phase 2 pattern analysis report is superseded by the implementation results. This keeps the orchestrator lean across long sessions.
 
@@ -767,6 +790,12 @@ If you catch yourself thinking:
 - Forming hypotheses before receiving synthesis report
 - **"One more fix attempt" (when already at Cycle 3+)**
 - **Each fix reveals new problem in different place**
+
+**Compression State violations:**
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
+- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
 
 **ALL of these mean: STOP. Return to the correct phase.**
 
