@@ -77,6 +77,11 @@ Append after the shared header:
 - Plan: PASSED (1 round)
 - Task tiers: 1x T1, 1x T2, 1x T3
 - Code: not yet reached
+
+## Checkpoints
+- Last checkpoint: pre-wave-3 (12:45:30)
+- Total checkpoints: 7
+- Shadow repo: healthy
 ```
 
 ### Health State Machine
@@ -101,8 +106,9 @@ Output concise inline status alongside the status file write:
 After compaction, before re-writing the status file:
 1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files
-3. Write the updated status file
-4. Output inline status to CLI
+3. If crucible:checkpoint was used: verify checkpoint availability by checking for the shadow repo at the computed path. Log available checkpoint count. Do not restore — just confirm checkpoints are recoverable.
+4. Write the updated status file
+5. Output inline status to CLI
 
 ## Mode Detection
 
@@ -174,6 +180,8 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 ### Step 2: Innovate and Red-Team the Design
 
 After the user approves the design and before starting Phase 2:
+
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching innovate and quality-gate on the design doc.
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
 2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) design doc with artifact type "design". Iterates until clean or stagnation.
@@ -314,6 +322,8 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 
 **After the plan passes review:**
 
+**RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching innovate and quality-gate on the plan.
+
 1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
 2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context.
 
@@ -380,6 +390,8 @@ Before dispatching:
 
 For each task (or wave of parallel tasks):
 
+**RECOMMENDED SUB-SKILL:** Before dispatching each execution wave, use crucible:checkpoint — create checkpoint with reason "pre-wave-N" (where N is the wave number). This captures the working directory state after the prior wave's verification gate passed.
+
 1. Mark task `in_progress` via `TaskUpdate`
 2. Spawn **Implementer** teammate (Opus) via Task tool with `team_name` and `subagent_type="general-purpose"`
    - Use `./build-implementer-prompt.md` template
@@ -409,6 +421,8 @@ When a contract YAML exists for the current ticket (detected during Step 0 or pr
 #### De-Sloppify Cleanup
 
 After the implementer reports completion and before dispatching the reviewer:
+
+**RECOMMENDED:** Use crucible:checkpoint — create checkpoint with reason "pre-cleanup-task-N" before dispatching the cleanup agent. If cleanup removes something needed, restore to this checkpoint.
 
 1. Record the pre-cleanup commit SHA
 2. Dispatch a fresh **Cleanup Agent** (Opus) using `./cleanup-prompt.md`
@@ -651,7 +665,9 @@ After all tasks complete:
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
+3. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-code-review" before dispatching code review. If the iterative review fix cycle introduces regressions, this is the rollback target.
 3. **REQUIRED SUB-SKILL:** Use crucible:code-review on full implementation (iterative until clean)
+4. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-inquisitor" before dispatching inquisitor. If the inquisitor's fix cycle produces regressions, this is the rollback target.
 4. **REQUIRED SUB-SKILL:** Use crucible:inquisitor on full implementation (dispatches 5 parallel dimensions against full feature diff)
    - Input: `git diff <base-sha>..HEAD` where base-sha is the commit before Phase 3 execution began
    - Runs after code review (obvious issues already fixed) and before quality gate (gate reviews final state)
@@ -661,6 +677,7 @@ After all tasks complete:
    - This is NOT a full implementation re-review — scope it to only the fixer's changes
    - Iterative until clean, same as step 3
    - Skip if the inquisitor reported all PASS (no fixes were needed)
+6. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-impl-gate" before dispatching the implementation quality gate. If gate fix rounds degrade the code, this is the rollback target.
 6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
 7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
@@ -715,6 +732,7 @@ Decision types to capture:
 - Test suite failures not obviously fixable
 - Multiple teammates fail on different tasks
 - Teammate reports context pressure at 50%+ with significant work remaining
+- When escalating for regression or stagnation AND a checkpoint exists for the current phase boundary: include "A checkpoint from [reason] is available. Restore to pre-regression state?" in the escalation message.
 
 **Minor issues:** Log, work around, include in final report.
 
@@ -800,6 +818,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
+- **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-code-review, pre-inquisitor, pre-impl-gate)
 
 **Phase 3 sub-skills (dispatched per-task):**
 - **crucible:test-coverage** — Test alignment audit after each task's test quality review (staleness, dead tests, coincidence tests)
