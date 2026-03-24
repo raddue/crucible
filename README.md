@@ -4,7 +4,7 @@ A collection of agent skills for systematic software development. Works with [Cl
 
 Covers the full development lifecycle: design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. Every skill is [eval-tested](#eval-results) with measured A/B deltas.
 
-Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged.
+Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged. Pipeline checkpoint system, auto skill extraction, structured context compression, and trajectory capture inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
 ### Marketplace Availability
 
