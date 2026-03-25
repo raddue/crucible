@@ -125,9 +125,33 @@ If either condition is met → progress, loop again. No judge needed.
 
 **Regression with checkpoint:** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
 
+### Multi-Model Consensus (when available)
+
+When the `consensus_query` MCP tool is available and consensus mode `verdict` is enabled:
+
+1. Instead of dispatching a single Sonnet judge via Task tool, call
+   `consensus_query(mode: "verdict")` with:
+   - prompt: the stagnation judge prompt from `stagnation-judge-prompt.md`
+   - context: round N findings, round N-1 findings, latest fix journal entry,
+     prior comparison files (same inputs as the single-model judge)
+   - metadata: { artifact_type, round_number, score_progression }
+
+2. Read the consensus response:
+   - If `status: "consensus"` or `status: "partial"`:
+     - Use the `synthesis` verdict (PROGRESS/STAGNATION/DIMINISHING_RETURNS)
+     - If the verdict is STAGNATION or DIMINISHING_RETURNS and disagreements
+       exist, include the dissent summary in the escalation message:
+       "Stagnation detected (consensus: N/M models agree, dissent: [summary])."
+   - If `status: "unavailable"`:
+     - Fall back to single-Sonnet judge dispatch (existing behavior)
+
+3. The comparison file (`round-N-comparison.md`) includes the consensus
+   metadata: models queried, models responded, agreement level, and any
+   dissenting verdicts.
+
 ### Judge Dispatch (only when first-pass check would trigger stagnation)
 
-If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds.
+If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator pastes all input directly.
 
@@ -207,7 +231,7 @@ Quality gate writes round state to disk for compaction recovery.
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
-- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error)
+- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts.
 - `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes)
 
 **Compaction recovery:**
