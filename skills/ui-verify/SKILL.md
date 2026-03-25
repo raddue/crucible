@@ -73,20 +73,28 @@ Evaluate each category. Mark each as pass, fail, or warning.
 
 Produce a structured report using this format:
 
+**Confidence tags:**
+- `[PASS-visual]` — verified via screenshot comparison (high confidence)
+- `[PASS-code]` — verified via code-level structural audit only (lower confidence — means "the code looks right" not "the output looks right")
+- `[FAIL]` — mismatch found
+- `[WARN]` — USS limitation, documented in translation map or uss-approximation-patterns.md
+
+Use `[PASS-visual]` when a screenshot was compared. Use `[PASS-code]` when only code-level audit was performed (Step 2b). This distinction lets downstream consumers know which findings are high-confidence visual checks and which are structural inferences.
+
 ```
 ## UI Verification: [Component Name]
 Source: docs/mockups/[feature]-mockup.html
 Method: [screenshot | code-audit]
 
 ### Results
-[PASS] Layout: hierarchy matches (N containers, correct flex directions)
+[PASS-visual] Layout: hierarchy matches (N containers, correct flex directions)
 [FAIL] Spacing: top-bar padding is 8px, mockup uses --spacing-xl (16px)
 [FAIL] Color: search-box border hardcoded #2a2a3a, should be var(--color-border)
-[PASS] Typography: font sizes match scale
-[PASS] Borders: widths and radius correct
+[PASS-visual] Typography: font sizes match scale
+[PASS-code] Borders: widths and radius correct (code-level check only)
 [WARN] Interactive: hover states not yet wired (Layer 4 pending)
 [FAIL] Theming: 2 hardcoded color values found
-[PASS] Bug workarounds: ScrollView height handled via inline C#
+[PASS-visual] Bug workarounds: ScrollView height handled via inline C#
 
 ### Action Items
 1. Fix top-bar padding: change 8px → var(--spacing-xl)
@@ -99,6 +107,10 @@ Method: [screenshot | code-audit]
 **If acting as the implementer:** Fix each failed item. After fixes, re-run verification (loop back to Step 1). Continue until all items pass or are documented as known limitations.
 
 **If acting as a reviewer:** Report the delta to the implementing agent or user. Do not fix — the implementer owns the code.
+
+## Quality Gate
+
+This skill produces **delta reports**. When used standalone, invoke `crucible:quality-gate` after the delta report is produced if significant failures remain unresolved. When used as a sub-skill of mock-to-unity (Step 6), the parent skill handles iteration — quality-gate is not needed.
 
 ## Scope Adaptation
 
