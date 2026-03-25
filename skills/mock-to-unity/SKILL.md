@@ -39,7 +39,7 @@ Do not skip this step. Do not skim. The mockup is the source of truth for the en
 
 ## Step 2: Produce a Translation Map
 
-Write a structured mapping document before any implementation code. This is the checkpoint that catches drift early.
+Write a structured mapping document before any implementation code. This is the checkpoint that catches drift early. **Persist the translation map to `docs/plans/<feature>-translation-map.md` and commit it.** All subsequent steps reference this file on disk, not conversation context.
 
 ### Selectors
 Map every CSS class to its USS selector:
@@ -59,10 +59,16 @@ text-overflow: ellipsis        → needs C# truncation                [inline wo
 ```
 
 ### Variables
-Confirm every CSS variable exists in Theme.uss. Read `~/.claude/skills/mockup-builder/references/theme-variables.md` for the catalog:
+Confirm every CSS variable exists in Theme.uss. Read the mockup-builder skill's references/theme-variables.md for the catalog:
 ```
 var(--color-bg-base)       → exists in Theme.uss     [ok]
 var(--color-vendor-price)  → NOT in Theme.uss         [needs adding]
+```
+
+**:root Value Validation:** For each `:root` variable in the mockup, verify its VALUE matches the mockup-builder skill's `references/theme-variables.md` (which reflects Theme.uss `:root`). Flag value mismatches — these cause the mockup to render differently in browser vs Unity:
+```
+var(--color-bg-base): rgb(20, 20, 31) in mockup → rgb(20, 20, 31) in Theme.uss   [ok]
+var(--color-bg-base): rgb(25, 25, 40) in mockup → rgb(20, 20, 31) in Theme.uss   [MISMATCH - fix mockup or update Theme.uss]
 ```
 
 ### Hierarchy
@@ -98,7 +104,7 @@ Build in this order. Do not skip layers or combine them.
 
 **Layer 1 — Structure:** VisualElement hierarchy only. No styling. Create all containers and elements matching the translation map hierarchy. Verify element names and nesting depth match.
 
-**Layer 2 — USS Styling:** Write USS selectors using Theme.uss variables. Reference the translation map for every property. Use `var()` references exclusively — no hardcoded values. For any variable flagged as "needs adding to Theme.uss" in the translation map, add it to `Assets/_Project/Resources/UI/Theme.uss` in the appropriate section with a comment. Also update `~/.claude/skills/mockup-builder/references/theme-variables.md` to include the new variable.
+**Layer 2 — USS Styling:** Write USS selectors using Theme.uss variables. Reference the translation map for every property. Use `var()` references exclusively — no hardcoded values. For any variable flagged as "needs adding to Theme.uss" in the translation map, add it to `Assets/_Project/Resources/UI/Theme.uss` in the appropriate section with a comment. Also update the mockup-builder skill's references/theme-variables.md to include the new variable.
 
 **Layer 3 — Inline C# Workarounds:** For every item flagged in the translation map's bug zone flags and property gaps. Each workaround gets a code comment:
 ```csharp
@@ -107,7 +113,7 @@ Build in this order. Do not skip layers or combine them.
 element.style.height = 30;
 ```
 
-**Layer 4 — Interactive Behavior:** Hover states via `PointerEnterEvent`/`PointerLeaveEvent`, click handlers, drag registration, context menu wiring.
+**Layer 4 — Interactive Behavior:** Hover/active states use USS pseudo-classes (`:hover`, `:active`) — these work directly in USS. Only use C# `PointerEnterEvent`/`PointerLeaveEvent` for hover behavior that changes non-style properties (e.g., showing a tooltip, triggering animations via DOTween). Click handlers, drag registration, context menu wiring remain in C#.
 
 ## Step 5: Self-Verify
 
@@ -124,9 +130,23 @@ Verification is layer-appropriate — not every layer needs a screenshot:
 **If UI is NOT reachable** (requires specific game state like level 25, combat, NPC interaction):
 Fall back to code-level structural audit — invoke the `ui-verify` skill in code-audit mode.
 
+## Step 6: Mandatory ui-verify
+
+After self-verification (Step 5) passes, invoke `crucible:ui-verify` as a mandatory cross-check:
+
+1. Invoke `crucible:ui-verify` with the mockup path and translation map path (`docs/plans/<feature>-translation-map.md`)
+2. ui-verify forces a fresh re-read of the mockup and produces a structured delta report
+3. Loop until: all categories pass (`[PASS-visual]` or `[PASS-code]`), OR remaining deltas are documented as USS limitations (`[WARN]` with reference to `skills/shared/uss-approximation-patterns.md`)
+4. Do NOT skip this step. Self-verification (Step 5) checks your own work. ui-verify checks against the source of truth with a fresh read.
+
 ## Quality Gate
 
-This skill produces **translation maps** and **implementations**. When used standalone, invoke `crucible:quality-gate` after self-verification. When used as a sub-skill of build, the parent orchestrator handles gating.
+This skill produces **translation maps** and **implementations**. When used standalone, invoke `crucible:quality-gate` after ui-verify (Step 6) completes. When used as a sub-skill of build, the parent orchestrator handles gating.
+
+The gate reviews:
+1. **Translation map completeness** — every mockup element mapped, translation map persisted to `docs/plans/<feature>-translation-map.md`
+2. **USS approximation patterns applied** — every flagged gap has a documented workaround from `skills/shared/uss-approximation-patterns.md` that was actually implemented
+3. **ui-verify delta report** — no unresolved `[FAIL]` items (only `[PASS-visual]`, `[PASS-code]`, or `[WARN]` for documented USS limitations)
 
 ## Unity 6 Rules
 
@@ -143,5 +163,5 @@ These are non-negotiable. Violations are bugs.
 
 ## Reference
 
-For the full Theme.uss variable catalog, read `~/.claude/skills/mockup-builder/references/theme-variables.md`.
+For the full Theme.uss variable catalog, read the mockup-builder skill's references/theme-variables.md.
 For CSS-to-USS property mapping, read `references/css-to-uss-mapping.md`.
