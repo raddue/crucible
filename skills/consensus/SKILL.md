@@ -186,6 +186,34 @@ Periodic application (rather than every-round) keeps cost manageable. A 10-round
 - **Include provenance metadata in consensus results.** Every finding and verdict must trace back to the model(s) that produced it. Provenance enables debugging, trust calibration, and cost attribution.
 - **Check tool availability before attempting consensus calls.** Skills must verify that the `consensus_query` tool exists in the current tool list before calling it. If absent, skip the consensus step silently.
 
+## Integration Points
+
+### Active Integration
+
+| Skill | Decision Point | Consensus Mode | Frequency |
+|-------|---------------|---------------|-----------|
+| quality-gate | Stagnation judge | verdict | Every judge dispatch |
+| quality-gate | Red-team review | review | Rounds 1, 4, 7, 10, 13 |
+| design | Challenger (deep dive) | investigate | Every deep-dive challenge |
+
+### Excluded (with rationale)
+
+| Skill | Decision Point | Why Excluded |
+|-------|---------------|-------------|
+| inquisitor | 5-dimension dispatch | Subagents write and run tests — requires local filesystem and execution environment. External models cannot participate. |
+| quality-gate | Fix verifier | Mechanical check (did the fix address the finding?). Single-model Sonnet is sufficient. Multi-model adds cost without proportional value. |
+| quality-gate | Fix agent | Requires filesystem access to modify code/docs. External models cannot write local files. |
+| red-team | Standalone full-loop | When invoked directly (not via quality-gate), red-team runs its own stagnation loop. Consensus integration is at the quality-gate level, which owns the iteration. |
+| design | Investigation agents | Codebase Scout, Domain Researcher, Impact Analyst all need filesystem access. External models cannot read the local codebase. |
+| build | Task implementation | Code generation requires filesystem access and project context. |
+
+### Reconsideration Criteria
+
+An excluded decision point should be reconsidered for consensus integration if:
+1. The task becomes self-contained (no filesystem dependency), OR
+2. MCP servers gain filesystem-pass-through capabilities, OR
+3. Empirical evidence shows the single-model output has systematic blind spots at that point
+
 ## MCP Server Implementation Guide
 
 The `crucible-consensus` MCP server is a standalone Python process at `mcp-servers/crucible-consensus/`.
