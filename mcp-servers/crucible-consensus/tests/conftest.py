@@ -1,4 +1,6 @@
 import sys
+from dataclasses import dataclass
+from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +21,60 @@ _mock_genai = MagicMock()
 _mock_google.genai = _mock_genai
 sys.modules.setdefault("google", _mock_google)
 sys.modules.setdefault("google.genai", _mock_genai)
+
+
+# ---------------------------------------------------------------------------
+# Mock the mcp SDK so server.py imports succeed without the real package
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _MockTextContent:
+    type: str
+    text: str
+
+
+@dataclass
+class _MockTool:
+    name: str
+    description: str
+    inputSchema: dict
+
+
+class _MockServer:
+    """Minimal mock of mcp.server.Server that makes decorators pass-through."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def list_tools(self):
+        """Decorator that registers a list_tools handler — returns fn unchanged."""
+        def decorator(fn):
+            return fn
+        return decorator
+
+    def call_tool(self):
+        """Decorator that registers a call_tool handler — returns fn unchanged."""
+        def decorator(fn):
+            return fn
+        return decorator
+
+
+# Build the mcp module hierarchy
+_mcp_mod = ModuleType("mcp")
+_mcp_server_mod = ModuleType("mcp.server")
+_mcp_server_stdio_mod = ModuleType("mcp.server.stdio")
+_mcp_types_mod = ModuleType("mcp.types")
+
+_mcp_server_mod.Server = _MockServer
+_mcp_server_stdio_mod.stdio_server = MagicMock()
+_mcp_types_mod.Tool = _MockTool
+_mcp_types_mod.TextContent = _MockTextContent
+
+sys.modules.setdefault("mcp", _mcp_mod)
+sys.modules.setdefault("mcp.server", _mcp_server_mod)
+sys.modules.setdefault("mcp.server.stdio", _mcp_server_stdio_mod)
+sys.modules.setdefault("mcp.types", _mcp_types_mod)
 
 
 # ---------------------------------------------------------------------------
