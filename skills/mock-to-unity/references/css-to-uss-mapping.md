@@ -39,14 +39,15 @@ These translate 1:1 with identical or near-identical syntax:
 | `visibility` | `visibility` | visible, hidden |
 | `cursor` | `cursor` | Limited set (arrow, text, resize-*, etc.) |
 | `:focus` | `:focus` | USS pseudo-class — works directly |
+| `:hover` | `:hover` | USS pseudo-class — works directly. Do NOT use C# PointerEnterEvent for hover styling. |
+| `:active` | `:active` | USS pseudo-class — works directly. Do NOT use C# PointerDownEvent for active styling. |
+| `pointer-events: none` | `picking-mode: Ignore` | Different name, same behavior |
 
 ## CSS Properties That Need C# Workarounds
 
 | CSS Property | USS Status | C# Workaround |
 |-------------|-----------|----------------|
 | `gap` | Not supported | Apply `margin` to children instead |
-| `:hover` | Not supported in USS | Register `PointerEnterEvent` / `PointerLeaveEvent` callbacks |
-| `:active` | Not supported in USS | Register `PointerDownEvent` / `PointerUpEvent` callbacks |
 | `transition` | `transition` exists but limited | Prefer DOTween for complex animations |
 | `transform` | `translate`, `rotate`, `scale` | Separate properties, not shorthand `transform` |
 | `text-overflow: ellipsis` | `-unity-text-overflow-position` | May need C# string truncation |
@@ -67,6 +68,8 @@ These translate 1:1 with identical or near-identical syntax:
 | `background-image: url()` | Use `background-image: resource()` or `-unity-background-image-tint-color` |
 | `@media` queries | Not supported — use C# screen size checks |
 | `animation` / `@keyframes` | DOTween or manual C# interpolation |
+| `::before` / `::after` | Create real child VisualElements with descriptive class names (e.g., `.window__glow-line`). See `skills/shared/uss-approximation-patterns.md` Pattern 8. |
+| `content: ''` | Not applicable — USS has no generated content. Use real elements instead. |
 
 ## USS-Only Properties (No CSS Equivalent)
 
