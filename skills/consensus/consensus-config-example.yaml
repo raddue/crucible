@@ -1,0 +1,83 @@
+# =============================================================================
+# Consensus Configuration Example
+# =============================================================================
+# Place this file at: .claude/consensus-config.yaml
+#
+# This configures the multi-model consensus MCP tool used by quality-gate
+# (stagnation judge, periodic red-team) and design (Challenger).
+#
+# IMPORTANT: API keys are referenced by environment variable name.
+# Never paste raw API keys into this file.
+# =============================================================================
+
+consensus:
+  # Master switch. Set to false (or remove this file) to disable consensus
+  # entirely. All consensus_query calls will immediately return
+  # status: "unavailable" and skills will use single-model behavior.
+  enabled: true
+
+  # Minimum number of models that must respond for a result to be usable.
+  # If fewer models respond (due to timeouts or errors), the result status
+  # will be "unavailable" and the calling skill falls back to single-model.
+  # Must be >= 2.
+  min_models: 2
+
+  # Maximum time (in seconds) to wait for all models to respond.
+  # Models that exceed this timeout are marked as responded: false in the
+  # per_model results. Range: 10-600. Default: 120.
+  timeout_seconds: 120
+
+  # ---------------------------------------------------------------------------
+  # Model Definitions
+  # ---------------------------------------------------------------------------
+  # Each entry defines a model to query. You need at least min_models entries.
+  # Shipped providers: anthropic, google
+  # Planned providers: openai, deepseek
+  models:
+    # --- Anthropic -----------------------------------------------------------
+    - provider: anthropic
+      # Model identifier as recognized by the Anthropic API.
+      model: claude-sonnet-4-20250514
+      # Environment variable containing your Anthropic API key.
+      # The MCP server reads this at runtime. The key is never stored on disk.
+      api_key_env: ANTHROPIC_API_KEY
+      # Sampling temperature. Lower = more deterministic. Range: 0.0-1.0.
+      # 0.6 is recommended for review/verdict tasks (balanced reasoning).
+      temperature: 0.6
+
+    # --- Google --------------------------------------------------------------
+    - provider: google
+      # Model identifier as recognized by the Google AI API.
+      model: gemini-2.5-pro
+      # Environment variable containing your Google API key.
+      api_key_env: GOOGLE_API_KEY
+      # Slightly higher temperature can surface more diverse findings in
+      # investigate mode. Adjust to taste.
+      temperature: 0.6
+
+    # --- Additional models (uncomment when providers are available) ----------
+    # - provider: openai
+    #   model: o3
+    #   api_key_env: OPENAI_API_KEY
+    #   temperature: 0.6
+    #
+    # - provider: deepseek
+    #   model: deepseek-r1
+    #   api_key_env: DEEPSEEK_API_KEY
+    #   temperature: 0.6
+
+  # ---------------------------------------------------------------------------
+  # Mode Toggles
+  # ---------------------------------------------------------------------------
+  # Control which consensus modes are active. Set a mode to false to make
+  # consensus_query calls with that mode return "unavailable" immediately.
+  # Useful for cost management — disable modes you don't need.
+  modes:
+    # review: adversarial review aggregation (red-team, design review)
+    review: true
+
+    # verdict: binary/ternary decision aggregation (stagnation judge, fix verification)
+    verdict: true
+
+    # investigate: exploratory analysis aggregation (Challenger, architectural analysis)
+    investigate: true
