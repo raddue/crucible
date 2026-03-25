@@ -1,10 +1,21 @@
 # Theme.uss Variable Reference
 
-Source: Your project's Theme.uss file (e.g., `Assets/_Project/Resources/UI/Theme.uss`)
+Source: Your project's Theme.uss file `:root` block only (e.g., `Assets/_Project/Resources/UI/Theme.uss`)
 Last synced: 2026-02-26
 
+## Freshness Check
+
+Before using this file, verify the `Last synced` date is current:
+1. Check if the project's Theme.uss file has been modified since the `Last synced` date
+2. If stale: regenerate this file by reading ONLY the `:root` block from Theme.uss
+   - Ignore theme variant selectors (`.theme-outrun`, `.theme-dark`, `.theme-crt`, etc.)
+   - Ignore font scale classes, accessibility overlays, and utility classes
+   - Extract only the base `:root` variables and their values
+3. Update the `Last synced` date to today
+4. If Theme.uss cannot be located, note this and proceed with caution — values may be outdated
+
 All mockups MUST use these variables via CSS custom properties. No hardcoded values.
-For domain-specific variables not listed here, read the actual Theme.uss file directly.
+For domain-specific variables not listed here, read the actual Theme.uss `:root` block directly.
 
 ## Core UI Chrome
 
