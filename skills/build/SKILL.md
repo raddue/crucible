@@ -754,6 +754,14 @@ After all tasks complete:
 6. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-impl-gate" before dispatching the implementation quality gate. If gate fix rounds degrade the code, this is the rollback target.
 6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
 7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
+7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
+   append a minimal chronicle signal directly:
+   - Read the metrics log at `/tmp/crucible-metrics-<session-id>.log` for duration and subagent counts
+   - Construct signal: `v=1`, `ts=now`, `skill="build"`, `outcome` from acceptance test results,
+     `duration_m` from metrics log, `branch` from git, `files_touched` from `git diff <base-sha>..HEAD --name-only`,
+     `metrics={mode, tasks count, tasks_passed count from task list, stagnation=false}`
+   - Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
+   - If forge retrospective DID run, skip this step (forge Step 8.5 already emitted the signal)
 8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user

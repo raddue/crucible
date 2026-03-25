@@ -687,6 +687,13 @@ After the Implementation agent reports back, the orchestrator evaluates four pos
 
 **Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 4.5 ("Where Else?" blast radius scan). After Phase 4.5 completes, proceed to Phase 5. After Phase 5 passes clean:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
+- **Chronicle signal fallback:** If forge retrospective will not run (user declined, session ending),
+  append a minimal chronicle signal directly:
+  - Construct signal: `v=1`, `ts=now`, `skill="debugging"`, `outcome` from fix verification,
+    `duration_m` from session timing, `branch` from git, `files_touched` from `git diff --name-only`,
+    `metrics={hypotheses count, root_cause_category from fix, where_else_hits count}`
+  - Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
+  - If forge retrospective WILL run, skip this step (forge Step 8.5 handles it)
 - **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
 
 **Test passes immediately (no fix applied)** -- The implementer's reproduction test passed before any fix was written. Two possibilities:

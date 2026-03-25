@@ -54,9 +54,14 @@ All data lives in the project memory directory:
     YYYY-MM-DD-<topic>.md           # Skill mutation proposals
   skill-proposals/
     YYYY-MM-DD-<topic>.md           # Skill extraction proposals
+  chronicle/
+    signals.jsonl                   # Always-on execution signals (1 line per skill completion)
+    summary.md                      # Bounded summary (~100 lines, regenerated on read)
 ```
 
-**Context budget:** `patterns.md` MUST stay under 200 lines. It is loaded into context during feed-forward. Individual retrospective files are NOT loaded during feed-forward — only during mutation analysis.
+**Context budget:** `patterns.md` MUST stay under 200 lines. `chronicle/summary.md` MUST stay under 100 lines. Both are loaded into context during feed-forward. Individual retrospective files are NOT loaded during feed-forward — only during mutation analysis.
+
+**Chronicle is always-on** — no config toggle. Signals contain no prompt content or task descriptions, only operational metrics (skill name, duration, outcome, files touched, skill-specific counts). This is separate from trajectory capture, which remains opt-in.
 
 **Skill-Worthy Patterns section format** (within `patterns.md`):
 
@@ -219,6 +224,48 @@ After any skill that completes a significant task reports success. The calling s
       - Otherwise: append to `failed_trajectories.jsonl`
    e. Check file size: if the target file exceeds `max_entries` lines, remove the
       oldest entries (from the top of the file) to bring it back to `max_entries`.
+8.5. **Chronicle signal** (always-on — runs regardless of trajectory capture config):
+   a. Construct signal entry from execution data already in context:
+      - `v`: 1 (schema version)
+      - `ts`: ISO-8601 completion timestamp
+      - `skill`: The Crucible skill that just completed
+      - `outcome`: From retrospective's outcome field (success/failure/partial)
+      - `duration_m`: Wall clock minutes from start to completion
+      - `branch`: Current git branch
+      - `files_touched`: Project-relative paths of files modified during the skill invocation
+      - `metrics`: Skill-specific metrics bag (see table below)
+   b. Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
+   c. If the file or directory doesn't exist, create it
+   d. This step does NOT require redaction — signals contain no prompt content,
+      task descriptions, or secrets. Only operational facts.
+
+   **Example signal:**
+   ```jsonl
+   {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false}}
+   ```
+
+   **Metrics bag by skill:**
+
+   | Skill | Metrics |
+   |-------|---------|
+   | build | mode, tasks, tasks_passed, qg_rounds, review_rounds, stagnation |
+   | debugging | hypotheses, root_cause_category, where_else_hits |
+   | quality-gate | artifact_type, rounds, fatals_found, stagnation |
+   | design | questions_investigated, auto_resolved |
+   | planning | task_count, review_rounds |
+   | audit | findings_count, lenses_dispatched |
+   | code-review | rounds, findings_by_severity |
+   | TDD | cycles, red_green_refactor_count |
+
+   **Signal scope rule:** Emit one signal per top-level skill invocation, not per
+   sub-skill dispatch. When build calls quality-gate internally, quality-gate does
+   NOT emit its own signal — its metrics are captured in build's metrics bag.
+   Standalone invocations of quality-gate, code-review, etc. DO emit signals.
+
+   This is self-enforcing: forge retrospective only runs at the end of a top-level
+   skill invocation, so Step 8.5 naturally fires once per top-level skill. Sub-skills
+   called within build do not trigger their own forge retrospective.
+
 9. **Skill extraction check (all sessions):** Evaluate the just-produced
    retrospective entry against the following trigger heuristics. If ANY
    trigger fires, dispatch a Skill Extraction Analyst subagent (Sonnet)
@@ -303,6 +350,14 @@ cost of less-rich analytical fields. The skill-creator's eval generation pipelin
 handles entries with `deviation_type: "unknown"` by clustering on execution
 metrics alone.
 
+Similarly, any skill that completes a significant task SHOULD append a minimal
+chronicle signal if no forge retrospective is expected to run. The minimal signal
+uses `outcome` from the skill's own completion status, `files_touched` from
+`git diff --name-only`, and whatever metrics are available in context. Chronicle
+signals require no redaction (they contain no prompt content), so the fallback
+path is simpler than trajectory fallback. This ensures chronicle data is captured
+even when forge does not run.
+
 ---
 
 ## Mode 2: Pre-Task Feed-Forward
@@ -316,6 +371,25 @@ Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its co
 1. Check if `~/.claude/projects/<project-hash>/memory/forge/patterns.md` exists
 2. **Cold start (no file):** Report "No prior retrospective data for this project. Proceeding without feed-forward." Return immediately. No subagent needed.
 3. **Data exists:** Read `patterns.md` (under 200 lines — safe for context)
+3.5. **Chronicle context** (always-on):
+    a. Check if `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl` exists
+    b. If not found: skip (cold start — no chronicle data yet)
+    c. If found: compare `signals.jsonl` mtime with `chronicle/summary.md` mtime
+       - If `summary.md` doesn't exist OR `signals.jsonl` is newer: regenerate `summary.md`
+       - **Regeneration:** Read all signals from `signals.jsonl`, compute:
+         - **Hotspots:** Group `files_touched` by cartographer module (if module maps exist
+           in `memory/cartographer/modules/`) or by directory prefix. A module qualifies as
+           a hotspot when it has 3+ signals with friction indicators (`stagnation=true`,
+           `metrics.qg_rounds>2`, `skill="debugging"`, or `outcome="failure"/"stagnation"`).
+           Show top 5 hotspots sorted by signal count.
+         - **Skill Performance:** Aggregate runs, avg duration, avg QG rounds, stagnation
+           rate, success rate per skill. Cap at 8 rows.
+         - **Trends:** Compare last 10 signals vs prior 10 for key metrics.
+         - **Recent Friction:** Last 5 signals with friction indicators.
+         - **Hard cap at 100 lines** — drop Trends and Recent Friction sections first if needed.
+       - Write regenerated summary to `chronicle/summary.md`
+    d. Load `chronicle/summary.md` into context alongside `patterns.md`
+    e. Pass both to the Feed-Forward Advisor in Step 4
 4. Dispatch a **Feed-Forward Advisor** subagent (Sonnet) using `./feed-forward-prompt.md`
 4b. **Trajectory context** (if trajectory capture is enabled):
     Also read `~/.claude/projects/<hash>/memory/trajectories/failed_trajectories.jsonl`
@@ -326,7 +400,7 @@ Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its co
     - "Debugging tasks on this project have a 40% failure rate — consider more
       investigation before committing to a fix"
     If no trajectory data exists, skip this addition.
-5. Provide: the patterns file content AND a brief description of the upcoming task
+5. Provide: the patterns file content, chronicle summary (if available from Step 3.5), AND a brief description of the upcoming task
 6. Subagent returns 3-5 targeted warnings/adjustments relevant to THIS task
 7. Surface warnings to the calling skill's orchestrator as bias adjustments (not hard blockers)
 
@@ -334,8 +408,9 @@ Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its co
 
 - **First task:** No feed-forward (no data). Retrospective runs after completion. This produces data.
 - **Second task:** Feed-forward has 1 data point. Advisor notes "limited data" but still surfaces any relevant warning.
+- **After 3+ tasks:** Chronicle hotspots start to form. Summary becomes useful.
 - **After 5+ tasks:** Feed-forward becomes meaningfully useful.
-- **After 10+ tasks:** Mutation proposals become available.
+- **After 10+ tasks:** Mutation proposals become available. Chronicle trends become meaningful.
 
 ---
 
@@ -378,6 +453,7 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | `crucible:design` | Feed-Forward | Before first question | Topic description |
 | `crucible:build` | Retrospective (decision extraction) | After fix verified | Decision journal + task list → cartographer decisions via recorder |
 | Any skill | Trajectory Record | After retrospective step 7 | Execution data + retrospective output (opt-in only) |
+| Any skill | Chronicle Signal | After retrospective step 8 | Execution metrics (always-on) |
 
 **Forge is RECOMMENDED, not REQUIRED.** It is a learning accelerator, not a quality gate. Skipping it does not produce broken output — it misses an opportunity to learn.
 
@@ -410,6 +486,7 @@ descriptions from the skill directories to check for overlap.
 - Store raw user prompts in trajectory files — only store prompt hashes and redacted summaries
 - Write a trajectory entry without completing the redaction pass
 - Auto-enable trajectory capture — it must be explicitly opted into via config file
+- Include prompt content or task descriptions in chronicle signals — signals are operational metrics only
 
 **Always:**
 - Run retrospective after significant tasks
@@ -422,6 +499,7 @@ descriptions from the skill directories to check for overlap.
 - Check trajectory-config.json before any trajectory operation
 - Run the full redaction pass before writing any trajectory entry
 - Set `redacted: true` only after the redaction pass completes
+- Append a chronicle signal after every significant task retrospective (Step 8.5)
 
 ## Rationalization Prevention
 

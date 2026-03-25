@@ -14,6 +14,17 @@ Task tool (general-purpose, model: sonnet):
 
     [PASTE FULL TEXT of patterns.md here]
 
+    ## Chronicle Summary (if available)
+
+    [PASTE FULL TEXT of chronicle/summary.md here, or "No chronicle data yet" if cold start]
+
+    If chronicle data is provided above, use it to inform your warnings:
+    - Hotspot modules deserve extra caution — suggest specific checks based on past friction
+    - Skill performance trends indicate whether current process is improving or degrading
+    - Recent friction events may be directly relevant to the upcoming task's target files
+    Chronicle data is aggregate statistics, not individual task details. Use it for
+    pattern detection, not specifics.
+
     ## Upcoming Task
 
     [Brief description of what is about to be brainstormed/planned/executed]
