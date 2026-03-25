@@ -14,6 +14,26 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 **Execution model:** When this skill is running, YOU are the orchestrator. You drive the loop, dispatch fix agents and reviewers as subagents, track scores, and make escalation decisions. All references to "the orchestrator" in this document refer to you.
 
+## Consensus Detection
+
+At the start of the quality gate, check whether the `consensus_query` MCP tool
+is available in the current environment:
+
+1. If the tool is available: consensus-eligible rounds will use multi-model
+   dispatch (see Multi-Model Red-Team Review and Multi-Model Consensus in
+   Stagnation Detection below).
+2. If the tool is not available: all rounds use standard single-model dispatch.
+   No degradation, no warnings — the gate behaves exactly as it did before
+   consensus was introduced.
+
+**Do NOT:**
+- Prompt the user to set up consensus if it is unavailable
+- Log warnings about missing consensus configuration
+- Change any scoring, stagnation, or escalation logic based on consensus availability
+
+Consensus is a transparent enhancement. Its presence improves coverage;
+its absence changes nothing.
+
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
@@ -258,6 +278,9 @@ Quality gate writes round state to disk for compaction recovery.
 6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch.
 7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
 8. Emit a Compression State Block into the conversation with gate-specific state: current round, score progression, artifact type under review. Inherit Goal and Key Decisions from the parent skill's last Compression State if available.
+8b. Check whether `consensus_query` MCP tool is available (consensus
+    availability may have changed across compaction boundary). Use current
+    availability for subsequent rounds regardless of what was used pre-compaction.
 9. Dispatch the next red-team round.
 
 ### Checkpoint Timing
