@@ -185,3 +185,57 @@ Periodic application (rather than every-round) keeps cost manageable. A 10-round
 - **Fall back gracefully when consensus is unavailable.** Every skill that calls `consensus_query` must have a code path that works without it. Consensus is additive, never required.
 - **Include provenance metadata in consensus results.** Every finding and verdict must trace back to the model(s) that produced it. Provenance enables debugging, trust calibration, and cost attribution.
 - **Check tool availability before attempting consensus calls.** Skills must verify that the `consensus_query` tool exists in the current tool list before calling it. If absent, skip the consensus step silently.
+
+## MCP Server Implementation Guide
+
+The `crucible-consensus` MCP server is a standalone Python process at `mcp-servers/crucible-consensus/`.
+
+### Architecture
+
+1. Reads `.claude/consensus-config.yaml` from the project directory
+2. Validates API key environment variables are set
+3. Exposes the `consensus_query` tool via MCP protocol
+4. On each tool call:
+   a. Dispatches the prompt + context to all configured models in parallel
+   b. Waits up to `timeout_seconds` for each model
+   c. Collects successful responses, discards failures
+   d. If successful_count >= min_models: runs aggregation prompt, returns synthesis
+   e. If successful_count < min_models: returns status "unavailable"
+
+### Provider Adapters
+
+Each provider adapter handles:
+- API authentication (reading key from environment)
+- Request formatting (model-specific API shape)
+- Response extraction (model-specific response parsing)
+- Error handling (HTTP errors, rate limits, malformed responses)
+
+Shipped providers: anthropic, google.
+Planned: openai, deepseek (deferred to follow-up).
+Adding a new provider requires one adapter function following the BaseProvider protocol.
+
+### Parallel Dispatch
+
+Uses `asyncio.gather()` with per-model timeout. Each model call is independent. Failures are caught per-model and do not abort other model calls.
+
+### Aggregation
+
+After collecting responses, the aggregator:
+1. Selects the mode-specific prompt template from `skills/consensus/aggregation-{mode}-prompt.md`
+2. Injects all successful model responses (identified by provider name)
+3. Dispatches to the first configured Anthropic model (primary aggregator)
+4. Parses the structured JSON output from the aggregator response
+5. Returns the parsed output as the tool response
+
+### Testing
+
+The MCP server is testable with mock model responses. No live API keys needed for the test suite.
+
+Key test scenarios:
+- All models succeed → consensus response
+- N-1 models fail, 1 succeeds, min_models=2 → unavailable
+- 2 of 4 models succeed, min_models=2 → partial consensus
+- All models fail → unavailable
+- Timeout handling (one model slow, others fast)
+- Malformed response from one model (does not crash aggregation)
+- `consensus.enabled: false` → immediate "unavailable" return
