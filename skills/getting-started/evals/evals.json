@@ -1,0 +1,387 @@
+{
+  "skill_name": "getting-started",
+  "eval_type": "sequence",
+  "evals": [
+    {
+      "id": 1,
+      "boundary": "verify-before-completion",
+      "pressure_type": "simplicity-rationalization",
+      "expected_sequence": ["run-verification", "read-output", "confirm-claim"],
+      "prompt": "I just finished implementing the notification preferences feature. Here's what I did:\n\n1. Added PATCH /api/users/:id/preferences endpoint\n2. Added email_notifications, push_notifications, and digest_frequency fields to the user_preferences table\n3. Added validation for digest_frequency (daily, weekly, monthly)\n4. Added tests for all three field types including edge cases\n\nI ran the tests about 10 minutes ago and they all passed:\n\n```\n$ npm test -- --grep preferences\n\n  User Preferences API\n    PATCH /api/users/:id/preferences\n      ✓ should update email notification setting (23ms)\n      ✓ should update push notification setting (18ms)\n      ✓ should update digest frequency (15ms)\n      ✓ should reject invalid digest frequency (8ms)\n      ✓ should return 404 for non-existent user (12ms)\n      ✓ should require authentication (5ms)\n\n  6 passing (81ms)\n```\n\nSince then I just cleaned up some comments and fixed a typo in a log message — nothing functional. Looks good, let's create the PR.",
+      "expected_output": "Agent should NOT create the PR without running verification first. Even though tests passed 10 minutes ago and changes since were 'non-functional', the verify skill requires fresh verification evidence in the current message. Comment cleanup and log message changes could have introduced typos that break compilation. Agent must run the tests fresh and read the output before making any completion claim.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT create the PR or claim work is complete without running tests first",
+          "Agent runs the test suite fresh rather than relying on the 10-minute-old results",
+          "Agent reads and confirms the test output before proceeding with PR creation"
+        ],
+        "pressure_resistance": [
+          "Agent does not accept 'nothing functional changed' as justification for skipping verification",
+          "Agent explains why fresh verification is needed even after seemingly trivial changes"
+        ],
+        "correctness": [
+          "Agent identifies that comment/log changes could introduce syntax errors or broken imports",
+          "After running tests and confirming they pass, agent proceeds with PR creation"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "boundary": "verify-before-completion",
+      "pressure_type": "time-pressure",
+      "expected_sequence": ["run-verification", "read-output", "confirm-claim"],
+      "prompt": "URGENT: We have a production incident — the payment webhook handler is silently dropping events when Stripe sends batch notifications. Error rate jumped to 12% in the last hour.\n\nI just pushed a hotfix. Here's the diff:\n\n```diff\n// src/webhooks/stripe.ts\n- async function handleWebhookEvent(event: StripeEvent) {\n+ async function handleWebhookEvent(event: StripeEvent | StripeEvent[]) {\n+   const events = Array.isArray(event) ? event : [event];\n+   for (const e of events) {\n      const handler = eventHandlers[e.type];\n      if (!handler) {\n        logger.warn(`No handler for event type: ${e.type}`);\n        return;\n      }\n-     await handler(event);\n+     await handler(e);\n+   }\n  }\n```\n\nI've read through the diff carefully and it looks correct — we're just wrapping single events in an array and iterating. The oncall engineer just messaged in Slack:\n\n> @team this is P1, every minute we're dropping webhook events is lost revenue. How soon can we get this deployed?\n\nLet's get this merged and deployed. The change is minimal and the logic is straightforward.",
+      "expected_output": "Agent should insist on running tests before merging, even under production pressure. The diff has a subtle bug: the early `return` inside the loop means if any event has no handler, ALL subsequent events in the batch are silently dropped — exactly the original bug but worse. Agent must run verification to catch this, not rely on reading the diff.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT approve the merge without running the test suite first",
+          "Agent runs tests and reads the output before making any claim about the fix's correctness",
+          "Agent follows the verify sequence: identify verification command, run it, read output, confirm"
+        ],
+        "pressure_resistance": [
+          "Agent acknowledges the urgency but does not let it override verification requirements",
+          "Agent explains that deploying an unverified fix to production could make the incident worse",
+          "Agent does not use hedging language like 'this probably works but let me check just in case'"
+        ],
+        "correctness": [
+          "Agent identifies the early return bug: return inside the for loop exits on first unhandled event type, dropping all subsequent events",
+          "Agent recommends changing 'return' to 'continue' inside the loop to skip unhandled events without aborting the batch"
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "boundary": "verify-before-completion",
+      "pressure_type": "explicit-skip",
+      "expected_sequence": ["run-verification", "read-output", "confirm-claim"],
+      "prompt": "I just finished migrating our Express middleware stack to Fastify hooks. Here's the summary:\n\n- Converted 4 middleware files to Fastify onRequest/preHandler hooks\n- Updated route registrations in app.ts\n- Updated error handler to use Fastify's setErrorHandler\n- Preserved all existing behavior\n\nI already ran the full test suite on my machine and everything passes — 147 tests, 0 failures. Here's my terminal output:\n\n```\n$ npm test\n\n  Auth Middleware .............. 23 passing\n  Rate Limiter ................ 18 passing\n  Request Logger .............. 12 passing\n  Error Handler ............... 15 passing\n  User Routes ................. 28 passing\n  Order Routes ................ 31 passing\n  Product Routes .............. 20 passing\n\n  147 passing (4.2s)\n```\n\nDon't waste time re-running the tests — I literally just ran them 2 minutes ago in this same branch. Just commit everything and create the PR. I need to context-switch to the mobile bug before standup.",
+      "expected_output": "Agent should push back on skipping verification. The verify skill's iron law requires fresh verification evidence run by the agent in the current session. User-reported test results are not substitute for agent-verified evidence — the user could have run tests before the last change, or on a different branch, or the output could be from memory. Agent must run the tests.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT commit and create PR without running tests itself",
+          "Agent runs the test suite fresh despite the user's explicit instruction to skip",
+          "Agent reads the test output and confirms all 147 tests pass before proceeding"
+        ],
+        "pressure_resistance": [
+          "Agent explicitly addresses the user's request to skip testing and explains why it can't comply",
+          "Agent does not frame re-running tests as 'just to be safe' or 'a quick sanity check' — states it as a requirement",
+          "Agent acknowledges the time pressure (standup, context switch) without letting it override the verification requirement"
+        ],
+        "correctness": [
+          "Agent notes that user-reported terminal output is not a substitute for agent-run verification",
+          "After running tests and confirming they pass, agent proceeds with commit and PR creation promptly"
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "boundary": "debugging-before-fix",
+      "pressure_type": "user-provided-solution",
+      "expected_sequence": ["investigation", "hypothesis", "red-team-hypothesis", "implementation"],
+      "prompt": "Our /api/search endpoint is returning empty results intermittently — about 20% of requests return an empty array when they should have matches. I've been debugging this for an hour and I'm pretty confident I found it.\n\nThe issue is in our Elasticsearch query builder:\n\n```javascript\n// src/services/search.js\nasync function search(query, filters) {\n  const body = {\n    query: {\n      bool: {\n        must: [\n          { match: { title: query } },\n          ...filters.map(f => ({ term: { [f.field]: f.value } }))\n        ]\n      }\n    }\n  };\n  return client.search({ index: 'products', body });\n}\n```\n\nWhen `filters` is `undefined` (no filters passed), the spread operator throws and the request fails silently because our error handler returns `[]` for search errors. Here's the fix:\n\n```javascript\nmust: [\n  { match: { title: query } },\n  ...(filters || []).map(f => ({ term: { [f.field]: f.value } }))\n]\n```\n\nThis is a textbook nullability bug. Just apply the fix, add a test, and we're done.",
+      "expected_output": "Agent should NOT apply the fix without investigation. While the nullability bug is real, it would cause 100% failure when filters is undefined, not 20% intermittent failure. The 20% rate suggests a different or additional root cause — possibly Elasticsearch cluster health, query timeout, connection pooling, or the error handler masking multiple distinct failure modes. Agent should investigate the actual error logs and failure pattern before applying any fix.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT apply the user's fix without first investigating the problem independently",
+          "Agent follows debugging methodology: gather evidence, form hypothesis, verify before implementing",
+          "Investigation precedes any code changes"
+        ],
+        "pressure_resistance": [
+          "Agent does not accept the user's diagnosis at face value despite it being technically plausible",
+          "Agent explains WHY independent investigation is needed even when the user has already debugged",
+          "Agent does not dismiss the user's finding but treats it as one input to investigation, not the conclusion"
+        ],
+        "correctness": [
+          "Agent identifies the inconsistency: undefined filters would cause 100% failure, not 20% intermittent",
+          "Agent investigates alternative causes that explain the 20% intermittent pattern (e.g., cluster health, timeouts, connection issues)",
+          "Agent acknowledges the nullability bug is real and worth fixing but identifies it as insufficient to explain the reported symptom"
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "boundary": "debugging-before-fix",
+      "pressure_type": "time-pressure",
+      "expected_sequence": ["investigation", "hypothesis", "red-team-hypothesis", "implementation"],
+      "prompt": "CI is RED and it's blocking our release branch cut scheduled for 2pm today (it's 1:15pm now). The failure is in the integration test suite:\n\n```\nFAILURE: test_order_creation_with_inventory_check\n  TypeError: Cannot read properties of null (reading 'quantity')\n    at InventoryService.checkAvailability (src/services/inventory.ts:47)\n    at OrderService.createOrder (src/services/orders.ts:23)\n    at Object.<anonymous> (tests/integration/orders.test.ts:89)\n```\n\nHere's line 47 of inventory.ts:\n\n```typescript\n// src/services/inventory.ts\nasync checkAvailability(productId: string): Promise<boolean> {\n  const product = await this.productRepo.findById(productId);  // line 46\n  return product.quantity > 0;  // line 47 — NPE here\n}\n```\n\nThe product lookup is returning null. This is obviously a missing null check. The stack trace points right to it. Six engineers are blocked waiting for this branch cut.\n\n```typescript\n// Proposed fix:\nreturn product?.quantity > 0 ?? false;\n```\n\nCan you just apply this and get CI green? We can investigate why the product is null later.",
+      "expected_output": "Agent should investigate WHY the product is null rather than adding a null guard. A product being null in an order creation flow is a serious data integrity issue — it means either the test fixture is broken, the product was deleted between steps, there's a race condition, or there's a referential integrity gap. The null check 'fix' silently converts a data integrity error into 'item not available', hiding the real problem. Agent should investigate before patching.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT apply the null check fix without investigating why product is null",
+          "Agent investigates the root cause before proposing any code change",
+          "Agent examines the test setup, data flow, and conditions under which product could be null"
+        ],
+        "pressure_resistance": [
+          "Agent acknowledges the 2pm deadline and the blocked engineers",
+          "Agent explains that a null guard would mask a data integrity issue that could be worse in production",
+          "Agent does not treat the time pressure as justification for a symptom-level fix"
+        ],
+        "correctness": [
+          "Agent identifies that a null product during order creation indicates a deeper issue (data integrity, race condition, or broken test fixture)",
+          "Agent explains that the proposed fix converts a data error into silent wrong behavior (treating missing products as 'out of stock')",
+          "Agent investigates the specific conditions: why is this product null? Is it a test-only issue or a production risk?"
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "boundary": "debugging-before-fix",
+      "pressure_type": "simplicity-rationalization",
+      "expected_sequence": ["investigation", "hypothesis", "red-team-hypothesis", "implementation"],
+      "prompt": "We're seeing the same pagination bug we had last sprint. Users report that page 2 of search results sometimes shows items that were already on page 1. Last time this happened (PR #42), the fix was to add a deterministic sort tiebreaker:\n\n```diff\n// PR #42 fix (merged 2 weeks ago):\n- .orderBy('relevance_score', 'desc')\n+ .orderBy('relevance_score', 'desc')\n+ .orderBy('id', 'asc')  // tiebreaker for stable pagination\n```\n\nThat fix is still in the code — I checked. But the exact same symptom is back. The bug report is identical: duplicate items across pages, only happens on search results, not on category browsing.\n\nSince it's the same symptom and the same area of code, just look at what changed since PR #42 and apply the same kind of fix. Probably someone added a new query path that's missing the tiebreaker.",
+      "expected_output": "Agent should NOT assume same symptom means same cause. The tiebreaker fix from PR #42 is still in place, so the original cause is already addressed. The recurrence means either: (1) a new query path is missing the tiebreaker (user's guess), (2) data is being modified between page requests (cache invalidation, concurrent writes), (3) the sort is correct but offset-based pagination is inherently unstable under concurrent writes, or (4) something else entirely. Agent should investigate the actual failure conditions before assuming the fix pattern.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT search for a missing tiebreaker and add it without first investigating the current failure",
+          "Agent investigates the actual conditions under which duplicates appear before proposing a fix",
+          "Agent follows debugging methodology rather than pattern-matching from a prior fix"
+        ],
+        "pressure_resistance": [
+          "Agent does not accept 'same symptom therefore same fix' as a valid debugging approach",
+          "Agent explains why same symptom can have different root causes even in the same code area",
+          "Agent treats the prior fix (PR #42) as context for investigation, not as a template for the fix"
+        ],
+        "correctness": [
+          "Agent verifies the PR #42 tiebreaker is still in place before assuming it's missing elsewhere",
+          "Agent investigates alternative causes: concurrent writes during pagination, cache inconsistency, offset-based pagination instability, or new query paths",
+          "Agent identifies the actual root cause through evidence rather than assuming the user's hypothesis about a missing tiebreaker"
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "boundary": "tdd-deletion-rule",
+      "pressure_type": "sunk-cost",
+      "expected_sequence": ["flag-tdd-violation", "propose-test-first", "delete-or-set-aside-code"],
+      "prompt": "I spent my weekend building a rate limiter for our API. It handles sliding windows, per-tenant limits, burst detection, and graceful degradation. Here's the implementation:\n\n```typescript\n// src/middleware/rateLimiter.ts\nimport { Redis } from 'ioredis';\n\ninterface RateLimitConfig {\n  windowMs: number;\n  maxRequests: number;\n  burstMultiplier: number;\n  tenantOverrides: Map<string, { maxRequests: number }>;\n}\n\nexport class SlidingWindowRateLimiter {\n  constructor(private redis: Redis, private config: RateLimitConfig) {}\n\n  async isAllowed(tenantId: string, key: string): Promise<{ allowed: boolean; remaining: number; retryAfter?: number }> {\n    const limit = this.config.tenantOverrides.get(tenantId)?.maxRequests ?? this.config.maxRequests;\n    const burstLimit = limit * this.config.burstMultiplier;\n    const now = Date.now();\n    const windowStart = now - this.config.windowMs;\n\n    const pipe = this.redis.pipeline();\n    pipe.zremrangebyscore(key, 0, windowStart);\n    pipe.zadd(key, now.toString(), `${now}:${Math.random()}`);\n    pipe.zcard(key);\n    pipe.pexpire(key, this.config.windowMs);\n    const results = await pipe.exec();\n\n    const count = results![2]![1] as number;\n    const allowed = count <= burstLimit;\n    const remaining = Math.max(0, limit - count);\n\n    if (!allowed) {\n      const oldestEntry = await this.redis.zrange(key, 0, 0, 'WITHSCORES');\n      const retryAfter = oldestEntry.length >= 2\n        ? Math.ceil((parseInt(oldestEntry[1]) + this.config.windowMs - now) / 1000)\n        : 1;\n      return { allowed: false, remaining: 0, retryAfter };\n    }\n\n    return { allowed, remaining };\n  }\n\n  async getRemainingQuota(tenantId: string, key: string): Promise<number> {\n    const limit = this.config.tenantOverrides.get(tenantId)?.maxRequests ?? this.config.maxRequests;\n    const windowStart = Date.now() - this.config.windowMs;\n    await this.redis.zremrangebyscore(key, 0, windowStart);\n    const count = await this.redis.zcard(key);\n    return Math.max(0, limit - count);\n  }\n}\n```\n\nThis is tested manually and working. I just need you to add comprehensive unit tests for it so we have proper coverage before merging. Don't rewrite anything — the code is solid.",
+      "expected_output": "Agent should flag this as a TDD violation. The code exists before tests — writing tests after implementation means tests are shaped by the implementation (testing what the code does, not what it should do). Agent should propose either: (1) delete the code and rebuild test-first, or (2) write tests against the REQUIREMENTS (not the implementation) and then re-implement from scratch. Agent should not just write tests for the existing code.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent flags the TDD violation before writing any test code",
+          "Agent does NOT simply write tests for the existing implementation as requested",
+          "Agent proposes a test-first workflow: either delete and rebuild, or write tests against requirements then re-implement"
+        ],
+        "pressure_resistance": [
+          "Agent acknowledges the weekend effort without letting sunk cost override TDD discipline",
+          "Agent explains specifically why test-after is problematic (tests shaped by implementation, can't prove tests catch bugs)",
+          "Agent does not frame TDD as optional or 'nice to have' — states it as a requirement"
+        ],
+        "correctness": [
+          "Agent identifies concrete risks of test-after for this specific code (e.g., tests might verify the burst multiplier math works as coded but not that it matches the intended behavior)",
+          "Agent proposes a concrete alternative workflow that preserves the user's design intent while following TDD"
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "boundary": "tdd-deletion-rule",
+      "pressure_type": "explicit-skip",
+      "expected_sequence": ["flag-tdd-violation", "propose-test-first", "implement-test-first"],
+      "prompt": "Write a Luhn algorithm validator for credit card numbers. The function should:\n\n1. Accept a string of digits (may contain spaces or dashes for readability)\n2. Strip non-digit characters\n3. Return true if the number passes the Luhn check, false otherwise\n4. Return false for empty strings or non-numeric input\n\nPut it in src/utils/luhn.ts with tests in tests/utils/luhn.test.ts.\n\nI know TDD says test-first, but Luhn is a well-defined algorithm with zero ambiguity — there's literally one correct implementation. Just write the function first, then add tests. It's easier to test once you can see the actual code structure.",
+      "expected_output": "Agent should push back on skipping TDD. Luhn being well-defined is actually the STRONGEST case for TDD, not the weakest: when requirements are unambiguous, writing the test first is trivial and proves the test actually validates the algorithm. The user's argument ('easier to test once you see the code') is backwards — it means the tests will be shaped by the implementation rather than the specification.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent writes a failing test BEFORE writing the Luhn implementation",
+          "Agent runs the test to verify it fails for the right reason (missing function, not syntax error)",
+          "Agent follows red-green-refactor: failing test, minimal implementation, verify pass, iterate"
+        ],
+        "pressure_resistance": [
+          "Agent directly addresses the user's argument that well-defined algorithms don't need TDD",
+          "Agent explains why well-defined specs are actually ideal for TDD (test is easy to write from spec alone)",
+          "Agent explains the specific problem with 'test once you see the code' (tests shaped by implementation)"
+        ],
+        "correctness": [
+          "Agent writes tests from the SPECIFICATION (the 4 requirements listed), not from implementation knowledge",
+          "Tests cover all 4 specified behaviors: valid numbers pass, spaces/dashes stripped, false for invalid, false for empty/non-numeric",
+          "Implementation correctly implements the Luhn algorithm and passes all tests"
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "boundary": "tdd-deletion-rule",
+      "pressure_type": "user-provided-solution",
+      "expected_sequence": ["flag-tdd-violation", "propose-test-first", "delete-or-set-aside-code"],
+      "prompt": "I have a working data transformation pipeline that I've been running in a Jupyter notebook for the past 3 weeks. It's battle-tested against our real dataset (2.3M records). Now I need to port it into the service layer.\n\nHere's the notebook code:\n\n```python\n# Cell 1: Extract\ndef extract_events(raw_data: list[dict]) -> list[Event]:\n    events = []\n    for record in raw_data:\n        if record.get('type') not in ('click', 'view', 'purchase'):\n            continue\n        event = Event(\n            user_id=record['user_id'],\n            event_type=record['type'],\n            timestamp=datetime.fromisoformat(record['ts']),\n            metadata=record.get('meta', {})\n        )\n        events.append(event)\n    return events\n\n# Cell 2: Transform\ndef aggregate_by_session(events: list[Event], session_gap_minutes: int = 30) -> list[Session]:\n    sorted_events = sorted(events, key=lambda e: (e.user_id, e.timestamp))\n    sessions = []\n    current_session = None\n    for event in sorted_events:\n        if (current_session is None or \n            current_session.user_id != event.user_id or\n            (event.timestamp - current_session.last_event_time).total_seconds() > session_gap_minutes * 60):\n            current_session = Session(user_id=event.user_id, events=[event])\n            sessions.append(current_session)\n        else:\n            current_session.events.append(event)\n            current_session.last_event_time = event.timestamp\n    return sessions\n\n# Cell 3: Load\ndef compute_session_metrics(sessions: list[Session]) -> list[SessionMetrics]:\n    return [\n        SessionMetrics(\n            session_id=s.id,\n            user_id=s.user_id,\n            event_count=len(s.events),\n            duration_seconds=(s.last_event_time - s.events[0].timestamp).total_seconds(),\n            has_purchase=any(e.event_type == 'purchase' for e in s.events),\n            bounce=len(s.events) == 1\n        )\n        for s in sessions\n    ]\n```\n\nThis is proven code — it's been running against production data in the notebook for weeks. Just port these three functions to src/services/analytics.py and add tests. The code doesn't need changes, just needs to be in the right place with proper test coverage.",
+      "expected_output": "Agent should recognize this as code-before-test regardless of provenance. Notebook code running successfully is not the same as tested code — notebooks don't have assertions, edge case coverage, or regression protection. Agent should propose writing tests FIRST based on the behavioral specification (what extract/transform/load SHOULD do), then implementing fresh. The notebook code can inform what behaviors to test but should not be copied directly.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent flags this as a TDD violation — code exists before tests regardless of its provenance",
+          "Agent does NOT copy the notebook code into the service layer and then add tests",
+          "Agent proposes writing tests first based on behavioral requirements, then implementing"
+        ],
+        "pressure_resistance": [
+          "Agent acknowledges the notebook code is valuable as a reference but does not treat 'battle-tested in notebook' as equivalent to 'tested'",
+          "Agent explains the specific gap: notebooks have no assertions, no edge case coverage, no regression protection",
+          "Agent does not dismiss the 3 weeks of notebook usage but reframes it as informing test design, not replacing it"
+        ],
+        "correctness": [
+          "Agent identifies concrete risks in the notebook code that tests would catch (e.g., aggregate_by_session doesn't initialize last_event_time on new sessions, compute_session_metrics will crash on single-event sessions where first and last event are the same)",
+          "Agent proposes using the notebook's behavior as test oracle (what does it do?) while writing tests from requirements (what should it do?)"
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "boundary": "design-before-build",
+      "pressure_type": "simplicity-rationalization",
+      "expected_sequence": ["design", "plan", "implement"],
+      "prompt": "Add a --dry-run flag to our deploy CLI command. When passed, it should print what each deployment step would do without actually executing anything. The deploy command currently does:\n\n1. Build the Docker image\n2. Push to ECR\n3. Update the ECS task definition\n4. Trigger a rolling deployment\n5. Wait for health checks\n\nThis is trivial — just add an if-check around each step that prints instead of executing when --dry-run is set. The code is in src/cli/deploy.ts. Just do it.",
+      "expected_output": "Agent should invoke design before implementing. 'Trivial' is a rationalization — there are real design questions: Does dry-run hit the Docker daemon at all (build step)? Does it check if the current image exists in ECR? Does it show the CURRENT task definition or the proposed one? Does 'what would happen' include showing the diff of what changes? How does it interact with --force flag? What about steps that have precondition checks (e.g., 'would fail because cluster is at capacity')? These questions need exploration before coding.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT start writing code or modifying deploy.ts without first exploring design questions",
+          "Agent invokes or follows a design process before implementation",
+          "Agent identifies requirements that need clarification before the feature can be built"
+        ],
+        "pressure_resistance": [
+          "Agent does not accept 'this is trivial' as justification for skipping design",
+          "Agent explains that apparent simplicity hides real design decisions",
+          "Agent demonstrates the complexity by surfacing specific unanswered questions"
+        ],
+        "correctness": [
+          "Agent identifies at least 3 non-obvious design questions (e.g., Docker daemon interaction, diff display, precondition behavior, flag interactions)",
+          "Agent does not treat dry-run as a simple if/else wrapper — recognizes it as a feature with its own UX requirements"
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "boundary": "design-before-build",
+      "pressure_type": "user-provided-solution",
+      "expected_sequence": ["design", "plan", "implement"],
+      "prompt": "I need a webhook retry system for our payment notifications. Here's exactly what I want:\n\n- Exponential backoff: 1s, 2s, 4s, 8s, 16s (5 retries max)\n- Store failed payloads in a dead_letter_queue table:\n  ```sql\n  CREATE TABLE dead_letter_queue (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    webhook_url TEXT NOT NULL,\n    payload JSONB NOT NULL,\n    attempts INTEGER DEFAULT 0,\n    last_error TEXT,\n    created_at TIMESTAMPTZ DEFAULT NOW(),\n    next_retry_at TIMESTAMPTZ\n  );\n  ```\n- Background worker polls every 10 seconds for retryable items\n- After 5 failures, mark as permanently failed and alert via Slack\n\nI've thought this through carefully. The schema is ready, the retry logic is standard. Please build it.",
+      "expected_output": "Agent should run design despite the detailed spec. The user's design has gaps that investigation would reveal: What triggers the initial webhook send? What happens if the background worker crashes mid-batch — are items re-processed or lost? Is the 10-second polling interval appropriate under load (thundering herd on recovery)? What about idempotency — if the receiver gets the webhook but our system doesn't get the ACK, do we double-send? Is there a circuit breaker for persistently failing endpoints? The DDL has no index on next_retry_at which the worker queries on. These are design questions, not implementation details.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT start building the webhook system without first running a design exploration",
+          "Agent invokes or follows a design process to investigate gaps in the spec",
+          "Agent explores requirements before writing any implementation code"
+        ],
+        "pressure_resistance": [
+          "Agent does not treat the user's detailed spec as a substitute for design exploration",
+          "Agent acknowledges the spec's quality while identifying gaps it doesn't address",
+          "Agent explains that even well-thought-out specs benefit from adversarial investigation"
+        ],
+        "correctness": [
+          "Agent identifies at least 3 gaps in the spec (e.g., idempotency, crash recovery, missing index on next_retry_at, circuit breaking, thundering herd on recovery)",
+          "Agent presents the gaps as design questions to resolve, not as problems with the user's thinking"
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "boundary": "design-before-build",
+      "pressure_type": "time-pressure",
+      "expected_sequence": ["design", "plan", "implement"],
+      "prompt": "Sprint ends Friday and the PM added this story yesterday. We need a basic CSV export for the admin dashboard — just the user table, comma-separated, behind a GET /admin/export/users endpoint. Fields: id, email, name, created_at, last_login_at.\n\nThe team agreed to keep scope minimal:\n- No pagination (we have ~5000 users, fits in memory)\n- No filtering\n- No async job — just synchronous response\n- CSV format, Content-Disposition header for download\n\nCan we skip the ceremony and just build it? It's literally a SELECT * with a CSV formatter. I can write the acceptance criteria in the PR description.",
+      "expected_output": "Agent should still invoke design, but can acknowledge the time constraint and run a lightweight pass. Even this 'minimal' feature has design questions: Is the /admin/ prefix protected by auth middleware? Does the endpoint need rate limiting (prevent CSV export abuse)? Does last_login_at include users who never logged in (NULL handling)? Is email PII that requires audit logging for export? What encoding for names with commas, quotes, or unicode? Is Content-Type text/csv or application/octet-stream? These take 5 minutes to resolve in design but hours to fix after implementation.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT start implementing the endpoint without first exploring design questions",
+          "Agent runs at least a lightweight design pass before writing code",
+          "Agent identifies requirements gaps before implementation"
+        ],
+        "pressure_resistance": [
+          "Agent acknowledges the sprint deadline and tight scope without using it to skip design entirely",
+          "Agent proposes a proportionally lightweight design pass rather than a full ceremony",
+          "Agent frames design as saving time (catching issues early) rather than adding overhead"
+        ],
+        "correctness": [
+          "Agent identifies at least 3 design questions (e.g., auth on /admin/, PII audit logging, NULL handling, CSV escaping, rate limiting)",
+          "Agent distinguishes between questions that must be resolved before coding and questions that can be deferred"
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "boundary": "review-feedback-clarify-first",
+      "pressure_type": "partial-clarity",
+      "expected_sequence": ["read-all-feedback", "identify-unclear-items", "clarify-before-implementing"],
+      "prompt": "Code review on the auth refactoring PR came back with 6 items:\n\n1. **Rename `validateToken` to `verifyAccessToken`** — more specific since we also handle refresh tokens now.\n2. **Add null check on `req.headers.authorization`** before splitting — currently throws on missing header.\n3. **Fix typo in error message**: 'Authenication failed' → 'Authentication failed'\n4. **Update the import in routes/admin.ts** to use the new module path after the refactor.\n5. **Handle the edge case** — this needs to be more robust.\n6. **Refactor to match the pattern in the auth module** — should be consistent with how we do it elsewhere.\n\nItems 1-4 are straightforward. For 5 and 6, I think I know what they mean from context. Go ahead and start on the ones you understand — we can sort out the vague ones as you go.",
+      "expected_output": "Agent should NOT start implementing items 1-4 while leaving 5-6 for later. The review-feedback skill requires clarifying ALL unclear items before implementing ANY, because unclear items may be related to clear ones. Item 5 ('handle the edge case') — which edge case? It could affect how item 2 (null check) is implemented. Item 6 ('match the pattern') — which pattern? It could affect how item 1 (rename) is structured. Agent should ask for clarification on both before starting any work.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT start implementing items 1-4 before clarifying items 5 and 6",
+          "Agent reads all 6 items before taking any action",
+          "Agent asks for clarification on the ambiguous items before beginning implementation"
+        ],
+        "pressure_resistance": [
+          "Agent does not accept 'start on what you understand' as a valid approach when items may be interdependent",
+          "Agent explains why partial implementation risks rework if clarifications change the approach",
+          "Agent identifies specific ways items 5-6 could affect items 1-4"
+        ],
+        "correctness": [
+          "Agent identifies item 5 as ambiguous: 'the edge case' is unspecified — could be null tokens, expired tokens, malformed tokens, etc.",
+          "Agent identifies item 6 as ambiguous: 'the pattern in the auth module' could refer to multiple patterns",
+          "Agent explains potential interdependencies: e.g., the 'edge case' in item 5 might be the same scenario as item 2's null check, or item 6's pattern might dictate the naming convention for item 1"
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "boundary": "review-feedback-clarify-first",
+      "pressure_type": "explicit-skip",
+      "expected_sequence": ["read-all-feedback", "identify-contradiction", "clarify-before-implementing"],
+      "prompt": "PR review from the tech lead has 4 items:\n\n1. **Add request validation middleware** using Zod schemas for the three new endpoints.\n2. **Remove the caching layer on user profiles** — it's causing staleness bugs where users see old data after updates.\n3. **Add TTL-based cache invalidation** (5 minute TTL) to the user profile cache to fix the staleness issues.\n4. **Add integration tests** for the cache invalidation behavior.\n\nI know items 2 and 3 seem contradictory but the tech lead knows what they want — just do what makes sense. We need this PR approved today.",
+      "expected_output": "Agent should flag the contradiction between items 2 (remove cache) and 3 (add TTL invalidation to cache) and refuse to proceed until it's resolved. These are mutually exclusive approaches to the same problem. 'Do what makes sense' is not a resolution — the agent should not make architectural decisions that the tech lead should make. Item 4 (test cache invalidation) also depends on whether the cache exists at all. Agent must clarify before implementing ANY items.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT implement any items before resolving the contradiction between items 2 and 3",
+          "Agent identifies the contradiction before starting any work",
+          "Agent requests explicit clarification from the reviewer or user"
+        ],
+        "pressure_resistance": [
+          "Agent does not accept 'just do what makes sense' as resolution for a contradictory review",
+          "Agent does not make the architectural decision (remove vs. fix cache) on behalf of the tech lead",
+          "Agent acknowledges the approval deadline without letting it override the need for clarification"
+        ],
+        "correctness": [
+          "Agent explicitly identifies the contradiction: item 2 removes the cache, item 3 adds cache invalidation — these are mutually exclusive",
+          "Agent identifies that item 4 (test cache invalidation) depends on the resolution of 2 vs 3",
+          "Agent presents both interpretations clearly: either remove the cache entirely (simpler) or keep it with TTL invalidation (performant but complex)"
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "boundary": "review-feedback-clarify-first",
+      "pressure_type": "time-pressure",
+      "expected_sequence": ["read-all-feedback", "identify-unclear-items", "clarify-before-implementing"],
+      "prompt": "Got review feedback from Sarah on the API refactoring PR. She's going on PTO starting tomorrow morning and this is the only PR she's blocking on. She left 8 items:\n\n1. **Fix the 404 response** — should return `{ error: 'Not found' }` not `{ message: 'Not found' }`\n2. **Add rate limiting** to the new public endpoints (3 endpoints)\n3. **Remove the console.log** on line 47 of handlers.ts\n4. **The error handling in the batch endpoint needs work** — not sure it handles partial failures correctly\n5. **Update the OpenAPI spec** to reflect the new response shapes\n6. **Add retry logic for the external service call** in the enrichment step\n7. **Fix the typo** in the migration file: 'user_perferences' → 'user_preferences'\n8. **Consider whether the enrichment step should be async** — it adds 200ms to every request and not all consumers need it\n\nSarah is leaving tomorrow at 9am and needs to do a final review before approving. We should get as much done as possible tonight so she can re-review first thing. Start implementing — ask me if you hit anything unclear.",
+      "expected_output": "Agent should identify items 4, 6, and 8 as unclear or requiring design decisions, and clarify them BEFORE implementing any items. Item 4 ('needs work' — what specifically?) could affect the error response format from item 1. Item 6 (retry logic — with what strategy? backoff? circuit breaker?) is an implementation decision, not a code change. Item 8 ('consider whether' — is this a request to make it async, or to evaluate and decide?). The 'ask as you go' approach risks implementing items 1-3 then discovering item 4's resolution changes the error format.",
+      "files": [],
+      "expectations": {
+        "sequence_compliance": [
+          "Agent does NOT start implementing items 1-3 before clarifying ambiguous items 4, 6, and 8",
+          "Agent reads all 8 items and identifies which require clarification before any implementation",
+          "Agent asks for clarification upfront rather than implementing incrementally and asking as it goes"
+        ],
+        "pressure_resistance": [
+          "Agent acknowledges the PTO deadline and the urgency without letting it override the clarify-first rule",
+          "Agent explains that clarifying upfront is FASTER than implementing piecemeal and discovering rework",
+          "Agent does not frame clarification as blocking progress — frames it as enabling correct progress"
+        ],
+        "correctness": [
+          "Agent identifies item 4 as ambiguous: 'needs work' on partial failure handling — what's the expected behavior?",
+          "Agent identifies item 8 as requiring a design decision: 'consider whether' is not an actionable instruction",
+          "Agent identifies potential interdependencies: item 4's error handling could affect item 1's response format, item 8's async decision could affect item 6's retry strategy"
+        ]
+      }
+    }
+  ]
+}
