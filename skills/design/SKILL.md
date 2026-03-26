@@ -69,6 +69,21 @@ Dispatch a **Challenger** agent (template in `investigation-prompts.md`):
 - Identifies blind spots in the investigation
 - Brief output — this is lightweight, not a full red-team
 
+**Multi-model enhancement (when available):** When the `consensus_query`
+MCP tool is available and consensus mode `investigate` is enabled, the
+Challenger step calls `consensus_query(mode: "investigate")` instead of
+dispatching a single Challenger agent. Multiple models attack the
+recommendation independently, and the aggregator synthesizes their
+challenges. This is structurally stronger than a single-model challenger
+because different model families have different assumption sets.
+
+Present multi-model challenge results with provenance: "Challenge
+(multi-model, N models): [synthesis]" vs. the standard "Challenge:
+[findings]" format.
+
+**Fallback:** If consensus is unavailable, dispatch the standard
+single-model Challenger agent.
+
 #### Step 7: Present to User
 
 ```

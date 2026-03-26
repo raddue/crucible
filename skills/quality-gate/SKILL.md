@@ -14,6 +14,26 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 **Execution model:** When this skill is running, YOU are the orchestrator. You drive the loop, dispatch fix agents and reviewers as subagents, track scores, and make escalation decisions. All references to "the orchestrator" in this document refer to you.
 
+## Consensus Detection
+
+At the start of the quality gate, check whether the `consensus_query` MCP tool
+is available in the current environment:
+
+1. If the tool is available: consensus-eligible rounds will use multi-model
+   dispatch (see Multi-Model Red-Team Review and Multi-Model Consensus in
+   Stagnation Detection below).
+2. If the tool is not available: all rounds use standard single-model dispatch.
+   No degradation, no warnings — the gate behaves exactly as it did before
+   consensus was introduced.
+
+**Do NOT:**
+- Prompt the user to set up consensus if it is unavailable
+- Log warnings about missing consensus configuration
+- Change any scoring, stagnation, or escalation logic based on consensus availability
+
+Consensus is a transparent enhancement. Its presence improves coverage;
+its absence changes nothing.
+
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
@@ -33,6 +53,20 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 7. Read the judge's verdict and act on it (see Stagnation Detection below)
 8. **Progress notification.** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause.
 9. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
+
+### Multi-Model Red-Team Review (when available)
+
+**Applies to:** Round 1 and every 3rd round thereafter (rounds 1, 4, 7, 10, 13).
+**Intermediate rounds:** Standard single-model red-team dispatch (no change).
+
+On consensus-eligible rounds:
+1. Instead of dispatching a single red-team subagent, call `consensus_query(mode: "review")` with the red-team prompt and artifact content
+2. The consensus response provides merged findings with per-finding severity (Fatal/Significant/Minor), confidence (High/Medium/Low based on model agreement), provenance (which models raised it), and unique findings flagged as "potentially novel"
+3. The orchestrator processes these findings exactly as single-model findings: compute weighted score, compare to prior round, dispatch fix agent if needed
+4. Findings from consensus rounds include provenance metadata in `round-N-findings.md`
+
+**Cost control:** The consensus dispatch replaces (not supplements) the single-model dispatch on eligible rounds.
+**Fallback:** If consensus is unavailable on an eligible round, dispatch standard single-model red-team review.
 
 ## Fix Mechanism
 
@@ -125,9 +159,33 @@ If either condition is met → progress, loop again. No judge needed.
 
 **Regression with checkpoint:** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
 
+### Multi-Model Consensus (when available)
+
+When the `consensus_query` MCP tool is available and consensus mode `verdict` is enabled:
+
+1. Instead of dispatching a single Sonnet judge via Task tool, call
+   `consensus_query(mode: "verdict")` with:
+   - prompt: the stagnation judge prompt from `stagnation-judge-prompt.md`
+   - context: round N findings, round N-1 findings, latest fix journal entry,
+     prior comparison files (same inputs as the single-model judge)
+   - metadata: { artifact_type, round_number, score_progression }
+
+2. Read the consensus response:
+   - If `status: "consensus"` or `status: "partial"`:
+     - Use the `synthesis` verdict (PROGRESS/STAGNATION/DIMINISHING_RETURNS)
+     - If the verdict is STAGNATION or DIMINISHING_RETURNS and disagreements
+       exist, include the dissent summary in the escalation message:
+       "Stagnation detected (consensus: N/M models agree, dissent: [summary])."
+   - If `status: "unavailable"`:
+     - Fall back to single-Sonnet judge dispatch (existing behavior)
+
+3. The comparison file (`round-N-comparison.md`) includes the consensus
+   metadata: models queried, models responded, agreement level, and any
+   dissenting verdicts.
+
 ### Judge Dispatch (only when first-pass check would trigger stagnation)
 
-If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds.
+If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator pastes all input directly.
 
@@ -207,7 +265,7 @@ Quality gate writes round state to disk for compaction recovery.
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
-- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error)
+- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts.
 - `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes)
 
 **Compaction recovery:**
@@ -220,6 +278,9 @@ Quality gate writes round state to disk for compaction recovery.
 6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch.
 7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
 8. Emit a Compression State Block into the conversation with gate-specific state: current round, score progression, artifact type under review. Inherit Goal and Key Decisions from the parent skill's last Compression State if available.
+8b. Check whether `consensus_query` MCP tool is available (consensus
+    availability may have changed across compaction boundary). Use current
+    availability for subsequent rounds regardless of what was used pre-compaction.
 9. Dispatch the next red-team round.
 
 ### Checkpoint Timing
@@ -299,6 +360,9 @@ Three exit modes beyond clean approval:
 - Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
 - Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
 - Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
+- Using consensus on every red-team round (periodic only: rounds 1, 4, 7, ...)
+- Treating single-model unique findings from consensus as less important than multi-model agreements
+- Passing consensus provenance metadata to the fix agent's red-team framing (provenance is for the fix journal and orchestrator, not for biasing the next reviewer)
 
 ## Integration
 
