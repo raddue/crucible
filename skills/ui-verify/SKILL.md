@@ -68,6 +68,7 @@ Evaluate each category. Mark each as pass, fail, or warning.
 | **Interactive States** | Hover, active, disabled, selected — are callbacks wired? |
 | **Theming Compliance** | All values via Theme.uss variables? Any hardcoded colors or sizes? |
 | **Bug Workarounds** | USS bug zones handled correctly? FontManager called? |
+| **Cross-Panel Consistency** | Effect techniques match the USS Effect Decision Registry (`skills/shared/uss-effect-decisions.md`)? Flag any deviations. |
 
 ## Step 4: Delta Report
 

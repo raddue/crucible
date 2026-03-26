@@ -71,6 +71,16 @@ var(--color-bg-base): rgb(20, 20, 31) in mockup → rgb(20, 20, 31) in Theme.uss
 var(--color-bg-base): rgb(25, 25, 40) in mockup → rgb(20, 20, 31) in Theme.uss   [MISMATCH - fix mockup or update Theme.uss]
 ```
 
+### Effect Decision Registry
+
+Before choosing a USS approximation pattern for any flagged CSS effect:
+1. Read `skills/shared/uss-effect-decisions.md`
+2. If a prior decision exists for the same effect intent (e.g., "outer glow on interactive elements"), use that exact pattern — do not choose a different approximation
+3. If no prior decision exists, choose from `skills/shared/uss-approximation-patterns.md`, implement it, and append a new entry to the registry after the implementation is verified
+4. To deliberately deviate from a registry decision, document the justification in the translation map and note it as a fork in the registry entry
+
+This ensures visual consistency across all panels. Panel 15 should use the same glow technique as Panel 1.
+
 ### Hierarchy
 Map HTML nesting to VisualElement tree:
 ```
