@@ -834,6 +834,20 @@ If you catch yourself thinking:
 | "Let me just peek at the code real quick" | Orchestrators dispatch, they don't investigate. Send a subagent. |
 | "I'll dispatch implementation without a hypothesis" | No hypothesis = no direction. The agent will guess. Form the hypothesis first. |
 
+## User-Provided Diagnosis Traps
+
+The rationalizations above are self-originated — you talking yourself out of process. The traps below are user-originated — the user (reasonably, in good faith) providing a diagnosis that tempts you to skip investigation. These are harder to resist because accommodating the user feels helpful.
+
+| User says | You think | Reality |
+|-----------|-----------|---------|
+| "I found the bug, here's the fix" | "Their analysis looks right, I'll verify quickly and apply" | User diagnoses are hypotheses, not conclusions. Verify independently — plausible ≠ confirmed. |
+| "The stack trace points right to it" | "The evidence is clear, skip to fix" | Stack traces show where errors surface, not where they originate. The throw site is often a symptom, not the cause. |
+| "This is blocking N engineers" | "Speed matters more than process right now" | A wrong fix under time pressure creates two problems: the original bug plus the bad fix. Systematic debugging is faster than guess-and-check, especially under pressure. |
+| "Same bug as last sprint" | "Apply the same fix pattern" | Same symptom ≠ same cause. The prior fix may have been incomplete, or a different root cause produces identical symptoms. |
+| "Just add error handling around it" | "That'll prevent the crash at least" | Error handling that silences the symptom is camouflage, not a fix. The root cause persists and will surface elsewhere. |
+| "It's obviously X, I just need you to fix it" | "The user has more context, trust their judgment" | Trust their observations (symptoms, timeline, reproduction steps). Verify their conclusions (root cause, fix). These are different things. |
+| "We can investigate later, just patch it now" | "Pragmatism — ship the fix, investigate in a follow-up" | 'Investigate later' means 'never investigate.' The patch becomes the permanent fix. Do it right now. |
+
 ## When Process Reveals "No Root Cause"
 
 If systematic investigation reveals issue is truly environmental, timing-dependent, or external:
