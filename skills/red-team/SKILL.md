@@ -106,6 +106,19 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weig
 - A blocker for the sake of blocking — challenges must be specific and actionable
 - A rewriter — they challenge, they don't produce an alternative
 
+## Depth Calibration
+
+If a reviewer returns fewer findings than expected, the review is likely shallow. Dispatch a second reviewer with the instruction: "A prior reviewer found N issues. Find what they missed."
+
+| Artifact | Expected findings (Fatal + Significant) | Minimum dimensions covered |
+|---|---|---|
+| Design doc | 5-10 | All 6 |
+| Implementation plan | 3-8 | Fatal Flaws, Hidden Risks, Fragility, Assumptions |
+| Code (feature) | 3-6 | Fatal Flaws, Hidden Risks, Fragility |
+| Code (refactor) | 2-5 | Fatal Flaws, Assumptions, Completeness |
+
+These are guidelines, not quotas. A genuinely clean artifact with 1 finding and thorough dimension coverage is fine. A 1-finding review that only addresses one dimension is shallow regardless of the artifact.
+
 ## The Iron Law
 
 ```
