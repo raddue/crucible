@@ -106,14 +106,43 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weig
 - A blocker for the sake of blocking — challenges must be specific and actionable
 - A rewriter — they challenge, they don't produce an alternative
 
+## The Iron Law
+
+```
+No artifact ships without adversarial review.
+Code review is necessary but not sufficient.
+```
+
+Code review checks quality — is the code correct, clean, well-structured? Red-teaming attacks assumptions — will this actually work under adversarial conditions? What happens when inputs are hostile, dependencies fail, or load exceeds expectations? These are non-overlapping concerns. Passing code review is not evidence that red-teaming is unnecessary.
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Code review already passed" | Code review and red-teaming have non-overlapping coverage. Review checks quality; red-teaming attacks assumptions under adversarial conditions. Both are required. |
+| "This is a minor change" | Minor changes in critical paths have disproportionate blast radius. Small diffs are where subtle bugs hide — less code to review means less obvious where to look. |
+| "We're behind schedule" | Skipping adversarial review saves hours now, costs days when the issue surfaces in production. Red-teaming is the cheapest place to find these issues. |
+| "The design was thorough" | Thorough designs have thorough failure modes. Complexity = attack surface. The more thought went in, the more assumptions to challenge. |
+| "Just a refactor, behavior unchanged" | Refactors are where equivalence assumptions hide. Red-team verifies the equivalence claim — the most dangerous bugs are ones where "nothing changed" but something did. |
+| "Quality gate will catch it later" | Quality gate invokes red-team. Skipping here means skipping there. |
+| "The inquisitor already tested it" | Inquisitor writes executable tests for cross-component behavior. Red-team attacks design assumptions and failure modes that can't be expressed as tests. Different tools. |
+| "We already did N rounds" | Prior rounds found things to fix. That's evidence the artifact needed review, not evidence it's now clean. Fresh eyes, every round. |
+
 ## Red Flags
 
-**Never:**
+**Process violations — Never:**
 - Reuse the same reviewer subagent across rounds
 - Pass prior findings to the next reviewer
 - Skip re-review after fixes ("the fixes look fine, let's move on")
 - Ignore Fatal issues
 - Proceed with unfixed Significant issues
+
+**Skip rationalizations — STOP if you catch yourself thinking:**
+- "This artifact doesn't need adversarial review"
+- "The scope is too small for red-teaming"
+- "We're running behind, skip this pass"
+- "Code review / inquisitor already covered this"
+- "The user said to skip it" (the user can override, but name the risk explicitly first)
 
 ## Dual-Mode Operation
 
