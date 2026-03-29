@@ -17,11 +17,6 @@ Agent tool (subagent_type: general-purpose, model: sonnet):
 
     [CARTOGRAPHER_MODULE_DATA if available, or "No cartographer data available"]
 
-    ## Pathfinder Context
-
-    [PATHFINDER_TOPOLOGY if available and --orgs specified, or
-     "No cross-repo data available (single-repo migration)"]
-
     ## Your Job
 
     Map every consumer of the APIs being migrated. Be exhaustive — a missed
@@ -40,20 +35,7 @@ Agent tool (subagent_type: general-purpose, model: sonnet):
     4. **Check configuration/wiring** — DI registrations, config files, build
        scripts, CI pipelines that reference the target
 
-    ### Step 2: Cross-repo Consumer Discovery (if pathfinder data available)
-
-    If pathfinder topology data is provided:
-    1. Identify which packages/modules are being migrated
-    2. Query the topology for downstream consumers of those packages
-    3. For each downstream repo, estimate migration complexity:
-       - **Low:** uses only renamed/reorganized APIs (mechanical replacement)
-       - **Medium:** uses APIs with changed signatures (logic changes needed)
-       - **High:** uses APIs with behavioral changes (design decisions needed)
-
-    If pathfinder data is NOT available, note: "Cross-repo consumers not mapped.
-    Run crucible:pathfinder for cross-repo awareness."
-
-    ### Step 3: Consumer Registry
+    ### Step 2: Consumer Registry
 
     Write the complete consumer registry to [SCRATCH_DIR]/blast-radius.md.
 

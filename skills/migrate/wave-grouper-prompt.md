@@ -86,8 +86,8 @@ Task tool (model: sonnet):
     - A consumer's wave number must be strictly greater than all of its
       dependencies' wave numbers
     - If all consumers are independent, a single wave is acceptable
-    - For cross-repo migrations: consumers in different repos are independent
-      unless the pathfinder topology shows a direct dependency between them
+    - For cross-repo migrations: consumers in different repos are typically independent
+      unless analysis shows a direct dependency between them
     - Flag any consumer that appears in the registry but has no usage_pattern
       — it may be a false positive from the blast radius scan
     - Prefer fewer, larger waves over many small waves (reduces phase count

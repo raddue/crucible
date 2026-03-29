@@ -25,7 +25,7 @@ Autonomous migration planning and execution: analyzes a migration target, maps b
 /migrate "upgrade lodash from v3 to v4"                    # plan + execute
 /migrate --plan-only "upgrade React Router v5 to v6"       # plan only, no execution
 /migrate --execute docs/plans/2026-03-23-lodash-migration-plan.md  # execute existing plan
-/migrate --orgs org1,org2 "upgrade shared-auth v2 to v3"   # cross-repo with pathfinder
+/migrate --orgs org1,org2 "upgrade shared-auth v2 to v3"   # cross-repo
 ```
 
 ## Communication Requirement (Non-Negotiable)
@@ -182,8 +182,7 @@ Before any agent dispatch:
 
 1. **Consult cartographer** (consult mode) -- load known module boundaries for blast radius mapping
 2. **Consult forge** (feed-forward) -- check past lessons, especially prior migration outcomes
-3. **Check pathfinder topology** -- if `--orgs` specified, check for topology data at `~/.claude/memory/pathfinder/<org>/topology.json`. If missing, warn: "No pathfinder topology found for [org]. Run `crucible:pathfinder` first for cross-repo migration planning." Proceed without cross-repo awareness (single-repo mode).
-4. **Handle `--execute`** -- if specified, read the existing plan file, validate it has the expected structure (phases, consumer registry, rollback points), and skip to Phase 7.
+3. **Handle `--execute`** -- if specified, read the existing plan file, validate it has the expected structure (phases, consumer registry, rollback points), and skip to Phase 7.
 5. **Write invocation.md** to scratch directory with migration target, mode, and scope.
 
 ---
@@ -224,10 +223,6 @@ Dispatch the **Blast Radius Mapper** (Sonnet, Agent tool, general-purpose) using
 - **Indirect dependents** -- code that depends on direct consumers (transitive)
 - **Test coverage** -- which tests exercise the target behavior
 - **Configuration/wiring** -- config files, DI registrations, build scripts referencing the target
-
-**Cross-repo mapping** (when pathfinder data available):
-- Query pathfinder: `crucible:pathfinder query downstream <package-name>`
-- For each downstream repo: estimate migration complexity based on usage pattern depth
 
 **Output:** Impact manifest + consumer registry written to `scratch/<run-id>/blast-radius.md`.
 
@@ -428,7 +423,6 @@ Escalate to the user when:
 - **Skip compatibility layer for "simple" migrations** without analysis confirming it's unnecessary
 - **Execute phases in parallel** -- phases are strictly sequential; coexistence depends on prior phase
 - **Remove compatibility layer before user-approved cleanup phase**
-- **Modify pathfinder topology data** -- read-only consumer
 - **Proceed past the user gate without explicit approval**
 
 ---
@@ -441,7 +435,6 @@ Escalate to the user when:
 | `crucible:cartographer` | Record mode | Phase 8 (record migration discoveries) |
 | `crucible:forge` | Feed-forward | Phase 0 (past migration lessons) |
 | `crucible:forge` | Retrospective | Phase 8 (capture migration outcome) |
-| `crucible:pathfinder` | Query mode | Phase 2 (cross-repo consumer discovery) |
 | `crucible:build` | Refactor mode | Phase 7 (per-phase execution for restructuring phases) |
 | `crucible:build` | Feature mode | Phase 7 (per-phase execution for additive phases) |
 | `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase) |

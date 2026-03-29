@@ -131,8 +131,6 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | **forge** | Self-improving retrospective system. Post-task retrospectives classify deviations and extract lessons. Auto-detects skill-worthy workflows via 5 trigger heuristics and proposes extraction (never auto-creates). Opt-in trajectory capture records skill invocations as structured JSONL for eval generation. Pre-task feed-forward surfaces relevant warnings and recent failure patterns. Periodic mutation analysis proposes concrete skill edits for human review. |
 | **cartographer** | Living architectural map that accumulates across sessions. Records codebase structure, conventions, landmines, and defect signatures after exploration. Surfaces structural context and known defect patterns before tasks. Defect signatures persist Phase 4.5 "Where Else?" scan results — build implementers and debugging investigators receive matching patterns proactively. |
 | **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
-| **pathfinder** | Maps GitHub org service topology — enumerates repos, classifies services, detects inter-service dependencies (HTTP, gRPC, Kafka, shared DBs, shared packages). Produces Mermaid diagrams, JSON topology, and markdown reports. Crawl mode starts from a seed repo and discovers connected services bidirectionally (forward fan-out + reverse fan-in) with frontier prioritization and adaptive depth. Query mode provides blast-radius analysis from persisted data. |
-
 ### Maintenance & Meta
 
 | Skill | Description |
