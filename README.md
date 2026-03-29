@@ -207,16 +207,16 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | audit | 95% | 64% | **31%** | Multi-lens methodology and no-fix discipline are clear differentiators |
 | review-feedback | 100% | 81% | **19%** | Technical rigor over performative agreement. Rejects wrong suggestions with evidence |
 | debugging | 97% | 83% | **14%** | Multi-phase investigation with hypothesis red-teaming and TDD discipline |
+| red-team | 98% | 85% | **13%** | Steel-man-then-kill protocol forces deeper reasoning per finding. Bidirectional severity calibration prevents inflation on clean artifacts |
 | inquisitor | 100% | 89% | **11%** | 5-dimension cross-component analysis catches subtle integration bugs |
 | innovate | 95% | 86% | **10%** | Structured divergent thinking with alternatives comparison and cost/impact analysis |
-| red-team | 98% | 95% | **2%** | Model already red-teams well without structure |
 | verify | 100% | 100% | **0%** | Model already catches false confidence claims without the skill |
 
 ### Key Findings
 
 **Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. The model already knows the right answers — skills add the methodology and discipline to consistently surface them. Quality-gate's without-skill baseline scored 0/42 on process expectations (iterative rounds, severity tracking, stagnation detection, fix journals) while passing most domain-correctness expectations. The model finds the issues but never iterates.
 
-**Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +68%, TDD +53%, planning +39%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (red-team +2%, verify +0%) show minimal lift. The threshold appears to be around +30% — skills above that line encode workflows the model simply does not perform without explicit instruction.
+**Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +68%, TDD +53%, planning +39%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (verify +0%) show minimal lift. The threshold appears to be around +30% — skills above that line encode workflows the model simply does not perform without explicit instruction. Red-team's delta moved from +2% to +13% after adding the steel-man-then-kill protocol (forces deeper reasoning per finding) and bidirectional severity calibration (prevents inflation on clean artifacts while promoting real design flaws with silent failure modes).
 
 ### Sequence Evals: Ordering Discipline Under Pressure
 
