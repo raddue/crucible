@@ -101,9 +101,9 @@ Task tool (general-purpose, model: opus):
     **Bias check (both directions):** Your natural tendency is to undergrade severity on artifacts with real problems, and to inflate severity on clean artifacts to justify your existence. Apply both checks:
 
     - **Undergrade check:** Re-read your Significant findings and ask: "Would I be comfortable shipping this if I own the pager?" If no, promote to Fatal.
-    - **Inflation check:** Re-read your Fatal findings and ask: "Would a senior engineer who has shipped similar systems agree this is Fatal, or would they call it a known tradeoff?" If the latter, demote to Significant or Minor. A real Fatal issue is one where the system WILL break in production — not one where a design decision has tradeoffs.
+    - **Inflation check:** Re-read your Fatal findings and ask: "Is this a real design flaw with a concrete failure mode, or am I manufacturing a problem from a style preference or speculative concern?" Demote only if the finding is genuinely manufactured — a naming complaint dressed up as a Fatal, or a theoretical concern that requires an implausible chain of events. Real design flaws with silent failure modes stay promoted, even if a large team might accept them as tradeoffs. The cost of investigating a promoted finding is low; the cost of a demoted-but-real issue surfacing in production is high.
 
-    The inflation check is as important as the undergrade check. Finding real problems is valuable. Manufacturing severity is worse than missing it — it erodes trust in the review process and causes teams to ignore future findings.
+    The inflation check catches manufactured problems, not aggressive-but-real findings. Finding real problems is valuable. Manufacturing severity erodes trust. But demoting real issues erodes safety.
 
     ## Rules of Engagement
 

@@ -60,16 +60,16 @@
     {
       "id": 4,
       "prompt": "Red-team this implementation plan for adding pagination to our API:\n\n## Plan: Cursor-based Pagination\n\n**Task 1:** Create a `PaginationParams` type with `cursor?: string` and `limit: number` (default 20, max 100). Write unit tests for parameter validation.\n\n**Task 2:** Implement a `paginate<T>` helper that takes a Knex query builder, applies `WHERE id > cursor ORDER BY id ASC LIMIT limit+1`, returns `{ data: T[], nextCursor: string | null }`. The +1 trick determines if there's a next page. Write tests with an in-memory SQLite database.\n\n**Task 3:** Apply `paginate` to GET /api/users and GET /api/orders endpoints. Each endpoint already has integration tests — extend them with pagination test cases.\n\n**Task 4:** Update the React frontend to use `nextCursor` for infinite scroll. Add a `useInfiniteQuery` hook wrapping React Query.\n\n**Task 5:** Update API documentation with cursor pagination examples.\n\n**Task 6:** Run the full test suite and verify all existing tests still pass.\n\nTech stack: Express, PostgreSQL, Knex, React, React Query, Vitest.",
-      "expected_output": "Red-team should find this plan is well-structured with only minor issues. It should NOT manufacture Fatal issues. It might flag: using `id` for cursor assumes sequential IDs (minor), no mention of sort order customization (minor), SQLite vs PostgreSQL test fidelity (minor/significant). Should give a positive overall assessment.",
+      "expected_output": "Red-team should find this plan is well-structured overall but identify the generic paginate<T> helper with hardcoded integer ID assumption as a real design flaw — the generic signature encourages reuse on UUID tables where it silently produces wrong results. This is Significant or Fatal, not Minor, because the failure mode is silent wrong data. Should assess the plan's architecture as sound while flagging the ID assumption and SQLite test gap. Should NOT manufacture problems from style or naming concerns.",
       "files": [],
       "expectations": [
         "Review begins by establishing the scope and context of what artifact is being evaluated",
-        "Did NOT characterize any issues as showstoppers or blockers — the plan has no fatal flaws",
-        "Correctly assessed the plan as fundamentally sound in the overall assessment",
-        "Identified the assumption that IDs are sequential integers as a minor concern (UUIDs would break the cursor logic)",
+        "Identified the hardcoded sequential ID assumption in the generic paginate<T> helper as a significant or fatal concern — silent wrong results on UUID tables",
+        "Correctly assessed the plan's overall architecture as sound (cursor-based over offset-based is the right choice)",
         "Identified SQLite-vs-PostgreSQL test fidelity gap as a potential concern",
-        "Did NOT manufacture severity inflation — minor concerns are not exaggerated into major issues",
-        "Overall assessment verdict is positive ('plan is solid', 'ship it', or equivalent)",
+        "Did NOT manufacture severity inflation from style or naming concerns — only real design flaws are promoted",
+        "Every major finding includes a proposed fix or mitigation, not just identification of the problem",
+        "Overall assessment acknowledges the plan's strengths alongside its flaws — not a blanket rejection",
         "Findings are organized by severity with an overall assessment and verdict",
         "Overall assessment conveys a clear confidence level in the review's conclusions"
       ]
