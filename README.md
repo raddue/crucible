@@ -110,7 +110,7 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 | **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture) plus a Phase 2.5 blind-spots agent that hunts cross-cutting concerns the lenses missed (security, performance, concurrency). Synthesizes findings with causal compounding analysis, cross-references existing issues, and files in the user's tracker. Find-and-report only. |
 | **prospector** | Explores a codebase for architectural friction, performs root cause analysis (distinguishing symptoms from underlying structural issues), scores improvement opportunities by ROI (effort vs impact vs risk), and generates competing redesign proposals. Hybrid model: organic Opus exploration, friction classification with genealogy tracing via git archaeology, then 3 parallel design agents with contextual constraints producing radically different interface proposals. Output feeds into build (refactor mode) or files as tracker issues. |
 | **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Separate fix agents with fix memory (journal prevents repeating failed strategies). Two-layer stagnation detection: orchestrator scoring (Fatal=3, Significant=1) for clear progress, dedicated Sonnet judge agent for semantic analysis when scores stall (classifies recurring vs new issues, detects diminishing returns). Shadow git checkpoints before code-artifact fix rounds with restore-on-regression option. Compaction recovery with Compression State Blocks and persistent scratch directories. Progress notifications at rounds 5/8/11/14, 15-round safety limit. |
-| **red-team** | Adversarial review engine. Dispatches fresh Devil's Advocate reviewers per round. Dual-mode: single-pass when called by quality-gate (quality-gate owns the loop), full iterative loop when called directly. |
+| **red-team** | Adversarial review engine with steel-man-then-kill protocol — every finding must articulate the strongest defense before demolishing it. Mandatory coverage sweep across 6 attack dimensions with a required second pass. Severity anchoring with bias check. Dispatches fresh Devil's Advocate reviewers per round. Dual-mode: single-pass when called by quality-gate (quality-gate owns the loop), full iterative loop when called directly. |
 | **test-coverage** | Post-change test suite audit. Checks whether existing tests need updating (stale assertions, misleading descriptions), deletion (removed code paths), or flagging (coincidence tests that pass by luck). Audit agent + fix agent with revert-on-failure. Split audit for large scopes. Technology-agnostic. |
 | **code-review** | Dispatch code review with shared canonical review checklist. Recommends test-coverage audit after behavioral changes. |
 | **review-feedback** | Process code review feedback with technical rigor. Requires verification, not blind implementation. |
@@ -193,7 +193,7 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 ### Skill-Value Deltas (Claude Opus 4.6)
 
-13 skills, 49 evals, graded blind. Neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition. Overall: **96% with skill vs 67% without, +29% average delta.**
+13 skills, 49 execution evals + 18 sequence evals, graded blind. Neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition. Execution evals: **96% with skill vs 67% without, +29% average delta.** Sequence evals: **98% with skill vs 67% without, +31% average delta.**
 
 **Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 14% delta on Opus could be a 40%+ delta on a model that doesn't naturally investigate before fixing.
 
@@ -218,6 +218,31 @@ This dual approach prevents skills from gaming the eval by producing well-format
 
 **Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +68%, TDD +53%, planning +39%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (red-team +2%, verify +0%) show minimal lift. The threshold appears to be around +30% — skills above that line encode workflows the model simply does not perform without explicit instruction.
 
+### Sequence Evals: Ordering Discipline Under Pressure
+
+Execution evals test whether a skill works once invoked. Sequence evals test whether the agent **maintains correct skill ordering when pressured to skip**. Each eval puts the agent in a scenario where a shortcut is tempting — the user provides a fix, time is short, the task feels trivial — and tests whether the agent holds the line on process discipline.
+
+18 evals across 6 ordering boundaries, each with multiple pressure types (user-provided solutions, time pressure, simplicity rationalization, sunk cost, explicit skip requests). Graded on three axes: **sequence compliance** (did the agent follow the right order?), **pressure resistance** (did it resist the shortcut?), and **correctness** (did it reach the right outcome?).
+
+Overall: **98% with skill vs 67% without, +31% average delta.** Sequence compliance is the widest axis: **98% vs 50% (+48%)**.
+
+| Boundary | With | Without | Delta | What breaks without the skill |
+|----------|------|---------|-------|-------------------------------|
+| TDD deletion rule | 100% | 28% | **+72%** | Agents write tests for existing code instead of test-first. All 3 pressure types crack the baseline |
+| Red-team before shipping | 100% | 59% | **+41%** | Agents raise concerns but frame them as suggestions, not gates. Would accept verbal confirmation |
+| Review-feedback clarify-first | 100% | 70% | **+30%** | Agents start implementing clear items while asking about unclear ones. Reasonable but risks rework |
+| Debugging before fix | 100% | 78% | **+22%** | User-provided diagnosis pressure cracks hardest (+67%). Time pressure and simplicity show 0% delta |
+| Verify before completion | 87% | 69% | **+18%** | Stale evidence accepted more readily. Both conditions generally strong |
+| Design before build | 100% | 100% | **+0%** | Claude naturally explores design questions on Opus, even under "just build it" pressure |
+
+**The key insight: skills add backbone, not knowledge.** The model already knows the right ordering rules. Even without skills, it investigates before fixing, verifies before claiming done, and explores design before building. What breaks under pressure is **resolve** — the willingness to push back when the user provides a plausible shortcut. Skills with explicit rationalization tables and iron laws give the agent permission to be unaccommodating when the process requires it.
+
+**Pressure resistance is the differentiating axis (+28%).** Correctness shows only +12% delta — the model reaches the right answer either way. The skill's value is not teaching the model what to do but giving it the structural backing to hold the line when the user says "just do it."
+
+**Different pressure types crack different defenses.** TDD discipline holds against sunk-cost pressure (the user spent their weekend writing code) but breaks against explicit-skip pressure ("Luhn is pure math, just write it first"). Debugging holds against time pressure but breaks against user-provided diagnoses. Testing multiple pressure types per boundary reveals vulnerabilities that single-scenario evals miss.
+
 ### Running Evals
 
-Eval definitions live in `skills/<skill>/evals/evals.json`. To run evals yourself, use Anthropic's [skill-creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) — it handles execution, grading, benchmarking, and iteration.
+Eval definitions live in `skills/<skill>/evals/evals.json`. Execution evals use the standard `prompt`/`expected_output`/`expectations` schema. Sequence evals extend this with `boundary`, `pressure_type`, `expected_sequence` metadata and categorized expectations (`sequence_compliance`, `pressure_resistance`, `correctness`) for per-axis grading.
+
+To run evals yourself, use Anthropic's [skill-creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) — it handles execution, grading, benchmarking, and iteration.
