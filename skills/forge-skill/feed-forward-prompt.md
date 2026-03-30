@@ -25,6 +25,24 @@ Task tool (general-purpose, model: sonnet):
     Chronicle data is aggregate statistics, not individual task details. Use it for
     pattern detection, not specifics.
 
+    ## Dead-End Context (if available)
+
+    [PASTE matching landmine dead-end entries from landmines.md that are relevant
+    to this task's target modules, or "No dead-end data for target modules" if
+    none match]
+
+    If dead-end entries are provided above, they represent specific prior failures
+    in modules this task touches. Use them as context when forming your advisories.
+    They count toward your 5-warning maximum — prioritize by relevance to THIS
+    task, not by source type.
+
+    Dead-end context is most valuable when the upcoming task directly modifies
+    files in the dead-end's module. If the task only peripherally touches the
+    module (e.g., importing from it but not modifying it), deprioritize dead-end
+    warnings in favor of process-level warnings from patterns.md. When both
+    compete for the 5-warning cap, direct-module dead-ends take priority over
+    peripheral-module dead-ends.
+
     ## Upcoming Task
 
     [Brief description of what is about to be brainstormed/planned/executed]

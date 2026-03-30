@@ -1,6 +1,26 @@
 # Diagnostic Pattern Extraction Prompt
 
-Use this template when dispatching a diagnostic pattern extraction subagent during forge retrospectives for debugging sessions.
+Use this template when dispatching a diagnostic pattern extraction subagent during forge retrospectives for debugging sessions (step 6) and build sessions with QG fix journals (step 6b).
+
+## Source Context: Quality Gate Fix Journal (prepend for step 6b dispatches only)
+
+When the source is a QG fix journal (not a debugging session), prepend this context before the "Session Artifacts" section:
+
+> The artifacts below are from a quality gate fix cycle, not a debugging session. The fix journal records iterative attempts to resolve red-team findings on a code artifact.
+>
+> Mapping to your extraction targets:
+> - "Hypotheses tried" = fix strategies attempted per round (## Round N Fix entries)
+> - "Evidence that ruled them out" = verifier Unresolved assessments + next-round re-raises of the same finding
+> - "Root cause" = the final successful fix approach (last round entry)
+> - "Diagnostic path" = the progression across rounds from initial approach to resolution
+>
+> Extract dead ends where: a fix approach was tried in round N, the verifier marked it Unresolved or the next review re-raised the same finding, and a different approach succeeded in a later round. These are genuine dead ends with discriminating evidence.
+>
+> Skip entries where the fix was simply incomplete (addressed 2 of 3 findings) rather than wrong-approach (tried X, X didn't work, Y worked).
+>
+> Tag all dead-end entries with `(source: qg)` after the evidence text.
+
+---
 
 ```
 Task tool (general-purpose, model: opus):
