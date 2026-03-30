@@ -67,9 +67,21 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     **Quality:**
     - Clean separation of concerns? Single responsibility per component?
     - Clear naming that matches what things DO, not how they work?
-    - Proper error handling?
+    - Proportional error handling? (validate at boundaries, trust internal contracts — see AI Slop Signals for specific diff-level patterns)
     - DRY principle followed?
     - No overengineering or YAGNI violations?
+
+    <!-- CANONICAL: shared/reviewer-common.md — Review Checklist (AI Slop Signals) -->
+    **AI Slop Signals:**
+    AI agents produce characteristic padding that inflates diffs and obscures real changes. Typically Minor severity; Important only when padding obscures real changes. Common patterns:
+    - Comment inflation: comments restating obvious code. Comments explain *why*, not *what*.
+    - Docstring/annotation padding retrofitted onto code not otherwise changed in this diff. (Type annotations required by type-checking config are not padding.)
+    - Over-defensive error handling for conditions that cannot occur given call site and framework guarantees.
+    - Premature abstraction: helpers, wrappers, or type definitions used exactly once without adding meaningful naming.
+    - Backwards-compatibility ghosts: renamed-but-unused vars, re-exported dead types, `// removed` comments.
+    - Unused imports: imports for modules, types, or symbols not referenced in the file.
+    Judge by whether additions serve the task or merely inflate the diff.
+    In the build pipeline, check the de-sloppify cleanup log before flagging these patterns independently.
 
     **Wiring:**
     - Is new code actually connected to the rest of the system?

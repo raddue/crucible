@@ -25,9 +25,21 @@
 ### Quality
 - Clean separation of concerns? Single responsibility per component?
 - Clear naming that matches what things DO, not how they work?
-- Proper error handling?
+- Proportional error handling? (validate at boundaries, trust internal contracts — see AI Slop Signals for specific diff-level patterns)
 - DRY principle followed?
 - No overengineering or YAGNI violations?
+
+### AI Slop Signals
+AI agents produce characteristic padding patterns that aren't bugs but inflate diffs, obscure real changes, and accumulate as maintenance burden. These are typically Minor or Suggestion severity; escalate to Important only when padding materially obscures real changes in the diff. Common patterns include:
+
+- **Comment inflation:** Inline comments restating obvious code (`// increment counter` above `counter++`). Comments should explain *why*, not *what*.
+- **Docstring/annotation padding:** Docstrings or annotations retrofitted onto code not otherwise changed in this diff. New public APIs deserve docs; retrofitting docs onto untouched private helpers is noise. (Type annotations required by the project's type-checking configuration are not padding.)
+- **Over-defensive error handling:** Try/catch, null checks, or validation for conditions that cannot occur given the call site and framework guarantees. Trust internal code; validate at system boundaries only.
+- **Premature abstraction:** Helpers, utilities, wrapper functions, or type definitions used exactly once and not providing a meaningful name for a complex operation. Three similar lines are better than a one-call abstraction that just moves code.
+- **Backwards-compatibility ghosts:** Renamed-but-unused `_old_var`, re-exported types no consumer imports, `// removed` comments for deleted code. If it's unused, delete it completely.
+- **Unused imports:** Import statements for modules, types, or symbols not referenced in the file. Especially common when an agent adds imports speculatively during implementation and doesn't clean up.
+
+**Distinguishing slop from substance:** A docstring on a new public function is legitimate. The same docstring retrofitted onto an existing private helper that wasn't touched — that's padding. Context matters: judge by whether the addition serves the task or merely inflates the diff.
 
 ### Testing
 - Tests actually test behavior (not just mock interactions)?
