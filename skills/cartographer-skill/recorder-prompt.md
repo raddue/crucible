@@ -107,8 +107,17 @@ Task tool (general-purpose, model: sonnet):
       tried and evidence that ruled them out) and `diagnostic_path` (steps
       that found the root cause). These fields are optional for non-debugging
       landmines. Format:
-        - **Dead ends:** [hypothesis] — ruled out because [evidence].
+        - **Dead ends:** [hypothesis] — ruled out because [evidence]. (source: debugging)
         - **Diagnostic path:** [steps that found root cause].
+    - For QG-originated landmines (from forge step 6b), dead-end entries
+      describe fix strategies rather than diagnostic hypotheses. Format:
+        - **Dead ends:** [fix strategy] — ruled out because [reason]. (source: qg)
+        - **Diagnostic path:** [round progression].
+    - **Dedup on UPDATE:** When updating existing landmine entries with new
+      dead-end evidence, preserve each distinct failure description as a
+      separate bullet. Do not merge two different failure descriptions into
+      one sentence. Two dead-ends that share a file path but describe
+      different failure modes remain as separate bullets within the same entry.
     - If updating an existing file, MERGE with existing content. Do not
       drop existing entries unless they are demonstrably wrong.
     - Keep module files under 100 lines. If you're exceeding that, the

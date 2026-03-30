@@ -190,7 +190,13 @@ After any skill that completes a significant task reports success. The calling s
 3. Subagent returns structured retrospective entry
 4. Write entry to `~/.claude/projects/<project-hash>/memory/forge/retrospectives/YYYY-MM-DD-HHMMSS-<slug>.md`
 5. Update `patterns.md` — read current file, merge new findings, rewrite
-6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent (Opus). Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer` (record mode) with `dead_ends` and `diagnostic_path` fields.
+6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent (Opus). Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer` (record mode) with `dead_ends` and `diagnostic_path` fields. Tag dead-end entries with `(source: debugging)`.
+6b. For build sessions with QG fix journals: glob for `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-*.md`. For each handoff file found:
+    a. Read `landmines.md` and check for existing entries matching the same module + same failed approach (same file path AND same module AND 3+ non-stopword shared terms). If matching entries exist, skip extraction — handoff was already processed. Delete the handoff file.
+    b. If no match: dispatch the diagnostic extraction subagent (Opus) using `./diagnostic-extraction-prompt.md` with the QG-specific addendum (see that file's "Source Context: Quality Gate Fix Journal" section). Tag dead-end entries with `(source: qg)`.
+    c. Write extracted dead ends to cartographer's landmines via `crucible:cartographer` (record mode).
+    d. Delete the handoff file after successful extraction.
+    e. **Cap-pressure behavior:** If `landmines.md` is within 10 lines of its 100-line cap, write only Fatal-severity dead ends. At cap, skip and emit a chronicle signal: `{ "event": "dead_end_cap_skip", "module": "<module>", "source": "qg" }`.
 7. For build sessions with a decision journal, the retrospective also extracts
    substantive design decisions. The retrospective analyst identifies decisions
    that are NOT operational routing (reviewer-model, gate-round, task-grouping,
@@ -390,6 +396,13 @@ Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its co
        - Write regenerated summary to `chronicle/summary.md`
     d. Load `chronicle/summary.md` into context alongside `patterns.md`
     e. Pass both to the Feed-Forward Advisor in Step 4
+3.7. **Dead-end context** (if cartographer data exists):
+    a. Check if `~/.claude/projects/<project-hash>/memory/cartographer/landmines.md` exists
+    b. If not found: skip (no dead-end data yet)
+    c. If found: identify the upcoming task's target file paths from the task description. Resolve each to a cartographer module via `Path:` prefix matching (same logic as Cartographer Mode 3 Load step 7). Scan `landmines.md` for entries with file paths resolving to the same modules.
+    d. If 0 matching entries: skip
+    e. If 1+ matching entries: extract the matching entries (both `source: qg` and `source: debugging`). Pass to the Feed-Forward Advisor in Step 4 under the "Dead-End Context" section.
+    **Note:** Forge scans `landmines.md` directly rather than routing through Cartographer Mode 3 Load to avoid coupling — feed-forward works even when no Cartographer consult runs in the current session.
 4. Dispatch a **Feed-Forward Advisor** subagent (Sonnet) using `./feed-forward-prompt.md`
 4b. **Trajectory context** (if trajectory capture is enabled):
     Also read `~/.claude/projects/<hash>/memory/trajectories/failed_trajectories.jsonl`

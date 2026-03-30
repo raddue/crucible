@@ -367,7 +367,7 @@ When dispatching an implementer, reviewer, investigator, or any subagent that wi
    - **What to load per subagent type:** See the subagent loading table below.
    - **`Last loaded` update:** Loading is a pure-read operation. After all subagent dispatches for the current phase complete, the orchestrator batch-updates the `Last loaded` field on all signatures that were loaded during that phase.
 8. If no module file exists: dispatch without it (subagent explores normally, record afterwards)
-9. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing
+9. When loading landmines for debugging investigators and synthesis agents, include `dead_ends` and `diagnostic_path` fields for hypothesis cross-referencing. **Source-tag filtering:** Dead-end entries include a `(source: qg)` or `(source: debugging)` tag. Debugging investigators should only receive `source: debugging` entries for hypothesis cross-referencing — QG-sourced dead ends describe fix strategies, not diagnostic hypotheses, and would create noise. Reviewer and red-team subagents receive all entries regardless of source tag.
 
 ### What Each Subagent Type Gets
 

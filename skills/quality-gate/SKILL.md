@@ -258,7 +258,7 @@ Quality gate writes round state to disk for compaction recovery.
 
 **Active run marker:** At the start of the gate, write `~/.claude/projects/<project-hash>/memory/quality-gate/active-run-<run-id>.md` containing the run-id and scratch directory path. Delete only your own marker when the gate completes. After compaction, glob for `active-run-*.md` files to locate active runs — recover the one whose run-id matches context, or the most recent if context is lost.
 
-**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker.
+**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge sessions).
 
 **After each round, write:**
 - `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count
@@ -290,6 +290,8 @@ Emit a Compression State Block at:
 - **Before stagnation judge dispatch:** When the first-pass check would trigger stagnation
 - **Gate completion:** When the gate passes or escalates (before returning to parent skill)
 - **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
+
+**Dead-end handoff (step 4a, code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 1+ round entries, copy its contents to `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective. On stagnation/escalation exit paths, also write the handoff file before escalating — stagnated sessions produce the highest-value dead-end data.
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
 
