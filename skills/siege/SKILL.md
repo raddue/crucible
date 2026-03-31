@@ -59,7 +59,16 @@ A single signal is insufficient -- too many false positives. Two or more signals
 
 ### Binary Execution
 
-Once activated, Siege runs at maximum force. There is no "light mode" or "quick scan." The 6-agent dispatch, iterative gate, and threat model update all execute. The cost of a missed security vulnerability in production dwarfs the cost of a thorough review.
+Once activated, Siege runs at maximum force. There is no "light mode" or "quick scan." The iterative gate and threat model update always execute. The cost of a missed security vulnerability in production dwarfs the cost of a thorough review.
+
+### Scope-Based Agent Count
+
+| Scope | Agents | Rationale |
+|-------|--------|-----------|
+| Single subsystem (<20 files) | 4: Boundary Attacker, Insider Threat, Fresh Attacker, Chain Analyst | Focused target — 6 perspectives produce ~60% overlap. 4 agents capture the same findings with less noise. |
+| Multi-subsystem (20+ files) | 6: all agents | Broader target — distinct perspectives cover different services/components. |
+
+Fresh Attacker and Chain Analyst always run regardless of scope. They are the differentiators — the Fresh Attacker breaks epistemic closure and the Chain Analyst finds multi-step exploits. The scope heuristic only affects whether Infrastructure Prober and Betrayed Consumer are included.
 
 ## Commit Anchor (TOCTOU Prevention)
 
@@ -216,7 +225,8 @@ At the start of Phase 2, check whether `consensus_query` MCP tool is available. 
 
 Orchestrator reads all 6 findings files from `scratch/<run-id>/`. Steel-man-then-kill: for each finding, the orchestrator first articulates the strongest case that the finding is a false positive, then attempts to refute that case with evidence from the codebase. Findings that survive steel-manning proceed; findings that do not are demoted to "Noted" (below Minor) with the steel-man reasoning documented.
 
-1. **Deduplicate:** Same mechanism as audit Phase 3 -- overlapping file + line_range + same underlying concern = merge. Tie-breaking: keep both, note possible relation.
+1. **Mechanical dedup first:** Use the `<!-- dedup: ... -->` metadata from each finding. Same file + overlapping line range + same CWE = merge. This is fast and deterministic. Then steel-man-then-kill runs only on the deduplicated set.
+1b. **Design-phase cross-reference:** If this Siege run targets code that had a prior design-phase red-team or Siege run on the design doc, check the threat model's Historical Findings for matches. Tag findings that were already flagged at design time: "Previously flagged in design review — implementation did not address." This helps triage: design-flagged findings that persist into code are higher priority than net-new findings.
 2. **Chain detection:** After dedup, scan for findings from different agents that touch the same data flow path or trust boundary. Flag as a chain ONLY when the orchestrator can articulate the specific multi-step exploitation scenario. Proximity alone is not chaining.
 3. **Severity classification** (no demotion without proof):
    - **Critical:** Exploitable with no authentication, or leads to full system compromise, or affects all users. Equivalent to CVSS 9.0+.
@@ -319,7 +329,17 @@ Evidence: [specific code reference or design element]
 Verification: [concrete test or check that confirms the vulnerability]
 ```
 
-Agents output findings in this format only. No blast radius, no extended analysis. This keeps per-agent output under 50 lines for a typical 5-8 finding set.
+Agents output findings in this format only. No blast radius, no extended analysis. This keeps per-agent output under 30 lines for a typical 5-finding set.
+
+### Structured Dedup Fields
+
+For mechanical deduplication before steel-manning, each finding also includes structured metadata as a comment block:
+
+```
+<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->
+```
+
+The orchestrator uses these fields for first-pass mechanical dedup: same file + overlapping line range + same CWE = merge. Steel-man-then-kill runs only on the deduplicated set, reducing synthesis cost.
 
 ### Full Report Findings (Critical and High Only) -- Phase 3 Output
 
@@ -435,7 +455,16 @@ Accepted risks contain attacker-relevant information (what is known to be vulner
 ## Siege Preferences
 - Last scan: [ISO-8601]
 - Default scope: [subsystem name or "full"]
-- Intelligence sources: [which succeeded, which failed]
+- Agent count: [4 or 6, based on last scope size]
+
+## Intelligence Source History
+| Source | Last attempt | Status | Notes |
+|--------|-------------|--------|-------|
+| pnpm audit | 2026-03-30 | success | 2 CVEs found |
+| CISA KEV | 2026-03-30 | failed | WebFetch timeout |
+| OWASP cheat sheets | never | not attempted | |
+
+On subsequent runs, retry failed sources. If a source fails 3 consecutive times, skip by default but note in scope limitations.
 ```
 
 ## Communication Requirement (Non-Negotiable)
@@ -642,7 +671,7 @@ Siege effectiveness is measured by:
 **Agents must NOT:**
 - Modify any code during Phase 2 (analysis is read-only; fixes happen in Phase 4 only)
 - Flag findings without specific evidence (no "consider adding input validation" without pointing to the exact unvalidated input)
-- Exceed 8 findings per agent (focus on highest-impact; the Chain Analyst cap is 5 chains)
+- Exceed 5 findings per agent (focus on highest-impact; the Chain Analyst cap is 5 chains). Every finding must have a concrete, demonstrable exploitation scenario in the CURRENT codebase. Speculative findings about hypothetical future code are not findings.
 - Speculate about vulnerabilities in code they did not receive in their Tier 2 partition
 
 **The orchestrator must NOT:**

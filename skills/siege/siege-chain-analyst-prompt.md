@@ -68,15 +68,24 @@ Task tool (general-purpose, model: opus):
     2. **Read the trust boundary files.** Where does data cross from one
        trust domain to another? Is it re-validated at each crossing?
 
-    3. **Construct multi-step attack paths.** "Step 1: exploit X in
-       component A (Medium alone). Step 2: use the result to bypass Y in
-       component B (Medium alone). Combined: attacker gains Z (Critical)."
+    3. **Construct multi-step attack paths.** A chain requires:
+       - **Demonstrated vulnerability A** (concrete code evidence, not speculation)
+       - **Demonstrated vulnerability B** (concrete code evidence)
+       - **A concrete mechanism where A enables B** (data flow, shared state, trust transition)
+       - Example: "Step 1: exploit X in component A (Medium alone). Step 2:
+         use the result to bypass Y in component B (Medium alone). Combined:
+         attacker gains Z (Critical)."
 
     4. **Every chain must have a concrete end state.** What does the
        attacker ultimately achieve? Data theft? Admin access? Code execution?
        A chain without a payoff is not a finding.
 
-    5. **Cap at 5 chains.** Chains are expensive to verify. Quality matters
+    5. **Coverage gaps are NOT chains.** If files were not examined by other
+       agents, report them separately under "## Coverage Gaps" at the end
+       of your output. Do not inflate your chain count with "these files
+       weren't examined, so MAYBE there's a problem."
+
+    6. **Cap at 5 chains.** Chains are expensive to verify. Quality matters
        more than quantity.
 
     ## What You Must NOT Do

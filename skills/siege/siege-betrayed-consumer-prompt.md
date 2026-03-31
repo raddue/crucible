@@ -66,7 +66,9 @@ Task tool (general-purpose, model: opus):
        stdout, which is captured by CloudWatch, which is readable by all
        developers with AWS access."
 
-    4. **Cap at 8 findings.**
+    4. **Cap at 5 findings.** Every finding must trace a concrete data path
+       in the current code. "This could leak data if someone adds logging
+       later" is not a finding.
 
     ## What You Must NOT Do
 
@@ -81,6 +83,7 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=betrayed-consumer -->
     **[SIEGE-BC-N]** [severity] -- [title]
     File: [path]:[line_range] | Agent: Betrayed Consumer
     Attack: [what data is exposed, to whom, through what path]

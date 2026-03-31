@@ -56,8 +56,9 @@ Task tool (general-purpose, model: opus):
     3. **Construct an attack if you can.** If you can't construct a concrete
        attack, the finding is informational, not a vulnerability.
 
-    4. **Cap at 8 findings.** Quality over quantity. One well-evidenced
-       finding is worth more than five hunches.
+    4. **Cap at 5 findings.** Quality over quantity. One well-evidenced
+       finding is worth more than five hunches. Every finding must be
+       demonstrable in the current codebase.
 
     ## What You Must NOT Do
 
@@ -74,6 +75,7 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=fresh-attacker -->
     **[SIEGE-FA-N]** [severity] -- [title]
     File: [path]:[line_range] | Agent: Fresh Attacker
     Attack: [what you'd do with this, concretely]

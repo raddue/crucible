@@ -76,7 +76,9 @@ Task tool (general-purpose, model: opus):
        path actually reachable in this codebase? CISA KEV matches are
        automatic Critical — these are actively exploited in the wild.
 
-    5. **Cap at 8 findings.**
+    5. **Cap at 5 findings.** Every finding must have concrete evidence in
+       the current codebase. A dependency CVE counts if the vulnerable code
+       path is reachable. A CISA KEV match is always a finding regardless.
 
     ## What You Must NOT Do
 
@@ -91,6 +93,7 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=infrastructure-prober -->
     **[SIEGE-IP-N]** [severity] -- [title]
     File: [path]:[line_range] | Agent: Infrastructure Prober
     Attack: [what an attacker gains from this misconfiguration]

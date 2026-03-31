@@ -76,9 +76,10 @@ Task tool (general-purpose, model: opus):
        - **Medium** -- Requires unlikely conditions or limited impact
        - **Low** -- Theoretical, defense-in-depth improvement
 
-    5. **Cap at 8 findings.** Focus on highest impact. If you have more
-       than 8, keep the 8 most severe and note "additional lower-severity
-       findings omitted."
+    5. **Cap at 5 findings.** Focus on highest impact. Every finding must
+       have a concrete, demonstrable exploitation scenario in the CURRENT
+       codebase. Speculative findings about hypothetical future endpoints
+       or unwritten code are not findings.
 
     ## What You Must NOT Do
 
@@ -97,8 +98,9 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
-    Use this EXACT format for each finding (5 lines max per finding):
+    Use this EXACT format for each finding (5 lines + dedup metadata):
 
+    <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=boundary-attacker -->
     **[SIEGE-BA-N]** [severity] -- [title]
     File: [path]:[line_range] | Agent: Boundary Attacker
     Attack: [1-sentence exploitation scenario with specific payload]
