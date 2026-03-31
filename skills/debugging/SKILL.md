@@ -126,7 +126,7 @@ At each phase transition, in addition to writing session state files, emit a Com
 ### Checkpoint Timing
 
 Emit a Compression State Block at:
-- **Phase transitions:** 0->1, 1->Synthesis, Synthesis->2, 2->3, 3->3.5, 3.5->4, 4->4.5, 4.5->5
+- **Phase transitions:** 0→1, Synthesis→3, 3.5→4, 4.5→5 — emit a **Phase Handoff Manifest** (see below) instead of a Compression State Block at these major boundaries. Other transitions (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5) continue to use CSBs.
 - **Hypothesis cycles:** After each hypothesis is formed or invalidated
 - **Fix attempts:** After each Phase 4 implementation attempt completes (success or failure)
 - **Escalations:** Before any escalation to user
@@ -135,6 +135,7 @@ Emit a Compression State Block at:
 **Context hygiene:** After synthesis completes, raw Phase 1 investigation reports are superseded by the synthesis report. The orchestrator should rely on the synthesis report going forward, not the raw reports. After Phase 4 completes (success or failure), the Phase 2 pattern analysis report is superseded by the implementation results. This keeps the orchestrator lean across long sessions.
 
 **Compaction recovery:**
+0. Check for handoff manifests (`handoff-*-to-*.md`) in the scratch directory. If the most recent manifest exists, use its Inputs, Decisions, and Constraints to reconstruct state for the current phase — this supersedes session state files for phase-boundary recovery. If no manifest exists, continue with standard recovery.
 1. Read `phase-state.md` to determine current phase and cycle.
 2. Read `hypothesis-log.md` for hypothesis history.
 3. Read `synthesis-report.md` for latest investigation findings.
@@ -143,6 +144,36 @@ Emit a Compression State Block at:
 6. Output status to user and continue from the current phase.
 
 **Cleanup:** Delete scratch directory after debugging completes (Phase 5 passes clean or escalation to user).
+
+### Phase Handoff Manifest
+
+At major phase boundaries (0→1, Synthesis→3, 3.5→4, 4.5→5), write a **handoff manifest** to the scratch directory instead of emitting a Compression State Block. The manifest defines exactly what the next phase needs — an allowlist. Everything not on the manifest is shed.
+
+**Format:**
+
+```markdown
+# Phase Handoff: N → M
+**Timestamp:** ISO-8601
+**Goal:** [original bug report, verbatim]
+
+## Inputs for Phase M
+- **[Input name]:** [disk path or inline value]
+
+## Decisions Carried Forward
+- [DEC-N] [decision]: [reasoning, one line]
+
+## Active Constraints
+- [constraint affecting remaining work]
+
+## Shed Receipt
+- [what was shed] → [where it lives on disk]
+```
+
+**Rules:**
+- After writing the manifest, emit an explicit **shed statement**.
+- After writing the manifest, update `## Compression State` in pipeline-status.md with manifest contents.
+- CSBs continue at non-major-boundary checkpoint triggers (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5, hypothesis cycles, fix attempts, escalations, health transitions).
+- **Backward compatibility:** If no manifest exists at a recovery point, fall back to CSB-based recovery.
 
 ## The Iron Law
 
@@ -296,6 +327,20 @@ Check the project's CLAUDE.md for a `## Debugging Domains` table:
 
 **When a referenced skill doesn't exist:** Log a warning and proceed without domain enrichment. Never fail on missing config.
 
+#### Phase Handoff: 0 → 1
+
+Before dispatching investigation agents:
+
+1. Write `handoff-0-to-1.md` with:
+   - **Goal:** bug report / user description, verbatim
+   - **Inputs for Phase 1:** cartographer module paths, defect signature paths (with match notes), domain context (if any), error messages / stack traces (verbatim), reproduction steps (if any)
+   - **Decisions Carried Forward:** (typically empty at this point)
+   - **Active Constraints:** user-stated constraints
+   - **Shed Receipt:** raw cartographer exploration output → module files on disk
+2. Emit shed statement: "Phase 0 context shed. Module files, defect signatures, and error context captured in manifest. Raw exploration output is not carried forward."
+3. Update `## Compression State` in pipeline-status.md.
+4. Do NOT emit a Compression State Block.
+
 ---
 
 ### Phase 1: Investigation (Parallel Subagent Dispatch)
@@ -374,6 +419,20 @@ Dispatch a single Pattern Analysis agent that receives the synthesis report.
 
 **When to skip:** The orchestrator skips Phase 2 when the synthesis report identifies an obvious root cause with high confidence (all investigation agents agree, clear evidence chain).
 
+#### Phase Handoff: Synthesis → 3
+
+Before the orchestrator forms a hypothesis (whether Phase 2 ran or was skipped):
+
+1. Write `handoff-synthesis-to-3.md` with:
+   - **Goal:** original bug report, verbatim
+   - **Inputs for Phase 3:** synthesis report path, pattern analysis report path (or "skipped" with reason), hypothesis log path (empty if cycle 1), key file paths surfaced during investigation
+   - **Decisions Carried Forward:** skip-phase-2 decision (if applicable), investigator-count decision
+   - **Active Constraints:** constraints from investigation findings
+   - **Shed Receipt:** raw Phase 1 investigation reports (3-6 agent reports) → synthesis report captures consolidated findings
+2. Emit shed statement: "Investigation context shed. Synthesis report captures consolidated findings. Raw investigator reports are not carried forward."
+3. Update `## Compression State` in pipeline-status.md.
+4. Do NOT emit a Compression State Block.
+
 ---
 
 ### Phase 3: Hypothesis Formation (Orchestrator Only -- No Subagent)
@@ -421,6 +480,20 @@ The quality gate challenges:
 
 **If hypothesis survives:** Proceed to Phase 4.
 **If hypothesis is torn apart:** Reform the hypothesis or dispatch additional investigation (back to Phase 1) without wasting a full TDD cycle.
+
+#### Phase Handoff: 3.5 → 4
+
+Before dispatching the implementation agent:
+
+1. Write `handoff-3.5-to-4.md` with:
+   - **Goal:** original bug report, verbatim
+   - **Inputs for Phase 4:** validated hypothesis (verbatim), target file paths, conventions path, hypothesis log path, implementation details log path (if prior cycles exist)
+   - **Decisions Carried Forward:** hypothesis rationale, red-team survival notes
+   - **Active Constraints:** constraints on the fix approach
+   - **Shed Receipt:** red-team round details, hypothesis formation reasoning → hypothesis log captures outcomes; gate round details are shed
+2. Emit shed statement: "Hypothesis formation context shed. Validated hypothesis, target files, and hypothesis log on disk. Red-team round details are not carried forward."
+3. Update `## Compression State` in pipeline-status.md.
+4. Do NOT emit a Compression State Block.
 
 ---
 
@@ -592,6 +665,20 @@ If `update_path` was provided (merge case): rename the file to use today's date 
 **`Last loaded` batch update:** After all subagent dispatches for the current phase complete (including the recorder), batch-update the `Last loaded` field on all defect signatures that were loaded during Phase 0 or Phase 4.5. The recorder sets `Last loaded` to today on `update_path` writes, so skip those files during the batch update.
 
 **Over-count recovery:** If count exceeds 20 after a failed prune (e.g., all signatures are age-protected), the next invocation's pre-recorder pruning pass cleans up before writing.
+
+#### Phase Handoff: 4.5 → 5
+
+Before invoking the quality gate on the fix:
+
+1. Write `handoff-4.5-to-5.md` with:
+   - **Goal:** original bug report, verbatim
+   - **Inputs for Phase 5:** full diff (`git diff <pre-fix-sha>..HEAD`), conventions path, test file paths, Where Else report path (or "no siblings found"), defect signature path (if written)
+   - **Decisions Carried Forward:** root cause, fix approach, sibling fix decisions
+   - **Active Constraints:** constraints on review scope
+   - **Shed Receipt:** Phase 4 TDD cycle details, Phase 4.5 candidate evaluation reasoning → fix is in the diff, sibling results in the report
+2. Emit shed statement: "Implementation context shed. Fix diff, test files, and sibling report on disk. TDD cycle details and candidate evaluation reasoning are not carried forward."
+3. Update `## Compression State` in pipeline-status.md.
+4. Do NOT emit a Compression State Block.
 
 ---
 
@@ -800,6 +887,8 @@ If you catch yourself thinking:
 
 **Compression State violations:**
 - Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block at a major phase boundary (0→1, Synthesis→3, 3.5→4, 4.5→5) instead of writing a handoff manifest
+- Skipping the shed statement after a manifest write
 - Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
 - Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
 - Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
