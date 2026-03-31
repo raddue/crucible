@@ -117,6 +117,7 @@ Output concise inline status alongside the status file write:
 
 After compaction, before re-writing the status file:
 0. Read the `## Compression State` section from `pipeline-status.md` — recover Goal, Key Decisions, Active Constraints, and Next Steps. If the section is absent (pre-update pipeline), skip to step 1.
+0.5. Check for handoff manifests (`handoff-*-to-*.md`) in the scratch directory. If the most recent manifest exists, use its Inputs, Decisions, and Constraints to reconstruct state for the current phase — this supersedes the Compression State section for phase-boundary recovery. If no manifest exists, continue with CSB-based recovery.
 1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files
 3. If crucible:checkpoint was used: verify checkpoint availability by checking for the shadow repo at the computed path. Log available checkpoint count. Do not restore — just confirm checkpoints are recoverable.
@@ -174,14 +175,44 @@ Next Steps:
 
 Emit a Compression State Block into the conversation AND update the `## Compression State` section in pipeline-status.md at these points:
 
-- **Phase transitions:** 1->2, 2->3, 3->4
+- **Phase transitions:** 1→2, 2→3, 3→4 — emit a **Phase Handoff Manifest** (see below) instead of a Compression State Block at these points
 - **Phase 3 progress:** After every 3 task completions
 - **Quality gate entry/exit:** Before first quality gate round dispatch and after gate completes (pass or escalation)
 - **Escalations:** Before any escalation to user
 - **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
 These triggers are a superset of the existing pipeline-status.md write triggers. The Compression State Block is emitted alongside (not instead of) the normal narration and status file write.
->>>>>>> e113e69 (feat: add structured compression state block for pipeline resilience (#72))
+
+### Phase Handoff Manifest
+
+At phase boundaries (1→2, 2→3, 3→4), write a **handoff manifest** to the scratch directory instead of emitting a Compression State Block. The manifest defines exactly what the next phase needs — an allowlist, not a denylist. Everything not on the manifest is shed.
+
+**Format:**
+
+```markdown
+# Phase Handoff: N → M
+**Timestamp:** ISO-8601
+**Goal:** [original user request, verbatim]
+**Mode:** feature | refactor
+
+## Inputs for Phase M
+- **[Input name]:** [disk path or inline value]
+
+## Decisions Carried Forward
+- [DEC-N] [decision]: [reasoning, one line]
+
+## Active Constraints
+- [constraint affecting remaining work]
+
+## Shed Receipt
+- [what was shed] → [where it lives on disk]
+```
+
+**Rules:**
+- After writing the manifest, emit an explicit **shed statement**: list what context is no longer needed, where it lives on disk, and that the orchestrator operates from manifest inputs only going forward.
+- After writing the manifest, update the `## Compression State` section in pipeline-status.md with the manifest contents (Goal, Decisions, Constraints, and the Inputs as Next Steps). This ensures compaction recovery can reconstruct state even if the manifest is lost.
+- CSBs continue at all non-boundary checkpoint triggers (intra-phase progress, quality gate entry/exit, escalations, health transitions).
+- **Backward compatibility:** If a handoff manifest does not exist at a recovery point, fall back to CSB-based recovery (existing behavior).
 
 ## Mode Detection
 
@@ -209,6 +240,7 @@ Propagate refactor mode to subagents through:
 Build's existing compaction step must read the Compression State FIRST (step 0 from Pipeline Status Compaction Recovery), then the mode file, before re-reading the task list or any other state. On resumption after compaction:
 
 0. **Read `## Compression State` from pipeline-status.md** — recover goal, decisions, constraints, next steps.
+0.5. **Check for handoff manifests** (`handoff-*-to-*.md`) in the scratch directory. If the most recent manifest exists, use its Inputs and Mode to bootstrap recovery — this supersedes the mode file for phase-boundary state.
 1. **Read `/tmp/crucible-build-mode.md`** — recover mode and baseline commit SHA.
 2. **If file is missing:** Default to feature mode and warn.
 3. **If mode is `refactor`:** Verify baseline commit SHA exists.
@@ -356,6 +388,21 @@ When triggered:
 
 The impact manifest records which gaps the user chose to leave uncovered.
 
+### Phase Handoff: 1 → 2
+
+Before dispatching the Plan Writer, write a handoff manifest to the scratch directory:
+
+1. Write `handoff-1-to-2.md` with:
+   - **Goal:** original user request, verbatim
+   - **Mode:** feature or refactor
+   - **Inputs for Phase 2:** design doc path, acceptance test paths (or contract tests in refactor mode), PRD path (if generated), conventions path (from cartographer, if loaded)
+   - **Decisions Carried Forward:** accumulated decisions from Phase 1
+   - **Active Constraints:** constraints affecting planning
+   - **Shed Receipt:** design iteration history, innovate proposals, quality gate round details → design doc on disk captures the outcome
+2. Emit shed statement: "Phase 1 context shed. Design doc, acceptance tests, and PRD are on disk. Design iteration history, innovate proposals, and gate round details are not carried forward."
+3. Update `## Compression State` in pipeline-status.md with manifest contents.
+4. Do NOT emit a Compression State Block (manifest replaces it at this boundary).
+
 ## Phase 2: Plan (Autonomous)
 
 ### Step 1: Write the Plan
@@ -402,6 +449,21 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context.
 
 The quality gate handles the iterative red-team loop — fresh review each round, weighted stagnation detection, 15-round safety limit, escalation. See `crucible:quality-gate` for details.
+
+### Phase Handoff: 2 → 3
+
+Before creating the team and task list, write a handoff manifest:
+
+1. Write `handoff-2-to-3.md` with:
+   - **Goal:** original user request, verbatim
+   - **Mode:** feature or refactor
+   - **Inputs for Phase 3:** plan path, design doc path, acceptance test paths (or contract tests), contract YAML path (if exists), baseline SHA (current HEAD), cartographer context paths (module files, conventions.md, landmines.md)
+   - **Decisions Carried Forward:** accumulated decisions from Phases 1-2
+   - **Active Constraints:** constraints affecting execution
+   - **Shed Receipt:** plan review iterations, innovate proposals, quality gate round history → plan on disk captures the outcome
+2. Emit shed statement: "Phase 2 context shed. Plan, design doc, and acceptance tests are on disk. Plan review rounds, innovate proposals, and gate details are not carried forward."
+3. Update `## Compression State` in pipeline-status.md with manifest contents.
+4. Do NOT emit a Compression State Block.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
@@ -731,6 +793,21 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 - Minor concerns → adjust prompts for remaining tasks
 - All clear → continue
 
+### Phase Handoff: 3 → 4
+
+Before running acceptance tests and code review, write a handoff manifest:
+
+1. Write `handoff-3-to-4.md` with:
+   - **Goal:** original user request, verbatim
+   - **Mode:** feature or refactor
+   - **Inputs for Phase 4:** HEAD SHA (all tasks committed), design doc path, acceptance test paths (or contract tests), baseline SHA (for `git diff` scope), task summary (completed count, escalation outcomes)
+   - **Decisions Carried Forward:** accumulated decisions from Phases 1-3
+   - **Active Constraints:** constraints affecting completion review
+   - **Shed Receipt:** per-task review rounds, implementer context, wave verification details → task completion status in task list; per-task review details are shed
+2. Emit shed statement: "Phase 3 context shed. Working code at HEAD, design doc, and acceptance tests on disk. Per-task implementation context, review rounds, and verification details are not carried forward."
+3. Update `## Compression State` in pipeline-status.md with manifest contents.
+4. Do NOT emit a Compression State Block.
+
 ## Phase 4: Completion
 
 After all tasks complete:
@@ -890,6 +967,8 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 ## Red Flags
 
 - Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block at a phase boundary (1→2, 2→3, 3→4) instead of writing a handoff manifest
+- Skipping the shed statement after a manifest write
 - Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
 - Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
 - Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
