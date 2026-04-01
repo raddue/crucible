@@ -80,6 +80,19 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 **`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50`** — Performance recommendation for long-running pipelines. Triggers compaction earlier to preserve context for complex multi-phase work. Pipeline skills emit structured Compression State Blocks at checkpoint boundaries to guide the compactor on what to preserve.
 
+## Recommended CLAUDE.md Additions
+
+Your project's `CLAUDE.md` is loaded into every turn of the conversation — it's the single highest-leverage configuration file for shaping agent behavior. Crucible skills inherit whatever you put there, so a well-configured `CLAUDE.md` makes every skill work better.
+
+Consider adding:
+
+- **Architecture overview** — module boundaries, key abstractions, data flow. Skills like build and design use this to make informed structural decisions.
+- **Coding standards** — naming conventions, patterns your team follows, patterns to avoid. Implementers and reviewers reference these automatically.
+- **Test conventions** — test framework, file naming, what level of test to write when. TDD, test-coverage, and adversarial-tester all benefit from knowing your testing culture.
+- **Common pitfalls** — things that look right but break in your codebase. Crucible's cartographer accumulates these over time, but seeding them in `CLAUDE.md` gives you immediate coverage.
+
+You have 40,000 characters — use them. The more context you provide about your project's taste and conventions, the less crucible's skills need to infer.
+
 ## Skills
 
 ### Core Pipeline
