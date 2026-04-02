@@ -32,6 +32,24 @@ Every status update must include:
 
 **This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
 
+## Quality Gate Requirement (Non-Negotiable)
+
+**Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on task size, complexity, or scope.
+
+Quality gates are unconditional at all three gate points:
+1. **Phase 1, Step 2** — Design doc gate
+2. **Phase 2, Step 3** — Plan gate
+3. **Phase 4, Step 6** — Implementation gate
+
+**Common rationalizations that are NEVER valid reasons to skip:**
+- "This is a small change"
+- "This is trivial / simple / straightforward"
+- "This is just a config change / documentation update / one-liner"
+- "The quality gate won't find anything on something this simple"
+- "I fixed the findings, so the gate is done" — **fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a clean verification round (0 Fatal, 0 Significant on a fresh review). Fix agents introduce new issues or incompletely resolve old ones — that is why fresh-eyes re-review exists.
+
+**This requirement exists because:** Quality gates consistently find issues the pipeline misses regardless of task size. There is no category of task that is immune. In observed runs, tasks self-assessed as "trivial" had the same defect rate as complex tasks. The only way to skip a quality gate is with explicit user approval — an unambiguous instruction specifically referencing the gate, not general feedback like "looks good" or "move on."
+
 ## Pipeline Status
 
 Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
@@ -290,7 +308,7 @@ After the user approves the design and before starting Phase 2:
 **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching innovate and quality-gate on the design doc.
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
-2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) design doc with artifact type "design". Iterates until clean or stagnation.
+2. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design". Iterates until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 3. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 4. Design doc is now finalized — proceed to acceptance tests.
 
@@ -446,7 +464,7 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching innovate and quality-gate on the plan.
 
 1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
-2. **Quality gate:** Dispatch `crucible:quality-gate` on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context.
+2. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
 
 The quality gate handles the iterative red-team loop — fresh review each round, weighted stagnation detection, 15-round safety limit, escalation. See `crucible:quality-gate` for details.
 
@@ -829,7 +847,7 @@ After all tasks complete:
    - Iterative until clean, same as step 3
    - Skip if the inquisitor reported all PASS (no fixes were needed)
 6. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-impl-gate" before dispatching the implementation quality gate. If gate fix rounds degrade the code, this is the rollback target.
-6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean)
+6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean) **(Non-negotiable — see Quality Gate Requirement.)**
 7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
    append a minimal chronicle signal directly:
@@ -866,6 +884,8 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Active work time (merge overlapping parallel intervals — NOT naive sum)
 - Wall clock time (first dispatch to final completion)
 - Quality gate rounds (per gate: design, plan, implementation)
+
+**Gate tracking verification:** Before compiling the pipeline summary (Phase 4 Step 9), verify that all three gate categories (design, plan, implementation) show round count >= 1 with clean final rounds (0 Fatal, 0 Significant). If any gate was skipped with explicit user approval, record it as `USER_SKIP` in the metrics. A zero without user approval indicates a gate was dropped — report this in the summary.
 
 ### Pipeline Decision Journal
 
@@ -972,6 +992,12 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
 - Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
 - Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
+- Skipping a REQUIRED quality gate because the task seems "small", "simple", or "trivial"
+- Self-assessing that a quality gate is unnecessary based on perceived task complexity
+- Rationalizing that quality-gate findings would be "minor" as justification to skip
+- Declaring a quality gate "done" after fixing findings without a clean verification round (fixing is not passing)
+- Short-circuiting the quality-gate iteration loop by assuming fixes are self-evidently correct
+- Interpreting general user feedback as approval to skip a quality gate that has not yet run — once a gate has run and presented findings to the user, the user's decision to proceed is authoritative. Pre-gate skip approval must be an unambiguous instruction specifically referencing the gate.
 
 ## Integration
 

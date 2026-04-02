@@ -68,6 +68,14 @@ On consensus-eligible rounds:
 **Cost control:** The consensus dispatch replaces (not supplements) the single-model dispatch on eligible rounds.
 **Fallback:** If consensus is unavailable on an eligible round, dispatch standard single-model red-team review.
 
+## Non-Skippability
+
+**This gate cannot be bypassed without explicit user approval.** Task size, complexity, or scope is never a valid reason to skip. The invoking skill is responsible for always dispatching the gate AND letting it run to completion.
+
+**The gate is not "done" until it completes with a clean round** (0 Fatal, 0 Significant on a fresh review). Fixing findings and moving on without a verification round is a skip, not a pass. The iteration loop exists because fix agents introduce new issues or incompletely resolve old ones — fresh-eyes re-review catches what the fixer missed.
+
+**The only valid skip** is an unambiguous user instruction specifically referencing the gate (e.g., "skip the quality gate"). General feedback like "looks good" or "move on" is not skip approval. Once a gate has run and presented findings to the user, the user's decision to proceed is authoritative.
+
 ## Fix Mechanism
 
 The orchestrator coordinates the loop but does NOT fix artifacts directly. Fixes are dispatched to a **separate subagent** to maintain separation of concerns between coordination, review, and remediation.
@@ -345,7 +353,9 @@ Three exit modes beyond clean approval:
 
 - Orchestrator fixing artifacts directly instead of dispatching a fix agent
 - Rationalizing away red-team findings instead of addressing them
-- Skipping the gate without user approval
+- Skipping the gate without explicit user approval — including autonomous decisions based on task size, complexity, or scope assessment ("this is small", "this is trivial", "this is just a config change")
+- Rationalizing that a change doesn't need adversarial review based on perceived simplicity
+- Declaring the gate complete after fixing findings without a clean verification round — the iteration loop must run to completion (0 Fatal, 0 Significant on a fresh review)
 - Exceeding the 15-round safety limit without escalating
 - Using the same red-team agent across rounds (always dispatch fresh)
 - Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
