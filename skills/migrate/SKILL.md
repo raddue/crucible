@@ -333,7 +333,7 @@ After Phase 5, the orchestrator consolidates all outputs into `scratch/<run-id>/
 
 **On approval:** Save the plan to `docs/plans/YYYY-MM-DD-<topic>-migration-plan.md`. If `--plan-only` mode: stop here, report success.
 
-**Quality gate:** Dispatch `crucible:quality-gate` on the migration plan with artifact type "plan". Iterate until clean or stagnation.
+**REQUIRED SUB-SKILL:** Use crucible:quality-gate on the migration plan with artifact type "plan". Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 
 ---
 
@@ -450,6 +450,18 @@ Escalate to the user when:
 - `./compatibility-designer-prompt.md` -- Phase 4 shim/adapter design
 - `./wave-grouper-prompt.md` -- Phase 5 consumer wave assignment
 
+## Quality Gate Requirement (Non-Negotiable)
+
+**Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on migration step size, complexity, or perceived mechanical nature.
+
+Migration work is especially vulnerable to "this is mechanical/boilerplate" rationalization. Mechanical changes still introduce bugs — mismatched imports, forgotten call sites, subtle behavioral differences in new APIs. Quality gates catch these regardless of how "simple" the migration step appears.
+
+**Fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a clean verification round (0 Fatal, 0 Significant on a fresh review).
+
+**The only valid skip** is an unambiguous user instruction specifically referencing the gate. General feedback is not skip approval.
+
+**Gate tracking:** Before compiling the migration summary, verify gate round counts by category: `plan` (Phase 5), `code-per-phase` (Phase 7, one entry per executed phase), `cleanup` (Phase 8). Each must show round count >= 1 with clean final rounds. If any gate was skipped with explicit user approval, record it as `USER_SKIP`. A zero without user approval indicates a gate was dropped — report this in the summary.
+
 ## Quality Gate Orchestration
 
 | Pipeline Stage | Artifact Type | Purpose |
@@ -457,3 +469,18 @@ Escalate to the user when:
 | After Phase 5 (plan consolidation) | plan | Verify migration plan completeness, phase boundary safety |
 | Phase 7 (per-phase, after build completes) | code | Verify phase implementation correctness |
 | Phase 8 (after cleanup) | code | Verify clean removal of compatibility layer |
+
+## Red Flags
+
+**Quality gate violations:**
+- Skipping a quality gate because the migration step is "mechanical" or "boilerplate"
+- Self-assessing that a quality gate is unnecessary based on perceived migration step simplicity
+- Declaring a quality gate "done" after fixing findings without a clean verification round (fixing is not passing)
+- Short-circuiting the quality-gate iteration loop by assuming fixes are self-evidently correct
+- Interpreting general user feedback as approval to skip a quality gate that has not yet run
+
+**Compression State violations:**
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
+- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest

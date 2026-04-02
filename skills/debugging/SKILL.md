@@ -855,7 +855,15 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 
 ## Quality Gate
 
-This skill produces **hypotheses** (Phase 3.5) and **fixes** (Phase 5). When used standalone, quality gate is invoked at Phase 3.5 (on hypotheses) and Phase 5 (on fixes). When used as a sub-skill, the parent orchestrator may handle gating.
+This skill produces **hypotheses** (Phase 3.5) and **fixes** (Phase 5).
+
+**When used standalone:** Debugging is the outermost orchestrator and MUST invoke quality-gate at Phase 3.5 (on hypotheses) and Phase 5 (on fixes). These gates are non-negotiable regardless of fix size — a "one-liner" fix is not exempt.
+
+**When used as a sub-skill:** The parent orchestrator is responsible for dispatching gates (per the Invocation Convention: "Skills NEVER self-invoke quality-gate"). If you are unsure whether you are standalone or a sub-skill, invoke the gate — double-gating is preferable to no gating.
+
+**The only legitimate skip** is at Phase 5 when there is no code change (bug was already resolved). Do not extrapolate from this — it applies only to the specific "no code change" scenario, not to "small" or "trivial" changes.
+
+**Gate tracking:** Before declaring done, verify that Phase 3.5 (hypothesis gate) and Phase 5 (fix gate, unless legitimately skipped for no-code-change) each show round count >= 1 with clean final rounds. If any gate was skipped with explicit user approval, record it as `USER_SKIP`.
 
 ---
 
@@ -884,6 +892,14 @@ If you catch yourself thinking:
 - Forming hypotheses before receiving synthesis report
 - **"One more fix attempt" (when already at Cycle 3+)**
 - **Each fix reveals new problem in different place**
+
+**Quality gate violations:**
+- "This fix is too small to need a quality gate"
+- "It's just a one-liner, the gate won't find anything"
+- Skipping Phase 3.5 or Phase 5 quality gate without explicit user approval
+- Declaring a quality gate "done" after fixing findings without a clean verification round (fixing is not passing)
+- Extrapolating from the "no code change" skip to justify skipping on small changes
+- Interpreting general user feedback as approval to skip a quality gate that has not yet run
 
 **Compression State violations:**
 - Skipping Compression State Block emission at checkpoint boundaries

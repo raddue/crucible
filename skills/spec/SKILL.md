@@ -539,6 +539,16 @@ On re-invocation of `/spec` with the same epic URL:
 3. **Skip** `committed` tickets. **Retry** `failed` and `re-queued` tickets. **Resume** `pending` tickets. **Re-process** `needs-respec` tickets with upstream contracts now available. **Unblock** `blocked` tickets: present blocking decision context and options to user, collect input, then resume.
 4. Present the resume plan to the user before proceeding.
 
+## Quality Gate Requirement (Non-Negotiable)
+
+**Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on ticket size, complexity, or scope. Spec dispatches quality gates on every committed ticket (potentially dozens), which creates strong temptation to skip on "simple" tickets. Do not yield to this temptation.
+
+**Fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a clean verification round (0 Fatal, 0 Significant on a fresh review). Spec is the highest-volume gate dispatcher — the short-circuit temptation is strongest here.
+
+**The only valid skip** is an unambiguous user instruction specifically referencing the gate. General feedback is not skip approval.
+
+**Gate tracking:** Before compiling the end-of-run summary, verify that every committed ticket has per-document gate round counts >= 1 with clean final rounds. If any gate was skipped with explicit user approval, record it as `USER_SKIP`. A zero without user approval indicates a gate was dropped — report this in the summary.
+
 ## End-of-Run Quality Gate
 
 After all waves complete and all tickets are in terminal states, run a two-phase quality gate.
@@ -547,14 +557,14 @@ After all waves complete and all tickets are in terminal states, run a two-phase
 
 For each committed ticket, dispatch two standard quality gate passes using existing artifact types:
 
-1. **Design doc gate:** Dispatch `crucible:quality-gate` with artifact type `design` on the ticket's design doc. Review scope: Are decisions well-reasoned? Are acceptance criteria testable? Is the current-state analysis accurate?
-2. **Implementation plan gate:** Dispatch `crucible:quality-gate` with artifact type `plan` on the ticket's implementation plan. Review scope: Are tasks concrete? Do they align with the design doc? Are dependencies between tasks identified?
+1. **Design doc gate:** **(Non-negotiable — see Quality Gate Requirement.)** Dispatch `crucible:quality-gate` with artifact type `design` on the ticket's design doc. Review scope: Are decisions well-reasoned? Are acceptance criteria testable? Is the current-state analysis accurate?
+2. **Implementation plan gate:** **(Non-negotiable — see Quality Gate Requirement.)** Dispatch `crucible:quality-gate` with artifact type `plan` on the ticket's implementation plan. Review scope: Are tasks concrete? Do they align with the design doc? Are dependencies between tasks identified?
 
 These use the quality gate's existing iterative fix loop. Each gate runs within normal context budgets (one document per gate invocation). Per-document gates can run in parallel across tickets (via Agent Teams, or sequentially via Agent tool fallback).
 
 ### Phase 2: Cross-Ticket Integration Check
 
-After all per-document gates pass, run a lightweight integration check across ticket boundaries using the prompt template `spec/integration-check-prompt.md`. This is NOT dispatched through `crucible:quality-gate`'s iterative loop -- it is a focused consistency review with a targeted remediation path.
+After all per-document gates pass, run a mandatory integration check across ticket boundaries using the prompt template `spec/integration-check-prompt.md`. **(Non-negotiable — see Quality Gate Requirement.)** This check is mandatory but is NOT dispatched through `crucible:quality-gate`'s iterative loop — it is a focused consistency review with targeted remediation.
 
 **Input (kept small for context budget):**
 - All contract YAML files (500-1000 tokens each)
@@ -729,6 +739,11 @@ When `/spec` resolves an ambiguity or defines an API surface on ticket N that af
 - Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
 - Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
 - Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
+- Skipping a per-document quality gate because the ticket seems "small", "simple", or "trivial"
+- Self-assessing that a quality gate is unnecessary based on perceived ticket complexity
+- Declaring a quality gate "done" after fixing findings without a clean verification round (fixing is not passing)
+- Skipping the integration check because "all per-document gates passed so it's fine"
+- Interpreting general user feedback as approval to skip a quality gate that has not yet run — once a gate has run and presented findings to the user, the user's decision to proceed is authoritative
 
 ## Integration
 
