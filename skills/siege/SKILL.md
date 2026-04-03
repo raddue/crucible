@@ -57,18 +57,21 @@ A single signal is insufficient -- too many false positives. Two or more signals
 - `--skip` -- Suppress Siege activation even when heuristic triggers (user explicitly declines)
 - When audit detects security surfaces during its Phase 2 analysis, it may recommend: "Security surfaces detected. Run `/siege` for full security audit." This is a recommendation, not automatic invocation.
 
-### Binary Execution
+### Execution Intensity
 
-Once activated, Siege runs at maximum force. There is no "light mode" or "quick scan." The iterative gate and threat model update always execute. The cost of a missed security vulnerability in production dwarfs the cost of a thorough review.
+Siege scales its agent count to match the scope. Rigor is constant — every tier runs the full iterative gate and threat model update. What changes is agent count, because overlapping perspectives on a small target produce noise, not coverage.
 
 ### Scope-Based Agent Count
 
 | Scope | Agents | Rationale |
 |-------|--------|-----------|
-| Single subsystem (<20 files) | 4: Boundary Attacker, Insider Threat, Fresh Attacker, Chain Analyst | Focused target — 6 perspectives produce ~60% overlap. 4 agents capture the same findings with less noise. |
+| Targeted change (<5 files, single concern) | 3: Boundary Attacker, Fresh Attacker, Chain Analyst | Surgical target — more perspectives restate the same findings. Boundary catches injection/input flaws, Fresh breaks epistemic closure, Chain catches cross-boundary paths. |
+| Single subsystem (5-19 files) | 4: Boundary Attacker, Insider Threat, Fresh Attacker, Chain Analyst | Focused target — 6 perspectives produce ~60% overlap. 4 agents capture the same findings with less noise. |
 | Multi-subsystem (20+ files) | 6: all agents | Broader target — distinct perspectives cover different services/components. |
 
-Fresh Attacker and Chain Analyst always run regardless of scope. They are the differentiators — the Fresh Attacker breaks epistemic closure and the Chain Analyst finds multi-step exploits. The scope heuristic only affects whether Infrastructure Prober and Betrayed Consumer are included.
+Fresh Attacker and Chain Analyst always run regardless of scope. They are the differentiators — the Fresh Attacker breaks epistemic closure and the Chain Analyst finds multi-step exploits. The scope heuristic only affects whether domain-specific agents (Insider Threat, Infrastructure Prober, Betrayed Consumer) are included.
+
+**Scope override:** User may force a specific tier with `--agents 3|4|6`. The default is auto-detected from the manifest.
 
 ## Commit Anchor (TOCTOU Prevention)
 
@@ -157,6 +160,37 @@ Adopts audit's tiered context model with security-specific partitioning.
 | `code` | Manifest + interfaces + dependency graph | Source files partitioned by security domain (auth files to Insider Threat, input handling to Boundary Attacker, etc.) |
 | `mixed` | Design/plan as context | Code partitioned as above |
 
+#### Automated Context Assembly Procedure
+
+The orchestrator builds context programmatically. Manual file reading and pasting is an anti-pattern.
+
+**Step 1 — Build Tier 1 (once, shared):**
+1. Read the manifest from `scratch/<run-id>/manifest.md`
+2. Read `scratch/<run-id>/intelligence-summary.md`
+3. If threat model exists, extract Trust Boundaries and Attack Surfaces sections (30-line budget)
+4. Concatenate into a single Tier 1 block. If >500 lines, summarize the manifest to file-name + role (one line each)
+5. Write to `scratch/<run-id>/tier1-context.md`
+
+**Step 2 — Build Tier 2 partitions (per-agent):**
+1. Calculate Tier 2 budget: `1500 - len(Tier 1) - len(prompt template) - len(intelligence)` lines
+2. For each agent, select files from the manifest using the security-domain mapping:
+   - Boundary Attacker: API routes, input parsers, URL routing, file upload handlers, deserialization
+   - Insider Threat: auth middleware, RBAC, user-facing endpoints, data access layers
+   - Infrastructure Prober: config files, env handling, middleware setup, logging config, Docker/CI
+   - Betrayed Consumer: data models, serialization/response shaping, logging, session management, cache
+   - Fresh Attacker: random 40% sample (deterministic seed = hash of run-id + manifest content)
+   - Chain Analyst: trust boundary files from threat model + manifest API surface files
+3. Read selected files. If total lines exceed Tier 2 budget, include highest-priority files as full source and remainder as 2-3 line summaries
+4. Write each partition to `scratch/<run-id>/<agent>-partition.md`
+
+**Step 3 — Assemble dispatch prompt (per-agent):**
+1. Read the agent's prompt template from `./siege-<agent>-prompt.md`
+2. Substitute bracketed sections: `[PASTE: Intelligence...]` → content from `intelligence-summary.md`, `[PASTE: Subsystem Overview...]` → content from `tier1-context.md`, `[PASTE: Source Files...]` → content from `<agent>-partition.md`
+3. Verify total prompt ≤ 1500 lines. If over, truncate Tier 2 with overflow summaries
+4. Dispatch the assembled prompt — agents receive a complete, ready-to-analyze context with no manual intervention
+
+**File-type heuristic for domain mapping:** When manifest files don't have obvious security-domain labels, use filename/path patterns: `*auth*`, `*login*`, `*session*`, `*permission*` → Insider Threat; `*route*`, `*handler*`, `*controller*`, `*api*` → Boundary Attacker; `*config*`, `*.env*`, `*docker*`, `*nginx*`, `*.yml` → Infrastructure Prober; `*model*`, `*schema*`, `*log*`, `*serial*` → Betrayed Consumer. Files matching multiple domains go to all matched agents (within budget).
+
 ### The 6 Agents
 
 Each agent receives a structured prompt template and outputs findings in the initial lightweight format (see Finding Format below).
@@ -211,6 +245,7 @@ Each agent receives a structured prompt template and outputs findings in the ini
 **Trust boundary file selection:** Trust boundary files for the Chain Analyst's Tier 2 come from the persistent THREAT MODEL (Phase 1 Step 3, Trust Boundaries section) and the MANIFEST (Phase 1 Step 2, specifically interfaces and API surface files). They are NEVER selected based on agent findings. If no prior threat model exists, trust boundary files are identified from the manifest by selecting: (a) files at module/service boundaries, (b) API route handlers and middleware, (c) authentication/authorization entry points, (d) data serialization/deserialization interfaces.
 **Input budget:** Coverage map: 40 lines max. Remaining budget after Tier 1 + coverage map goes to source files at trust boundary crossings.
 **Hunts for:** Authentication bypass chains, data flow paths that cross trust boundaries without re-validation, time-of-check/time-of-use windows exploitable by attackers, dependency chains where a compromised package enables lateral movement.
+**Anti-restatement rule:** Every chain must pass the cross-boundary test — vulnerabilities A and B must be in different files or components, connected by a concrete mechanism. A single vulnerability's consequences described in multiple steps is not a chain. Chains that fail this test are rejected.
 **Dispatch:** Runs AFTER agents 1-5 complete (needs their partition records for the coverage map). This is the only sequential dependency.
 
 **Write-on-complete:** Each agent writes findings immediately to `scratch/<run-id>/<agent>-findings.md` on completion. Partition records written to `scratch/<run-id>/<agent>-partition.md` before dispatch.
@@ -225,7 +260,17 @@ At the start of Phase 2, check whether `consensus_query` MCP tool is available. 
 
 Orchestrator reads all 6 findings files from `scratch/<run-id>/`. Steel-man-then-kill: for each finding, the orchestrator first articulates the strongest case that the finding is a false positive, then attempts to refute that case with evidence from the codebase. Findings that survive steel-manning proceed; findings that do not are demoted to "Noted" (below Minor) with the steel-man reasoning documented.
 
-1. **Mechanical dedup first:** Use the `<!-- dedup: ... -->` metadata from each finding. Same file + overlapping line range + same CWE = merge. This is fast and deterministic. Then steel-man-then-kill runs only on the deduplicated set.
+1. **Mechanical dedup (orchestrator, no agent dispatch):**
+
+   The orchestrator runs dedup before steel-manning. This is deterministic and requires no LLM reasoning.
+
+   **Step 1 — Parse:** Read all `<agent>-findings.md` files from `scratch/<run-id>/`. Extract the `<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->` metadata from each finding into a structured list.
+
+   **Step 2 — Exact dedup:** Group findings by `(file, cwe)`. Within each group, merge findings whose line ranges overlap (e.g., lines 10-25 and lines 15-30 overlap). Keep the finding with the highest severity as the primary; append other agent names as "also flagged by: [agents]". Write merged finding count to the report.
+
+   **Step 3 — Fuzzy dedup (same root cause, different CWEs):** Within the same file, findings from different agents that reference the same function or code block (overlapping line ranges, any CWE) are likely the same root cause seen from different perspectives. Group these as a "cluster" — present as a single finding with the highest severity, noting the multiple CWEs and perspectives. Example: Boundary Attacker flags CWE-89 (SQL injection) on line 42, Betrayed Consumer flags CWE-200 (information exposure) on line 44 of the same function — these are one root cause (unsanitized input reaches a query that leaks data), not two findings.
+
+   **Step 4 — Write dedup summary:** Write `scratch/<run-id>/dedup-summary.md` with: raw finding count, exact-dedup merges, fuzzy-dedup clusters, final deduplicated count. This is the set that enters steel-man-then-kill.
 1b. **Design-phase cross-reference:** If this Siege run targets code that had a prior design-phase red-team or Siege run on the design doc, check the threat model's Historical Findings for matches. Tag findings that were already flagged at design time: "Previously flagged in design review — implementation did not address." This helps triage: design-flagged findings that persist into code are higher priority than net-new findings.
 2. **Chain detection:** After dedup, scan for findings from different agents that touch the same data flow path or trust boundary. Flag as a chain ONLY when the orchestrator can articulate the specific multi-step exploitation scenario. Proximity alone is not chaining.
 3. **Severity classification** (no demotion without proof):
@@ -532,6 +577,8 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 | `<agent>-partition.md` | Before each agent dispatch | Files sent as full source |
 | `<agent>-findings.md` | On agent completion | Per-agent findings |
 | `coverage-map.md` | Before Chain Analyst dispatch | Agent coverage for chain analysis |
+| `tier1-context.md` | Phase 2 Step 1 | Shared Tier 1 context block |
+| `dedup-summary.md` | Phase 3 Step 4 | Raw → deduplicated finding counts and merge log |
 | `report.md` | Phase 3 | Synthesized findings |
 | `fix-journal.md` | Phase 4, per fix round | Cumulative fix history |
 | `round-N-score.md` | Phase 4, per round | Weighted score snapshot |

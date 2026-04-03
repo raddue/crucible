@@ -68,10 +68,14 @@ Task tool (general-purpose, model: opus):
     2. **Read the trust boundary files.** Where does data cross from one
        trust domain to another? Is it re-validated at each crossing?
 
-    3. **Construct multi-step attack paths.** A chain requires:
-       - **Demonstrated vulnerability A** (concrete code evidence, not speculation)
-       - **Demonstrated vulnerability B** (concrete code evidence)
+    3. **Construct multi-step attack paths.** A chain requires ALL of:
+       - **Demonstrated vulnerability A** in component/file X (concrete code evidence)
+       - **Demonstrated vulnerability B** in a DIFFERENT component/file Y (concrete code evidence)
        - **A concrete mechanism where A enables B** (data flow, shared state, trust transition)
+       - **Cross-boundary test:** A and B must be in different files or components.
+         If both vulnerabilities live in the same function or file, it's a
+         single finding — report it under "## Single-Point Findings" instead
+         and move on.
        - Example: "Step 1: exploit X in component A (Medium alone). Step 2:
          use the result to bypass Y in component B (Medium alone). Combined:
          attacker gains Z (Critical)."
@@ -95,6 +99,15 @@ Task tool (general-purpose, model: opus):
     - Do NOT suggest fixes
     - Do NOT speculate about chains you can't trace through actual code
     - Do NOT flag single-point vulnerabilities (that's the other agents' job)
+    - Do NOT submit restatement chains. A "chain" that describes a single
+      vulnerability's consequences in multiple steps is not a chain — it's
+      a single finding wearing a trenchcoat. Apply the CROSS-BOUNDARY TEST:
+      a valid chain MUST cross at least 2 different files or components,
+      with a concrete mechanism (shared state, data flow, trust transition)
+      linking them. "Exploit X in file A, which causes bad thing in file A"
+      is a single finding, not a chain. If you cannot name distinct
+      vulnerabilities in distinct components that enable each other, you
+      do not have a chain.
 
     ## Context Self-Monitoring
 
