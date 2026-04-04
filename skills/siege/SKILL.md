@@ -272,13 +272,20 @@ Orchestrator reads all 6 findings files from `scratch/<run-id>/`. Steel-man-then
 
    **Step 4 — Write dedup summary:** Write `scratch/<run-id>/dedup-summary.md` with: raw finding count, exact-dedup merges, fuzzy-dedup clusters, final deduplicated count. This is the set that enters steel-man-then-kill.
 1b. **Design-phase cross-reference:** If this Siege run targets code that had a prior design-phase red-team or Siege run on the design doc, check the threat model's Historical Findings for matches. Tag findings that were already flagged at design time: "Previously flagged in design review — implementation did not address." This helps triage: design-flagged findings that persist into code are higher priority than net-new findings.
-2. **Chain detection:** After dedup, scan for findings from different agents that touch the same data flow path or trust boundary. Flag as a chain ONLY when the orchestrator can articulate the specific multi-step exploitation scenario. Proximity alone is not chaining.
+2. **Chain detection:** After dedup, scan for findings from different agents that touch the same data flow path or trust boundary. Flag as a chain ONLY when the orchestrator can articulate the specific multi-step exploitation scenario. Proximity alone is not chaining. Assign exploitability to each chain using weakest-link inheritance: if any step is Hardening, the chain is Hardening. A chain is Active only when every step is independently exploitable today.
 3. **Severity classification** (no demotion without proof):
    - **Critical:** Exploitable with no authentication, or leads to full system compromise, or affects all users. Equivalent to CVSS 9.0+.
    - **High:** Exploitable with some prerequisites (valid session, specific input), significant data exposure or privilege escalation. CVSS 7.0-8.9.
    - **Medium:** Requires unlikely conditions or provides limited impact. CVSS 4.0-6.9.
    - **Low:** Theoretical, defense-in-depth improvement, or informational.
    - **Severity promotion bias:** When a finding sits between two severity levels, promote. Solo dev, silent security bugs are expensive. Demotion requires concrete proof that the exploitation scenario is infeasible (not merely unlikely).
+
+   **Exploitability tag (required on every finding):**
+   Every finding must be tagged with exactly one exploitability class. This is orthogonal to severity — a High/Active is urgent, a High/Hardening is important but not on fire.
+   - **Active:** Exploitable in the current codebase without hypothetical preconditions. An attacker can trigger this today.
+   - **Hardening:** Not currently exploitable, but the design has a latent weakness that becomes exploitable if a reasonable future change occurs (e.g., a new route added without the same guard, a config flag flipped). These matter — but they are a different urgency than active vulnerabilities.
+
+   The tag appears in both the 5-line initial format and the full report format. The final report groups findings by exploitability within each severity level (Active first, then Hardening).
 4. **Write initial report** to `scratch/<run-id>/report.md` using the initial lightweight finding format.
 
 ## Phase 4: Security Gate (Iterative Loop)
@@ -289,7 +296,7 @@ The security gate iterates until **zero Critical + zero High** findings remain, 
 
 Adopts quality-gate's iterative pattern with security-specific scoring.
 
-**Scoring:** Critical = 5, High = 2, Medium = 0 (medium findings are tracked but do not block the gate).
+**Scoring:** Critical = 5, High = 2, Medium = 0 (medium findings are tracked but do not block the gate). Both Active and Hardening findings contribute equally to the gate score — exploitability affects triage priority in the report, not gate blocking. A Critical/Hardening finding ("one reasonable change from full compromise") is too dangerous to pass through.
 
 **Loop:**
 1. Present findings from Phase 3 (or latest round) to the fix agent
@@ -367,7 +374,7 @@ If the fix agent or user identifies a finding as a false positive:
 ### Initial Findings (Per-Agent Output) -- 5 Lines Max
 
 ```
-**[ID]** [severity] -- [title]
+**[ID]** [severity] [Active|Hardening] -- [title]
 File: [path]:[line_range] | Agent: [agent_name]
 Attack: [1-sentence exploitation scenario]
 Evidence: [specific code reference or design element]
@@ -392,7 +399,7 @@ Critical and High findings are expanded in the Phase 3 report:
 
 ```
 ### [ID]: [title]
-**Severity:** [Critical|High] | **Agent:** [agent_name] | **Chain:** [yes/no]
+**Severity:** [Critical|High] | **Exploitability:** [Active|Hardening] | **Agent:** [agent_name] | **Chain:** [yes/no]
 **File:** [path]:[line_range]
 
 **Exploitation Scenario:**
@@ -428,20 +435,27 @@ Written to `scratch/<run-id>/report.md` and presented to the user.
 ## Scope Limitations
 [What Siege cannot detect -- see Known Limitations. Always present.]
 
+## Attack Chains
+[Multi-step chains identified by Chain Analyst, with full exploitation narrative. Chains are the highest-signal output — present them first so the reviewer sees composed threats before individual findings.
+Chains inherit exploitability from their weakest link: if ANY step in the chain requires a future change to become exploitable, the entire chain is Hardening. A chain is Active only when every step is independently exploitable today.]
+
 ## Critical Findings
+### Active Vulnerabilities
+[Full report format for each, or "None"]
+### Hardening
 [Full report format for each, or "None"]
 
 ## High Findings
+### Active Vulnerabilities
+[Full report format for each, or "None"]
+### Hardening
 [Full report format for each, or "None"]
 
 ## Medium Findings
-[Initial 5-line format for each, or "None"]
+[Initial 5-line format for each, or "None". Medium and Low use the compact 5-line format which includes the exploitability tag per-finding. No Active/Hardening sub-grouping — these severities do not block the gate, so triage ordering is less critical.]
 
 ## Low Findings
 [Initial 5-line format for each, or "None"]
-
-## Attack Chains
-[Multi-step chains identified by Chain Analyst, with full exploitation narrative]
 
 ## Accepted Risks
 [Any findings the user acknowledged with rationale, or "None"]
@@ -476,10 +490,10 @@ Updated at the end of every Siege run (Phase 5). Accumulates across sessions.
 
 ## Historical Findings
 ### [date] -- [target]
-- [finding ID]: [severity] [title] -- [status: resolved|accepted|open]
+- [finding ID]: [severity] [Active|Hardening] [title] -- [status: resolved|accepted|open]
 
 ## Accepted Risks
-- [finding ID]: [severity] [title] -- Accepted [date] by [user]
+- [finding ID]: [severity] [Active|Hardening] [title] -- Accepted [date] by [user]
   Rationale: [user-provided rationale]
   Next review: [date, set by sentinel schedule]
 ```
@@ -718,8 +732,9 @@ Siege effectiveness is measured by:
 **Agents must NOT:**
 - Modify any code during Phase 2 (analysis is read-only; fixes happen in Phase 4 only)
 - Flag findings without specific evidence (no "consider adding input validation" without pointing to the exact unvalidated input)
-- Exceed 5 findings per agent (focus on highest-impact; the Chain Analyst cap is 5 chains). Every finding must have a concrete, demonstrable exploitation scenario in the CURRENT codebase. Speculative findings about hypothetical future code are not findings.
+- Exceed 5 findings per agent (focus on highest-impact; the Chain Analyst cap is 5 chains). Every **Active** finding must have a concrete, demonstrable exploitation scenario in the CURRENT codebase. **Hardening** findings must name a specific, reasonable future change that would make the weakness exploitable — not hypothetical future code in general, but a concrete change (e.g., "adding a public route that calls this unguarded helper"). Speculative findings that cannot identify either a current exploit or a named future-change trigger are not findings.
 - Speculate about vulnerabilities in code they did not receive in their Tier 2 partition
+- File findings where no concrete exploitation scenario (Active or Hardening) can be constructed. If unsure, the agent should either commit to the finding (with evidence of a current exploit or a named future-change trigger) or not file it.
 
 **The orchestrator must NOT:**
 - Proceed to Phase 2 without user-confirmed manifest
@@ -734,8 +749,10 @@ Siege effectiveness is measured by:
 
 ## Red Flags
 
-- Running Siege as a "light scan" (there is no light mode -- if activated, it runs fully)
+- Running Siege below the scope-appropriate agent count (3/4/6 -- match the scope, not convenience)
 - Treating Siege findings as audit findings (security findings require exploitation scenarios, not just code quality observations)
+- Mixing active vulnerabilities and design hardening without the exploitability tag (different urgency, different reviewer response)
+- Filing findings where no exploitation scenario (Active or Hardening) can be constructed (wastes reviewer time)
 - Skipping the Chain Analyst (the most valuable agent for finding real-world exploits)
 - Accepting risks without written rationale (silent suppression)
 - Committing `threat-model.md` or `accepted-risks.md` to the repository

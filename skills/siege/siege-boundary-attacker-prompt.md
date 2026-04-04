@@ -76,10 +76,12 @@ Task tool (general-purpose, model: opus):
        - **Medium** -- Requires unlikely conditions or limited impact
        - **Low** -- Theoretical, defense-in-depth improvement
 
-    5. **Cap at 5 findings.** Focus on highest impact. Every finding must
-       have a concrete, demonstrable exploitation scenario in the CURRENT
-       codebase. Speculative findings about hypothetical future endpoints
-       or unwritten code are not findings.
+    5. **Cap at 5 findings.** Focus on highest impact. Every **Active**
+       finding must have a concrete, demonstrable exploitation scenario
+       in the CURRENT codebase. **Hardening** findings must name a
+       specific, reasonable future change that would make it exploitable.
+       Speculative findings about hypothetical future endpoints or
+       unwritten code without a named trigger are not findings.
 
     ## What You Must NOT Do
 
@@ -87,6 +89,7 @@ Task tool (general-purpose, model: opus):
     - Do NOT flag auth/access control issues (Insider Threat handles that)
     - Do NOT flag configuration issues (Infrastructure Prober handles that)
     - Do NOT speculate -- every finding must have code evidence
+    - Do NOT file findings where no concrete exploitation scenario (Active or Hardening) can be constructed
     - Do NOT produce extended analysis or blast radius (that's Phase 3)
 
     ## Context Self-Monitoring
@@ -98,10 +101,14 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    **Exploitability tags:**
+    - **Active:** Exploitable in the current codebase today, no hypothetical preconditions.
+    - **Hardening:** Not currently exploitable, but becomes exploitable if a specific, reasonable future change occurs. You MUST name that change.
+
     Use this EXACT format for each finding (5 lines + dedup metadata):
 
     <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=boundary-attacker -->
-    **[SIEGE-BA-N]** [severity] -- [title]
+    **[SIEGE-BA-N]** [severity] [Active|Hardening] -- [title]
     File: [path]:[line_range] | Agent: Boundary Attacker
     Attack: [1-sentence exploitation scenario with specific payload]
     Evidence: [specific code reference -- quote the vulnerable line]

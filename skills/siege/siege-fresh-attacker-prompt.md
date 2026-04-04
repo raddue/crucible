@@ -57,8 +57,10 @@ Task tool (general-purpose, model: opus):
        attack, the finding is informational, not a vulnerability.
 
     4. **Cap at 5 findings.** Quality over quantity. One well-evidenced
-       finding is worth more than five hunches. Every finding must be
-       demonstrable in the current codebase.
+       finding is worth more than five hunches. Every **Active** finding
+       must be demonstrable in the current codebase. **Hardening** findings
+       must name a specific, reasonable future change that would make the
+       weakness exploitable.
 
     ## What You Must NOT Do
 
@@ -66,6 +68,7 @@ Task tool (general-purpose, model: opus):
       the other agents do)
     - Do NOT suggest fixes
     - Do NOT speculate without code evidence
+    - Do NOT file findings where no concrete exploitation scenario (Active or Hardening) can be constructed
     - Do NOT say "this could potentially be vulnerable" — either show the
       attack or mark it Low
 
@@ -75,8 +78,12 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    **Exploitability tags:**
+    - **Active:** Exploitable in the current codebase today, no hypothetical preconditions.
+    - **Hardening:** Not currently exploitable, but becomes exploitable if a specific, reasonable future change occurs. You MUST name that change.
+
     <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=fresh-attacker -->
-    **[SIEGE-FA-N]** [severity] -- [title]
+    **[SIEGE-FA-N]** [severity] [Active|Hardening] -- [title]
     File: [path]:[line_range] | Agent: Fresh Attacker
     Attack: [what you'd do with this, concretely]
     Evidence: [the code that caught your eye and why]
