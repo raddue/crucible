@@ -127,10 +127,38 @@ If the subagent cannot read the dispatch file: abort and report "Could not read 
 
 The orchestrator verifies the file exists and re-writes if missing, then re-dispatches. No inline fallback, no redundant writes. If /tmp is broken, the pipeline has bigger problems.
 
+### Dispatch Manifest
+
+Every dispatch directory includes a `manifest.jsonl` file — a structured execution trace. The orchestrator appends one entry after each dispatch completes:
+
+```jsonl
+{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves"}
+{"seq":2,"file":"2-plan-reviewer.md","role":"plan-reviewer","phase":"2","task":null,"status":"completed","duration_s":45,"summary":"2 issues found: dependency gap, missing edge case"}
+{"seq":3,"file":"3-build-implementer.md","role":"implementer","phase":"3","task":1,"status":"completed","duration_s":120,"summary":"Auth middleware implemented, 4 tests green"}
+{"seq":4,"file":"4-build-reviewer.md","role":"reviewer","phase":"3","task":1,"status":"failed","duration_s":67,"summary":"2 Critical: missing null check, unsanitized input"}
+```
+
+**Fields:**
+- `seq` — dispatch sequence number (matches file counter)
+- `file` — dispatch file name
+- `role` — subagent role (implementer, reviewer, red-team, etc.)
+- `phase` — pipeline phase
+- `task` — task number (null for non-task dispatches)
+- `status` — completed, failed, skipped, error
+- `duration_s` — wall clock seconds
+- `summary` — one-line result extracted from subagent output
+
+**What this enables:**
+1. **Zero-cost failure replay** — debugging skill reads manifest, identifies failing dispatch, re-runs from preserved file with identical context. No reconstruction.
+2. **Forge execution data** — machine-readable trace of template failure rates, phase durations, iteration counts. Direct feed into forge retrospectives.
+3. **Pipeline resume (future)** — skip completed dispatches, restart from first failure. 10x harder to add later without the manifest.
+
+**Cost:** ~3-5 lines per orchestrator skill to append after each dispatch. One Bash append call per entry.
+
 ### Cleanup Strategy
 
 - **On successful pipeline completion:** delete the dispatch directory
-- **On failure or escalation:** preserve for inspection
+- **On failure or escalation:** preserve for inspection (manifest + dispatch files = full replay capability)
 - Pipeline completion steps (build Phase 4, debugging Phase 5, etc.) each include cleanup
 
 ## Convention Propagation
@@ -206,7 +234,8 @@ Apply convention to all 16 skills and 75 templates.
 3. No Agent tool prompt exceeds 80 tokens (pointer only)
 4. Dispatch files written before dispatch and readable by subagents
 5. Dispatch directory cleaned up on success, preserved on failure
-6. No "paste X into prompt" language remains in any SKILL.md or template file
+6. Dispatch manifest (`manifest.jsonl`) appended after every dispatch with seq, role, status, duration, summary
+7. No "paste X into prompt" language remains in any SKILL.md or template file
 7. Every dispatch template has the `<!-- DISPATCH: disk-mediated -->` comment
 8. `shared/dispatch-convention.md` exists and referenced by all 16 skills
 
@@ -219,6 +248,7 @@ Apply convention to all 16 skills and 75 templates.
 - Every dispatch template has the `<!-- DISPATCH: disk-mediated -->` comment
 - `shared/dispatch-convention.md` exists and is referenced by all 16 orchestrator skills
 - Dispatch files follow naming: `<counter>-<template-name>.md`
+- `manifest.jsonl` exists in dispatch directory with one entry per dispatch
 
 ### Testable (requires eval)
 
@@ -230,6 +260,7 @@ Apply convention to all 16 skills and 75 templates.
 
 ### In scope
 - Shared dispatch convention document
+- Dispatch manifest (manifest.jsonl) — structured execution trace
 - SKILL.md edits for 16 orchestrator skills
 - Comment headers for 75 dispatch templates
 - Primacy eval on 3 templates using #126 as fixture
