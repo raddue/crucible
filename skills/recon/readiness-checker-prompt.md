@@ -3,7 +3,7 @@
 Use this template when dispatching the Readiness Checker depth agent. Primary consumer: `/build`. Discovers test, lint, and CI verification commands for the `## Execution Readiness` section.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Agent tool (subagent_type: Explore, model: sonnet):
   description: "Readiness Checker: discover verification commands"
   prompt: |
     You are a Readiness Checker discovering the test, lint, and CI verification
@@ -85,4 +85,7 @@ Task tool (general-purpose, model: sonnet):
 
     ### Manual Verification
     - [what to check] — [why automated tools can't]
+
+    ### Open Questions
+    - **[Question]** — [why it matters] — resolvable by: [what would answer it]
 ```

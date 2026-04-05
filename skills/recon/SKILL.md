@@ -44,6 +44,11 @@ Structured prior decisions from a parent skill (e.g., accumulated design choices
 
 Distinct from `task:` which describes *what* to investigate; `context:` describes *what's already been decided*.
 
+**Recognized context keys:**
+- `decisions` — list of prior design/implementation decisions
+- `constraints` — list of constraints affecting investigation
+- `target` — specific symbol/module for `consumer-registry` depth module (used by `/migrate`). Falls back to the `task:` string if absent.
+
 **`session_id`** (optional)
 Enables cross-invocation caching within a session. When provided, the Structure Scout report is cached and reused on subsequent invocations with the same session_id. Pattern Scout always runs fresh (its output varies with cascading context). Parent skills generate the session_id (e.g., `/design` uses its run timestamp). Without a session_id, no caching occurs.
 
@@ -143,7 +148,7 @@ Before dispatching scouts, check for existing cartographer data.
 If `session_id` is provided:
 1. Check for cached Structure Scout report at: `~/.claude/projects/<project-hash>/memory/recon/sessions/<session_id>/structure-scout.md`
 2. **If cached report exists:** Skip Structure Scout dispatch. Use cached report. Mark Structure Scout as `cached` in pipeline status.
-3. **If no cache:** Dispatch normally. After completion, write report to cache path.
+3. **If no cache:** Dispatch normally. After completion, write report to cache path with a metadata line prepended: `<!-- cached-commit: [HEAD SHA] -->`. This line is used for invalidation checks.
 
 Pattern Scout always runs fresh — its output varies with cascading context.
 
@@ -158,6 +163,10 @@ Agent tool (subagent_type: Explore, model: sonnet):
 ```
 - Template: `./structure-scout-prompt.md`
 - Fill placeholders: `[TASK]`, `[SCOPE]`, `[CONTEXT]`, `[CARTOGRAPHER]`
+- **Default values for absent parameters:**
+  - `[TASK]` → "Full repository scan — no specific task"
+  - `[SCOPE]` → "No scope constraint — explore entire repository"
+  - `[CONTEXT]` → "No prior decisions"
 
 **Pattern Scout:**
 ```
@@ -226,6 +235,19 @@ When scouts report `cartographer-conflict` findings, apply this adjudication tab
 For auto-update actions: queue the update for Phase 5 (Cartographer Feedback).
 For unresolved actions: surface in the `## Conflicts` section of the brief.
 
+### Open Questions Aggregation
+
+After contradiction detection, aggregate open questions from both scout reports:
+
+1. Collect all items from each scout's `### Open Questions` section
+2. Deduplicate — merge questions about the same unknown from both scouts
+3. Tag each question with:
+   - **Relevant to:** which consumer skills would need this answer (e.g., `/design`, `/build`)
+   - **Resolvable by:** what specific investigation or human input would answer it (e.g., "check with team lead", "run integration tests", "read module X in detail")
+4. If depth modules also report open questions, merge those in during Phase 4
+
+Open questions that get resolved in subsequent pipeline phases are high-value cartographer recordings — feed them back in Phase 5.
+
 ### Assemble the Investigation Brief
 
 Build the Investigation Brief markdown with all core sections:
@@ -261,13 +283,19 @@ Build the Investigation Brief markdown with all core sections:
 ## Conflicts
 <!-- Only present if contradictions detected between scouts -->
 - **[Tension]** — Structure Scout: [claim + evidence]. Pattern Scout: [claim + evidence]. Confidence: [assessment].
+
+## Open Questions
+<!-- Aggregated from scouts and depth modules — what recon couldn't determine -->
+- **[Question]** — [Why it matters] — Relevant to: [consumer list] — Resolvable by: [specific investigation or human input]
 ```
 
 ## Overflow Handling
 
 ### Scout Report Overflow
 
-If a scout report exceeds its token budget (2,000 tokens for scoped, 4,000 for full-repo):
+**Detection:** Use line count as a proxy for token budget. If a scout report exceeds 80 lines (scoped) or 160 lines (full-repo), apply overflow handling. Depth modules: 120 lines (80 for readiness-checker). Lines are mechanically countable; token counts are not.
+
+If a scout report exceeds its budget:
 
 1. **Task-aware truncation:** Sections relevant to the current task retain full content (including reasoning prose needed for contradiction detection). Out-of-scope sections are reduced to headings + first-level bullets.
 2. **If still over budget:** Request a scoped re-run from the scout with a narrower scope constraint.
@@ -292,19 +320,19 @@ When multiple modules are requested, dispatch them in parallel. Each depth agent
 
 | Module | Agent | Dispatch | Template |
 |---|---|---|---|
-| `impact-analysis` | Impact Analyst | `Task tool (general-purpose, model: opus)` | `./impact-analyst-prompt.md` |
-| `consumer-registry` | Consumer Mapper | `Agent tool (subagent_type: general-purpose, model: sonnet)` | `./consumer-mapper-prompt.md` |
-| `friction-scan` | Friction Scanner | `Agent tool (subagent_type: general-purpose, model: opus)` | `./friction-scanner-prompt.md` |
-| `subsystem-manifest` | Manifest Builder | `Task tool (general-purpose, model: sonnet)` | `./manifest-builder-prompt.md` |
-| `diagnostic-context` | Diagnostic Gatherer | `Agent tool (subagent_type: general-purpose, model: opus)` | `./diagnostic-gatherer-prompt.md` |
-| `execution-readiness` | Readiness Checker | `Task tool (general-purpose, model: sonnet)` | `./readiness-checker-prompt.md` |
+| `impact-analysis` | Impact Analyst | `Agent tool (subagent_type: Explore, model: opus)` | `./impact-analyst-prompt.md` |
+| `consumer-registry` | Consumer Mapper | `Agent tool (subagent_type: Explore, model: sonnet)` | `./consumer-mapper-prompt.md` |
+| `friction-scan` | Friction Scanner | `Agent tool (subagent_type: Explore, model: opus)` | `./friction-scanner-prompt.md` |
+| `subsystem-manifest` | Manifest Builder | `Agent tool (subagent_type: Explore, model: sonnet)` | `./manifest-builder-prompt.md` |
+| `diagnostic-context` | Diagnostic Gatherer | `Agent tool (subagent_type: Explore, model: opus)` | `./diagnostic-gatherer-prompt.md` |
+| `execution-readiness` | Readiness Checker | `Agent tool (subagent_type: Explore, model: sonnet)` | `./readiness-checker-prompt.md` |
 
 ### Placeholder Filling
 
 - `[CORE_BRIEF]` — the assembled core Investigation Brief (all core sections)
 - `[TASK]` — the original task description
 - `[SCOPE]` — scope constraint (if provided)
-- `[TARGET]` — for `consumer-registry` only: the migration target symbol/module. Extract from `context.target` if provided; fall back to the full `task:` string if absent.
+- `[TARGET]` — for `consumer-registry` only: the migration target symbol/module. Extract from `context.target` if provided; fall back to the full `task:` string if absent. **Validation:** If `consumer-registry` is requested and neither `context.target` nor `task` is provided, reject with error: "consumer-registry requires a target — provide context.target or task."
 
 ### Output Handling
 
@@ -328,9 +356,15 @@ On failure (timeout, error, or agent did not return useful output):
 After the Investigation Brief is assembled (core + any depth modules):
 
 1. **Check for new information:** Compare scout findings against cartographer context provided in Phase 1.
-2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder (Sonnet) using the existing `crucible:cartographer` skill's `recorder-prompt.md` template (at `skills/cartographer-skill/recorder-prompt.md`). Pass scout findings as input following the recorder's expected format.
+2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder:
+   ```
+   Task tool (general-purpose, model: sonnet):
+     description: "Cartographer recording for recon findings"
+   ```
+   Use the existing `crucible:cartographer` skill's `recorder-prompt.md` template (at `skills/cartographer-skill/recorder-prompt.md`). Note: this is `Task tool`, not `Agent tool (Explore)` — the recorder needs write access to the memory directory. Pass scout findings as input following the recorder's expected format.
    - Include auto-update resolutions from cartographer conflict adjudication
    - New module files, conventions, or landmines flow into cartographer storage
+   - **Narrate auto-updates:** "Auto-updating cartographer: [description]. Review with `/cartographer consult`." Auto-updates must be visible — silent persistent changes affect all future sessions.
 3. **If nothing new:** Skip recorder dispatch.
 
 **Key constraint:** `/recon` is read-only on the codebase. Cartographer writes go to the memory directory, not the repo.
@@ -368,6 +402,9 @@ The brief follows the exact template from the design, including the metadata blo
 ...
 
 ## Conflicts
+...
+
+## Open Questions
 ...
 
 ---
@@ -426,6 +463,7 @@ The brief follows the exact template from the design, including the metadata blo
 Structure Scout reports are cached for cross-invocation reuse within a session:
 - Cache path: `~/.claude/projects/<project-hash>/memory/recon/sessions/<session_id>/structure-scout.md`
 - When `session_id` is provided, check this path before dispatching Structure Scout
+- **Invalidation:** If the cached report's commit SHA (from the `<!-- cached-commit: ... -->` metadata line) differs from current HEAD, discard the cache and re-dispatch. Narrate: "Structure Scout cache invalidated (codebase changed: [old SHA] → [new SHA]). Re-running fresh." This handles cases where the codebase changes mid-session and ensures the parent skill knows the structural basis changed.
 - Session cache files follow the same 24-hour stale cleanup as run directories
 
 ### Stale Directory Cleanup
@@ -469,6 +507,9 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 **Stable (changing requires updating all consumer templates):**
 - Brief metadata fields: `Brief version`, `Task`, `Scope`, `Depth modules`, `Cartographer state`, `Commit`
 - Core section headers: `## Project Structure`, `## Existing Patterns`, `## Scope Boundaries`, `## Prior Art`, `## Conflicts`
+
+**Semi-stable (additive, consumers opt-in):**
+- `## Open Questions` — present when scouts report unknowns. Consumers that need it parse for it; consumers that don't can ignore it. Not yet validated by consumer integration — promoted to stable once 2+ consumers confirm they consume it.
 
 **Semi-stable (consumers that request specific modules depend on these):**
 - Depth module section headers: `## Impact Analysis`, `## Consumer Registry`, `## Friction Scan`, `## Subsystem Manifest`, `## Diagnostic Context`, `## Execution Readiness`

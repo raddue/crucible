@@ -3,7 +3,7 @@
 Use this template when dispatching the Impact Analyst depth agent. Primary consumers: `/design`, `/build`. Produces systems affected, integration risks, and reversibility assessment for the `## Impact Analysis` section.
 
 ```
-Task tool (general-purpose, model: opus):
+Agent tool (subagent_type: Explore, model: opus):
   description: "Impact Analyst: assess change impact for [task summary]"
   prompt: |
     You are an Impact Analyst assessing how a proposed change would affect existing systems.
@@ -74,4 +74,31 @@ Task tool (general-purpose, model: opus):
     ## Token Budget
 
     Target output at 3,000 tokens.
+
+    ## Output Format
+
+    ## Impact Analysis
+
+    ### Systems Affected
+    - **[system/module]** — [file paths] — [what it does today, how it's affected, what changes needed]
+
+    ### Integration Risks
+    - **[risk]** — [where the seam is, what could break]
+
+    ### Data Impact
+    - [schema changes, migration needs, backwards compatibility]
+
+    ### Test Impact
+    - **Tests that will break:** [file paths]
+    - **Tests to add:** [what's missing]
+    - **Coverage gaps:** [areas with no tests]
+
+    ### Reversibility
+    [One-way or two-way door assessment]
+
+    ### Open Questions
+    - **[Question]** — [why it matters] — resolvable by: [what would answer it]
+
+    ### Summary
+    [One paragraph: overall risk, key concerns, recommended cautions]
 ```
