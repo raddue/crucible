@@ -43,6 +43,9 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     Cite specific paths for every finding. Do not make claims without path evidence.
 
+    **Epistemic honesty:** If you look for something and can't determine it, report
+    it as an open question. What you couldn't find is as valuable as what you did.
+
     ## Scope Suggestions
 
     After your investigation, emit a `suggested_scope` section:
@@ -104,6 +107,10 @@ Agent tool (subagent_type: Explore, model: sonnet):
     ### Cartographer Conflicts
     <!-- Only present if conflicts found -->
     - [cartographer claim] vs. [fresh finding] — evidence: [type]
+
+    ### Open Questions
+    <!-- What you looked for and couldn't determine -->
+    - **[Question]** — [why it matters] — resolvable by: [what would answer it]
 
     ### Notes
     [Exploration budget usage, areas not covered, confidence notes]

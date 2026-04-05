@@ -3,7 +3,7 @@
 Use this template when dispatching the Manifest Builder depth agent. Primary consumer: `/audit`. Produces a structured file roster with roles, boundaries, and dependency graph for the `## Subsystem Manifest` section.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Agent tool (subagent_type: Explore, model: sonnet):
   description: "Manifest Builder: produce file roster for [subsystem]"
   prompt: |
     You are a Manifest Builder producing a structured file roster for a subsystem,
@@ -55,6 +55,9 @@ Task tool (general-purpose, model: sonnet):
     - Do NOT assess correctness
     - Do NOT suggest improvements
     - Do NOT skip files — completeness is critical for audit scoping
+    - If the scoped directory contains more than ~100 files, report top-level
+      structure with file counts per subdirectory instead of exhaustive listing.
+      Flag as `(scope too broad for exhaustive manifest)` so the consumer can refine.
 
     ## Assumption Annotation
 
@@ -70,4 +73,31 @@ Task tool (general-purpose, model: sonnet):
     ## Token Budget
 
     Target output at 3,000 tokens.
+
+    ## Output Format
+
+    ## Subsystem Manifest
+
+    ### File Roster
+    | # | File | Role | Centrality |
+    |---|------|------|------------|
+    | 1 | [path] | [one-line role] | High/Medium/Low |
+
+    ### Boundary Description
+    - **Inside:** [directories/files within the subsystem]
+    - **Outside:** [adjacent directories/files]
+    - **Boundary markers:** [what defines the edge]
+
+    ### Dependency Graph
+    **Internal:**
+    - [file] → [file] (imports/uses)
+
+    **External:**
+    - [external module] — used by: [files]
+
+    ### Entry Points
+    - [file] — consumed by: [external subsystems]
+
+    ### Open Questions
+    - **[Question]** — [why it matters] — resolvable by: [what would answer it]
 ```

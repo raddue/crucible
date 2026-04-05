@@ -3,7 +3,7 @@
 Use this template when dispatching the Consumer Mapper depth agent. Primary consumer: `/migrate`. Produces a structured registry of all consumers of a target symbol, module, or API for the `## Consumer Registry` section.
 
 ```
-Agent tool (subagent_type: general-purpose, model: sonnet):
+Agent tool (subagent_type: Explore, model: sonnet):
   description: "Consumer Mapper: build consumer registry for [target]"
   prompt: |
     You are a Consumer Mapper building a structured registry of all consumers of a
@@ -85,6 +85,9 @@ Agent tool (subagent_type: general-purpose, model: sonnet):
 
     ### [Consumer 2]
     ...
+
+    ### Open Questions
+    - **[Question]** — [why it matters] — resolvable by: [what would answer it]
 
     ### Summary
     - [N] simple renames, [N] behavioral changes, [N] major refactors
