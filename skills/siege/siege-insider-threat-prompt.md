@@ -66,9 +66,12 @@ Task tool (general-purpose, model: opus):
     4. **Construct concrete attacks.** "As user with role X, send request Y
        to endpoint Z, gain access to W."
 
-    5. **Cap at 5 findings.** Every finding must have a concrete exploitation
-       scenario in the CURRENT codebase. "This endpoint could be vulnerable
-       if a future endpoint reuses this pattern" is not a finding.
+    5. **Cap at 5 findings.** Every **Active** finding must have a concrete
+       exploitation scenario in the CURRENT codebase. **Hardening** findings
+       must name a specific, reasonable future change that would make it
+       exploitable. "This endpoint could be vulnerable if a future endpoint
+       reuses this pattern" is not a finding unless you name the specific
+       pattern and trigger.
 
     ## What You Must NOT Do
 
@@ -76,6 +79,7 @@ Task tool (general-purpose, model: opus):
     - Do NOT flag injection vulnerabilities (Boundary Attacker handles that)
     - Do NOT flag configuration issues (Infrastructure Prober handles that)
     - Do NOT speculate without code evidence
+    - Do NOT file findings where no concrete exploitation scenario (Active or Hardening) can be constructed
 
     ## Context Self-Monitoring
 
@@ -84,8 +88,12 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    **Exploitability tags:**
+    - **Active:** Exploitable in the current codebase today, no hypothetical preconditions.
+    - **Hardening:** Not currently exploitable, but becomes exploitable if a specific, reasonable future change occurs. You MUST name that change.
+
     <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=insider-threat -->
-    **[SIEGE-IT-N]** [severity] -- [title]
+    **[SIEGE-IT-N]** [severity] [Active|Hardening] -- [title]
     File: [path]:[line_range] | Agent: Insider Threat
     Attack: [as user with role X, do Y to gain Z]
     Evidence: [specific code -- the missing check or bypassable check]

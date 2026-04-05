@@ -76,15 +76,19 @@ Task tool (general-purpose, model: opus):
        path actually reachable in this codebase? CISA KEV matches are
        automatic Critical — these are actively exploited in the wild.
 
-    5. **Cap at 5 findings.** Every finding must have concrete evidence in
-       the current codebase. A dependency CVE counts if the vulnerable code
-       path is reachable. A CISA KEV match is always a finding regardless.
+    5. **Cap at 5 findings.** Every **Active** finding must have concrete
+       evidence of exploitability in the current codebase. **Hardening**
+       findings must name a specific, reasonable future change that would
+       make the weakness exploitable. A dependency CVE counts if the
+       vulnerable code path is reachable. A CISA KEV match is always a
+       finding regardless.
 
     ## What You Must NOT Do
 
     - Do NOT suggest fixes
     - Do NOT flag injection or access control issues
     - Do NOT speculate without evidence
+    - Do NOT file findings where no concrete exploitation scenario (Active or Hardening) can be constructed
     - Do NOT downgrade CISA KEV matches — actively exploited = Critical
 
     ## Context Self-Monitoring
@@ -93,8 +97,12 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
+    **Exploitability tags:**
+    - **Active:** Exploitable in the current codebase today, no hypothetical preconditions.
+    - **Hardening:** Not currently exploitable, but becomes exploitable if a specific, reasonable future change occurs. You MUST name that change.
+
     <!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=infrastructure-prober -->
-    **[SIEGE-IP-N]** [severity] -- [title]
+    **[SIEGE-IP-N]** [severity] [Active|Hardening] -- [title]
     File: [path]:[line_range] | Agent: Infrastructure Prober
     Attack: [what an attacker gains from this misconfiguration]
     Evidence: [specific code or config reference]

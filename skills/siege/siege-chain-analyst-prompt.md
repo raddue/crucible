@@ -115,7 +115,11 @@ Task tool (general-purpose, model: opus):
 
     ## Output Format
 
-    **[SIEGE-CA-N]** [severity] -- [chain title]
+    **Exploitability tags:**
+    - **Active:** Every step in the chain is exploitable in the current codebase today.
+    - **Hardening:** Any step in the chain requires a future change to become exploitable. Chains inherit exploitability from their weakest link -- if any step is Hardening, the chain is Hardening. You MUST name the specific future change.
+
+    **[SIEGE-CA-N]** [severity] [Active|Hardening] -- [chain title]
     File: [path1]:[line] → [path2]:[line] → [path3]:[line] | Agent: Chain Analyst
     Attack: [multi-step exploitation narrative: step 1 → step 2 → impact]
     Evidence: [code at each step in the chain]
