@@ -49,7 +49,7 @@ Add an optional `deployment_context` parameter to Siege invocation:
 |---|---|---|
 | `intranet` | Internal network only, no internet exposure | Network-level findings downgraded by 1 level. Application-level findings unchanged. |
 | `public` | Internet-facing, untrusted users | No adjustment (current default behavior) |
-| `hybrid` | Internal app with some external-facing endpoints | No blanket adjustment; agents assess per-endpoint |
+| `hybrid` | Internal app with some external-facing endpoints | Same as `public` (no blanket adjustment). Users with mixed exposure should use `public` — the intranet downgrade only applies when ALL endpoints are internal. |
 | *(unset)* | Unknown | Assume worst case = `public` (no change from v1) |
 
 **Severity adjustment rules:**
@@ -86,7 +86,7 @@ After the fix agent generates its approach but before writing code, output the a
 
 1. Fix agent generates the fix and commits it to a separate commit
 2. The orchestrator reports: "Fix generated for [finding]. Review the diff before accepting."
-3. The fix is already committed — rejecting is a `git reset HEAD~1`
+3. The fix is already committed — rejecting is a `git revert <commit-sha>`
 4. This is **non-blocking**: the pipeline continues to the next review round immediately. The user can reject fixes asynchronously.
 
 **Why option C over A or B:**
