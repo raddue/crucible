@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Architecture Reviewer Prompt Template
 
 Use this template at the mid-plan architectural checkpoint to assess whether the emerging system coheres.

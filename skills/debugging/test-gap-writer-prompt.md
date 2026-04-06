@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Test Gap Writer Prompt Template (Debugging)
 
 Use this template when dispatching a test gap writer after Phase 5 (red-team + code review) identifies missing test coverage for a fix.

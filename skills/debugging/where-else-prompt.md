@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # "Where Else?" Scan Agent Prompt Template
 
 Use this template when the orchestrator dispatches the Phase 4.5 "Where Else?" scan agent. This agent runs ONLY after Phase 4 succeeds (fix works, no regressions). It receives the fix diff, cartographer context, and implementer observations, then finds and fixes analogous locations in the codebase that have the same bug pattern.

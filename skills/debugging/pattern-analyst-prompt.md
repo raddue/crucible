@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Pattern Analyst Subagent Prompt Template
 
 Use this template when dispatching a pattern analysis subagent during Phase 2 of systematic debugging.

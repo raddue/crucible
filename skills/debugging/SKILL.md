@@ -7,6 +7,9 @@ description: Use when encountering any bug, test failure, or unexpected behavior
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Random fixes waste time and create new bugs. Quick patches mask underlying issues.
 
 **Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
@@ -285,7 +288,7 @@ Done.
 
 ### Phase 0: Load Codebase Context
 
-**Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, paste them into every investigator's prompt so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
+**Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, include them in every investigator's dispatch file so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
 **Defect signature loading (for investigators):**
 1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory

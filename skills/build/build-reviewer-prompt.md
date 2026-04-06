@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 <!-- Sections marked CANONICAL are defined in shared/reviewer-common.md. Keep in sync when updating. -->
 
 # Build Reviewer Prompt Template

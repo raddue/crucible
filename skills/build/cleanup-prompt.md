@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Cleanup Agent Prompt Template
 
 Use this template when dispatching a de-sloppify cleanup agent in Phase 3.

@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Synthesis Subagent Prompt Template
 
 Use this template when dispatching a synthesis subagent to consolidate Phase 1 investigation findings.
