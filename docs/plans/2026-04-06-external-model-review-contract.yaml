@@ -1,0 +1,171 @@
+version: "1.0"
+ticket: "#144"
+epic: "#144"
+title: "Provider-agnostic external model review"
+date: "2026-04-06"
+
+api_surface:
+  - name: "ModelConfig.base_url_env"
+    type: "interface"
+    signature: "ModelConfig(provider, model_id, api_key_env, temperature, base_url_env)"
+    params:
+      - name: "base_url_env"
+        type: "str | None"
+        required: false
+    returns: "ModelConfig"
+    description: "New optional field on existing ModelConfig dataclass for OpenAI-compatible endpoint override"
+
+  - name: "OpenAIProvider"
+    type: "class"
+    signature: "class OpenAIProvider(config: ModelConfig): async def query(prompt: str, context: str) -> ModelResponse"
+    params:
+      - name: "config"
+        type: "ModelConfig"
+        required: true
+    returns: "OpenAIProvider instance"
+    description: "Provider adapter for OpenAI-compatible API endpoints (OpenAI, Azure, Codex, local inference). Constructor reads api_key from env, base_url from base_url_env if set."
+
+  - name: "ExternalReviewConfig"
+    type: "class"
+    signature: "class ExternalReviewConfig(enabled: bool, models: list[ModelConfig], timeout_seconds: int, temperature: float, skills: dict[str, bool])"
+    params:
+      - name: "enabled"
+        type: "bool"
+        required: true
+      - name: "models"
+        type: "list[ModelConfig]"
+        required: true
+      - name: "timeout_seconds"
+        type: "int"
+        required: false
+      - name: "temperature"
+        type: "float"
+        required: false
+      - name: "skills"
+        type: "dict[str, bool]"
+        required: false
+    returns: "ExternalReviewConfig"
+    description: "Configuration dataclass for external review feature"
+
+  - name: "load_external_review_config"
+    type: "function"
+    signature: "def load_external_review_config(project_dir: str) -> ExternalReviewConfig"
+    params:
+      - name: "project_dir"
+        type: "str"
+        required: true
+    returns: "ExternalReviewConfig"
+    description: "Loads external_review section from .claude/consensus-config.yaml"
+
+  - name: "external_review"
+    type: "function"
+    signature: "MCP tool: external_review(prompt: str, context: str, metadata: dict) -> ExternalReviewResult"
+    params:
+      - name: "prompt"
+        type: "str"
+        required: true
+      - name: "context"
+        type: "str"
+        required: true
+      - name: "metadata"
+        type: "dict"
+        required: false
+    returns: "ExternalReviewResult {status, models_queried, models_responded, reviews[]}"
+    description: "MCP tool that dispatches review prompt to all configured external models and returns raw per-model responses"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "External review must never block or delay the host model's review, except on consensus bridge rounds where external results feed into consensus_query as additional_responses"
+      verification: "External review dispatch is always parallel to (never sequential after) host dispatch. Exception: on consensus-eligible quality-gate rounds (1/4/7/10/13), external_review runs first so its results can be injected into consensus_query via additional_responses. This sequential dependency is an accepted latency tradeoff for cross-model synthesis."
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "External review findings must not affect quality-gate scoring"
+      verification: "Quality-gate weighted score calculation uses only host red-team findings. External findings appear in output and fix journal only."
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Zero configured external models produces identical behavior to today"
+      verification: "No external_review section in config, or enabled: false, results in no MCP calls and no output changes in any skill."
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "API keys are never stored in config files"
+      verification: "Config schema uses api_key_env (environment variable name), never api_key (literal value). No grep match for literal API key patterns in config examples."
+      check_method: "grep"
+
+    - id: "INV-5"
+      description: "OpenAIProvider follows BaseProvider protocol"
+      verification: "OpenAIProvider implements async query(prompt: str, context: str) -> ModelResponse matching the BaseProvider Protocol"
+      check_method: "code-inspection"
+
+    - id: "INV-6"
+      description: "Single external model is fully functional"
+      verification: "No min_models field or minimum count check in external review config. A config with exactly one model in the models list passes validation and produces review output."
+      check_method: "code-inspection"
+
+    - id: "INV-12"
+      description: "Config parser handles both flat and nested YAML structures"
+      verification: "load_config() reads consensus section via raw.get('consensus', raw) fallback. Both flat YAML and nested consensus: YAML parse correctly."
+      check_method: "code-inspection"
+
+    - id: "INV-13"
+      description: "Config YAML uses model_id (not model) matching ModelConfig dataclass"
+      verification: "No occurrence of bare 'model:' key (without _id suffix) in consensus-config-example.yaml model entries"
+      check_method: "grep"
+
+  testable:
+    - id: "INV-7"
+      description: "OpenAIProvider returns valid ModelResponse on success and on API error"
+      verification: "Unit test with mocked OpenAI client verifying both success and error paths"
+      test_tag: "contract:provider:inv-7"
+
+    - id: "INV-8"
+      description: "external_review MCP tool returns raw per-model responses without aggregation"
+      verification: "Integration test calling external_review with 2 mock providers, verifying response contains 2 separate review entries with distinct content"
+      test_tag: "contract:mcp:inv-8"
+
+    - id: "INV-9"
+      description: "Graceful degradation when external provider times out"
+      verification: "Test with one fast provider and one slow provider (exceeds timeout). Result status is 'partial', fast provider's review is included, slow provider has error field set."
+      test_tag: "contract:resilience:inv-9"
+
+    - id: "INV-10"
+      description: "Config validation rejects unknown providers and missing env vars"
+      verification: "Test that ConfigError is raised for provider not in SUPPORTED_PROVIDERS and for missing environment variable"
+      test_tag: "contract:config:inv-10"
+
+    - id: "INV-11"
+      description: "external_review with disabled config returns unavailable status"
+      verification: "Test that enabled: false in config causes external_review tool to return status 'unavailable' without dispatching any providers"
+      test_tag: "contract:config:inv-11"
+
+integration_points:
+  - contract: null
+    ticket: "#73"
+    relationship: "extends"
+    surface: "crucible-consensus MCP server"
+    notes: "Adds external_review tool alongside existing consensus_query. Shares provider infrastructure and config file."
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Extend existing consensus MCP server rather than building a new server"
+    confidence: "high"
+    alternatives: ["New standalone external-review MCP server", "HTTP microservice instead of MCP"]
+    reasoning: "Provider adapters, dispatch, config loading, and tests are already built. Duplication is wasteful. The two tools share providers but differ in post-dispatch handling."
+    reversibility: "Low — once integrated, extracting to separate server requires splitting shared code"
+
+  - id: "AMB-2"
+    decision: "External findings do NOT affect quality-gate scoring, only appear in output and fix journal"
+    confidence: "high"
+    alternatives: ["Score external findings alongside host findings", "Weight external findings at 50% of host findings"]
+    reasoning: "Quality-gate stagnation detection is calibrated to host model severity scale. Mixing external severities destabilizes scoring. External findings are informational, not authoritative."
+    reversibility: "High — could add external scoring later by modifying quality-gate scoring logic"
+
+  - id: "AMB-3"
+    decision: "Inquisitor external review defaults to disabled due to 5x cost multiplier"
+    confidence: "medium"
+    alternatives: ["Enable by default for all skills", "Enable for first dimension only"]
+    reasoning: "5 parallel external calls per inquisitor run is expensive. Users who want it can opt in via config. Other skills have 1 external call per dispatch."
+    reversibility: "High — config toggle, flip default"

@@ -37,6 +37,65 @@ is available in the current environment:
 Consensus is a transparent enhancement. Its presence improves coverage;
 its absence changes nothing.
 
+## External Model Review (Optional)
+
+At the start of the quality gate, check whether the `external_review` MCP tool
+is available in the current environment AND `skills.quality_gate` is enabled in
+the external review config. If either check fails, skip all external review
+steps silently — no warnings, no prompts.
+
+### When It Runs
+
+Every red-team round, alongside the host red-team dispatch. Call
+`external_review` with:
+- `prompt`: contents of `skills/shared/external-review-prompt.md`
+- `context`: the same artifact context given to the red-team subagent
+- `skill`: `"quality_gate"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "quality_gate", "round": N}` (traceability)
+
+### Consensus Bridge (rounds 1, 4, 7, 10, 13)
+
+On consensus-eligible rounds where both `consensus_query` and `external_review`
+are available:
+
+1. Run `external_review` FIRST, before calling `consensus_query`
+2. Only bridge reviews where `error` is null. Skip errored reviews — their
+   empty content would corrupt the consensus signal.
+3. Pass the non-errored external review responses as the `additional_responses`
+   parameter to `consensus_query`
+4. The aggregator deduplicates findings across all models (consensus + external),
+   surfaces cross-model disagreements, and tags external-unique findings with
+   confidence levels
+5. On non-consensus rounds, external review runs independently — its findings
+   are appended to round output but not routed through the aggregator
+
+### Scoring Invariant (INV-2)
+
+**CRITICAL: External findings do NOT affect the scoring algorithm.**
+
+- The weighted score (Fatal=3, Significant=1) is computed from **host red-team
+  findings ONLY**
+- External findings are appended to round output for visibility
+- External findings are added to the fix journal context (so the fix agent sees
+  them as additional perspective)
+- External findings are NEVER inputs to the stagnation detection scoring
+
+This invariant is load-bearing. The quality gate's convergence guarantees depend
+on a single, consistent scoring source. Mixing external signal into scoring
+would create non-deterministic stagnation behavior.
+
+### Graceful Degradation
+
+- `external_review` tool not available (MCP server not running): skip silently.
+- Response `status` is `"unavailable"` (no config or disabled): skip silently.
+- Response `status` is `"error"` (all models failed): skip silently, note
+  failure in round output. Distinct from "unavailable" — means the feature is
+  configured but every model errored.
+- Response `status` is `"partial"` (some models failed): include available
+  reviews, note which models failed in round output.
+- External review timeout or failure never blocks or delays the host red-team
+  round.
+
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
@@ -378,6 +437,9 @@ Three exit modes beyond clean approval:
 - Using consensus on every red-team round (periodic only: rounds 1, 4, 7, ...)
 - Treating single-model unique findings from consensus as less important than multi-model agreements
 - Passing consensus provenance metadata to the fix agent's red-team framing (provenance is for the fix journal and orchestrator, not for biasing the next reviewer)
+- Including external review findings in the weighted score calculation (INV-2: host red-team findings ONLY)
+- Using external findings as inputs to stagnation detection scoring
+- Blocking the host red-team round on external review availability or timeout
 
 ## Integration
 

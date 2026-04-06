@@ -259,6 +259,20 @@ The **orchestrator** (not this skill) decides whether to skip. When used standal
 
 This skill produces **adversarial tests across 5 dimensions**. The tests themselves are the quality mechanism. When used in the build pipeline, the quality-gate that follows reviews the final state including any inquisitor fixes. No additional quality gate is needed on the inquisitor's own output.
 
+## External Model Review (Optional)
+
+**Disabled by default** due to cost: with N external models, this adds 5*N API calls per inquisitor run (one per dimension per model).
+
+Only active if `skills.inquisitor` is explicitly set to `true` in external review config. If the `external_review` MCP tool is unavailable or the call fails for any dimension, skip silently and proceed with host findings only.
+
+Per-dimension: after dispatching the host Opus subagent for each dimension, call the `external_review` MCP tool with:
+- `prompt`: contents of `skills/shared/external-review-prompt.md`
+- `context`: same diff + dimension-specific framing (dimension name, focus areas, attack lens)
+- `skill`: `"inquisitor"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "inquisitor", "dimension": "<dimension_name>"}` (traceability)
+
+Append external perspectives per dimension alongside the host subagent's findings in the dimension section of the INQUISITOR REPORT. External findings inform fix guidance but do not independently trigger fix cycles — only host-written executable test failures drive fixes.
+
 ## Integration
 
 - **Called by:** `crucible:build` (Phase 4, after code-review, before quality-gate)

@@ -61,6 +61,33 @@ After fixing Critical/Important issues, dispatch a **NEW fresh code-reviewer sub
 
 **Fresh reviewer every round.** Never pass prior findings to the next reviewer.
 
+## External Model Review (Optional)
+
+After dispatching the host code-reviewer subagent, optionally call the `external_review` MCP tool for an independent second opinion from external models. The preferred pattern is: dispatch the host reviewer as a background Agent first, call `external_review`, then collect host results — this gives effective parallelism where background agents are available.
+
+**Invocation:**
+
+Call `external_review` with:
+- `prompt`: contents of `skills/shared/external-review-prompt.md`
+- `context`: the same diff and requirements context given to the host reviewer
+- `skill`: `"code_review"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "code_review", "round": N}` (traceability; where N is the current review round)
+
+**Per-skill toggle:** The server checks the `skill` argument against `skills.code_review` in the external review config. If `false`, the server returns `unavailable`.
+
+**Graceful degradation:**
+- `external_review` tool not available (MCP server not running): skip silently.
+- Response `status` is `"unavailable"` (no config or disabled): skip silently.
+- Response `status` is `"partial"` (some models failed): show available reviews, note which models failed.
+
+**Output format:** After the host review output, append each external review in its own section:
+```
+## External Review — {provider} ({model_id})
+{review content}
+```
+
+**Contract INV-1:** External review dispatch must never block or delay the host review. If external review times out or fails, the host review stands alone.
+
 ## Example
 
 ```

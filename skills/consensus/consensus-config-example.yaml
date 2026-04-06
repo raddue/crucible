@@ -37,7 +37,7 @@ consensus:
     # --- Anthropic -----------------------------------------------------------
     - provider: anthropic
       # Model identifier as recognized by the Anthropic API.
-      model: claude-sonnet-4-20250514
+      model_id: claude-sonnet-4-20250514
       # Environment variable containing your Anthropic API key.
       # The MCP server reads this at runtime. The key is never stored on disk.
       api_key_env: ANTHROPIC_API_KEY
@@ -48,7 +48,7 @@ consensus:
     # --- Google --------------------------------------------------------------
     - provider: google
       # Model identifier as recognized by the Google AI API.
-      model: gemini-2.5-pro
+      model_id: gemini-2.5-pro
       # Environment variable containing your Google API key.
       api_key_env: GOOGLE_API_KEY
       # Slightly higher temperature can surface more diverse findings in
@@ -57,12 +57,12 @@ consensus:
 
     # --- Additional models (uncomment when providers are available) ----------
     # - provider: openai
-    #   model: o3
+    #   model_id: o3
     #   api_key_env: OPENAI_API_KEY
     #   temperature: 0.6
     #
     # - provider: deepseek
-    #   model: deepseek-r1
+    #   model_id: deepseek-r1
     #   api_key_env: DEEPSEEK_API_KEY
     #   temperature: 0.6
 
@@ -81,3 +81,64 @@ consensus:
 
     # investigate: exploratory analysis aggregation (Challenger, architectural analysis)
     investigate: true
+
+# =============================================================================
+# External Review Configuration
+# =============================================================================
+# External review provides independent second opinions from non-Anthropic models.
+# Unlike consensus (which synthesizes multiple responses into a unified verdict),
+# external review returns raw per-model perspectives alongside Claude's analysis.
+#
+# External review provides raw per-model perspectives. Consensus synthesizes.
+# On consensus-eligible quality-gate rounds, external responses are bridged
+# into consensus.
+# =============================================================================
+
+external_review:
+  # Master switch. Set to false to disable external review entirely.
+  # Skills will proceed with Claude-only analysis.
+  enabled: true
+
+  # Maximum time (in seconds) to wait for external model responses.
+  # Range: 30-600. Default: 180. Higher values accommodate slower providers.
+  timeout_seconds: 180
+
+  # Default sampling temperature for all external models.
+  # Per-model temperature overrides this value. Range: 0.0-1.0.
+  temperature: 0.3
+
+  # ---------------------------------------------------------------------------
+  # Model Definitions
+  # ---------------------------------------------------------------------------
+  # Single-provider setup (common case — one external perspective is enough):
+  models:
+    - provider: google
+      # Model identifier as recognized by the provider's API.
+      model_id: gemini-2.5-pro
+      # Environment variable containing the API key. Never paste raw keys.
+      api_key_env: GOOGLE_API_KEY
+      # Optional: environment variable for a custom base URL (proxies, etc.)
+      # base_url_env: GOOGLE_BASE_URL
+
+  # Multi-provider setup (uncomment to add a second external model):
+  # models:
+  #   - provider: google
+  #     model_id: gemini-2.5-pro
+  #     api_key_env: GOOGLE_API_KEY
+  #     temperature: 0.3
+  #   - provider: openai
+  #     model_id: o3
+  #     api_key_env: OPENAI_API_KEY
+  #     # Per-model temperature override (takes precedence over section default)
+  #     temperature: 0.4
+
+  # ---------------------------------------------------------------------------
+  # Skill Toggles
+  # ---------------------------------------------------------------------------
+  # Control which skills use external review. Set to false to disable for
+  # specific skills. Defaults shown in comments.
+  skills:
+    code_review: true      # default: true — external perspective on code changes
+    quality_gate: true     # default: true — external review in QG red-team rounds
+    red_team: true         # default: true — external adversarial analysis
+    inquisitor: false      # default: false — cross-component testing (opt-in)
