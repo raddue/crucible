@@ -256,7 +256,7 @@ digraph deps {
 4. Enforce line caps — if a module file hits 100 lines, split into sub-modules or compress
 5. Mark resolved landmines with strikethrough, prune after 10 sessions
 6. **Retire stale landmines:** During each recorder update, check if any Active Landmine entries reference file paths that no longer exist in the current tree. If ALL file paths in an entry are gone, move the entry to `## Retired Landmines` with format: `~~[Short title]~~ — [Retired: paths no longer exist. Original module: X]`. Retired entries do NOT count toward the 100-line cap and are NOT loaded into subagent dispatch files.
-6. Update `map.md` module table whenever a new module file is created
+7. Update `map.md` module table whenever a new module file is created
 
 ### Defect Signature Recording
 
