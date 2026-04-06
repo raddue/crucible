@@ -86,6 +86,7 @@
 - Extend `initialize()`:
   - Wrap existing `load_config()` call in try/except ConfigError — if consensus config fails, set `_config = None` and log warning (don't crash). This allows external review to work even if consensus is not configured.
   - After consensus init, call `load_external_review_config()` for `_external_config` and build `_external_providers` list. This never raises — returns disabled config on missing file/section.
+- Extend `consensus_query` schema: add optional `additional_responses` parameter (array of `{provider, model_id, content, latency_ms}`). When present, deserialize into `ModelResponse` objects and append to dispatch results before calling `aggregate()`. This lets external review responses feed into consensus synthesis on eligible rounds.
 - Add `external_review` to `list_tools()` with schema: `prompt` (string, required), `context` (string, required), `metadata` (object, optional)
 - Restructure `call_tool()` routing: replace `if name != "consensus_query": error` with if/elif/else routing for `consensus_query`, `external_review`, and unknown tools
 - Add `external_review` handler:
@@ -150,7 +151,7 @@
 - External findings are appended to round output for visibility
 - External findings are added to the fix journal context (so fix agent sees them as additional perspective)
 - **Critical invariant (INV-2):** External findings do NOT affect the scoring algorithm. The weighted score (Fatal=3, Significant=1) is computed from host red-team findings ONLY. External findings are informational context, not scoring inputs.
-- If consensus is also active on an eligible round, both consensus and external review run — consensus synthesizes host+external for a verdict, external review provides raw per-model perspectives. They serve different purposes.
+- **Consensus bridge (innovative addition):** On consensus-eligible rounds (1/4/7/10/13), run `external_review` first, then pass the external responses as `additional_responses` to `consensus_query`. The aggregator deduplicates findings across all models (consensus + external), surfaces cross-model disagreements, and tags external unique findings with proper confidence. On non-consensus rounds, external review runs independently as raw output.
 - Respect per-skill toggle: check `skills.quality_gate` in external review config
 
 **Complexity:** Medium (must preserve scoring invariant)

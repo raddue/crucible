@@ -147,7 +147,25 @@ The calling skill (code-review, quality-gate, etc.) formats each response into a
 
 **Rationale:** Different models have different strengths, but asking them all to use the same output format makes findings comparable without synthesis. The prompt is the same; the API adapter handles the plumbing.
 
-**Confidence: Medium.** Some models may not follow the severity format well. Mitigation: the prompt includes explicit examples, and the calling skill treats external reviews as "best effort" — malformed output is shown as-is with a warning rather than discarded.
+**Confidence: Medium.** Some models may not follow the severity format well.
+
+### Decision 8: Bridge External Review into Consensus on Eligible Rounds
+
+**Choice: On consensus-eligible quality-gate rounds (1/4/7/10/13), feed external review responses into `consensus_query` as additional model inputs** instead of running them as a disconnected sidebar.
+
+Add an optional `additional_responses` parameter to the `consensus_query` MCP tool. When present, these responses are appended to the dispatch results before aggregation. The aggregator's `build_aggregation_input()` already iterates over a `list[ModelResponse]` — concat the lists. External models become first-class consensus participants on high-stakes rounds.
+
+On non-consensus rounds, external review runs independently as raw per-model output (no change).
+
+**Rationale:** Without this, consensus-eligible rounds produce two disconnected outputs: a synthesized consensus verdict (blind to external models) and raw external reviews (blind to consensus synthesis). This is architectural waste — the same artifact reviewed twice with no cross-pollination. Bridging gives:
+- Deduplication of overlapping findings across all models
+- Cross-model disagreements surfaced explicitly (e.g., Gemini vs Claude on severity)
+- External unique findings get proper confidence tagging via the aggregator
+- Zero changes to `aggregator.py` — it already handles N models
+
+**Cost:** One optional parameter on `consensus_query` schema, ~10 lines in `server.py`, ~5 lines per skill integration on consensus-eligible rounds.
+
+**Confidence: High.** The aggregator is provably model-count-agnostic. This is additive (optional parameter, backward compatible). Mitigation: the prompt includes explicit examples, and the calling skill treats external reviews as "best effort" — malformed output is shown as-is with a warning rather than discarded.
 
 ### Decision 7: Single Provider is First-Class
 
