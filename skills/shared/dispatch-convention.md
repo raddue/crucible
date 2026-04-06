@@ -28,7 +28,7 @@ version: 1
 1. **Subagent dispatches** (Agent/Task tool): The `Dispatch-Dir:` header field in the dispatch file carries the path. Subagents extract it and use it for their own dispatches.
 2. **Skill invocations** (crucible:quality-gate, crucible:red-team, etc.): The parent orchestrator passes the dispatch directory path as part of the invocation context — e.g., "Dispatch directory: /tmp/crucible-dispatch-1775430161/" in the quality-gate/red-team input.
 
-Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup. The seq counter is recovered from the manifest (last `seq` + 1) — no shared counter state needed.
+Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup. The seq counter MUST be recovered from the manifest (last `seq` + 1) immediately before each dispatch — do not cache across dispatches. Nested sub-skills (e.g., quality-gate calling red-team) append entries to the shared manifest, so a cached counter goes stale.
 
 **Fallback for missing path:** If a sub-skill receives no dispatch directory path (e.g., standalone invocation), create a new dispatch directory with a timestamp-based session ID. Do not glob for other sessions' directories — this would break session isolation under concurrent pipelines.
 
@@ -87,7 +87,11 @@ Begin by reading that file.
 <scratch>/.dispatch-active-<session-id>
 ```
 
-Contents: dispatch directory path and current seq counter.
+Format (two lines):
+```
+dispatch-dir: /tmp/crucible-dispatch-<session-id>/
+seq: <current counter>
+```
 
 **After compaction:**
 1. Glob for `.dispatch-active-*` in the pipeline's persistent scratch directory
@@ -98,7 +102,7 @@ This works for all 21 orchestrator skills regardless of whether they have Compre
 
 ## Dispatch Manifest
 
-Every dispatch directory includes `manifest.jsonl` — a structured execution trace.
+Every dispatch directory includes `manifest.jsonl` — a structured execution trace. Manifest entries must remain under 4096 bytes (POSIX PIPE_BUF) to ensure atomic appends under concurrent access.
 
 ### Protocol: Write Before Dispatch
 
