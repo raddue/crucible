@@ -114,9 +114,8 @@ class OpenAIProvider:
         self.config = config
         api_key = os.environ.get(config.api_key_env)
         base_url = None
-        base_url_env = getattr(config, 'base_url_env', None)
-        if base_url_env:
-            base_url = os.environ.get(base_url_env) or None
+        if config.base_url_env:
+            base_url = os.environ.get(config.base_url_env) or None
         self.client = openai.AsyncOpenAI(
             api_key=api_key,
             **({"base_url": base_url} if base_url else {}),

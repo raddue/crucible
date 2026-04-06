@@ -72,6 +72,7 @@ def load_config(project_dir: str) -> ConsensusConfig:
             model_id=m["model_id"],
             api_key_env=m["api_key_env"],
             temperature=m.get("temperature", 0.6),
+            base_url_env=m.get("base_url_env", None),
         ))
 
     # Validate providers
@@ -79,7 +80,7 @@ def load_config(project_dir: str) -> ConsensusConfig:
         if model.provider not in SUPPORTED_PROVIDERS:
             raise ConfigError(
                 f"Provider '{model.provider}' is not yet supported. "
-                f"Supported: anthropic, google."
+                f"Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}."
             )
 
     # Validate env vars
@@ -165,13 +166,8 @@ def load_external_review_config(project_dir: str) -> ExternalReviewConfig:
                 f"Environment variable '{model.api_key_env}' is not set "
                 f"(required by {model.provider} model)"
             )
-        if model.base_url_env is not None:
-            base_url_val = os.environ.get(model.base_url_env)
-            if not base_url_val:
-                raise ConfigError(
-                    f"Environment variable '{model.base_url_env}' is not set "
-                    f"(required by {model.provider} model)"
-                )
+        # base_url_env is optional — if declared but env var is missing/empty,
+        # the provider falls back to its default endpoint (no error)
 
     # Parse skills with defaults
     default_skills = {

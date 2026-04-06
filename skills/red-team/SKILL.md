@@ -181,7 +181,7 @@ After dispatching the host red-team subagent, call the `external_review` MCP too
 
 **Per-skill toggle:** only active if `skills.red_team` is set to `true` in external review config. If the `external_review` MCP tool is unavailable or the call fails, skip silently and proceed with host findings only.
 
-Append external perspectives after the host Devil's Advocate findings in the output. External findings use the same Fatal/Significant/Minor classification and count toward stagnation scoring like any other finding.
+Append external perspectives after the host Devil's Advocate findings in the output. External findings use the same Fatal/Significant/Minor classification but are **informational only** — they do NOT count toward stagnation scoring (INV-2). Only host red-team findings drive the scoring algorithm.
 
 ## Integration
 

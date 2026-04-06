@@ -176,7 +176,7 @@ external_review:
   enabled: true
   models:
     - provider: google
-      model: gemini-2.5-pro
+      model_id: gemini-2.5-pro
       api_key_env: GOOGLE_API_KEY
 ```
 
