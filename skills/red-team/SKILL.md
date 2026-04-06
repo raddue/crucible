@@ -177,9 +177,10 @@ Red-team operates in two modes depending on the caller:
 After dispatching the host red-team subagent, call the `external_review` MCP tool with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
 - `context`: same artifact + attack prompt context provided to the host reviewer
-- `metadata`: `{"skill": "red-team"}`
+- `skill`: `"red_team"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "red_team"}` (traceability)
 
-**Per-skill toggle:** only active if `skills.red_team` is set to `true` in external review config. If the `external_review` MCP tool is unavailable or the call fails, skip silently and proceed with host findings only.
+**Per-skill toggle:** The server checks the `skill` argument against `skills.red_team` in the external review config. Only active if set to `true`. If the `external_review` MCP tool is unavailable or the call fails, skip silently and proceed with host findings only.
 
 Append external perspectives after the host Devil's Advocate findings in the output. External findings use the same Fatal/Significant/Minor classification but are **informational only** — they do NOT count toward stagnation scoring (INV-2). Only host red-team findings drive the scoring algorithm.
 

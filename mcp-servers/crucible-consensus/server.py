@@ -159,12 +159,15 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
     additional_responses = arguments.get("additional_responses")
     if additional_responses:
         for ar in additional_responses:
-            responses.append(ModelResponse(
-                provider=ar["provider"],
-                model_id=ar["model_id"],
-                content=ar["content"],
-                latency_ms=ar["latency_ms"],
-            ))
+            try:
+                responses.append(ModelResponse(
+                    provider=ar["provider"],
+                    model_id=ar["model_id"],
+                    content=ar.get("content", ""),
+                    latency_ms=ar.get("latency_ms", 0),
+                ))
+            except (KeyError, TypeError) as e:
+                logger.warning(f"Skipping malformed additional_response: {e}")
 
     # Aggregate responses
     prompts_dir = str(Path(_project_dir) / "skills" / "consensus")
@@ -190,7 +193,8 @@ async def _handle_external_review(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps({"status": "unavailable"}))]
 
     # Per-skill toggle: if caller declares a skill, check whether it's enabled
-    skill = arguments.get("skill")
+    # Normalize hyphenated names to underscored to match config keys
+    skill = (arguments.get("skill") or "").replace("-", "_") or None
     if skill and not _external_config.skills.get(skill, True):
         return [TextContent(type="text", text=json.dumps({"status": "unavailable", "reason": f"external review disabled for skill '{skill}'"}))]
 

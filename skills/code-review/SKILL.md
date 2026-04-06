@@ -70,9 +70,10 @@ After dispatching the host code-reviewer subagent, optionally call the `external
 Call `external_review` with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
 - `context`: the same diff and requirements context given to the host reviewer
-- `metadata`: `{"skill": "code-review", "round": N}` (where N is the current review round)
+- `skill`: `"code_review"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "code_review", "round": N}` (traceability; where N is the current review round)
 
-**Per-skill toggle:** Check `skills.code_review` in the external review config. If `false`, skip.
+**Per-skill toggle:** The server checks the `skill` argument against `skills.code_review` in the external review config. If `false`, the server returns `unavailable`.
 
 **Graceful degradation:**
 - `external_review` tool not available (MCP server not running): skip silently.

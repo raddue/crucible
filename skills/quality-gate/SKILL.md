@@ -50,7 +50,8 @@ Every red-team round, alongside the host red-team dispatch. Call
 `external_review` with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
 - `context`: the same artifact context given to the red-team subagent
-- `metadata`: `{"skill": "quality-gate", "round": N}`
+- `skill`: `"quality_gate"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "quality_gate", "round": N}` (traceability)
 
 ### Consensus Bridge (rounds 1, 4, 7, 10, 13)
 

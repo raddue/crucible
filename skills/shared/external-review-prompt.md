@@ -6,7 +6,7 @@ You will review the code diff and any requirements provided in the CONTEXT secti
 
 ## Context
 
-[CONTEXT]
+The code to review has been provided to you as context. Review it thoroughly.
 
 ## Severity Definitions
 

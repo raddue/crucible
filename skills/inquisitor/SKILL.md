@@ -268,7 +268,8 @@ Only active if `skills.inquisitor` is explicitly set to `true` in external revie
 Per-dimension: after dispatching the host Opus subagent for each dimension, call the `external_review` MCP tool with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
 - `context`: same diff + dimension-specific framing (dimension name, focus areas, attack lens)
-- `metadata`: `{"skill": "inquisitor", "dimension": "<dimension_name>"}`
+- `skill`: `"inquisitor"` (top-level argument for per-skill toggle enforcement)
+- `metadata`: `{"skill": "inquisitor", "dimension": "<dimension_name>"}` (traceability)
 
 Append external perspectives per dimension alongside the host subagent's findings in the dimension section of the INQUISITOR REPORT. External findings inform fix guidance but do not independently trigger fix cycles — only host-written executable test failures drive fixes.
 
