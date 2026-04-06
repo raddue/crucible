@@ -1,0 +1,55 @@
+version: "1.0"
+ticket: "#126, #127, #128"
+epic: "#126"
+title: "Three /design skill enhancements"
+date: "2026-04-06"
+
+api_surface:
+  - name: "/design"
+    type: "interface"
+    signature: "/design (enhanced with scope absorption, grain test, stall-breaker)"
+    params:
+      - name: "idea"
+        type: "string — the user's feature or design idea"
+        required: true
+    returns: "Design doc with enhanced dimension analysis"
+    description: "Design skill with scope absorption test, data modeling grain test, and decision stall-breaker protocol"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Scope absorption test present in Step 5 synthesis"
+      verification: "SKILL.md contains 4-question scope absorption test between auto-resolution and question redirection checks"
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "Data modeling grain test in triage and gap checklist"
+      verification: "SKILL.md Step 3 triage section mentions data model dimensions warranting deep dive, and gap checklist includes grain test item"
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Stall-breaker protocol with 3-tier tiebreaker"
+      verification: "SKILL.md contains stall detection trigger (2+ exchanges) and 3-tier protocol (eliminate wrong, pick reversible, pick ships sooner)"
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "Existing Phase 2 flow preserved"
+      verification: "Steps 1-8 are unchanged — new content is additive (Step 5 insertion, Step 3 note, new Step 9)"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "No new files created"
+      verification: "Only skills/design/SKILL.md is modified"
+      check_method: "file-structure"
+
+  testable: []
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "All three enhancements in SKILL.md only, no new prompt templates"
+    confidence: "high"
+    alternatives: ["Add investigation agent instructions for each heuristic"]
+    reasoning: "These are orchestrator-level heuristics applied after agents return. Agents don't need to know about them."
+    reversibility: "High — could add agent-level checks later"
