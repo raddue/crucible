@@ -94,6 +94,28 @@ Task tool (model: opus):
     - **Yes/No:** [determination]
     - **Reason:** [why or why not]
 
+    ### Legacy Migration Pattern Checklist
+
+    After structuring the phases, verify the plan against these operational
+    patterns. Flag any violations in a "Pattern Compliance" section at the
+    end of the phase plan.
+
+    1. **Map the territory:** Are there operational unknowns (manual processes,
+       workarounds, tribal knowledge) that the technical analysis didn't
+       capture? Flag them as risks requiring user confirmation before cutover.
+    2. **Build alongside:** Does the plan include a coexistence period where
+       old and new systems run in parallel? If not, justify why hard cutover
+       is acceptable.
+    3. **Cut over by group:** Do consumer migration waves (Phase 3a-3N) map
+       to user groups or teams, not just code modules? If applicable, identify
+       rollout groups.
+    4. **Don't migrate data unless you must:** Are any phases flagged as data
+       migration? If so, verify the migration is genuinely required — not just
+       assumed. Flag data migration phases as high-risk.
+    5. **Kill the old system:** Does the plan include an explicit decommission
+       step as the final phase? Include criteria for when decommission triggers
+       (last user migrated, parallel period complete).
+
     ## Rules
 
     - Every phase must satisfy the safe stopping point invariant

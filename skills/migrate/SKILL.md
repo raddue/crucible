@@ -266,6 +266,20 @@ Each phase entry includes:
 - Safe stopping point verification criteria
 - Dependencies on prior phases
 
+### Legacy Migration Patterns
+
+The planner must verify the phase plan against these operational patterns. These address the human and organizational side of migration that the technical decomposition doesn't cover.
+
+1. **Map the territory first** — Understand what the legacy system *actually does*, not what it was designed to do. Hidden workflows, tribal knowledge in column headers, undocumented behaviors ARE the requirements spec. If `/recon` with `consumer-registry` was run, the technical mapping exists — but the planner should flag operational unknowns (manual processes, workarounds, tribal knowledge) as risks requiring user confirmation before cutover phases.
+
+2. **Build alongside, not on top of** — The new system must run in parallel with the old. Both are live during migration. Users try the new while the old is a safety net. The phase plan must include a **coexistence period** — never require a hard cutover without one. If Phase 2 (compatibility layer) was skipped, the planner must justify why parallel operation is unnecessary.
+
+3. **Cut over by group, not by system** — Migration happens one team/department at a time, not all at once. The phase plan should identify **rollout groups** (who moves when) in addition to technical phases. Wave 3a-3N should map to user groups, not just code modules.
+
+4. **Don't migrate data unless you must** — Historical data in the old system is fine where it is. The new system starts capturing from day one. If historical queries are needed, build a read-only bridge. The planner should flag any data migration phases as **high-risk** and verify that data migration is genuinely required (not just assumed).
+
+5. **Kill the old system explicitly** — The phase plan must include an explicit **decommission step**: archive the old system and remove access. "Still available just in case" systems never die. This should be the final phase, with clear criteria for when it triggers (last user migrated, parallel period complete, no fallback queries in N days).
+
 **Output:** `scratch/<run-id>/phase-plan.md`
 
 ---
