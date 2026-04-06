@@ -1,0 +1,133 @@
+version: "1.0"
+ticket: "#121"
+epic: "#121"
+title: "Assay Skill — Recon-Informed Approach Evaluator"
+date: "2026-04-05"
+
+api_surface:
+  - name: "/assay"
+    type: "interface"
+    signature: "/assay question: string, context: object, decision_type?: string, approaches?: array, cascading_decisions?: array"
+    params:
+      - name: "question"
+        type: "string — the decision/question to evaluate"
+        required: true
+      - name: "context"
+        type: "object — recon brief, caller evidence, or structured codebase context"
+        required: true
+      - name: "decision_type"
+        type: "string — architecture | strategy | diagnosis | optimization (auto-detected if omitted)"
+        required: false
+      - name: "approaches"
+        type: "array of {name, description} — candidate approaches (evaluator generates 2-4 if omitted)"
+        required: false
+      - name: "cascading_decisions"
+        type: "array of {decision, reasoning} — prior decisions treated as hard constraints"
+        required: false
+    returns: "Assay Report (structured JSON)"
+    description: "Evaluate competing approaches against codebase constraints and return a structured recommendation with confidence scoring, kill criteria, and evidence grounding"
+
+  - name: "AssayReport"
+    type: "interface"
+    signature: "JSON object returned by the assay evaluator"
+    params:
+      - name: "decision_type"
+        type: "string — architecture | strategy | diagnosis | optimization"
+        required: true
+      - name: "confidence"
+        type: "string — high | medium | low"
+        required: true
+      - name: "missing_information"
+        type: "array of strings — what additional context would improve the recommendation"
+        required: true
+      - name: "recommended"
+        type: "object — {name, rationale, evidence[], risks[], kill_criteria}"
+        required: true
+      - name: "alternatives"
+        type: "array of {name, pros[], cons[], would_recommend_if}"
+        required: true
+      - name: "constraint_fit"
+        type: "object — {pattern_alignment, scope_fit, reversibility, integration_risk}"
+        required: true
+      - name: "prior_decision_conflicts"
+        type: "array of strings — conflicts with cascading decisions"
+        required: true
+    returns: "N/A (this is the return type)"
+    description: "Structured evaluation output consumable by design, debugging, migrate, and prospector skills"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "SKILL.md references shared dispatch convention"
+      verification: "skills/assay/SKILL.md contains <!-- CANONICAL: shared/dispatch-convention.md -->"
+      check_method: "grep"
+
+    - id: "INV-2"
+      description: "Evaluator prompt template has disk-mediated dispatch header"
+      verification: "skills/assay/assay-evaluator-prompt.md contains <!-- DISPATCH: disk-mediated -->"
+      check_method: "grep"
+
+    - id: "INV-3"
+      description: "Evaluator prompt includes all 4 decision types with distinct scoring weights"
+      verification: "assay-evaluator-prompt.md contains architecture, strategy, diagnosis, optimization with different weight descriptions"
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "Evaluator prompt requires evidence grounding (file:line references, not generic advice)"
+      verification: "Prompt contains instruction to cite specific evidence from context, not industry best practices"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "Evaluator prompt requires kill_criteria on recommended approach"
+      verification: "Prompt instructs evaluator to include kill_criteria in the recommended object"
+      check_method: "code-inspection"
+
+    - id: "INV-6"
+      description: "Cascading decisions treated as immutable constraints"
+      verification: "Prompt instructs evaluator to never modify or challenge cascading decisions"
+      check_method: "code-inspection"
+
+    - id: "INV-7"
+      description: "Assay Report output is structured JSON, not prose"
+      verification: "Prompt includes exact JSON schema and instructs evaluator to return JSON only"
+      check_method: "code-inspection"
+
+    - id: "INV-8"
+      description: "Confidence scoring includes missing_information when confidence is low"
+      verification: "Prompt requires missing_information to be populated when confidence is low"
+      check_method: "code-inspection"
+
+  testable:
+    - id: "INV-9"
+      description: "Assay Report JSON validates against the declared schema"
+      verification: "Parse evaluator output as JSON, verify all required fields present with correct types"
+      test_tag: "contract:schema:inv-9"
+
+    - id: "INV-10"
+      description: "When approaches are omitted, evaluator generates 2-4 candidates"
+      verification: "Invoke assay without approaches field, verify alternatives array has 1-3 entries (plus recommended = 2-4 total)"
+      test_tag: "contract:generation:inv-10"
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Single Opus evaluator agent, not multi-agent"
+    confidence: "high"
+    alternatives: ["Multiple evaluators with meta-synthesis", "Per-approach advocacy agents"]
+    reasoning: "Evaluation is synthesis of already-gathered evidence. Multi-agent adds competitive advocacy, not balanced evaluation."
+    reversibility: "High — could add agents later if single-agent proves insufficient"
+
+  - id: "AMB-2"
+    decision: "Structured JSON output, not prose comparison table"
+    confidence: "high"
+    alternatives: ["Prose comparison table", "Markdown with headers"]
+    reasoning: "4 consumer skills need to parse output programmatically. JSON is unambiguous."
+    reversibility: "Medium — changing output format requires updating all consumers"
+
+  - id: "AMB-3"
+    decision: "Evaluator generates approaches when not provided"
+    confidence: "medium"
+    alternatives: ["Always require approaches from caller"]
+    reasoning: "/design identifies dimensions but doesn't enumerate approaches — that's currently the Domain Researcher's job. Assay needs to handle both modes."
+    reversibility: "High — could make approaches required in a future version"
