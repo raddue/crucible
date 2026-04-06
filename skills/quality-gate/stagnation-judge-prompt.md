@@ -1,5 +1,5 @@
-<!-- DISPATCH: paste-only | This template is pasted inline (exempt from disk-mediated dispatch).
-     See shared/dispatch-convention.md for paste-only criteria. -->
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 
 # Stagnation Judge
 

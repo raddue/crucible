@@ -183,9 +183,9 @@ Every dispatch directory includes a `manifest.jsonl` file — a structured execu
 
 Some subagent dispatches receive all input directly in the Agent/Task tool prompt and need no file access. These are exempt from disk-mediated dispatch:
 
-- **QG stagnation judge** — receives only the previous-round summary; no file reads needed
-- **Fix verifier** — receives the specific fix description and expected outcome inline
-- **Prospector analysis agents** — receive pre-extracted findings pasted by the orchestrator. **Note:** Validate that prospector analysis payloads actually stay under the 500-token exclusion threshold in practice; complex codebases may produce findings that exceed it. If they do, promote prospector analysis to disk-mediated dispatch.
+- ~~**QG stagnation judge**~~ — promoted to disk-mediated; template exceeds 500 tokens static (~1000 tokens)
+- ~~**Fix verifier**~~ — promoted to disk-mediated; template exceeds 500 tokens static (~900 tokens)
+- ~~**Prospector analysis agents**~~ — promoted to disk-mediated; template exceeds 500 tokens with 8 expansion sections. (Original note: "Validate that prospector analysis payloads actually stay under the 500-token exclusion threshold in practice." Validated — they don't.)
 
 **Bright-line rule:** Dispatches with <500 tokens total payload AND that use the Task tool without file access are exempt from disk-mediated dispatch. These dispatches are small (typically <200 tokens of injected context) and their prompts compress normally under autocompact. Disk-mediating them would add file I/O overhead for negligible savings.
 

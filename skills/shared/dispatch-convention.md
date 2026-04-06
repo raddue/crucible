@@ -13,10 +13,9 @@ version: 1
 
 **Disk-mediated dispatch (default):** All Agent tool and Task tool subagent dispatches where the expanded prompt exceeds 500 tokens.
 
-**Paste-only (exempt):** A dispatch is paste-only when ALL three conditions are met: (1) total payload <500 tokens, (2) uses the Task tool, and (3) the subagent needs no file access. These are small enough that autocompact handles them normally. Known paste-only dispatches:
-- QG stagnation judge (receives only previous-round summary)
-- Fix verifier (receives specific fix description and expected outcome)
-- Prospector analysis agents (receives pre-extracted findings)
+**Paste-only (exempt):** A dispatch is paste-only when ALL three conditions are met: (1) total payload <500 tokens, (2) uses the Task tool, and (3) the subagent needs no file access. These are small enough that autocompact handles them normally. No current templates qualify as paste-only — the QG stagnation judge and fix verifier were originally listed here but exceed 500 tokens static and have been promoted to disk-mediated.
+
+**Excluded skills:** `skill-creator` is a meta-tool for creating/evaluating skills, not a production pipeline orchestrator. Its low-frequency subagent dispatches are excluded from this convention. `stocktake` and `parallel` do not dispatch subagents and are not affected.
 
 **Stocktake note:** Stocktake should flag paste-only dispatches exceeding 500 tokens for promotion to disk-mediated.
 
@@ -26,7 +25,7 @@ version: 1
 
 **Session ID:** Reuse the pipeline's existing session identifier (timestamp-based ID generated at pipeline start). Skills invoked standalone that lack an existing session ID must generate one: Unix epoch seconds.
 
-**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, etc.) use the **parent orchestrator's dispatch directory and seq counter**. The parent passes the dispatch directory path as input. Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup.
+**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, etc.) use the **parent orchestrator's dispatch directory and seq counter**. The parent includes the dispatch directory path in the sub-skill's dispatch file (as a `Dispatch-Dir:` field in the header or as an explicit instruction). Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup.
 
 **Fallback for missing path:** If a sub-skill receives no dispatch directory path, glob `/tmp/crucible-dispatch-*/manifest.jsonl`, select the most recently modified match, and use that directory. Emit warning: "No dispatch directory provided; attached to [path] by last-modified fallback." If no directories exist, create a new one with a timestamp-based session ID.
 
@@ -78,16 +77,16 @@ Begin by reading that file.
 
 ## Compaction Recovery
 
-**On-disk marker (primary mechanism):** At dispatch-directory creation time, the orchestrator writes a marker to the pipeline's project-scoped memory directory (`~/.claude/projects/<project-hash>/memory/`):
+**On-disk marker (primary mechanism):** At dispatch-directory creation time, the orchestrator writes a marker to the pipeline's persistent scratch directory:
 
 ```
-<memory-dir>/.dispatch-active-<session-id>
+<scratch>/.dispatch-active-<session-id>
 ```
 
 Contents: dispatch directory path and current seq counter.
 
 **After compaction:**
-1. Glob for `.dispatch-active-*` in the project-scoped memory directory
+1. Glob for `.dispatch-active-*` in the pipeline's persistent scratch directory
 2. Read `manifest.jsonl` to find the last entry's `seq` value + 1 as the next counter
 3. Resume dispatching
 
@@ -149,6 +148,12 @@ The manifest schema is designed to be chronicle-compatible. When the chronicle s
 
 Pipeline completion steps (build Phase 4, debugging Phase 5, etc.) each include cleanup.
 
+## Failure Handling
+
+If a subagent cannot read its dispatch file, it must **abort immediately** and report the missing file path. No inline fallback — the subagent must not attempt to proceed without its instructions.
+
+**Orchestrator responsibility:** Before dispatching, verify the dispatch file exists on disk. If the file is missing (e.g., after compaction or filesystem error), re-write the dispatch file from the template and re-dispatch. Never fall back to pasting instructions inline.
+
 ## Template Comment Header
 
 Every dispatch template file gets this comment:
@@ -158,6 +163,15 @@ Every dispatch template file gets this comment:
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 ```
 
-Files with multiple dispatch prompts (e.g., `investigation-prompts.md`) get the header on each distinct prompt section.
+For paste-only dispatches (see "When to Use" criteria):
+
+```markdown
+<!-- DISPATCH: paste-only | This template is pasted directly into the Task tool prompt.
+     Payload <500 tokens, no file access needed. See shared/dispatch-convention.md -->
+```
+
+Files with multiple dispatch prompts (e.g., `investigation-prompts.md`) get the header on each distinct prompt section. A file-level header is sufficient when all prompts in the file share the same dispatch mode.
 
 Template expansion follows the existing bracket-placeholder pattern (`{{variable}}`). Disk-mediated dispatch changes delivery, not composition.
+
+**Note:** Existing `[PASTE: ...]` placeholders in templates are expansion markers, not delivery instructions. They indicate what content the orchestrator substitutes before writing the dispatch file. This syntax coexists with the `{{variable}}` pattern and is exempt from AC #7 (no paste-into-prompt language).
