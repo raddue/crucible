@@ -59,30 +59,30 @@ Priority chain when `artifact_type` is not provided:
 
 #### `design` — Design Documents
 
-| Lens | Core Question | Focus Areas |
-|---|---|---|
-| Technical Soundness | "Are the technical decisions well-reasoned?" | Trade-off analysis quality, constraint identification, decision-evidence alignment, alternative exploration depth |
-| Integration Impact | "How does this design interact with existing systems?" | Breaking changes identified, migration path, dependency awareness, blast radius assessment |
-| Edge Cases | "What happens at the boundaries?" | Failure modes addressed, boundary conditions, concurrent usage, data edge cases, degraded-mode behavior |
-| Scope Clarity | "Is the scope well-defined and appropriate?" | Non-goals stated, scope-to-problem fit, YAGNI compliance, acceptance criteria testability |
+| Lens | Core Question | Focus Areas | Exclusions |
+|---|---|---|---|
+| Technical Soundness | "Are the technical decisions well-reasoned?" | Trade-off analysis quality, constraint identification, decision-evidence alignment, alternative exploration depth | Integration concerns (Integration Impact lens), boundary conditions (Edge Cases lens), scope questions (Scope Clarity lens) |
+| Integration Impact | "How does this design interact with existing systems?" | Breaking changes identified, migration path, dependency awareness, blast radius assessment | Decision quality (Technical Soundness lens), boundary conditions (Edge Cases lens), scope questions (Scope Clarity lens) |
+| Edge Cases | "What happens at the boundaries?" | Failure modes addressed, boundary conditions, concurrent usage, data edge cases, degraded-mode behavior | Decision quality (Technical Soundness lens), integration concerns (Integration Impact lens), scope questions (Scope Clarity lens) |
+| Scope Clarity | "Is the scope well-defined and appropriate?" | Non-goals stated, scope-to-problem fit, YAGNI compliance, acceptance criteria testability | Decision quality (Technical Soundness lens), integration concerns (Integration Impact lens), boundary conditions (Edge Cases lens) |
 
 #### `plan` — Strategic Plans, Implementation Plans, PRDs
 
-| Lens | Core Question | Focus Areas |
-|---|---|---|
-| Feasibility | "Can this actually be executed as described?" | Resource requirements vs availability, timeline realism, skill/capability assumptions, tooling prerequisites |
-| Risk & Dependencies | "What could derail execution?" | External dependency risks, sequencing risks, single points of failure, rollback provisions, blast radius of partial failure |
-| Completeness | "What's missing from this plan?" | Phases covered, milestones defined, success criteria measurable, testing strategy present, communication plan |
-| Assumptions | "What's being taken for granted?" | Environmental assumptions, team capacity assumptions, technical assumptions, timeline assumptions, stakeholder alignment assumptions |
+| Lens | Core Question | Focus Areas | Exclusions |
+|---|---|---|---|
+| Feasibility | "Can this actually be executed as described?" | Resource requirements vs availability, timeline realism, skill/capability assumptions, tooling prerequisites | Risk identification (Risk & Dependencies lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens) |
+| Risk & Dependencies | "What could derail execution?" | External dependency risks, sequencing risks, single points of failure, rollback provisions, blast radius of partial failure | Execution feasibility (Feasibility lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens) |
+| Completeness | "What's missing from this plan?" | Phases covered, milestones defined, success criteria measurable, testing strategy present, communication plan | Execution feasibility (Feasibility lens), risk identification (Risk & Dependencies lens), environmental assumptions (Assumptions lens) |
+| Assumptions | "What's being taken for granted?" | Environmental assumptions, team capacity assumptions, technical assumptions, timeline assumptions, stakeholder alignment assumptions | Execution feasibility (Feasibility lens), risk identification (Risk & Dependencies lens), missing sections (Completeness lens) |
 
 #### `concept` — Product Concepts, Proposals, Early-Stage Ideas
 
-| Lens | Core Question | Focus Areas |
-|---|---|---|
-| Problem-Solution Fit | "Does this concept solve a real problem?" | Problem definition clarity, target audience identified, value proposition specificity, differentiation from existing solutions |
-| Feasibility & Cost | "Is this achievable and worth the investment?" | Build vs buy analysis, resource requirements, timeline expectations, opportunity cost, maintenance burden |
-| Stakeholder Alignment | "Who needs to agree and will they?" | Decision-makers identified, conflicting incentives surfaced, adoption path realistic, organizational readiness |
-| Blind Assumptions | "What is this concept taking for granted?" | Market assumptions, user behavior assumptions, technical assumptions, competitive landscape assumptions, sustainability assumptions |
+| Lens | Core Question | Focus Areas | Exclusions |
+|---|---|---|---|
+| Problem-Solution Fit | "Does this concept solve a real problem?" | Problem definition clarity, target audience identified, value proposition specificity, differentiation from existing solutions | Build feasibility (Feasibility & Cost lens), stakeholder concerns (Stakeholder Alignment lens), hidden assumptions (Blind Assumptions lens) |
+| Feasibility & Cost | "Is this achievable and worth the investment?" | Build vs buy analysis, resource requirements, timeline expectations, opportunity cost, maintenance burden | Problem-solution fit (Problem-Solution Fit lens), stakeholder concerns (Stakeholder Alignment lens), hidden assumptions (Blind Assumptions lens) |
+| Stakeholder Alignment | "Who needs to agree and will they?" | Decision-makers identified, conflicting incentives surfaced, adoption path realistic, organizational readiness | Problem-solution fit (Problem-Solution Fit lens), build feasibility (Feasibility & Cost lens), hidden assumptions (Blind Assumptions lens) |
+| Blind Assumptions | "What is this concept taking for granted?" | Market assumptions, user behavior assumptions, technical assumptions, competitive landscape assumptions, sustainability assumptions | Problem-solution fit (Problem-Solution Fit lens), build feasibility (Feasibility & Cost lens), stakeholder concerns (Stakeholder Alignment lens) |
 
 ### Non-Code Finding Format
 
@@ -517,7 +517,7 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 **Non-code audits:** Read `<lens-name-kebab>-findings.md` for each of the 4 type-specific lenses (e.g., `technical-soundness-findings.md`, `integration-impact-findings.md`, `edge-cases-findings.md`, `scope-clarity-findings.md` for design), plus `noncode-blindspots-findings.md`.
 
-1. **Deduplicate:** When two findings reference overlapping file + line_range and describe the same underlying concern (using common fields: severity, file, line_range, evidence, description), merge into one finding noting both lenses. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
+1. **Deduplicate:** When two findings reference the same location and describe the same underlying concern, merge into one finding noting both lenses. For code audits, match on overlapping `file` + `line_range`. For non-code audits, match on identical `section` headings. Use common fields (severity, evidence, description) for similarity comparison. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
 2. **Compounding risks:** After dedup, scan pairs of findings from different lenses that touch the same file or related files. Flag as compounding ONLY when you can articulate the specific mechanism by which the two findings combine into a worse problem (e.g., "this robustness gap means malformed input reaches this code path, where this correctness edge case causes data corruption"). File proximity alone is not compounding -- the findings must be causally related. Add a "Compounding" tag with the mechanism description to the grouped output.
 3. **Severity-rank:** Fatal first, then Significant, then Minor.
 4. **Group by theme** (e.g., "Error Handling," "State Management," "API Contracts").
