@@ -54,6 +54,31 @@ Siege activates when the orchestrator (build, audit, or user session) encounters
 
 A single signal is insufficient -- too many false positives. Two or more signals, or any signal combined with user confirmation, activates Siege at full force.
 
+### Parameters
+
+**`deployment_context`** (optional) — `intranet` | `public` | `hybrid`
+
+Declares the deployment environment for context-aware severity adjustment.
+
+| Context | Effect on Severity |
+|---|---|
+| `intranet` | Network-level findings downgraded by 1 level (Critical→High, High→Medium, etc.). Application-level findings unchanged. |
+| `public` | No adjustment (default behavior) |
+| `hybrid` | Same as `public` — no blanket adjustment. Use `public` when any endpoints face the internet. Intranet downgrade only applies when ALL endpoints are internal. |
+| *(unset)* | Assumes `public` (worst-case, no change from v1) |
+
+**Network-level findings** (eligible for intranet downgrade): anonymous endpoints, TLS/transport gaps, CORS misconfiguration, port exposure, security header gaps, rate limiting gaps.
+
+**Application-level findings** (NEVER downgraded): injection, auth bypass, IDOR, data exposure, privilege escalation, business logic flaws, deserialization, SSRF.
+
+Severity adjustments are applied during Phase 3 synthesis (not by agents). Every downgrade is logged: "Downgraded [ID] from [original] to [adjusted] due to intranet deployment context." Original severity preserved in finding metadata.
+
+When `deployment_context` is not specified but exists in the persistent threat model, use the persisted value: "Using deployment context from threat model: {context}. Override with explicit parameter." Explicit parameter overrides persisted value and updates the threat model.
+
+**`attack_mapping`** (optional) — boolean, default `false`
+
+When `true`: Chain Analyst annotates chain steps with MITRE ATT&CK technique IDs. Other agents are unaffected. When `false` (default): no ATT&CK references anywhere. Behavior identical to v1.
+
 ### Escape Hatches
 
 - `--force` -- Activate Siege regardless of heuristic (user explicitly wants security review)
@@ -289,7 +314,14 @@ Orchestrator reads all 6 findings files from `scratch/<run-id>/`. Steel-man-then
    - **Hardening:** Not currently exploitable, but the design has a latent weakness that becomes exploitable if a reasonable future change occurs (e.g., a new route added without the same guard, a config flag flipped). These matter — but they are a different urgency than active vulnerabilities.
 
    The tag appears in both the 5-line initial format and the full report format. The final report groups findings by exploitability within each severity level (Active first, then Hardening).
-4. **Write initial report** to `scratch/<run-id>/report.md` using the initial lightweight finding format.
+4. **Deployment context severity adjustment:** When `deployment_context: intranet`, apply network-level downgrade after severity classification:
+   - Classify each finding as network-level or application-level using the categories from the Parameters section
+   - Network-level findings: downgrade severity by 1 (Critical→High, High→Medium, Medium→Low, Low→Informational)
+   - Application-level findings: no change
+   - Log each downgrade: `Downgraded [ID] from [original] to [adjusted] — intranet deployment context (network-level finding)`
+   - Preserve original severity in finding metadata: `Original-Severity: [severity]`
+   - When `deployment_context` is `public`, `hybrid`, or unset: no adjustment
+5. **Write initial report** to `scratch/<run-id>/report.md` using the initial lightweight finding format.
 
 ## Phase 4: Security Gate (Iterative Loop)
 
@@ -303,8 +335,23 @@ Adopts quality-gate's iterative pattern with security-specific scoring.
 
 **Loop:**
 1. Present findings from Phase 3 (or latest round) to the fix agent
-2. Fix agent remediates Critical and High findings (see Fix Mechanism below)
-3. Dispatch a FRESH review round: 2 agents only (Boundary Attacker + one rotating agent). The rotating agent is selected based on the security domain of files modified by the fix agent: auth/RBAC changes → Insider Threat, data/logging changes → Betrayed Consumer, config/infra changes → Infrastructure Prober, multi-domain or ambiguous → Chain Analyst. On every 3rd round, the Fresh Attacker replaces the rotating domain agent (keeping the count at 2 review agents per round). When the Fresh Attacker is included in a Phase 4 round, it receives the full fix diff plus a random sample of unchanged files from the manifest (same 40% sampling strategy as Phase 2, re-seeded for this round). This preserves its 'fresh eyes on broader context' value -- it reviews the fix AND looks for new issues the fix may have exposed in surrounding code. Full 6-agent re-dispatch is disproportionate for incremental fixes.
+2. Fix agent remediates Critical and High findings (see Fix Mechanism below). **One commit per finding** — not a batch commit. Each commit message: `fix(security): address [SIEGE-XX-N] — [title]`
+3. **Fix approval output (non-blocking):** After the fix round completes, output a per-fix commit table:
+
+   ```
+   ## Siege Fix — Round N
+
+   | # | Finding | Approach | Files | Commit |
+   |---|---------|----------|-------|--------|
+   | 1 | [SIEGE-BA-1] SQL injection | Parameterized query | UserController.cs | abc1234 |
+   | 2 | [SIEGE-IT-3] IDOR on /api/records | Added ownership check | RecordService.cs | def5678 |
+
+   **To reject a fix:** `git revert <commit-sha>` (each fix is a separate commit)
+   **To accept all:** No action needed — fixes are already applied.
+   ```
+
+   The pipeline does NOT pause. The next review round proceeds immediately with the current code state (fixes applied). If the user rejects a fix between rounds, the next review will re-find the vulnerability — this is correct behavior.
+4. Dispatch a FRESH review round: 2 agents only (Boundary Attacker + one rotating agent). The rotating agent is selected based on the security domain of files modified by the fix agent: auth/RBAC changes → Insider Threat, data/logging changes → Betrayed Consumer, config/infra changes → Infrastructure Prober, multi-domain or ambiguous → Chain Analyst. On every 3rd round, the Fresh Attacker replaces the rotating domain agent (keeping the count at 2 review agents per round). When the Fresh Attacker is included in a Phase 4 round, it receives the full fix diff plus a random sample of unchanged files from the manifest (same 40% sampling strategy as Phase 2, re-seeded for this round). This preserves its 'fresh eyes on broader context' value -- it reviews the fix AND looks for new issues the fix may have exposed in surrounding code. Full 6-agent re-dispatch is disproportionate for incremental fixes.
 4. Score the new findings. Compare to prior round:
    - Strictly lower score = progress, loop again
    - Same or higher score = dispatch Stagnation Judge
@@ -484,6 +531,7 @@ Updated at the end of every Siege run (Phase 5). Accumulates across sessions.
 # Threat Model
 **Last updated:** [ISO-8601]
 **Last commit anchor:** [SHA]
+**Deployment context:** [intranet|public|hybrid|unset]
 
 ## Trust Boundaries
 - [boundary]: [description, files involved]

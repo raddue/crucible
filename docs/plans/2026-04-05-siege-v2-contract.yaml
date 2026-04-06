@@ -1,0 +1,149 @@
+version: "1.0"
+ticket: "#123"
+epic: "#123"
+title: "Siege v2 — Environment Context, Fix Approval, Runtime Proof, Dependency Depth, ATT&CK Scoping"
+date: "2026-04-05"
+
+api_surface:
+  - name: "deployment_context"
+    type: "interface"
+    signature: "/siege deployment_context: intranet | public | hybrid"
+    params:
+      - name: "deployment_context"
+        type: "string — intranet | public | hybrid"
+        required: false
+    returns: "Severity-adjusted findings with audit trail when set to intranet"
+    description: "Optional deployment environment context. When intranet, network-level findings are downgraded by 1 severity level. Application-level findings are never adjusted."
+
+  - name: "attack_mapping"
+    type: "interface"
+    signature: "/siege attack_mapping: true | false"
+    params:
+      - name: "attack_mapping"
+        type: "boolean — default false"
+        required: false
+    returns: "Chain Analyst output includes ATT&CK technique IDs when true"
+    description: "Optional ATT&CK mapping flag. When true, Chain Analyst annotates chain steps with MITRE ATT&CK technique IDs. Other agents unchanged."
+
+  - name: "FixApprovalGateOutput"
+    type: "interface"
+    signature: "Post-fix-round table with per-finding commit SHAs and reject instructions"
+    params:
+      - name: "findings"
+        type: "array — findings addressed in this fix round"
+        required: true
+      - name: "commits"
+        type: "array — per-finding commit SHAs"
+        required: true
+    returns: "Formatted table: finding ID, approach, files, commit SHA, reject instruction"
+    description: "After each fix round, output a per-fix commit table enabling independent acceptance/rejection of each fix"
+
+  - name: "ReproductionSection"
+    type: "interface"
+    signature: "## Reproduction section in each finding"
+    params:
+      - name: "commands"
+        type: "array — 1-3 concrete reproduction commands"
+        required: true
+      - name: "expected_vulnerable"
+        type: "string — expected output showing vulnerability present"
+        required: true
+      - name: "expected_fixed"
+        type: "string — expected output after fix applied"
+        required: true
+    returns: "Appended to each finding in agent output and final report"
+    description: "Concrete proof-of-concept commands for each finding. Non-destructive, read-only demonstrations."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "deployment_context defaults to public (worst-case) when unset"
+      verification: "SKILL.md specifies unset = public behavior with no severity adjustment"
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "Application-level findings are never severity-downgraded regardless of deployment_context"
+      verification: "SKILL.md Phase 3 explicitly excludes injection, auth bypass, data exposure, IDOR from downgrade"
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Each severity downgrade is logged with original and adjusted severity"
+      verification: "SKILL.md Phase 3 specifies audit trail format for downgrades"
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "Fix agent creates one commit per finding, not batch commits"
+      verification: "SKILL.md Phase 4 specifies per-finding commit pattern"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "Pipeline does not pause after fix round (non-blocking)"
+      verification: "SKILL.md Phase 4 does not contain any user-blocking steps in the fix approval gate"
+      check_method: "code-inspection"
+
+    - id: "INV-6"
+      description: "All 6 agent prompt templates include reproduction section in finding format"
+      verification: "grep for '## Reproduction' in all *-prompt.md files in skills/siege/"
+      check_method: "grep"
+
+    - id: "INV-7"
+      description: "Reproduction commands are specified as non-destructive and read-only"
+      verification: "Each agent prompt contains 'non-destructive' or 'read-only' near reproduction instructions"
+      check_method: "grep"
+
+    - id: "INV-8"
+      description: "attack_mapping defaults to false"
+      verification: "SKILL.md specifies default false for attack_mapping parameter"
+      check_method: "code-inspection"
+
+    - id: "INV-9"
+      description: "ATT&CK mapping only appears in Chain Analyst prompt, not other 5 agents"
+      verification: "grep for 'ATT&CK' in agent prompts — only chain-analyst-prompt.md matches"
+      check_method: "grep"
+
+    - id: "INV-10"
+      description: "Dispatch templates preserve disk-mediated dispatch headers"
+      verification: "All modified *-prompt.md files retain <!-- DISPATCH: disk-mediated --> header"
+      check_method: "grep"
+
+  testable:
+    - id: "INV-11"
+      description: "With deployment_context=intranet, a network-level finding is downgraded and an app-level finding is not"
+      verification: "Run siege on a test case with both finding types and verify severity adjustment"
+      test_tag: "contract:severity:inv-11"
+
+    - id: "INV-12"
+      description: "With attack_mapping=false, no ATT&CK references appear in output"
+      verification: "Run siege without attack_mapping and grep output for T[0-9]{4}"
+      test_tag: "contract:attack-mapping:inv-12"
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Orchestrator-side severity adjustment, not agent-side"
+    confidence: "high"
+    alternatives: ["Pass context to agents and let them self-adjust (inconsistent calibration risk)"]
+    reasoning: "Centralized adjustment in Phase 3 is consistent and auditable. Agents produce raw signal; orchestrator applies policy."
+    reversibility: "High — could move to agent-side in a future version"
+
+  - id: "AMB-2"
+    decision: "Non-blocking suggest-then-apply fix gate (option C)"
+    confidence: "high"
+    alternatives: ["Block and wait for approval (breaks walkaway)", "Auto-select simpler approach (no veto)"]
+    reasoning: "Preserves autonomous pipeline while giving developer full veto via git revert per-commit."
+    reversibility: "Medium — changing to blocking would require pipeline restructuring"
+
+  - id: "AMB-3"
+    decision: "Expand Infrastructure Prober for dependency depth, not a new 7th agent"
+    confidence: "high"
+    alternatives: ["Add dedicated dependency scanner agent"]
+    reasoning: "Prober already handles dependency scanning. Adding depth is natural extension. New agent adds dispatch overhead."
+    reversibility: "High — could extract to separate agent later if scope grows"
+
+  - id: "AMB-4"
+    decision: "ATT&CK scoped to Chain Analyst only, off by default"
+    confidence: "high"
+    alternatives: ["ATT&CK on all agents (wrong taxonomy for app-level)", "ATT&CK always on (noise for teams that don't use it)"]
+    reasoning: "Chain Analyst already builds kill chains. ATT&CK technique IDs formalize the mapping. Other agents use CWE/OWASP which is the right fit."
+    reversibility: "High — could expand to other agents if demand exists"

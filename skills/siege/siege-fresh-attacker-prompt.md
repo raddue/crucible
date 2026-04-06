@@ -92,6 +92,15 @@ Task tool (general-purpose, model: opus):
     Evidence: [the code that caught your eye and why]
     Verification: [how to confirm this is exploitable]
 
+    ## Reproduction
+    ```
+    [1-3 commands — whatever format best demonstrates the finding (curl, grep, script invocation, etc.)]
+    ```
+    **Vulnerable output:** [what the command reveals when the vulnerability is present]
+    **Fixed output:** [what the output should look like after remediation]
+
+    Reproduction commands must be non-destructive and read-only.
+
     ## Summary
     - Files examined: N
     - Files summarized: N

@@ -100,6 +100,15 @@ Task tool (general-purpose, model: opus):
     Evidence: [specific code -- the log statement, the unfiltered response, the plaintext storage]
     Verification: [concrete check: search logs for X, inspect response Y, check storage Z]
 
+    ## Reproduction
+    ```
+    [1-3 commands — curl showing over-broad API responses, log greps showing PII, storage inspection commands]
+    ```
+    **Vulnerable output:** [response/log showing data leakage or privacy violation]
+    **Fixed output:** [response/log showing proper data filtering after remediation]
+
+    Reproduction commands must be non-destructive and read-only.
+
     ## Summary
     - Files examined: N
     - Files summarized: N

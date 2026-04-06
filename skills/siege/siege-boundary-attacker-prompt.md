@@ -117,6 +117,15 @@ Task tool (general-purpose, model: opus):
     Evidence: [specific code reference -- quote the vulnerable line]
     Verification: [concrete test: send X to Y, expect Z]
 
+    ## Reproduction
+    ```
+    [1-3 concrete commands — curl with injection payloads, malformed inputs, etc.]
+    ```
+    **Vulnerable output:** [what the response looks like when the vulnerability is present]
+    **Fixed output:** [what the response should look like after remediation]
+
+    Reproduction commands must be non-destructive and read-only. No data modification, no state changes.
+
     End with:
 
     ## Summary
