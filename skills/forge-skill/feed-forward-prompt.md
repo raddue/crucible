@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Feed-Forward Advisor — Dispatch Template
 
 Dispatch a Sonnet subagent before starting a new task using this template.

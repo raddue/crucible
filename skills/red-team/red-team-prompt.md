@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Red Team (Devil's Advocate) Prompt Template
 
 Use this template when dispatching a devil's advocate subagent in Phase 2, Step 3.

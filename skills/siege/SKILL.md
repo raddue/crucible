@@ -13,6 +13,9 @@ Full-lifecycle security audit. Dispatches 6 parallel Opus agents across distinct
 
 **Model:** All SECURITY ANALYSIS agents are Opus, no exceptions. Orchestrator, all 6 attacker-perspective agents, synthesis, and fix dispatch are Opus. Support functions (manifest scoping, stagnation judging, fix verification) may use Sonnet where the task is mechanical rather than analytical. If the session is not running Opus, refuse: "Siege requires Opus for all security analysis agents. Cannot proceed on a lesser model."
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 ## Why This Exists
 
 Audit finds bugs, robustness gaps, and architecture issues. Quality-gate iterates artifacts to convergence. Inquisitor hunts cross-component integration bugs. None of these operate from an attacker's perspective. Security is a discipline -- it requires threat modeling, attack surface enumeration, exploitation scenario analysis, and chain-of-vulnerability reasoning that generalist review skills are not equipped to perform. A robustness finding ("missing input validation") and a security finding ("this missing validation enables SQL injection via the /api/users endpoint, escalating to full database read") are categorically different in blast radius, urgency, and remediation strategy.
@@ -185,7 +188,7 @@ The orchestrator builds context programmatically. Manual file reading and pastin
 
 **Step 3 — Assemble dispatch prompt (per-agent):**
 1. Read the agent's prompt template from `./siege-<agent>-prompt.md`
-2. Substitute bracketed sections: `[PASTE: Intelligence...]` → content from `intelligence-summary.md`, `[PASTE: Subsystem Overview...]` → content from `tier1-context.md`, `[PASTE: Source Files...]` → content from `<agent>-partition.md`
+2. Substitute bracketed sections: `[PASTE: Intelligence...]` → content from `intelligence-summary.md`, `[PASTE: Subsystem Overview...]` → content from `tier1-context.md`, `[PASTE: Source Files...]` → content from `<agent>-partition.md`. Include all substituted content in the dispatch file.
 3. Verify total prompt ≤ 1500 lines. If over, truncate Tier 2 with overflow summaries
 4. Dispatch the assembled prompt — agents receive a complete, ready-to-analyze context with no manual intervention
 

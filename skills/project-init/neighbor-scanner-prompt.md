@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Neighbor Scanner — Dispatch Template
 
 Dispatch one Sonnet subagent per neighboring repository for a lightweight scan of purpose and interfaces.

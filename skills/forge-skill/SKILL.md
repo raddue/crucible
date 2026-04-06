@@ -7,6 +7,9 @@ description: Use when a significant task completes and you need a retrospective,
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Self-improving retrospective system. After tasks complete, runs structured retrospectives. Before tasks begin, consults accumulated lessons. Periodically proposes concrete skill edits based on evidence.
 
 **Core principle:** The agent that never reviews its own performance never improves. The Forge closes the loop.

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Manifest Builder Prompt Template
 
 Use this template when dispatching the Manifest Builder depth agent. Primary consumer: `/audit`. Produces a structured file roster with roles, boundaries, and dependency graph for the `## Subsystem Manifest` section.

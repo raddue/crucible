@@ -5,6 +5,9 @@ description: Use when completing tasks, implementing major features, or before m
 
 # Requesting Code Review
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Dispatch a code review subagent (general-purpose) to catch issues before they cascade.
 
 **Core principle:** Review early, review often.

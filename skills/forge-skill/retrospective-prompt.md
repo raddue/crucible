@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Retrospective Analyst — Dispatch Template
 
 Dispatch a Sonnet subagent after task completion using this template.

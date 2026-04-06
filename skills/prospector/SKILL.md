@@ -5,6 +5,9 @@ description: "Explore a codebase for architectural friction and propose competin
 
 # Prospector
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Explores a codebase organically, surfaces architectural friction, and proposes competing redesigns for the user to choose from.
 
 **Announce at start:** "Running prospector on [codebase/directory name]."

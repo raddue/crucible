@@ -13,6 +13,9 @@ Hunt cross-component bugs by dispatching 5 parallel adversarial dimensions again
 
 **Model:** Opus (orchestrating parallel adversarial subagents requires precise coordination)
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 ## Why This Exists
 
 Per-task adversarial testing (Phase 3) sees one task's diff. It catches bugs within each task's scope. But the bugs you find instantly after a big feature lands live in the **seams** -- wiring that's almost right, state that initializes in one task but gets consumed in another, edge cases that only appear when the whole feature is assembled.

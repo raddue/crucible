@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Genealogist Prompt Template
 
 Use this template when dispatching a Phase 1.5 git archaeology agent. The orchestrator fills in the bracketed sections — one agent per friction point.

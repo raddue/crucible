@@ -7,6 +7,9 @@ description: Use when a design doc or implementation plan is finalized and you w
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Divergent creativity injection. Dispatches an Innovation subagent to propose the single most impactful addition to an artifact. One shot, not iterative — the red-team that follows is the quality gate.
 
 **Core principle:** The best ideas often come from asking "what's missing?" after you think you're done.

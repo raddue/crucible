@@ -7,6 +7,9 @@ description: "You MUST use this before any creative work - creating features, bu
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Turn ideas into fully formed designs through investigated, collaborative dialogue.
 
 Every significant design question is backed by parallel investigation agents that research the codebase, explore approaches, and assess impact BEFORE the question reaches the user. Questions arrive informed, not naive.

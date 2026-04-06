@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Blast Radius Mapper Prompt Template
 
 Use this template when dispatching the Blast Radius Mapper agent in Phase 2.

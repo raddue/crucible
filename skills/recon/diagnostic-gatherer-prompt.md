@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Diagnostic Gatherer Prompt Template
 
 Use this template when dispatching the Diagnostic Gatherer depth agent. Primary consumer: `/debugging`. Produces call chains, error context, and data flow traces for the `## Diagnostic Context` section.

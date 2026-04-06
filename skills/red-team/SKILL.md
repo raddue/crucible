@@ -7,6 +7,9 @@ description: Use when you need adversarial review of any artifact — design doc
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to attack the work, fixes findings, then dispatches a FRESH Devil's Advocate to attack again. Iterates until clean or stagnation is detected.
 
 **Core principle:** Fresh eyes every round. No anchoring, no confirmation bias.
@@ -82,7 +85,7 @@ The Devil's Advocate MUST classify every challenge:
 ### 2. Dispatch Devil's Advocate
 
 Use the `red-team-prompt.md` template in this directory. Provide:
-- The full artifact content (paste it, don't make the subagent read files)
+- The full artifact content (include in dispatch file, don't make the subagent read files)
 - Project context (existing systems, constraints, tech stack)
 - What the artifact is supposed to accomplish
 

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Siege: Betrayed Consumer Prompt Template
 
 Use this template when dispatching the Betrayed Consumer agent. The orchestrator fills in the bracketed sections.

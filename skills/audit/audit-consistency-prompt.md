@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Audit Consistency Prompt Template
 
 The Consistency lens uses a two-agent protocol. The orchestrator dispatches Agent A first (in parallel with other lenses), then dispatches Agent B after Agent A returns.

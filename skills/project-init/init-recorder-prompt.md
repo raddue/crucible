@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Init Recorder — Dispatch Template
 
 Dispatch a Sonnet subagent for Tier 1 fan-in — merges multiple partition explorer outputs into cartographer format.

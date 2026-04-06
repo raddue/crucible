@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Test Fix Prompt Template
 
 Use this template when dispatching the test fix agent after the audit agent reports findings in categories 1-2 (tests to update, tests to delete). The orchestrator fills in the bracketed sections.

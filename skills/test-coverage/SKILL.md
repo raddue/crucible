@@ -5,6 +5,9 @@ description: "Audit existing tests for staleness, needed updates, or removal aft
 
 # Test Alignment Audit
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Audits whether existing tests need updating, removal, or modification after code changes. Distinct from test-gap-writer (which adds NEW tests for missing coverage) — this skill reviews the EXISTING test suite's alignment with changed code.
 
 **Announce at start:** "Running test alignment audit on [scope description]."

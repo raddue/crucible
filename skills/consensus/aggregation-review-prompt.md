@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Aggregation Review Prompt Template
 
 Used by the consensus MCP server when `mode: "review"`. After dispatching the same review prompt to multiple LLM providers in parallel, the aggregator model receives all their responses and this prompt guides synthesis into a single structured analysis.

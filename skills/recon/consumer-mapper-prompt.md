@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Consumer Mapper Prompt Template
 
 Use this template when dispatching the Consumer Mapper depth agent. Primary consumer: `/migrate`. Produces a structured registry of all consumers of a target symbol, module, or API for the `## Consumer Registry` section.

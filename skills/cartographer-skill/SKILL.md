@@ -7,6 +7,9 @@ description: Use when exploring unfamiliar code and want to persist what you lea
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Living architectural map of the codebase that accumulates across sessions. After exploration, captures what was learned. Before tasks, surfaces relevant structural knowledge. Subagents receive module-specific context so they don't make wrong assumptions.
 
 **Core principle:** The agent that re-discovers the same codebase every session wastes the first 20% of every task. The Cartographer remembers the terrain.
@@ -64,10 +67,10 @@ All data lives in the project memory directory:
 | File | Max Lines | Loaded By | When |
 |------|-----------|-----------|------|
 | `map.md` | 200 | Orchestrator | Consult mode (every task start) |
-| `conventions.md` | 150 | Implementer subagents | Pasted into dispatch prompt |
-| `landmines.md` | 100 | Reviewer/red-team subagents | Pasted into dispatch prompt |
-| `decisions.md` | 200 | Implementer, Reviewer, Red-team subagents | Pasted into dispatch prompt |
-| `modules/<name>.md` | 100 each | Subagents working in that area | Pasted into dispatch prompt |
+| `conventions.md` | 150 | Implementer subagents | Included in dispatch file |
+| `landmines.md` | 100 | Reviewer/red-team subagents | Included in dispatch file |
+| `decisions.md` | 200 | Implementer, Reviewer, Red-team subagents | Included in dispatch file |
+| `modules/<name>.md` | 100 each | Subagents working in that area | Included in dispatch file |
 | `defect-signatures/<name>.md` | 30 sibling entries | Implementer, Investigator, Where Else? subagents | Matched by module name at load time |
 | `defect-signatures/<name>.non-matches.md` | 100 entries (soft cap) | Investigator (truncated to 50), Where Else? (paths only) | Loaded alongside parent signature |
 | Total defect signatures | 20 files | N/A | LRU pruning with 30-day age protection |
@@ -356,10 +359,10 @@ When dispatching an implementer, reviewer, investigator, or any subagent that wi
 
 1. Identify which module(s) the subagent will touch (from the task description and file paths)
 2. Check if `modules/<name>.md` exists for those modules
-3. If yes: read the module file(s) and paste into the subagent's dispatch prompt
-4. Also paste `conventions.md` into implementer prompts
-5. Also paste `landmines.md` into reviewer and red-team prompts
-6. Also paste `decisions.md` into implementer, reviewer, and red-team prompts.
+3. If yes: read the module file(s) and include in the subagent's dispatch file
+4. Also include `conventions.md` in implementer dispatch files
+5. Also include `landmines.md` in reviewer and red-team dispatch files
+6. Also include `decisions.md` in implementer, reviewer, and red-team dispatch files.
    This provides cross-cutting decision rationale alongside module-specific context.
 7. Also load matching defect signatures from `defect-signatures/` into implementer and investigator prompts:
    - **Module matching:** Read each cartographer module file's `Path:` field. A task's file is in a module if the file path starts with the module's `Path:` value. When a task spans multiple modules, load signatures for all matched modules. When no cartographer modules exist, fall back to directory prefix matching against the signature's `Modules` field.

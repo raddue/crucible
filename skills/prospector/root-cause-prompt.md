@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Root Cause Prompt Template
 
 Use this template when dispatching a Phase 2 root cause analysis agent. The orchestrator fills in the bracketed sections — one agent per High-severity friction point.

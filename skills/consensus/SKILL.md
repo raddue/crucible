@@ -5,6 +5,9 @@ description: Multi-model consensus for high-stakes quality decisions. Opt-in MCP
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Multi-model consensus dispatches high-stakes decision prompts to multiple LLM providers in parallel via an MCP server, then synthesizes the responses. It surfaces blind spots that single-model review misses. Entirely opt-in — without configuration, all skills behave exactly as before.
 
 The consensus system is not a replacement for existing skill logic. It is an amplifier applied at specific, high-leverage decision points where the cost of a missed defect or a wrong judgment is disproportionately high. Skills that integrate consensus call it at defined moments (e.g., the stagnation judge in quality-gate, the Challenger in design review) and treat its output as additional signal, not as an override.

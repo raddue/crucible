@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Structure Scout Prompt Template
 
 Use this template when dispatching the Structure Scout in Phase 2. This agent maps project layout, module boundaries, entry points, and build system. Feeds the `project_structure` core field.
