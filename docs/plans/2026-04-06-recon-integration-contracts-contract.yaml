@@ -1,0 +1,58 @@
+version: "1.0"
+ticket: "#130"
+epic: "#130"
+title: "Add integration contract assessment to /recon impact-analyst"
+date: "2026-04-06"
+
+api_surface:
+  - name: "impact-analyst-prompt.md"
+    type: "interface"
+    signature: "Prompt template with integration contract assessment subsection"
+    params:
+      - name: "TASK"
+        type: "string — original task description"
+        required: true
+      - name: "CORE_BRIEF"
+        type: "string — assembled core investigation brief"
+        required: true
+    returns: "Impact Analysis with integration contract checks in Integration Risks section"
+    description: "Enhanced impact analyst prompt that checks abstraction, write direction, shared schema coupling, and fallback paths when integrations are in scope"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "All 4 integration contract checks are present in the prompt"
+      verification: "impact-analyst-prompt.md contains abstraction check, write direction, shared schema coupling, and fallback path checks"
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "Checks are within the Integration Risks section, not a new top-level section"
+      verification: "The 4 checks appear between the existing Integration Risks heading and the Data Impact heading"
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Checks are conditional on external system integrations being in scope"
+      verification: "Prompt includes conditional framing (e.g., 'When the proposed change touches code that integrates with external systems')"
+      check_method: "grep"
+
+    - id: "INV-4"
+      description: "Existing prompt structure is preserved"
+      verification: "All original sections (Systems Affected, Integration Risks, Data Impact, Test Impact, Reversibility, Summary) and guardrails are unchanged"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "Disk-mediated dispatch header preserved"
+      verification: "impact-analyst-prompt.md contains <!-- DISPATCH: disk-mediated -->"
+      check_method: "grep"
+
+  testable: []
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Embed within Integration Risks, not new top-level section"
+    confidence: "high"
+    alternatives: ["New top-level 'Integration Health' section"]
+    reasoning: "Issue explicitly says to add to Integration Risks. Keeps output within token budget and maintains section structure."
+    reversibility: "High — could extract to own section later"
