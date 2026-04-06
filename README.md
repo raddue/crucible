@@ -19,9 +19,11 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Why Crucible?
 
-**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 13 skills, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. See the [full scoreboard](#eval-results).
+**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 13 skills eval'd, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. 30+ skills total across pipeline, implementation, quality, security, debugging, knowledge, and utilities. See the [full scoreboard](#eval-results).
 
 **Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This accounts for a **68% delta** over unstructured review — the model scores 88% with the skill vs 19% without. Process expectations (iterative rounds, severity tracking, stagnation detection) are **0% without the skill**.
+
+**Token-efficient by design.** All 22 orchestrator skills use [disk-mediated dispatch](skills/shared/dispatch-convention.md) — full subagent prompts are written to `/tmp` dispatch files, and only a ~100-token pointer prompt enters the orchestrator's context. Over a full build pipeline (52-93 dispatches), this recovers 73-131K tokens of context that would otherwise fossilize in conversation history. The distill skill extends this philosophy to document ingestion: convert a 50-page PDF to a 4-page digest and save ~80% of context budget.
 
 **Full pipeline orchestration.** The build skill chains design, planning, execution, and completion into a single autonomous pipeline. It dispatches parallel implementers, runs two-pass code review per task, fills test coverage gaps, writes adversarial tests designed to break the implementation, and runs a 5-dimension cross-component inquisitor before the final quality gate.
 
@@ -104,6 +106,7 @@ You have 40,000 characters — use them. The more context you provide about your
 | **prd** | Generates a stakeholder-facing Product Requirements Document from a finalized design doc. Transforms technical design decisions into problem statements, user stories, requirements, scope, and success metrics. Also runs automatically in the build pipeline. |
 | **design** | Interactive design refinement with quality gate on completed designs. Explores intent, requirements, and design before implementation. Produces a design doc. |
 | **planning** | Implementation plan writing with quality gate on completed plans. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
+| **recon** | Standalone codebase investigation with layered output. Produces a core Investigation Brief (structure, patterns, scope, prior art) plus optional depth modules (impact-analysis, consumer-registry, friction-scan, subsystem-manifest, diagnostic-context, execution-readiness). Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before any task requiring codebase understanding. |
 
 ### Implementation
 
@@ -115,12 +118,15 @@ You have 40,000 characters — use them. The more context you provide about your
 | **parallel** | Dispatch independent tasks to parallel subagents to work without shared state or sequential dependencies. |
 | **adversarial-tester** | Reads completed implementation and writes up to 5 tests designed to expose unknown failure modes. Targets edge cases, boundary conditions, and runtime behavior the implementer didn't anticipate. |
 | **inquisitor** | Full-feature cross-component adversarial testing. Runs 5 parallel adversarial dimensions (wiring, integration, edge cases, state/lifecycle, regression) against the complete implementation diff to find bugs that per-task testing misses. |
+| **migrate** | Autonomous migration planning and execution. Takes a migration target (framework upgrade, API version bump, dependency major version, deprecation removal) and produces a phased migration plan with compatibility verification. Optionally executes via build's refactor mode. |
 
 ### Quality & Audit
 
 | Skill | Description |
 |-------|-------------|
 | **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture) plus a Phase 2.5 blind-spots agent that hunts cross-cutting concerns the lenses missed (security, performance, concurrency). Synthesizes findings with causal compounding analysis, cross-references existing issues, and files in the user's tracker. Find-and-report only. |
+| **siege** | Security audit of design docs, implementation plans, and code. Dispatches 6 parallel Opus agents across attacker perspectives (boundary analyst, insider threat, chain analyst, supply chain, cryptographic, social engineering), iterates until zero Critical + zero High findings, and maintains a persistent threat model. Steel-mans before attacking. |
+| **consensus** | Multi-model consensus for high-stakes quality decisions. Opt-in MCP-based system that dispatches prompts to multiple LLM providers in parallel and synthesizes responses. Enhances quality-gate (stagnation verdicts, periodic red-team rounds) and design (Challenger step) when available. Transparent degradation — changes nothing when absent. |
 | **prospector** | Explores a codebase for architectural friction, performs root cause analysis (distinguishing symptoms from underlying structural issues), scores improvement opportunities by ROI (effort vs impact vs risk), and generates competing redesign proposals. Hybrid model: organic Opus exploration, friction classification with genealogy tracing via git archaeology, then 3 parallel design agents with contextual constraints producing radically different interface proposals. Output feeds into build (refactor mode) or files as tracker issues. |
 | **quality-gate** | Iterative red-teaming of any artifact (design, plan, code, hypothesis, mockup). Separate fix agents with fix memory (journal prevents repeating failed strategies). Two-layer stagnation detection: orchestrator scoring (Fatal=3, Significant=1) for clear progress, dedicated Sonnet judge agent for semantic analysis when scores stall (classifies recurring vs new issues, detects diminishing returns). Shadow git checkpoints before code-artifact fix rounds with restore-on-regression option. Compaction recovery with Compression State Blocks and persistent scratch directories. Progress notifications at rounds 5/8/11/14, 15-round safety limit. |
 | **red-team** | Adversarial review engine with steel-man-then-kill protocol — every finding must articulate the strongest defense before demolishing it. Mandatory coverage sweep across 6 attack dimensions with a required second pass. Severity anchoring with bias check. Dispatches fresh Devil's Advocate reviewers per round. Dual-mode: single-pass when called by quality-gate (quality-gate owns the loop), full iterative loop when called directly. |
@@ -144,6 +150,12 @@ You have 40,000 characters — use them. The more context you provide about your
 | **forge** | Self-improving retrospective system. Post-task retrospectives classify deviations and extract lessons. Auto-detects skill-worthy workflows via 5 trigger heuristics and proposes extraction (never auto-creates). Opt-in trajectory capture records skill invocations as structured JSONL for eval generation. Pre-task feed-forward surfaces relevant warnings and recent failure patterns. Periodic mutation analysis proposes concrete skill edits for human review. |
 | **cartographer** | Living architectural map that accumulates across sessions. Records codebase structure, conventions, landmines, and defect signatures after exploration. Surfaces structural context and known defect patterns before tasks. Defect signatures persist Phase 4.5 "Where Else?" scan results — build implementers and debugging investigators receive matching patterns proactively. |
 | **project-init** | Eliminates cold-start penalty by deep-scanning the current repo and discovering cross-repo topology. Produces structural cartographer maps and a topology directory before the first real task. |
+### Utilities
+
+| Skill | Description |
+|-------|-------------|
+| **distill** | Convert heavy document formats (PDF, Word, Excel, PowerPoint, and 10+ others) to token-efficient Markdown/CSV. Three conversion tiers: Pandoc-native (9 formats), PDF (pdftotext + Claude structuring), Python venv (pptx via python-pptx, xlsx via openpyxl). Structurally-aware digest pass compresses to 20-30% of token count. Pre-flight safety checks (zip bomb, PDF attachments, encoding). Graceful degradation when tools are missing. |
+
 ### Maintenance & Meta
 
 | Skill | Description |
@@ -176,6 +188,12 @@ The **forge** and **cartographer** skills are recommended (not required) knowled
 The **spec** skill produces design docs, implementation plans, and machine-readable contracts from a GitHub epic — feeding directly into build for autonomous execution of an entire epic.
 
 The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
+
+The **recon** skill provides structured codebase investigation — run `/recon` before any task to get a layered brief (structure, patterns, scope, prior art) with optional depth modules. Multiple skills (design, build, debugging, prospector, audit) consume recon output.
+
+The **siege** skill performs security audits — 6 parallel attacker-perspective agents iterate until zero Critical/High findings.
+
+The **distill** skill converts heavy documents (PDF, Word, Excel, PowerPoint) to token-efficient Markdown/CSV with a digest pass — reducing context budget by ~80% for document-heavy workflows.
 
 Individual skills can also be used standalone (e.g., `test-driven-development` for any implementation work, `debugging` for any bug, `audit` for adversarial review of any existing subsystem).
 

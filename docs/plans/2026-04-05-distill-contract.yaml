@@ -1,0 +1,166 @@
+version: "1.0"
+ticket: "#111"
+epic: "#111"
+title: "Distill Skill — Convert Heavy Documents to Token-Efficient Formats"
+date: "2026-04-05"
+
+api_surface:
+  - name: "/distill"
+    type: "interface"
+    signature: "/distill <path> [path2 ...] or /distill <directory>"
+    params:
+      - name: "paths"
+        type: "string[] — file or directory paths to convert"
+        required: true
+    returns: "Conversion summary with per-file results and token savings metrics"
+    description: "Invoke the distill skill to convert heavy document formats to token-efficient Markdown/CSV with optional digest compression"
+
+  - name: "Tier1PandocConversion"
+    type: "function"
+    signature: "pandoc -f \"$FORMAT\" -t markdown --wrap=none \"$INPUT_PATH\" -o \"$OUTPUT_PATH\""
+    params:
+      - name: "FORMAT"
+        type: "string — pandoc format flag (docx, rtf, html, odt, epub, rst, org, latex, ipynb). Note: .html and .htm both map to 'html' — 9 format flags, 10 file extensions."
+        required: true
+      - name: "INPUT_PATH"
+        type: "string — absolute path to source file"
+        required: true
+      - name: "OUTPUT_PATH"
+        type: "string — absolute path for converted .md output"
+        required: true
+    returns: "Markdown file at OUTPUT_PATH"
+    description: "Tier 1 conversion via pandoc. Supports 9 formats (10 file extensions counting .html/.htm separately)."
+
+  - name: "Tier2PDFConversion"
+    type: "function"
+    signature: "pdftotext -layout $INPUT_PATH $TEXT_PATH && dispatch pdf-structurer agent → $OUTPUT_PATH"
+    params:
+      - name: "INPUT_PATH"
+        type: "string — absolute path to PDF file"
+        required: true
+      - name: "TEXT_PATH"
+        type: "string — absolute path for intermediate pdftotext output"
+        required: true
+      - name: "OUTPUT_PATH"
+        type: "string — absolute path for final structured .md output"
+        required: true
+    returns: "Structured Markdown file at OUTPUT_PATH after Claude structuring pass"
+    description: "Tier 2 PDF conversion: pdftotext extraction + Sonnet structuring agent for heading/list/table recovery"
+
+  - name: "Tier3PythonConversion"
+    type: "function"
+    signature: "python3 convert_pptx.py|convert_xlsx.py --input $INPUT --output $OUTPUT"
+    params:
+      - name: "input"
+        type: "string — absolute path to pptx or xlsx file"
+        required: true
+      - name: "output"
+        type: "string — absolute path for output (md for pptx, csv prefix for xlsx)"
+        required: true
+    returns: "Slide-structured Markdown (pptx) or per-sheet CSV files (xlsx)"
+    description: "Tier 3 conversion via Python venv with pinned dependencies (python-pptx==1.0.2, openpyxl==3.1.5)"
+
+  - name: "DigestPass"
+    type: "function"
+    signature: "dispatch Sonnet digest agent with full .md content"
+    params:
+      - name: "content"
+        type: "string — full converted Markdown content (>500 words)"
+        required: true
+      - name: "target_ratio"
+        type: "float — target compression ratio, default 0.25 (20-30% range)"
+        required: false
+    returns: ".digest.md at 20-30% of input token count"
+    description: "Structurally-aware compression pass. Preserves headings, key data, decisions, code blocks. Eliminates redundancy, boilerplate, verbose explanations."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Source files are never modified or deleted"
+      verification: "No rm, mv, or in-place write operations target source file paths"
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "All file paths passed to shell commands via variables, never inline interpolation"
+      verification: "No unquoted $() or backtick interpolation of file paths in Bash commands"
+      check_method: "grep"
+
+    - id: "INV-3"
+      description: "Python dependencies are pinned to exact versions"
+      verification: "python-pptx==1.0.2 and openpyxl==3.1.5 in install commands"
+      check_method: "grep"
+
+    - id: "INV-4"
+      description: "Dispatch templates have disk-mediated dispatch headers"
+      verification: "All *-prompt.md files in skills/distill/ contain <!-- DISPATCH: disk-mediated --> comment"
+      check_method: "grep"
+
+    - id: "INV-5"
+      description: "SKILL.md references shared dispatch convention"
+      verification: "skills/distill/SKILL.md contains <!-- CANONICAL: shared/dispatch-convention.md -->"
+      check_method: "grep"
+
+    - id: "INV-6"
+      description: "Venv is in /tmp, not in project directory"
+      verification: "Venv path is /tmp/crucible-distill-venv/, no venv directory created under project root"
+      check_method: "grep"
+
+  testable:
+    - id: "INV-7"
+      description: "Tier 1 pandoc conversion produces valid Markdown for all 10 supported formats"
+      verification: "Convert one sample file per format, verify non-empty .md output"
+      test_tag: "contract:conversion:inv-7"
+
+    - id: "INV-8"
+      description: "Tier 2 PDF conversion detects scanned PDFs"
+      verification: "Feed a scanned PDF (image-only), verify detection message is emitted"
+      test_tag: "contract:conversion:inv-8"
+
+    - id: "INV-9"
+      description: "Tier 3 XLSX conversion produces one CSV per sheet with correct sheet count guard"
+      verification: "Convert a multi-sheet workbook, verify CSV count matches sheet count (up to 20)"
+      test_tag: "contract:conversion:inv-9"
+
+    - id: "INV-10"
+      description: "Digest pass produces output within 20-30% of input word count"
+      verification: "Digest a 2000-word converted .md, verify digest is 400-600 words"
+      test_tag: "contract:digest:inv-10"
+
+    - id: "INV-11"
+      description: "Zip bomb detection aborts conversion for oversized archives"
+      verification: "Feed a docx with >500MB uncompressed size, verify abort message"
+      test_tag: "contract:preflight:inv-11"
+
+    - id: "INV-12"
+      description: "Unsupported formats produce actionable guidance, not errors"
+      verification: "Feed a .xls file, verify guidance message includes specific conversion instructions"
+      test_tag: "contract:unsupported:inv-12"
+
+    - id: "INV-13"
+      description: "Graceful degradation when pandoc is unavailable"
+      verification: "Simulate missing pandoc, verify skill reports the gap and continues with available tiers"
+      test_tag: "contract:degradation:inv-13"
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Use python-pptx for PPTX — pandoc 3.1.3 does not support pptx as input"
+    confidence: "high"
+    alternatives: ["No viable pandoc alternative at this version"]
+    reasoning: "python-pptx is the only option that provides slide structure, speaker notes, and layout metadata. Pandoc 3.1.3 does not list pptx in its input formats."
+    reversibility: "High — if future pandoc versions add quality pptx input, could migrate"
+
+  - id: "AMB-2"
+    decision: "Sequential file processing, no batch parallelism"
+    confidence: "medium"
+    alternatives: ["Parallel conversion via Agent Teams (faster for large batches)"]
+    reasoning: "Most invocations process 1-3 files. Conversion is fast (sub-second for pandoc/pdftotext). Only digest is slow, and parallelizing LLM calls risks orchestrator context exhaustion. Sequential is correct for v1."
+    reversibility: "High — adding parallelism later is purely additive"
+
+  - id: "AMB-3"
+    decision: "Output files placed alongside source files, not in a separate directory"
+    confidence: "high"
+    alternatives: ["Separate output directory (e.g., distilled/)"]
+    reasoning: "Converted file is a view of the source. Colocation makes the association obvious. No directory creation needed."
+    reversibility: "High — changing output location is a one-line config change"
