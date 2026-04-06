@@ -107,6 +107,7 @@ You have 40,000 characters — use them. The more context you provide about your
 | **design** | Interactive design refinement with quality gate on completed designs. Explores intent, requirements, and design before implementation. Produces a design doc. |
 | **planning** | Implementation plan writing with quality gate on completed plans. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
 | **recon** | Standalone codebase investigation with layered output. Produces a core Investigation Brief (structure, patterns, scope, prior art) plus optional depth modules (impact-analysis, consumer-registry, friction-scan, subsystem-manifest, diagnostic-context, execution-readiness). Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before any task requiring codebase understanding. |
+| **assay** | Recon-informed approach evaluator. Weighs competing options against codebase constraints with decision-type-adaptive scoring (architecture, strategy, diagnosis, optimization). Returns structured JSON Assay Reports with recommendations, alternatives with kill criteria, confidence scoring, and evidence grounding. Consumed by design, debugging, migrate, and prospector. |
 
 ### Implementation
 
