@@ -142,11 +142,11 @@ integration_points: []
 
 ambiguity_resolutions:
   - id: "AMB-1"
-    decision: "Use python-pptx for PPTX instead of pandoc's native pptx reader"
+    decision: "Use python-pptx for PPTX — pandoc 3.1.3 does not support pptx as input"
     confidence: "high"
-    alternatives: ["Pandoc native pptx (simpler but loses slide structure and speaker notes)"]
-    reasoning: "Slide structure preservation is critical for meaningful conversion. Pandoc flattens slides into a single text stream."
-    reversibility: "High — switching to pandoc would simplify Tier 3 but lose slide metadata"
+    alternatives: ["No viable pandoc alternative at this version"]
+    reasoning: "python-pptx is the only option that provides slide structure, speaker notes, and layout metadata. Pandoc 3.1.3 does not list pptx in its input formats."
+    reversibility: "High — if future pandoc versions add quality pptx input, could migrate"
 
   - id: "AMB-2"
     decision: "Sequential file processing, no batch parallelism"

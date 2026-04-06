@@ -27,6 +27,8 @@ No document conversion capability exists in the Crucible skill framework today. 
 | `python3` | 3.12.3 | Runtime for specialized libraries |
 | `pip3` + `venv` | Available | Isolated dependency management |
 
+**Dispatch convention:** All subagent dispatches (PDF structuring pass, digest pass) follow `shared/dispatch-convention.md` — disk-mediated dispatch with dispatch files written to `/tmp/crucible-dispatch-<session-id>/`, manifest logging, and pointer prompts.
+
 ## 2. Target State
 
 A standalone `/distill` skill that:
@@ -47,6 +49,10 @@ slides.pptx      → slides.md + slides.digest.md
 ```
 
 Source files are never modified or deleted.
+
+### Generated File Handling
+
+Converted files (`.md`, `.digest.md`, `.csv`) are working artifacts, not source files. The skill does not modify `.gitignore` — the user decides whether to track, ignore, or clean up generated files. The conversion summary includes a reminder: "Generated files can be added to .gitignore if not needed in version control."
 
 ## 3. Architecture: Three Conversion Tiers
 
@@ -92,7 +98,7 @@ PDFs are structurally ambiguous — columns, headers, footers, page breaks all c
 | `.xlsx` | `openpyxl` | `3.1.5` |
 
 **Why not pandoc for these?**
-- **PPTX:** Pandoc 3.1.3 can read pptx, but flattens slide structure. `python-pptx` preserves slide boundaries, speaker notes, and layout metadata — critical for meaningful conversion.
+- **PPTX:** Pandoc 3.1.3 does not support pptx as an input format (`pandoc --list-input-formats` does not include `pptx`). `python-pptx` provides full access to slide structure, speaker notes, and layout metadata.
 - **XLSX:** Pandoc has no xlsx support. `openpyxl` reads cells, formulas, and sheet structure.
 
 **Venv management:**
@@ -117,7 +123,7 @@ PDFs are structurally ambiguous — columns, headers, footers, page breaks all c
 **XLSX conversion output:**
 - One CSV file per sheet: `{basename}-{sheetname}.csv`
 - Sheet count guard: if >20 sheets, warn and convert only the first 20
-- Formula-cell warning: if >30% of cells contain formulas, warn that values may differ from displayed results (openpyxl reads calculated values, not live formulas)
+- Formula-cell warning: if >30% of cells contain formulas, warn that values may differ from displayed results. Note: openpyxl with `data_only=True` reads *cached* formula results from the last Excel save — if a file was created programmatically and never opened in Excel/LibreOffice, formula cells return `None`. If formula cells return `None`, emit a per-file warning: "Spreadsheet contains formulas with no cached values. Open and save in Excel/LibreOffice before distilling for accurate results."
 
 ### Unsupported Formats (with actionable guidance)
 
@@ -186,15 +192,15 @@ After conversion, verify output is valid UTF-8. If conversion produces non-UTF-8
 
 ## 6. Key Design Decisions
 
-### DEC-1: Tier 3 vs. Pandoc for PPTX (High confidence)
+### DEC-1: python-pptx for PPTX (High confidence)
 
-**Decision:** Use python-pptx (Tier 3) for PPTX, not pandoc's native pptx reader.
+**Decision:** Use python-pptx (Tier 3) for PPTX conversion.
 
 **Alternatives considered:**
-- Pandoc native pptx: Simpler (no venv), but flattens slide structure and loses speaker notes
+- Pandoc: pandoc 3.1.3 does not support pptx as an input format — not a viable alternative
 - python-pptx: Preserves slide boundaries, speaker notes, layout metadata
 
-**Reasoning:** Slide structure preservation is critical for meaningful conversion. A flat text dump of a presentation loses the sequential narrative that slides encode. The venv cost is minimal (one-time setup, cached in /tmp).
+**Reasoning:** python-pptx is the only viable option that preserves slide structure. The venv cost is minimal (one-time setup, cached in /tmp).
 
 ### DEC-2: Output placement alongside source files (High confidence)
 
@@ -236,7 +242,7 @@ After conversion, verify output is valid UTF-8. If conversion produces non-UTF-8
 | pdftotext not installed | Medium | Pre-flight check. Graceful degradation: skip PDF conversion with guidance |
 | Python deps fail to install (network, permissions) | Medium | Cache venv, pin versions, clear error message with manual install instructions |
 | Scanned PDFs produce empty output | Low | Detection + user guidance (see Tier 2 design) |
-| Very large files exhaust digest agent context | Medium | Chunk files >50K words before digest pass. Process chunks independently, concatenate digests. |
+| Very large files exhaust digest agent context | Medium | v1: hard cap at 50K words per file — report "File exceeds 50K word limit for digest pass. Consider splitting the document." Chunked digestion deferred to v2. |
 | Office format corruption / password protection | Low | Catch conversion errors, report per-file, continue with remaining files |
 
 ## 8. Acceptance Criteria
@@ -249,7 +255,7 @@ After conversion, verify output is valid UTF-8. If conversion produces non-UTF-8
 6. Digest pass: `.digest.md` at 20-30% token count for all converted `.md` files over 500 words
 7. Pre-flight: zip bomb detection, PDF attachment detection, encoding validation
 8. Unsupported formats reported with actionable guidance
-9. Shell safety: all file paths via environment variables, no inline interpolation
+9. Shell safety: all file paths via quoted shell variables (e.g., `"$INPUT_PATH"`), no inline interpolation
 10. Conversion summary with token savings metrics
 11. No source files modified or deleted
 12. Tool availability checks with clear install guidance on failure

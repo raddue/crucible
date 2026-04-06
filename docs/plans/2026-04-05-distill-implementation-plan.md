@@ -9,7 +9,7 @@ source: "spec"
 
 ## Task Overview
 
-8 tasks across 3 waves. Wave 1 is the skill skeleton + Tier 1 (pandoc). Wave 2 adds Tier 2 (PDF) + Tier 3 (Python venv). Wave 3 adds the digest pass + pre-flight checks + integration.
+9 tasks across 3 waves. Wave 1 is the skill skeleton + Tier 1 (pandoc) + tool checks. Wave 2 adds Tier 2 (PDF) + Tier 3 (Python venv). Wave 3 adds the digest pass + pre-flight checks + integration.
 
 ## Wave 1: Skill Skeleton + Tier 1
 
@@ -46,7 +46,20 @@ Implement the pandoc conversion path:
 
 Note: The skill orchestrator runs pandoc directly via Bash tool. No subagent needed for Tier 1.
 
-### Task 3: Implement unsupported format handling
+### Task 3: Implement tool availability pre-flight
+
+**Files:** `skills/distill/SKILL.md` (tool check section)
+**Complexity:** Low
+**Dependencies:** Task 1
+
+At skill start (before processing any files), check for required tools:
+- **Tier 1:** `which pandoc` — if missing, report: "pandoc not found. Install with: `apt install pandoc` (Debian/Ubuntu) or `brew install pandoc` (macOS). Tier 1 formats (docx, rtf, html, odt, epub, rst, org, tex, ipynb) will be skipped."
+- **Tier 2:** `which pdftotext` — if missing, report: "pdftotext not found. Install with: `apt install poppler-utils` (Debian/Ubuntu) or `brew install poppler` (macOS). PDF conversion will be skipped."
+- **Tier 3:** `which python3` — if missing, report: "python3 not found. PPTX and XLSX conversion will be skipped."
+
+Build a set of available tiers. Route files only to available tiers. Files targeting unavailable tiers get routed to unsupported-with-guidance.
+
+### Task 4: Implement unsupported format handling
 
 **Files:** `skills/distill/SKILL.md` (unsupported format section)
 **Complexity:** Low
@@ -56,11 +69,11 @@ Add the unsupported format guidance table. When a file's extension matches an un
 
 ## Wave 2: Tier 2 + Tier 3
 
-### Task 4: Implement Tier 2 PDF conversion
+### Task 5: Implement Tier 2 PDF conversion
 
 **Files:** `skills/distill/SKILL.md` (PDF section), `skills/distill/pdf-structurer-prompt.md`
 **Complexity:** High
-**Dependencies:** Task 1
+**Dependencies:** Task 1, Task 3 (tool check must confirm pdftotext available)
 
 Two-step PDF conversion:
 1. Run `pdftotext -layout` to extract text
@@ -74,30 +87,32 @@ Create `pdf-structurer-prompt.md` dispatch template:
 
 Include scanned PDF detection: if pdftotext output averages < 50 chars/page, report as likely scanned.
 
-### Task 5: Implement Tier 3 Python venv conversion
+### Task 6: Implement Tier 3 Python venv conversion
 
 **Files:** `skills/distill/SKILL.md` (Tier 3 section), `skills/distill/convert_pptx.py`, `skills/distill/convert_xlsx.py`
 **Complexity:** Medium
-**Dependencies:** Task 1
+**Dependencies:** Task 1, Task 3 (tool check must confirm python3 available)
 
 Implement venv management:
 - Check for existing venv at `/tmp/crucible-distill-venv/`
 - Create if missing: `python3 -m venv /tmp/crucible-distill-venv/`
-- Install pinned deps: `python-pptx==1.0.2 openpyxl==3.1.5`
+- Install pinned deps: `pip install python-pptx==1.0.2 openpyxl==3.1.5`
+- **Error handling:** Check pip install exit code. On failure (no network, proxy, permissions), report: "Failed to install Python dependencies. Manual install: `pip install python-pptx==1.0.2 openpyxl==3.1.5`. PPTX and XLSX conversion will be skipped." Route pptx/xlsx files to unsupported-with-guidance.
+- **UX:** If venv creation is needed, announce: "Installing Python dependencies (one-time setup, ~15 seconds)..."
 
 Create conversion scripts:
 - `convert_pptx.py`: Read pptx, output slide-structured Markdown (slide title, content, speaker notes per slide, separated by `---`)
-- `convert_xlsx.py`: Read xlsx, output one CSV per sheet. Implement formula-cell warning (>30% formula cells) and sheet count guard (max 20 sheets).
+- `convert_xlsx.py`: Read xlsx, output one CSV per sheet with naming pattern `{basename}-{sheetname}.csv` (sheetname sanitized: spaces to hyphens, special chars stripped). Implement formula-cell warning (>30% formula cells), `None` value detection (warn if formula cells return `None` — file needs to be opened in Excel first), and sheet count guard (max 20 sheets).
 
 Both scripts accept input/output paths via command-line arguments (not env vars — Python argparse is safe). Scripts validate inputs and return non-zero on failure.
 
 ## Wave 3: Digest + Pre-Flight + Integration
 
-### Task 6: Implement digest pass
+### Task 7: Implement digest pass
 
 **Files:** `skills/distill/SKILL.md` (digest section), `skills/distill/digest-prompt.md`
 **Complexity:** High
-**Dependencies:** Tasks 2, 4, 5
+**Dependencies:** Tasks 2, 5, 6
 
 Create `digest-prompt.md` dispatch template:
 - Input: full converted `.md` content
@@ -107,16 +122,19 @@ Create `digest-prompt.md` dispatch template:
 
 Implement digest orchestration in SKILL.md:
 - Word count check (skip files ≤500 words)
+- Hard cap: reject files >50K words with guidance ("File exceeds 50K word limit for digest pass. Consider splitting the document."). Chunked digestion deferred to v2.
 - Dispatch Sonnet digest agent
 - Verify output is within 20-30% target (15-35% acceptable range)
 - One retry if out of range (stricter or looser instructions)
-- Large file chunking: if input >50K words, chunk by heading boundaries, digest chunks independently
+- Second result accepted regardless
 
-### Task 7: Implement pre-flight checks
+### Task 8: Implement pre-flight checks
 
 **Files:** `skills/distill/SKILL.md` (pre-flight section)
 **Complexity:** Medium
 **Dependencies:** Task 1
+
+Note: Pre-flight logic is described in SKILL.md and runs before any conversion (Tasks 2/5/6). This task writes the SKILL.md section; runtime ordering is: tool check → per-file pre-flight → convert → digest → report.
 
 Implement three pre-flight checks:
 1. **Zip bomb detection** (docx/pptx/xlsx): `unzip -l` to check uncompressed size. Abort if >500MB.
@@ -125,11 +143,11 @@ Implement three pre-flight checks:
 
 Pre-flight runs before conversion for each file. Failures are per-file (don't halt the batch).
 
-### Task 8: Implement conversion summary and token metrics
+### Task 9: Implement conversion summary and token metrics
 
 **Files:** `skills/distill/SKILL.md` (summary section)
 **Complexity:** Low
-**Dependencies:** Tasks 2, 4, 5, 6
+**Dependencies:** Tasks 2, 5, 6, 7
 
 After all conversions complete, output a summary table:
 
@@ -150,12 +168,13 @@ Token savings = `1 - (digest words / original converted words)`. Use word count 
 
 ```
 Task 1 (skeleton) ← Task 2 (Tier 1)
-                  ← Task 3 (unsupported)
-                  ← Task 4 (Tier 2)
-                  ← Task 5 (Tier 3)
-Task 2,4,5        ← Task 6 (digest)
-Task 1            ← Task 7 (pre-flight)
-Task 2,4,5,6      ← Task 8 (summary)
+                  ← Task 3 (tool checks)
+                  ← Task 4 (unsupported)
+Task 1, Task 3    ← Task 5 (Tier 2)
+Task 1, Task 3    ← Task 6 (Tier 3)
+Task 2, 5, 6      ← Task 7 (digest)
+Task 1            ← Task 8 (pre-flight)
+Task 2, 5, 6, 7   ← Task 9 (summary)
 ```
 
 ## Implementation Notes
