@@ -105,9 +105,58 @@ class GoogleProvider:
             )
 
 
+class OpenAIProvider:
+    """Provider adapter for OpenAI-compatible models."""
+
+    def __init__(self, config: ModelConfig):
+        import openai
+        import os
+        self.config = config
+        api_key = os.environ.get(config.api_key_env)
+        base_url = None
+        base_url_env = getattr(config, 'base_url_env', None)
+        if base_url_env:
+            base_url = os.environ.get(base_url_env) or None
+        self.client = openai.AsyncOpenAI(
+            api_key=api_key,
+            **({"base_url": base_url} if base_url else {}),
+        )
+
+    async def query(self, prompt: str, context: str) -> ModelResponse:
+        start = time.monotonic()
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.config.model_id,
+                messages=[
+                    {"role": "system", "content": context},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=4096,
+                temperature=self.config.temperature,
+            )
+            content = response.choices[0].message.content
+            latency = int((time.monotonic() - start) * 1000)
+            return ModelResponse(
+                provider=self.config.provider,
+                model_id=self.config.model_id,
+                content=content,
+                latency_ms=latency,
+            )
+        except Exception as e:
+            latency = int((time.monotonic() - start) * 1000)
+            return ModelResponse(
+                provider=self.config.provider,
+                model_id=self.config.model_id,
+                content="",
+                latency_ms=latency,
+                error=str(e),
+            )
+
+
 PROVIDER_REGISTRY: dict[str, type] = {
     "anthropic": AnthropicProvider,
     "google": GoogleProvider,
+    "openai": OpenAIProvider,
 }
 
 

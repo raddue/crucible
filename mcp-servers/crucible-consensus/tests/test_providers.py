@@ -9,6 +9,7 @@ from config import ModelConfig
 from providers import (
     AnthropicProvider,
     GoogleProvider,
+    OpenAIProvider,
     ModelResponse,
     create_provider,
     dispatch_all,
@@ -135,6 +136,95 @@ async def test_google_provider_error(google_config):
 
 
 # ---------------------------------------------------------------------------
+# OpenAI provider tests
+# ---------------------------------------------------------------------------
+
+
+async def test_openai_provider_success(openai_config):
+    """OpenAIProvider returns a valid ModelResponse on success."""
+    mock_message = MagicMock()
+    mock_message.content = "GPT says hello"
+
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+
+    mock_completions = MagicMock()
+    mock_completions.create = AsyncMock(return_value=mock_response)
+
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+
+    provider = OpenAIProvider(openai_config)
+    provider.client.chat = mock_chat
+
+    result = await provider.query("test prompt", "test context")
+
+    assert isinstance(result, ModelResponse)
+    assert result.provider == "openai"
+    assert result.model_id == "gpt-4o"
+    assert result.content == "GPT says hello"
+    assert result.error is None
+    assert result.latency_ms >= 0
+
+    mock_completions.create.assert_awaited_once_with(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "test context"},
+            {"role": "user", "content": "test prompt"},
+        ],
+        max_tokens=4096,
+        temperature=0.6,
+    )
+
+
+async def test_openai_provider_error(openai_config):
+    """OpenAIProvider captures exceptions into ModelResponse.error."""
+    mock_completions = MagicMock()
+    mock_completions.create = AsyncMock(side_effect=RuntimeError("OpenAI API failure"))
+
+    mock_chat = MagicMock()
+    mock_chat.completions = mock_completions
+
+    provider = OpenAIProvider(openai_config)
+    provider.client.chat = mock_chat
+
+    result = await provider.query("test prompt", "test context")
+
+    assert isinstance(result, ModelResponse)
+    assert result.provider == "openai"
+    assert result.content == ""
+    assert result.error == "OpenAI API failure"
+    assert result.latency_ms >= 0
+
+
+async def test_openai_provider_base_url_override(monkeypatch):
+    """OpenAIProvider reads base_url from env when base_url_env is set."""
+    monkeypatch.setenv("TEST_OPENAI_KEY", "test-key-789")
+    monkeypatch.setenv("TEST_OPENAI_BASE_URL", "https://custom.api.example.com/v1")
+
+    config = ModelConfig(
+        provider="openai",
+        model_id="gpt-4o",
+        api_key_env="TEST_OPENAI_KEY",
+        temperature=0.6,
+    )
+    # Attach base_url_env dynamically (Task 2 adds the field formally)
+    config.base_url_env = "TEST_OPENAI_BASE_URL"
+
+    provider = OpenAIProvider(config)
+
+    # The mock AsyncOpenAI constructor should have been called with base_url
+    import openai
+    openai.AsyncOpenAI.assert_called_with(
+        api_key="test-key-789",
+        base_url="https://custom.api.example.com/v1",
+    )
+
+
+# ---------------------------------------------------------------------------
 # dispatch_all tests
 # ---------------------------------------------------------------------------
 
@@ -235,13 +325,19 @@ def test_create_provider_google(google_config):
     assert isinstance(provider, GoogleProvider)
 
 
+def test_create_provider_openai(openai_config):
+    """create_provider returns an OpenAIProvider for 'openai' config."""
+    provider = create_provider(openai_config)
+    assert isinstance(provider, OpenAIProvider)
+
+
 def test_create_provider_unknown():
     """create_provider raises ValueError for an unknown provider."""
     config = ModelConfig(
-        provider="openai",
-        model_id="gpt-4o",
-        api_key_env="OPENAI_API_KEY",
+        provider="cohere",
+        model_id="command-r-plus",
+        api_key_env="COHERE_API_KEY",
         temperature=0.6,
     )
-    with pytest.raises(ValueError, match="Unknown provider: openai"):
+    with pytest.raises(ValueError, match="Unknown provider: cohere"):
         create_provider(config)

@@ -22,6 +22,10 @@ _mock_google.genai = _mock_genai
 sys.modules.setdefault("google", _mock_google)
 sys.modules.setdefault("google.genai", _mock_genai)
 
+# Mock the openai module
+_mock_openai = MagicMock()
+sys.modules.setdefault("openai", _mock_openai)
+
 
 # ---------------------------------------------------------------------------
 # Mock the mcp SDK so server.py imports succeed without the real package
@@ -100,5 +104,16 @@ def google_config(monkeypatch):
         provider="google",
         model_id="gemini-2.5-pro",
         api_key_env="TEST_GOOGLE_KEY",
+        temperature=0.6,
+    )
+
+
+@pytest.fixture
+def openai_config(monkeypatch):
+    monkeypatch.setenv("TEST_OPENAI_KEY", "test-key-789")
+    return ModelConfig(
+        provider="openai",
+        model_id="gpt-4o",
+        api_key_env="TEST_OPENAI_KEY",
         temperature=0.6,
     )
