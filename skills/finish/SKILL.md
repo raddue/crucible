@@ -7,6 +7,9 @@ description: Use when implementation is complete, all tests pass, and you need t
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Guide completion of development work by presenting clear options and handling chosen workflow.
 
 **Core principle:** Verify tests -> Code review -> Red-team -> Present options -> Execute choice -> Clean up.

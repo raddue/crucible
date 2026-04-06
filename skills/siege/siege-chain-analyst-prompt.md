@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Siege: Chain Analyst Prompt Template
 
 Use this template when dispatching the Chain Analyst agent. The orchestrator fills in the bracketed sections. The Chain Analyst runs AFTER agents 1-5 complete.

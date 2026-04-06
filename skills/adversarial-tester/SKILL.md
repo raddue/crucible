@@ -13,6 +13,9 @@ Read completed implementation and write up to 5 tests designed to make it break.
 
 **Model:** Opus (adversarial reasoning about failure modes requires creative analytical thinking)
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 ## Distinction from Related Skills
 
 | Agent | Question | Output | Scope |

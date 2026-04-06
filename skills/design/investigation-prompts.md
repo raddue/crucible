@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Design Investigation Prompt Templates
 
 Templates for dispatching investigation agents during the design skill's Phase 2 (Investigated Questions).

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Partition Explorer — Dispatch Template
 
 Dispatch one Sonnet subagent per source directory partition to scan and produce a structured inventory.

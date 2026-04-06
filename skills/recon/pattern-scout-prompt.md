@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Pattern Scout Prompt Template
 
 Use this template when dispatching the Pattern Scout in Phase 2. This agent discovers conventions, naming patterns, test patterns, existing abstractions, and prior art relevant to the task. Feeds `existing_patterns` + `prior_art` core fields.

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Cross-Ticket Integration Check Prompt Template
 
 Prompt template for the Phase 2 end-of-run quality gate. Dispatched by the spec orchestrator after all per-document quality gates (Phase 1) pass. This is NOT routed through `crucible:quality-gate`'s iterative fix loop -- it is a single focused consistency review with structured findings that the orchestrator routes to targeted remediation.

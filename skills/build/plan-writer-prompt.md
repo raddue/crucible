@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Plan Writer Prompt Template
 
 Use this template when dispatching a plan writer subagent in Phase 2.

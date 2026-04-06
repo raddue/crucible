@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Inquisitor Dimension Prompt Template
 
 Use this template when dispatching each of the 5 inquisitor dimension subagents. The orchestrator fills in the dimension-specific sections.

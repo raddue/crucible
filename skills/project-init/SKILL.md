@@ -7,6 +7,9 @@ description: Use when onboarding to an unfamiliar codebase and want full structu
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Eliminate cold-start penalty by proactively mapping the current repo and its neighborhood. Instead of re-discovering the codebase during every first task, project-init builds structural context upfront so that build, design, and debugging skills start informed.
 
 **Invocation:** User runs `/project-init`. Not auto-triggered.
@@ -122,7 +125,7 @@ Use the prompt template at `./init-recorder-prompt.md`. Fill in the template var
 3. Dispatch a final Init Recorder (without "batch mode") that receives the batch output file paths and produces the definitive cartographer files. The final recorder treats batch files exactly like partition reports — same input format, same processing steps.
 4. The final pass handles deduplication and conflict resolution across batches
 
-The orchestrator passes **file paths, not content** for partition reports to the Init Recorder — the recorder reads the partition reports itself. Existing cartographer data (for re-invocation merge) is pasted directly into the template since it's small and needed for merge decisions.
+The orchestrator passes **file paths, not content** for partition reports to the Init Recorder — the recorder reads the partition reports itself. Existing cartographer data (for re-invocation merge) is included directly in the dispatch file since it's small and needed for merge decisions.
 
 ### Step 5: Validation Gate
 

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Design Competitor Prompt Template
 
 Use this template when dispatching a competing design agent. The orchestrator fills in the bracketed sections. Three agents are dispatched in parallel, each with a different assigned constraint from the constraint menu.

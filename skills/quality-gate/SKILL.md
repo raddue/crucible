@@ -6,6 +6,9 @@ origin: crucible
 
 # Quality Gate
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Shared iterative red-teaming mechanism invoked at the end of artifact-producing skills. Provides rigorous adversarial review as the core quality mechanism.
 
 **Announce at start:** "Running quality gate on [artifact type]."
@@ -126,7 +129,7 @@ The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch di
 
 After each fix agent completes and before the next red-team round, dispatch a **Fix Verifier** — a dedicated Sonnet agent that checks whether each fix actually resolves its stated finding. No re-fix sub-loop; the verifier checks once, and its output feeds into the fix journal for the next round.
 
-**Dispatch method:** Task tool (model: Sonnet), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator pastes all input directly.
+**Dispatch method:** Task tool (model: Sonnet), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator includes all input in the dispatch file directly.
 
 **Input the orchestrator provides:**
 1. Round N findings (the findings the fix agent was asked to address)
@@ -195,7 +198,7 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
 
 If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
-**Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator pastes all input directly.
+**Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
 
 **Input the orchestrator provides:**
 1. The content of `round-N-findings.md` (current round)

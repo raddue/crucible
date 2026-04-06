@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Contract Test Writer Prompt Template
 
 Use this template when dispatching a contract test writer subagent in refactor-mode Phase 1. These tests lock existing behavior before refactoring begins — the build pipeline starts GREEN and must stay GREEN throughout.

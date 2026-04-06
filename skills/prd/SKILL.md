@@ -7,6 +7,9 @@ description: "Generate a stakeholder-facing PRD from a design doc. Use when you 
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Generates a Product Requirements Document (PRD) from a finalized design doc. The PRD reformats technical design decisions into stakeholder-friendly language — problem statement, user stories, requirements, scope, success metrics.
 
 **Announce at start:** "I'm using the PRD skill to generate a product requirements document."

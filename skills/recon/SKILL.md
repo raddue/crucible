@@ -7,6 +7,9 @@ description: "Standalone codebase investigation. Produces a layered Investigatio
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Structured, parallel codebase investigation with a layered output model. Produces a core Investigation Brief that all consumers share, plus optional depth modules for consumer-specific needs.
 
 **Skill type:** Rigid — follow exactly, no shortcuts.

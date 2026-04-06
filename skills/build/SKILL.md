@@ -7,6 +7,9 @@ description: Use when starting any feature development, building new functionali
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
@@ -250,7 +253,7 @@ The user's answer sets the mode for the entire pipeline. No special syntax neede
 Propagate refactor mode to subagents through:
 
 1. **New refactor-specific prompt templates** — `contract-test-writer-prompt.md` and `refactor-implementer-addendum.md` are standalone files used only in refactor mode. Select these instead of (or in addition to) the feature-mode equivalents.
-2. **Appended context blocks** — For existing prompts that serve both modes (`plan-writer-prompt.md`, `build-implementer-prompt.md`), append a "Refactor Mode Context" section when pasting the prompt. The templates remain flat markdown — the orchestrator decides what to paste.
+2. **Appended context blocks** — For existing prompts that serve both modes (`plan-writer-prompt.md`, `build-implementer-prompt.md`), append a "Refactor Mode Context" section when composing the dispatch file. The templates remain flat markdown — the orchestrator decides what to include.
 3. **Scratch file for compaction recovery** — Persist the current mode in `/tmp/crucible-build-mode.md` containing `mode: refactor` or `mode: feature` plus the baseline commit SHA. Only one build runs per session, so a well-known filename is sufficient.
 
 ### Compaction Recovery
@@ -487,7 +490,7 @@ Before creating the team and task list, write a handoff manifest:
 
 ### Step 0: Load Module Context for Subagents
 
-- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (load mode) — when dispatching implementers and reviewers, paste relevant module files, conventions.md, and landmines.md into their prompts
+- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (load mode) — when dispatching implementers and reviewers, include relevant module files, conventions.md, and landmines.md in their dispatch files
 
 - **Defect signature loading (for implementers only):**
   1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory

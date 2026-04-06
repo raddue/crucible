@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Investigator Subagent Prompt Template
 
 Use this template when dispatching Phase 1 investigation subagents. The orchestrator selects which roles to dispatch based on the bug context:

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Siege: Stagnation Judge Prompt Template
 
 Use this template when dispatching the stagnation judge during Phase 4 Security Gate. The judge is a Sonnet agent performing semantic comparison of findings across rounds.

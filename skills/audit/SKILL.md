@@ -15,6 +15,9 @@ Adversarial review of existing subsystems. Dispatches parallel analysis agents a
 
 **Model:** Opus (orchestrator and analysis agents). Sonnet (scoping exploration). If the orchestrator session is not running Opus, warn: "Audit requires Opus-level reasoning for synthesis. Results may be degraded."
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 ## Why This Exists
 
 Per-task quality gates (red-team, inquisitor) review artifacts produced during development. But the bugs that accumulate in stable code -- the ones nobody's looked at critically in months -- live in subsystems that passed their original review but have drifted, accrued inconsistencies, or developed subtle failure modes. The audit skill performs a focused adversarial review of any existing subsystem on demand.

@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Acceptance Test Writer Prompt Template
 
 Use this template when dispatching an acceptance test writer subagent in Phase 1, Step 3. These tests define "done" at the feature level — the build pipeline starts RED and ends GREEN.

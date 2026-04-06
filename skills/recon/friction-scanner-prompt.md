@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Friction Scanner Prompt Template
 
 Use this template when dispatching the Friction Scanner depth agent. Primary consumer: `/prospector`. Produces friction points with severity, frequency, and file locations for the `## Friction Scan` section.

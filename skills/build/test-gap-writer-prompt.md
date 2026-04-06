@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Test Gap Writer Prompt Template
 
 Use this template when dispatching a test gap writer after Pass 2 (Test Review) identifies missing coverage.

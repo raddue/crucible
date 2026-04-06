@@ -7,6 +7,9 @@ description: "Autonomous migration planning and execution. Takes a migration tar
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Autonomous migration planning and execution: analyzes a migration target, maps blast radius, decomposes into safe phases with compatibility layers, groups consumers into waves, then executes through build's refactor/feature mode with verification at each phase boundary.
 
 **Announce at start:** "Running migrate on [migration target description]."

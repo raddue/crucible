@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # PRD Writer Prompt Template
 
 Use this template when dispatching a PRD writer subagent in Phase 1, Step 2.5. The PRD reformats the approved design doc for non-technical stakeholders.

@@ -1,3 +1,5 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Plan Reviewer Prompt Template
 
 Use this template when dispatching a plan reviewer subagent in Phase 2.

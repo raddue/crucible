@@ -1,8 +1,10 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
 # Synthesis Subagent Prompt Template
 
 Use this template when dispatching a synthesis subagent to consolidate Phase 1 investigation findings.
 
-The orchestrator pastes ALL Phase 1 agent reports verbatim into the prompt below. The synthesis agent distills them into a concise root-cause analysis so the orchestrator only reads a short summary.
+The orchestrator includes ALL Phase 1 agent reports verbatim in the template below. The synthesis agent distills them into a concise root-cause analysis so the orchestrator only reads a short summary.
 
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):

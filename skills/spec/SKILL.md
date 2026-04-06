@@ -7,6 +7,9 @@ description: "Use when you have a GitHub epic (or equivalent) with child tickets
 
 ## Overview
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
 Fully autonomous skill that takes a GitHub epic (or equivalent issue tracker artifact), processes child tickets without human interaction, and produces complete design docs + implementation plans + machine-readable contracts per ticket. Designed to run unattended while a separate agent (or human) handles implementation.
 
 **The core insight:** Separate the cognitive work (design, investigation, decision-making, planning) from the execution work (implementation, testing). One agent specs autonomously, another builds. The spec agent requires no human input after the initial invocation -- it investigates the codebase, makes design decisions, documents its reasoning, and flags uncertainty via terminal alerts rather than blocking on human answers. Contracts solve the hard problem of two async agents communicating through prose -- prose is ambiguous, contracts make inter-ticket interfaces structural and verifiable.

@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Mutation Analyst — Dispatch Template
 
 Dispatch an Opus subagent when 10+ retrospectives have accumulated and recurring patterns emerge. This produces proposals for human review — it NEVER directly modifies skills.

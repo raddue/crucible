@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Topology Recorder — Dispatch Template
 
 Dispatch a Sonnet subagent during Tier 2 fan-in to synthesize neighbor scan results into a cross-repo topology map.

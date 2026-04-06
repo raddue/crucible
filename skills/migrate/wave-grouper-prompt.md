@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Wave Grouper Prompt Template
 
 Use this template when dispatching the Consumer Wave Grouper agent in Phase 5.

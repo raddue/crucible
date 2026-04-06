@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Spec Writer Prompt Template
 
 Use this template when dispatching a teammate (or sequential sub-agent) to process a single ticket during `/spec` execution. The orchestrator fills in all `[PLACEHOLDER]` injection points before dispatch.

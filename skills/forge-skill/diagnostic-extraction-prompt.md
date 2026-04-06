@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Diagnostic Pattern Extraction Prompt
 
 Use this template when dispatching a diagnostic pattern extraction subagent during forge retrospectives for debugging sessions (step 6) and build sessions with QG fix journals (step 6b).

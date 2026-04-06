@@ -1,3 +1,6 @@
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+
 # Readiness Checker Prompt Template
 
 Use this template when dispatching the Readiness Checker depth agent. Primary consumer: `/build`. Discovers test, lint, and CI verification commands for the `## Execution Readiness` section.
