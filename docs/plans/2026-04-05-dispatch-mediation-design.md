@@ -51,6 +51,7 @@ The dispatch file is the fully expanded template — identical to what currently
 # Dispatch: <template-name>
 **Pipeline:** <skill-name> | **Phase:** <phase> | **Task:** <N>
 **Timestamp:** <ISO-8601>
+**Dispatch-Dir:** <dispatch directory path>
 
 ---
 
@@ -134,7 +135,7 @@ Counter increments per dispatch within the session. Template name makes files se
 
 **Sub-skill inheritance:** When an orchestrator invokes sub-skills (quality-gate, red-team, etc.), those sub-skills use the **parent orchestrator's dispatch directory and seq counter**, not their own. The parent is responsible for cleanup. Sub-skills receive the dispatch directory path as input and append to the existing `manifest.jsonl`. This prevents dispatch directory proliferation and keeps the execution trace unified.
 
-**Fallback for missing dispatch directory path:** If a sub-skill receives no explicit dispatch directory path (e.g., invoked standalone or the parent omitted it), the sub-skill should glob `/tmp/crucible-dispatch-*/manifest.jsonl`, select the most recently modified match, and use that directory — emitting a warning: "No dispatch directory provided; attached to [path] by last-modified fallback." This turns silent failure into noisy-but-recoverable behavior. If no dispatch directories exist, the sub-skill creates a new one with a timestamp-based session ID.
+**Fallback for missing dispatch directory path:** If a sub-skill receives no explicit dispatch directory path (e.g., invoked standalone or the parent omitted it), the sub-skill creates a new dispatch directory with a timestamp-based session ID. Do not glob for other sessions' directories — this would break session isolation under concurrent pipelines.
 
 Example files:
 - `1-plan-writer.md`
