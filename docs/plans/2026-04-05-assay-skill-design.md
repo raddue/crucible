@@ -77,6 +77,27 @@ If no type hint is provided, the evaluator infers from the question. If ambiguou
   ]
 ```
 
+### Context Shapes
+
+The `context` parameter accepts different shapes depending on the caller. The evaluator prompt handles all shapes — callers should use the recognized keys:
+
+| Caller | Context Shape | Key Fields |
+|---|---|---|
+| `/design` | Recon brief | `project_structure`, `existing_patterns`, `scope_boundaries`, `prior_art` |
+| `/debugging` | Investigation findings | `hypotheses`, `evidence_per_hypothesis`, `symptoms`, `stack_traces` |
+| `/migrate` | Recon brief + migration target | `project_structure`, `migration_target`, `breaking_changes`, `blast_radius` |
+| `/prospector` | Friction analysis + recon brief | `friction_points`, `existing_patterns`, `dependency_graph` |
+| Generic caller | Freeform evidence | `description` (string) — unstructured context, lower confidence |
+
+When context contains unrecognized keys, the evaluator treats them as additional evidence without special handling. When context is a bare string (not an object), treat as `{ "description": context }`.
+
+### Error Handling
+
+If the evaluator returns invalid JSON or missing required fields:
+1. Retry once with validation errors as feedback
+2. On second failure, return: `{ "error": "Evaluator produced invalid output after retry", "raw_output": "..." }`
+3. Callers must check for the `error` field before accessing Assay Report fields
+
 **When approaches are omitted:** The evaluator generates 2-4 candidate approaches based on the question and context. This is the common case when called from `/design` (the dimension is identified, approaches are discovered).
 
 **When approaches are provided:** The evaluator scores them as given. This is the case when called from `/prospector` (competing redesigns already generated) or `/debugging` (hypotheses already identified).
@@ -93,22 +114,28 @@ If no type hint is provided, the evaluator infers from the question. If ambiguou
     "rationale": "Aligns with existing src/events/bus.ts pattern...",
     "evidence": ["src/events/bus.ts:14 — existing event dispatch", "src/api/routes/users.ts:7 — already subscribes to events"],
     "risks": ["Adds async complexity to currently synchronous flow"],
-    "kill_criteria": "Switch away if latency requirements exceed 50ms p99 (event bus adds ~20ms)"
+    "kill_criteria": "Switch away if latency requirements exceed 50ms p99 (event bus adds ~20ms)",
+    "constraint_fit": {
+      "pattern_alignment": "high",
+      "scope_fit": "high",
+      "reversibility": "two-way door",
+      "integration_risk": "low"
+    }
   },
   "alternatives": [
     {
       "name": "Direct service calls",
+      "constraint_fit": {
+        "pattern_alignment": "medium",
+        "scope_fit": "high",
+        "reversibility": "one-way door",
+        "integration_risk": "medium"
+      },
       "pros": ["Simpler mental model", "Synchronous — easy to debug"],
       "cons": ["Tight coupling between auth and user services", "Requires shared deployment"],
       "would_recommend_if": "Team prefers simplicity over decoupling, or latency is critical"
     }
   ],
-  "constraint_fit": {
-    "pattern_alignment": "high",
-    "scope_fit": "high",
-    "reversibility": "two-way door",
-    "integration_risk": "low"
-  },
   "prior_decision_conflicts": []
 }
 ```

@@ -13,7 +13,7 @@ api_surface:
         type: "string — the decision/question to evaluate"
         required: true
       - name: "context"
-        type: "object — recon brief, caller evidence, or structured codebase context"
+        type: "object — recon brief (project_structure, existing_patterns, scope_boundaries, prior_art), investigation findings (hypotheses, evidence_per_hypothesis), or freeform evidence (description string). See design doc Context Shapes table."
         required: true
       - name: "decision_type"
         type: "string — architecture | strategy | diagnosis | optimization (auto-detected if omitted)"
@@ -41,14 +41,14 @@ api_surface:
         type: "array of strings — what additional context would improve the recommendation"
         required: true
       - name: "recommended"
-        type: "object — {name, rationale, evidence[], risks[], kill_criteria}"
+        type: "object — {name, rationale, evidence[], risks[], kill_criteria, constraint_fit}"
         required: true
       - name: "alternatives"
-        type: "array of {name, pros[], cons[], would_recommend_if}"
+        type: "array of {name, constraint_fit, pros[], cons[], would_recommend_if}"
         required: true
-      - name: "constraint_fit"
-        type: "object — {pattern_alignment, scope_fit, reversibility, integration_risk}"
-        required: true
+      - name: "error"
+        type: "string — present only when evaluator failed after retry"
+        required: false
       - name: "prior_decision_conflicts"
         type: "array of strings — conflicts with cascading decisions"
         required: true
