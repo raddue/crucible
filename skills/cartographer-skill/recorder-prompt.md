@@ -116,11 +116,25 @@ Task tool (general-purpose, model: sonnet):
       describe fix strategies rather than diagnostic hypotheses. Format:
         - **Dead ends:** [fix strategy] — ruled out because [reason]. (source: qg)
         - **Diagnostic path:** [round progression].
-    - **Dedup on UPDATE:** When updating existing landmine entries with new
-      dead-end evidence, preserve each distinct failure description as a
-      separate bullet. Do not merge two different failure descriptions into
-      one sentence. Two dead-ends that share a file path but describe
-      different failure modes remain as separate bullets within the same entry.
+    - **Retirement check:** Before writing, check if any Active Landmine entries
+      reference file paths that no longer exist. If ALL file paths in an entry
+      are gone, move it to `## Retired Landmines` with format:
+      `~~[Short title]~~ — [Retired: paths no longer exist. Original module: X]`.
+      Retired entries free cap budget for fresh entries.
+    - **Semantic dedup on UPDATE:** When adding a new dead-end entry to an
+      existing landmine, compare it against all existing dead-end bullets
+      for that entry. For each existing bullet, assess: "Does the new dead-end
+      describe the same failure mechanism and reach the same conclusion?"
+      - **DUPLICATE** (same mechanism, same conclusion, different wording) →
+        skip the new entry. Example: "Redis connection timeout causes auth
+        failure" and "Auth fails because Redis connection times out" are
+        DUPLICATE — same mechanism, same conclusion.
+      - **DISTINCT** (different mechanism OR different conclusion) → add as
+        new bullet. Example: "Timeout in auth when Redis is down" and
+        "Timeout in auth when Postgres is down" are DISTINCT — different
+        failure mechanisms despite similar symptoms.
+      Two dead-ends that mention the same file but describe different failure
+      modes are always DISTINCT. Do not merge them.
     - If updating an existing file, MERGE with existing content. Do not
       drop existing entries unless they are demonstrably wrong.
     - Keep module files under 100 lines. If you're exceeding that, the
