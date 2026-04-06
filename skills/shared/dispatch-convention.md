@@ -98,7 +98,7 @@ seq: <current counter>
 2. Read `manifest.jsonl` to find the last entry's `seq` value + 1 as the next counter
 3. Resume dispatching
 
-This works for all 21 orchestrator skills regardless of whether they have Compression State Block support. CSB inclusion of the dispatch directory path is a secondary nice-to-have.
+This works for all 22 orchestrator skills regardless of whether they have Compression State Block support. CSB inclusion of the dispatch directory path is a secondary nice-to-have.
 
 ## Dispatch Manifest
 

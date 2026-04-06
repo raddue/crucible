@@ -1,6 +1,8 @@
+<!-- DISPATCH: addendum | Appended to build-implementer dispatch file, not dispatched standalone.
+     See shared/dispatch-convention.md -->
 # Refactor Implementer Addendum
 
-Appended to the build implementer prompt when the build pipeline is running in **refactor mode**. The orchestrator pastes this section after the standard implementer prompt. This addendum overrides TDD discipline with GREEN-GREEN discipline for refactoring tasks.
+Appended to the build implementer dispatch file when the build pipeline is running in **refactor mode**. The orchestrator includes this section after the standard implementer prompt. This addendum overrides TDD discipline with GREEN-GREEN discipline for refactoring tasks.
 
 ---
 
