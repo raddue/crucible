@@ -133,7 +133,7 @@ After the user answers, add the decision and rationale to the running context. A
 
 #### Step 9: Stall-Breaker (Conditional)
 
-**Trigger:** The same design dimension has been discussed for 2+ exchanges without new information surfacing or a decision being made. "Discussed" means the question was presented, the user responded, and the response did not resolve the dimension (asked for more analysis, expressed uncertainty, or revisited a prior option).
+**Trigger:** The same design dimension has received 2+ user responses without new information surfacing or a decision being made. A "user response" is a reply after the dimension is presented that does not resolve it (asks for more analysis, expresses uncertainty, or revisits a prior option). The initial presentation (Step 7) does not count — the user gets at least two chances to engage before the stall-breaker activates.
 
 When triggered, apply this tiebreaker protocol in order:
 
