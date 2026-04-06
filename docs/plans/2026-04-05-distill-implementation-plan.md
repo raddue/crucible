@@ -9,7 +9,7 @@ source: "spec"
 
 ## Task Overview
 
-9 tasks across 3 waves. Wave 1 is the skill skeleton + Tier 1 (pandoc) + tool checks. Wave 2 adds Tier 2 (PDF) + Tier 3 (Python venv). Wave 3 adds the digest pass + pre-flight checks + integration.
+10 tasks across 3 waves. Wave 1 is the skill skeleton + Tier 1 (pandoc) + tool checks + input handling. Wave 2 adds Tier 2 (PDF) + Tier 3 (Python venv). Wave 3 adds the digest pass + pre-flight checks + integration.
 
 ## Wave 1: Skill Skeleton + Tier 1
 
@@ -56,8 +56,23 @@ At skill start (before processing any files), check for required tools:
 - **Tier 1:** `which pandoc` — if missing, report: "pandoc not found. Install with: `apt install pandoc` (Debian/Ubuntu) or `brew install pandoc` (macOS). Tier 1 formats (docx, rtf, html, odt, epub, rst, org, tex, ipynb) will be skipped."
 - **Tier 2:** `which pdftotext` — if missing, report: "pdftotext not found. Install with: `apt install poppler-utils` (Debian/Ubuntu) or `brew install poppler` (macOS). PDF conversion will be skipped."
 - **Tier 3:** `which python3` — if missing, report: "python3 not found. PPTX and XLSX conversion will be skipped."
+- **Pre-flight tools:** `which unzip` (for zip bomb detection on Office formats), `which pdfdetach` (for PDF attachment detection, ships with poppler-utils). If missing, skip the respective pre-flight check with a note — these are safety checks, not conversion blockers.
 
 Build a set of available tiers. Route files only to available tiers. Files targeting unavailable tiers get routed to unsupported-with-guidance.
+
+### Task 3b: Implement directory-mode input
+
+**Files:** `skills/distill/SKILL.md` (input handling section)
+**Complexity:** Low
+**Dependencies:** Task 1
+
+When the user passes a directory path:
+1. Single-level glob for files with supported extensions (not recursive — explicit paths for nested directories)
+2. Build file list from glob results, sorted alphabetically
+3. Report: "Found {N} convertible files in {directory}: {list}"
+4. Process each file through the normal conversion pipeline
+
+When the user passes individual file paths, use them directly. Mixed mode (files + directories) is supported.
 
 ### Task 4: Implement unsupported format handling
 
@@ -83,7 +98,7 @@ Create `pdf-structurer-prompt.md` dispatch template:
 - Input: raw pdftotext output
 - Instructions: identify headings (by capitalization, spacing, font-size-implied patterns), recover list structure, identify table boundaries, detect code blocks
 - Output: clean Markdown with recovered structure
-- Add `<!-- DISPATCH: disk-mediated -->` header per dispatch convention
+- Add the full dispatch comment header per `skills/shared/dispatch-convention.md`
 
 Include scanned PDF detection: if pdftotext output averages < 50 chars/page, report as likely scanned.
 
@@ -95,7 +110,8 @@ Include scanned PDF detection: if pdftotext output averages < 50 chars/page, rep
 
 Implement venv management:
 - Check for existing venv at `/tmp/crucible-distill-venv/`
-- Create if missing: `python3 -m venv /tmp/crucible-distill-venv/`
+- Health check: run `"$VENV/bin/python3" -c "import sys"` — if it fails (e.g., system Python upgraded, broken symlinks), recreate the venv
+- Create if missing or unhealthy: `python3 -m venv /tmp/crucible-distill-venv/`
 - Install pinned deps: `pip install python-pptx==1.0.2 openpyxl==3.1.5`
 - **Error handling:** Check pip install exit code. On failure (no network, proxy, permissions), report: "Failed to install Python dependencies. Manual install: `pip install python-pptx==1.0.2 openpyxl==3.1.5`. PPTX and XLSX conversion will be skipped." Route pptx/xlsx files to unsupported-with-guidance.
 - **UX:** If venv creation is needed, announce: "Installing Python dependencies (one-time setup, ~15 seconds)..."
@@ -118,9 +134,9 @@ Create `digest-prompt.md` dispatch template:
 - Input: full converted `.md` content
 - Target: 20-30% of input word count
 - Instructions per design doc section 4 (preserve structure, key data, eliminate redundancy)
-- Add `<!-- DISPATCH: disk-mediated -->` header
+- Add the full dispatch comment header per `skills/shared/dispatch-convention.md`
 
-Implement digest orchestration in SKILL.md:
+Implement digest orchestration in SKILL.md (routing logic):
 - Word count check (skip files ≤500 words)
 - Hard cap: reject files >50K words with guidance ("File exceeds 50K word limit for digest pass. Consider splitting the document."). Chunked digestion deferred to v2.
 - Dispatch Sonnet digest agent
@@ -143,7 +159,7 @@ Implement three pre-flight checks:
 
 Pre-flight runs before conversion for each file. Failures are per-file (don't halt the batch).
 
-### Task 9: Implement conversion summary and token metrics
+### Task 10: Implement conversion summary and token metrics
 
 **Files:** `skills/distill/SKILL.md` (summary section)
 **Complexity:** Low
@@ -157,24 +173,27 @@ After all conversions complete, output a summary table:
 | File | Format | Tier | Converted | Digest | Token Savings |
 |---|---|---|---|---|---|
 | report.pdf | PDF | 2 | report.md (4,200 words) | report.digest.md (1,100 words) | ~74% |
-| data.xlsx | Excel | 3 | 3 sheets → CSV | N/A | N/A |
+| data.xlsx | Excel | 3 | 3 sheets → CSV | — | — |
+| slides.pptx | PPTX | 3 | slides.md (800 words) | — (under 500w) | — |
 
-**Total:** 2 files converted, 1 digest produced, ~74% token savings on digestible content.
+**Total:** 3 files converted, 1 digest produced, ~74% token savings on digestible content.
+Generated files can be added to .gitignore if not needed in version control.
 ```
 
-Token savings = `1 - (digest words / original converted words)`. Use word count as a proxy for token count (close enough for reporting).
+Token savings = `1 - (digest words / original converted words)`. Word count as a proxy for token count (close enough for reporting). Include .gitignore reminder per design doc.
 
 ## Dependency Graph
 
 ```
 Task 1 (skeleton) ← Task 2 (Tier 1)
-                  ← Task 3 (tool checks)
+                  ← Task 3 (tool checks) + Task 3b (directory mode)
                   ← Task 4 (unsupported)
 Task 1, Task 3    ← Task 5 (Tier 2)
 Task 1, Task 3    ← Task 6 (Tier 3)
 Task 2, 5, 6      ← Task 7 (digest)
 Task 1            ← Task 8 (pre-flight)
-Task 2, 5, 6, 7   ← Task 9 (summary)
+Task 2, 5, 6, 7   ← Task 9 (not used — renumbered)
+Task 2, 5, 6, 7   ← Task 10 (summary)
 ```
 
 ## Implementation Notes
@@ -182,4 +201,5 @@ Task 2, 5, 6, 7   ← Task 9 (summary)
 - **Shell safety is non-negotiable.** Every Bash command that touches file paths must use quoted variables. The SKILL.md must explicitly state this constraint with examples.
 - **No source file modification.** The skill reads source files and writes new files alongside them. `rm`, `mv`, or in-place edits on source files are forbidden.
 - **Graceful degradation.** If pandoc/pdftotext/python3 is missing, the skill reports the gap and continues with available tiers. A system with only pandoc still converts 10 formats.
-- **Disk-mediated dispatch.** PDF structurer and digest agents use the shared dispatch convention. Dispatch files go to `/tmp/crucible-dispatch-<session-id>/`.
+- **Disk-mediated dispatch.** PDF structurer and digest agents use the shared dispatch convention (`skills/shared/dispatch-convention.md`). Dispatch files go to `/tmp/crucible-dispatch-<session-id>/`.
+- **Idempotency.** Re-running `/distill` on the same file overwrites existing output. No backup or versioning.

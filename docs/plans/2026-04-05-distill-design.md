@@ -27,12 +27,12 @@ No document conversion capability exists in the Crucible skill framework today. 
 | `python3` | 3.12.3 | Runtime for specialized libraries |
 | `pip3` + `venv` | Available | Isolated dependency management |
 
-**Dispatch convention:** All subagent dispatches (PDF structuring pass, digest pass) follow `shared/dispatch-convention.md` — disk-mediated dispatch with dispatch files written to `/tmp/crucible-dispatch-<session-id>/`, manifest logging, and pointer prompts.
+**Dispatch convention:** All subagent dispatches (PDF structuring pass, digest pass) follow `skills/shared/dispatch-convention.md` — disk-mediated dispatch with dispatch files written to `/tmp/crucible-dispatch-<session-id>/`, manifest logging, and pointer prompts. Prompt templates: `skills/distill/pdf-structurer-prompt.md` and `skills/distill/digest-prompt.md`.
 
 ## 2. Target State
 
 A standalone `/distill` skill that:
-1. Accepts one or more file paths (or a directory)
+1. Accepts one or more file paths, or a directory (single-level glob for supported extensions, not recursive — use explicit paths for nested directories)
 2. Detects format and routes through the appropriate conversion tier
 3. Produces `.md` (or `.csv` for spreadsheets) intermediate representations
 4. Runs a digest pass on converted files over 500 words, producing `.digest.md` at 20-30% of token count
@@ -49,6 +49,10 @@ slides.pptx      → slides.md + slides.digest.md
 ```
 
 Source files are never modified or deleted.
+
+### Idempotency
+
+Re-running `/distill` on the same file overwrites existing output files (`.md`, `.digest.md`, `.csv`). No backup or versioning. The digest pass is non-deterministic (LLM output varies), so re-runs may produce different digests. This is acceptable — the digest is a working artifact, not a canonical representation.
 
 ### Generated File Handling
 
@@ -123,7 +127,7 @@ PDFs are structurally ambiguous — columns, headers, footers, page breaks all c
 **XLSX conversion output:**
 - One CSV file per sheet: `{basename}-{sheetname}.csv`
 - Sheet count guard: if >20 sheets, warn and convert only the first 20
-- Formula-cell warning: if >30% of cells contain formulas, warn that values may differ from displayed results. Note: openpyxl with `data_only=True` reads *cached* formula results from the last Excel save — if a file was created programmatically and never opened in Excel/LibreOffice, formula cells return `None`. If formula cells return `None`, emit a per-file warning: "Spreadsheet contains formulas with no cached values. Open and save in Excel/LibreOffice before distilling for accurate results."
+- Formula-cell warning: if >30% of cells contain formulas, warn that values may differ from displayed results. Note: openpyxl with `data_only=True` reads *cached* formula results from the last Excel save — if a file was created programmatically and never opened in Excel/LibreOffice, formula cells return `None`. If formula cells return `None`, write `#NO_CACHE` as the cell value in the CSV (making data loss visible in the output itself) and emit a per-file warning: "Spreadsheet contains formulas with no cached values. Open and save in Excel/LibreOffice before distilling for accurate results."
 
 ### Unsupported Formats (with actionable guidance)
 
@@ -164,7 +168,26 @@ The full `.md` conversion is the intermediate step. The `.digest.md` is what dow
 
 ### Digest quality metric
 
-The orchestrator verifies the digest is within the 20-30% target range (by word count as a proxy for token count). If the digest exceeds 35%, re-dispatch with stricter compression instructions. If below 15%, re-dispatch with "preserve more detail" instructions. One retry only — the second result is accepted regardless.
+The orchestrator verifies the digest is within the 20-30% target range (by word count as a proxy for token count — these diverge for code-heavy or CJK content, but word count is sufficient for v1 reporting). If the digest exceeds 35%, re-dispatch with stricter compression instructions. If below 15%, re-dispatch with "preserve more detail" instructions. One retry only — the second result is accepted regardless.
+
+### Conversion summary format
+
+After all files are processed, output:
+
+```
+## Distill Summary
+
+| File | Format | Tier | Converted | Digest | Token Savings |
+|---|---|---|---|---|---|
+| report.pdf | PDF | 2 | report.md (4,200 words) | report.digest.md (1,100 words) | ~74% |
+| data.xlsx | Excel | 3 | 3 sheets → CSV | — | — |
+| slides.pptx | PPTX | 3 | slides.md (800 words) | — (under 500w threshold) | — |
+
+**Total:** 3 files converted, 1 digest produced, ~74% token savings on digestible content.
+Generated files can be added to .gitignore if not needed in version control.
+```
+
+Token savings = `1 - (digest words / converted words)`. Word count is a proxy for token count.
 
 ## 5. Pre-Flight Checks
 
