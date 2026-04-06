@@ -255,7 +255,7 @@ Skills that participate in design/planning phases or are invoked as sub-skills b
 - **code-review** — 1 file (`code-reviewer.md`)
 - **finish** — 0 template files (dispatches inline from SKILL.md). SKILL.md changes only.
 - **innovate** — 1 template (`innovate-prompt.md`). Called by build/design; included in Wave 2 since those skills are dispatchers.
-- **consensus** — 3 templates (`aggregation-investigate.md`, `aggregation-review.md`, `aggregation-verdict.md`). Uses MCP not Agent tool, but templates get comment headers for consistency.
+- **consensus** — 3 templates (`aggregation-investigate-prompt.md`, `aggregation-review-prompt.md`, `aggregation-verdict-prompt.md`). Uses MCP not Agent tool, but templates get comment headers for consistency.
 
 **Per-skill SKILL.md changes:** Same pattern as Task 6 (canonical ref, dispatch section sentence, remove paste language, add dispatch init/manifest/cleanup).
 
@@ -276,7 +276,7 @@ Add the 3-line comment header. For paste-only exclusions (QG stagnation judge, f
 - **Restructuring-only:** false (paste language cleanup modifies template instructions beyond adding headers)
 - **Safe-partial:** true
 - **Rollback:** `git revert` to pre-task commit
-- **Tests to verify:** grep for `<!-- DISPATCH:` in all template files; grep for `dispatch-convention.md` in all 5 SKILL.md files; grep -L for "paste into prompt" in all 5 SKILL.md files (should return nothing)
+- **Tests to verify:** grep for `<!-- DISPATCH:` in all template files; grep for `dispatch-convention.md` in all 7 SKILL.md files; grep -L for "paste into prompt" in all 7 SKILL.md files (should return nothing)
 
 ---
 
@@ -328,7 +328,7 @@ Skills with moderate template counts or specialized dispatch patterns.
 
 **Sub-step: paste language cleanup.** Same grep-and-replace procedure as Task 6 — update any dispatch-method instructions across all files touched in this wave. Cartographer's `recorder-prompt.md` specifically has "paste into the subagent's dispatch prompt" language that must be neutralized.
 
-- **Files:** 36 (7 SKILL.md + 30 templates (including 1 additional template from forge-skill's templates))
+- **Files:** 37 (7 SKILL.md + 30 templates)
 - **Complexity:** Medium
 - **Review-Tier:** 2
 - **Dependencies:** Task 6 (validates the pattern)
@@ -336,7 +336,7 @@ Skills with moderate template counts or specialized dispatch patterns.
 - **Restructuring-only:** false (paste language cleanup modifies template instructions beyond adding headers)
 - **Safe-partial:** true
 - **Rollback:** `git revert` to pre-task commit
-- **Tests to verify:** grep for `<!-- DISPATCH:` in all 24 template files; grep for `dispatch-convention.md` in all 5 SKILL.md files
+- **Tests to verify:** grep for `<!-- DISPATCH:` in all 30 template files; grep for `dispatch-convention.md` in all 7 SKILL.md files
 
 ---
 
