@@ -170,6 +170,19 @@ Red-team operates in two modes depending on the caller:
 
 **Multi-model consensus:** When invoked by quality-gate on consensus-eligible rounds, quality-gate handles the multi-model dispatch via the consensus MCP tool. Red-team itself does not call consensus — the quality-gate orchestrator substitutes a consensus call for the red-team dispatch on eligible rounds. When invoked standalone, red-team uses single-model dispatch only.
 
+## External Model Review (Optional)
+
+**Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate handles its own external review integration.
+
+After dispatching the host red-team subagent, call the `external_review` MCP tool with:
+- `prompt`: contents of `skills/shared/external-review-prompt.md`
+- `context`: same artifact + attack prompt context provided to the host reviewer
+- `metadata`: `{"skill": "red-team"}`
+
+**Per-skill toggle:** only active if `skills.red_team` is set to `true` in external review config. If the `external_review` MCP tool is unavailable or the call fails, skip silently and proceed with host findings only.
+
+Append external perspectives after the host Devil's Advocate findings in the output. External findings use the same Fatal/Significant/Minor classification and count toward stagnation scoring like any other finding.
+
 ## Integration
 
 **Called by:**
