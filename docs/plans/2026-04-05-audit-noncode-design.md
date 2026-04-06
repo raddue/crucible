@@ -213,10 +213,12 @@ The existing compaction recovery logic checks for code-specific scratch files (`
 - `gate-approved.md` — same as code path
 
 **Recovery procedure:** On compaction recovery, read `artifact-type.md` first. If present and not `code`, follow non-code recovery:
+
 1. Read `artifact-type.md` to recover type
-2. Look for `<lens-name>-findings.md` files matching the type's lens names
-3. Look for `noncode-blindspots-findings.md`
-4. Resume from the latest completed phase
+2. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation (same pattern as code path's manifest re-presentation)
+3. **Phase 2+ recovery:** If `gate-approved.md` exists, look for `<lens-name-kebab>-findings.md` files matching the type's lens names
+4. Look for `noncode-blindspots-findings.md`
+5. Resume from the latest completed phase
 
 If `artifact-type.md` is absent, fall back to existing code recovery.
 
@@ -252,7 +254,7 @@ Dispatches Feasibility, Risk & Dependencies, Completeness, Assumptions lenses.
 ```
 /audit "We should build a CLI tool that converts design docs into interactive decision trees..."
 ```
-Auto-detects `concept` (no file path, freeform text). Dispatches Viability, Technical Feasibility, User Impact, Gaps lenses.
+Auto-detects `concept` (no file path, freeform text). Dispatches Problem-Solution Fit, Feasibility & Cost, Stakeholder Alignment, Blind Assumptions lenses.
 
 **Code audit (unchanged):**
 ```
