@@ -62,7 +62,7 @@ Converted files (`.md`, `.digest.md`, `.csv`) are working artifacts, not source 
 
 The tiered design minimizes dependencies — most formats need only pandoc (already installed). Heavier tools are loaded only when needed.
 
-### Tier 1: Pandoc-Native (10 formats, single command each)
+### Tier 1: Pandoc-Native (9 formats / 10 file extensions, single command each)
 
 | Extension | Format | Pandoc `-f` flag |
 |---|---|---|

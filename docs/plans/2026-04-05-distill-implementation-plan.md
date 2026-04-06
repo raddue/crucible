@@ -9,7 +9,7 @@ source: "spec"
 
 ## Task Overview
 
-10 tasks across 3 waves. Wave 1 is the skill skeleton + Tier 1 (pandoc) + tool checks + input handling. Wave 2 adds Tier 2 (PDF) + Tier 3 (Python venv). Wave 3 adds the digest pass + pre-flight checks + integration.
+9 tasks (plus 3b) across 3 waves. Wave 1 is the skill skeleton + Tier 1 (pandoc) + tool checks + input handling. Wave 2 adds Tier 2 (PDF) + Tier 3 (Python venv). Wave 3 adds the digest pass + pre-flight checks + integration.
 
 ## Wave 1: Skill Skeleton + Tier 1
 
@@ -159,7 +159,7 @@ Implement three pre-flight checks:
 
 Pre-flight runs before conversion for each file. Failures are per-file (don't halt the batch).
 
-### Task 10: Implement conversion summary and token metrics
+### Task 9: Implement conversion summary and token metrics
 
 **Files:** `skills/distill/SKILL.md` (summary section)
 **Complexity:** Low
@@ -192,8 +192,7 @@ Task 1, Task 3    ← Task 5 (Tier 2)
 Task 1, Task 3    ← Task 6 (Tier 3)
 Task 2, 5, 6      ← Task 7 (digest)
 Task 1            ← Task 8 (pre-flight)
-Task 2, 5, 6, 7   ← Task 9 (not used — renumbered)
-Task 2, 5, 6, 7   ← Task 10 (summary)
+Task 2, 5, 6, 7   ← Task 9 (summary)
 ```
 
 ## Implementation Notes

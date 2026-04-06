@@ -17,10 +17,10 @@ api_surface:
 
   - name: "Tier1PandocConversion"
     type: "function"
-    signature: "pandoc -f $FORMAT -t markdown --wrap=none $INPUT_PATH -o $OUTPUT_PATH"
+    signature: "pandoc -f \"$FORMAT\" -t markdown --wrap=none \"$INPUT_PATH\" -o \"$OUTPUT_PATH\""
     params:
       - name: "FORMAT"
-        type: "string — pandoc format flag (docx, rtf, html, odt, epub, rst, org, latex, ipynb)"
+        type: "string — pandoc format flag (docx, rtf, html, odt, epub, rst, org, latex, ipynb). Note: .html and .htm both map to 'html' — 9 format flags, 10 file extensions."
         required: true
       - name: "INPUT_PATH"
         type: "string — absolute path to source file"
@@ -29,7 +29,7 @@ api_surface:
         type: "string — absolute path for converted .md output"
         required: true
     returns: "Markdown file at OUTPUT_PATH"
-    description: "Tier 1 conversion via pandoc. Supports 10 formats natively."
+    description: "Tier 1 conversion via pandoc. Supports 9 formats (10 file extensions counting .html/.htm separately)."
 
   - name: "Tier2PDFConversion"
     type: "function"
