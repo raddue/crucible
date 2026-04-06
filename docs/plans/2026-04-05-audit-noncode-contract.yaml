@@ -1,0 +1,138 @@
+version: "1.0"
+ticket: "#102"
+epic: "#102"
+title: "Mature /audit to support non-code artifacts"
+date: "2026-04-05"
+
+api_surface:
+  - name: "/audit"
+    type: "interface"
+    signature: "/audit target: string, artifact_type?: string"
+    params:
+      - name: "target"
+        type: "string — subsystem name, file path, or freeform text"
+        required: true
+      - name: "artifact_type"
+        type: "string — code | design | plan | concept (auto-detected if omitted)"
+        required: false
+    returns: "Audit Report (structured findings with severity, evidence, per-type lens-specific fields)"
+    description: "Adversarial review of code subsystems or non-code artifacts through parallel analytical lenses"
+
+  - name: "NonCodeFinding"
+    type: "interface"
+    signature: "Finding format for non-code artifact audits"
+    params:
+      - name: "severity"
+        type: "string — Fatal | Significant | Minor"
+        required: true
+      - name: "section"
+        type: "string — heading or paragraph reference in the artifact"
+        required: true
+      - name: "evidence"
+        type: "string — quoted text from the artifact demonstrating the issue"
+        required: true
+      - name: "concern"
+        type: "string — lens-specific concern description"
+        required: true
+      - name: "description"
+        type: "string — what's wrong and why it matters"
+        required: true
+    returns: "N/A (this is a data type)"
+    description: "Structured finding for non-code audits, replacing file+line_range with section reference"
+
+  - name: "ArtifactTypeLensConfig"
+    type: "interface"
+    signature: "Per-type lens configuration defining the 4 lenses for each artifact type"
+    params:
+      - name: "artifact_type"
+        type: "string — design | plan | concept"
+        required: true
+      - name: "lenses"
+        type: "array of {name, core_question, focus_areas[], exclusions[]}"
+        required: true
+    returns: "N/A (this is a configuration type)"
+    description: "Lens configuration used by the orchestrator to fill the parameterized non-code lens template"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Existing code audit prompt templates are not modified"
+      verification: "audit-correctness-prompt.md, audit-robustness-prompt.md, audit-consistency-prompt.md, audit-architecture-prompt.md, audit-blindspots-prompt.md, audit-scoping-prompt.md are unchanged (git diff shows no modifications)"
+      check_method: "grep"
+
+    - id: "INV-2"
+      description: "Non-code lens template has disk-mediated dispatch header"
+      verification: "audit-noncode-lens-prompt.md contains <!-- DISPATCH: disk-mediated -->"
+      check_method: "grep"
+
+    - id: "INV-3"
+      description: "Non-code blind-spots template has disk-mediated dispatch header"
+      verification: "audit-noncode-blindspots-prompt.md contains <!-- DISPATCH: disk-mediated -->"
+      check_method: "grep"
+
+    - id: "INV-4"
+      description: "SKILL.md defines lens configurations for all 3 non-code artifact types"
+      verification: "SKILL.md contains lens tables for design, plan, and concept types with 4 lenses each"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "Non-code lens template includes all required placeholders"
+      verification: "audit-noncode-lens-prompt.md contains {{LENS_NAME}}, {{LENS_QUESTION}}, {{LENS_FOCUS_AREAS}}, {{LENS_EXCLUSIONS}}, {{ARTIFACT_TYPE}}, {{ARTIFACT_CONTENT}}"
+      check_method: "grep"
+
+    - id: "INV-6"
+      description: "Non-code finding format uses section instead of file+line_range"
+      verification: "audit-noncode-lens-prompt.md output format includes Section field and does not include File or Line range fields"
+      check_method: "code-inspection"
+
+    - id: "INV-7"
+      description: "SKILL.md references shared dispatch convention"
+      verification: "skills/audit/SKILL.md contains <!-- CANONICAL: shared/dispatch-convention.md -->"
+      check_method: "grep"
+
+  testable:
+    - id: "INV-8"
+      description: "Design doc audit dispatches design-specific lenses"
+      verification: "Invoke /audit on a design doc, verify dispatched lenses are Technical Soundness, Integration Impact, Edge Cases, Scope Clarity"
+      test_tag: "contract:dispatch:inv-8"
+
+    - id: "INV-9"
+      description: "Plan audit dispatches plan-specific lenses"
+      verification: "Invoke /audit on an implementation plan, verify dispatched lenses are Feasibility, Risk & Dependencies, Completeness, Assumptions"
+      test_tag: "contract:dispatch:inv-9"
+
+    - id: "INV-10"
+      description: "Code audit path is completely unchanged"
+      verification: "Invoke /audit on a code subsystem, verify existing 4 code lenses dispatch with Tier 1/Tier 2 context management"
+      test_tag: "contract:regression:inv-10"
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Single parameterized template for all non-code lenses, not 12 separate files"
+    confidence: "high"
+    alternatives: ["12 separate prompt files (4 types x 3 new lens sets)", "3 per-type template files"]
+    reasoning: "Non-code lens prompts share identical structure — only the instructions differ. 1 template with placeholders is DRY and maintainable."
+    reversibility: "High — could split into separate files later if lens-specific needs diverge"
+
+  - id: "AMB-2"
+    decision: "Separate non-code blind-spots template rather than parameterizing existing"
+    confidence: "medium"
+    alternatives: ["Parameterize existing audit-blindspots-prompt.md with code/non-code branches"]
+    reasoning: "Code blind-spots are deeply tied to coverage maps and file partitions. Document-level gaps (contradictions, unstated assumptions, missing perspectives) are fundamentally different. Separate template is cleaner."
+    reversibility: "High — could merge templates later"
+
+  - id: "AMB-3"
+    decision: "Auto-detection with explicit override, not always-explicit"
+    confidence: "high"
+    alternatives: ["Always require artifact_type parameter"]
+    reasoning: "Most invocations have obvious type from the file path or content shape. Requiring explicit type adds friction. Auto-detection handles 90% of cases; override handles the rest."
+    reversibility: "High — could make parameter required later"
+
+  - id: "AMB-4"
+    decision: "4 artifact types (code, design, plan, concept), not 3 or 5+"
+    confidence: "high"
+    alternatives: ["3 types (merge plan and concept)", "5+ types (add strategy, approach, etc.)"]
+    reasoning: "The issue proposes 4 types matching real-world usage. Design and plan have genuinely different lens needs (technical soundness vs feasibility). Concept captures freeform/early-stage artifacts. More types would fragment without adding value."
+    reversibility: "Medium — adding types is easy; removing types after consumers depend on them is harder"
