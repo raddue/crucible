@@ -1,0 +1,163 @@
+---
+version: 1
+---
+
+# Dispatch Convention
+
+> Canonical reference for disk-mediated subagent dispatch across all orchestrator skills.
+> Each orchestrator SKILL.md references this file via `<!-- CANONICAL: shared/dispatch-convention.md -->`.
+>
+> **This is a shared skill reference, not a CLAUDE.md directive.** CLAUDE.md must not duplicate dispatch rules.
+
+## When to Use
+
+**Disk-mediated dispatch (default):** All Agent tool and Task tool subagent dispatches where the expanded prompt exceeds 500 tokens.
+
+**Paste-only (exempt):** A dispatch is paste-only when ALL three conditions are met: (1) total payload <500 tokens, (2) uses the Task tool, and (3) the subagent needs no file access. These are small enough that autocompact handles them normally. Known paste-only dispatches:
+- QG stagnation judge (receives only previous-round summary)
+- Fix verifier (receives specific fix description and expected outcome)
+- Prospector analysis agents (receives pre-extracted findings)
+
+**Stocktake note:** Stocktake should flag paste-only dispatches exceeding 500 tokens for promotion to disk-mediated.
+
+## Dispatch Directory
+
+**Path:** `/tmp/crucible-dispatch-<session-id>/`
+
+**Session ID:** Reuse the pipeline's existing session identifier (timestamp-based ID generated at pipeline start). Skills invoked standalone that lack an existing session ID must generate one: Unix epoch seconds.
+
+**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, etc.) use the **parent orchestrator's dispatch directory and seq counter**. The parent passes the dispatch directory path as input. Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup.
+
+**Fallback for missing path:** If a sub-skill receives no dispatch directory path, glob `/tmp/crucible-dispatch-*/manifest.jsonl`, select the most recently modified match, and use that directory. Emit warning: "No dispatch directory provided; attached to [path] by last-modified fallback." If no directories exist, create a new one with a timestamp-based session ID.
+
+## File Naming
+
+**Pattern:** `<N>-<template-name>.md`
+
+The counter `N` increments per dispatch within the session. Template name makes files self-documenting.
+
+Examples:
+- `1-plan-writer.md`
+- `2-plan-reviewer.md`
+- `3-build-implementer.md`
+- `4-build-reviewer.md`
+
+## Dispatch File Header
+
+Every dispatch file begins with a 4-line audit header:
+
+```markdown
+# Dispatch: <template-name>
+**Pipeline:** <skill-name> | **Phase:** <phase> | **Task:** <N>
+**Timestamp:** <ISO-8601>
+
+---
+```
+
+The subagent reads from below the `---` onward. The header provides execution trace context.
+
+## Pointer Prompt Format
+
+The pointer prompt is what goes into the Agent tool `prompt` parameter (or Task tool `prompt:` field) and fossilizes in orchestrator history:
+
+```
+You are a [role] for [task summary].
+Read your full instructions and context at [dispatch file path].
+Begin by reading that file.
+```
+
+**Rules:**
+- Role must be specific enough for error reporting (e.g., "code implementer for Task 3: Auth middleware", not just "implementer")
+- Task summary is one clause, not a paragraph
+- No file lists, no context, no instructions beyond "read the file"
+- **Target:** 80 tokens. **Hard ceiling:** 120 tokens (full disk-mediated) or 300 tokens (hybrid mode)
+- Pointer prompts between 80-120 tokens must justify the extra length with a role description that cannot be shortened without losing error-diagnostic specificity
+- Token limits apply to the `prompt` parameter/field only, not to structured Task tool fields (`team_name`, `name`, `description`, `subagent_type`)
+- "Begin by reading that file" establishes the first action, not the only action
+- For teammate dispatches: mailbox/communication protocol instructions go in the dispatch file, not the pointer prompt
+
+## Compaction Recovery
+
+**On-disk marker (primary mechanism):** At dispatch-directory creation time, the orchestrator writes a marker to the pipeline's project-scoped memory directory (`~/.claude/projects/<project-hash>/memory/`):
+
+```
+<memory-dir>/.dispatch-active-<session-id>
+```
+
+Contents: dispatch directory path and current seq counter.
+
+**After compaction:**
+1. Glob for `.dispatch-active-*` in the project-scoped memory directory
+2. Read `manifest.jsonl` to find the last entry's `seq` value + 1 as the next counter
+3. Resume dispatching
+
+This works for all 21 orchestrator skills regardless of whether they have Compression State Block support. CSB inclusion of the dispatch directory path is a secondary nice-to-have.
+
+## Dispatch Manifest
+
+Every dispatch directory includes `manifest.jsonl` — a structured execution trace.
+
+### Protocol: Write Before Dispatch
+
+1. **Before dispatching:** Append entry with `status: "dispatched"`
+2. **After dispatch returns:** Update entry to `"completed"`, `"failed"`, etc.
+3. **After compaction:** Entries still showing `"dispatched"` are treated as needs-re-dispatch (conservative default)
+
+### Entry Format
+
+```jsonl
+{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves"}
+```
+
+**Fields:**
+- `seq` — dispatch sequence number (matches file counter)
+- `file` — dispatch file name
+- `role` — subagent role (implementer, reviewer, red-team, etc.)
+- `phase` — pipeline phase
+- `task` — task number (null for non-task dispatches)
+- `status` — dispatched | completed | failed | skipped | error
+- `duration_s` — wall clock seconds (null while dispatched)
+- `summary` — one-line result from subagent output
+
+### Re-dispatch Safety
+
+Read-only agents (reviewers, red-team) can be re-dispatched safely — second runs overwrite the same outputs.
+
+**Mutating agents (implementers):** Before re-dispatching after compaction, verify:
+1. Dispatch file creation timestamp is recent (within current session)
+2. Check for evidence of prior completion (commits, test results, output files)
+
+### What the Manifest Enables
+
+1. **Failure replay** — debugging skill reads manifest, re-runs failing dispatch from preserved file
+2. **Forge execution data** — machine-readable trace of template failure rates, phase durations, iteration counts
+3. **Pipeline resume (future)** — skip completed dispatches, restart from first failure
+
+### Chronicle Compatibility
+
+The manifest schema is designed to be chronicle-compatible. When the chronicle system is live, the cleanup step should transform completed manifest entries into chronicle signals (per-dispatch granularity). This wiring is deferred to chronicle implementation — this note documents the intent so the schema doesn't drift.
+
+## Cleanup
+
+**On successful pipeline completion:**
+1. Copy `manifest.jsonl` to the pipeline's persistent scratch directory (for forge retrospectives)
+2. Delete the dispatch directory
+
+**On failure or escalation:**
+1. Copy the full dispatch directory to the pipeline's persistent scratch directory (durable record for inspection and replay)
+2. Leave the `/tmp` copy in place as well (`/tmp` is ephemeral; scratch copy is durable)
+
+Pipeline completion steps (build Phase 4, debugging Phase 5, etc.) each include cleanup.
+
+## Template Comment Header
+
+Every dispatch template file gets this comment:
+
+```markdown
+<!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
+     not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
+```
+
+Files with multiple dispatch prompts (e.g., `investigation-prompts.md`) get the header on each distinct prompt section.
+
+Template expansion follows the existing bracket-placeholder pattern (`{{variable}}`). Disk-mediated dispatch changes delivery, not composition.
