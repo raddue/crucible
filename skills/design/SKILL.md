@@ -43,6 +43,11 @@ Write down what you EXPECT to find before dispatching agents. After agents retur
 | **Quick scan** | Implementation approach within decided architecture, which existing pattern to follow | Single codebase scout |
 | **Direct ask** | Naming, UI placement, priority ordering — no technical implications | Ask directly |
 
+**Data model dimensions:** Decisions involving database schema, data model, or persistent storage always warrant **Deep dive**. During synthesis, apply the grain test:
+- **Grain:** "What is one row in this table?" Must be answerable in a single sentence. Bad signs: rows that mean different things depending on a type column, rows containing multiple independent facts, rows whose identity requires reading application code.
+- **Relationships:** Every foreign key tells a story. Parent-child relationships should be obvious from the schema alone. If you need a whiteboard to explain how two tables relate, add an intermediate table or rethink the relationship.
+- **Durability:** The schema outlives the application. Design tables as if the application will be replaced but the data must survive. Use simple types, avoid application-specific encoding.
+
 #### Step 4: Dispatch Investigation
 
 **Deep dive** — spawn three agents in parallel (templates in `investigation-prompts.md`):
@@ -61,8 +66,14 @@ After agents return:
 
 1. **Compare to hypothesis** — note surprises
 2. **Check for auto-resolution** — if only one viable path exists, inform the user rather than asking: "Investigation showed X is the only viable approach because [reasons]. Moving on." User can interrupt if they disagree.
-3. **Check for question redirection** — if agents found the wrong question is being asked, redirect: "Was going to ask about X, but investigation revealed the real decision is Y."
-4. **Synthesize into 2-3 informed options** with a recommended choice
+3. **Scope absorption test** — If this feature targets an existing system (not greenfield), challenge the assumption that it belongs there. Apply four questions:
+   - Does this share the same data model as the host application?
+   - Does this share the same interaction pattern (form entry vs. dashboard vs. real-time)?
+   - Does this serve the same users with the same workflows?
+   - Would this feature survive if the host application were replaced tomorrow?
+   If fewer than 3 answers are "yes," flag to the user: "This feature may not belong in [target system] — it only shares [N/4] characteristics. Consider whether it deserves its own application. Each application should be describable in a single sentence — if you need a paragraph, it's doing too much." The user decides; this is a structured nudge, not a veto.
+4. **Check for question redirection** — if agents found the wrong question is being asked, redirect: "Was going to ask about X, but investigation revealed the real decision is Y."
+5. **Synthesize into 2-3 informed options** with a recommended choice
 
 #### Step 6: Challenge (Deep Dive Only)
 
@@ -120,6 +131,23 @@ For auto-resolved questions:
 
 After the user answers, add the decision and rationale to the running context. All subsequent agents receive this.
 
+#### Step 9: Stall-Breaker (Conditional)
+
+**Trigger:** The same design dimension has received 2+ user responses without new information surfacing or a decision being made. A "user response" is a reply after the dimension is presented that does not resolve it (asks for more analysis, expresses uncertainty, or revisits a prior option). The initial presentation (Step 7) does not count — the user gets at least two chances to engage before the stall-breaker activates.
+
+When triggered, apply this tiebreaker protocol in order:
+
+1. **Eliminate:** Can you identify a concrete technical reason one option is wrong? If so, eliminate it and present the remaining option as the recommendation.
+2. **Reversibility:** Are both options still viable? Pick the one that's simpler to reverse if you're wrong. Two-way doors beat one-way doors.
+3. **Ship sooner:** Still stuck? Pick the one that ships sooner. Shipping teaches things deliberation cannot.
+
+**Present the tiebreaker:**
+> "We've been deliberating on [dimension] for a while without new information surfacing. Here's my tiebreaker recommendation: **[option]**, because [reason from the protocol above]. If you disagree, tell me — otherwise I'll proceed with this."
+
+The user can always override. This is a structured nudge, not a forced decision. If the user provides genuinely new information (not a restatement of prior concerns), reset the exchange counter and continue normal investigation.
+
+**What "decided" means:** The decision is implemented and no longer being discussed. If the same question keeps resurfacing after a tiebreaker, it hasn't been decided — escalate: "This dimension keeps resurfacing. Would it help to time-box it, or should we move forward and revisit after we see the rest of the design?"
+
 ### Phase 3: Design Presentation
 
 Once key dimensions are decided:
@@ -143,6 +171,7 @@ Scan for gaps (use judgment — not every item applies):
 - [ ] **Edge cases** — Boundary conditions?
 - [ ] **API surface defined** — Public interfaces with signatures?
 - [ ] **Invariants identified** — Hard constraints (checkable vs testable)?
+- [ ] **Data model grain** — Can you answer "what is one row?" in a single sentence for every new table? Relationships obvious from schema alone? Schema durable beyond the application?
 
 Raise critical gaps with the user before saving.
 
