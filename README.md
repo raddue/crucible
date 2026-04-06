@@ -125,7 +125,7 @@ You have 40,000 characters — use them. The more context you provide about your
 
 | Skill | Description |
 |-------|-------------|
-| **audit** | Adversarial review of existing subsystems on demand. Dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture) plus a Phase 2.5 blind-spots agent that hunts cross-cutting concerns the lenses missed (security, performance, concurrency). Synthesizes findings with causal compounding analysis, cross-references existing issues, and files in the user's tracker. Find-and-report only. |
+| **audit** | Adversarial review of code subsystems or non-code artifacts (design docs, plans, concepts). For code: dispatches 4 parallel analysis lenses (correctness, robustness, consistency, architecture) plus blind-spots. For non-code: dispatches 4 type-specific lenses (e.g., technical soundness, integration impact, edge cases, scope clarity for design docs) plus document-level blind-spots. Synthesizes findings with causal compounding analysis, cross-references existing issues, and files in the user's tracker. Find-and-report only. |
 | **siege** | Security audit of design docs, implementation plans, and code. Dispatches 6 parallel Opus agents across attacker perspectives (boundary analyst, insider threat, chain analyst, supply chain, cryptographic, social engineering), iterates until zero Critical + zero High findings, and maintains a persistent threat model. Steel-mans before attacking. |
 | **consensus** | Multi-model consensus for high-stakes quality decisions. Opt-in MCP-based system that dispatches prompts to multiple LLM providers in parallel and synthesizes responses. Enhances quality-gate (stagnation verdicts, periodic red-team rounds) and design (Challenger step) when available. Transparent degradation — changes nothing when absent. |
 | **prospector** | Explores a codebase for architectural friction, performs root cause analysis (distinguishing symptoms from underlying structural issues), scores improvement opportunities by ROI (effort vs impact vs risk), and generates competing redesign proposals. Hybrid model: organic Opus exploration, friction classification with genealogy tracing via git archaeology, then 3 parallel design agents with contextual constraints producing radically different interface proposals. Output feeds into build (refactor mode) or files as tracker issues. |
@@ -196,7 +196,7 @@ The **siege** skill performs security audits — 6 parallel attacker-perspective
 
 The **distill** skill converts heavy documents (PDF, Word, Excel, PowerPoint) to token-efficient Markdown/CSV with a digest pass — reducing context budget by ~80% for document-heavy workflows.
 
-Individual skills can also be used standalone (e.g., `test-driven-development` for any implementation work, `debugging` for any bug, `audit` for adversarial review of any existing subsystem).
+Individual skills can also be used standalone (e.g., `test-driven-development` for any implementation work, `debugging` for any bug, `audit` for adversarial review of any existing subsystem or document).
 
 ## Eval Results
 

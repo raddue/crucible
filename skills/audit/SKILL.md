@@ -1,13 +1,13 @@
 ---
 name: audit
-description: "Review existing subsystems for bugs, robustness gaps, inconsistencies, and architecture issues. Triggers on 'audit', 'review subsystem', 'check the save system', 'examine the UI code', or any task requesting adversarial review of existing (not newly written) code."
+description: "Adversarial review of code subsystems or non-code artifacts (design docs, plans, concepts) through parallel analytical lenses. Triggers on 'audit', 'review subsystem', 'audit this design', 'review this plan', 'audit concept', 'check the save system', 'examine the UI code', or any task requesting adversarial review of existing artifacts."
 ---
 
 # Audit
 
-Adversarial review of existing subsystems. Dispatches parallel analysis agents across four lenses, synthesizes findings, and offers to file them in the user's issue tracker.
+Adversarial review of code subsystems or non-code artifacts. Dispatches parallel analysis agents across four lenses adapted to the artifact type, synthesizes findings, and offers to file them in the user's issue tracker.
 
-**Announce at start:** "Running audit on [subsystem name]."
+**Announce at start:** "Running audit on [target name] (type: [artifact type])."
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
@@ -17,6 +17,95 @@ Adversarial review of existing subsystems. Dispatches parallel analysis agents a
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
+
+## Artifact Types
+
+Audit supports 4 artifact types, each with tailored analytical lenses:
+
+| Artifact Type | Lens 1 | Lens 2 | Lens 3 | Lens 4 |
+|---|---|---|---|---|
+| `code` (default) | Correctness | Robustness | Consistency | Architecture |
+| `design` | Technical Soundness | Integration Impact | Edge Cases | Scope Clarity |
+| `plan` | Feasibility | Risk & Dependencies | Completeness | Assumptions |
+| `concept` | Problem-Solution Fit | Feasibility & Cost | Stakeholder Alignment | Blind Assumptions |
+
+### Invocation
+
+```
+/audit save/load                                          # code (default)
+/audit docs/plans/2026-04-01-auth-design.md               # auto-detects design
+/audit docs/plans/2026-04-01-plan.md artifact_type: plan   # explicit type
+/audit "We should build a CLI tool that..."               # auto-detects concept
+```
+
+**Parameters:**
+- `target` (required) — subsystem name, file path, or freeform text
+- `artifact_type` (optional) — `code | design | plan | concept`. Auto-detected if omitted.
+
+### Auto-Detection
+
+Priority chain when `artifact_type` is not provided:
+
+1. Directory or subsystem name → `code` (existing behavior)
+2. File with code extension (`.py`, `.ts`, `.go`, etc.) → `code`
+3. YAML frontmatter contains `source: "design"` or `source: "spec"` → `design`
+4. YAML frontmatter contains `source: "plan"` or title contains "implementation plan" → `plan`
+5. No file path (freeform text input) → `concept`
+6. Ambiguous → ask user: "I detected a markdown document but can't determine its type. Is this a design doc, plan, or concept?"
+
+**Limitation:** Frontmatter-based detection relies on Crucible's `source` field convention. Repos without this convention will hit the "ambiguous → ask user" fallback more often. The explicit `artifact_type` parameter is the reliable path for any repo.
+
+### Non-Code Lens Configurations
+
+#### `design` — Design Documents
+
+| Lens | Core Question | Focus Areas | Exclusions |
+|---|---|---|---|
+| Technical Soundness | "Are the technical decisions well-reasoned?" | Trade-off analysis quality, constraint identification, decision-evidence alignment, alternative exploration depth | Integration concerns (Integration Impact lens), boundary conditions (Edge Cases lens), scope questions (Scope Clarity lens) |
+| Integration Impact | "How does this design interact with existing systems?" | Breaking changes identified, migration path, dependency awareness, blast radius assessment | Decision quality (Technical Soundness lens), boundary conditions (Edge Cases lens), scope questions (Scope Clarity lens) |
+| Edge Cases | "What happens at the boundaries?" | Failure modes addressed, boundary conditions, concurrent usage, data edge cases, degraded-mode behavior | Decision quality (Technical Soundness lens), integration concerns (Integration Impact lens), scope questions (Scope Clarity lens) |
+| Scope Clarity | "Is the scope well-defined and appropriate?" | Non-goals stated, scope-to-problem fit, YAGNI compliance, acceptance criteria testability | Decision quality (Technical Soundness lens), integration concerns (Integration Impact lens), boundary conditions (Edge Cases lens) |
+
+#### `plan` — Strategic Plans, Implementation Plans, PRDs
+
+| Lens | Core Question | Focus Areas | Exclusions |
+|---|---|---|---|
+| Feasibility | "Can this actually be executed as described?" | Resource requirements vs availability, timeline realism, skill/capability assumptions, tooling prerequisites | Risk identification (Risk & Dependencies lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens) |
+| Risk & Dependencies | "What could derail execution?" | External dependency risks, sequencing risks, single points of failure, rollback provisions, blast radius of partial failure | Execution feasibility (Feasibility lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens) |
+| Completeness | "What's missing from this plan?" | Phases covered, milestones defined, success criteria measurable, testing strategy present, communication plan | Execution feasibility (Feasibility lens), risk identification (Risk & Dependencies lens), environmental assumptions (Assumptions lens) |
+| Assumptions | "What's being taken for granted?" | Environmental assumptions, team capacity assumptions, technical assumptions, timeline assumptions, stakeholder alignment assumptions | Execution feasibility (Feasibility lens), risk identification (Risk & Dependencies lens), missing sections (Completeness lens) |
+
+#### `concept` — Product Concepts, Proposals, Early-Stage Ideas
+
+| Lens | Core Question | Focus Areas | Exclusions |
+|---|---|---|---|
+| Problem-Solution Fit | "Does this concept solve a real problem?" | Problem definition clarity, target audience identified, value proposition specificity, differentiation from existing solutions | Build feasibility (Feasibility & Cost lens), stakeholder concerns (Stakeholder Alignment lens), hidden assumptions (Blind Assumptions lens) |
+| Feasibility & Cost | "Is this achievable and worth the investment?" | Build vs buy analysis, resource requirements, timeline expectations, opportunity cost, maintenance burden | Problem-solution fit (Problem-Solution Fit lens), stakeholder concerns (Stakeholder Alignment lens), hidden assumptions (Blind Assumptions lens) |
+| Stakeholder Alignment | "Who needs to agree and will they?" | Decision-makers identified, conflicting incentives surfaced, adoption path realistic, organizational readiness | Problem-solution fit (Problem-Solution Fit lens), build feasibility (Feasibility & Cost lens), hidden assumptions (Blind Assumptions lens) |
+| Blind Assumptions | "What is this concept taking for granted?" | Market assumptions, user behavior assumptions, technical assumptions, competitive landscape assumptions, sustainability assumptions | Problem-solution fit (Problem-Solution Fit lens), build feasibility (Feasibility & Cost lens), stakeholder concerns (Stakeholder Alignment lens) |
+
+### Non-Code Finding Format
+
+Non-code findings use the same severity levels (Fatal/Significant/Minor) but replace code-specific fields:
+
+| Field | Code | Non-Code |
+|---|---|---|
+| Location | `file` + `line_range` | `section` (nearest markdown heading, e.g., `## Key Decisions > DEC-3`) |
+| Lens-specific | `scenario`, `failure_scenario`, `convention_violated`, `impact` | `concern` |
+| Evidence | Code quotes | Document text quotes |
+
+For artifacts without markdown headings, `section` uses a brief quoted phrase from the opening of the relevant paragraph.
+
+### Non-Code Blind-Spots Categories
+
+When auditing non-code artifacts, the blind-spots agent hunts for document-level gaps:
+
+- Internal contradictions (artifact says X in one section, Y in another)
+- Unstated assumptions (decisions depending on undocumented conditions)
+- Missing stakeholder perspectives (who would disagree with this?)
+- Scope boundary gaps (what's just outside scope that could cause problems?)
+- Silent dependencies (external factors assumed to remain true)
+- Logical leaps (conclusions not supported by the preceding argument)
 
 ## Why This Exists
 
@@ -28,7 +117,7 @@ Per-task quality gates (red-team, inquisitor) review artifacts produced during d
 |-------|---------|------|--------|-------|
 | red-team | A single artifact just produced | During creation | Yes (loop) | One doc/plan/impl |
 | inquisitor | A complete implementation diff | During build phase 4 | Yes (automated fix cycle) | Changes only (diffs) |
-| **audit** | Existing code in a subsystem | On demand | No (reports only) | Existing codebase |
+| **audit** | Existing code subsystems or non-code artifacts | On demand | No (reports only) | Existing codebase or documents |
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -46,6 +135,8 @@ Every status update must include:
 > "Phase 2: Correctness and Robustness lenses complete (4 findings, 2 findings). Architecture still in flight. Consistency Agent A returned -- flagged 6 files, dispatching Agent B."
 
 > "Phase 2 complete. All 4 lenses reported: 14 total findings. Moving to Phase 3 synthesis."
+
+> "Phase 2 (design audit): Technical Soundness and Integration Impact complete (3 findings, 1 finding). Edge Cases and Scope Clarity still in flight."
 
 ## Pipeline Status
 
@@ -80,13 +171,22 @@ The status file uses this structure (overwritten in full each time):
 Append after the shared header:
 
 ```
-## Lenses
+## Lenses (code audit)
 - Correctness: DONE (4 findings)
 - Robustness: DONE (2 findings)
 - Architecture: IN PROGRESS
 - Consistency: PENDING
 - Blind-spots: PENDING
+
+## Lenses (design audit — example)
+- Technical Soundness: DONE (3 findings)
+- Integration Impact: DONE (1 finding)
+- Edge Cases: IN PROGRESS
+- Scope Clarity: PENDING
+- Blind-spots: PENDING
 ```
+
+Use the lens names matching the current artifact type.
 
 ### Health State Machine
 
@@ -151,7 +251,14 @@ The `<run-id>` is the same timestamp used for the scratch directory.
 
 ## Compaction Recovery
 
-After context compaction, the orchestrator must:
+After context compaction, the orchestrator must first determine whether this is a code or non-code audit:
+
+### Step 1: Detect Audit Type
+
+Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-code recovery. If absent, follow code recovery (existing behavior).
+
+### Code Recovery (artifact_type: code)
+
 1. Read `scratch/<run-id>/` to determine current state:
    - `manifest.md` exists → Phase 1 scoping is complete
    - `gate-approved.md` exists → user confirmed scope, Phase 2 can proceed
@@ -164,14 +271,24 @@ After context compaction, the orchestrator must:
 3. Output current status to user before continuing
 4. Continue with the appropriate phase
 
-**Phase-specific recovery:**
+**Phase-specific recovery (code):**
 - **Phase 1:** If `manifest.md` exists but `gate-approved.md` does not, re-present the manifest to the user for confirmation.
 - **Phase 2:** Check which lenses have findings files. Dispatch any remaining lenses.
 - **Phase 2.5:** If all four lens findings files exist but `blindspots-findings.md` does not, rebuild the coverage map from partition records and findings files (see Coverage Map Construction), then dispatch the blind-spots agent. If `blindspots-findings.md` exists, Phase 2.5 is complete.
 - **Phase 3:** If compaction occurs during synthesis, re-read all findings files (including blindspots) and re-run synthesis. This is safe — synthesis is idempotent.
 - **Phase 4:** If `report.md` exists, re-read it and continue with cross-referencing/filing.
 
+### Non-Code Recovery (artifact_type: design | plan | concept)
+
+1. Read `artifact-type.md` to recover the artifact type
+2. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation
+3. **Phase 2 recovery:** Look for `<lens-name-kebab>-findings.md` files matching the type's lens names (e.g., `technical-soundness-findings.md` for design). Dispatch any lenses that don't have findings files.
+4. **Phase 2.5 recovery:** If all 4 lens findings exist but `noncode-blindspots-findings.md` does not, build the lens summary and dispatch the non-code blind-spots agent. If `noncode-blindspots-findings.md` exists, Phase 2.5 is complete.
+5. **Phase 3/4 recovery:** Same as code path — re-read findings, re-run synthesis if needed, continue with reporting.
+
 ## Phase 1: Scoping
+
+### Code Path (artifact_type: code)
 
 Dispatch: `Agent tool (subagent_type: Explore, model: sonnet)` using `audit-scoping-prompt.md`
 
@@ -185,7 +302,42 @@ Dispatch: `Agent tool (subagent_type: Explore, model: sonnet)` using `audit-scop
 
 If the user removes all files or the manifest is empty: abort cleanly with "No files in scope -- audit cancelled."
 
+### Non-Code Path (artifact_type: design | plan | concept)
+
+No scoping agent needed — the artifact IS the scope. The orchestrator:
+
+1. **Validate artifact:** Read the file or accept freeform text input. If file does not exist, abort.
+2. **Detect or confirm type:** Apply auto-detection (see Auto-Detection above) or use explicit `artifact_type`.
+3. **Write type marker:** Write `scratch/<run-id>/artifact-type.md` containing the detected type. This file is the compaction recovery marker for non-code audits.
+4. **Gather supporting context:** Parse the artifact for references:
+   - Markdown links (`[text](path)`)
+   - File paths (`path/to/file.ext`)
+   - Issue references (`#NNN`)
+   - Explicit "see also" references
+   For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 2000 lines total.** If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 2000-line context cap reached]". If no references found: proceed with artifact-only context.
+5. **Present user gate:** "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Proceed?"
+6. **Write gate marker:** Write `scratch/<run-id>/gate-approved.md` (same as code path).
+
 ## Phase 2: Analysis
+
+### Non-Code Dispatch (artifact_type: design | plan | concept)
+
+Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel, using `audit-noncode-lens-prompt.md` with lens-specific instruction injection.
+
+For each of the 4 lenses matching the artifact type (see Artifact Types table):
+1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`
+2. Dispatch via disk-mediated dispatch
+3. Write findings to `scratch/<run-id>/<lens-name-kebab>-findings.md` (e.g., `technical-soundness-findings.md`)
+
+**Key differences from code path:**
+- Full artifact content to each lens (no Tier 1/Tier 2 tiering — non-code artifacts are small)
+- All single-agent (no dual-agent Consistency pattern)
+- No partition records (all lenses see the full artifact)
+- Findings use `section` instead of `file` + `line_range`, and `concern` instead of lens-specific code fields
+
+After all 4 lenses complete, proceed to Phase 2.5 (non-code blind-spots).
+
+### Code Dispatch (artifact_type: code)
 
 Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel (matching inquisitor pattern). Fallback if parallel dispatch fails: dispatch sequentially via `Task tool (general-purpose, model: opus)`, with a one-time note to user: "Parallel dispatch unavailable -- running analysis lenses sequentially."
 
@@ -254,6 +406,24 @@ All lenses output structured findings with these common fields: `{severity, file
 **Dispatch:** Single agent.
 
 ## Phase 2.5: Blind Spots
+
+### Non-Code Blind-Spots (artifact_type: design | plan | concept)
+
+Dispatch: `Task tool (general-purpose, model: opus)` using `audit-noncode-blindspots-prompt.md`. Runs AFTER all Phase 2 non-code lenses have reported, BEFORE Phase 3 synthesis.
+
+**No coverage map needed** — all lenses see the full artifact. Instead, the orchestrator builds a **lens summary** with this format:
+
+```
+## Lens Summary
+- **[Lens Name]** — [Core Question]. Findings: N (Fatal: N, Significant: N, Minor: N). Focus areas: [brief list].
+[repeat for each lens]
+```
+
+The blind-spots agent receives the full artifact content + lens summary and hunts for document-level gaps (see Non-Code Blind-Spots Categories above). Write findings to `scratch/<run-id>/noncode-blindspots-findings.md`.
+
+**No follow-up dispatches** for non-code (the artifact is fully visible to the blind-spots agent — there are no "never-examined files").
+
+### Code Blind-Spots (artifact_type: code)
 
 Dispatch: `Task tool (general-purpose, model: opus)` using `audit-blindspots-prompt.md`. Runs AFTER all Phase 2 lenses have reported (including Consistency Agent B), BEFORE Phase 3 synthesis.
 
@@ -341,9 +511,13 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 ## Phase 3: Synthesis
 
-Orchestrator reads all confirmed findings from `scratch/<run-id>/` on disk. Read `correctness-findings.md`, `robustness-findings.md`, `consistency-b-findings.md`, `architecture-findings.md`, `blindspots-findings.md`, and if they exist: `blindspots-followup-findings.md`, `blindspots-crosschunk-findings.md`. Do NOT read `consistency-a-findings.md` (triage data, not confirmed findings).
+### Reading Findings
 
-1. **Deduplicate:** When two findings reference overlapping file + line_range and describe the same underlying concern (using common fields: severity, file, line_range, evidence, description), merge into one finding noting both lenses. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
+**Code audits:** Read `correctness-findings.md`, `robustness-findings.md`, `consistency-b-findings.md`, `architecture-findings.md`, `blindspots-findings.md`, and if they exist: `blindspots-followup-findings.md`, `blindspots-crosschunk-findings.md`. Do NOT read `consistency-a-findings.md` (triage data, not confirmed findings).
+
+**Non-code audits:** Read `<lens-name-kebab>-findings.md` for each of the 4 type-specific lenses (e.g., `technical-soundness-findings.md`, `integration-impact-findings.md`, `edge-cases-findings.md`, `scope-clarity-findings.md` for design), plus `noncode-blindspots-findings.md`.
+
+1. **Deduplicate:** When two findings reference the same location and describe the same underlying concern, merge into one finding noting both lenses. For code audits, match on overlapping `file` + `line_range`. For non-code audits, match on identical `section` headings. Use common fields (severity, evidence, description) for similarity comparison. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
 2. **Compounding risks:** After dedup, scan pairs of findings from different lenses that touch the same file or related files. Flag as compounding ONLY when you can articulate the specific mechanism by which the two findings combine into a worse problem (e.g., "this robustness gap means malformed input reaches this code path, where this correctness edge case causes data corruption"). File proximity alone is not compounding -- the findings must be causally related. Add a "Compounding" tag with the mechanism description to the grouped output.
 3. **Severity-rank:** Fatal first, then Significant, then Minor.
 4. **Group by theme** (e.g., "Error Handling," "State Management," "API Contracts").
@@ -363,11 +537,13 @@ Orchestrator reads all confirmed findings from `scratch/<run-id>/` on disk. Read
 3. Ask user: **"File as individual issues, one umbrella issue with checklist, or skip filing?"**
    - If filing: use available environment tools to create issues with structured body (severity tag, file references, evidence snippet).
 
-4. **Record to cartographer:** After completion, dispatch cartographer recorder (Mode 1) with the Phase 1 manifest only. The manifest was deliberately scoped during exploration and is reliable structural data. Do NOT feed incidental observations from Phase 2 bug-hunting agents to cartographer -- those are unverified structural inferences.
+4. **Record to cartographer (code audits only):** After completion, dispatch cartographer recorder (Mode 1) with the Phase 1 manifest only. The manifest was deliberately scoped during exploration and is reliable structural data. Do NOT feed incidental observations from Phase 2 bug-hunting agents to cartographer -- those are unverified structural inferences. **Skip for non-code audits** — no subsystem manifest to record.
 
 5. **Cleanup:** Delete the `scratch/<run-id>/` directory only after ALL Phase 4 actions are complete (issue filing, cartographer recording). Do not clean up prematurely -- the report on disk is needed for compaction recovery during Phase 4.
 
 ## Prompt Templates
+
+### Code Audit Templates
 
 - `audit-scoping-prompt.md` -- Phase 1 subsystem scoping dispatch (`Agent tool, subagent_type: Explore, model: sonnet`)
 
@@ -378,7 +554,12 @@ Analysis lens templates (all use `Task tool, general-purpose, model: opus`):
 - `audit-architecture-prompt.md` -- Architecture lens dispatch
 
 Blind-spots template (`Task tool, general-purpose, model: opus`):
-- `audit-blindspots-prompt.md` -- Phase 2.5 gap-hunting dispatch (receives all prior findings)
+- `audit-blindspots-prompt.md` -- Phase 2.5 gap-hunting dispatch (receives coverage map)
+
+### Non-Code Audit Templates
+
+- `audit-noncode-lens-prompt.md` -- Parameterized lens dispatch for all non-code artifact types. Orchestrator fills `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`.
+- `audit-noncode-blindspots-prompt.md` -- Non-code blind-spots dispatch (receives lens summary, not coverage map)
 
 Each analysis template includes:
 - Dispatch metadata (for orchestrator reference): `Task tool (general-purpose, model: opus)`
@@ -415,7 +596,7 @@ Each analysis template includes:
 
 ## Integration
 
-- **Dispatches:** Audit-specific prompt templates (scoping, correctness, robustness, consistency [2 agents], architecture, blind-spots)
+- **Dispatches:** Code audit templates (scoping, correctness, robustness, consistency [2 agents], architecture, blind-spots) and non-code templates (noncode-lens [parameterized], noncode-blindspots)
 - **Consults:** `crucible:cartographer` (Mode 2: consult map) for subsystem scoping and conventions
 - **Records to:** `crucible:cartographer` (Mode 1: record discovery) -- Phase 1 manifest only
 - **Pairs with:** `crucible:forge` -- audit findings could inform retrospective if they reveal systemic patterns
