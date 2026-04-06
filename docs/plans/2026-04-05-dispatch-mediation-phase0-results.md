@@ -67,3 +67,36 @@ Even the most conservative estimate (Method A low end, 50% autocompact compressi
 2. Cannot observe autocompact behavior directly from within a session
 3. Injected context sizes estimated from placeholder descriptions, not measured from real pipeline data
 4. Phase dispatch counts are estimates based on plan analysis, not observed runs
+
+---
+
+## Phase 2.5: Pointer Prompt Length Validation
+
+**Date:** 2026-04-05
+**Method:** Word-count proxy (words × 1.3)
+**Scope:** 75 dispatch points across 71 template files (design/investigation-prompts.md contains 4 sub-templates)
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Templates within 80-token target | **75/75 (100%)** |
+| Templates exceeding 80 tokens | 0 |
+| Templates exceeding 120-token ceiling | 0 |
+| Longest pointer prompt | ~44 tokens (stagnation judge, integration check) |
+| Shortest pointer prompt | ~33 tokens (cleanup, acceptance-test-writer) |
+| Median | ~38 tokens |
+
+### Top 5 Longest
+
+| Template | Words | Est. Tokens |
+|---|---|---|
+| quality-gate/stagnation-judge | 34 | 44 |
+| spec/integration-check | 34 | 44 |
+| debugging/test-gap-writer | 33 | 43 |
+| migrate/compatibility-designer | 33 | 43 |
+| siege/siege-betrayed-consumer | 32 | 42 |
+
+### Decision
+
+**PASS.** All 75 dispatch points fit within the 80-token target with substantial headroom (~36 tokens of margin at the worst case). No role descriptions need shortening. Even with 20% tokenizer variance, the absolute worst case would be ~53 tokens — still under the 80-token target.
