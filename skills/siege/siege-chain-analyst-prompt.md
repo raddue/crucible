@@ -128,6 +128,31 @@ Task tool (general-purpose, model: opus):
     Evidence: [code at each step in the chain]
     Verification: [how to confirm the chain is exploitable end-to-end]
 
+    ## Reproduction
+    ```
+    Step 1: [command demonstrating first link in the chain]
+    Step 2: [command using step 1's result to demonstrate second link]
+    Step 3: [command showing final impact]
+    ```
+    **Vulnerable output:** [what each step produces when the chain is exploitable]
+    **Fixed output:** [where the chain breaks after remediation]
+
+    Reproduction commands must be non-destructive and read-only.
+
+    {{#if attack_mapping}}
+    ## ATT&CK Mapping
+
+    For each chain, map steps to MITRE ATT&CK technique IDs:
+
+    | Chain Step | Technique ID | Technique Name | Tactic |
+    |---|---|---|---|
+    | [step 1 description] | T[NNNN] | [technique name] | [tactic: initial-access/execution/persistence/etc.] |
+    | [step 2 description] | T[NNNN] | [technique name] | [tactic] |
+
+    Only include this section when attack_mapping is enabled. Use ATT&CK Enterprise matrix techniques.
+    Common mappings: T1190 (exploit public-facing app), T1078 (valid accounts), T1068 (exploitation for privilege escalation), T1005 (data from local system), T1071 (application layer protocol).
+    {{/if}}
+
     ## Summary
     - Trust boundaries examined: N
     - Coverage gaps investigated: N

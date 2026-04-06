@@ -102,6 +102,15 @@ Task tool (general-purpose, model: opus):
     Evidence: [specific code -- the missing check or bypassable check]
     Verification: [concrete test: authenticate as X, request Y, expect Z]
 
+    ## Reproduction
+    ```
+    [1-3 commands — curl with different auth tokens showing unauthorized access, IDOR requests, privilege escalation steps]
+    ```
+    **Vulnerable output:** [response showing unauthorized data/action succeeded]
+    **Fixed output:** [response showing proper 403/404 after remediation]
+
+    Reproduction commands must be non-destructive and read-only.
+
     ## Summary
     - Files examined: N
     - Files summarized: N
