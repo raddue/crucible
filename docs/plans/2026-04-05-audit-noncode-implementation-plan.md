@@ -9,37 +9,41 @@ source: "spec"
 
 ## Task Overview
 
-7 tasks across 2 waves. All deliverables are prompt templates and SKILL.md updates — no compiled code, no runtime dependencies.
+6 tasks in a flat fan from Task 1. All deliverables are prompt templates and SKILL.md updates — no compiled code, no runtime dependencies.
 
-## Wave 1: Core Infrastructure
-
-### Task 1: Add artifact type detection and routing to SKILL.md
+### Task 1: Add artifact type system, routing, and phase adaptations to SKILL.md
 
 **Files:** `skills/audit/SKILL.md`
 **Complexity:** High
 **Dependencies:** None
 
-Update SKILL.md to add:
+This is the single large task that modifies SKILL.md. All non-code logic lives here — no subsequent tasks re-edit SKILL.md to "add detail."
 
-1. **Artifact type declaration** — Add a new section after the Overview defining the 4 supported types (`code`, `design`, `plan`, `concept`) with their lens configurations.
+Updates:
 
-2. **Invocation API update** — Add `artifact_type` parameter (optional, auto-detected if omitted). Document auto-detection logic:
-   - Directory or subsystem name → `code`
-   - File with code extension → `code`
-   - `docs/plans/*-design.md` or frontmatter `source: design/spec` → `design`
-   - `docs/plans/*-implementation-plan.md` or `*-prd.md` → `plan`
-   - Freeform text (no file path) → `concept`
-   - Ambiguous → ask user
+1. **Frontmatter and triggers** — Update `description` to include non-code artifacts. Add trigger phrases: "audit this design", "review this plan", "audit concept."
 
-3. **Phase 1 bifurcation** — Add non-code scoping path: validate artifact → detect type → gather supporting context → user gate. Code path unchanged.
+2. **Artifact type declaration** — New section after Overview defining 4 types (`code`, `design`, `plan`, `concept`) with summary table and auto-detection logic (frontmatter `source` field → path patterns → ask user). Include auto-detection limitations note for non-Crucible repos.
 
-4. **Phase 2 bifurcation** — Add non-code dispatch path: 4 parallel lenses using `audit-noncode-lens-prompt.md` with lens-specific instructions. Document the lens configuration tables for all 3 non-code types (design, plan, concept). Code path unchanged.
+3. **Invocation API** — Add `artifact_type` parameter (optional, auto-detected if omitted).
 
-5. **Phase 2.5 bifurcation** — Add non-code blind-spots dispatch using `audit-noncode-blindspots-prompt.md`. No coverage map for non-code (all lenses see full artifact). Code path unchanged.
+4. **Lens configuration tables** — Full per-type configs for all 12 non-code lenses (3 types × 4 lenses). Each entry: lens name, core question, focus areas, exclusions. Design: Technical Soundness, Integration Impact, Edge Cases, Scope Clarity. Plan: Feasibility, Risk & Dependencies, Completeness, Assumptions. Concept: Problem-Solution Fit, Feasibility & Cost, Stakeholder Alignment, Blind Assumptions.
 
-6. **Finding format adaptation** — Document `section` field replacing `file` + `line_range` for non-code findings. Document lens-specific `concern` field replacing code-specific fields (`scenario`, `failure_scenario`, `convention_violated`, `impact`).
+5. **Phase 1 (non-code scoping)** — Full procedure: validate artifact → detect type → gather supporting context (parse markdown links, file paths, issue refs; read referenced files up to 2000-line soft cap with prioritization rules) → present user gate → write `gate-approved.md` and `artifact-type.md` to scratch.
 
-7. **Lens configuration reference tables** — Full per-type lens configs with core question, focus areas, and exclusions for each of the 12 non-code lenses (4 types × ... wait, 3 non-code types × 4 lenses = 12 lens configs).
+6. **Phase 2 (non-code lens dispatch)** — 4 parallel lenses using `audit-noncode-lens-prompt.md` with lens-specific instruction injection. All single-agent, no dual-agent pattern. Full artifact + supporting context to each lens.
+
+7. **Phase 2.5 (non-code blind-spots)** — Build lens summary (format: lens name, core question, finding counts, focus areas). Dispatch `audit-noncode-blindspots-prompt.md` with artifact + lens summary. No coverage map, no follow-up dispatch.
+
+8. **Finding format** — Document `section` field (nearest markdown heading, e.g., `## Key Decisions > DEC-3`) replacing `file` + `line_range`. Document `concern` field replacing lens-specific code fields.
+
+9. **Compaction recovery** — Write `artifact-type.md` at Phase 1 completion. Non-code recovery: read type file → look for `<lens-name-kebab>-findings.md` → look for `noncode-blindspots-findings.md` → resume from latest phase. Fall back to code recovery if `artifact-type.md` absent.
+
+10. **Communication updates** — Status narration uses type-appropriate lens names. Pipeline status `## Lenses` section reflects current artifact type.
+
+11. **Cartographer recording** — Skip for non-code (no subsystem manifest to record).
+
+12. **Distinction table** — Update to "existing code subsystems or non-code artifacts."
 
 ### Task 2: Create non-code lens prompt template
 
@@ -50,19 +54,12 @@ Update SKILL.md to add:
 Create a single parameterized dispatch template with:
 - `<!-- DISPATCH: disk-mediated -->` header
 - Role: "You are an auditor reviewing a non-code artifact through a specific analytical lens."
-- Template placeholders:
-  - `{{LENS_NAME}}` — e.g., "Technical Soundness"
-  - `{{LENS_QUESTION}}` — e.g., "Are the technical decisions well-reasoned?"
-  - `{{LENS_FOCUS_AREAS}}` — bullet list of what to look for
-  - `{{LENS_EXCLUSIONS}}` — what NOT to look for (other lenses handle it)
-  - `{{ARTIFACT_TYPE}}` — design/plan/concept
-  - `{{ARTIFACT_CONTENT}}` — the full artifact text
-  - `{{SUPPORTING_CONTEXT}}` — referenced docs, if any
-- Output format matching code lens format but with `section` instead of `file` + `line_range`, and `concern` as the lens-specific field
+- Template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`
+- Output format: section (nearest markdown heading), evidence (quoted text), concern (lens-specific), description, severity
 - 5-finding cap with justification override
 - Context self-monitoring section
-- Evidence grounding rules: every finding must quote specific text from the artifact
-- "Do NOT suggest fixes" and "Do NOT speculate" guardrails
+- Evidence grounding: every finding must quote specific text from the artifact
+- Guardrails: "Do NOT suggest fixes", "Do NOT speculate"
 
 ### Task 3: Create non-code blind-spots prompt template
 
@@ -73,79 +70,51 @@ Create a single parameterized dispatch template with:
 Create dispatch template with:
 - `<!-- DISPATCH: disk-mediated -->` header
 - Role: "You are a second-opinion auditor. Four specialist reviewers have already examined this artifact through separate analytical lenses. Your job is to find what they MISSED."
-- Input: full artifact content + lens summary (which lenses ran and what they focused on)
-- Gap categories specific to documents:
-  - Internal contradictions
-  - Unstated assumptions
-  - Missing stakeholder perspectives
-  - Scope boundary gaps
-  - Silent dependencies
-  - Logical leaps (conclusions not supported by the argument)
+- Input: full artifact content + lens summary (structured format: lens name, core question, finding counts, focus areas per lens)
+- Gap categories: internal contradictions, unstated assumptions, missing stakeholder perspectives, scope boundary gaps, silent dependencies, logical leaps
 - 8-finding cap
-- Same output format as code blind-spots but with `section` instead of `file` + `line_range`
+- Same output format as non-code lens (section, evidence, concern, description, severity)
 
-## Wave 2: Integration and Documentation
-
-### Task 4: Update Phase 1 scoping for non-code artifacts
-
-**Files:** `skills/audit/SKILL.md`
-**Complexity:** Low
-**Dependencies:** Task 1
-
-Add detailed non-code scoping procedure to Phase 1:
-1. If input is a file path: read file, check frontmatter, detect type
-2. If input is freeform text: set type to `concept`, use text as artifact content
-3. Gather supporting context: scan artifact for references to other docs (e.g., "see design doc at...", "#NNN", file paths). Read referenced docs up to 2000-line soft cap.
-4. Present user gate: "Auditing [name] as [type]. Supporting context: [list]. Proceed?"
-5. Write `gate-approved.md` for compaction recovery (same as code path)
-
-### Task 5: Update Phase 2.5 for non-code artifacts
-
-**Files:** `skills/audit/SKILL.md`
-**Complexity:** Low
-**Dependencies:** Task 1, Task 3
-
-Document non-code blind-spots dispatch:
-1. No coverage map construction (all lenses see full artifact)
-2. Instead, build a lens summary: which 4 lenses ran, their core questions, and finding counts
-3. Dispatch `audit-noncode-blindspots-prompt.md` with artifact + lens summary
-4. No follow-up dispatch for non-code (the artifact is fully visible to blind-spots agent)
-
-### Task 6: Update communication and status sections
-
-**Files:** `skills/audit/SKILL.md`
-**Complexity:** Low
-**Dependencies:** Task 1
-
-Update narration examples and pipeline status format to include artifact type:
-- Status line: "Auditing [name] as [type]. Phase 2: [lens status]."
-- Lens names in status reflect the current artifact type (e.g., "Technical Soundness: DONE (3 findings)" not "Correctness: DONE")
-- Pipeline status file `## Lenses` section uses type-appropriate lens names
-
-### Task 7: Update README
+### Task 4: Update README
 
 **Files:** `README.md`
 **Complexity:** Low
 **Dependencies:** Task 1
 
-Update the audit entry in the README to reflect multi-artifact support. Change description from code-only subsystem review to artifact-aware subsystem/document review. One sentence, not a paragraph.
+Update the audit entry in the README to reflect multi-artifact support. Change description from code-only subsystem review to artifact-aware subsystem/document review.
+
+### Task 5: Update contract
+
+**Files:** `docs/plans/2026-04-05-audit-noncode-contract.yaml`
+**Complexity:** Low
+**Dependencies:** Task 1
+
+Update the contract to reflect any changes from QG (concept lens names changed, new acceptance criteria added).
+
+### Task 6: Verify code path unchanged
+
+**Files:** None (verification only)
+**Complexity:** Low
+**Dependencies:** Tasks 1-3
+
+Verify that all 6 existing code prompt templates are unmodified (`git diff` shows no changes to `audit-correctness-prompt.md`, `audit-robustness-prompt.md`, `audit-consistency-prompt.md`, `audit-architecture-prompt.md`, `audit-blindspots-prompt.md`, `audit-scoping-prompt.md`).
 
 ## Dependency Graph
 
 ```
-Task 1 (SKILL.md core) ← Task 2 (noncode lens template)
-                       ← Task 3 (noncode blindspots template)
-                       ← Task 4 (Phase 1 scoping detail)
-                       ← Task 5 (Phase 2.5 detail)
-                       ← Task 6 (communication updates)
-                       ← Task 7 (README)
+Task 1 (SKILL.md — all non-code logic) ← Task 2 (noncode lens template)
+                                        ← Task 3 (noncode blindspots template)
+                                        ← Task 4 (README)
+                                        ← Task 5 (contract update)
+                                        ← Task 6 (code path verification)
 ```
 
-Task 1 is the foundation. Tasks 2-7 are independent of each other.
+Task 1 is the foundation. Tasks 2-6 are independent of each other.
 
 ## Implementation Notes
 
 - **This is a prompt-only skill update.** No Python scripts, no shell commands. SKILL.md + 2 new prompt templates.
-- **Code path is untouched.** The 6 existing prompt templates (`audit-correctness-prompt.md`, `audit-robustness-prompt.md`, `audit-consistency-prompt.md`, `audit-architecture-prompt.md`, `audit-blindspots-prompt.md`, `audit-scoping-prompt.md`) are not modified.
+- **Code path is untouched.** The 6 existing prompt templates are not modified. Task 6 explicitly verifies this.
 - **Disk-mediated dispatch.** Both new templates use the shared dispatch convention.
-- **Testing strategy.** Acceptance: invoke `/audit` on a design doc, verify 4 type-appropriate lenses dispatch. Invoke on a plan, verify different lenses. Invoke on code subsystem, verify existing behavior unchanged.
+- **Single SKILL.md edit task.** Task 1 is large but coherent — it writes all non-code logic to SKILL.md in one pass, avoiding ambiguous boundaries between "stub" and "detail" tasks.
+- **Testing strategy.** Invoke `/audit` on a design doc → verify 4 design-specific lenses dispatch. Invoke on a plan → verify 4 plan-specific lenses. Invoke on code subsystem → verify existing behavior unchanged. Invoke after compaction → verify non-code recovery works.

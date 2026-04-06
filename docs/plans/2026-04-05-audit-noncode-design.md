@@ -38,7 +38,7 @@ Audit supports 4 artifact types with per-type lens configurations:
 | `code` | Correctness | Robustness | Consistency | Architecture |
 | `design` | Technical Soundness | Integration Impact | Edge Cases | Scope Clarity |
 | `plan` | Feasibility | Risk & Dependencies | Completeness | Assumptions |
-| `concept` | Viability | Technical Feasibility | User Impact | Gaps |
+| `concept` | Problem-Solution Fit | Feasibility & Cost | Stakeholder Alignment | Blind Assumptions |
 
 The `code` path is **completely unchanged** — existing prompt templates, Tier 1/Tier 2 context management, and dual-agent Consistency lens all remain as-is.
 
@@ -60,17 +60,20 @@ Non-code artifact types use:
 
 **How it works:**
 1. User can pass `artifact_type: design | plan | concept | code`
-2. If omitted, auto-detect:
-   - File path points to source code → `code`
-   - File path in `docs/plans/*-design.md` or contains design doc frontmatter → `design`
-   - File path in `docs/plans/*-implementation-plan.md` or `docs/plans/*-prd.md` → `plan`
+2. If omitted, auto-detect using this priority chain:
+   - Directory or subsystem name → `code` (existing behavior)
+   - File with code extension (`.py`, `.ts`, `.go`, etc.) → `code`
+   - YAML frontmatter contains `source: "design"` or `source: "spec"` → `design`
+   - YAML frontmatter contains `source: "plan"` or title contains "implementation plan" → `plan`
    - No file path (freeform text input) → `concept`
-   - Ambiguous → ask user
+   - Ambiguous → ask user: "I detected a markdown document but can't determine its type. Is this a design doc, plan, or concept?"
 3. `code` is the default when pointing at a directory or subsystem name (existing behavior)
+
+**Auto-detection limitations:** The frontmatter-based detection relies on Crucible's `source` field convention. Repos without this convention will hit the "ambiguous → ask user" fallback more often. The explicit `artifact_type` parameter is the reliable path for any repo.
 
 ### DEC-2: Single Parameterized Non-Code Template (High Confidence)
 
-**Decision:** One `audit-noncode-lens-prompt.md` template with `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, and `{{LENS_EXCLUSIONS}}` placeholders, rather than 12 separate prompt files (4 types × 3 non-code lens variations each).
+**Decision:** One `audit-noncode-lens-prompt.md` template with `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, and `{{LENS_EXCLUSIONS}}` placeholders, rather than 12 separate prompt files (3 non-code types × 4 lenses each).
 
 **Alternatives considered:**
 - 12 separate prompt files (rejected: massive duplication — the prompt structure is identical across lenses, only the instructions differ)
@@ -104,6 +107,7 @@ Non-code artifact types use:
 - Missing stakeholder perspectives (who would disagree with this?)
 - Scope boundary gaps (what's just outside scope that could cause problems?)
 - Silent dependencies (what external factors does this assume will remain true?)
+- Logical leaps (conclusions not supported by the preceding argument)
 
 **Alternative considered:** Reuse code blind-spots template with parameterization (rejected: code blind-spots are deeply tied to coverage maps, file partitions, and code-specific categories like security/performance/concurrency — the document-level gaps are fundamentally different).
 
@@ -115,7 +119,7 @@ Non-code artifact types use:
 
 **Non-code finding format:** severity, section, evidence, description + lens-specific field (concern)
 
-The `section` field replaces `file` + `line_range` for non-code artifacts, pointing to a heading or paragraph in the document.
+The `section` field replaces `file` + `line_range` for non-code artifacts. Format: the nearest markdown heading that contains the issue, e.g., `## Key Decisions > DEC-3`. For artifacts without markdown headings, use a brief quoted phrase from the opening of the relevant paragraph (e.g., `"The orchestrator validates..."`). This pinned format ensures Phase 3 dedup can match findings from different lenses that reference the same section.
 
 ### DEC-7: Finding Cap Unchanged (High Confidence)
 
@@ -141,14 +145,16 @@ The `section` field replaces `file` + `line_range` for non-code artifacts, point
 | Completeness | "What's missing from this plan?" | Phases covered, milestones defined, success criteria measurable, testing strategy present, communication plan |
 | Assumptions | "What's being taken for granted?" | Environmental assumptions, team capacity assumptions, technical assumptions, timeline assumptions, stakeholder alignment assumptions |
 
-### `concept` — Product Concepts, Proposals, Approaches
+### `concept` — Product Concepts, Proposals, Early-Stage Ideas
+
+The concept type is for artifacts that haven't yet been refined into a design or plan. Where `design` assumes technical decisions have been made and `plan` assumes execution steps are defined, `concept` evaluates whether the idea itself is worth pursuing.
 
 | Lens | Core Question | Focus Areas |
 |---|---|---|
-| Viability | "Does this concept hold together?" | Internal consistency, problem-solution fit, value proposition clarity, differentiation from alternatives |
-| Technical Feasibility | "Can this be built with available means?" | Technology readiness, integration complexity, performance requirements achievable, maintenance burden realistic |
-| User Impact | "Does this serve the intended audience?" | User journey completeness, friction points, adoption barriers, accessibility considerations |
-| Gaps | "What's missing from this concept?" | Unaddressed use cases, missing constraints, competitive landscape gaps, monetization/sustainability gaps |
+| Problem-Solution Fit | "Does this concept solve a real problem?" | Problem definition clarity, target audience identified, value proposition specificity, differentiation from existing solutions |
+| Feasibility & Cost | "Is this achievable and worth the investment?" | Build vs buy analysis, resource requirements, timeline expectations, opportunity cost, maintenance burden |
+| Stakeholder Alignment | "Who needs to agree and will they?" | Decision-makers identified, conflicting incentives surfaced, adoption path realistic, organizational readiness |
+| Blind Assumptions | "What is this concept taking for granted?" | Market assumptions, user behavior assumptions, technical assumptions, competitive landscape assumptions, sustainability assumptions |
 
 ## Phase Adaptations for Non-Code
 
@@ -157,6 +163,13 @@ The `section` field replaces `file` + `line_range` for non-code artifacts, point
 **Code (unchanged):** Cartographer → scoping agent → subsystem manifest → user gate.
 
 **Non-code:** Orchestrator validates artifact → detects type → gathers referenced context → presents scope summary → user gate.
+
+**Supporting context gathering procedure:**
+1. Parse the artifact for references: markdown links (`[text](path)`), file paths (`path/to/file.ext`), issue references (`#NNN`), and explicit "see also" references
+2. For each referenced file that exists locally: read it and include as supporting context
+3. For issue references: fetch the issue title and body via `gh issue view`
+4. **Soft cap: 2000 lines total** for all supporting context. If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with a note: "[truncated — 2000-line context cap reached]"
+5. If no references found: proceed with artifact-only context (no supporting context)
 
 The user gate is still non-negotiable. For non-code, the gate confirms: "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Proceed?"
 
@@ -170,7 +183,15 @@ The user gate is still non-negotiable. For non-code, the gate confirms: "Auditin
 
 **Code (unchanged):** Coverage map → blind-spots agent → gap hunting.
 
-**Non-code:** No coverage map needed (all lenses see the full artifact). The `audit-noncode-blindspots-prompt.md` receives the artifact, a summary of which lenses ran and what they focused on, and hunts for document-level gaps (contradictions, unstated assumptions, missing perspectives, scope boundary gaps, silent dependencies).
+**Non-code:** No coverage map needed (all lenses see the full artifact). The `audit-noncode-blindspots-prompt.md` receives the artifact and a **lens summary** with this format:
+
+```
+## Lens Summary
+- **[Lens Name]** — [Core Question]. Findings: N (Fatal: N, Significant: N, Minor: N). Focus areas: [brief list].
+[repeat for each lens]
+```
+
+The blind-spots agent uses this summary to understand which analytical angles were already covered and hunts for document-level gaps: contradictions, unstated assumptions, missing perspectives, scope boundary gaps, silent dependencies, and logical leaps.
 
 ### Phase 3: Synthesis
 
@@ -179,6 +200,39 @@ The user gate is still non-negotiable. For non-code, the gate confirms: "Auditin
 ### Phase 4: Cross-Reference
 
 **Unchanged.** Works on findings regardless of artifact type.
+
+### Compaction Recovery
+
+The existing compaction recovery logic checks for code-specific scratch files (`manifest.md`, `<lens>-partition.md`, `consistency-a-findings.md`, `consistency-b-findings.md`). Non-code audits need adapted recovery.
+
+**Non-code scratch file naming convention:**
+- `artifact-type.md` — contains the detected artifact type, written at Phase 1 completion
+- `<lens-name-kebab>-findings.md` — e.g., `technical-soundness-findings.md`, `feasibility-findings.md`
+- `noncode-blindspots-findings.md` — blind-spots findings
+- No partition files (non-code lenses receive full artifact, no partitioning)
+- `gate-approved.md` — same as code path
+
+**Recovery procedure:** On compaction recovery, read `artifact-type.md` first. If present and not `code`, follow non-code recovery:
+1. Read `artifact-type.md` to recover type
+2. Look for `<lens-name>-findings.md` files matching the type's lens names
+3. Look for `noncode-blindspots-findings.md`
+4. Resume from the latest completed phase
+
+If `artifact-type.md` is absent, fall back to existing code recovery.
+
+### SKILL.md Metadata Updates
+
+The SKILL.md frontmatter `description` and trigger phrases must be updated to include non-code artifacts:
+
+**Current:** `"Review existing subsystems for bugs, robustness gaps, inconsistencies, and architecture issues. Triggers on 'audit', 'review subsystem', 'check the save system', 'examine the UI code', or any task requesting adversarial review of existing (not newly written) code."`
+
+**Updated:** `"Adversarial review of code subsystems or non-code artifacts (design docs, plans, concepts) through parallel analytical lenses. Triggers on 'audit', 'review subsystem', 'audit this design', 'review this plan', 'check the save system', or any task requesting adversarial review of existing artifacts."`
+
+The "Distinction from Related Skills" table must also be updated: audit reviews "existing code subsystems or non-code artifacts" (not just "existing code in a subsystem").
+
+### Phase 4: Cartographer Recording
+
+For non-code audits, skip cartographer recording (Mode 1). The recorder expects a subsystem manifest with file paths and role descriptions — non-code audits do not produce this. Recording a single-file "manifest" adds noise to the cartographer map without structural value.
 
 ## Invocation Examples
 
@@ -223,4 +277,6 @@ Existing behavior. No changes to code audit path.
 5. Non-code findings use `section` instead of `file` + `line_range`
 6. User gate still fires for non-code artifacts before Phase 2
 7. Blind-spots agent runs for non-code artifacts with document-level gap categories
-8. Phase 3 synthesis handles mixed finding formats (code and non-code) in the same report if needed
+8. SKILL.md frontmatter description and trigger phrases updated to include non-code artifacts
+9. Compaction recovery works for non-code audits (reads `artifact-type.md`, recovers non-code lens findings)
+10. Pipeline status lens names reflect the current artifact type (e.g., "Technical Soundness" not "Correctness" for design audits)

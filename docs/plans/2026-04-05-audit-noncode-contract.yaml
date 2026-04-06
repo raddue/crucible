@@ -26,7 +26,7 @@ api_surface:
         type: "string — Fatal | Significant | Minor"
         required: true
       - name: "section"
-        type: "string — heading or paragraph reference in the artifact"
+        type: "string — nearest markdown heading reference (e.g., '## Key Decisions > DEC-3'), or brief quoted phrase for non-markdown artifacts"
         required: true
       - name: "evidence"
         type: "string — quoted text from the artifact demonstrating the issue"
@@ -90,21 +90,31 @@ invariants:
       verification: "skills/audit/SKILL.md contains <!-- CANONICAL: shared/dispatch-convention.md -->"
       check_method: "grep"
 
-  testable:
     - id: "INV-8"
-      description: "Design doc audit dispatches design-specific lenses"
-      verification: "Invoke /audit on a design doc, verify dispatched lenses are Technical Soundness, Integration Impact, Edge Cases, Scope Clarity"
-      test_tag: "contract:dispatch:inv-8"
+      description: "SKILL.md frontmatter description includes non-code artifact types"
+      verification: "SKILL.md description field mentions design docs, plans, and concepts (not just code)"
+      check_method: "code-inspection"
 
     - id: "INV-9"
+      description: "Compaction recovery handles non-code audits"
+      verification: "SKILL.md documents artifact-type.md file and non-code recovery procedure"
+      check_method: "code-inspection"
+
+  testable:
+    - id: "INV-10"
+      description: "Design doc audit dispatches design-specific lenses"
+      verification: "Invoke /audit on a design doc, verify dispatched lenses are Technical Soundness, Integration Impact, Edge Cases, Scope Clarity"
+      test_tag: "contract:dispatch:inv-10"
+
+    - id: "INV-11"
       description: "Plan audit dispatches plan-specific lenses"
       verification: "Invoke /audit on an implementation plan, verify dispatched lenses are Feasibility, Risk & Dependencies, Completeness, Assumptions"
-      test_tag: "contract:dispatch:inv-9"
+      test_tag: "contract:dispatch:inv-11"
 
-    - id: "INV-10"
+    - id: "INV-12"
       description: "Code audit path is completely unchanged"
       verification: "Invoke /audit on a code subsystem, verify existing 4 code lenses dispatch with Tier 1/Tier 2 context management"
-      test_tag: "contract:regression:inv-10"
+      test_tag: "contract:regression:inv-12"
 
 integration_points: []
 
