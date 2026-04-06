@@ -143,7 +143,7 @@ Example files:
 - `4-build-reviewer.md`
 - `5-cleanup.md`
 
-**Compaction Recovery (on-disk marker — primary mechanism):** At dispatch-directory creation time, the orchestrator writes a marker file to the pipeline's persistent scratch directory: `<scratch>/.dispatch-active-<session-id>`. The marker contains the dispatch directory path and the current seq counter. After compaction, the orchestrator globs for `.dispatch-active-*` in scratch to rediscover in-flight dispatch state, reads `manifest.jsonl` to find the last entry's `seq` value + 1 as the next counter, and resumes. All 16 orchestrator skills use this same marker pattern — it does not depend on per-skill CSB support. CSB inclusion of the dispatch directory path is a secondary nice-to-have for skills that already have Compression State Blocks (build, debugging, quality-gate, migrate).
+**Compaction Recovery (on-disk marker — primary mechanism):** At dispatch-directory creation time, the orchestrator writes a marker file to the pipeline's persistent scratch directory: `<scratch>/.dispatch-active-<session-id>`. The marker contains the dispatch directory path and the current seq counter. After compaction, the orchestrator globs for `.dispatch-active-*` in scratch to rediscover in-flight dispatch state, reads `manifest.jsonl` to find the last entry's `seq` value + 1 as the next counter, and resumes. All 17 orchestrator skills use this same marker pattern — it does not depend on per-skill CSB support. CSB inclusion of the dispatch directory path is a secondary nice-to-have for skills that already have Compression State Blocks (build, debugging, quality-gate, migrate).
 
 ### Failure Handling
 
@@ -218,14 +218,14 @@ Before any other implementation work, validate the savings claim with direct obs
 
 `skills/shared/dispatch-convention.md` — defines the full pattern (~50-80 lines): when to use, file naming, pointer format, cleanup rules, failure handling. The convention doc must include `version: 1` as the first field. **CLAUDE.md note:** The convention doc should mention its relationship to CLAUDE.md — specifically that dispatch-convention.md is a shared skill reference, not a CLAUDE.md directive, and that CLAUDE.md should not duplicate dispatch rules. **Stocktake integration:** Stocktake should flag paste-only dispatches exceeding 500 tokens.
 
-### Per-Skill Changes (16 orchestrator skills)
+### Per-Skill Changes (17 orchestrator skills)
 
 Each gets:
 1. A reference comment: `<!-- CANONICAL: shared/dispatch-convention.md -->`
 2. One sentence at the top of their dispatch section: "All subagent dispatches use disk-mediated dispatch (see shared/dispatch-convention.md)."
 3. Removal of any "paste X into prompt" language
 
-**Skills requiring changes:** build, debugging, quality-gate, spec, migrate, audit, siege, prospector, recon, project-init, inquisitor, code-review, finish, test-coverage, adversarial-tester, design.
+**Skills requiring changes:** build, debugging, quality-gate, spec, migrate, audit, siege, prospector, recon, project-init, inquisitor, code-review, finish, test-coverage, adversarial-tester, design, red-team.
 
 ### Per-Template Changes (~70 dispatch templates)
 
@@ -289,23 +289,23 @@ If prompt primacy effects are observed:
 
 ### Phase 2.5: Pointer Prompt Length Validation (before rollout)
 
-Write sample pointer prompts for all ~70 dispatch templates and validate the 80-token target / 120-token ceiling holds. For each template, compose the pointer prompt using realistic role descriptions and file paths. Report the top 5 longest pointer prompts as examples. If any exceed 80 tokens, confirm the role description cannot be shortened without losing error-diagnostic specificity. If any exceed 120 tokens, shorten the role description. This catches templates with naturally verbose roles (e.g., "adversarial red-team reviewer for cross-component integration surface") before rollout creates a constraint violation.
+Write sample pointer prompts for all ~70 dispatch templates and validate the 80-token target / 120-token ceiling holds. For each template, compose the pointer prompt using realistic role descriptions and file paths. Report the top 10 longest pointer prompts as examples. If any exceed 80 tokens, confirm the role description cannot be shortened without losing error-diagnostic specificity. If any exceed 120 tokens, shorten the role description. This catches templates with naturally verbose roles (e.g., "adversarial red-team reviewer for cross-component integration surface") before rollout creates a constraint violation.
 
 ### Phase 3: Rollout (after eval passes)
 
-Apply convention to all 16 skills and ~70 templates.
+Apply convention to all 17 skills and ~70 templates.
 
 ## Acceptance Criteria
 
 1. Primacy eval passes on all 4 test templates (or hybrid fallback validated)
-2. All 16 orchestrator skills use disk-mediated dispatch for every Agent tool and Task tool subagent call (excluding paste-only dispatches)
+2. All 17 orchestrator skills use disk-mediated dispatch for every Agent tool and Task tool subagent call (excluding paste-only dispatches)
 3. No Agent/Task tool prompt exceeds 120 tokens (hard ceiling) for full disk-mediated dispatch, with 80-token target, or 300 tokens for hybrid mode (excluding paste-only dispatches)
 4. Dispatch files written before dispatch and readable by subagents
 5. Dispatch directory cleaned up on success, preserved on failure
 6. Dispatch manifest (`manifest.jsonl`) written before every dispatch (status `"dispatched"`) and updated after completion with final status, duration, and summary
 7. No "paste X into prompt" language remains in any SKILL.md or template file
 8. Every dispatch template has the `<!-- DISPATCH: disk-mediated -->` comment
-9. `shared/dispatch-convention.md` exists and referenced by all 16 skills
+9. `shared/dispatch-convention.md` exists and referenced by all 17 skills
 
 ## Invariants
 
@@ -314,7 +314,7 @@ Apply convention to all 16 skills and ~70 templates.
 - No Agent/Task tool prompt in any orchestrator exceeds 120 tokens hard ceiling (80-token target; 80-120 range requires justification) for full disk-mediated mode, or 300 tokens for hybrid mode, excluding paste-only dispatches
 - No SKILL.md contains "paste into prompt" or "paste relevant" language for subagent dispatch
 - Every dispatch template has the `<!-- DISPATCH: disk-mediated -->` comment
-- `shared/dispatch-convention.md` exists and is referenced by all 16 orchestrator skills
+- `shared/dispatch-convention.md` exists and is referenced by all 17 orchestrator skills
 - Dispatch files follow naming: `<counter>-<template-name>.md`
 - `manifest.jsonl` exists in dispatch directory with one entry per dispatch (entry written before dispatch, updated after)
 
@@ -329,7 +329,7 @@ Apply convention to all 16 skills and ~70 templates.
 ### In scope
 - Shared dispatch convention document
 - Dispatch manifest (manifest.jsonl) — structured execution trace
-- SKILL.md edits for 16 orchestrator skills
+- SKILL.md edits for all 17 orchestrator skills
 - Comment headers for ~70 dispatch templates
 - Phase 0 baseline token measurement (go/no-go gate for full implementation)
 - Primacy eval on 4 templates (3 Agent tool + 1 Task tool) using #126 as fixture plus one large-context fixture
