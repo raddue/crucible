@@ -11,7 +11,7 @@ version: 1
 
 ## When to Use
 
-**Disk-mediated dispatch (default):** All Agent tool and Task tool subagent dispatches where the expanded prompt exceeds 500 tokens.
+**Disk-mediated dispatch (default):** All Agent tool and Task tool subagent dispatches.
 
 **Paste-only exemption:** If a future template is under 500 tokens total payload, uses the Task tool, and needs no file access, it may skip disk-mediation. No current templates qualify — all were promoted to disk-mediated after validation.
 
@@ -36,7 +36,7 @@ Sub-skills append to the existing `manifest.jsonl`. The parent is responsible fo
 
 **Pattern:** `<N>-<template-name>.md`
 
-The counter `N` increments per dispatch within the session. Template name makes files self-documenting.
+The counter `N` increments per dispatch within the session. Template name makes files self-documenting. **Concurrent dispatches:** When dispatching multiple teammates in parallel, the parent orchestrator pre-allocates seq numbers before dispatch (e.g., assign seq 3, 4, 5 to three parallel implementers). This avoids counter collisions without shared state.
 
 Examples:
 - `1-plan-writer.md`
