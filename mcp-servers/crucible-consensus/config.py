@@ -46,9 +46,12 @@ def load_config(project_dir: str) -> ConsensusConfig:
     if raw is None:
         raw = {}
 
+    # Support both nested (consensus: ...) and flat formats
+    consensus_section = raw.get("consensus", raw)
+
     # Parse models
     models = []
-    for m in raw.get("models", []):
+    for m in consensus_section.get("models", []):
         models.append(ModelConfig(
             provider=m["provider"],
             model_id=m["model_id"],
@@ -75,11 +78,11 @@ def load_config(project_dir: str) -> ConsensusConfig:
 
     # Build config with defaults
     config = ConsensusConfig(
-        enabled=raw.get("enabled", True),
-        min_models=raw.get("min_models", 2),
-        timeout_seconds=raw.get("timeout_seconds", 120),
+        enabled=consensus_section.get("enabled", True),
+        min_models=consensus_section.get("min_models", 2),
+        timeout_seconds=consensus_section.get("timeout_seconds", 120),
         models=models,
-        modes=raw.get("modes", {
+        modes=consensus_section.get("modes", {
             "review": True,
             "verdict": True,
             "investigate": True,

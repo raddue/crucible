@@ -155,3 +155,23 @@ def test_enabled_false(tmp_path, monkeypatch):
     config = load_config(str(project_dir))
 
     assert config.enabled is False
+
+
+def test_nested_consensus_key(tmp_path, monkeypatch):
+    """Config nested under 'consensus:' key loads correctly (matches example YAML)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
+
+    nested_data = {"consensus": VALID_YAML}
+    project_dir = _write_config(tmp_path, nested_data)
+    config = load_config(str(project_dir))
+
+    assert config.enabled is True
+    assert config.min_models == 2
+    assert config.timeout_seconds == 90
+    assert len(config.models) == 2
+    assert config.models[0].provider == "anthropic"
+    assert config.models[0].model_id == "claude-sonnet-4-20250514"
+    assert config.models[1].provider == "google"
+    assert config.models[1].model_id == "gemini-2.0-flash"
+    assert config.modes == {"review": True, "verdict": False, "investigate": True}
