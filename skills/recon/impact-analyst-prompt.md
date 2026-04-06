@@ -47,7 +47,8 @@ Agent tool (subagent_type: Explore, model: opus):
       — flag as integration risk.
     - **Write direction:** Does the system write directly to another system's
       tables or storage? Read-only access to systems you don't own is acceptable.
-      Writes should go through staging tables or outbound queues, never direct
+      Writes should go through an owned intermediary (staging tables, outbound
+      queues, API calls to the owning system, CDC pipelines) — never direct
       INSERT/UPDATE into another system's production data. Flag direct writes.
     - **Shared schema coupling:** Do two applications share a database schema as
       their integration mechanism? That's coupling disguised as simplicity —
@@ -78,12 +79,19 @@ Agent tool (subagent_type: Explore, model: opus):
     - What state changes are irreversible?
     - Feature flag feasibility
 
+    ### Open Questions
+    Unknowns you encountered during investigation that affect the impact
+    assessment. For each: what the question is, why it matters for impact,
+    and what would resolve it (a specific file to read, a person to ask,
+    a test to run).
+
     ### Summary
     One paragraph: overall risk level, key concerns, recommended cautions.
 
     ## What You Must NOT Do
 
-    - Do NOT suggest implementation approaches
+    - Do NOT suggest implementation approaches (flagging integration
+      anti-patterns is in scope; prescribing how to fix them is not)
     - Do NOT assess code quality
     - Do NOT speculate without evidence from the core brief or codebase
 
