@@ -25,9 +25,9 @@ version: 1
 
 **Session ID:** Reuse the pipeline's existing session identifier (timestamp-based ID generated at pipeline start). Skills invoked standalone that lack an existing session ID must generate one: Unix epoch seconds.
 
-**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, etc.) use the **parent orchestrator's dispatch directory and seq counter**. The parent includes the dispatch directory path in the sub-skill's dispatch file (as a `Dispatch-Dir:` field in the header or as an explicit instruction). Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup.
+**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, etc.) use the **parent orchestrator's dispatch directory and seq counter**. The parent includes the dispatch directory path in the sub-skill's dispatch file via the `Dispatch-Dir:` header field (see Dispatch File Header). Sub-skills extract this path, use it for their own dispatches, and append to the existing `manifest.jsonl`. The parent is responsible for cleanup.
 
-**Fallback for missing path:** If a sub-skill receives no dispatch directory path, glob `/tmp/crucible-dispatch-*/manifest.jsonl`, select the most recently modified match, and use that directory. Emit warning: "No dispatch directory provided; attached to [path] by last-modified fallback." If no directories exist, create a new one with a timestamp-based session ID.
+**Fallback for missing path:** If a sub-skill's dispatch file has no `Dispatch-Dir:` field (e.g., standalone invocation), create a new dispatch directory with a timestamp-based session ID. Do not glob for other sessions' directories — this would break session isolation under concurrent pipelines.
 
 ## File Naming
 
@@ -49,11 +49,12 @@ Every dispatch file begins with a 4-line audit header:
 # Dispatch: <template-name>
 **Pipeline:** <skill-name> | **Phase:** <phase> | **Task:** <N>
 **Timestamp:** <ISO-8601>
+**Dispatch-Dir:** <dispatch directory path>
 
 ---
 ```
 
-The subagent reads from below the `---` onward. The header provides execution trace context.
+The `Dispatch-Dir` field enables sub-skill inheritance — when a sub-skill reads its dispatch file, it extracts this path and uses it for its own dispatches. The subagent reads from below the `---` onward. The header provides execution trace context.
 
 ## Pointer Prompt Format
 
@@ -99,8 +100,8 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 ### Protocol: Write Before Dispatch
 
 1. **Before dispatching:** Append entry with `status: "dispatched"`
-2. **After dispatch returns:** Update entry to `"completed"`, `"failed"`, etc.
-3. **After compaction:** Entries still showing `"dispatched"` are treated as needs-re-dispatch (conservative default)
+2. **After dispatch returns:** Append a new entry with the same `seq` and updated status/duration/summary. The last entry for a given `seq` is authoritative (append-only, no in-place rewrite — this preserves crash safety).
+3. **After compaction:** If the last entry for a `seq` still shows `"dispatched"`, treat as needs-re-dispatch (conservative default)
 
 ### Entry Format
 
