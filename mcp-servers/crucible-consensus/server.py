@@ -54,8 +54,12 @@ def initialize():
 
         logger.info(f"Consensus server ready: {len(_providers)} providers, min_models={_config.min_models}")
 
-    # Load external review config (never raises — returns disabled on missing)
-    _external_config = load_external_review_config(_project_dir)
+    # Load external review config (may raise ConfigError on malformed config)
+    try:
+        _external_config = load_external_review_config(_project_dir)
+    except ConfigError as e:
+        _external_config = ExternalReviewConfig()
+        logger.warning(f"External review config not loaded: {e}")
     _external_providers = []
     if _external_config.enabled and _external_config.models:
         for model_config in _external_config.models:
@@ -108,6 +112,7 @@ async def list_tools() -> list[Tool]:
                     "prompt": {"type": "string", "description": "Review prompt to send to external models"},
                     "context": {"type": "string", "description": "Code diff and supporting context"},
                     "metadata": {"type": "object", "description": "Traceability metadata"},
+                    "skill": {"type": "string", "description": "Calling skill name (e.g. 'code_review', 'quality_gate'). If provided, checked against per-skill toggles in config."},
                 },
                 "required": ["prompt", "context"],
             },
@@ -183,6 +188,11 @@ async def _handle_external_review(arguments: dict) -> list[TextContent]:
 
     if not _external_providers:
         return [TextContent(type="text", text=json.dumps({"status": "unavailable"}))]
+
+    # Per-skill toggle: if caller declares a skill, check whether it's enabled
+    skill = arguments.get("skill")
+    if skill and not _external_config.skills.get(skill, True):
+        return [TextContent(type="text", text=json.dumps({"status": "unavailable", "reason": f"external review disabled for skill '{skill}'"}))]
 
     prompt = arguments["prompt"]
     context = arguments["context"]

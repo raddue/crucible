@@ -76,8 +76,8 @@ api_surface:
 invariants:
   checkable:
     - id: "INV-1"
-      description: "External review must never block or delay the host model's review"
-      verification: "External review dispatch is always parallel to (never sequential after) host dispatch. No await on external result before host result is processed."
+      description: "External review must never block or delay the host model's review, except on consensus bridge rounds where external results feed into consensus_query as additional_responses"
+      verification: "External review dispatch is always parallel to (never sequential after) host dispatch. Exception: on consensus-eligible quality-gate rounds (1/4/7/10/13), external_review runs first so its results can be injected into consensus_query via additional_responses. This sequential dependency is an accepted latency tradeoff for cross-model synthesis."
       check_method: "code-inspection"
 
     - id: "INV-2"

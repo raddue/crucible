@@ -206,6 +206,7 @@ async def test_list_tools_returns_consensus_query():
     assert "prompt" in external_tool.inputSchema["properties"]
     assert "context" in external_tool.inputSchema["properties"]
     assert "metadata" in external_tool.inputSchema["properties"]
+    assert "skill" in external_tool.inputSchema["properties"]
     assert "prompt" in external_tool.inputSchema["required"]
     assert "context" in external_tool.inputSchema["required"]
 
@@ -383,3 +384,89 @@ async def test_consensus_with_additional_responses(mock_dispatch, mock_aggregate
     assert responses_passed[1].provider == "openai"
     assert responses_passed[1].model_id == "gpt-4o"
     assert responses_passed[1].content == "external review content"
+
+
+# ---------------------------------------------------------------------------
+# Skill toggle tests (S4)
+# ---------------------------------------------------------------------------
+
+
+async def test_external_review_skill_disabled():
+    """When a skill is disabled in config, external_review returns unavailable."""
+    ext_config = ExternalReviewConfig(
+        enabled=True,
+        models=[
+            ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
+        ],
+        timeout_seconds=180,
+        skills={"inquisitor": False, "code_review": True},
+    )
+    server_mod._external_config = ext_config
+    server_mod._external_providers = [("mock_provider", "mock_config")]
+
+    result = await call_tool("external_review", {
+        "prompt": "Review this",
+        "context": "some code",
+        "skill": "inquisitor",
+    })
+
+    parsed = json.loads(result[0].text)
+    assert parsed["status"] == "unavailable"
+    assert "inquisitor" in parsed.get("reason", "")
+
+
+@patch("server.dispatch_all", new_callable=AsyncMock)
+async def test_external_review_skill_enabled(mock_dispatch):
+    """When a skill is enabled in config, external_review proceeds normally."""
+    ext_config = ExternalReviewConfig(
+        enabled=True,
+        models=[
+            ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
+        ],
+        timeout_seconds=180,
+        skills={"code_review": True},
+    )
+    server_mod._external_config = ext_config
+    server_mod._external_providers = [("mock_provider", "mock_config")]
+
+    mock_dispatch.return_value = [
+        ModelResponse(provider="openai", model_id="gpt-4o", content="Looks good", latency_ms=200),
+    ]
+
+    result = await call_tool("external_review", {
+        "prompt": "Review this",
+        "context": "some code",
+        "skill": "code_review",
+    })
+
+    parsed = json.loads(result[0].text)
+    assert parsed["status"] == "available"
+    assert parsed["models_responded"] == 1
+
+
+@patch("server.dispatch_all", new_callable=AsyncMock)
+async def test_external_review_unknown_skill_defaults_enabled(mock_dispatch):
+    """An unknown skill name defaults to enabled (True)."""
+    ext_config = ExternalReviewConfig(
+        enabled=True,
+        models=[
+            ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
+        ],
+        timeout_seconds=180,
+        skills={"code_review": True},
+    )
+    server_mod._external_config = ext_config
+    server_mod._external_providers = [("mock_provider", "mock_config")]
+
+    mock_dispatch.return_value = [
+        ModelResponse(provider="openai", model_id="gpt-4o", content="OK", latency_ms=100),
+    ]
+
+    result = await call_tool("external_review", {
+        "prompt": "Review this",
+        "context": "some code",
+        "skill": "some_future_skill",
+    })
+
+    parsed = json.loads(result[0].text)
+    assert parsed["status"] == "available"

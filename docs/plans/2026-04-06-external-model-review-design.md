@@ -124,6 +124,8 @@ The calling skill (code-review, quality-gate, etc.) formats each response into a
 
 **Choice: Skills call the `external_review` MCP tool first, then dispatch the host reviewer.** The MCP call is fast (fires async API requests, returns raw responses). The host reviewer dispatch follows. Both results are collected and formatted.
 
+**Consensus bridge exception:** On consensus-eligible quality-gate rounds (1/4/7/10/13), external_review runs *before* consensus_query so its results can be injected via the `additional_responses` parameter. This creates a sequential dependency (external must complete before consensus dispatch). The latency tradeoff is accepted because cross-model synthesis on high-stakes rounds is more valuable than the 10-30s saved by parallelism. On non-consensus rounds, the standard parallel pattern applies. See INV-1 in the contract for the explicit carve-out.
+
 **Why not parallel:** Claude Code's tool-use model executes tool calls within a turn. While multiple tool calls can be batched in a single response, an MCP tool call and an Agent/Task dispatch cannot truly race. The practical pattern is: call `external_review` MCP (which internally dispatches all providers in parallel via `asyncio.gather`), collect results, then dispatch host reviewer. The external API calls happen during the MCP tool execution, so total wall-clock overhead is `max(external_model_latencies)` — typically 10-30 seconds.
 
 **Alternative:** If the orchestrator skill uses the Agent tool for host review, it could dispatch the host agent first (which runs in background), then call the MCP tool, then collect both. This gives effective parallelism. Skills should prefer this pattern where Agent Teams or background agents are available.

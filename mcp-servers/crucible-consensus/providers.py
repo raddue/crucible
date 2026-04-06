@@ -86,7 +86,7 @@ class GoogleProvider:
                     "max_output_tokens": 4096,
                 },
             )
-            content = response.text
+            content = response.text or ""
             latency = int((time.monotonic() - start) * 1000)
             return ModelResponse(
                 provider=self.config.provider,
@@ -133,7 +133,7 @@ class OpenAIProvider:
                 max_tokens=4096,
                 temperature=self.config.temperature,
             )
-            content = response.choices[0].message.content
+            content = response.choices[0].message.content or ""
             latency = int((time.monotonic() - start) * 1000)
             return ModelResponse(
                 provider=self.config.provider,
