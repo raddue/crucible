@@ -13,11 +13,9 @@ version: 1
 
 **Disk-mediated dispatch (default):** All Agent tool and Task tool subagent dispatches where the expanded prompt exceeds 500 tokens.
 
-**Paste-only (exempt):** A dispatch is paste-only when ALL three conditions are met: (1) total payload <500 tokens, (2) uses the Task tool, and (3) the subagent needs no file access. These are small enough that autocompact handles them normally. No current templates qualify as paste-only — the QG stagnation judge and fix verifier were originally listed here but exceed 500 tokens static and have been promoted to disk-mediated.
+**Paste-only exemption:** If a future template is under 500 tokens total payload, uses the Task tool, and needs no file access, it may skip disk-mediation. No current templates qualify — all were promoted to disk-mediated after validation.
 
-**Excluded skills:** `skill-creator` is a meta-tool for creating/evaluating skills, not a production pipeline orchestrator. Its low-frequency subagent dispatches are excluded from this convention. `stocktake` and `parallel` do not dispatch subagents and are not affected.
-
-**Stocktake note:** Stocktake should flag paste-only dispatches exceeding 500 tokens for promotion to disk-mediated.
+**Excluded skills:** `skill-creator` is a meta-tool, not a production pipeline orchestrator. `stocktake` and `parallel` do not dispatch subagents.
 
 ## Dispatch Directory
 
@@ -25,9 +23,14 @@ version: 1
 
 **Session ID:** Reuse the pipeline's existing session identifier (timestamp-based ID generated at pipeline start). Skills invoked standalone that lack an existing session ID must generate one: Unix epoch seconds.
 
-**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, etc.) use the **parent orchestrator's dispatch directory and seq counter**. The parent includes the dispatch directory path in the sub-skill's dispatch file via the `Dispatch-Dir:` header field (see Dispatch File Header). Sub-skills extract this path, use it for their own dispatches, and append to the existing `manifest.jsonl`. The parent is responsible for cleanup.
+**Sub-skill inheritance:** Sub-skills (quality-gate, red-team, innovate, etc.) use the **parent orchestrator's dispatch directory and seq counter**. Two passing mechanisms:
 
-**Fallback for missing path:** If a sub-skill's dispatch file has no `Dispatch-Dir:` field (e.g., standalone invocation), create a new dispatch directory with a timestamp-based session ID. Do not glob for other sessions' directories — this would break session isolation under concurrent pipelines.
+1. **Subagent dispatches** (Agent/Task tool): The `Dispatch-Dir:` header field in the dispatch file carries the path. Subagents extract it and use it for their own dispatches.
+2. **Skill invocations** (crucible:quality-gate, crucible:red-team, etc.): The parent orchestrator passes the dispatch directory path as part of the invocation context — e.g., "Dispatch directory: /tmp/crucible-dispatch-1775430161/" in the quality-gate/red-team input.
+
+Sub-skills append to the existing `manifest.jsonl`. The parent is responsible for cleanup. The seq counter is recovered from the manifest (last `seq` + 1) — no shared counter state needed.
+
+**Fallback for missing path:** If a sub-skill receives no dispatch directory path (e.g., standalone invocation), create a new dispatch directory with a timestamp-based session ID. Do not glob for other sessions' directories — this would break session isolation under concurrent pipelines.
 
 ## File Naming
 
@@ -162,13 +165,6 @@ Every dispatch template file gets this comment:
 ```markdown
 <!-- DISPATCH: disk-mediated | This template is written to a dispatch file,
      not pasted into the Agent tool prompt. See shared/dispatch-convention.md -->
-```
-
-For paste-only dispatches (see "When to Use" criteria):
-
-```markdown
-<!-- DISPATCH: paste-only | This template is pasted directly into the Task tool prompt.
-     Payload <500 tokens, no file access needed. See shared/dispatch-convention.md -->
 ```
 
 Files with multiple dispatch prompts (e.g., `investigation-prompts.md`) get the header on each distinct prompt section. A file-level header is sufficient when all prompts in the file share the same dispatch mode.
