@@ -332,6 +332,36 @@ async def test_external_review_timeout_partial(mock_dispatch):
     assert parsed["reviews"][1]["error"] == "timeout"
 
 
+@patch("server.dispatch_all", new_callable=AsyncMock)
+async def test_external_review_all_errored_returns_error_status(mock_dispatch):
+    """When ALL models error, status is 'error' (not 'unavailable')."""
+    ext_config = ExternalReviewConfig(
+        enabled=True,
+        models=[
+            ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
+            ModelConfig(provider="anthropic", model_id="claude-sonnet-4-20250514", api_key_env="TEST_ANTHROPIC_KEY"),
+        ],
+        timeout_seconds=180,
+    )
+    server_mod._external_config = ext_config
+    server_mod._external_providers = [("mock1", "cfg1"), ("mock2", "cfg2")]
+
+    mock_dispatch.return_value = [
+        ModelResponse(provider="openai", model_id="gpt-4o", content="", latency_ms=180000, error="timeout"),
+        ModelResponse(provider="anthropic", model_id="claude-sonnet-4-20250514", content="", latency_ms=180000, error="timeout"),
+    ]
+
+    result = await call_tool("external_review", {
+        "prompt": "Review this",
+        "context": "some code",
+    })
+
+    parsed = json.loads(result[0].text)
+    assert parsed["status"] == "error"
+    assert parsed["models_queried"] == 2
+    assert parsed["models_responded"] == 0
+
+
 async def test_external_review_no_config():
     """When _external_config is None, returns unavailable."""
     server_mod._external_config = None

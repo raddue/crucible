@@ -62,7 +62,7 @@ def load_config(project_dir: str) -> ConsensusConfig:
         raw = {}
 
     # Support both nested (consensus: ...) and flat formats
-    consensus_section = raw.get("consensus", raw)
+    consensus_section = raw.get("consensus", {})
 
     # Parse models
     models = []

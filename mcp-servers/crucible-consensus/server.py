@@ -163,8 +163,8 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
                 responses.append(ModelResponse(
                     provider=ar["provider"],
                     model_id=ar["model_id"],
-                    content=ar.get("content", ""),
-                    latency_ms=ar.get("latency_ms", 0),
+                    content=ar["content"],
+                    latency_ms=ar["latency_ms"],
                 ))
             except (KeyError, TypeError) as e:
                 logger.warning(f"Skipping malformed additional_response: {e}")
@@ -211,7 +211,7 @@ async def _handle_external_review(arguments: dict) -> list[TextContent]:
     elif models_responded > 0:
         status = "partial"
     else:
-        status = "unavailable"
+        status = "error"
 
     result = {
         "status": status,

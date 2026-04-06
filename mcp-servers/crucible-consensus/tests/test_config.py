@@ -17,7 +17,7 @@ def _write_config(tmp_path: Path, data: dict) -> Path:
     return tmp_path
 
 
-VALID_YAML = {
+VALID_CONSENSUS_SECTION = {
     "enabled": True,
     "min_models": 2,
     "timeout_seconds": 90,
@@ -41,6 +41,8 @@ VALID_YAML = {
         "investigate": True,
     },
 }
+
+VALID_YAML = {"consensus": VALID_CONSENSUS_SECTION}
 
 
 def test_valid_config_loads(tmp_path, monkeypatch):
@@ -91,7 +93,7 @@ def test_min_models_exceeds_count_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
     monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
 
-    data = {**VALID_YAML, "min_models": 3}
+    data = {"consensus": {**VALID_CONSENSUS_SECTION, "min_models": 3}}
     project_dir = _write_config(tmp_path, data)
 
     with pytest.raises(ConfigError, match="min_models \\(3\\) exceeds configured model count \\(2\\)"):
@@ -103,13 +105,15 @@ def test_unsupported_provider_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("COHERE_API_KEY", "co-test")
 
     data = {
-        "models": [
-            {
-                "provider": "cohere",
-                "model_id": "command-r-plus",
-                "api_key_env": "COHERE_API_KEY",
-            },
-        ],
+        "consensus": {
+            "models": [
+                {
+                    "provider": "cohere",
+                    "model_id": "command-r-plus",
+                    "api_key_env": "COHERE_API_KEY",
+                },
+            ],
+        },
     }
     project_dir = _write_config(tmp_path, data)
 
@@ -123,18 +127,20 @@ def test_defaults_applied(tmp_path, monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
 
     data = {
-        "models": [
-            {
-                "provider": "anthropic",
-                "model_id": "claude-sonnet-4-20250514",
-                "api_key_env": "ANTHROPIC_API_KEY",
-            },
-            {
-                "provider": "google",
-                "model_id": "gemini-2.0-flash",
-                "api_key_env": "GOOGLE_API_KEY",
-            },
-        ],
+        "consensus": {
+            "models": [
+                {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-20250514",
+                    "api_key_env": "ANTHROPIC_API_KEY",
+                },
+                {
+                    "provider": "google",
+                    "model_id": "gemini-2.0-flash",
+                    "api_key_env": "GOOGLE_API_KEY",
+                },
+            ],
+        },
     }
     project_dir = _write_config(tmp_path, data)
     config = load_config(str(project_dir))
@@ -153,7 +159,7 @@ def test_enabled_false(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
     monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
 
-    data = {**VALID_YAML, "enabled": False}
+    data = {"consensus": {**VALID_CONSENSUS_SECTION, "enabled": False}}
     project_dir = _write_config(tmp_path, data)
     config = load_config(str(project_dir))
 
@@ -165,7 +171,7 @@ def test_nested_consensus_key(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
     monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
 
-    nested_data = {"consensus": VALID_YAML}
+    nested_data = {"consensus": VALID_CONSENSUS_SECTION}
     project_dir = _write_config(tmp_path, nested_data)
     config = load_config(str(project_dir))
 

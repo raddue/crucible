@@ -59,12 +59,14 @@ On consensus-eligible rounds where both `consensus_query` and `external_review`
 are available:
 
 1. Run `external_review` FIRST, before calling `consensus_query`
-2. Pass the external review responses as the `additional_responses` parameter
-   to `consensus_query`
-3. The aggregator deduplicates findings across all models (consensus + external),
+2. Only bridge reviews where `error` is null. Skip errored reviews — their
+   empty content would corrupt the consensus signal.
+3. Pass the non-errored external review responses as the `additional_responses`
+   parameter to `consensus_query`
+4. The aggregator deduplicates findings across all models (consensus + external),
    surfaces cross-model disagreements, and tags external-unique findings with
    confidence levels
-4. On non-consensus rounds, external review runs independently — its findings
+5. On non-consensus rounds, external review runs independently — its findings
    are appended to round output but not routed through the aggregator
 
 ### Scoring Invariant (INV-2)
@@ -86,6 +88,9 @@ would create non-deterministic stagnation behavior.
 
 - `external_review` tool not available (MCP server not running): skip silently.
 - Response `status` is `"unavailable"` (no config or disabled): skip silently.
+- Response `status` is `"error"` (all models failed): skip silently, note
+  failure in round output. Distinct from "unavailable" — means the feature is
+  configured but every model errored.
 - Response `status` is `"partial"` (some models failed): include available
   reviews, note which models failed in round output.
 - External review timeout or failure never blocks or delays the host red-team
