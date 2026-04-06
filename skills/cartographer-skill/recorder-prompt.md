@@ -116,6 +116,11 @@ Task tool (general-purpose, model: sonnet):
       describe fix strategies rather than diagnostic hypotheses. Format:
         - **Dead ends:** [fix strategy] — ruled out because [reason]. (source: qg)
         - **Diagnostic path:** [round progression].
+    - **Retirement check:** Before writing, check if any Active Landmine entries
+      reference file paths that no longer exist. If ALL file paths in an entry
+      are gone, move it to `## Retired Landmines` with format:
+      `~~[Short title]~~ — [Retired: paths no longer exist. Original module: X]`.
+      Retired entries free cap budget for fresh entries.
     - **Dedup on UPDATE:** When updating existing landmine entries with new
       dead-end evidence, preserve each distinct failure description as a
       separate bullet. Do not merge two different failure descriptions into
