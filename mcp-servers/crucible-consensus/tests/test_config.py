@@ -186,6 +186,39 @@ def test_nested_consensus_key(tmp_path, monkeypatch):
     assert config.modes == {"review": True, "verdict": False, "investigate": True}
 
 
+def test_flat_format_config_loads(tmp_path, monkeypatch):
+    """Flat YAML (no consensus: wrapper) loads correctly for backward compat."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
+
+    flat_data = VALID_CONSENSUS_SECTION  # No consensus: wrapper
+    project_dir = _write_config(tmp_path, flat_data)
+    config = load_config(str(project_dir))
+
+    assert config.enabled is True
+    assert len(config.models) == 2
+    assert config.models[0].provider == "anthropic"
+
+
+def test_flat_format_not_confused_by_external_review(tmp_path, monkeypatch):
+    """Nested config with external_review sibling doesn't leak into consensus."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    monkeypatch.setenv("GOOGLE_API_KEY", "goog-test-456")
+
+    data = {
+        "external_review": {
+            "enabled": True,
+            "models": [{"provider": "google", "model_id": "gemini", "api_key_env": "GOOGLE_API_KEY"}],
+        }
+    }
+    project_dir = _write_config(tmp_path, data)
+
+    # No consensus section + external_review sibling → min_models(2) > 0 models → ConfigError
+    # This proves external_review models did NOT leak into consensus parsing
+    with pytest.raises(ConfigError, match="min_models"):
+        load_config(str(project_dir))
+
+
 # ── External Review Config Tests ──────────────────────────────────────
 
 

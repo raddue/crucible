@@ -61,8 +61,15 @@ def load_config(project_dir: str) -> ConsensusConfig:
     if raw is None:
         raw = {}
 
-    # Support both nested (consensus: ...) and flat formats
-    consensus_section = raw.get("consensus", {})
+    # Support both nested (consensus: ...) and flat formats.
+    # If external_review is a sibling key, the config is nested — consensus: is required.
+    # If no sibling keys, fall back to raw (flat format backward compat).
+    if "consensus" in raw:
+        consensus_section = raw["consensus"]
+    elif "external_review" in raw:
+        consensus_section = {}  # Nested format without consensus section
+    else:
+        consensus_section = raw  # Flat format (legacy)
 
     # Parse models
     models = []
@@ -155,7 +162,7 @@ def load_external_review_config(project_dir: str) -> ExternalReviewConfig:
         if model.provider not in SUPPORTED_PROVIDERS:
             raise ConfigError(
                 f"Provider '{model.provider}' is not yet supported. "
-                f"Supported: anthropic, google, openai."
+                f"Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}."
             )
 
     # Validate env vars
