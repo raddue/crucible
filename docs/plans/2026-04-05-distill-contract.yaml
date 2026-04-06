@@ -33,15 +33,18 @@ api_surface:
 
   - name: "Tier2PDFConversion"
     type: "function"
-    signature: "pdftotext -layout $INPUT_PATH $TEXT_PATH && dispatch pdf-structurer agent"
+    signature: "pdftotext -layout $INPUT_PATH $TEXT_PATH && dispatch pdf-structurer agent → $OUTPUT_PATH"
     params:
       - name: "INPUT_PATH"
         type: "string — absolute path to PDF file"
         required: true
       - name: "TEXT_PATH"
-        type: "string — absolute path for intermediate text output"
+        type: "string — absolute path for intermediate pdftotext output"
         required: true
-    returns: "Structured Markdown file after Claude structuring pass"
+      - name: "OUTPUT_PATH"
+        type: "string — absolute path for final structured .md output"
+        required: true
+    returns: "Structured Markdown file at OUTPUT_PATH after Claude structuring pass"
     description: "Tier 2 PDF conversion: pdftotext extraction + Sonnet structuring agent for heading/list/table recovery"
 
   - name: "Tier3PythonConversion"

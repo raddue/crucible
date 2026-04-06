@@ -118,7 +118,7 @@ Implement venv management:
 
 Create conversion scripts:
 - `convert_pptx.py`: Read pptx, output slide-structured Markdown (slide title, content, speaker notes per slide, separated by `---`)
-- `convert_xlsx.py`: Read xlsx, output one CSV per sheet with naming pattern `{basename}-{sheetname}.csv` (sheetname sanitized: spaces to hyphens, special chars stripped). Implement formula-cell warning (>30% formula cells), `None` value detection (warn if formula cells return `None` — file needs to be opened in Excel first), and sheet count guard (max 20 sheets).
+- `convert_xlsx.py`: Read xlsx, output one CSV per sheet with naming pattern `{basename}-{sheetname}.csv` (sheetname sanitized: spaces to hyphens, special chars stripped). Implement formula-cell warning (>30% formula cells), `None` value detection (write `#NO_CACHE` as the cell value in CSV output when formula cells return `None`, making data loss visible in the output itself; also warn that file needs to be opened in Excel first), and sheet count guard (max 20 sheets).
 
 Both scripts accept input/output paths via command-line arguments (not env vars — Python argparse is safe). Scripts validate inputs and return non-zero on failure.
 
