@@ -10,7 +10,6 @@ from pathlib import Path
 
 try:
     from pptx import Presentation
-    from pptx.util import Inches, Pt
 except ImportError:
     print("Error: python-pptx is not installed.", file=sys.stderr)
     print("Install with: pip install python-pptx==1.0.2", file=sys.stderr)

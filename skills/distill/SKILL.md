@@ -226,7 +226,7 @@ After all conversions complete, run the digest pass on eligible files.
 - Word count > 500 words
 - Word count ≤ 50,000 words (hard cap — report "File exceeds 50K word limit for digest pass. Consider splitting the document." for larger files)
 
-**Dispatch:** For each eligible file, dispatch a Sonnet digest agent using `skills/distill/digest-prompt.md`. The agent receives the full `.md` content and produces a `.digest.md` at 20-30% of input word count.
+**Dispatch:** For each eligible file, dispatch a Sonnet digest agent using `skills/distill/digest-prompt.md`. Before dispatching, fill template placeholders: replace `{{ORIGINAL_WORDS}}` with the converted file's word count and `{{TARGET_WORDS}}` with 25% of that count. The raw pdftotext output (for `pdf-structurer-prompt.md`) or converted `.md` content (for `digest-prompt.md`) is included as a content block below the prompt template in the dispatch file.
 
 **Quality check:** After the digest agent returns, count words in the digest:
 - If digest is 15-35% of input word count: accept
