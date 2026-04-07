@@ -6,7 +6,7 @@ import sys
 import logging
 from pathlib import Path
 
-from mcp.server import Server
+from mcp.server import Server, InitializationOptions, NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
@@ -234,8 +234,16 @@ async def _handle_external_review(arguments: dict) -> list[TextContent]:
 
 async def main():
     initialize()
+    init_options = InitializationOptions(
+        server_name="crucible-consensus",
+        server_version="1.0.0",
+        capabilities=server.get_capabilities(
+            notification_options=NotificationOptions(),
+            experimental_capabilities=None,
+        ),
+    )
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream)
+        await server.run(read_stream, write_stream, init_options)
 
 
 if __name__ == "__main__":
