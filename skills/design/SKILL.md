@@ -25,6 +25,25 @@ Every significant design question is backed by parallel investigation agents tha
 
 ### Phase 2: Investigated Questions
 
+#### Step 0: Recon Dispatch
+
+Before entering the dimension loop, dispatch `/recon` to gather structural context for all subsequent investigations:
+
+```
+/recon
+  task: [user's feature request / design goal]
+  session_id: "<design-run-timestamp>"
+  modules: ["impact-analysis"]
+```
+
+Store the Investigation Brief in the design session's scratch directory. The brief provides codebase structure, existing patterns, scope boundaries, prior art, and task-level impact analysis that all dimension investigations share.
+
+**Narration:** "Dispatching recon for design context [with session_id: X]."
+
+**On success:** The brief is available as `[RECON_BRIEF]` context for all subsequent dimension investigations. Quick scan dimensions read the brief directly (no agent dispatch). Deep dive dimensions pass relevant sections to the Domain Researcher and Impact Analyst.
+
+**On failure:** "Recon failed: [reason]. Falling back to inline investigation." Proceed without recon context -- dimension investigations explore from scratch (existing behavior). All subsequent steps work identically, just without the acceleration that recon provides.
+
 For each design dimension that needs a decision, follow this loop:
 
 #### Step 1: Identify the Design Dimension
@@ -39,8 +58,8 @@ Write down what you EXPECT to find before dispatching agents. After agents retur
 
 | Tier | When | Effort |
 |------|------|--------|
-| **Deep dive** | Architectural decisions, integration points, pattern choices, anything constraining future work | 3 parallel agents + challenger |
-| **Quick scan** | Implementation approach within decided architecture, which existing pattern to follow | Single codebase scout |
+| **Deep dive** | Architectural decisions, integration points, pattern choices, anything constraining future work | 2 parallel agents (Domain Researcher + Impact Analyst) + challenger, with recon brief as context |
+| **Quick scan** | Implementation approach within decided architecture, which existing pattern to follow | Read relevant sections of the recon brief (no agent dispatch needed) |
 | **Direct ask** | Naming, UI placement, priority ordering — no technical implications | Ask directly |
 
 **Data model dimensions:** Decisions involving database schema, data model, or persistent storage always warrant **Deep dive**. During synthesis, apply the grain test:
@@ -50,15 +69,14 @@ Write down what you EXPECT to find before dispatching agents. After agents retur
 
 #### Step 4: Dispatch Investigation
 
-**Deep dive** — spawn three agents in parallel (templates in `investigation-prompts.md`):
+**Deep dive** — spawn two agents in parallel (templates in `investigation-prompts.md`):
 
-1. **Codebase Scout** — What does the codebase already do in this area? Existing patterns, conventions, constraints.
-2. **Domain Researcher** — What are the viable approaches? Trade-offs, best practices, precedents.
-3. **Impact Analyst** — What existing systems does this decision affect? What could break?
+1. **Domain Researcher** — What are the viable approaches? Trade-offs, best practices, precedents. Receives `[RECON_BRIEF]` with relevant structural context.
+2. **Impact Analyst** — What existing systems does this decision affect? What could break? Receives `[RECON_BRIEF]` with relevant structural context.
 
 Pass the **cascading context** (all prior decisions and rationale) to each agent.
 
-**Quick scan** — dispatch only the Codebase Scout.
+**Quick scan** — read relevant sections of the recon brief directly. No agent dispatch needed. Extract existing patterns, constraints, touchpoints, and precedents from the brief's `## Project Structure`, `## Existing Patterns`, and `## Prior Art` sections.
 
 #### Step 5: Synthesize
 
@@ -73,7 +91,25 @@ After agents return:
    - Would this feature survive if the host application were replaced tomorrow?
    If fewer than 3 answers are "yes," flag to the user: "This feature may not belong in [target system] — it only shares [N/4] characteristics. Consider whether it deserves its own application. Each application should be describable in a single sentence — if you need a paragraph, it's doing too much." The user decides; this is a structured nudge, not a veto.
 4. **Check for question redirection** — if agents found the wrong question is being asked, redirect: "Was going to ask about X, but investigation revealed the real decision is Y."
-5. **Synthesize into 2-3 informed options** with a recommended choice
+5. **Assay dispatch (Deep Dive only)** — For Deep Dive dimensions, dispatch `/assay` for structured evaluation:
+
+   ```
+   /assay
+     question: "<design dimension question>"
+     context: { recon brief sections + agent findings + open_questions: [recon's ## Open Questions relevant to this dimension] }
+     decision_type: "architecture"
+     cascading_decisions: [<prior dimension decisions>]
+   ```
+
+   Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds assay's confidence scoring on what the investigation explicitly could not determine, and populates `missing_information` with actionable items (using recon's `Resolvable by:` metadata).
+
+   Use assay's recommendation as the starting point. Present assay's `constraint_fit` scoring, `kill_criteria`, and `confidence` level to the user.
+
+   **On assay failure:** "Assay evaluation failed: [reason]. Proceeding with manual synthesis." Synthesize options manually (existing behavior).
+
+   Quick scan and Direct ask dimensions do NOT dispatch assay.
+
+6. **Synthesize into 2-3 informed options** with a recommended choice (enriched by assay output when available)
 
 #### Step 6: Challenge (Deep Dive Only)
 
@@ -107,11 +143,16 @@ single-model Challenger agent.
 **Surprises:** [anything that contradicted expectations — highlight these]
 
 **Investigation:**
-- **Codebase:** [2-3 sentence summary]
+- **Codebase (recon):** [2-3 sentence summary from recon brief]
 - **Approaches:** [2-3 sentence summary of viable options]
 - **Impact:** [2-3 sentence summary of affected systems]
 
 **Challenge:** [1-2 sentence summary of what the challenger raised]
+
+**Constraint Fit:** [from assay report, if available — pattern_alignment, scope_fit, reversibility, integration_risk]
+**Kill Criteria:** [from assay — when to revisit this decision]
+**Confidence:** [high/medium/low from assay]
+**Unknowns:** [from assay's missing_information, grounded by recon's Open Questions — what we don't know and how to find out]
 
 **Recommendation:** [your recommended option and why]
 
@@ -221,7 +262,9 @@ This skill produces **design docs**. When used standalone, invoke `crucible:qual
 
 ## Integration
 
-**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate, crucible:spec
+**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context), crucible:assay (Phase 2 decision evaluation)
+
+**Recon/Assay dispatch:** Recon is dispatched once at Phase 2 start (Step 0) with `modules: ["impact-analysis"]` and a session-level `session_id`. Assay is dispatched per Deep Dive dimension during synthesis (Step 5) with `decision_type: "architecture"`. Both include fallback to existing behavior on failure.
 
 **Contract schema:** Shared with `/spec` — see `skills/spec/SKILL.md` for the canonical contract YAML schema (version 1.0). Both `/design` and `/spec` emit contracts that `/build` consumes.
 

@@ -1,0 +1,267 @@
+version: "1.0"
+ticket: "#147"
+title: "Integrate /recon and /assay into consuming skills"
+date: "2026-04-08"
+
+api_surface:
+  recon_consumer_dispatch:
+    description: "Standard invocation pattern for consumers dispatching /recon"
+    parameters:
+      task:
+        type: string
+        required: false
+        description: "Task description. Consumer provides its goal. Omit for full-repo scan."
+      context:
+        type: object
+        required: false
+        description: "Structured prior decisions. Keys: decisions, constraints, target."
+      session_id:
+        type: string
+        required: false
+        description: "Enables Structure Scout caching. Design/spec set once per session."
+      modules:
+        type: "array[string]"
+        required: false
+        description: "Depth modules to produce. Valid: impact-analysis, consumer-registry, friction-scan, subsystem-manifest, diagnostic-context, execution-readiness."
+      scope:
+        type: string
+        required: false
+        description: "Directory constraint. Audit uses this to scope to subsystem path."
+    return:
+      type: markdown
+      format: "Investigation Brief (see recon SKILL.md Brief Schema Stability)"
+      stable_headers:
+        - "## Project Structure"
+        - "## Existing Patterns"
+        - "## Scope Boundaries"
+        - "## Prior Art"
+        - "## Conflicts"
+      semi_stable_headers:
+        - "## Open Questions"
+        - "## Impact Analysis"
+        - "## Consumer Registry"
+        - "## Subsystem Manifest"
+
+  assay_consumer_dispatch:
+    description: "Standard invocation pattern for consumers dispatching /assay"
+    parameters:
+      question:
+        type: string
+        required: true
+        description: "The decision question. One clear sentence."
+      context:
+        type: object
+        required: true
+        description: "Evidence for evaluation. Shape varies by caller (see assay SKILL.md)."
+      decision_type:
+        type: string
+        required: false
+        enum: ["architecture", "strategy", "diagnosis", "optimization"]
+        description: "Scoring weight profile. Auto-detected if omitted."
+      approaches:
+        type: "array[{name, description}]"
+        required: false
+        description: "Candidate approaches. Evaluator generates if omitted."
+      cascading_decisions:
+        type: "array[{decision, reasoning}]"
+        required: false
+        description: "Prior decisions treated as hard constraints."
+    return:
+      type: json
+      required_fields:
+        - "decision_type"
+        - "confidence"
+        - "missing_information"
+        - "recommended"
+        - "recommended.name"
+        - "recommended.rationale"
+        - "recommended.evidence"
+        - "recommended.risks"
+        - "recommended.kill_criteria"
+        - "recommended.constraint_fit"
+        - "alternatives"
+        - "prior_decision_conflicts"
+
+invariants:
+  checkable:
+    - id: INV-1
+      description: "No consumer quality degradation"
+      check: "Every consumer that dispatches recon/assay includes a fallback path to existing behavior on dispatch failure"
+      enforcement: "Code review — verify fallback exists in every dispatch site"
+
+    - id: INV-2
+      description: "Consolidation over layering"
+      check: "When recon replaces inline investigation, the old inline code is deleted (not left alongside)"
+      enforcement: "Code review — verify no dead Codebase Scout dispatches remain in design/spec"
+
+    - id: INV-3
+      description: "Recon brief schema stability"
+      check: "Consumer skills parse recon briefs by stable section headers only (## Project Structure, ## Existing Patterns, etc.)"
+      enforcement: "Grep consumer templates for recon-brief parsing — must use stable headers"
+
+    - id: INV-4
+      description: "Assay output validation"
+      check: "Consumer skills validate assay JSON output has all required fields before consuming"
+      enforcement: "Code review — verify consumers check for required fields or handle missing gracefully"
+
+    - id: INV-5
+      description: "Session ID consistency"
+      check: "Design and spec set session_id once per run and reuse across all recon invocations"
+      enforcement: "Code review — verify session_id is set at run start, not per-dimension"
+
+    - id: INV-6
+      description: "Non-integrated consumers documented"
+      check: "Debugging, build, prospector, project-init all document why they do not dispatch recon/assay"
+      enforcement: "Grep for #147 reference in those skills' SKILL.md files"
+
+  testable:
+    - id: INV-7
+      description: "Recon fallback activates on failure"
+      test: "Simulate recon dispatch failure (timeout/error). Verify consumer proceeds with existing investigation logic."
+      scope: "All four integrated consumers (design, spec, migrate, audit)"
+
+    - id: INV-8
+      description: "Assay fallback activates on failure"
+      test: "Simulate assay dispatch failure (invalid JSON after retry). Verify consumer proceeds with manual synthesis."
+      scope: "Design, spec, migrate"
+
+    - id: INV-9
+      description: "Structure Scout cache reuse within session"
+      test: "Dispatch recon twice with same session_id. Second invocation should use cached Structure Scout."
+      scope: "Design dimension loop, spec multi-ticket run"
+
+    - id: INV-10
+      description: "Consumer-registry data flows to Blast Radius Mapper"
+      test: "Run migrate with recon. Verify Blast Radius Mapper receives consumer-registry in prompt and skips direct consumer discovery."
+      scope: "Migrate Phase 0-2"
+
+    - id: INV-11
+      description: "Audit subsystem manifest replaces scoping agent"
+      test: "Run code audit. Verify recon dispatch occurs, scoping agent does not dispatch (unless recon fails)."
+      scope: "Audit Phase 1 code path"
+
+integration_points:
+  - consumer: "/design"
+    recon_integration:
+      dispatch_point: "Phase 2, Step 0 (before dimension loop)"
+      modules: ["impact-analysis"]
+      session_id: "design run timestamp"
+      replaces: "Codebase Scout (deleted from investigation-prompts.md)"
+      keeps: "Domain Researcher, Impact Analyst, Challenger"
+    assay_integration:
+      dispatch_point: "Phase 2, Step 5 (Synthesize) for Deep Dive dimensions"
+      decision_type: "architecture"
+      replaces: "Informal option comparison prose in Step 5"
+      keeps: "Challenger agent (Step 6)"
+
+  - consumer: "/spec"
+    recon_integration:
+      dispatch_point: "Per-ticket investigation start"
+      modules: ["impact-analysis"]
+      session_id: "epic run ID (shared across all tickets)"
+      replaces: "Codebase Scout from spec-writer investigation"
+      keeps: "Domain Researcher, Impact Analyst"
+    assay_integration:
+      dispatch_point: "Per-ticket architectural dimension evaluation"
+      decision_type: "architecture"
+      confidence_routing:
+        high: "Accept, log, proceed"
+        medium: "Accept, emit terminal alert"
+        low: "Emit block terminal alert"
+
+  - consumer: "/migrate"
+    recon_integration:
+      dispatch_point: "Phase 0 (pre-flight, after cartographer/forge)"
+      modules: ["consumer-registry"]
+      context_key: "target (migration target symbol)"
+      replaces: "Direct consumer discovery in Blast Radius Mapper"
+      keeps: "Migration Analyzer, Blast Radius Mapper (transitive deps + test coverage)"
+    assay_integration:
+      dispatch_point: "User Gate (after Phase 5)"
+      decision_type: "strategy"
+      replaces: "Unstructured plan presentation"
+
+  - consumer: "/audit"
+    recon_integration:
+      dispatch_point: "Phase 1, Code Path"
+      modules: ["subsystem-manifest"]
+      scope: "subsystem path"
+      replaces: "Scoping exploration agent (audit-scoping-prompt.md becomes fallback-only)"
+      keeps: "Non-code path (unchanged), USER GATE, Phase 2 analysis"
+    assay_integration: null
+
+  - consumer: "/build"
+    recon_integration: "Indirect via /design (Phase 1 dispatches design)"
+    assay_integration: "Indirect via /design"
+    direct_changes: "Documentation only"
+
+  - consumer: "/debugging"
+    recon_integration: null
+    assay_integration: null
+    rationale: "Specialized investigation pipeline (Error Analysis, Change Analysis, etc.) is categorically different from structural investigation"
+
+  - consumer: "/prospector"
+    recon_integration: null
+    assay_integration: null
+    rationale: "Organic exploration is fundamentally different from structured investigation. Competing design evaluation is already more sophisticated."
+
+  - consumer: "/project-init"
+    recon_integration: null
+    assay_integration: null
+    rationale: "Bootstraps cartographer data that recon consults. Complementary, not overlapping."
+
+error_handling:
+  recon_failure:
+    description: "Recon dispatch fails (timeout, both scouts fail, etc.)"
+    behavior: "Consumer falls back to existing investigation behavior"
+    narration: "'Recon failed: [reason]. Falling back to inline investigation.'"
+    consumer_quality: "Not degraded — misses acceleration, retains correctness"
+    specific_fallbacks:
+      design: "Dimension investigations explore from scratch (no recon context)"
+      spec: "Same as design fallback"
+      migrate: "Blast Radius Mapper discovers consumers from scratch"
+      audit: "Dispatch scoping exploration agent (audit-scoping-prompt.md)"
+
+  assay_failure:
+    description: "Assay dispatch fails (evaluator timeout, invalid JSON after retry)"
+    behavior: "Consumer proceeds with existing decision-making approach"
+    narration: "'Assay evaluation failed: [reason]. Proceeding with manual synthesis.'"
+    consumer_quality: "Not degraded — misses structured scoring, retains decision ability"
+    specific_fallbacks:
+      design: "Orchestrator synthesizes options manually (existing Step 5 behavior)"
+      spec: "Spec writer makes decision based on investigation findings"
+      migrate: "Plan presented without strategy evaluation"
+
+  partial_recon:
+    description: "Recon returns core brief but depth module fails"
+    behavior: "Consumer uses core brief. Failed module flagged in brief."
+    narration: "Recon narrates depth module failure. Consumer proceeds with available data."
+
+backward_compatibility:
+  - guarantee: "All consumer changes include fallback to pre-integration behavior"
+    mechanism: "If recon/assay dispatch fails, consumers execute their existing code paths"
+
+  - guarantee: "Recon brief schema changes are breaking changes"
+    mechanism: "Recon's Brief Schema Stability section requires updating all consumer templates on stable header changes"
+
+  - guarantee: "Assay output schema changes require consumer updates"
+    mechanism: "Consumers validate required JSON fields. Missing fields trigger error path."
+
+  - guarantee: "Non-integrated consumers are explicitly documented as intentional"
+    mechanism: "Each non-integrated consumer's SKILL.md documents the rationale with #147 reference"
+
+ambiguity_resolutions:
+  - question: "Should design dispatch recon per dimension or once per session?"
+    resolution: "Once per session. Recon provides task-level context; per-dimension investigation is handled by the remaining agents."
+
+  - question: "Should the Codebase Scout be kept as a fallback?"
+    resolution: "No. The recon fallback path is 'explore from scratch' (no recon context), not 'dispatch the old Codebase Scout.' The template is deleted."
+
+  - question: "Should audit delete audit-scoping-prompt.md?"
+    resolution: "No. Keep as fallback template with a comment marking it as fallback-only. Recon failure in audit falls back to the scoping agent."
+
+  - question: "Should assay replace the Challenger in design?"
+    resolution: "No. Assay evaluates approaches (which option is best?). Challenger attacks assumptions (what could go wrong with the recommendation?). They serve different purposes."
+
+  - question: "Should spec's assay integration trigger user interaction on low confidence?"
+    resolution: "No. Spec is fully autonomous. Low confidence triggers a terminal alert (visible to user in another terminal) but does not block execution."

@@ -9,7 +9,7 @@
       "expectations": [
         "Design process includes at least two investigated questions with explicit hypotheses stated before investigation",
         "Investigation findings include surprises or confirmations compared to the stated hypotheses",
-        "At least one design dimension uses deep-dive investigation with multiple parallel agents (codebase scout, domain researcher, impact analyst)",
+        "At least one design dimension uses deep-dive investigation with multiple parallel agents (domain researcher, impact analyst) with recon brief context",
         "Design decisions are presented with 2-3 informed options and a recommendation",
         "Design includes proper REST resource modeling with nouns as resources (e.g., /events, /venues, /tickets) and correct HTTP verbs (GET, POST, PUT/PATCH, DELETE)",
         "Design addresses pagination strategy for list endpoints (cursor-based or offset-based with explicit trade-off rationale)",

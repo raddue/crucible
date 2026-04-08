@@ -5,49 +5,6 @@
 
 Templates for dispatching investigation agents during the design skill's Phase 2 (Investigated Questions).
 
-## Codebase Scout
-
-```
-Agent tool (subagent_type: Explore, thoroughness: "very thorough"):
-  description: "Codebase scout: [design dimension]"
-  prompt: |
-    You are a Codebase Scout investigating how this project handles [DESIGN DIMENSION].
-
-    ## What You're Investigating
-
-    [1-2 sentence description of the design dimension being explored]
-
-    ## Decisions Made So Far
-
-    [CASCADING CONTEXT — all prior design decisions and their rationale]
-
-    ## Your Job
-
-    Search the codebase for:
-
-    1. **Existing patterns** — How does the project currently handle this or similar concerns? What conventions are established?
-    2. **Constraints** — What architectural decisions, dependencies, or framework requirements limit the options?
-    3. **Touchpoints** — What files, systems, or interfaces would a new feature in this area need to interact with?
-    4. **Precedents** — Has this problem been solved elsewhere in the codebase? What approach was used?
-
-    ## Output Format
-
-    ### Existing Patterns
-    [What the codebase already does, with file paths and line references]
-
-    ### Constraints
-    [What limits the options — framework requirements, existing contracts, dependencies]
-
-    ### Key Touchpoints
-    [Files and systems that would be involved]
-
-    ### Precedents
-    [Similar problems already solved in the codebase, if any]
-
-    ### Summary
-    [2-3 sentence synthesis: what does the codebase tell us about how to approach this?]
-```
-
 ## Domain Researcher
 
 ```
@@ -59,6 +16,14 @@ Agent tool (subagent_type: general-purpose):
     ## What You're Researching
 
     [1-2 sentence description of the design dimension]
+
+    ## Recon Brief (Structural Context)
+
+    [RECON_BRIEF — relevant sections of the Investigation Brief from /recon. The recon brief provides codebase patterns and structure. Focus your research on approaches and trade-offs, not codebase discovery.]
+
+    ## Recon Open Questions (Unknowns to Resolve)
+
+    [RECON_OPEN_QUESTIONS — entries from recon's ## Open Questions section relevant to this dimension. If you can resolve any of these during your research, include the answer. These feed into assay's confidence scoring.]
 
     ## Project Context
 
@@ -120,6 +85,14 @@ Agent tool (subagent_type: Explore, thoroughness: "very thorough"):
 
     [1-2 sentence description of the design dimension]
 
+    ## Recon Brief (Structural Context)
+
+    [RECON_BRIEF — relevant sections of the Investigation Brief from /recon. The recon brief includes a task-level impact analysis. Focus on dimension-specific impact — how does THIS decision affect systems beyond what the task-level analysis covers.]
+
+    ## Recon Open Questions (Unknowns to Resolve)
+
+    [RECON_OPEN_QUESTIONS — entries from recon's ## Open Questions section relevant to this dimension. If you can resolve any of these during your impact analysis, include the answer.]
+
     ## Likely Approaches Being Considered
 
     [Brief summary of the approaches the domain researcher is exploring, if known — otherwise describe the general direction]
@@ -173,14 +146,17 @@ Agent tool (subagent_type: general-purpose):
 
     ## Investigation Findings
 
-    **Codebase Scout found:**
-    [Summary of codebase investigation]
+    **Recon Brief (structural context):**
+    [Summary of relevant recon brief sections — existing patterns, constraints, prior art]
 
     **Domain Researcher found:**
     [Summary of domain research and recommended approach]
 
     **Impact Analyst found:**
     [Summary of impact analysis]
+
+    **Assay Evaluation (if available):**
+    [Summary of assay recommendation, constraint fit, and kill criteria — or "Not dispatched (Quick scan dimension)"]
 
     ## The Recommendation
 

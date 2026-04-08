@@ -1,6 +1,6 @@
 ---
 name: assay
-description: "Recon-informed approach evaluator. Weighs competing options against codebase constraints and returns structured recommendations with confidence scoring, kill criteria, and evidence grounding. Consumes recon briefs or caller context. Used by design, debugging, migrate, prospector. Triggers on /assay, 'evaluate approaches', 'which option', 'compare alternatives'."
+description: "Recon-informed approach evaluator. Weighs competing options against codebase constraints and returns structured recommendations with confidence scoring, kill criteria, and evidence grounding. Consumes recon briefs or caller context. Used by design, spec, migrate. Triggers on /assay, 'evaluate approaches', 'which option', 'compare alternatives'."
 ---
 
 # Assay
@@ -41,10 +41,9 @@ Evaluate competing approaches against codebase constraints. Returns a structured
 
 | Caller | Context Shape | Key Fields |
 |---|---|---|
-| `/design` | Recon brief | `project_structure`, `existing_patterns`, `scope_boundaries`, `prior_art` |
-| `/debugging` | Investigation findings | `hypotheses`, `evidence_per_hypothesis`, `symptoms`, `stack_traces` |
-| `/migrate` | Recon brief + migration target | `project_structure`, `migration_target`, `breaking_changes`, `blast_radius` |
-| `/prospector` | Friction analysis + recon brief | `friction_points`, `existing_patterns`, `dependency_graph` |
+| `/design` | Recon brief + agent findings | `project_structure`, `existing_patterns`, `scope_boundaries`, `prior_art` |
+| `/spec` | Recon brief + agent findings (autonomous) | `project_structure`, `existing_patterns`, `scope_boundaries`, `prior_art` |
+| `/migrate` | Recon brief + migration analysis | `project_structure`, `migration_target`, `breaking_changes`, `blast_radius` |
 | Generic caller | Freeform evidence | `description` (string) — unstructured context, lower confidence |
 
 When context contains unrecognized keys, the evaluator treats them as additional evidence. When context is a bare string, treat as `{ "description": context }`.
@@ -185,9 +184,10 @@ These make decisions revisitable without re-running the full analysis.
 | Skill | Decision Type | Context Source | Approaches |
 |---|---|---|---|
 | `/design` | `architecture` | Recon brief + cascading decisions | Evaluator generates |
-| `/debugging` | `diagnosis` | Investigation findings | Hypotheses as approaches |
-| `/migrate` | `strategy` | Recon brief + migration target | Evaluator generates |
-| `/prospector` | `optimization` | Friction analysis + recon brief | Competing redesigns |
+| `/spec` | `architecture` | Recon brief + cascading decisions (autonomous — confidence routing) | Evaluator generates |
+| `/migrate` | `strategy` | Recon brief + migration analysis | Evaluator generates |
+
+**Not called by (investigated, not a fit):** `/debugging` (hypothesis evaluation uses quality-gate, not assay), `/prospector` (competing design evaluation is more sophisticated than assay for this use case). See #147 for rationale.
 
 ### Consumer Dispatch Examples
 
@@ -200,17 +200,15 @@ These make decisions revisitable without re-running the full analysis.
   cascading_decisions: [{ decision: "Using Redis for session store", reasoning: "..." }]
 ```
 
-**From `/debugging`:**
+**From `/spec`:**
 ```
 /assay
-  question: "Which hypothesis best explains the observed symptoms?"
-  context: { hypotheses: [...], evidence_per_hypothesis: {...}, symptoms: [...] }
-  decision_type: "diagnosis"
-  approaches: [
-    { name: "Race condition in event handler", description: "..." },
-    { name: "Stale cache returning old data", description: "..." }
-  ]
+  question: "How should the auth middleware handle token refresh?"
+  context: { recon brief + investigation findings }
+  decision_type: "architecture"
+  cascading_decisions: [{ decision: "Using Redis for session store", reasoning: "..." }]
 ```
+Spec consumes assay output autonomously: high confidence = accept, medium = terminal alert, low = block alert.
 
 **From `/migrate`:**
 ```
@@ -218,19 +216,6 @@ These make decisions revisitable without re-running the full analysis.
   question: "What migration strategy minimizes risk for the React 18→19 upgrade?"
   context: { recon brief + migration_target: "React 19", breaking_changes: [...] }
   decision_type: "strategy"
-```
-
-**From `/prospector`:**
-```
-/assay
-  question: "Which redesign offers the best improvement-to-disruption ratio?"
-  context: { friction analysis + recon brief }
-  decision_type: "optimization"
-  approaches: [
-    { name: "Extract service", description: "..." },
-    { name: "Facade pattern", description: "..." },
-    { name: "Event-driven decoupling", description: "..." }
-  ]
 ```
 
 ### Standalone Usage

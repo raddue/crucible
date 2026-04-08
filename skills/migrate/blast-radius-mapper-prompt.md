@@ -20,15 +20,36 @@ Agent tool (subagent_type: general-purpose, model: sonnet):
 
     [CARTOGRAPHER_MODULE_DATA if available, or "No cartographer data available"]
 
+    ## Recon Consumer Registry
+
+    [CONSUMER_REGISTRY — consumer registry from /recon's consumer-registry depth
+    module, if available. Contains pre-discovered direct consumers with usage
+    patterns and migration complexity. If "No consumer registry available", perform
+    full direct consumer discovery in Step 1.]
+
     ## Your Job
 
     Map every consumer of the APIs being migrated. Be exhaustive — a missed
     consumer causes a runtime failure after migration.
 
-    ### Step 1: Intra-repo Consumer Discovery
+    ### Step 1: Consumer Discovery and Augmentation
 
     For each breaking change in the migration analysis:
 
+    **If consumer registry is available from recon:**
+    1. **Verify the registry** — spot-check 3-5 consumers from the registry to
+       confirm they still reference the old API (registry may be from a cached
+       recon run)
+    2. **Augment with missed consumers** — search for any direct consumers NOT
+       in the registry (grep/glob for imports, function calls, type references,
+       and configuration references to the old API that recon missed)
+    3. **Trace indirect dependents** — for each direct consumer (from registry +
+       newly discovered), check if other code depends on it
+    4. **Map test coverage** — which test files exercise the affected code paths?
+    5. **Check configuration/wiring** — DI registrations, config files, build
+       scripts, CI pipelines that reference the target
+
+    **If NO consumer registry available (recon failed):**
     1. **Search for direct consumers** — grep/glob for imports, function calls,
        type references, and configuration references to the old API
     2. **Trace indirect dependents** — for each direct consumer, check if other

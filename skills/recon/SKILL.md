@@ -558,6 +558,8 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 
 **Records to:** `crucible:cartographer` (recorder dispatch after investigation, using `skills/cartographer-skill/recorder-prompt.md`)
 
-**Called by:** `/design`, `/build`, `/debugging`, `/migrate`, `/audit`, `/prospector` (supplementary), `/project-init`
+**Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/migrate` (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
+
+**Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design), `/prospector` (organic exploration is different), `/project-init` (bootstraps cartographer, complementary purpose). See #147 for rationale.
 
 **Pairs with:** `/assay` (sequential — recon produces evidence, assay evaluates options)

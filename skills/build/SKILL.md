@@ -1058,6 +1058,8 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-code-review, pre-inquisitor, pre-impl-gate)
 
+**Recon/assay context:** Inherits recon/assay context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
+
 **Phase 3 sub-skills (dispatched per-task):**
 - **crucible:test-coverage** — Test alignment audit after each task's test quality review (staleness, dead tests, coincidence tests)
 

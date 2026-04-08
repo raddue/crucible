@@ -415,6 +415,8 @@ Skills that benefit from project-init output:
 - `crucible:design` — architecture planning (consumes map and topology)
 - `crucible:debugging` — investigation workflow (consumes modules and landmines)
 
+**Does not dispatch /recon** -- bootstraps the cartographer data that /recon consults. Complementary, not overlapping. See #147 for rationale.
+
 ---
 
 ## Prompt Templates

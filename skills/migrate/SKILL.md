@@ -199,6 +199,19 @@ Before any agent dispatch:
 1. **Consult cartographer** (consult mode) -- load known module boundaries for blast radius mapping
 2. **Consult forge** (feed-forward) -- check past lessons, especially prior migration outcomes
 3. **Handle `--execute`** -- if specified, read the existing plan file, validate it has the expected structure (phases, consumer registry, rollback points), and skip to Phase 7.
+4. **Dispatch recon** with consumer-registry module:
+
+   ```
+   /recon
+     task: "Map structure and consumers for migration: <migration target>"
+     context: { target: "<migration-target-symbol>" }
+     modules: ["consumer-registry"]
+   ```
+
+   Write recon's Investigation Brief to `scratch/<run-id>/recon-brief.md`. Write recon's Consumer Registry section to `scratch/<run-id>/consumer-registry-from-recon.md`.
+
+   **On recon failure:** "Recon failed: [reason]. Blast Radius Mapper will discover consumers from scratch." Proceed without recon context -- Phase 2 falls back to full consumer discovery (existing behavior).
+
 5. **Write invocation.md** to scratch directory with migration target, mode, and scope.
 
 ---
@@ -232,10 +245,14 @@ Dispatch the **Migration Analyzer** (Opus, Agent tool, Explore subagent) using `
 
 Dispatch the **Blast Radius Mapper** (Sonnet, Agent tool, general-purpose) using `./blast-radius-mapper-prompt.md`.
 
-**Input:** Migration analysis from Phase 1, cartographer module data (if available).
+**Input:** Migration analysis from Phase 1, cartographer module data (if available), recon consumer registry (if available from Phase 0).
+
+**When recon's consumer registry is available:** The mapper receives pre-discovered direct consumers and focuses on transitive dependencies, test coverage, and configuration/wiring. Direct consumer discovery is skipped -- the mapper verifies and augments the registry instead.
+
+**When recon's consumer registry is NOT available (recon failed):** The mapper falls back to full discovery (existing behavior).
 
 **Intra-repo mapping** (follows build refactor mode's blast radius analysis pattern):
-- **Direct consumers** -- code that imports/calls/references the migration target
+- **Direct consumers** -- from recon's consumer registry (or discovered from scratch if recon failed)
 - **Indirect dependents** -- code that depends on direct consumers (transitive)
 - **Test coverage** -- which tests exercise the target behavior
 - **Configuration/wiring** -- config files, DI registrations, build scripts referencing the target
@@ -335,7 +352,20 @@ For cross-repo migrations: each wave entry includes repo name, estimated effort 
 
 ## User Gate
 
-After Phase 5, the orchestrator consolidates all outputs into `scratch/<run-id>/migration-plan.md` and presents the complete plan:
+After Phase 5, the orchestrator consolidates all outputs into `scratch/<run-id>/migration-plan.md`.
+
+Before presenting the plan to the user, dispatch `/assay` for structured strategy evaluation:
+
+```
+/assay
+  question: "Is this migration approach the best strategy for <migration target>?"
+  context: { recon brief + migration analysis + blast radius summary }
+  decision_type: "strategy"
+```
+
+**On assay failure:** "Assay evaluation failed: [reason]. Presenting plan without structured evaluation." Present the plan without assay's scoring (existing behavior).
+
+Present the complete plan:
 
 ```
 ### Migration Plan: [target description]
@@ -345,6 +375,10 @@ After Phase 5, the orchestrator consolidates all outputs into `scratch/<run-id>/
 **Consumer waves:** M
 **Estimated total effort:** [estimate]
 **Cross-repo scope:** [yes/no, N repos]
+
+**Strategy Confidence:** [from assay — high/medium/low]
+**Kill Criteria:** [from assay — when to abort this migration approach]
+**Missing Information:** [from assay — what would increase confidence]
 
 #### Phase Summary
 [table of phases with descriptions, affected files, effort, build mode]
@@ -462,6 +496,8 @@ Escalate to the user when:
 
 | Skill | How Used | When |
 |-------|----------|------|
+| `crucible:recon` | Consumer-registry module | Phase 0 (structural context + direct consumer discovery). Fallback: Blast Radius Mapper discovers consumers from scratch. |
+| `crucible:assay` | Strategy evaluation | User Gate (structured evaluation of migration approach with kill criteria). Fallback: present plan without assay scoring. |
 | `crucible:cartographer` | Consult mode | Phase 0 (module boundaries for blast radius) |
 | `crucible:cartographer` | Record mode | Phase 8 (record migration discoveries) |
 | `crucible:forge` | Feed-forward | Phase 0 (past migration lessons) |

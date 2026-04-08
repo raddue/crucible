@@ -64,39 +64,85 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
 
     ---
 
+    ## Step 0: Recon Dispatch
+
+    Before investigating any design dimension, dispatch /recon for structural context:
+
+    ```
+    /recon
+      task: "<ticket title and description>"
+      session_id: "<spec-epic-run-id>"
+      modules: ["impact-analysis"]
+    ```
+
+    The session_id is shared across all tickets in this epic run -- the Structure Scout
+    runs once for the first ticket and is cached for subsequent tickets.
+
+    On recon failure: proceed without recon context. Dimension investigations explore
+    from scratch (existing behavior). Log: "Recon failed: [reason]. Falling back to
+    inline investigation."
+
     ## Step 1: Investigation
 
     For each design dimension in the ticket, triage the required investigation depth:
 
-    - **Deep dive** (architectural decisions, high-impact choices): Dispatch 3 parallel
+    - **Deep dive** (architectural decisions, high-impact choices): Dispatch 2 parallel
       investigation agents + a challenger:
-      1. **Codebase Scout** -- Search the codebase for existing patterns, constraints,
-         touchpoints, and precedents relevant to this dimension. Output: existing patterns
-         with file paths, constraints, key touchpoints, precedents, and a 2-3 sentence
-         synthesis.
-      2. **Domain Researcher** -- Research 2-4 viable approaches for this dimension.
-         Compare them on fit, complexity, and risk. Recommend one with clear reasoning.
+      1. **Domain Researcher** -- Research 2-4 viable approaches for this dimension.
+         Receives [RECON_BRIEF] with relevant structural context. Focus on approaches
+         and trade-offs, not codebase discovery. Compare on fit, complexity, and risk.
+         Recommend one with clear reasoning.
          Output: recommended approach, comparison table, approach details, open questions.
-      3. **Impact Analyst** -- Assess how each approach would affect existing systems.
-         Cover: systems affected (with file paths), integration risks, data impact, test
-         impact, reversibility. Output: impact assessment per dimension.
-      4. **Challenger** -- Lightweight review of the synthesized recommendation. Check for
+      2. **Impact Analyst** -- Assess how each approach would affect existing systems.
+         Receives [RECON_BRIEF] with task-level impact analysis. Focus on dimension-
+         specific impact beyond what the recon brief covers. Cover: systems affected
+         (with file paths), integration risks, data impact, test impact, reversibility.
+         Output: impact assessment per dimension.
+      3. **Challenger** -- Lightweight review of the synthesized recommendation. Check for
          assumption gaps, investigation blind spots, prior decision conflicts, missing
          options, and risk underestimation. If the recommendation is solid, say so in one
          sentence and stop. Do NOT manufacture concerns.
 
-    - **Quick scan** (implementation approach, lower-impact decisions): Dispatch a single
-      Codebase Scout agent. Summarize findings in 2-3 sentences.
+    - **Quick scan** (implementation approach, lower-impact decisions): Read relevant
+      sections of the recon brief directly (no agent dispatch needed). Extract existing
+      patterns, constraints, touchpoints, and precedents from the brief's Project
+      Structure, Existing Patterns, and Prior Art sections. Summarize in 2-3 sentences.
 
     - **Direct resolution** (no technical implications, obvious answer): Decide immediately
       with a one-sentence rationale. No investigation agents needed.
+
+    ### Assay Dispatch (Deep Dive Architectural Dimensions)
+
+    For architectural dimensions investigated via Deep Dive, dispatch /assay after
+    investigation completes:
+
+    ```
+    /assay
+      question: "<dimension question>"
+      context: { recon brief + investigation findings + open_questions: [recon's ## Open Questions relevant to this dimension] }
+      decision_type: "architecture"
+      cascading_decisions: [<prior decisions from decisions log>]
+    ```
+
+    Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds assay's confidence on what the investigation explicitly could not determine.
+
+    Use assay's recommendation as the starting point for autonomous decision-making.
+    Apply confidence-based routing:
+    - **high** confidence: Accept assay recommendation. Log decision. Proceed.
+    - **medium** confidence: Accept recommendation but emit terminal alert with assay's
+      `missing_information` field (now grounded by recon's Open Questions).
+    - **low** confidence: Emit `block` terminal alert with `missing_information` items and their `Resolvable by:` metadata so the user knows exactly what to investigate. Log as uncertain decision.
+
+    On assay failure: "Assay evaluation failed: [reason]. Proceeding with manual
+    synthesis." Make decision based on investigation findings (existing behavior).
 
     ### Complexity Flag Behavior
 
     If `[COMPLEXITY_FLAG]` is "complex":
     - Use **quick-scan** investigation for ALL dimensions, regardless of their natural
-      depth classification. Do not dispatch deep dives.
-    - Summarize each finding to 2-3 sentences before proceeding to the next dimension.
+      depth classification. Do not dispatch deep dives or assay.
+    - Read the recon brief for each dimension. Summarize each finding to 2-3 sentences
+      before proceeding to the next dimension.
     - This reduces context consumption for tickets with many design dimensions (5+ dimensions
       or 3+ upstream contracts).
 
@@ -162,7 +208,7 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
 
     For each design dimension, after investigation:
 
-    1. **Synthesize** the investigation results (codebase scout findings, domain research,
+    1. **Synthesize** the investigation results (recon brief findings, domain research,
        impact analysis, challenger feedback -- or quick-scan summary if complex).
     2. **Pick** the recommended option (or the only viable path).
     3. **Assign a confidence level** using these exact thresholds:

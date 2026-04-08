@@ -260,7 +260,7 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 ### Code Recovery (artifact_type: code)
 
 1. Read `scratch/<run-id>/` to determine current state:
-   - `manifest.md` exists → Phase 1 scoping is complete
+   - `manifest.md` exists → Phase 1 scoping is complete (whether produced by recon's subsystem-manifest or the fallback scoping agent -- both write the same format)
    - `gate-approved.md` exists → user confirmed scope, Phase 2 can proceed
    - `<lens>-partition.md` files → those lenses' Tier 2 source partitions are recorded
    - `<lens>-findings.md` files → those lenses have reported
@@ -290,11 +290,21 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 
 ### Code Path (artifact_type: code)
 
-Dispatch: `Agent tool (subagent_type: Explore, model: sonnet)` using `audit-scoping-prompt.md`
-
 1. User names a subsystem ("save/load", "UI", "networking")
 2. Consult cartographer data if it exists for subsystem boundaries
-3. If no cartographer data: dispatch a Sonnet exploration agent to identify the subsystem boundary using the scoping prompt template.
+3. **Dispatch recon** with subsystem-manifest module:
+
+   ```
+   /recon
+     task: "Subsystem manifest for audit: <subsystem name>"
+     scope: "<subsystem-path or cartographer-identified boundary>"
+     modules: ["subsystem-manifest"]
+   ```
+
+   Parse the subsystem manifest from recon's brief to produce the file list + role descriptions for the USER GATE. Write to `scratch/<run-id>/manifest.md` in the same format the scoping agent produces (file paths + brief role descriptions). This format compatibility ensures all downstream code (Phase 2, compaction recovery) works without modification.
+
+   **On recon failure:** "Recon failed: [reason]. Falling back to scoping exploration agent." Dispatch the fallback scoping agent: `Agent tool (subagent_type: Explore, model: sonnet)` using `audit-scoping-prompt.md` (existing behavior).
+
 4. If the subsystem cannot be cleanly scoped (files share no common dependency chain, naming convention, or functional cohesion), report the scoping difficulty to the user and ask for clarification or a file list.
 5. **Output:** A manifest of files belonging to the subsystem (paths + brief role descriptions). Write to `scratch/<run-id>/manifest.md`.
 
@@ -596,9 +606,13 @@ Each analysis template includes:
 
 ## Integration
 
-- **Dispatches:** Code audit templates (scoping, correctness, robustness, consistency [2 agents], architecture, blind-spots) and non-code templates (noncode-lens [parameterized], noncode-blindspots)
-- **Consults:** `crucible:cartographer` (Mode 2: consult map) for subsystem scoping and conventions
-- **Records to:** `crucible:cartographer` (Mode 1: record discovery) -- Phase 1 manifest only
+| Skill | How Used | When |
+|-------|----------|------|
+| `crucible:recon` | Subsystem-manifest module | Phase 1 Code Path (subsystem scoping via structured manifest). Fallback: dispatch scoping agent via `audit-scoping-prompt.md`. |
+| `crucible:cartographer` | Consult mode | Phase 1 (subsystem scoping and conventions) |
+| `crucible:cartographer` | Record mode | Phase 4 (Phase 1 manifest only) |
+
+- **Dispatches:** Code audit templates (correctness, robustness, consistency [2 agents], architecture, blind-spots) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback).
 - **Pairs with:** `crucible:forge` -- audit findings could inform retrospective if they reveal systemic patterns
 - **Called by:** Standalone only (user invokes directly). Not part of any pipeline.
-- **Does NOT use:** `crucible:quality-gate` (audit is not a fix loop), `crucible:red-team` (designed for single artifacts)
+- **Does NOT use:** `crucible:quality-gate` (audit is not a fix loop), `crucible:red-team` (designed for single artifacts), `crucible:assay` (audit is find-and-report, not decision evaluation)
