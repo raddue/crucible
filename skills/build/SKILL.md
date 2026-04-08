@@ -273,6 +273,25 @@ Build's existing compaction step must read the Compression State FIRST (step 0 f
 
 ## Phase 1: Design (Interactive)
 
+### Step -1: Resume Detection and Pipeline-Active Marker
+
+Before any design or dispatch work, check for a crashed prior pipeline:
+
+1. **Check `<scratch>/.pipeline-active`** (where `<scratch>` is `~/.claude/projects/<hash>/memory/`)
+2. **Not found:** Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"build"`, `phase` set to `"1"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` set to the scratch directory path, `dispatch_dir` set to the dispatch directory path). Proceed to Step 0.
+3. **Found, same `pipeline_id` as current session:** This is a compaction recovery scenario. Follow existing compaction recovery procedures. Do not re-write the marker.
+4. **Found, different `pipeline_id`:**
+   a. Read `manifest.jsonl` from the marker's `dispatch_dir` (or from the scratch directory copy if `/tmp` was lost)
+   b. Identify the last successful phase boundary by scanning manifest entries grouped by phase. A phase boundary is verified when all dispatches in that phase have `status: "completed"`.
+   c. Present resume option to the user:
+      > "Previous build crashed at Phase [N], [context]. Resume from [last good boundary] ([checkpoint reason], [estimated time preserved] of work preserved)? [yes / no / fresh]"
+   d. **User accepts:** Invoke `crucible:replay` in resume mode, passing the scratch directory path. The replay skill handles checkpoint restore, state reconstruction, and re-dispatch. The build pipeline does not continue -- replay takes over.
+   e. **User declines (fresh):** Delete the stale `.pipeline-active` marker. Write a fresh marker with the current session. Proceed to Step 0 as a new pipeline run.
+
+**Marker updates during pipeline:** Update the `phase` field in `.pipeline-active` at each phase boundary (1->2, 2->3, 3->4) to track progress for crash detection.
+
+**Marker cleanup:** Delete `.pipeline-active` at Phase 4 completion (step 11, after finish skill completes, before final report).
+
 ### Step 0: Pre-Existing Doc Detection
 
 Before running interactive design, check whether `/spec` (or a prior `/build` run) already produced design artifacts for this ticket.
@@ -872,6 +891,7 @@ After all tasks complete:
 10. Report to user
 10.5. **Session index event:** Emit a `skill_end` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_end","summary":"/build complete: <outcome summary>","detail":{"skill":"build","outcome":"success|failure|escalated"}}`.
 11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's Step 2.5 (test-coverage)** since test-coverage ran per-task in Phase 3, and **skip finish's Step 3 (red-team)** since quality-gate already ran at step 6. Tell finish to skip both.
+12. **Delete pipeline-active marker:** Remove `<scratch>/.pipeline-active`. This signals that the pipeline completed successfully. If deletion fails (permissions, missing file), log a warning but do not fail the pipeline.
 
 ### Session Metrics
 
