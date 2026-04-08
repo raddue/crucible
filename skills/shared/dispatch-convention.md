@@ -226,7 +226,7 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 - `est_rework_tokens = (rework_input_chars + rework_output_chars) / 4`
 - `rework_pct = est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`
 
-These aggregates feed into the chronicle signal's `efficiency` sub-object (see forge-skill/SKILL.md Step 8.5).
+These aggregates feed into the chronicle signal's `efficiency` sub-object (see forge/SKILL.md Step 8.5).
 
 ## Cleanup
 

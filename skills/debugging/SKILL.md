@@ -108,7 +108,7 @@ After compaction, before re-writing the status file:
 1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files (see Session State below)
 3. Emit a Compression State Block into the conversation to seed the new context window
-3.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive.
+3.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive. If `summary.md` lacks detail for a specific event type (e.g., errors, hypothesis changes, file modifications), use `/recall` to query `events.jsonl` with filters for targeted recovery.
 4. Write the updated status file
 5. Output inline status to CLI
 
