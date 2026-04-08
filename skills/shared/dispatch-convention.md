@@ -173,6 +173,12 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 - `est_output_tokens = total_output_chars / 4` (rounded)
 - `dispatches_by_tier = count of entries grouped by model_tier` (skip nulls)
 
+**Rework analysis:** For any `seq` with multiple manifest entries where an earlier entry has `status: "failed"` or `status: "error"`, the subsequent retry's `input_chars + output_chars` count as rework. Compute separately:
+- `rework_input_chars = sum(input_chars)` for retry entries only
+- `rework_output_chars = sum(output_chars)` for retry entries only
+- `est_rework_tokens = (rework_input_chars + rework_output_chars) / 4`
+- `rework_pct = est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`
+
 These aggregates feed into the chronicle signal's `efficiency` sub-object (see forge-skill/SKILL.md Step 8.5).
 
 ## Cleanup

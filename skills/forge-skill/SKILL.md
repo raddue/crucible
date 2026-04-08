@@ -253,6 +253,8 @@ After any skill that completes a significant task reports success. The calling s
          - `est_input_tokens`: `total_input_chars / 4` (rounded to nearest integer)
          - `est_output_tokens`: `total_output_chars / 4` (rounded to nearest integer)
          - `dispatches_by_tier`: count of dispatches grouped by `model_tier` (e.g., `{"opus": 5, "sonnet": 8, "haiku": 2}`) — skip null tiers
+         - `est_rework_tokens`: for any `seq` with a failed/errored entry followed by a retry, sum the retry's `(input_chars + output_chars) / 4`. `0` if no retries occurred.
+         - `rework_pct`: `est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`, rounded to 1 decimal
          - `active_work_m`: from existing metrics log computation (overlapping parallel intervals merged)
          - `wall_clock_m`: from existing duration computation
       5. Include as `metrics.efficiency` in the signal entry.
@@ -263,7 +265,7 @@ After any skill that completes a significant task reports success. The calling s
 
    **Example signal (with efficiency):**
    ```jsonl
-   {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false,"efficiency":{"total_input_chars":128400,"total_output_chars":82000,"est_input_tokens":32100,"est_output_tokens":20500,"dispatches_by_tier":{"opus":5,"sonnet":8,"haiku":2},"active_work_m":28,"wall_clock_m":42}}}
+   {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false,"efficiency":{"total_input_chars":128400,"total_output_chars":82000,"est_input_tokens":32100,"est_output_tokens":20500,"est_rework_tokens":4200,"rework_pct":8.0,"dispatches_by_tier":{"opus":5,"sonnet":8,"haiku":2},"active_work_m":28,"wall_clock_m":42}}}
    ```
 
    **Example signal (without efficiency — pre-enrichment or no manifest data):**

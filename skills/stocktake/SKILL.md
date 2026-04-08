@@ -106,7 +106,10 @@ Group filtered signals by `skill`. For each skill, compute:
 - **Avg Est. Tokens (in+out)**: average of `(est_input_tokens + est_output_tokens)` across runs
 - **Avg Duration**: average `duration_m`
 - **Avg Dispatches**: average total dispatches (sum of `dispatches_by_tier` values)
+- **Rework %**: average `rework_pct` across runs. If `rework_pct` is missing (pre-rework-tracking signal), display "—"
 - **Trend**: compare last 3 runs vs prior 3 runs — "improving" (fewer tokens), "stable" (within 10%), or "increasing" (more tokens). "insufficient data" if fewer than 4 runs.
+
+If any skill has average rework >30%, append a note: "**[skill]**: rework >30% — consider reviewing dispatch templates or quality-gate prompts for this skill."
 
 Output:
 
@@ -117,8 +120,8 @@ Output:
 **Disclaimer:** Estimates based on dispatch file sizes (chars/4). Actual token consumption may vary +/-30%.
 
 ### Per-Skill Summary
-| Skill | Runs | Avg Est. Tokens (in+out) | Avg Duration | Avg Dispatches | Trend |
-|-------|------|--------------------------|--------------|----------------|-------|
+| Skill | Runs | Avg Est. Tokens (in+out) | Rework % | Avg Duration | Avg Dispatches | Trend |
+|-------|------|--------------------------|----------|--------------|----------------|-------|
 ```
 
 ### Step 3: Dispatch Breakdown
