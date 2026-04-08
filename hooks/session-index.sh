@@ -211,7 +211,7 @@ echo "$ENTRY" >> "$EVENTS_FILE"
 
 # ── Trigger summary writer every 20 events or on semantic events ────────
 SHOULD_SUMMARIZE=false
-if [ "$EVENT_TYPE" = "phase_change" ] || [ "$EVENT_TYPE" = "skill_end" ]; then
+if [ "$EVENT_TYPE" = "phase_change" ] || [ "$EVENT_TYPE" = "skill_end" ] || [ "$EVENT_TYPE" = "error" ] || [ "$EVENT_TYPE" = "decision" ]; then
   SHOULD_SUMMARIZE=true
 elif [ $((SEQ % 20)) -eq 0 ]; then
   SHOULD_SUMMARIZE=true
