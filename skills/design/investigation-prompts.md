@@ -21,6 +21,10 @@ Agent tool (subagent_type: general-purpose):
 
     [RECON_BRIEF — relevant sections of the Investigation Brief from /recon. The recon brief provides codebase patterns and structure. Focus your research on approaches and trade-offs, not codebase discovery.]
 
+    ## Recon Open Questions (Unknowns to Resolve)
+
+    [RECON_OPEN_QUESTIONS — entries from recon's ## Open Questions section relevant to this dimension. If you can resolve any of these during your research, include the answer. These feed into assay's confidence scoring.]
+
     ## Project Context
 
     [Tech stack, architecture style, key constraints]
@@ -84,6 +88,10 @@ Agent tool (subagent_type: Explore, thoroughness: "very thorough"):
     ## Recon Brief (Structural Context)
 
     [RECON_BRIEF — relevant sections of the Investigation Brief from /recon. The recon brief includes a task-level impact analysis. Focus on dimension-specific impact — how does THIS decision affect systems beyond what the task-level analysis covers.]
+
+    ## Recon Open Questions (Unknowns to Resolve)
+
+    [RECON_OPEN_QUESTIONS — entries from recon's ## Open Questions section relevant to this dimension. If you can resolve any of these during your impact analysis, include the answer.]
 
     ## Likely Approaches Being Considered
 

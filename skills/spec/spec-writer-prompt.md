@@ -119,17 +119,19 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
     ```
     /assay
       question: "<dimension question>"
-      context: { recon brief + investigation findings }
+      context: { recon brief + investigation findings + open_questions: [recon's ## Open Questions relevant to this dimension] }
       decision_type: "architecture"
       cascading_decisions: [<prior decisions from decisions log>]
     ```
+
+    Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds assay's confidence on what the investigation explicitly could not determine.
 
     Use assay's recommendation as the starting point for autonomous decision-making.
     Apply confidence-based routing:
     - **high** confidence: Accept assay recommendation. Log decision. Proceed.
     - **medium** confidence: Accept recommendation but emit terminal alert with assay's
-      `missing_information` field.
-    - **low** confidence: Emit `block` terminal alert. Log as uncertain decision.
+      `missing_information` field (now grounded by recon's Open Questions).
+    - **low** confidence: Emit `block` terminal alert with `missing_information` items and their `Resolvable by:` metadata so the user knows exactly what to investigate. Log as uncertain decision.
 
     On assay failure: "Assay evaluation failed: [reason]. Proceeding with manual
     synthesis." Make decision based on investigation findings (existing behavior).

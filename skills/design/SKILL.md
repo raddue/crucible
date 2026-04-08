@@ -96,10 +96,12 @@ After agents return:
    ```
    /assay
      question: "<design dimension question>"
-     context: { recon brief sections + agent findings }
+     context: { recon brief sections + agent findings + open_questions: [recon's ## Open Questions relevant to this dimension] }
      decision_type: "architecture"
      cascading_decisions: [<prior dimension decisions>]
    ```
+
+   Extract `## Open Questions` from the recon brief and include entries whose `Relevant to:` tag matches the current dimension. This grounds assay's confidence scoring on what the investigation explicitly could not determine, and populates `missing_information` with actionable items (using recon's `Resolvable by:` metadata).
 
    Use assay's recommendation as the starting point. Present assay's `constraint_fit` scoring, `kill_criteria`, and `confidence` level to the user.
 
@@ -150,6 +152,7 @@ single-model Challenger agent.
 **Constraint Fit:** [from assay report, if available — pattern_alignment, scope_fit, reversibility, integration_risk]
 **Kill Criteria:** [from assay — when to revisit this decision]
 **Confidence:** [high/medium/low from assay]
+**Unknowns:** [from assay's missing_information, grounded by recon's Open Questions — what we don't know and how to find out]
 
 **Recommendation:** [your recommended option and why]
 
