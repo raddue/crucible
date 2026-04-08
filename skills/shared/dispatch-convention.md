@@ -79,6 +79,42 @@ Begin by reading that file.
 - "Begin by reading that file" establishes the first action, not the only action
 - For teammate dispatches: mailbox/communication protocol instructions go in the dispatch file, not the pointer prompt
 
+## Pipeline-Active Marker
+
+**Purpose:** Detect interrupted (crashed) pipelines across sessions. The dispatch-active marker (below, in Compaction Recovery) handles within-session compaction recovery. The pipeline-active marker handles cross-session crash detection.
+
+**Path:** `<scratch>/.pipeline-active`
+
+**Format (JSON):**
+```json
+{
+  "pipeline_id": "<session-id>",
+  "skill": "<skill-name>",
+  "phase": "<current-phase>",
+  "start_time": "<ISO-8601>",
+  "scratch_dir": "<scratch directory path>",
+  "dispatch_dir": "/tmp/crucible-dispatch-<session-id>/",
+  "branch": "<git branch at pipeline start>",
+  "baseline_sha": "<HEAD SHA at pipeline start>"
+}
+```
+
+**Lifecycle:**
+1. **Write** at pipeline start -- before the first dispatch, after the dispatch directory is created
+2. **Update** at phase boundaries -- update the `phase` field to track progress
+3. **Delete** on successful pipeline completion -- the final cleanup step removes the marker
+4. **Leave in place on crash** -- the marker's presence with a non-current session ID IS the crash signal
+
+**Detection (at pipeline start):**
+1. Check `<scratch>/.pipeline-active`
+2. Not found -> write marker (include `branch` from `git branch --show-current` and `baseline_sha` from `git rev-parse HEAD`), proceed normally
+3. Found, same `pipeline_id` as current session -> compaction recovery (within-session, existing behavior)
+4. Found, different `pipeline_id` -> previous pipeline crashed. Check `branch` field against current `git branch --show-current`:
+   - **Branch matches:** offer resume per the skill's resume logic (see `crucible:replay` for full orchestration, or per-skill detection-only for secondary skills)
+   - **Branch mismatch:** warn the user: *"Previous [skill] on branch [marker.branch] crashed at Phase [phase]. You are currently on [current-branch]. Switch to [marker.branch] before resuming? [switch+resume / start fresh / abort]"*. Do NOT proceed with resume on the wrong branch — checkpoint restore would contaminate the current branch.
+
+**Where `<scratch>` is:** The pipeline's persistent scratch directory (`~/.claude/projects/<hash>/memory/`).
+
 ## Compaction Recovery
 
 **On-disk marker (primary mechanism):** At dispatch-directory creation time, the orchestrator writes a marker to the pipeline's persistent scratch directory:
@@ -137,8 +173,11 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 - `output_chars` — subagent response length in characters, measured after completion (null for pre-enrichment entries, in-flight dispatches, or crashed subagents)
 - `model_tier` — "opus", "sonnet", or "haiku" (null for pre-enrichment entries)
 - `tool_calls` — count of tool invocations by the subagent (null if unavailable)
+- `replay_of` — seq number of the original dispatch being replayed (null or absent for non-replay entries)
+- `replay_session` — session ID of the replay run (null or absent for non-replay entries)
+- `mutation` — template mutation applied during replay, e.g. `"original.md -> replacement.md"` (null or absent for non-replay or faithful replay entries)
 
-**Backward compatibility:** Entries without `input_chars`, `output_chars`, `model_tier`, or `tool_calls` (from pre-enrichment runs) are valid. Consumers must handle missing/null values gracefully.
+**Backward compatibility:** Entries without efficiency fields (`input_chars`, `output_chars`, `model_tier`, `tool_calls`) or replay fields (`replay_of`, `replay_session`, `mutation`) are valid. Consumers must handle missing/null values gracefully.
 
 ### Re-dispatch Safety
 
@@ -148,11 +187,13 @@ Read-only agents (reviewers, red-team) can be re-dispatched safely — second ru
 1. Dispatch file creation timestamp is recent (within current session)
 2. Check for evidence of prior completion (commits, test results, output files)
 
+**Cross-session re-dispatch (replay):** The `crucible:replay` skill performs artifact verification before any cross-session re-dispatch -- checking git log for expected commits and verifying output files exist. This is the canonical pre-dispatch check for resume scenarios. See replay skill for details.
+
 ### What the Manifest Enables
 
 1. **Failure replay** — debugging skill reads manifest, re-runs failing dispatch from preserved file
 2. **Forge execution data** — machine-readable trace of template failure rates, phase durations, iteration counts
-3. **Pipeline resume (future)** — skip completed dispatches, restart from first failure
+3. **Pipeline replay** — resume from crash or replay with template mutations (see `crucible:replay`)
 
 ### Chronicle Compatibility
 

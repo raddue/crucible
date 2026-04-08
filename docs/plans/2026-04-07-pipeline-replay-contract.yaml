@@ -9,20 +9,26 @@ api_surface:
     type: "file-format"
     signature: "<scratch>/.pipeline-active"
     params:
-      - name: "pipeline"
+      - name: "pipeline_id"
         type: "string"
         required: true
-      - name: "session-id"
+      - name: "skill"
         type: "string"
         required: true
-      - name: "started"
+      - name: "phase"
+        type: "string"
+        required: true
+      - name: "start_time"
         type: "ISO-8601 timestamp"
         required: true
-      - name: "dispatch-dir"
+      - name: "scratch_dir"
         type: "string"
         required: true
-    returns: "4-line plaintext marker file"
-    description: "Marker file written at pipeline start, deleted on successful completion. Presence with a non-current session ID indicates a crashed pipeline."
+      - name: "dispatch_dir"
+        type: "string"
+        required: true
+    returns: "JSON marker file with 6 fields"
+    description: "Marker file written at pipeline start, deleted on successful completion. Presence with a non-current pipeline_id indicates a crashed pipeline. The phase field is updated at phase boundaries to track progress."
 
   - name: "manifest replay fields"
     type: "interface"

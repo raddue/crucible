@@ -268,6 +268,19 @@ Emit a Compression State Block at:
 - **Escalations:** Before any escalation to user
 - **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
+## Pipeline-Active Marker
+
+Before any dispatch work, check for a crashed prior spec session:
+
+1. **Check `<scratch>/.pipeline-active`** (where `<scratch>` is `~/.claude/projects/<hash>/memory/`)
+2. **Not found:** Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"spec"`, `phase` set to `"init"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` and `dispatch_dir` paths, `branch` from `git branch --show-current`, `baseline_sha` from `git rev-parse HEAD`). Proceed to Orchestration Flow.
+3. **Found, same `pipeline_id`:** Compaction recovery (existing behavior). Do not re-write the marker.
+4. **Found, different `pipeline_id`:** Previous spec session crashed. Check marker's `branch` against current branch — if mismatched, warn the user which branch the crashed session was on. Present to user:
+   > "Previous spec session on branch [marker.branch] crashed. Start fresh? [yes]"
+   Delete the stale marker. Write a fresh marker. Proceed to Orchestration Flow. (Full replay orchestration for spec is deferred -- detection and cleanup only for now.)
+
+**Marker cleanup:** Delete `.pipeline-active` after the summary report (step [12]) completes.
+
 ## Orchestration Flow
 
 ```

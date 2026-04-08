@@ -147,7 +147,7 @@ Emit a Compression State Block at:
 5. Read `where-else-state.md` (if exists) for Phase 4.5 progress — which siblings have been fixed, which remain.
 6. Output status to user and continue from the current phase.
 
-**Cleanup:** Delete scratch directory after debugging completes (Phase 5 passes clean or escalation to user).
+**Cleanup:** Delete scratch directory and `.pipeline-active` marker after debugging completes (Phase 5 passes clean or escalation to user).
 
 ### Phase Handoff Manifest
 
@@ -286,6 +286,19 @@ Done.
 ```
 
 ---
+
+### Phase -1: Pipeline-Active Marker Check
+
+Before any dispatch work, check for a crashed prior debugging session:
+
+1. **Check `<scratch>/.pipeline-active`** (where `<scratch>` is `~/.claude/projects/<hash>/memory/`)
+2. **Not found:** Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"debugging"`, `phase` set to `"0"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` and `dispatch_dir` paths, `branch` from `git branch --show-current`, `baseline_sha` from `git rev-parse HEAD`). Proceed to Phase 0.
+3. **Found, same `pipeline_id`:** Compaction recovery (existing behavior). Do not re-write the marker.
+4. **Found, different `pipeline_id`:** Previous debugging session crashed. Check marker's `branch` against current branch — if mismatched, warn the user which branch the crashed session was on. Present to user:
+   > "Previous debugging session on branch [marker.branch] crashed. Start fresh? [yes]"
+   Delete the stale marker. Write a fresh marker. Proceed to Phase 0. (Full replay orchestration for debugging is deferred -- detection and cleanup only for now.)
+
+**Marker cleanup:** Delete `.pipeline-active` after debugging completes (Phase 5 passes clean or escalation to user), alongside the existing scratch directory cleanup.
 
 ### Phase 0: Load Codebase Context
 
