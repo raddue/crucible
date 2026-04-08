@@ -2,6 +2,7 @@ node_modules/
 docs/plans/
 skills/*-workspace/
 skills/skill-creator/
+skills/stocktake/results.json
 src/
 tests/
 package.json
