@@ -5,6 +5,8 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 
 # Dispatching Parallel Agents
 
+<!-- CANONICAL: shared/dispatch-convention.md -->
+
 ## Overview
 
 When you have multiple unrelated failures (different test files, different subsystems, different bugs), investigating them sequentially wastes time. Each investigation is independent and can happen in parallel.
@@ -63,12 +65,17 @@ Each agent gets:
 
 ### 3. Dispatch in Parallel
 
-```typescript
-// In Claude Code / AI environment
-Task("Fix agent-tool-abort.test.ts failures")
-Task("Fix batch-completion-behavior.test.ts failures")
-Task("Fix tool-approval-race-conditions.test.ts failures")
-// All three run concurrently
+Use disk-mediated dispatch (see `shared/dispatch-convention.md`) to write dispatch files, then spawn agents:
+
+```markdown
+# Write dispatch files to /tmp/crucible-dispatch-<session-id>/
+# Each file contains the full prompt, constraints, and expected output format.
+
+dispatch-001-abort-tests.md    → Agent 1: Fix agent-tool-abort.test.ts
+dispatch-002-batch-tests.md    → Agent 2: Fix batch-completion-behavior.test.ts
+dispatch-003-race-tests.md     → Agent 3: Fix tool-approval-race-conditions.test.ts
+
+# Spawn all three agents concurrently, each reading its dispatch file.
 ```
 
 ### 4. Review and Integrate
@@ -139,11 +146,11 @@ Return: Summary of what you found and what you fixed.
 
 **Decision:** Independent domains - abort logic separate from batch completion separate from race conditions
 
-**Dispatch:**
+**Dispatch** (disk-mediated, one dispatch file per agent):
 ```
-Agent 1 → Fix agent-tool-abort.test.ts
-Agent 2 → Fix batch-completion-behavior.test.ts
-Agent 3 → Fix tool-approval-race-conditions.test.ts
+dispatch-001-abort.md     → Agent 1: Fix agent-tool-abort.test.ts
+dispatch-002-batch.md     → Agent 2: Fix batch-completion-behavior.test.ts
+dispatch-003-race.md      → Agent 3: Fix tool-approval-race-conditions.test.ts
 ```
 
 **Results:**
