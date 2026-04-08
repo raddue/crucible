@@ -256,6 +256,7 @@ After context compaction:
 5. Read `scratch/<run-id>/decisions.md` -- recover the decision log for context cascading to remaining tickets.
 6. For any ticket with status `investigating`, `dependency-check`, `writing`, or `validating`: restart from the beginning of its current phase.
 7. Emit a Compression State Block into the conversation to seed the new context window.
+7.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive.
 8. Resume processing from the wave schedule, skipping completed/committed tickets.
 
 ### Checkpoint Timing
@@ -747,6 +748,7 @@ When `/spec` resolves an ambiguity or defines an API surface on ticket N that af
 - Declaring a quality gate "done" after fixing findings without a clean verification round (fixing is not passing)
 - Skipping the integration check because "all per-document gates passed so it's fine"
 - Interpreting general user feedback as approval to skip a quality gate that has not yet run — once a gate has run and presented findings to the user, the user's decision to proceed is authoritative
+- Treating session index summary as authoritative over CSB state (session index is supplementary narrative, CSB is authoritative state)
 
 ## Integration
 
