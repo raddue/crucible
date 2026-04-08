@@ -1,0 +1,232 @@
+version: "1.0"
+ticket: "#106"
+epic: "#106"
+title: "Token Efficiency Tracking for Skills"
+date: "2026-04-07"
+
+api_surface:
+  - name: "EnrichedManifestEntry"
+    type: "interface"
+    signature: '{"seq":N,"file":"...","role":"...","phase":"...","task":N|null,"status":"...","duration_s":N,"summary":"...","input_chars":N|null,"output_chars":N|null,"model_tier":"opus"|"sonnet"|"haiku"|null,"tool_calls":N|null}'
+    params:
+      - name: "input_chars"
+        type: "integer|null — dispatch file size in characters, measured before dispatch"
+        required: false
+      - name: "output_chars"
+        type: "integer|null — subagent response length in characters, measured after completion"
+        required: false
+      - name: "model_tier"
+        type: 'string|null — "opus", "sonnet", or "haiku"'
+        required: false
+      - name: "tool_calls"
+        type: "integer|null — count of tool invocations by the subagent, null if unavailable"
+        required: false
+    returns: "JSONL line appended to manifest.jsonl"
+    description: "Extended dispatch manifest entry. New fields are additive and optional — entries without them (from pre-enrichment runs) are valid. Total entry size must remain under 4096 bytes (POSIX PIPE_BUF)."
+
+  - name: "EfficiencySubObject"
+    type: "interface"
+    signature: '{"total_input_chars":N,"total_output_chars":N,"est_input_tokens":N,"est_output_tokens":N,"dispatches_by_tier":{"opus":N,"sonnet":N,"haiku":N},"active_work_m":N,"wall_clock_m":N}'
+    params:
+      - name: "total_input_chars"
+        type: "integer — sum of input_chars across all manifest entries for this pipeline run"
+        required: true
+      - name: "total_output_chars"
+        type: "integer — sum of output_chars across all manifest entries"
+        required: true
+      - name: "est_input_tokens"
+        type: "integer — total_input_chars / 4, rounded to nearest integer"
+        required: true
+      - name: "est_output_tokens"
+        type: "integer — total_output_chars / 4, rounded to nearest integer"
+        required: true
+      - name: "dispatches_by_tier"
+        type: "object — count of dispatches grouped by model_tier"
+        required: true
+      - name: "active_work_m"
+        type: "number — active work minutes (overlapping parallel intervals merged)"
+        required: true
+      - name: "wall_clock_m"
+        type: "number — wall clock minutes from first dispatch to final completion"
+        required: true
+    returns: "Nested object within chronicle signal metrics bag"
+    description: "Aggregated efficiency metrics computed from enriched manifest at pipeline completion. Included in chronicle signal as metrics.efficiency. Omitted entirely if manifest lacks input_chars fields (pre-enrichment run)."
+
+  - name: "TokenEstimator"
+    type: "function"
+    signature: "est_tokens = chars / 4"
+    params:
+      - name: "chars"
+        type: "integer — character count of text content"
+        required: true
+    returns: "integer — estimated token count"
+    description: "Character-to-token estimation. Uses chars/4 ratio (English text average). Accuracy: +/-20% for prose, +/-25% for code. Not suitable for billing or exact cost calculation."
+
+  - name: "StocktakeEfficiencyReport"
+    type: "interface"
+    signature: "/stocktake efficiency"
+    params: []
+    returns: "Efficiency report with per-skill breakdown, dispatch analysis, baseline comparison"
+    description: "New stocktake mode that reads chronicle signals with efficiency sub-objects and produces comparative analysis. Requires 3+ signals with efficiency data to produce meaningful output."
+
+  - name: "MeasurementProtocol"
+    type: "interface"
+    signature: "Before dispatch: measure file size. After completion: measure response size."
+    params:
+      - name: "dispatch_file_path"
+        type: "string — absolute path to the dispatch file"
+        required: true
+    returns: "input_chars (before dispatch), output_chars + model_tier + tool_calls (after completion)"
+    description: "Two-phase measurement protocol integrated into the existing dispatch-convention flow. Measurement happens at the orchestrator level, not the subagent level."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Enriched manifest entries remain under 4096 bytes (POSIX PIPE_BUF)"
+      verification: "No manifest JSONL line exceeds 4096 bytes after adding efficiency fields"
+      check_method: "grep + wc"
+
+    - id: "INV-2"
+      description: "New manifest fields are optional — entries without them are valid"
+      verification: "All code that reads manifest entries handles null/missing input_chars, output_chars, model_tier, tool_calls gracefully"
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Chronicle signal schema is not broken — v1 signals remain valid"
+      verification: "Signal version field stays at v:1. Efficiency sub-object is additive within existing metrics bag"
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "All reporting includes accuracy disclaimer"
+      verification: "Every efficiency report output contains the string 'estimates' or 'estimated' and references the +/-30% accuracy range"
+      check_method: "grep"
+
+    - id: "INV-5"
+      description: "Token estimator uses chars/4, not any other ratio"
+      verification: "All token estimation divides character count by 4"
+      check_method: "grep"
+
+    - id: "INV-6"
+      description: "Efficiency sub-object omitted when manifest lacks enrichment data"
+      verification: "If no manifest entries have input_chars populated, the chronicle signal omits the efficiency key entirely (no zeros, no nulls)"
+      check_method: "code-inspection"
+
+    - id: "INV-7"
+      description: "Session JSONL logs are never parsed by this feature"
+      verification: "No skill reads from ~/.claude/projects/<hash>/<session-id>/ for token data"
+      check_method: "grep"
+
+    - id: "INV-8"
+      description: "Measurement happens at orchestrator level, not subagent level"
+      verification: "Dispatch file measurement (input_chars) is performed by the orchestrator before dispatch, not by the subagent"
+      check_method: "code-inspection"
+
+  testable:
+    - id: "INV-9"
+      description: "Build pipeline produces enriched manifest entries"
+      verification: "Run a build pipeline. Verify manifest.jsonl contains entries with input_chars and output_chars fields populated with positive integers."
+      test_tag: "contract:efficiency:inv-9"
+
+    - id: "INV-10"
+      description: "Forge emits chronicle signal with efficiency sub-object after enriched build"
+      verification: "Run a build pipeline with enriched manifest. Verify chronicle signal contains metrics.efficiency with all required fields."
+      test_tag: "contract:efficiency:inv-10"
+
+    - id: "INV-11"
+      description: "Stocktake efficiency mode produces report from chronicle data"
+      verification: "With 3+ chronicle signals containing efficiency data, run /stocktake efficiency. Verify output contains per-skill summary table and accuracy disclaimer."
+      test_tag: "contract:efficiency:inv-11"
+
+    - id: "INV-12"
+      description: "Backward compatibility — old manifests don't break new code"
+      verification: "Read a manifest.jsonl with no efficiency fields. Verify no errors, efficiency sub-object correctly omitted from chronicle signal."
+      test_tag: "contract:efficiency:inv-12"
+
+integration_points:
+  - target: "skills/shared/dispatch-convention.md"
+    type: "protocol-extension"
+    description: "Add measurement steps to dispatch protocol and new fields to manifest entry format"
+
+  - target: "skills/forge-skill/SKILL.md"
+    type: "signal-extension"
+    description: "Extend chronicle signal emission (Step 8.5) to compute and include efficiency sub-object from manifest data"
+
+  - target: "skills/build/SKILL.md"
+    type: "implementation"
+    description: "Reference implementation of manifest enrichment in the heaviest dispatch user"
+
+  - target: "skills/debugging/SKILL.md"
+    type: "implementation"
+    description: "Second implementation of manifest enrichment"
+
+  - target: "skills/stocktake/SKILL.md"
+    type: "reporting"
+    description: "New efficiency mode that consumes chronicle signals and produces comparative analysis"
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Use character count / 4 as token estimator instead of a tokenizer library"
+    confidence: "high"
+    alternatives: ["tiktoken library (Python dependency)", "cl100k_base tokenizer (binary dependency)", "word count / 0.75 (less accurate for code)"]
+    reasoning: "Skills are Markdown instruction files, not code. They cannot import libraries or run binaries. Character counting is available via shell (wc -c) or implicit from file reads. The +/-20% accuracy is acceptable for relative comparison, which is the primary use case."
+    reversibility: "High — if Claude Code ever exposes native token counts, the estimator can be replaced without changing the data schema (just the computation)"
+
+  - id: "AMB-2"
+    decision: "Do not parse Claude Code session JSONL logs for token data"
+    confidence: "high"
+    alternatives: ["Parse session logs for usage fields", "Hook into API response headers"]
+    reasoning: "Session JSONL format is not a public API. A skill cannot reliably read its own session log mid-execution (flush timing). Even if token fields exist, depending on them creates fragile coupling to Claude Code internals that could break on any update."
+    reversibility: "High — if Claude Code adds a stable token reporting API, this decision can be revisited without disrupting the proxy-based approach (which would become a fallback)"
+
+  - id: "AMB-3"
+    decision: "Enrich existing manifest.jsonl rather than creating a separate efficiency log"
+    confidence: "high"
+    alternatives: ["Separate /tmp/crucible-efficiency-<session-id>.log", "Efficiency fields in metrics log instead of manifest"]
+    reasoning: "The manifest already has per-dispatch granularity and a defined append protocol with PIPE_BUF atomicity. Adding 4 fields (~80 bytes) stays well within the 4096-byte entry limit. A separate log file adds coordination complexity and another file to clean up."
+    reversibility: "Medium — migrating fields out of manifest later would require updating all consumers, but the fields are optional so removing them is non-breaking"
+
+  - id: "AMB-4"
+    decision: "Structural baseline estimation rather than A/B testing"
+    confidence: "medium"
+    alternatives: ["Record baseline by running tasks without skills", "User self-report of time saved"]
+    reasoning: "Cannot run controlled experiments — there is no mechanism to replay the same task with and without skills. Structural analysis (monolithic input estimate vs. distributed dispatch) is honest about what it measures. User self-report is subjective and unreliable."
+    reversibility: "High — if task replay becomes possible, A/B comparison can be added as a separate reporting dimension"
+
+  - id: "AMB-5"
+    decision: "Stocktake as reporting surface rather than a dedicated efficiency skill"
+    confidence: "high"
+    alternatives: ["New standalone efficiency skill", "Forge mutation analysis"]
+    reasoning: "Stocktake already audits skill health across multiple dimensions. Efficiency is a health dimension. Adding a mode is cheaper than creating a new skill. Forge captures data but its role is retrospective and mutation, not reporting."
+    reversibility: "High — if efficiency reporting grows complex enough to warrant its own skill, extraction from stocktake is straightforward"
+
+error_handling:
+  - condition: "Manifest has no entries with input_chars (pre-enrichment run)"
+    behavior: "Omit efficiency sub-object from chronicle signal entirely. Do not emit zeros or nulls."
+
+  - condition: "Dispatch file unreadable at measurement time (race condition, permission error)"
+    behavior: "Set input_chars to null for that entry. Log a warning in the metrics log. Continue dispatch normally — measurement failure must not block pipeline execution."
+
+  - condition: "Subagent response length unavailable (agent crashed, timeout)"
+    behavior: "Set output_chars to null. Status field already captures failure. Efficiency aggregation skips null entries."
+
+  - condition: "Chronicle signals.jsonl missing or empty when stocktake efficiency runs"
+    behavior: "Report 'No efficiency data available. Run a pipeline with enriched manifest tracking to begin collecting data.' and exit cleanly."
+
+  - condition: "Fewer than 3 signals with efficiency data"
+    behavior: "Report available data with caveat: 'Insufficient data for trend analysis. N signals available, 3+ recommended for meaningful comparison.'"
+
+  - condition: "Mixed v1 (no efficiency) and enriched signals in chronicle"
+    behavior: "Filter to signals with efficiency sub-object for reporting. Report count of excluded signals: 'N of M total signals include efficiency data.'"
+
+accuracy_guarantees:
+  - claim: "Token estimates are directionally correct for relative comparison"
+    basis: "chars/4 ratio is well-established from tokenizer analysis across multiple LLM providers"
+    limitation: "Extended thinking tokens, prompt cache effects, and context carry-forward are not captured. Absolute accuracy is +/-30%."
+
+  - claim: "Baseline comparison measures structural distribution, not cost savings"
+    basis: "Cannot measure actual cost of skill-free alternative. Structural analysis compares what the skill sends vs. what a monolithic prompt would require."
+    limitation: "A monolithic prompt might not need all files that distributed dispatches reference. Baseline is an overestimate."
+
+  - claim: "Trend analysis is valid across runs of the same skill type"
+    basis: "Same estimation methodology applied consistently. Measurement errors are systematic (same direction and magnitude), so trends are reliable even if absolute values are approximate."
+    limitation: "Comparing across different skill types (build vs. debugging) is less meaningful — different work profiles produce different efficiency characteristics."

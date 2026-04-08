@@ -243,12 +243,32 @@ After any skill that completes a significant task reports success. The calling s
       - `branch`: Current git branch
       - `files_touched`: Project-relative paths of files modified during the skill invocation
       - `metrics`: Skill-specific metrics bag (see table below)
-   b. Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
-   c. If the file or directory doesn't exist, create it
-   d. This step does NOT require redaction — signals contain no prompt content,
+   b. **Compute efficiency sub-object from manifest** (if enriched manifest data is available):
+      1. Locate the dispatch directory from the `.dispatch-active-*` marker in the pipeline's scratch directory, or from the metrics log.
+      2. Read `manifest.jsonl` from the dispatch directory.
+      3. Check whether any manifest entries have `input_chars` populated (non-null). If none do (pre-enrichment run), skip — do NOT include the `efficiency` sub-object (no zeros, no nulls).
+      4. If enriched entries exist, compute:
+         - `total_input_chars`: sum of all `input_chars` values (skip nulls)
+         - `total_output_chars`: sum of all `output_chars` values (skip nulls)
+         - `est_input_tokens`: `total_input_chars / 4` (rounded to nearest integer)
+         - `est_output_tokens`: `total_output_chars / 4` (rounded to nearest integer)
+         - `dispatches_by_tier`: count of dispatches grouped by `model_tier` (e.g., `{"opus": 5, "sonnet": 8, "haiku": 2}`) — skip null tiers
+         - `est_rework_tokens`: for any `seq` with a failed/errored entry followed by a retry, sum the retry's `(input_chars + output_chars) / 4`. `0` if no retries occurred.
+         - `rework_pct`: `est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`, rounded to 1 decimal
+         - `active_work_m`: from existing metrics log computation (overlapping parallel intervals merged)
+         - `wall_clock_m`: from existing duration computation
+      5. Include as `metrics.efficiency` in the signal entry.
+   c. Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
+   d. If the file or directory doesn't exist, create it
+   e. This step does NOT require redaction — signals contain no prompt content,
       task descriptions, or secrets. Only operational facts.
 
-   **Example signal:**
+   **Example signal (with efficiency):**
+   ```jsonl
+   {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false,"efficiency":{"total_input_chars":128400,"total_output_chars":82000,"est_input_tokens":32100,"est_output_tokens":20500,"est_rework_tokens":4200,"rework_pct":8.0,"dispatches_by_tier":{"opus":5,"sonnet":8,"haiku":2},"active_work_m":28,"wall_clock_m":42}}}
+   ```
+
+   **Example signal (without efficiency — pre-enrichment or no manifest data):**
    ```jsonl
    {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false}}
    ```
@@ -265,6 +285,7 @@ After any skill that completes a significant task reports success. The calling s
    | audit | findings_count, lenses_dispatched |
    | code-review | rounds, findings_by_severity |
    | TDD | cycles, red_green_refactor_count |
+   | *all skills* | efficiency (optional sub-object, present only when enriched manifest data exists) |
 
    **Signal scope rule:** Emit one signal per top-level skill invocation, not per
    sub-skill dispatch. When build calls quality-gate internally, quality-gate does

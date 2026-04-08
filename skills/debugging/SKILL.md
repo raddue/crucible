@@ -740,7 +740,11 @@ This is user-gated, not automatic. The orchestrator does not decide whether to l
 
 Throughout the debugging session, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log`.
 
-At completion, compute and report:
+**Dispatch measurement protocol:** On every subagent dispatch, the orchestrator follows the enriched manifest protocol from `shared/dispatch-convention.md`:
+- **Before dispatching:** Measure the dispatch file size in characters. Record `input_chars` and `model_tier` in the manifest entry.
+- **After dispatch returns:** Measure the subagent response length in characters. Record `output_chars` and `tool_calls` (if available) in the manifest completion entry.
+
+At completion, read the metrics log and manifest, then compute and report:
 
 ```
 -- Debugging Complete ---------------------------------------
@@ -749,10 +753,15 @@ At completion, compute and report:
   Wall clock time:       3h 42m
   Hypothesis cycles:     3
   Quality gate rounds:   2 (hypothesis: 1, fix: 1)
+  Est. input tokens:    ~15,200 (60,800 chars)
+  Est. output tokens:   ~9,800 (39,200 chars)
+  Token estimate note:  Based on dispatch file sizes (chars/4). Actual consumption may vary +/-30%.
 -------------------------------------------------------------
 ```
 
 Additional debugging metric: **hypothesis cycles** (number of hypothesis → investigate → implement cycles before resolution).
+
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the debugging completion report alongside existing metrics.
 
 ### Pipeline Decision Journal
 

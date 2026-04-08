@@ -1,0 +1,205 @@
+version: "1.0"
+ticket: "#143"
+epic: "#143"
+title: "Pipeline Replay — crash recovery + A/B experimentation from dispatch manifests"
+date: "2026-04-07"
+
+api_surface:
+  - name: "pipeline-active marker"
+    type: "file-format"
+    signature: "<scratch>/.pipeline-active"
+    params:
+      - name: "pipeline"
+        type: "string"
+        required: true
+      - name: "session-id"
+        type: "string"
+        required: true
+      - name: "started"
+        type: "ISO-8601 timestamp"
+        required: true
+      - name: "dispatch-dir"
+        type: "string"
+        required: true
+    returns: "4-line plaintext marker file"
+    description: "Marker file written at pipeline start, deleted on successful completion. Presence with a non-current session ID indicates a crashed pipeline."
+
+  - name: "manifest replay fields"
+    type: "interface"
+    signature: '{"replay_of": int|null, "replay_session": string|null, "mutation": string|null}'
+    params:
+      - name: "replay_of"
+        type: "int | null"
+        required: false
+      - name: "replay_session"
+        type: "string | null"
+        required: false
+      - name: "mutation"
+        type: "string | null"
+        required: false
+    returns: "Extended manifest entry fields"
+    description: "Three optional fields added to dispatch manifest JSONL entries. Null or absent for non-replay dispatches. replay_of links to original seq, replay_session identifies the replay run, mutation describes template substitution."
+
+  - name: "/replay CLI"
+    type: "skill-invocation"
+    signature: "/replay <path> [--from-phase N] [--from-seq N] [--mutate original=replacement] [--diff] [--dry-run] [--template-ref sha]"
+    params:
+      - name: "path"
+        type: "string"
+        required: true
+      - name: "--from-phase"
+        type: "int"
+        required: false
+      - name: "--from-seq"
+        type: "int"
+        required: false
+      - name: "--mutate"
+        type: "string (repeatable)"
+        required: false
+      - name: "--diff"
+        type: "boolean flag"
+        required: false
+      - name: "--dry-run"
+        type: "boolean flag"
+        required: false
+      - name: "--template-ref"
+        type: "string (git ref)"
+        required: false
+    returns: "Resumed pipeline execution or structured diff output"
+    description: "Replay skill entry point. Path is a scratch directory or manifest.jsonl path. Modes: resume (default), A/B (--mutate), dry-run (--dry-run)."
+
+  - name: "structured diff output"
+    type: "output-format"
+    signature: "Markdown table + JSONL summary"
+    params:
+      - name: "original_session"
+        type: "string"
+        required: true
+      - name: "replay_session"
+        type: "string"
+        required: true
+    returns: "Comparison report with metrics table, per-dispatch comparison, and artifact diff"
+    description: "Produced by --diff flag. Contains template mutations applied, outcome metrics (dispatch count, gate rounds, wall time, test results), per-dispatch status comparison, and git diff summary."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Pipeline-active marker is written before the first dispatch and deleted after successful completion"
+      verification: "build SKILL.md Step -1 writes marker before any dispatch. Phase 4 cleanup deletes marker after finish skill completes."
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "Replay never modifies original manifest entries"
+      verification: "Replay appends new entries with status 'replayed' and replay_of back-reference. No in-place modification of existing entries. Manifest is append-only per dispatch-convention.md."
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Checkpoint restore requires explicit user confirmation"
+      verification: "Resume flow presents option to user and waits for response before any filesystem modification. No auto-restore path exists."
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "Absent .pipeline-active marker produces identical behavior to today"
+      verification: "Step -1 resume detection is a no-op when marker is absent. All subsequent pipeline behavior is unchanged. Zero code paths diverge when marker is missing."
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "Manifest entries under 4096 bytes including new replay fields"
+      verification: "replay_of (int), replay_session (string ~10 chars), mutation (string ~60 chars) add at most ~100 bytes to entries already under the 4096 PIPE_BUF limit."
+      check_method: "code-inspection"
+
+    - id: "INV-6"
+      description: "Corrupted manifest lines are skipped, not fatal"
+      verification: "Manifest reader catches JSON parse errors per line, logs warning with line number, continues. Only zero-valid-entries case is treated as unrecoverable."
+      check_method: "code-inspection"
+
+    - id: "INV-7"
+      description: "Replay fields are backward-compatible (existing readers ignore them)"
+      verification: "No existing manifest reader references replay_of, replay_session, or mutation. Fields are additive. JSON parsers ignore unknown keys by default."
+      check_method: "grep"
+
+    - id: "INV-8"
+      description: "Template mutation only occurs in A/B mode with explicit --mutate flag"
+      verification: "Resume mode (no --mutate) dispatches from original templates. Mutation code path is gated on presence of --mutate argument."
+      check_method: "code-inspection"
+
+    - id: "INV-9"
+      description: "Dry-run mode makes no filesystem changes and dispatches no subagents"
+      verification: "Dry-run path reads manifest, computes resume plan, outputs report, exits. No calls to checkpoint restore, no dispatch file writes, no manifest appends, no Agent/Task tool calls."
+      check_method: "code-inspection"
+
+    - id: "INV-10"
+      description: "Resume from Phase 3 restores to wave boundary, not mid-wave"
+      verification: "Phase 3 resume point is always a pre-wave-N checkpoint. If crash occurred mid-wave, the entire wave is re-executed from the wave boundary checkpoint."
+      check_method: "code-inspection"
+
+  testable:
+    - id: "INV-11"
+      description: "Manifest partition correctly identifies phase boundaries"
+      verification: "Given a synthetic manifest with entries across phases 1-4, partition identifies the correct boundary between each phase and the latest verified boundary."
+      test_tag: "contract:replay:inv-11"
+
+    - id: "INV-12"
+      description: "Artifact verification detects missing commits"
+      verification: "Given a manifest entry marked completed but with no matching git commit, verification reports the entry as unverified and falls back to an earlier boundary."
+      test_tag: "contract:replay:inv-12"
+
+    - id: "INV-13"
+      description: "Structured diff accurately compares original and replayed runs"
+      verification: "Given two manifests (original and replayed), diff output contains correct dispatch count delta, duration delta, and per-dispatch status comparison."
+      test_tag: "contract:replay:inv-13"
+
+integration_points:
+  - contract: null
+    ticket: "#143"
+    relationship: "extends"
+    surface: "dispatch-convention.md manifest format"
+    notes: "Adds 3 optional fields (replay_of, replay_session, mutation) to manifest entry format. Adds .pipeline-active marker spec."
+
+  - contract: "2026-03-23-pipeline-checkpoint-contract.yaml"
+    ticket: "#143"
+    relationship: "consumes"
+    surface: "checkpoint-manifest.md and shadow git restore"
+    notes: "Replay reads checkpoint-manifest.md to correlate phase boundaries with checkpoint hashes. Uses GIT_DIR/GIT_WORK_TREE restore for filesystem recovery."
+
+  - contract: "2026-03-23-structured-compression-contract.yaml"
+    ticket: "#143"
+    relationship: "consumes"
+    surface: "Compression State Blocks and Phase Handoff Manifests"
+    notes: "Replay reads CSBs from pipeline-status.md and handoff manifests from scratch directory to reconstruct orchestrator state."
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Resume at phase boundaries, not per-dispatch"
+    confidence: "high"
+    alternatives: ["Per-dispatch resume with full orchestrator state serialization", "Checkpoint at every dispatch (high overhead)"]
+    reasoning: "Phase boundaries have clean state (all in-flight work completed, checkpoint taken, handoff manifest written). Per-dispatch resume requires serializing review loop counters, wave progress, and task dependency state -- fragile and complex. Phase boundaries give 7 resume points for build, which limits max rework to one wave (~30 min)."
+    reversibility: "Medium -- per-dispatch could be layered on top of phase-boundary infrastructure later"
+
+  - id: "AMB-2"
+    decision: "Replayed entries append to original manifest (not separate file)"
+    confidence: "medium"
+    alternatives: ["Separate replay manifest file with cross-reference", "Copy original manifest and append to copy"]
+    reasoning: "Single file is the complete execution history. Append-only protocol already supports multiple entries per seq. replay_of field preserves linkage. Separate files require tooling to cross-reference."
+    reversibility: "High -- could switch to separate files by changing manifest write path"
+
+  - id: "AMB-3"
+    decision: "Secondary skills (debugging, spec, migrate) get detection-only, not full replay"
+    confidence: "high"
+    alternatives: ["Full replay support for all skills simultaneously", "No detection for secondary skills"]
+    reasoning: "Build is the longest-running pipeline (2-3 hours) and the highest-value resume target. Secondary skills have less granular phase structure documented. Detection-only is cheap (~15 lines per skill) and prevents silent rework when users restart after a crash."
+    reversibility: "High -- full replay can be added per-skill independently"
+
+  - id: "AMB-4"
+    decision: "Automatic resume detection is opt-out (user can say 'start fresh'), not opt-in"
+    confidence: "high"
+    alternatives: ["Opt-in: user must explicitly invoke /replay", "Always resume without asking"]
+    reasoning: "Opt-out catches the common case (user restarts after crash, doesn't know resume exists). Opt-in requires the user to remember /replay exists. Always-resume without asking is dangerous (the old state might be unwanted). The prompt is lightweight and informative."
+    reversibility: "High -- toggle between opt-in/opt-out is a one-line change in detection logic"
+
+  - id: "AMB-5"
+    decision: "Replay does not interact with forge chronicle yet (deferred to chronicle implementation)"
+    confidence: "medium"
+    alternatives: ["Build chronicle signal emission into replay now", "Skip chronicle entirely"]
+    reasoning: "Chronicle is not yet live. Building integration now risks drift if chronicle's schema changes. The design documents the intent (replay_source field, replay-diff signal type) so the schema is forward-compatible. Wiring is deferred."
+    reversibility: "High -- chronicle integration is additive"

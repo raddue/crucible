@@ -106,14 +106,16 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 
 ### Protocol: Write Before Dispatch
 
-1. **Before dispatching:** Append entry with `status: "dispatched"`
-2. **After dispatch returns:** Append a new entry with the same `seq` and updated status/duration/summary. The last entry for a given `seq` is authoritative (append-only, no in-place rewrite — this preserves crash safety).
+1. **Before dispatching:** Measure the dispatch file size in characters (e.g., read the file, count characters). Append entry with `status: "dispatched"` and `input_chars` set to the measured character count. Include `model_tier` based on the dispatch decision (opus/sonnet/haiku). Set `output_chars` and `tool_calls` to null (not yet available).
+2. **After dispatch returns:** Measure the subagent response length in characters. Append a new entry with the same `seq` and updated status/duration/summary. Set `output_chars` to the measured response length. Set `tool_calls` to the count of tool invocations if available from the response metadata, otherwise null. The last entry for a given `seq` is authoritative (append-only, no in-place rewrite — this preserves crash safety).
 3. **After compaction:** If the last entry for a `seq` still shows `"dispatched"`, treat as needs-re-dispatch (conservative default)
+
+**Measurement failure handling:** If the dispatch file is unreadable at measurement time (race condition, permission error), set `input_chars` to null for that entry. If the subagent response length is unavailable (agent crashed, timeout), set `output_chars` to null. Measurement failure must never block pipeline execution — the pipeline proceeds normally with null efficiency fields.
 
 ### Entry Format
 
 ```jsonl
-{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves"}
+{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves","input_chars":12840,"output_chars":8200,"model_tier":"opus","tool_calls":5}
 ```
 
 **Fields:**
@@ -125,6 +127,12 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 - `status` — dispatched | completed | failed | skipped | error
 - `duration_s` — wall clock seconds (null while dispatched)
 - `summary` — one-line result from subagent output
+- `input_chars` — dispatch file size in characters, measured before dispatch (null for pre-enrichment entries or measurement failure)
+- `output_chars` — subagent response length in characters, measured after completion (null for pre-enrichment entries, in-flight dispatches, or crashed subagents)
+- `model_tier` — "opus", "sonnet", or "haiku" (null for pre-enrichment entries)
+- `tool_calls` — count of tool invocations by the subagent (null if unavailable)
+
+**Backward compatibility:** Entries without `input_chars`, `output_chars`, `model_tier`, or `tool_calls` (from pre-enrichment runs) are valid. Consumers must handle missing/null values gracefully.
 
 ### Re-dispatch Safety
 
@@ -143,6 +151,35 @@ Read-only agents (reviewers, red-team) can be re-dispatched safely — second ru
 ### Chronicle Compatibility
 
 The manifest schema is designed to be chronicle-compatible. When the chronicle system is live, the cleanup step should transform completed manifest entries into chronicle signals (per-dispatch granularity). This wiring is deferred to chronicle implementation — this note documents the intent so the schema doesn't drift.
+
+### Token Estimation
+
+The manifest's `input_chars` and `output_chars` fields enable token estimation using a character-to-token ratio.
+
+**Methodology:** `estimated_tokens = chars / 4`. This uses the well-established approximation that 1 token ~= 4 characters for English text. For code-heavy content, 1 token ~= 3.5 characters, but `chars / 4` is used uniformly for simplicity and consistency.
+
+**Accuracy:** +/-30% overall (+/-20% for pure prose, +/-25% for code, worse for mixed content with extended thinking or system prompt overhead). Estimates are directionally correct and suitable for relative comparison across runs. They are NOT suitable for billing or exact cost calculation.
+
+**Known blind spots:**
+- **Extended thinking tokens** — Opus subagents may use extended thinking, which consumes tokens not captured in the dispatch file or response. This causes underestimation of total token consumption for Opus dispatches.
+- **Prompt cache effects** — Subagents share prompt caches. Cache-warm dispatches consume fewer actual tokens than estimated. This causes overestimation of cost for cache-warm subagents.
+- **Context carry-forward** — Orchestrator context grows across dispatches. The orchestrator's own token consumption is not captured per-dispatch.
+- **System prompt overhead** — Each subagent has a system prompt (~2000 tokens Opus, ~1500 Sonnet, ~800 Haiku) not reflected in `input_chars`.
+
+**Aggregation:** At pipeline completion, compute totals from the manifest:
+- `total_input_chars = sum(input_chars)` across all entries (skip nulls)
+- `total_output_chars = sum(output_chars)` across all entries (skip nulls)
+- `est_input_tokens = total_input_chars / 4` (rounded)
+- `est_output_tokens = total_output_chars / 4` (rounded)
+- `dispatches_by_tier = count of entries grouped by model_tier` (skip nulls)
+
+**Rework analysis:** For any `seq` with multiple manifest entries where an earlier entry has `status: "failed"` or `status: "error"`, the subsequent retry's `input_chars + output_chars` count as rework. Compute separately:
+- `rework_input_chars = sum(input_chars)` for retry entries only
+- `rework_output_chars = sum(output_chars)` for retry entries only
+- `est_rework_tokens = (rework_input_chars + rework_output_chars) / 4`
+- `rework_pct = est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`
+
+These aggregates feed into the chronicle signal's `efficiency` sub-object (see forge-skill/SKILL.md Step 8.5).
 
 ## Cleanup
 
