@@ -2,7 +2,7 @@
 
 A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), [OpenAI Codex](https://openai.com/codex/), [Amp](https://amp.dev), [Cline](https://cline.bot), and any platform that supports the SKILL.md format.
 
-Covers the full development lifecycle: design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. Every skill is [eval-tested](#eval-results) with measured A/B deltas.
+Covers the full development lifecycle: design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 39 skills across pipeline, implementation, quality, security, debugging, knowledge, and utilities. Every skill is [eval-tested](#eval-results) with measured A/B deltas.
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged. Pipeline checkpoint system, auto skill extraction, structured context compression, and trajectory capture inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
@@ -19,11 +19,15 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## Why Crucible?
 
-**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 13 skills eval'd, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. 30+ skills total across pipeline, implementation, quality, security, debugging, knowledge, and utilities. See the [full scoreboard](#eval-results).
+**Every skill is eval-tested.** Crucible is the only skill collection we know of with quantified, blind A/B deltas using [Anthropic's own skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator). Each skill is run with and without its methodology against neutral prompts, graded by an independent agent that doesn't know which condition it's scoring. 13 skills eval'd, 49 evals, 96% with-skill vs 67% without — an average **+29% delta**. See the [full scoreboard](#eval-results).
 
 **Iterative quality gates, not single-pass review.** Unlike other skill collections, Crucible's quality-gate skill loops — it red-teams an artifact, a separate fix agent revises (with a fix journal that prevents repeating failed strategies), a fresh reviewer attacks again, and it continues until clean or until enhanced stagnation detection (weighted scoring + Fatal count tracking + oscillation detection) determines further iteration won't help. This accounts for a **68% delta** over unstructured review — the model scores 88% with the skill vs 19% without. Process expectations (iterative rounds, severity tracking, stagnation detection) are **0% without the skill**.
 
-**Token-efficient by design.** All 22 orchestrator skills use [disk-mediated dispatch](skills/shared/dispatch-convention.md) — full subagent prompts are written to `/tmp` dispatch files, and only a ~100-token pointer prompt enters the orchestrator's context. Over a full build pipeline (52-93 dispatches), this recovers 73-131K tokens of context that would otherwise fossilize in conversation history. The distill skill extends this philosophy to document ingestion: convert a 50-page PDF to a 4-page digest and save ~80% of context budget.
+**Token-efficient by design.** Orchestrator skills use [disk-mediated dispatch](skills/shared/dispatch-convention.md) — full subagent prompts are written to `/tmp` dispatch files, and only a ~100-token pointer prompt enters the orchestrator's context. Over a full build pipeline (52-93 dispatches), this recovers 73-131K tokens of context that would otherwise fossilize in conversation history. Token efficiency tracking enriches dispatch manifests with character-count estimates so you can measure actual skill costs via `/stocktake efficiency`. The distill skill extends this philosophy to document ingestion: convert a 50-page PDF to a 4-page digest and save ~80% of context budget.
+
+**Crash-resilient pipelines.** Long-running pipelines (build dispatches 52-93 subagents across 4 phases) are vulnerable to context exhaustion, timeouts, and session crashes. The replay skill connects dispatch manifests, shadow git checkpoints, and Compression State Blocks to resume interrupted pipelines from the last phase boundary — a 90-minute build that crashes at Phase 4 costs ~10 minutes to resume, not 90 to restart. Build, debugging, spec, and migrate all write pipeline-active markers for automatic crash detection. Replay also enables A/B experimentation: swap dispatch templates and replay historical pipelines to measure the impact of skill changes.
+
+**Session continuity across compactions.** PostToolUse hooks log high-value session events (file edits, git operations, test runs, errors, decisions) to a searchable session activity index. The `/recall` skill queries session history by keyword, event type, or time range. Skills emit semantic events (phase transitions, design decisions) via an outbox pattern, and compaction recovery steps in build, debugging, and spec re-read session state after context compression fires.
 
 **Full pipeline orchestration.** The build skill chains design, planning, execution, and completion into a single autonomous pipeline. It dispatches parallel implementers, runs two-pass code review per task, fills test coverage gaps, writes adversarial tests designed to break the implementation, and runs a 5-dimension cross-component inquisitor before the final quality gate.
 
@@ -82,6 +86,23 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 **`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50`** — Performance recommendation for long-running pipelines. Triggers compaction earlier to preserve context for complex multi-phase work. Pipeline skills emit structured Compression State Blocks at checkpoint boundaries to guide the compactor on what to preserve.
 
+**Session Activity Index (hooks)** — Crucible includes PostToolUse hooks (`hooks/session-index.sh`, `hooks/session-summary.sh`) that log session events for compaction recovery and the `/recall` skill. To enable, add to your `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      { "command": "/path/to/crucible/hooks/session-index.sh" },
+      { "command": "/path/to/crucible/hooks/session-summary.sh" }
+    ]
+  }
+}
+```
+
+See `hooks/README.md` for details on storage layout, the outbox pattern, and hook dependencies.
+
+**External Model Review (MCP)** — For independent code review from non-Anthropic models (Gemini, OpenAI, etc.), configure `.claude/consensus-config.yaml` using the example at `consensus-config-example.yaml` and register the MCP server in `.mcp.json`. See the consensus and external review skill descriptions for details.
+
 ## Recommended CLAUDE.md Additions
 
 Your project's `CLAUDE.md` is loaded into every turn of the conversation — it's the single highest-leverage configuration file for shaping agent behavior. Crucible skills inherit whatever you put there, so a well-configured `CLAUDE.md` makes every skill work better.
@@ -101,12 +122,13 @@ You have 40,000 characters — use them. The more context you provide about your
 
 | Skill | Description |
 |-------|-------------|
-| **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. Auto-generates a stakeholder-facing PRD after design approval. Live pipeline status file with health indicators for ambient awareness. Shadow git checkpoints at 7 pipeline boundaries for structured rollback on regression. Structured Compression State Blocks for resilient compaction recovery. One command, idea to completion. |
+| **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. Auto-generates a stakeholder-facing PRD after design approval. Live pipeline status file with health indicators for ambient awareness. Shadow git checkpoints at 7 pipeline boundaries for structured rollback on regression. Structured Compression State Blocks for resilient compaction recovery. Pipeline-active markers enable automatic crash detection and resume via `/replay`. Token efficiency tracking enriches dispatch manifests for cost visibility. One command, idea to completion. |
 | **spec** | Autonomous epic-to-spec pipeline. Takes a GitHub epic with child tickets and produces design docs, implementation plans, and machine-readable contracts (API surface, checkable/testable invariants) for each ticket without human interaction. Contract-based handoff to build. |
 | **prd** | Generates a stakeholder-facing Product Requirements Document from a finalized design doc. Transforms technical design decisions into problem statements, user stories, requirements, scope, and success metrics. Also runs automatically in the build pipeline. |
 | **design** | Interactive design refinement with quality gate on completed designs. Explores intent, requirements, and design before implementation. Produces a design doc. |
 | **planning** | Implementation plan writing with quality gate on completed plans. Bite-sized tasks with exact file paths, complete code, and expected outputs. |
 | **recon** | Standalone codebase investigation with layered output. Produces a core Investigation Brief (structure, patterns, scope, prior art) plus optional depth modules (impact-analysis, consumer-registry, friction-scan, subsystem-manifest, diagnostic-context, execution-readiness). Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before any task requiring codebase understanding. |
+| **replay** | Pipeline crash recovery and A/B experimentation. Reads dispatch manifests, partitions into completed/incomplete at phase boundaries, restores shadow git checkpoints, reconstructs orchestrator state from disk, and re-dispatches from the first incomplete entry. Three modes: resume (automatic crash recovery), A/B (`--mutate` to swap dispatch templates and compare outcomes), and dry-run (verify resume feasibility without executing). Cross-session capable — new conversation, old manifest, no shared context needed. |
 | **assay** | Recon-informed approach evaluator. Weighs competing options against codebase constraints with decision-type-adaptive scoring (architecture, strategy, diagnosis, optimization). Returns structured JSON Assay Reports with recommendations, alternatives with kill criteria, confidence scoring, and evidence grounding. Consumed by design, debugging, migrate, and prospector. |
 
 ### Implementation
@@ -157,12 +179,13 @@ You have 40,000 characters — use them. The more context you provide about your
 | Skill | Description |
 |-------|-------------|
 | **distill** | Convert heavy document formats (PDF, Word, Excel, PowerPoint, and 10+ others) to token-efficient Markdown/CSV. Three conversion tiers: Pandoc-native (9 formats), PDF (pdftotext + Claude structuring), Python venv (pptx via python-pptx, xlsx via openpyxl). Structurally-aware digest pass compresses to 20-30% of token count. Pre-flight safety checks (zip bomb, PDF attachments, encoding). Graceful degradation when tools are missing. |
+| **recall** | Query session history from the session activity index. Four modes: full summary (no args), keyword search, type filter (errors/decisions/edits/commits/tests/phases), and time range (last N minutes/hours). Graceful degradation when no session index exists. Consumed by compaction recovery steps in build, debugging, and spec. |
 
 ### Maintenance & Meta
 
 | Skill | Description |
 |-------|-------------|
-| **stocktake** | Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan or full evaluation modes. |
+| **stocktake** | Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan, full evaluation, or efficiency report modes. Efficiency mode reads chronicle signals to produce per-skill token cost breakdowns, dispatch tier distribution, and structural baseline comparisons. |
 | **skill-creator** | Create, edit, and evaluate skills. Run A/B evals to measure skill performance with variance analysis. Optimize skill descriptions for better triggering accuracy. |
 | **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. |
 
@@ -196,6 +219,12 @@ The **recon** skill provides structured codebase investigation — run `/recon` 
 The **siege** skill performs security audits — 6 parallel attacker-perspective agents iterate until zero Critical/High findings.
 
 **External model review** adds independent non-Anthropic perspectives to code-review, quality-gate, red-team, and inquisitor. Unlike consensus (which requires multiple models and synthesizes), external review works with a single provider and returns raw per-model analysis. On consensus-eligible quality-gate rounds, external responses are bridged into consensus. Configure in `consensus-config-example.yaml` under `external_review:`.
+
+The **replay** skill provides crash recovery and A/B experimentation for any pipeline. When a build crashes at Phase 4, replay reads the dispatch manifest, verifies completed artifacts, restores the checkpoint, and resumes from the first incomplete entry — 10 minutes instead of 90. For A/B testing, `--mutate` swaps dispatch templates and replays historical pipelines to measure skill changes. Build, debugging, spec, and migrate all write pipeline-active markers for automatic crash detection.
+
+The **recall** skill queries the session activity index — a searchable log of file edits, git operations, test runs, and errors maintained by PostToolUse hooks. Compaction recovery steps in build, debugging, and spec re-read session state after context compression. Skills emit semantic events (phase transitions, design decisions) via an outbox pattern for cross-skill continuity.
+
+Token efficiency tracking enriches dispatch manifests with character-count estimates (chars/4 ≈ tokens). The `/stocktake efficiency` command reads chronicle signals to produce per-skill cost breakdowns, dispatch tier distribution, and structural baseline comparisons.
 
 The **distill** skill converts heavy documents (PDF, Word, Excel, PowerPoint) to token-efficient Markdown/CSV with a digest pass — reducing context budget by ~80% for document-heavy workflows.
 
