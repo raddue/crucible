@@ -437,14 +437,27 @@ Each ticket goes through the same investigation process as `/design`, but fully 
 
 ### Step 1: Investigation
 
+At the start of each ticket's investigation, dispatch `/recon` for structural context:
+
+```
+/recon
+  task: "<ticket title and description>"
+  session_id: "<spec-epic-run-id>"
+  modules: ["impact-analysis"]
+```
+
+The `session_id` is the epic run's session ID -- shared across all tickets for Structure Scout cache reuse. The Structure Scout runs once for the first ticket and is cached for all subsequent tickets.
+
+**On recon failure:** "Recon failed: [reason]. Falling back to inline investigation." Proceed without recon context -- dimension investigations explore from scratch.
+
 Same depth as `/design` Phase 2 -- for each design dimension:
-- **Deep dive** (architectural decisions): 3 parallel agents (codebase scout, domain researcher, impact analyst) + challenger
-- **Quick scan** (implementation approach): single codebase scout
+- **Deep dive** (architectural decisions): 2 parallel agents (domain researcher, impact analyst) with recon brief context + challenger
+- **Quick scan** (implementation approach): read relevant sections of the recon brief (no agent dispatch needed)
 - **Direct resolution** (no technical implications): decide immediately
 
 All investigation results cascade -- prior ticket decisions inform subsequent investigations via the decisions log in the scratch directory.
 
-If the ticket is flagged "complex" (5+ design dimensions or 3+ upstream contracts), use quick-scan for ALL dimensions. Summarize each finding to 2-3 sentences.
+If the ticket is flagged "complex" (5+ design dimensions or 3+ upstream contracts), use quick-scan for ALL dimensions (read recon brief). Summarize each finding to 2-3 sentences.
 
 ### Step 2: Dependency Discovery
 
@@ -769,6 +782,8 @@ When `/spec` resolves an ambiguity or defines an API surface on ticket N that af
 - **crucible:cartographer** -- consult mode, once at start of run
 - **crucible:forge** -- feed-forward mode, once at start of run
 - **crucible:design** -- investigation prompts (parallel agents) reused for autonomous investigation. Templates in `design/investigation-prompts.md`.
+- **crucible:recon** -- dispatched per-ticket at investigation start with `modules: ["impact-analysis"]` and epic-level `session_id` for Structure Scout cache reuse across tickets. Replaces Codebase Scout. Fallback: investigate from scratch.
+- **crucible:assay** -- dispatched per architectural dimension (Deep Dive) with `decision_type: "architecture"`. Confidence routing: high=accept, medium=alert, low=block-alert. Fallback: manual synthesis.
 - **crucible:quality-gate** -- per-document gates (artifact types `design` and `plan`) + cross-ticket integration check on contracts
 - **crucible:worktree** -- orchestrator-only, for the epic branch if the user's working tree is on a different branch
 
