@@ -14,6 +14,8 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
 
+**Session index event:** At startup, if session indexing is active (session index path discoverable via glob), emit a `skill_start` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_start","summary":"Starting /build for <user goal>","detail":{"skill":"build","goal":"<user goal>"}}`. See `skills/shared/session-index-convention.md` for the outbox pattern.
+
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
 
 ## Communication Requirement (Non-Negotiable)
@@ -143,6 +145,7 @@ After compaction, before re-writing the status file:
 2. Reconstruct phase, health, and skill-specific body from internal state files
 3. If crucible:checkpoint was used: verify checkpoint availability by checking for the shadow repo at the computed path. Log available checkpoint count. Do not restore — just confirm checkpoints are recoverable.
 4. Emit a Compression State Block into the conversation to seed the new context window with recovered state
+4.5. **Read session index summary (supplementary):** If the CSB Scratch State contains a `Session Index:` path, or if globbing `~/.claude/projects/<hash>/memory/session-index/*/summary.md` finds a recent file, read `summary.md`. Include the Activity Timeline, Files Modified, and Key Decisions sections in the post-compaction narration. If no session index exists, skip silently — this step is purely additive.
 5. Write the updated status file
 6. Output inline status to CLI
 
@@ -176,6 +179,7 @@ Files Modified:
 
 Scratch State:
 - Location: [scratch directory path]
+- Session Index: [~/.claude/projects/<hash>/memory/session-index/<session-id>/ if active, omit if not]
 - Recovery: [which files to read first, in order]
 
 Next Steps:
@@ -423,6 +427,7 @@ Before dispatching the Plan Writer, write a handoff manifest to the scratch dire
 2. Emit shed statement: "Phase 1 context shed. Design doc, acceptance tests, and PRD are on disk. Design iteration history, innovate proposals, and gate round details are not carried forward."
 3. Update `## Compression State` in pipeline-status.md with manifest contents.
 4. Do NOT emit a Compression State Block (manifest replaces it at this boundary).
+5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 1 -> Phase 2 (Plan)","detail":{"skill":"build","from":"1","to":"2"}}`.
 
 ## Phase 2: Plan (Autonomous)
 
@@ -485,6 +490,7 @@ Before creating the team and task list, write a handoff manifest:
 2. Emit shed statement: "Phase 2 context shed. Plan, design doc, and acceptance tests are on disk. Plan review rounds, innovate proposals, and gate details are not carried forward."
 3. Update `## Compression State` in pipeline-status.md with manifest contents.
 4. Do NOT emit a Compression State Block.
+5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 2 -> Phase 3 (Execute)","detail":{"skill":"build","from":"2","to":"3"}}`.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
 
@@ -828,6 +834,7 @@ Before running acceptance tests and code review, write a handoff manifest:
 2. Emit shed statement: "Phase 3 context shed. Working code at HEAD, design doc, and acceptance tests on disk. Per-task implementation context, review rounds, and verification details are not carried forward."
 3. Update `## Compression State` in pipeline-status.md with manifest contents.
 4. Do NOT emit a Compression State Block.
+5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 3 -> Phase 4 (Completion)","detail":{"skill":"build","from":"3","to":"4"}}`.
 
 ## Phase 4: Completion
 
@@ -863,6 +870,7 @@ After all tasks complete:
 8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user
+10.5. **Session index event:** Emit a `skill_end` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_end","summary":"/build complete: <outcome summary>","detail":{"skill":"build","outcome":"success|failure|escalated"}}`.
 11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's Step 2.5 (test-coverage)** since test-coverage ran per-task in Phase 3, and **skip finish's Step 3 (red-team)** since quality-gate already ran at step 6. Tell finish to skip both.
 
 ### Session Metrics
@@ -1012,6 +1020,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - Declaring a quality gate "done" after fixing findings without a clean verification round (fixing is not passing)
 - Short-circuiting the quality-gate iteration loop by assuming fixes are self-evidently correct
 - Interpreting general user feedback as approval to skip a quality gate that has not yet run — once a gate has run and presented findings to the user, the user's decision to proceed is authoritative. Pre-gate skip approval must be an unambiguous instruction specifically referencing the gate.
+- Treating session index summary as authoritative over CSB state (session index is supplementary narrative, CSB is authoritative state)
 
 ## Integration
 
