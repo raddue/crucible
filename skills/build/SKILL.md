@@ -176,6 +176,7 @@ Files Modified:
 
 Scratch State:
 - Location: [scratch directory path]
+- Session Index: [~/.claude/projects/<hash>/memory/session-index/<session-id>/ if active, omit if not]
 - Recovery: [which files to read first, in order]
 
 Next Steps:

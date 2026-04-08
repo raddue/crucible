@@ -69,7 +69,17 @@ fi
 
 # ── Drain outbox (semantic events from skills) ──────────────────────────
 if [ -f "$OUTBOX_FILE" ] && [ -s "$OUTBOX_FILE" ]; then
-  cat "$OUTBOX_FILE" >> "$EVENTS_FILE"
+  # Assign proper seq numbers to outbox entries (they arrive with seq:0)
+  DRAIN_SEQ=0
+  if [ -f "$EVENTS_FILE" ]; then
+    DRAIN_SEQ="$(wc -l < "$EVENTS_FILE")"
+  fi
+  while IFS= read -r outbox_line; do
+    if [ -n "$outbox_line" ]; then
+      DRAIN_SEQ=$((DRAIN_SEQ + 1))
+      echo "$outbox_line" | jq -c --argjson s "$DRAIN_SEQ" '.seq = $s' >> "$EVENTS_FILE" 2>/dev/null
+    fi
+  done < "$OUTBOX_FILE"
   rm -f "$OUTBOX_FILE"
 fi
 

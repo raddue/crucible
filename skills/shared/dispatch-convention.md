@@ -100,6 +100,12 @@ seq: <current counter>
 
 This works for all 22 orchestrator skills regardless of whether they have Compression State Block support. CSB inclusion of the dispatch directory path is a secondary nice-to-have.
 
+**Session index integration (supplementary):** When session indexing is active (PostToolUse hook configured), include the session index path in the CSB Scratch State section:
+```
+Session Index: ~/.claude/projects/<hash>/memory/session-index/<session-id>/
+```
+After compaction, skills can read `summary.md` from this path for narrative context that supplements the CSB's authoritative state. If the session-id is lost, glob `~/.claude/projects/<hash>/memory/session-index/*/events.jsonl` and pick the most recently modified directory. See `skills/shared/session-index-convention.md` for details.
+
 ## Dispatch Manifest
 
 Every dispatch directory includes `manifest.jsonl` — a structured execution trace. Manifest entries must remain under 4096 bytes (POSIX PIPE_BUF) to ensure atomic appends under concurrent access.
