@@ -1,0 +1,243 @@
+version: "1.0"
+ticket: "#108"
+epic: "#108"
+title: "Context window efficiency: session activity index and compaction recovery"
+date: "2026-04-07"
+
+api_surface:
+  - name: "PostToolUse hook (session-index.sh)"
+    type: "interface"
+    signature: "stdin: {tool: string, args: object, result: object} -> exit 0"
+    params:
+      - name: "tool"
+        type: "string — tool name (Edit, Write, Bash, etc.)"
+        required: true
+      - name: "args"
+        type: "object — tool arguments as passed by Claude Code"
+        required: true
+      - name: "result"
+        type: "object — tool result (may be truncated by microcompaction)"
+        required: true
+    returns: "exit code 0 (always)"
+    description: "PostToolUse hook that classifies tool events and appends high-value entries to the session activity index. Must complete in <100ms. Must never fail in a way that blocks tool execution."
+
+  - name: "events.jsonl entry"
+    type: "interface"
+    signature: "{ts: string, seq: number, type: EventType, summary: string, detail: object}"
+    params:
+      - name: "ts"
+        type: "string — ISO-8601 timestamp"
+        required: true
+      - name: "seq"
+        type: "number — monotonically increasing sequence within session"
+        required: true
+      - name: "type"
+        type: "EventType — one of: file_edit, file_create, git_commit, git_checkout, test_run, error, decision, phase_change, skill_start, skill_end"
+        required: true
+      - name: "summary"
+        type: "string — human-readable one-line summary, max 120 chars"
+        required: true
+      - name: "detail"
+        type: "object — type-specific payload, max 500 chars serialized"
+        required: true
+    returns: "N/A (appended to events.jsonl)"
+    description: "Single event entry in the session activity index"
+
+  - name: "summary.md"
+    type: "interface"
+    signature: "Markdown file with sections: Session metadata, Activity Timeline, Files Modified, Key Decisions, Errors Encountered"
+    params:
+      - name: "session_id"
+        type: "string — session identifier"
+        required: true
+      - name: "started"
+        type: "string — first event timestamp"
+        required: true
+      - name: "last_updated"
+        type: "string — latest event timestamp"
+        required: true
+      - name: "event_count"
+        type: "number — total events in events.jsonl"
+        required: true
+    returns: "N/A (written to disk)"
+    description: "Rolling narrative summary of session activity, capped at ~2000 tokens. Overwritten on each update."
+
+  - name: "/recall"
+    type: "interface"
+    signature: "/recall query?: string"
+    params:
+      - name: "query"
+        type: "string — optional keyword, event type, or time range expression"
+        required: false
+    returns: "Markdown-formatted event table or summary"
+    description: "User-facing skill for querying session history. No args returns full summary. Keywords search events. Type names (errors, decisions, edits) filter by type. Time expressions (last 30 minutes) filter by time."
+
+  - name: "outbox.jsonl"
+    type: "interface"
+    signature: "Same schema as events.jsonl entries, written by skills, drained by hook"
+    params:
+      - name: "entries"
+        type: "array of events.jsonl entries"
+        required: true
+    returns: "N/A (drained into events.jsonl by next hook invocation)"
+    description: "Write-ahead buffer for semantic events emitted by pipeline skills. Skills write to outbox.jsonl via Write tool. The PostToolUse hook drains entries into events.jsonl on each invocation and removes the outbox file."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "PostToolUse hook must always exit 0 regardless of input or internal errors"
+      verification: "Hook script has set +e (or explicit error handling) and ends with exit 0. No code path exits non-zero."
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "Hook must complete in under 500ms (timeout configured in settings.json)"
+      verification: "Hook performs no network calls, no database queries, no recursive file scans. Only reads stdin, appends to one file, and optionally triggers summary writer."
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Read-only tool uses (Read, Glob, Grep) are NOT indexed"
+      verification: "Hook's event classification logic skips tool names Read, Glob, Grep, and Bash commands matching read-only patterns (cat, ls, find, echo, head, tail)"
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "Session index lives at ~/.claude/projects/<hash>/memory/session-index/<session-id>/"
+      verification: "Hook computes project hash from PWD using sha256sum truncated to 16 chars, matching checkpoint skill convention"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "summary.md stays under 2000 tokens (~8000 chars)"
+      verification: "Summary writer truncates Activity Timeline from oldest entries when character count exceeds 8000"
+      check_method: "code-inspection"
+
+    - id: "INV-6"
+      description: "Session index path is included in CSB Scratch State section"
+      verification: "Build, debugging, and spec SKILL.md CSB templates include 'Session Index:' field in Scratch State"
+      check_method: "grep"
+
+    - id: "INV-7"
+      description: "/recall skill degrades gracefully when no session index exists"
+      verification: "SKILL.md includes explicit handling for missing session index directory, returning a helpful message instead of an error"
+      check_method: "code-inspection"
+
+    - id: "INV-8"
+      description: "Compaction recovery step 4.5 is additive, not replacing existing steps"
+      verification: "Build/debugging/spec compaction recovery sections still contain all original steps (0, 0.5, 1, 2, 3, 4). Step 4.5 is inserted between 4 and 5 (or appended)."
+      check_method: "code-inspection"
+
+    - id: "INV-9"
+      description: "Outbox drain is atomic: entries are moved to events.jsonl and outbox.jsonl is deleted in one hook invocation"
+      verification: "Hook reads outbox.jsonl, appends all entries to events.jsonl, then removes outbox.jsonl. If the hook crashes mid-drain, the next invocation re-drains (idempotent because events.jsonl is append-only and duplicates are tolerable)."
+      check_method: "code-inspection"
+
+    - id: "INV-10"
+      description: "No new CSB emission triggers are added"
+      verification: "No skill's Checkpoint Timing section is modified to add new triggers. Session index writes are independent of CSB emission."
+      check_method: "code-inspection"
+
+    - id: "INV-11"
+      description: "Stale session cleanup only deletes directories older than 7 days"
+      verification: "Hook's cleanup logic uses find with -mtime +7 (or equivalent). Directories modified within 7 days are never deleted."
+      check_method: "code-inspection"
+
+    - id: "INV-12"
+      description: "events.jsonl entries are valid JSONL (one JSON object per line)"
+      verification: "Each appended line is a complete JSON object. No multi-line entries. No trailing commas."
+      check_method: "code-inspection"
+
+    - id: "INV-13"
+      description: "/recall SKILL.md references the session-index-convention for event schema"
+      verification: "skills/recall/SKILL.md references or includes the event schema from shared/session-index-convention.md"
+      check_method: "grep"
+
+  testable:
+    - id: "INV-14"
+      description: "Hook correctly classifies Edit tool use as file_edit event"
+      verification: "Pipe sample PostToolUse JSON with tool=Edit to hook, verify events.jsonl contains file_edit entry with correct file path"
+      test_tag: "contract:hook:inv-14"
+
+    - id: "INV-15"
+      description: "Hook correctly classifies Bash git commit as git_commit event"
+      verification: "Pipe sample PostToolUse JSON with tool=Bash, command containing 'git commit' to hook, verify events.jsonl contains git_commit entry"
+      test_tag: "contract:hook:inv-15"
+
+    - id: "INV-16"
+      description: "Hook correctly classifies Bash non-zero exit as error event"
+      verification: "Pipe sample PostToolUse JSON with tool=Bash, exit_code != 0 to hook, verify events.jsonl contains error entry"
+      test_tag: "contract:hook:inv-16"
+
+    - id: "INV-17"
+      description: "Summary writer respects token budget with large event counts"
+      verification: "Generate 200 events, run summary writer, verify summary.md is under 8000 chars and retains Files Modified and Key Decisions sections"
+      test_tag: "contract:summary:inv-17"
+
+    - id: "INV-18"
+      description: "Outbox drain moves entries correctly"
+      verification: "Write 5 entries to outbox.jsonl, invoke hook, verify all 5 entries appear in events.jsonl and outbox.jsonl is deleted"
+      test_tag: "contract:outbox:inv-18"
+
+    - id: "INV-19"
+      description: "Hook ignores Read tool use"
+      verification: "Pipe sample PostToolUse JSON with tool=Read to hook, verify events.jsonl has no new entries (or does not exist if first invocation)"
+      test_tag: "contract:hook:inv-19"
+
+integration_points:
+  - contract: null
+    ticket: "#140"
+    relationship: "respects"
+    surface: "CSB emission frequency"
+    notes: "This work does NOT add new CSB triggers, consistent with #140's frequency reduction. Session index writes are independent of CSB emission."
+
+  - contract: null
+    ticket: "#106"
+    relationship: "complements"
+    surface: "Token efficiency tracking"
+    notes: "#106 measures token usage; #108 reduces token waste by providing persistent history that doesn't need to live in context. The session index could feed token-per-event metrics to #106."
+
+  - contract: null
+    ticket: "#107"
+    relationship: "data-source"
+    surface: "Self-evolving skills"
+    notes: "Session activity data (event frequencies, error patterns, recall queries) can serve as evolution signals for #107."
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Continuous logging via PostToolUse hook, not pre-compaction snapshot"
+    confidence: "high"
+    alternatives: ["PreCompact hook snapshot", "Periodic timer-based snapshot"]
+    reasoning: "Auto-compaction does not fire PreCompact hooks. Timer-based requires a daemon. PostToolUse fires on every tool use, ensuring the index is always current regardless of which compaction layer fires."
+    reversibility: "Low — switching to snapshot-based would miss all inter-snapshot events"
+
+  - id: "AMB-2"
+    decision: "JSONL for event storage, not SQLite"
+    confidence: "high"
+    alternatives: ["SQLite database", "Flat markdown log"]
+    reasoning: "JSONL is append-only (crash-safe), grep-searchable, parseable by shell scripts, and matches existing manifest.jsonl pattern. No binary dependencies."
+    reversibility: "Medium — migration would require a conversion script"
+
+  - id: "AMB-3"
+    decision: "Outbox pattern for skill-emitted semantic events"
+    confidence: "medium"
+    alternatives: ["Direct Bash append to events.jsonl", "Skills call a helper script", "MCP server for event ingestion"]
+    reasoning: "Safety hooks block Bash access to .claude/ paths. Write tool can write to outbox.jsonl. The hook drains on next invocation. Latency is acceptable (events appear within one tool use). MCP server violates the no-external-services principle."
+    reversibility: "High — could switch to direct append if safety hook constraint changes"
+
+  - id: "AMB-4"
+    decision: "Opt-in hook configuration, not auto-installed"
+    confidence: "high"
+    alternatives: ["Auto-install hook via CLAUDE.md directive", "Install as part of crucible setup"]
+    reasoning: "Hooks modify Claude Code's behavior globally for the project. Auto-installation is surprising and may conflict with user's existing hooks. Opt-in respects user agency. Documentation makes setup trivial."
+    reversibility: "High — could auto-install in a future version"
+
+  - id: "AMB-5"
+    decision: "7-day retention for session index directories"
+    confidence: "medium"
+    alternatives: ["24 hours", "30 days", "Never auto-delete"]
+    reasoning: "Sessions rarely span more than a few days. 7 days provides comfortable buffer for multi-day work. 30 days risks accumulating gigabytes on active projects. Never-delete requires manual cleanup."
+    reversibility: "High — retention period is a single constant"
+
+  - id: "AMB-6"
+    decision: "PostCompact recovery reads summary.md (supplementary), not events.jsonl (authoritative)"
+    confidence: "high"
+    alternatives: ["Inject last N events from events.jsonl into context", "Replay full event stream"]
+    reasoning: "Post-compaction context is precious. summary.md is pre-condensed to ~2000 tokens. Injecting raw events would consume unpredictable context. The summary provides narrative while the CSB provides authoritative state."
+    reversibility: "Medium — switching to raw events requires careful token budgeting"

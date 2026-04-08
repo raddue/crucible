@@ -869,7 +869,11 @@ After all tasks complete:
 
 Throughout the pipeline, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log` on each subagent dispatch and completion.
 
-At completion (before reporting to user, i.e. step 9), read the metrics log and compute:
+**Dispatch measurement protocol:** On every subagent dispatch, the orchestrator follows the enriched manifest protocol from `shared/dispatch-convention.md`:
+- **Before dispatching:** Measure the dispatch file size in characters. Record `input_chars` and `model_tier` in the manifest entry.
+- **After dispatch returns:** Measure the subagent response length in characters. Record `output_chars` and `tool_calls` (if available) in the manifest completion entry.
+
+At completion (before reporting to user, i.e. step 9), read the metrics log and manifest, then compute:
 
 ```
 -- Pipeline Complete ----------------------------------------
@@ -879,6 +883,9 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
   Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
   Task tiers:           3 Tier 1, 3 Tier 2, 2 Tier 3
   Subagent savings:     ~21 dispatches skipped vs all-Tier-3
+  Est. input tokens:    ~32,100 (128,400 chars)
+  Est. output tokens:   ~20,500 (82,000 chars)
+  Token estimate note:  Based on dispatch file sizes (chars/4). Actual consumption may vary +/-30%.
 -------------------------------------------------------------
 ```
 
@@ -887,6 +894,10 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Active work time (merge overlapping parallel intervals — NOT naive sum)
 - Wall clock time (first dispatch to final completion)
 - Quality gate rounds (per gate: design, plan, implementation)
+- Estimated input tokens (sum of `input_chars` from manifest / 4)
+- Estimated output tokens (sum of `output_chars` from manifest / 4)
+
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the pipeline completion report alongside existing metrics.
 
 **Gate tracking verification:** Before compiling the pipeline summary (Phase 4 Step 9), verify that all three gate categories (design, plan, implementation) show round count >= 1 with clean final rounds (0 Fatal, 0 Significant). If any gate was skipped with explicit user approval, record it as `USER_SKIP` in the metrics. A zero without user approval indicates a gate was dropped — report this in the summary.
 
