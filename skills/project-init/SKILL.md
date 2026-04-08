@@ -413,6 +413,8 @@ Skills that benefit from project-init output:
 - `crucible:cartographer` — ongoing codebase mapping (project-init bootstraps, cartographer maintains)
 - `crucible:build` — implementation workflow (consumes cartographer data)
 - `crucible:design` — architecture planning (consumes map and topology)
+
+**Does not dispatch /recon** -- bootstraps the cartographer data that /recon consults. Complementary, not overlapping. See #147 for rationale.
 - `crucible:debugging` — investigation workflow (consumes modules and landmines)
 
 ---

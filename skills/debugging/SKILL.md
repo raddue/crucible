@@ -1014,6 +1014,8 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 - **`crucible:red-team`** -- Invoked indirectly via quality-gate (stagnation detection pattern also used in loop-back)
 - **`crucible:test-coverage`** -- Phase 5 Step 2.5: audit existing tests for staleness, needed updates, or removal after the fix (if available)
 
+**Does not dispatch /recon or /assay** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not assay. See #147 for rationale.
+
 **Required skills:**
 - **`crucible:cartographer`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
 
