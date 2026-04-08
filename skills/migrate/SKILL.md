@@ -184,10 +184,10 @@ Recovery procedure:
 Before any dispatch work, check for a crashed prior migration session:
 
 1. **Check `<scratch>/.pipeline-active`** (where `<scratch>` is `~/.claude/projects/<hash>/memory/`)
-2. **Not found:** Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"migrate"`, `phase` set to `"0"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` and `dispatch_dir` paths). Proceed to Phase 0.
+2. **Not found:** Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"migrate"`, `phase` set to `"0"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` and `dispatch_dir` paths, `branch` from `git branch --show-current`, `baseline_sha` from `git rev-parse HEAD`). Proceed to Phase 0.
 3. **Found, same `pipeline_id`:** Compaction recovery (existing behavior). Do not re-write the marker.
-4. **Found, different `pipeline_id`:** Previous migration session crashed. Present to user:
-   > "Previous migration session crashed. Start fresh? [yes]"
+4. **Found, different `pipeline_id`:** Previous migration session crashed. Check marker's `branch` against current branch — if mismatched, warn the user which branch the crashed session was on. Present to user:
+   > "Previous migration session on branch [marker.branch] crashed. Start fresh? [yes]"
    Delete the stale marker. Write a fresh marker. Proceed to Phase 0. (Full replay orchestration for migrate is deferred -- detection and cleanup only for now.)
 
 **Marker cleanup:** Delete `.pipeline-active` after Phase 8 (Cleanup) completes successfully.

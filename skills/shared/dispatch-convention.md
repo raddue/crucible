@@ -93,7 +93,9 @@ Begin by reading that file.
   "phase": "<current-phase>",
   "start_time": "<ISO-8601>",
   "scratch_dir": "<scratch directory path>",
-  "dispatch_dir": "/tmp/crucible-dispatch-<session-id>/"
+  "dispatch_dir": "/tmp/crucible-dispatch-<session-id>/",
+  "branch": "<git branch at pipeline start>",
+  "baseline_sha": "<HEAD SHA at pipeline start>"
 }
 ```
 
@@ -105,9 +107,11 @@ Begin by reading that file.
 
 **Detection (at pipeline start):**
 1. Check `<scratch>/.pipeline-active`
-2. Not found -> write marker, proceed normally
+2. Not found -> write marker (include `branch` from `git branch --show-current` and `baseline_sha` from `git rev-parse HEAD`), proceed normally
 3. Found, same `pipeline_id` as current session -> compaction recovery (within-session, existing behavior)
-4. Found, different `pipeline_id` -> previous pipeline crashed. The skill's resume logic handles this (see `crucible:replay` for full orchestration, or per-skill detection-only for secondary skills)
+4. Found, different `pipeline_id` -> previous pipeline crashed. Check `branch` field against current `git branch --show-current`:
+   - **Branch matches:** offer resume per the skill's resume logic (see `crucible:replay` for full orchestration, or per-skill detection-only for secondary skills)
+   - **Branch mismatch:** warn the user: *"Previous [skill] on branch [marker.branch] crashed at Phase [phase]. You are currently on [current-branch]. Switch to [marker.branch] before resuming? [switch+resume / start fresh / abort]"*. Do NOT proceed with resume on the wrong branch — checkpoint restore would contaminate the current branch.
 
 **Where `<scratch>` is:** The pipeline's persistent scratch directory (`~/.claude/projects/<hash>/memory/`).
 

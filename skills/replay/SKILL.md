@@ -172,9 +172,15 @@ If the desired checkpoint is missing (evicted, shadow repo reinitialized, pre-ch
 
 ### Restore
 
+**Branch guard (mandatory):** Before offering restore, check the `.pipeline-active` marker's `branch` field against the current `git branch --show-current`. If they differ, abort with:
+
+> "Pipeline was running on branch [marker.branch] but you are on [current-branch]. Switch to [marker.branch] before resuming — restoring a checkpoint from a different branch would contaminate your working directory."
+
+Do NOT proceed with restore on the wrong branch. This is a data-safety invariant.
+
 **Before any restore, require explicit user confirmation:**
 
-> "About to restore working directory to checkpoint [reason] (taken at [timestamp]). This will reset uncommitted changes. Proceed? [yes / no]"
+> "About to restore working directory to checkpoint [reason] (taken at [timestamp], branch [marker.branch]). This will reset uncommitted changes. Proceed? [yes / no]"
 
 On confirmation:
 1. Use the shadow git repo to restore the working directory to the checkpoint state
