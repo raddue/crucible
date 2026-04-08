@@ -43,8 +43,8 @@ Resume interrupted pipelines from their last successful phase boundary, or repla
 
 Active when no `--mutate` flag is present. Restores checkpoint, reconstructs state, and re-dispatches from the last verified phase boundary.
 
-- Appends to existing `manifest.jsonl` with `status: "replayed"` entries
-- New entries carry `replay_of` back-referencing the original `seq`
+- Appends to existing `manifest.jsonl` with normal status lifecycle (`dispatched` -> `completed`)
+- New entries carry `replay_of` back-referencing the original `seq` and `replay_session` identifying this run
 - Uses current templates (not pinned -- you want the latest fixes)
 
 ### A/B Mode (`--mutate`)
@@ -94,7 +94,7 @@ Read the manifest from the provided path. Handle errors gracefully:
 4. **If zero valid entries:** Report "Manifest is empty or entirely corrupted. Cannot resume." and exit.
 
 **Manifest location priority:**
-1. Scratch directory copy (`<scratch>/dispatch-<session-id>/manifest.jsonl`) -- durable, survives `/tmp` loss
+1. Scratch directory copy (`<scratch>/crucible-dispatch-<session-id>/manifest.jsonl`) -- durable, survives `/tmp` loss
 2. Original dispatch directory (`/tmp/crucible-dispatch-<session-id>/manifest.jsonl`) -- may not survive reboot
 3. If neither exists: report "Manifest not found. Cannot resume." and exit
 
@@ -110,8 +110,9 @@ Partition the manifest into completed and incomplete phases:
 
 | Phase Boundary | Checkpoint Reason | When |
 |---------------|-------------------|------|
-| Pre-Phase 2 | `pre-design-gate` or `pre-plan-gate` | After design approval |
-| Pre-Phase 3 | `pre-wave-1` | After plan approval, before execution |
+| Pre-Phase 2 | `pre-design-gate` | After design approval, before planning |
+| Late Phase 2 | `pre-plan-gate` | After plan approval, before execution |
+| Pre-Phase 3 | `pre-wave-1` | After plan approval, before first execution wave |
 | Mid-Phase 3 (wave N) | `pre-wave-N` | After wave N-1 completion |
 | Pre-Phase 4 | `pre-code-review` | After all execution waves complete |
 | Mid-Phase 4 | `pre-inquisitor` | After code review, before inquisitor |
@@ -149,7 +150,8 @@ Map the verified resume point to a shadow git checkpoint:
 
 1. **Read `checkpoint-manifest.md`** from `~/.claude/projects/<hash>/checkpoints/<dir-hash>/`
 2. **Match checkpoint reason** to the resume point's phase boundary. Use string prefix matching:
-   - Phase 2 boundary -> checkpoint reason starts with `pre-design-gate` or `pre-plan-gate`
+   - Pre-Phase 2 boundary -> checkpoint reason starts with `pre-design-gate`
+   - Late Phase 2 boundary -> checkpoint reason starts with `pre-plan-gate`
    - Phase 3 boundary -> checkpoint reason starts with `pre-wave-1`
    - Phase 3 wave N -> checkpoint reason starts with `pre-wave-N`
    - Phase 4 boundary -> checkpoint reason starts with `pre-code-review`
@@ -260,7 +262,7 @@ After checkpoint restore and state reconstruction, hand off to the original skil
 New dispatches during replay append to the original `manifest.jsonl`:
 
 - **Seq numbering:** Continue from the last `seq` in the manifest + 1
-- **Status field:** Use `"replayed"` for dispatches that are re-executions of previously attempted work. Use normal statuses (`"dispatched"`, `"completed"`, etc.) for dispatches that are new work in the resumed pipeline.
+- **Status field:** Use normal status lifecycle (`"dispatched"` -> `"completed"`, etc.) for all dispatches during replay. Replay provenance is tracked via `replay_of` and `replay_session`, not via the status field. This ensures existing manifest readers (compaction recovery, forge, debugging) handle replay entries correctly.
 - **`replay_of` field:** Set to the original `seq` number when re-dispatching a previously attempted dispatch. Set to `null` for new dispatches that have no original counterpart.
 - **`replay_session` field:** Set to the current session ID for all entries written during a replay run.
 - **`mutation` field:** Set to `"original.md -> replacement.md"` if a template mutation was applied. `null` otherwise.

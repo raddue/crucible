@@ -290,7 +290,7 @@ Before any design or dispatch work, check for a crashed prior pipeline:
 
 **Marker updates during pipeline:** Update the `phase` field in `.pipeline-active` at each phase boundary (1->2, 2->3, 3->4) to track progress for crash detection.
 
-**Marker cleanup:** Delete `.pipeline-active` at Phase 4 completion (step 11, after finish skill completes, before final report).
+**Marker cleanup:** Delete `.pipeline-active` at Phase 4 step 12 (after finish skill completes).
 
 ### Step 0: Pre-Existing Doc Detection
 
