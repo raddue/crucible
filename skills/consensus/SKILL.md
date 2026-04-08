@@ -207,7 +207,7 @@ Periodic application (rather than every-round) keeps cost manageable. A 10-round
 | quality-gate | Fix verifier | Mechanical check (did the fix address the finding?). Single-model Sonnet is sufficient. Multi-model adds cost without proportional value. |
 | quality-gate | Fix agent | Requires filesystem access to modify code/docs. External models cannot write local files. |
 | red-team | Standalone full-loop | When invoked directly (not via quality-gate), red-team runs its own stagnation loop. Consensus integration is at the quality-gate level, which owns the iteration. |
-| design | Investigation agents | Codebase Scout, Domain Researcher, Impact Analyst all need filesystem access. External models cannot read the local codebase. |
+| design | Investigation agents | Domain Researcher, Impact Analyst all need filesystem access. External models cannot read the local codebase. Recon provides structural context but runs locally. |
 | build | Task implementation | Code generation requires filesystem access and project context. |
 
 ### Reconsideration Criteria

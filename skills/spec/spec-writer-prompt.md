@@ -206,7 +206,7 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
 
     For each design dimension, after investigation:
 
-    1. **Synthesize** the investigation results (codebase scout findings, domain research,
+    1. **Synthesize** the investigation results (recon brief findings, domain research,
        impact analysis, challenger feedback -- or quick-scan summary if complex).
     2. **Pick** the recommended option (or the only viable path).
     3. **Assign a confidence level** using these exact thresholds:

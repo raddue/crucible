@@ -1,6 +1,6 @@
 ---
 name: assay
-description: "Recon-informed approach evaluator. Weighs competing options against codebase constraints and returns structured recommendations with confidence scoring, kill criteria, and evidence grounding. Consumes recon briefs or caller context. Used by design, debugging, migrate, prospector. Triggers on /assay, 'evaluate approaches', 'which option', 'compare alternatives'."
+description: "Recon-informed approach evaluator. Weighs competing options against codebase constraints and returns structured recommendations with confidence scoring, kill criteria, and evidence grounding. Consumes recon briefs or caller context. Used by design, spec, migrate. Triggers on /assay, 'evaluate approaches', 'which option', 'compare alternatives'."
 ---
 
 # Assay
