@@ -156,22 +156,23 @@ Output:
 ### Step 5: Baseline Comparison (Structural)
 
 For each skill with sufficient data (3+ runs):
-- **Avg Monolithic Est.**: sum of all `total_input_chars` across dispatches — what a single-prompt approach would require (structural worst-case overestimate)
-- **Avg Distributed Est.**: average `total_input_chars` per run — what the skill actually sends across all dispatches
-- **Distribution Ratio**: `avg input per dispatch / monolithic baseline` — values < 1.0 mean the skill sends less context per dispatch than a monolithic approach
-- **Quality Investment**: `review dispatches / total dispatches` — fraction of dispatches dedicated to quality assurance
+- **Avg Total Context**: average `(total_input_chars + total_output_chars)` per run — total context the pipeline touched
+- **Avg Input/Dispatch**: average `total_input_chars / total dispatches` per run — how much context each subagent receives on average
+- **Context Focus Ratio**: `avg input per dispatch / avg total context` — lower values mean each subagent sees a smaller slice of the total, indicating effective context distribution
+- **Quality Investment**: `review dispatches / total dispatches` — fraction of dispatches dedicated to quality assurance (requires manifest data; "N/A" if only chronicle signals available)
 
 Output:
 
 ```
 ### Baseline Comparison (Structural)
-| Skill | Avg Monolithic Est. | Avg Distributed Est. | Distribution Ratio | Quality Investment |
-|-------|---------------------|----------------------|--------------------|--------------------|
+| Skill | Avg Total Context | Avg Input/Dispatch | Context Focus Ratio | Quality Investment |
+|-------|-------------------|--------------------|---------------------|--------------------|
 
-**Interpretation:** Distribution ratio < 1.0 means the skill sends less context per dispatch
-than a monolithic approach would require. Quality investment shows the fraction of dispatches
-dedicated to review, red-team, and quality gates. These are structural comparisons, not cost
-savings claims — the monolithic baseline is estimated, not measured.
+**Interpretation:** Context focus ratio measures how much of the total pipeline context each
+subagent receives. Lower values mean more focused dispatches. Quality investment shows the
+fraction of dispatches dedicated to review, red-team, and quality gates. These are structural
+comparisons, not cost savings claims — they measure how the skill distributes work, not what
+a monolithic alternative would cost.
 ```
 
 ### Step 6: Cache Results

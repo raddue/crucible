@@ -158,7 +158,7 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 
 **Methodology:** `estimated_tokens = chars / 4`. This uses the well-established approximation that 1 token ~= 4 characters for English text. For code-heavy content, 1 token ~= 3.5 characters, but `chars / 4` is used uniformly for simplicity and consistency.
 
-**Accuracy:** +/-20% for prose, +/-25% for code. Estimates are directionally correct and suitable for relative comparison across runs. They are NOT suitable for billing or exact cost calculation.
+**Accuracy:** +/-30% overall (+/-20% for pure prose, +/-25% for code, worse for mixed content with extended thinking or system prompt overhead). Estimates are directionally correct and suitable for relative comparison across runs. They are NOT suitable for billing or exact cost calculation.
 
 **Known blind spots:**
 - **Extended thinking tokens** — Opus subagents may use extended thinking, which consumes tokens not captured in the dispatch file or response. This causes underestimation of total token consumption for Opus dispatches.
