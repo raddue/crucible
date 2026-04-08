@@ -164,13 +164,11 @@ case "$TOOL" in
     ;;
   Write)
     local_file="$(echo "$INPUT" | jq -r '.input.file_path // empty' 2>/dev/null)"
-    if [ -f "$local_file" ] 2>/dev/null; then
-      EVENT_TYPE="file_edit"
-      EVENT_SUMMARY="Wrote ${local_file##*/}"
-    else
-      EVENT_TYPE="file_create"
-      EVENT_SUMMARY="Created ${local_file##*/}"
-    fi
+    # Skip outbox writes — these are semantic event emissions, not user file edits
+    case "$local_file" in */session-index/*/outbox.jsonl) exit 0 ;; esac
+    # Note: file always exists by PostToolUse time, so file_create is not reliably distinguishable
+    EVENT_TYPE="file_edit"
+    EVENT_SUMMARY="Wrote ${local_file##*/}"
     EVENT_DETAIL="$(jq -nc --arg file "$local_file" --arg tool "Write" '{file: $file, tool: $tool}')"
     ;;
   Bash)
@@ -221,7 +219,7 @@ fi
 
 if [ "$SHOULD_SUMMARIZE" = true ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  if [ -x "$SCRIPT_DIR/session-summary.sh" ]; then
+  if [ -f "$SCRIPT_DIR/session-summary.sh" ]; then
     bash "$SCRIPT_DIR/session-summary.sh" "$EVENTS_FILE" "$SESSION_DIR/summary.md" "$SESSION_ID" &
   fi
 fi
