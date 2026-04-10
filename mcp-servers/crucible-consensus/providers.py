@@ -1,11 +1,23 @@
 """Provider adapters for multi-model consensus dispatch."""
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from config import ModelConfig
+
+
+def _sanitize_error(e: Exception) -> str:
+    """Sanitize exception message to prevent API key leakage."""
+    msg = str(e)
+    # Redact anything that looks like an API key
+    msg = re.sub(r'(sk-|key-|AIza)[A-Za-z0-9_-]{10,}', '[REDACTED]', msg)
+    # Truncate to prevent excessive detail
+    if len(msg) > 200:
+        msg = msg[:200] + "..."
+    return f"{type(e).__name__}: {msg}"
 
 
 @dataclass
@@ -16,6 +28,7 @@ class ModelResponse:
     content: str
     latency_ms: int
     error: str | None = None
+    source: str = "provider"  # "provider" for real responses, "external" for injected
 
 
 class BaseProvider(Protocol):
@@ -59,7 +72,7 @@ class AnthropicProvider:
                 model_id=self.config.model_id,
                 content="",
                 latency_ms=latency,
-                error=str(e),
+                error=_sanitize_error(e),
             )
 
 
@@ -101,7 +114,7 @@ class GoogleProvider:
                 model_id=self.config.model_id,
                 content="",
                 latency_ms=latency,
-                error=str(e),
+                error=_sanitize_error(e),
             )
 
 
@@ -148,7 +161,7 @@ class OpenAIProvider:
                 model_id=self.config.model_id,
                 content="",
                 latency_ms=latency,
-                error=str(e),
+                error=_sanitize_error(e),
             )
 
 

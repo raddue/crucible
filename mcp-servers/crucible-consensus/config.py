@@ -113,6 +113,10 @@ def load_config(project_dir: str) -> ConsensusConfig:
     )
 
     # Validate min_models
+    if config.min_models < 1:
+        raise ConfigError(
+            f"min_models ({config.min_models}) must be at least 1"
+        )
     if config.min_models > len(config.models):
         raise ConfigError(
             f"min_models ({config.min_models}) exceeds configured model count "

@@ -209,10 +209,10 @@ def test_build_aggregation_input_formats_xml():
 
     result = build_aggregation_input(responses, "prompt", "context")
 
-    # Should include the two successful responses
-    assert '<model provider="anthropic" model_id="claude-sonnet-4-20250514">' in result
+    # Should include the two successful responses (with source attribute)
+    assert '<model provider="anthropic" model_id="claude-sonnet-4-20250514" source="provider">' in result
     assert "Good code" in result
-    assert '<model provider="google" model_id="gemini-2.5-pro">' in result
+    assert '<model provider="google" model_id="gemini-2.5-pro" source="provider">' in result
     assert "Needs work" in result
 
     # Should NOT include the failed response

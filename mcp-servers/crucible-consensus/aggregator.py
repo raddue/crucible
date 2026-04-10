@@ -3,6 +3,7 @@
 import json
 import re
 from dataclasses import dataclass, field
+from html import escape as html_escape
 from pathlib import Path
 
 from config import ConsensusConfig, ModelConfig
@@ -84,9 +85,15 @@ def build_aggregation_input(
     parts: list[str] = []
     for r in responses:
         if r.error is None:
+            # Escape provider/model_id to prevent attribute injection,
+            # and escape content to prevent tag injection (model impersonation)
+            safe_provider = html_escape(r.provider, quote=True)
+            safe_model_id = html_escape(r.model_id, quote=True)
+            safe_content = html_escape(r.content, quote=False)
+            source_attr = f' source="{html_escape(r.source, quote=True)}"'
             parts.append(
-                f'<model provider="{r.provider}" model_id="{r.model_id}">\n'
-                f"{r.content}\n"
+                f'<model provider="{safe_provider}" model_id="{safe_model_id}"{source_attr}>\n'
+                f"{safe_content}\n"
                 f"</model>"
             )
     return "\n\n".join(parts)

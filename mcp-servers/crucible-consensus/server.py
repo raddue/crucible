@@ -142,8 +142,14 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
     context = arguments["context"]
     mode = arguments["mode"]
 
+    # Input size limits to prevent DoS / API credit burn
+    MAX_INPUT_SIZE = 500_000  # 500KB
+    MAX_ADDITIONAL_RESPONSES = 10
+    if len(prompt) > MAX_INPUT_SIZE or len(context) > MAX_INPUT_SIZE:
+        return [TextContent(type="text", text=json.dumps({"status": "unavailable", "synthesis": "Input exceeds size limit (500KB max)"}))]
+
     if mode not in ("review", "verdict", "investigate"):
-        return [TextContent(type="text", text=f'{{"status": "unavailable", "synthesis": "Invalid mode: {mode}"}}')]
+        return [TextContent(type="text", text=json.dumps({"status": "unavailable", "synthesis": f"Invalid mode: {mode}"}))]
 
     # Check if this mode is enabled
     if not _config.modes.get(mode, True):
@@ -158,13 +164,21 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
     # Inject additional external review responses if provided
     additional_responses = arguments.get("additional_responses")
     if additional_responses:
+        if len(additional_responses) > MAX_ADDITIONAL_RESPONSES:
+            additional_responses = additional_responses[:MAX_ADDITIONAL_RESPONSES]
+            logger.warning(f"Truncated additional_responses to {MAX_ADDITIONAL_RESPONSES}")
         for ar in additional_responses:
             try:
+                content = ar["content"]
+                if len(content) > MAX_INPUT_SIZE:
+                    logger.warning("Skipping oversized additional_response")
+                    continue
                 responses.append(ModelResponse(
                     provider=ar["provider"],
                     model_id=ar["model_id"],
-                    content=ar["content"],
+                    content=content,
                     latency_ms=ar["latency_ms"],
+                    source="external",  # Tag to distinguish from real provider responses
                 ))
             except (KeyError, TypeError) as e:
                 logger.warning(f"Skipping malformed additional_response: {e}")

@@ -69,7 +69,7 @@ async def test_anthropic_provider_error(anthropic_config):
     assert isinstance(result, ModelResponse)
     assert result.provider == "anthropic"
     assert result.content == ""
-    assert result.error == "API failure"
+    assert "API failure" in result.error
     assert result.latency_ms >= 0
 
 
@@ -131,7 +131,7 @@ async def test_google_provider_error(google_config):
     assert isinstance(result, ModelResponse)
     assert result.provider == "google"
     assert result.content == ""
-    assert result.error == "Gemini API failure"
+    assert "Gemini API failure" in result.error
     assert result.latency_ms >= 0
 
 
@@ -196,7 +196,7 @@ async def test_openai_provider_error(openai_config):
     assert isinstance(result, ModelResponse)
     assert result.provider == "openai"
     assert result.content == ""
-    assert result.error == "OpenAI API failure"
+    assert "OpenAI API failure" in result.error
     assert result.latency_ms >= 0
 
 
