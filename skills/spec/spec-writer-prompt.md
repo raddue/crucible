@@ -246,6 +246,39 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
 
     ---
 
+    ## Step 3.5: Security Signal Scan
+
+    Before generating documents, scan for security-sensitive content using the keyword
+    lists from `shared/security-signals.md`. This determines whether the contract should
+    carry a `security_review` directive for `/build` to consume.
+
+    1. **Scan targets:** ticket body (`[TICKET_BODY]`), your investigation findings, and
+       the design doc content you are about to write.
+    2. **Match categories:** For each of the 7 signal categories in `security-signals.md`,
+       check if any keyword from that category appears in the scan targets (case-insensitive).
+       Count distinct categories matched — one hit per category is sufficient.
+    3. **Determine status:**
+       - **2+ categories matched:** Include `security_review` in the contract with
+         `status: required`. List matched categories with brief evidence snippets.
+       - **1 category matched:** Include `security_review` in the contract with
+         `status: recommended`. List the single matched category with evidence.
+       - **0 categories matched:** Omit the `security_review` field entirely.
+    4. **Deployment context:** If the ticket or design implies a deployment environment
+       (e.g., "public API", "internal tool", "intranet service"), include
+       `deployment_context` in the field. Otherwise omit it (siege defaults to `public`).
+
+    Record the scan result in `[SCRATCH_DIR]/decisions.md`:
+    ```markdown
+    ## Decision: SEC-SCAN (Ticket [TICKET_NUMBER])
+
+    **Choice:** security_review [status|omitted] — [N] signal categories detected
+    **Confidence:** high
+    **Categories:** [list matched categories or "none"]
+    **Evidence:** [brief evidence per category]
+    ```
+
+    ---
+
     ## Step 4: Document Generation
 
     Produce three files in `[SCRATCH_DIR]/output/`:
@@ -419,6 +452,19 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
         surface: "InterfaceName.method_name"  # specific API surface element
         notes: "Brief explanation of the dependency"
 
+    # Security review directive -- optional field, present when security signals
+    # detected during spec writing (Step 3.5). Consumed by /build Phase 4 Step 5.5.
+    # Omit entirely if no signals detected.
+    # See shared/security-signals.md for signal categories and threshold rules.
+    security_review:                           # OPTIONAL — omit if 0 signals
+      status: "required"                       # required (2+ signals) | recommended (1 signal)
+      signals_detected:
+        - category: "auth"                     # one of: auth, crypto, external_input, secrets, network, pii_data, dependencies
+          evidence: "ticket mentions login flow and JWT token handling"
+        - category: "external_input"
+          evidence: "design doc includes REST API endpoint definitions"
+      deployment_context: "public"             # OPTIONAL — public | intranet | hybrid
+
     # Decisions made where multiple viable paths existed.
     # May be empty if all decisions were high-confidence.
     ambiguity_resolutions:
@@ -437,6 +483,9 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
       what can be checked by reading code vs. what requires running tests.
     - `integration_points`: Reference upstream contracts from `[UPSTREAM_CONTRACTS]`.
       Add any downstream integration points discovered during investigation.
+    - `security_review`: Include if Step 3.5 detected security signals. Copy the status,
+      matched categories, and deployment context directly from your Step 3.5 scan results.
+      Omit entirely if no signals were detected.
     - `ambiguity_resolutions`: Mirror the decisions from Step 3 that had medium or low
       confidence. High-confidence decisions with no viable alternatives do not need
       entries here.

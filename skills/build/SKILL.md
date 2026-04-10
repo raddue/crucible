@@ -876,6 +876,32 @@ After all tasks complete:
    - This is NOT a full implementation re-review — scope it to only the fixer's changes
    - Iterative until clean, same as step 3
    - Skip if the inquisitor reported all PASS (no fixes were needed)
+5.5. **CONDITIONAL: Security review via crucible:siege**
+   <!-- CANONICAL: shared/security-signals.md -->
+   a. **Contract check:** If a contract YAML exists for this ticket with `security_review.status: "required"`, siege is mandatory — skip to step (d).
+   b. **Code scan:** If no contract directive (or contract has `security_review.status: "recommended"` or field absent), scan for siege activation signals:
+      - **Scan targets:** design doc content + `git diff <base-sha>..HEAD` (changed file contents)
+      - **Method:** Case-insensitive keyword matching using the 7-category keyword lists from `shared/security-signals.md`
+      - Count distinct categories matched (one hit per category is sufficient)
+   c. **Threshold evaluation:**
+      - **0 signals:** Skip siege silently. No narration needed.
+      - **1 signal:** Log in narration: "1 security signal detected ([category]) — skipping siege. Invoke `/siege --force` manually if needed." Record in manifest and decision journal: `security-review | choice=skip | reason=1 signal ([category])`.
+      - **2+ signals:** Proceed to step (d).
+   d. **Dispatch siege:**
+      - **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-siege" before dispatching siege. If siege's fix cycle produces regressions, this is the rollback target.
+      - Dispatch `crucible:siege` with:
+        - Target: design doc + full implementation diff (artifact type: `mixed`)
+        - `deployment_context`: from contract `security_review.deployment_context` if present, else unset (siege defaults to `public`)
+      - Narration: "Security signals detected: [list categories]. Dispatching siege."
+      - Decision journal: `security-review | choice=dispatch | reason=[N] signals ([categories]) [or contract-required]`
+      - **Session index event:** Emit to outbox: `{"ts":"<now>","seq":0,"type":"security_review","summary":"Siege dispatched: [N] signals detected","detail":{"skill":"build","signals":[categories]}}`
+   e. **Blocking behavior:** Siege iterates internally until zero Critical + zero High.
+      - If siege completes clean: continue to step 6 (quality-gate)
+      - If siege escalates (stagnation, user input needed): escalate to user with siege context
+      - If siege's fix cycle produced code changes: re-run crucible:code-review scoped to siege fix commits only (`git diff <pre-siege-sha>..HEAD`). Same pattern as post-inquisitor conditional review at step 5.
+   f. **Escape hatches:** User can override automatic siege behavior:
+      - `--force-siege` — Dispatch siege regardless of signal count. Maps to siege's `--force` flag. Decision journal: `security-review | choice=force-dispatch | reason=user --force-siege flag`
+      - `--skip-siege` — Suppress siege even when signals/contract require it. Maps to siege's `--skip` flag. Decision journal: `security-review | choice=force-skip | reason=user --skip-siege flag`
 6. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-impl-gate" before dispatching the implementation quality gate. If gate fix rounds degrade the code, this is the rollback target.
 6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean) **(Non-negotiable — see Quality Gate Requirement.)**
 7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
@@ -910,6 +936,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
   Active work time:      2h 47m
   Wall clock time:       11h 13m
   Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
+  Siege:                 dispatched (3 agents, 2 rounds, 0 Critical, 0 High) | skipped (0 signals) | skipped (1 signal: auth)
   Task tiers:           3 Tier 1, 3 Tier 2, 2 Tier 3
   Subagent savings:     ~21 dispatches skipped vs all-Tier-3
   Est. input tokens:    ~32,100 (128,400 chars)

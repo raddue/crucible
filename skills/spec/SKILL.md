@@ -538,7 +538,12 @@ After generating the contract YAML, validate against the schema:
    - `api_surface[].params` must be present for `function`, `class`, and `interface` types. Each param must have `name`, `type`, and `required` fields.
    - `invariants.checkable[].check_method` must be one of: `grep`, `code-inspection`, `file-structure`
    - `invariants.testable[].test_tag` must match the pattern `contract:<category>:<id>`
-3. **Integration point validation:** For each entry in `integration_points`, verify that the referenced contract file exists in `docs/plans/` or the scratch directory's `contracts/` folder. If the referenced contract does not yet exist (upstream ticket not yet processed), log a warning but do not block.
+3. **Security review field validation (when present):**
+   - `security_review.status` must be one of: `required`, `recommended`
+   - `security_review.signals_detected` must be a non-empty array
+   - Each entry must have `category` (one of: `auth`, `crypto`, `external_input`, `secrets`, `network`, `pii_data`, `dependencies`) and `evidence` (non-empty string)
+   - `security_review.deployment_context` (if present) must be one of: `public`, `intranet`, `hybrid`
+4. **Integration point validation:** For each entry in `integration_points`, verify that the referenced contract file exists in `docs/plans/` or the scratch directory's `contracts/` folder. If the referenced contract does not yet exist (upstream ticket not yet processed), log a warning but do not block.
 4. **On validation failure:** Report specific errors. Re-dispatch the contract generation step with the validation errors as feedback. If the second attempt also fails, log the errors, mark the contract as having validation warnings, and continue -- do not block the entire run on a malformed contract.
 
 ### Step 6: Lightweight Per-Ticket Validation
@@ -714,6 +719,18 @@ integration_points:
     surface: "AuthService.validate_token"
     notes: "Depends on the new token format from #124"
 
+# Security review directive -- optional, present when security signals detected
+# during spec writing. Consumed by /build Phase 4 Step 5.5 to dispatch siege.
+# Omit entirely if no signals detected. See shared/security-signals.md.
+security_review:                           # OPTIONAL
+  status: "required"                       # required (2+ signals) | recommended (1 signal)
+  signals_detected:
+    - category: "auth"                     # auth | crypto | external_input | secrets | network | pii_data | dependencies
+      evidence: "ticket mentions login flow and JWT tokens"
+    - category: "external_input"
+      evidence: "design doc includes API endpoint definitions"
+  deployment_context: "public"             # OPTIONAL — public | intranet | hybrid
+
 # Decisions made where multiple viable paths existed
 ambiguity_resolutions:
   - id: "AMB-1"
@@ -760,6 +777,9 @@ When `/spec` resolves an ambiguity or defines an API surface on ticket N that af
 | `invariants` | Yes | Must have at least one checkable or testable |
 | `invariants.checkable[].check_method` | Yes | `grep`, `code-inspection`, or `file-structure` |
 | `invariants.testable[].test_tag` | Yes | Pattern: `contract:<category>:<id>` |
+| `security_review` | No | Optional; present when security signals detected (see `shared/security-signals.md`) |
+| `security_review.status` | Conditional | Required when `security_review` present. `required` or `recommended` |
+| `security_review.signals_detected` | Conditional | Required when `security_review` present. Non-empty array of `{category, evidence}` |
 | `integration_points` | No | May be empty if no cross-ticket deps |
 | `ambiguity_resolutions` | No | May be empty if all decisions were high-confidence |
 
