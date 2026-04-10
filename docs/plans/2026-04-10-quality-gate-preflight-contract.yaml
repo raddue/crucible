@@ -1,0 +1,128 @@
+version: "1.0"
+ticket: "#146"
+epic: "#146"
+title: "Quality gate pre-flight dependency audit"
+date: "2026-04-10"
+
+api_surface:
+  - name: "skip_blocking"
+    type: "skill_argument"
+    signature: "skip_blocking: boolean (default: false)"
+    params:
+      - name: "skip_blocking"
+        type: "boolean"
+        required: false
+    returns: "N/A"
+    description: "Global override that disables all blocking regardless of min_blocking_severity. Findings are still reported but result is FINDINGS, not BLOCKED."
+
+  - name: "min_blocking_severity"
+    type: "skill_argument"
+    signature: "min_blocking_severity: string (default: 'critical')"
+    params:
+      - name: "min_blocking_severity"
+        type: "string"
+        required: false
+    returns: "N/A"
+    description: "Minimum normalized severity at which a finding triggers blocking. Accepted values: critical, high, moderate, low. Case-insensitive. Invalid values rejected before execution."
+
+  - name: "preflight-audit.md"
+    type: "output_file"
+    signature: "scratch/<run-id>/preflight-audit.md"
+    params: []
+    returns: "Markdown file"
+    description: "Immutable scan-time plan written before any audit tool runs. Contains run-id, timestamp, and manifest list with paths, ecosystems, and workspace decisions."
+
+  - name: "audit-results.md"
+    type: "output_file"
+    signature: "scratch/<run-id>/audit-results.md"
+    params: []
+    returns: "Markdown file"
+    description: "Execution-time results written incrementally. Contains tool availability, per-manifest findings with normalized severity, deduplication notes, and overall result."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Pre-flight audit runs only for code artifact type"
+      verification: "The Pre-Flight Dependency Audit section specifies artifact-type scoping to code only. No manifest scanning, tool invocation, or output files are produced for non-code artifacts."
+      check_method: "skill-inspection"
+
+    - id: "INV-2"
+      description: "Red-team dispatch receives no audit data (anti-anchoring)"
+      verification: "Neither preflight-audit.md nor audit-results.md is passed to red-team dispatch. The red-team receives only the prepared artifact, unchanged from current behavior."
+      check_method: "skill-inspection"
+
+    - id: "INV-3"
+      description: "Audit findings do not affect red-team scoring or stagnation detection"
+      verification: "Pre-flight results are surfaced to the orchestrator and user only. Weighted score calculation and stagnation detection logic remain unchanged."
+      check_method: "skill-inspection"
+
+    - id: "INV-4"
+      description: "skip_blocking supersedes min_blocking_severity entirely"
+      verification: "When skip_blocking is true, no blocking occurs regardless of min_blocking_severity value. The two arguments do not interact as independent thresholds."
+      check_method: "skill-inspection"
+
+    - id: "INV-5"
+      description: "preflight-audit.md is immutable after initial write"
+      verification: "The manifest list is written to preflight-audit.md before any audit tool is invoked. This file is not updated after execution begins."
+      check_method: "skill-inspection"
+
+    - id: "INV-6"
+      description: "Incomplete audit-results.md sections are discarded on recovery"
+      verification: "Each ecosystem section ends with a status: complete sentinel. Sections without the sentinel are discarded and re-run on compaction recovery."
+      check_method: "skill-inspection"
+
+    - id: "INV-7"
+      description: "All ecosystems run to completion regardless of individual failures"
+      verification: "A failure in one audit does not abort or skip audits for other manifests. A BLOCKED result from one ecosystem does not short-circuit remaining ecosystems."
+      check_method: "skill-inspection"
+
+    - id: "INV-8"
+      description: "Overall result follows strict priority precedence"
+      verification: "BLOCKED > FINDINGS > INCONCLUSIVE > FAILED > CLEAN. INCONCLUSIVE outranks FAILED because unknown coverage is more dangerous than a known retryable error."
+      check_method: "skill-inspection"
+
+    - id: "INV-9"
+      description: "Severity normalization uses inclusive-lower, exclusive-upper CVSS boundaries"
+      verification: "A CVSS score of exactly 9.0 maps to Critical, not High. A score of exactly 7.0 maps to High, not Moderate."
+      check_method: "skill-inspection"
+
+    - id: "INV-10"
+      description: "Python manifest deduplication uses (package name + CVE ID) key"
+      verification: "When both requirements.txt and pyproject.toml exist in the same directory, duplicate findings are deduplicated. Each unique (package, CVE) pair appears once."
+      check_method: "skill-inspection"
+
+integration_points:
+  - contract: null
+    ticket: "#146"
+    relationship: "extends"
+    surface: "skills/quality-gate/SKILL.md"
+    notes: "Adds pre-flight dependency audit phase to existing quality-gate skill"
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Audit findings go to orchestrator, not red-team"
+    confidence: "high"
+    alternatives: ["Seed red-team with audit findings", "Add audit findings to fix journal"]
+    reasoning: "Anti-anchoring is the quality gate's core invariant. Two independent signals (red-team + audit) are more valuable than one contaminated signal."
+    reversibility: "High -- could route findings to fix journal later without changing red-team isolation"
+
+  - id: "AMB-2"
+    decision: "No-CVSS findings default to Moderate severity"
+    confidence: "medium"
+    alternatives: ["Default to High (conservative)", "Default to Low (permissive)", "Skip no-CVSS findings"]
+    reasoning: "Moderate is the middle ground. Advisory-only findings without CVSS are uncertain -- too risky to ignore, not severe enough to block by default."
+    reversibility: "High -- severity mapping is a single table change"
+
+  - id: "AMB-3"
+    decision: "INCONCLUSIVE outranks FAILED in result precedence"
+    confidence: "high"
+    alternatives: ["FAILED outranks INCONCLUSIVE", "Equal precedence"]
+    reasoning: "Unknown coverage (manifest exists but was never audited) is more dangerous than a known, retryable tool error. A solo dev benefits from the conservative signal."
+    reversibility: "High -- precedence table change only"
+
+  - id: "AMB-4"
+    decision: "Pre-flight does not re-run after fix-agent remediation"
+    confidence: "high"
+    alternatives: ["Re-run after each fix round", "Re-run after final round"]
+    reasoning: "The gate run is a point-in-time evaluation. Fix agents modify application code, not dependency manifests. Re-running would add latency with no expected benefit."
+    reversibility: "Medium -- adding re-run would require new state tracking"
