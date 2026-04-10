@@ -317,7 +317,7 @@ Runs ecosystem-appropriate dependency audit commands before the red-team loop be
 
 **Artifact-type scoping:** Runs **only when the artifact type is `code`**. Unconditionally skipped for `design`, `plan`, `hypothesis`, `mockup`, and `translation` artifacts. When skipped, no audit section appears in gate output and no scratch files are written.
 
-**Timing:** Runs after the active-run marker is written (step 2 in How It Works) but before artifact preparation and red-team dispatch. The pre-flight completes fully before the first red-team round begins.
+**Timing:** Runs after the active-run marker is written (setup phase, before the numbered steps in How It Works) but before artifact preparation and red-team dispatch. The pre-flight completes fully before the first red-team round begins.
 
 ### Skill Arguments
 
@@ -377,7 +377,7 @@ Before invoking any audit tool, the gate checks availability:
 - **`requirements.txt`:** `pip-audit -r requirements.txt` reads the file directly. No virtualenv required. Available if `pip-audit` is on PATH.
 - **`pyproject.toml`:** `pip-audit` without `-r` inspects the installed environment. Requires an active virtualenv or a lockfile (`poetry.lock`, `pdm.lock`, `uv.lock`). If neither is present, skip with: "pip-audit requires a virtual environment or lock file for pyproject.toml; results would be unreliable."
 - **`Cargo.toml`:** Requires `Cargo.lock` to be present. If absent: "skipped — Cargo.lock absent; run cargo generate-lockfile first."
-- **`package.json`:** No special environment requirement beyond `npm` being on PATH.
+- **`package.json`:** Requires `package-lock.json` (or `npm-shrinkwrap.json`) in the same directory (or workspace root). If absent: "skipped — no lockfile found; run npm install to generate package-lock.json." `npm` must be on PATH.
 
 **Python manifest confidence:** When only `pyproject.toml` is present (no `requirements.txt` or lockfile in the same directory), include a notice in `audit-results.md`: "**Confidence: Reduced** — No requirements.txt or lock file found. pip-audit is resolving dependencies from pyproject.toml directly. Results may be incomplete."
 
@@ -412,6 +412,9 @@ Audit tools use different severity vocabularies. The gate normalizes to a common
 | **High** | `high` | CVSS >= 7.0 and < 9.0 | CVSS >= 7.0 and < 9.0 |
 | **Moderate** | `moderate` | CVSS >= 4.0 and < 7.0 | CVSS >= 4.0 and < 7.0 |
 | **Low** | `low` | CVSS >= 0.1 and < 4.0 | CVSS >= 0.1 and < 4.0 |
+| **Informational** | — | CVSS = 0.0 | CVSS = 0.0 |
+
+**CVSS 0.0** findings are classified as **Informational** — reported in `audit-results.md` but never count toward blocking. They do not map to any blocking severity level.
 
 If a finding has no CVSS score (advisory-only, no CVE assigned), it is treated as **Moderate** and flagged with `[no-cvss]` in the output.
 
@@ -451,15 +454,15 @@ run-id: <run-id>
 
 ## Summary
 Result: CLEAN | FINDINGS | BLOCKED | INCONCLUSIVE | FAILED
-Critical: N  High: N  Moderate: N  Low: N
+Critical: N  High: N  Moderate: N  Low: N  Informational: N
 
 ## npm — packages/api/package.json — FINDINGS
 [findings list: package, severity, CVE, fix-available]
 status: complete
 
-## pip — requirements.txt — FINDINGS
-## pip — pyproject.toml — FINDINGS
-[deduplicated: CVE-2024-XXXXX reported by both requirements.txt and pyproject.toml — counted once]
+## pip — src/requirements.txt — FINDINGS
+## pip — src/pyproject.toml — FINDINGS
+[deduplicated: CVE-2024-XXXXX reported by both src/requirements.txt and src/pyproject.toml — counted once]
 status: complete
 
 ## Warnings
@@ -551,7 +554,7 @@ Emit a Compression State Block at:
 - **Gate completion:** When the gate passes or escalates (before returning to parent skill)
 - **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
-**Dead-end handoff (step 4a, code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 1+ round entries, copy its contents to `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective. On stagnation/escalation exit paths, also write the handoff file before escalating — stagnated sessions produce the highest-value dead-end data.
+**Dead-end handoff (step 5, code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 1+ round entries, copy its contents to `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective. On stagnation/escalation exit paths, also write the handoff file before escalating — stagnated sessions produce the highest-value dead-end data.
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
 
