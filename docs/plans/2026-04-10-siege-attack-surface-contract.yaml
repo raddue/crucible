@@ -1,0 +1,137 @@
+version: "1.0"
+ticket: "#117"
+epic: "#117"
+title: "Siege Attack Surface Discovery -- Outside-In Recon for Phase 1"
+date: "2026-04-10"
+
+api_surface:
+  - name: "exposure-map"
+    type: "artifact"
+    signature: "scratch/<run-id>/exposure-map.md"
+    params:
+      - name: "endpoints"
+        type: "table -- method, route, file, line, in-manifest flag"
+        required: true
+      - name: "gaps"
+        type: "list -- endpoints whose source file is not in the manifest"
+        required: true
+    returns: "Markdown table of enumerated endpoints with coverage gap annotations"
+    description: "Static-analysis-derived map of all registered routes/endpoints, cross-referenced against the Siege file manifest to identify coverage gaps."
+
+  - name: "framework-detection"
+    type: "heuristic"
+    signature: "Phase 1 Step 2.5 Sub-step A"
+    params:
+      - name: "project_files"
+        type: "manifest file list"
+        required: true
+    returns: "List of detected web frameworks with confidence level"
+    description: "Scans package manifests and project config to identify which web frameworks the target uses. Drives pattern selection for route enumeration."
+
+  - name: "gap-auto-include"
+    type: "behavior"
+    signature: "Manifest augmentation with [attack-surface-gap] tag"
+    params:
+      - name: "gap_files"
+        type: "list -- files with registered endpoints not in manifest"
+        required: true
+    returns: "Updated manifest.md with gap files appended"
+    description: "Files that register externally-reachable endpoints but were not in the original manifest are automatically added. Boundary Attacker prioritizes these in Tier 2."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Step 2.5 is skipped cleanly when no web framework is detected"
+      verification: "SKILL.md contains explicit skip condition and scope limitation note for no-framework case"
+      check_method: "code-inspection"
+
+    - id: "INV-2"
+      description: "Framework detection table covers at least 13 frameworks"
+      verification: "Count rows in the framework detection table in SKILL.md Step 2.5"
+      check_method: "code-inspection"
+
+    - id: "INV-3"
+      description: "Route enumeration patterns exist for every detected framework"
+      verification: "Each framework in detection table has a corresponding row in the route patterns table"
+      check_method: "code-inspection"
+
+    - id: "INV-4"
+      description: "Gap files are tagged [attack-surface-gap] in the manifest"
+      verification: "SKILL.md specifies the tag and auto-append behavior"
+      check_method: "code-inspection"
+
+    - id: "INV-5"
+      description: "Exposure map summary in Tier 1 context is capped at 15 lines"
+      verification: "SKILL.md specifies 15-line budget for exposure map in Tier 1"
+      check_method: "code-inspection"
+
+    - id: "INV-6"
+      description: "Boundary Attacker Tier 2 partition prioritizes gap files"
+      verification: "SKILL.md Step 2 Tier 2 partitioning mentions gap file priority for Boundary Attacker"
+      check_method: "code-inspection"
+
+    - id: "INV-7"
+      description: "exposure-map.md appears in the File Inventory table"
+      verification: "grep for exposure-map.md in the File Inventory section"
+      check_method: "grep"
+
+    - id: "INV-8"
+      description: "Threat model delta references exposure map for drift detection"
+      verification: "Persistence section references new/retired attack surfaces from exposure map"
+      check_method: "code-inspection"
+
+    - id: "INV-9"
+      description: "No new agent dispatch -- all enumeration is orchestrator-level Sonnet work"
+      verification: "Step 2.5 does not reference Task tool, subagent, or dispatch"
+      check_method: "code-inspection"
+
+    - id: "INV-10"
+      description: "Static analysis only -- no application startup or HTTP requests"
+      verification: "Step 2.5 explicitly states static grep patterns; no curl, fetch, or server start"
+      check_method: "code-inspection"
+
+  testable:
+    - id: "INV-11"
+      description: "Running Siege on a project with Express routes produces an exposure map with correct endpoint count"
+      verification: "Run siege on test Express project, verify exposure-map.md contains expected routes"
+      test_tag: "contract:exposure-map:inv-11"
+
+    - id: "INV-12"
+      description: "A route file not in the initial manifest is detected as a gap and added"
+      verification: "Create project where a route file is outside normal security-relevant patterns, verify gap detection"
+      test_tag: "contract:gap-detection:inv-12"
+
+integration_points:
+  - name: "Phase 2 Tier 1 context"
+    direction: "Step 2.5 -> Phase 2 context assembly"
+    contract: "Exposure map summary (endpoint count + gap list) appended to tier1-context.md, max 15 lines"
+
+  - name: "Phase 2 Tier 2 Boundary Attacker partition"
+    direction: "Step 2.5 -> Boundary Attacker file selection"
+    contract: "Gap files prioritized in Boundary Attacker's Tier 2 partition"
+
+  - name: "Phase 5 Threat Model"
+    direction: "Step 2.5 -> Threat model delta"
+    contract: "New endpoints flagged as new attack surfaces; absent prior endpoints flagged as retired"
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Regex/grep patterns, not AST parsing"
+    confidence: "high"
+    alternatives: ["AST-based extraction per language (higher accuracy, much higher complexity)"]
+    reasoning: "This is a Sonnet-level scoping task. Grep catches 90%+ of routes in well-structured projects. AST parsing would require language-specific tooling and is disproportionate."
+    reversibility: "High -- could add AST-based extraction as an optional enhancement later"
+
+  - id: "AMB-2"
+    decision: "Gap files auto-added to manifest, not presented as a separate user gate"
+    confidence: "high"
+    alternatives: ["Present gaps to user and ask which to include (adds friction)"]
+    reasoning: "If a file registers an externally-reachable endpoint, it should always be in scope for security review. Auto-include is the safe default. User can still exclude via manifest adjustment."
+    reversibility: "High -- could add opt-out per gap file"
+
+  - id: "AMB-3"
+    decision: "Exposure map summary in Tier 1 (15 lines), full table in scratch only"
+    confidence: "high"
+    alternatives: ["Full table in Tier 1 (bloats context for large APIs)", "No Tier 1 inclusion (agents unaware of exposure surface)"]
+    reasoning: "Agents need to know what is externally reachable but don't need every route. Summary gives endpoint count and gap list; full table is in scratch if agents need to look up specific routes."
+    reversibility: "Medium -- changing Tier 1 budget affects all agents"
