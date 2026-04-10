@@ -171,6 +171,8 @@ Determine the artifact type and build the target manifest.
 
 Before agents are dispatched, enumerate the application's externally reachable endpoints via static pattern matching. This builds an "actually exposed" map independent of the file manifest, then cross-references the two to surface coverage gaps. Runs at orchestrator level (Sonnet) -- no agent dispatch.
 
+**Artifact-type guard:** Step 2.5 requires source files to grep. Skip entirely for `design` and `plan` artifact types (no code to scan). Run only for `code` and `mixed`. Note in scope limitations: "Attack surface enumeration skipped -- artifact type [design|plan] has no source files to scan."
+
 **Sub-step A -- Framework Detection:**
 
 Scan manifest files and project configuration to detect which web framework(s) the project uses:
@@ -226,7 +228,7 @@ Build the exposure map and cross-reference with `manifest.md`:
 
 1. For each enumerated endpoint, check if its source file appears in the manifest
 2. Endpoints whose source file is NOT in the manifest are flagged as **coverage gaps**
-3. Gap files are automatically appended to `manifest.md` with the tag `[attack-surface-gap]`
+3. Gap files are automatically appended to `manifest.md` with the tag `[attack-surface-gap]`. Log each addition: "Attack surface gap: added [file] to manifest ([N] endpoints not in original scope)." This is post-USER-GATE, so the user sees what changed before agent dispatch.
 4. Write the full exposure map to `scratch/<run-id>/exposure-map.md`:
 
 ```markdown
@@ -249,7 +251,7 @@ Build the exposure map and cross-reference with `manifest.md`:
 [framework-specific limitations from sub-step B]
 ```
 
-**Token budget:** The exposure map summary appended to Tier 1 context (Step 1 of Automated Context Assembly) is capped at **15 lines**: endpoint count, gap count, and the gap list. The full endpoint table remains in `scratch/<run-id>/exposure-map.md` only.
+**Line budget:** The exposure map summary appended to Tier 1 context (Step 1 of Automated Context Assembly) is capped at **15 lines**: endpoint count, gap count, and the gap list. The full endpoint table remains in `scratch/<run-id>/exposure-map.md` only.
 
 ### Step 3: Load Persistent Threat Model
 
@@ -274,6 +276,7 @@ Adopts audit's tiered context model with security-specific partitioning.
 - Intelligence summary (50 lines, from Step 1)
 - Prior threat context (30 lines, from Step 3)
 - Trust boundary diagram (if available from threat model)
+- Exposure map summary (15 lines, from Step 2.5 -- endpoint count, gap count, gap list)
 - Target: **300 lines**. Flexible up to 500 for complex multi-service architectures.
 
 **Tier 2 -- Deep dive (per-agent partitioning):**
@@ -805,7 +808,7 @@ After the security gate passes (or user accepts risks and proceeds):
 
 1. Read existing `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` (or create if first run)
 2. Merge new findings into Historical Findings (resolved findings from fix rounds, accepted risks, open items)
-3. Update Trust Boundaries and Attack Surfaces based on analysis
+3. Update Trust Boundaries and Attack Surfaces based on analysis. If `scratch/<run-id>/exposure-map.md` exists, merge its endpoints into Attack Surfaces: new endpoints not in the prior model are flagged "new attack surface"; endpoints present in the prior model but absent from the current enumeration are flagged "retired surface" in the Threat Model Delta.
 4. Record the Threat Model Delta in the report
 5. Write updated threat model to disk
 6. **Copy the final report** from `scratch/<run-id>/report.md` to `memory/security-audit/reports/<date>-<target>.md` for persistent access. Scratch directories are cleaned up on subsequent runs; the report copy ensures findings survive cleanup.
