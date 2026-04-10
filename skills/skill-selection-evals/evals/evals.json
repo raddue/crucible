@@ -136,11 +136,11 @@
       "id": "completion-claims-direct-01",
       "dimension": "direct",
       "boundary": "completion-claims",
-      "prompt": "Tests pass and the feature works. Let's create a PR and merge.",
+      "prompt": "I just ran the tests and they all pass — here's the output:\n\n```\n$ npm test\n  12 passing (340ms)\n  0 failing\n```\n\nFeature works end-to-end. Let's create a PR and merge.",
       "expected_skill": "finish",
       "common_mistakes": ["verify", "code-review"],
-      "context": "User has verified tests pass and wants to ship. This is an integration decision — how to get the work into the codebase.",
-      "reasoning": "Finish guides completion — presenting options for merge, PR, or cleanup. Verify gathers evidence (running tests, confirming output). The user has already gathered evidence ('tests pass'). The remaining decision is how to integrate the work, which is finish's domain."
+      "context": "User has provided fresh test evidence in the current message. Verification is satisfied. This is now an integration decision.",
+      "reasoning": "Finish guides completion — presenting options for merge, PR, or cleanup. Verify gathers evidence, but the user just provided fresh evidence (test output in the current message). The remaining decision is how to integrate the work, which is finish's domain."
     },
     {
       "id": "completion-claims-direct-02",
@@ -166,11 +166,11 @@
       "id": "completion-claims-context-01",
       "dimension": "context-dependent",
       "boundary": "completion-claims",
-      "prompt": "We're done here.",
-      "expected_skill": "verify",
-      "common_mistakes": ["finish"],
-      "context": "No test output or verification evidence has been presented in the conversation. The completion claim is unsupported.",
-      "reasoning": "Same completion signal but context matters. If tests had been run and confirmed passing earlier in the conversation, this would trigger finish (integration decision). Without evidence, 'we're done' should trigger verify first — evidence before assertions. The absence of prior verification is the distinguishing context."
+      "prompt": "Tests pass, CI is green, and the PR has two approvals. What now?",
+      "expected_skill": "finish",
+      "common_mistakes": ["verify"],
+      "context": "All verification signals present: tests pass, CI green, peer approvals received. The user is asking what the next step is — this is an integration decision.",
+      "reasoning": "Same completion-area prompt as other evals in this boundary, but context includes strong evidence (tests, CI, approvals). With evidence satisfied, the question 'what now?' is an integration decision — finish. If evidence were missing, verify would be correct. The distinguishing context is the presence of multiple verification signals."
     },
     {
       "id": "bug-handling-direct-01",
@@ -203,17 +203,17 @@
       "reasoning": "'Something is wrong' signals an active problem — debugging territory. If the user said 'review the caching system for potential issues', that would be audit (proactive review). If they said 'verify the caching system works', that would be verify. The 'wrong' qualifier indicates a bug to investigate."
     },
     {
-      "id": "cascade-direct-01",
+      "id": "cascade-ordering-01",
       "dimension": "cascade",
-      "boundary": "test-methodology",
+      "boundary": "review-direction",
       "prompt": "I want to add a webhook retry system with exponential backoff. Let's design it and build it properly.",
       "expected_skill": ["design", "build"],
       "common_mistakes": ["build", "planning"],
-      "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline.",
+      "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline. Tests design-before-build ordering discipline.",
       "reasoning": "Design must come before build — 'design it and build it' is the correct sequence. Skipping design and going straight to build violates the design-before-build discipline. Planning alone is insufficient — it produces a task list but not the design exploration. The correct cascade is design (explored questions, investigated options) then build (implementation pipeline)."
     },
     {
-      "id": "cascade-direct-02",
+      "id": "cascade-ordering-02",
       "dimension": "cascade",
       "boundary": "bug-handling",
       "prompt": "The payment processor is double-charging some customers. Fix it and make sure it's actually fixed before we deploy.",
@@ -223,9 +223,9 @@
       "reasoning": "Debugging investigates root cause and implements fix. Verify then confirms the fix actually works with fresh evidence. Skipping verify after debugging and going straight to finish (deploy) risks deploying an unverified fix. The correct cascade is debugging (find and fix) then verify (prove it works)."
     },
     {
-      "id": "cascade-direct-03",
+      "id": "cascade-ordering-03",
       "dimension": "cascade",
-      "boundary": "completion-claims",
+      "boundary": "test-methodology",
       "prompt": "I need to add real-time notifications to the dashboard. Let's think through the design, plan the tasks, then build it.",
       "expected_skill": ["design", "planning", "build"],
       "common_mistakes": ["build", "design"],
