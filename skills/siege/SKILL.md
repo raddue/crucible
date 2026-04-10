@@ -217,10 +217,13 @@ For each detected framework, grep project files using these patterns to extract 
 
 For each match, extract: HTTP method (or "ANY" if indeterminate), route path (raw string), source file path, line number, framework name.
 
+**Auth-signal heuristic (best-effort):** For each endpoint, scan surrounding context (same file, same route registration block) for auth middleware or decorator patterns: `[Authorize]`, `@RequireAuth`, `authenticate`, `isAuthenticated`, `requireLogin`, `@login_required`, `@permission_required`, `auth_guard`, `AuthGuard`, `before_action :authenticate`. Classify each endpoint as `auth: yes | no | unknown`. This is approximate -- false negatives are expected (auth applied at router level may not appear near the route). The classification feeds the exposure map's "Auth" column and helps prioritize: `auth: no` endpoints are highest priority for Boundary Attacker partitioning.
+
 **Limitations (documented in exposure map):**
 - Dynamic route registration (method/path from variables) is not captured
 - Middleware-only mounts (e.g., `app.use('/api', ...)`) are recorded as "middleware mount", not individual endpoints
 - Convention-based routing (Next.js file-based, Rails `resources` expansion) produces approximate routes
+- Auth-signal heuristic is best-effort: router-level or middleware-chain auth may not appear near the route definition, producing false `auth: unknown` classifications
 
 **Sub-step C -- Exposure Map and Cross-Reference:**
 
@@ -238,10 +241,10 @@ Build the exposure map and cross-reference with `manifest.md`:
 **Endpoint count:** [N]
 
 ## Endpoints
-| # | Method | Route | File | Line | In Manifest |
-|---|--------|-------|------|------|-------------|
-| 1 | GET | /api/users | src/controllers/UserController.ts | 42 | Yes |
-| 2 | DELETE | /admin/purge | src/admin/maintenance.ts | 88 | NO -- GAP |
+| # | Method | Route | File | Line | Auth | In Manifest |
+|---|--------|-------|------|------|------|-------------|
+| 1 | GET | /api/users | src/controllers/UserController.ts | 42 | yes | Yes |
+| 2 | DELETE | /admin/purge | src/admin/maintenance.ts | 88 | no | NO -- GAP |
 
 ## Coverage Gaps
 - `/admin/purge` (src/admin/maintenance.ts:88) -- file not in Siege manifest
