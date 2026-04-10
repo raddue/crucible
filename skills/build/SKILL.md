@@ -303,6 +303,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 
 3. **Full match (design doc + implementation plan + contract all present):**
    - Skip interactive design (the Phase 1 design sub-skill below) — design doc already exists
+   - **Security review check:** If the contract contains `security_review` field, note it in the Phase 1→2 handoff manifest under Active Constraints: "Contract requires security review (`security_review.status: [required|recommended]`) — siege will be evaluated in Phase 4 Step 5.5." This ensures the directive survives phase handoffs and compaction recovery.
    - Quality-gate the existing design doc with staleness context: "This design doc is pre-existing from /spec and may be stale — verify against current codebase state before proceeding"
    - **Staleness rejection:** If the quality gate finds that the design doc references files, interfaces, or modules that no longer exist in the codebase, reject the doc as fundamentally stale. Fall back to running Phase 1 interactively. Inform user: "Pre-existing design doc for #NNN is fundamentally stale (references [specific items] that no longer exist). Running interactive design instead."
    - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + innovate + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.

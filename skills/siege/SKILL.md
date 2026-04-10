@@ -40,6 +40,8 @@ Audit finds bugs, robustness gaps, and architecture issues. Quality-gate iterate
 
 ## Activation Heuristic
 
+<!-- CANONICAL: shared/security-signals.md — consumption-optimized keyword lists for build/spec/audit -->
+
 ### Content-Aware Detection
 
 Siege activates when the orchestrator (build, audit, or user session) encounters **two or more** of these high-risk signals in the target artifact:
@@ -84,6 +86,22 @@ When `true`: Chain Analyst annotates chain steps with MITRE ATT&CK technique IDs
 - `--force` -- Activate Siege regardless of heuristic (user explicitly wants security review)
 - `--skip` -- Suppress Siege activation even when heuristic triggers (user explicitly declines)
 - When audit detects security surfaces during its Phase 2 analysis, it may recommend: "Security surfaces detected. Run `/siege` for full security audit." This is a recommendation, not automatic invocation.
+
+## Pipeline Integration
+
+<!-- CANONICAL: shared/security-signals.md -->
+Siege integrates with orchestrator skills via `shared/security-signals.md`, which codifies the 7-category activation heuristic in a consumption-optimized format:
+
+- **crucible:build** — Phase 4 Step 5.5 checks for siege activation signals in the implementation diff and design doc. If 2+ signals detected (or contract specifies `security_review: required`), siege is dispatched automatically. Critical/High findings block the pipeline identically to quality-gate Fatal/Significant.
+- **crucible:spec** — Step 3.5 scans ticket content for signals during contract generation. Adds `security_review: required|recommended` to the contract YAML, which build consumes.
+- **crucible:audit** — Existing recommendation behavior unchanged. Audit may still recommend siege when it detects security surfaces.
+
+When dispatched from build, siege receives:
+- Artifact type: `mixed` (design doc + implementation diff)
+- `deployment_context`: from contract `security_review.deployment_context` if present, else defaults to `public`
+- Scope: determined by siege's own scope-based agent count heuristic (3/4/6 agents based on file count)
+
+Build's escape hatches (`--force-siege`, `--skip-siege`) map to siege's `--force` and `--skip` flags respectively.
 
 ### Execution Intensity
 

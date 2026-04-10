@@ -321,6 +321,7 @@ Before any dispatch work, check for a crashed prior spec session:
   |                +-- Run investigation (same depth as /design)
   |                +-- Dependency discovery check -> write discoveries.json
   |                +-- Update local status -> "writing"
+  |                +-- Security signal scan (shared/security-signals.md) -> include security_review in contract if signals detected
   |                +-- Write design doc + implementation plan + contract to output/
   |                +-- Contract schema validation
   |                +-- Update local status -> "validating"
@@ -334,7 +335,7 @@ Before any dispatch work, check for a crashed prior spec session:
   |                +-- Copy outputs from ticket dirs to docs/plans/
   |                +-- Commit outputs to spec/<epic-number> branch (serialized)
   |                +-- Check for re-queued tickets, update wave schedule
-  |                +-- Output status update to terminal
+  |                +-- Output status update to terminal (include security_review status per ticket if present)
   |
   +-- [11] End-of-run quality gate
   |        +-- Phase 1: Per-document gates (design + plan per ticket, in parallel)
