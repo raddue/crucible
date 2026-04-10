@@ -1,0 +1,236 @@
+{
+  "skill_name": "skill-selection-evals",
+  "eval_type": "selection",
+  "evals": [
+    {
+      "id": "test-methodology-direct-01",
+      "dimension": "direct",
+      "boundary": "test-methodology",
+      "prompt": "I just changed the auth module, make sure existing tests still make sense",
+      "expected_skill": "test-coverage",
+      "common_mistakes": ["test-driven-development", "verify"],
+      "context": "Code already exists and was recently modified. Tests exist but may be stale after the change.",
+      "reasoning": "TDD is for new code written test-first. Verify checks claims of completion. Test-coverage audits existing tests after code changes to find staleness, needed updates, or removal."
+    },
+    {
+      "id": "test-methodology-direct-02",
+      "dimension": "direct",
+      "boundary": "test-methodology",
+      "prompt": "I need to implement a Luhn validator for credit card numbers. Let's build it with tests.",
+      "expected_skill": "test-driven-development",
+      "common_mistakes": ["test-coverage", "build"],
+      "context": "New feature, no existing code. User wants test-first development.",
+      "reasoning": "This is greenfield implementation where no code exists yet. 'Build it with tests' signals test-first approach. TDD writes failing tests before implementation. Test-coverage only applies when tests already exist. Build would skip the test-first discipline."
+    },
+    {
+      "id": "test-methodology-direct-03",
+      "dimension": "direct",
+      "boundary": "test-methodology",
+      "prompt": "I just finished implementing the rate limiter. Try to break it — find edge cases I missed.",
+      "expected_skill": "adversarial-tester",
+      "common_mistakes": ["test-coverage", "test-driven-development", "red-team"],
+      "context": "Implementation is complete. User wants adversarial testing to find unknown failure modes.",
+      "reasoning": "Implementation is done — this is not TDD (code exists) or test-coverage (not auditing existing tests for staleness). Adversarial-tester reads implementation diffs and writes tests designed to make it break. Red-team reviews artifacts for design flaws, not implementation edge cases."
+    },
+    {
+      "id": "test-methodology-negative-01",
+      "dimension": "negative",
+      "boundary": "test-methodology",
+      "prompt": "Write tests for the parser I just built last week. It handles JSON, YAML, and TOML.",
+      "expected_skill": "test-coverage",
+      "common_mistakes": ["test-driven-development"],
+      "context": "Code was built last week. Tests need to be added after the fact. This is retroactive test addition, not test-first development.",
+      "reasoning": "Despite saying 'write tests', this is NOT TDD. The parser already exists — TDD requires writing tests BEFORE implementation. Test-coverage audits and adds tests for existing code. The key signal is 'I just built' (past tense) — the code-before-test ship has sailed."
+    },
+    {
+      "id": "test-methodology-context-01",
+      "dimension": "context-dependent",
+      "boundary": "test-methodology",
+      "prompt": "Write tests for the checkout flow.",
+      "expected_skill": "test-coverage",
+      "common_mistakes": ["test-driven-development"],
+      "context": "The checkout flow already exists in production. This is adding test coverage to existing, working code.",
+      "reasoning": "Same verb ('write tests') but context determines the skill. When the code already exists and is in production, this is test-coverage (audit and add tests for existing code). If the checkout flow did not exist yet, this would be TDD. The distinguishing signal is whether code exists."
+    },
+    {
+      "id": "review-direction-direct-01",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "I'm done with the feature branch. Can you review my changes before I create a PR?",
+      "expected_skill": "code-review",
+      "common_mistakes": ["review-feedback", "quality-gate"],
+      "context": "User is requesting a review of their own work before submission. No external feedback has been received.",
+      "reasoning": "Code-review is for when you want your work reviewed — requesting a review. Review-feedback is for when you have RECEIVED review comments and need to process them. The direction is outbound (requesting review), not inbound (receiving feedback)."
+    },
+    {
+      "id": "review-direction-direct-02",
+      "dimension": "direct",
+      "boundary": "review-direction",
+      "prompt": "I got 6 comments on my PR from the tech lead. Help me work through them.",
+      "expected_skill": "review-feedback",
+      "common_mistakes": ["code-review"],
+      "context": "User has received review feedback on a PR and needs to process and respond to the comments.",
+      "reasoning": "Review-feedback handles inbound review comments — analyzing them for technical merit, identifying unclear or contradictory items, and determining the right response. Code-review would be requesting a new review, which is the wrong direction."
+    },
+    {
+      "id": "review-direction-negative-01",
+      "dimension": "negative",
+      "boundary": "review-direction",
+      "prompt": "The senior dev left some comments on my PR saying 'looks good, just clean up the naming'. Help me with the review.",
+      "expected_skill": "review-feedback",
+      "common_mistakes": ["code-review"],
+      "context": "Despite using the word 'review', the user has RECEIVED feedback and needs to process it. The feedback is inbound.",
+      "reasoning": "The word 'review' appears but the direction is inbound — the user received comments and needs to process them. Review-feedback handles this. Code-review would be wrong because the user is not requesting a fresh review of their code."
+    },
+    {
+      "id": "review-direction-context-01",
+      "dimension": "context-dependent",
+      "boundary": "review-direction",
+      "prompt": "Review this code.",
+      "expected_skill": "code-review",
+      "common_mistakes": ["review-feedback", "audit"],
+      "context": "User is presenting their own code and asking for a review. No prior feedback exists — this is a request for review.",
+      "reasoning": "Same word 'review' but context determines direction. Here the user is requesting a review (outbound) — code-review. If the user had said 'I got a review on this code, help me address it', the direction would be inbound — review-feedback. Audit would be wrong because the user is asking for a targeted review, not a multi-lens adversarial subsystem audit."
+    },
+    {
+      "id": "adversarial-scope-direct-01",
+      "dimension": "direct",
+      "boundary": "adversarial-scope",
+      "prompt": "I just finished the design doc for the new notification service. Red-team it.",
+      "expected_skill": "red-team",
+      "common_mistakes": ["audit", "quality-gate", "siege"],
+      "context": "Single artifact (design doc) ready for adversarial review. Not a full codebase review, not a security audit.",
+      "reasoning": "Red-team is for adversarial review of a single artifact (design doc, plan, code, PR). Audit reviews existing codebase subsystems through parallel lenses. Quality-gate iterates with fixes until clean. Siege is specifically security-focused. The key signal is 'red-team it' on a single artifact."
+    },
+    {
+      "id": "adversarial-scope-direct-02",
+      "dimension": "direct",
+      "boundary": "adversarial-scope",
+      "prompt": "The payment module has been in production for a year. I want a thorough review of the whole subsystem — correctness, robustness, architecture, everything.",
+      "expected_skill": "audit",
+      "common_mistakes": ["red-team", "code-review", "prospector"],
+      "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact — an entire subsystem with multiple files.",
+      "reasoning": "Audit dispatches parallel analysis agents across four lenses (correctness, robustness, consistency, architecture) on an existing subsystem. Red-team reviews a single artifact. Code-review is lighter-weight. Prospector looks for architectural friction across the whole codebase, not a specific subsystem."
+    },
+    {
+      "id": "adversarial-scope-negative-01",
+      "dimension": "negative",
+      "boundary": "adversarial-scope",
+      "prompt": "We just assembled the full feature — auth, API routes, database migrations, and frontend. Hunt for cross-component bugs before we ship.",
+      "expected_skill": "inquisitor",
+      "common_mistakes": ["audit", "red-team", "adversarial-tester"],
+      "context": "Full feature assembled from multiple components. Need to find integration issues across component boundaries, not review a single artifact or existing subsystem.",
+      "reasoning": "Inquisitor runs 5 parallel adversarial dimensions against the complete implementation diff to find cross-component bugs. Audit reviews existing subsystems (this is new code). Red-team reviews single artifacts. Adversarial-tester finds edge cases in a single implementation, not cross-component integration issues."
+    },
+    {
+      "id": "adversarial-scope-context-01",
+      "dimension": "context-dependent",
+      "boundary": "adversarial-scope",
+      "prompt": "Audit this for security vulnerabilities.",
+      "expected_skill": "siege",
+      "common_mistakes": ["audit", "red-team"],
+      "context": "Despite using the word 'audit', the focus is specifically on security. This narrows the scope from general audit to security audit.",
+      "reasoning": "Siege is the security-specific audit — dispatches 6 parallel agents across attacker perspectives, iterates until zero Critical + zero High findings. General audit covers correctness, robustness, consistency, architecture — broader but not security-deep. The 'security vulnerabilities' qualifier triggers siege over audit."
+    },
+    {
+      "id": "completion-claims-direct-01",
+      "dimension": "direct",
+      "boundary": "completion-claims",
+      "prompt": "Tests pass and the feature works. Let's create a PR and merge.",
+      "expected_skill": "finish",
+      "common_mistakes": ["verify", "code-review"],
+      "context": "User has verified tests pass and wants to ship. This is an integration decision — how to get the work into the codebase.",
+      "reasoning": "Finish guides completion — presenting options for merge, PR, or cleanup. Verify gathers evidence (running tests, confirming output). The user has already gathered evidence ('tests pass'). The remaining decision is how to integrate the work, which is finish's domain."
+    },
+    {
+      "id": "completion-claims-direct-02",
+      "dimension": "direct",
+      "boundary": "completion-claims",
+      "prompt": "I think the migration is done. Can you confirm everything actually works?",
+      "expected_skill": "verify",
+      "common_mistakes": ["finish", "test-coverage"],
+      "context": "User is uncertain about completion. They need evidence, not an integration decision.",
+      "reasoning": "Verify runs verification commands and confirms output before any success claims — evidence before assertions. The user says 'I think' (uncertain) and 'confirm everything works' (needs evidence). Finish would be premature — the user has not yet confirmed the work is correct."
+    },
+    {
+      "id": "completion-claims-negative-01",
+      "dimension": "negative",
+      "boundary": "completion-claims",
+      "prompt": "Everything looks good to me. Ship it!",
+      "expected_skill": "verify",
+      "common_mistakes": ["finish"],
+      "context": "User claims completion but has not provided evidence of running tests or verification commands in the current session. 'Looks good to me' is a subjective claim, not verified evidence.",
+      "reasoning": "Despite the user's confidence, verify requires fresh evidence in the current session. 'Looks good to me' is not the same as 'tests pass and here is the output'. Verify must run before finish — the completion claim needs evidence backing."
+    },
+    {
+      "id": "completion-claims-context-01",
+      "dimension": "context-dependent",
+      "boundary": "completion-claims",
+      "prompt": "We're done here.",
+      "expected_skill": "verify",
+      "common_mistakes": ["finish"],
+      "context": "No test output or verification evidence has been presented in the conversation. The completion claim is unsupported.",
+      "reasoning": "Same completion signal but context matters. If tests had been run and confirmed passing earlier in the conversation, this would trigger finish (integration decision). Without evidence, 'we're done' should trigger verify first — evidence before assertions. The absence of prior verification is the distinguishing context."
+    },
+    {
+      "id": "bug-handling-direct-01",
+      "dimension": "direct",
+      "boundary": "bug-handling",
+      "prompt": "This endpoint returns 500 sometimes. Here's the error log showing a NullPointerException in the order handler.",
+      "expected_skill": "debugging",
+      "common_mistakes": ["verify", "audit"],
+      "context": "Active failure with error evidence. This is a bug to investigate and fix, not a completion check or subsystem review.",
+      "reasoning": "Debugging handles active failures — bugs, test failures, unexpected behavior. The user has an error log showing a specific failure. Verify checks completion claims (no active failure here). Audit reviews subsystems (this is a specific bug, not a broad review)."
+    },
+    {
+      "id": "bug-handling-direct-02",
+      "dimension": "direct",
+      "boundary": "bug-handling",
+      "prompt": "The tests pass but users are reporting that search results are wrong. Something is off.",
+      "expected_skill": "debugging",
+      "common_mistakes": ["verify", "test-coverage"],
+      "context": "Tests pass but behavior is wrong. This is a bug — the tests are insufficient or the bug is in an untested path.",
+      "reasoning": "Despite tests passing, there is unexpected behavior (wrong search results). This is a debugging scenario — investigate the root cause. Verify would just re-run the (already passing) tests. Test-coverage would audit test quality but not investigate the specific user-reported issue."
+    },
+    {
+      "id": "bug-handling-context-01",
+      "dimension": "context-dependent",
+      "boundary": "bug-handling",
+      "prompt": "Something is wrong with the caching system.",
+      "expected_skill": "debugging",
+      "common_mistakes": ["audit", "verify"],
+      "context": "User reports something is wrong — this is an active problem, not a proactive review. The phrasing indicates a current issue, not a desire for broad subsystem review.",
+      "reasoning": "'Something is wrong' signals an active problem — debugging territory. If the user said 'review the caching system for potential issues', that would be audit (proactive review). If they said 'verify the caching system works', that would be verify. The 'wrong' qualifier indicates a bug to investigate."
+    },
+    {
+      "id": "cascade-direct-01",
+      "dimension": "cascade",
+      "boundary": "test-methodology",
+      "prompt": "I want to add a webhook retry system with exponential backoff. Let's design it and build it properly.",
+      "expected_skill": ["design", "build"],
+      "common_mistakes": ["build", "planning"],
+      "context": "New feature requiring both design exploration and implementation. The user wants the full pipeline.",
+      "reasoning": "Design must come before build — 'design it and build it' is the correct sequence. Skipping design and going straight to build violates the design-before-build discipline. Planning alone is insufficient — it produces a task list but not the design exploration. The correct cascade is design (explored questions, investigated options) then build (implementation pipeline)."
+    },
+    {
+      "id": "cascade-direct-02",
+      "dimension": "cascade",
+      "boundary": "bug-handling",
+      "prompt": "The payment processor is double-charging some customers. Fix it and make sure it's actually fixed before we deploy.",
+      "expected_skill": ["debugging", "verify"],
+      "common_mistakes": ["debugging", "finish"],
+      "context": "Active bug requiring investigation, fix, and verified confirmation before deployment.",
+      "reasoning": "Debugging investigates root cause and implements fix. Verify then confirms the fix actually works with fresh evidence. Skipping verify after debugging and going straight to finish (deploy) risks deploying an unverified fix. The correct cascade is debugging (find and fix) then verify (prove it works)."
+    },
+    {
+      "id": "cascade-direct-03",
+      "dimension": "cascade",
+      "boundary": "completion-claims",
+      "prompt": "I need to add real-time notifications to the dashboard. Let's think through the design, plan the tasks, then build it.",
+      "expected_skill": ["design", "planning", "build"],
+      "common_mistakes": ["build", "design"],
+      "context": "User explicitly requests the full pipeline: design exploration, task planning, then implementation.",
+      "reasoning": "The user spells out the three-phase cascade: design (explore options, investigate questions), planning (break into tasks with ordering), build (implement). Skipping to build alone misses design exploration. Design alone misses the planning phase that produces the task breakdown. The full sequence ensures each phase informs the next."
+    }
+  ]
+}
