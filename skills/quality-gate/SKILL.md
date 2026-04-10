@@ -487,7 +487,7 @@ When results span multiple manifests with mixed outcomes, the overall `Result:` 
 
 When a finding at or above `min_blocking_severity` is present and `skip_blocking` is not `true`:
 
-- **Interactive session** (Claude Code can prompt the user): Present the finding summary and ask whether to continue to red-team review or abort.
+- **Interactive session** (Claude Code can prompt the user): Present the finding summary grouped by fix availability — "Fixable (N)" and "No fix available (M)" — and ask whether to continue to red-team review or abort. This grouping gives the user immediate signal on remediation effort: all-fixable blockers are a quick `npm audit fix` / `cargo update` away; no-fix blockers may require dependency replacement or acceptance.
 - **Non-interactive context** (automated pipeline, piped input): Write `Result: BLOCKED` and return to the parent orchestrator without prompting.
 
 Whether a session is interactive is a **Claude Code runtime property**, not something the skill detects via TTY heuristics or environment inspection.
