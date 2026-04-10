@@ -303,6 +303,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 
 3. **Full match (design doc + implementation plan + contract all present):**
    - Skip interactive design (the Phase 1 design sub-skill below) — design doc already exists
+   - **Security review check:** If the contract contains `security_review` field, note it in the Phase 1→2 handoff manifest under Active Constraints: "Contract requires security review (`security_review.status: [required|recommended]`) — siege will be evaluated in Phase 4 Step 5.5." This ensures the directive survives phase handoffs and compaction recovery.
    - Quality-gate the existing design doc with staleness context: "This design doc is pre-existing from /spec and may be stale — verify against current codebase state before proceeding"
    - **Staleness rejection:** If the quality gate finds that the design doc references files, interfaces, or modules that no longer exist in the codebase, reject the doc as fundamentally stale. Fall back to running Phase 1 interactively. Inform user: "Pre-existing design doc for #NNN is fundamentally stale (references [specific items] that no longer exist). Running interactive design instead."
    - If quality gate passes: Run Phase 2 on the pre-existing implementation plan — skip Plan Writer (plan already exists), but run Plan Reviewer + innovate + quality-gate on the existing plan. This ensures the plan gets the same review rigor as a freshly written plan.
@@ -876,6 +877,32 @@ After all tasks complete:
    - This is NOT a full implementation re-review — scope it to only the fixer's changes
    - Iterative until clean, same as step 3
    - Skip if the inquisitor reported all PASS (no fixes were needed)
+5.5. **CONDITIONAL: Security review via crucible:siege**
+   <!-- CANONICAL: shared/security-signals.md -->
+   a. **Contract check:** If a contract YAML exists for this ticket with `security_review.status: "required"`, siege is mandatory — skip to step (d).
+   b. **Code scan:** If no contract directive (or contract has `security_review.status: "recommended"` or field absent), scan for siege activation signals:
+      - **Scan targets:** design doc content + `git diff <base-sha>..HEAD` (changed file contents)
+      - **Method:** Case-insensitive keyword matching using the 7-category keyword lists from `shared/security-signals.md`
+      - Count distinct categories matched (one hit per category is sufficient)
+   c. **Threshold evaluation:**
+      - **0 signals:** Skip siege silently. No narration needed.
+      - **1 signal:** Log in narration: "1 security signal detected ([category]) — skipping siege. Invoke `/siege --force` manually if needed." Record in manifest and decision journal: `security-review | choice=skip | reason=1 signal ([category])`.
+      - **2+ signals:** Proceed to step (d).
+   d. **Dispatch siege:**
+      - **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-siege" before dispatching siege. If siege's fix cycle produces regressions, this is the rollback target.
+      - Dispatch `crucible:siege` with:
+        - Target: design doc + full implementation diff (artifact type: `mixed`)
+        - `deployment_context`: from contract `security_review.deployment_context` if present, else unset (siege defaults to `public`)
+      - Narration: "Security signals detected: [list categories]. Dispatching siege."
+      - Decision journal: `security-review | choice=dispatch | reason=[N] signals ([categories]) [or contract-required]`
+      - **Session index event:** Emit to outbox: `{"ts":"<now>","seq":0,"type":"security_review","summary":"Siege dispatched: [N] signals detected","detail":{"skill":"build","signals":[categories]}}`
+   e. **Blocking behavior:** Siege iterates internally until zero Critical + zero High.
+      - If siege completes clean: continue to step 6 (quality-gate)
+      - If siege escalates (stagnation, user input needed): escalate to user with siege context
+      - If siege's fix cycle produced code changes: re-run crucible:code-review scoped to siege fix commits only (`git diff <pre-siege-sha>..HEAD`). Same pattern as post-inquisitor conditional review at step 5.
+   f. **Escape hatches:** User can override automatic siege behavior:
+      - `--force-siege` — Dispatch siege regardless of signal count. Maps to siege's `--force` flag. Decision journal: `security-review | choice=force-dispatch | reason=user --force-siege flag`
+      - `--skip-siege` — Suppress siege even when signals/contract require it. Maps to siege's `--skip` flag. Decision journal: `security-review | choice=force-skip | reason=user --skip-siege flag`
 6. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-impl-gate" before dispatching the implementation quality gate. If gate fix rounds degrade the code, this is the rollback target.
 6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean) **(Non-negotiable — see Quality Gate Requirement.)**
 7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
@@ -910,6 +937,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
   Active work time:      2h 47m
   Wall clock time:       11h 13m
   Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
+  Siege:                 dispatched (3 agents, 2 rounds, 0 Critical, 0 High) | skipped (0 signals) | skipped (1 signal: auth)
   Task tiers:           3 Tier 1, 3 Tier 2, 2 Tier 3
   Subagent savings:     ~21 dispatches skipped vs all-Tier-3
   Est. input tokens:    ~32,100 (128,400 chars)
@@ -923,6 +951,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Active work time (merge overlapping parallel intervals — NOT naive sum)
 - Wall clock time (first dispatch to final completion)
 - Quality gate rounds (per gate: design, plan, implementation)
+- Siege status (dispatched with agent count, rounds, and final severity counts — or skipped with signal count and reason)
 - Estimated input tokens (sum of `input_chars` from manifest / 4)
 - Estimated output tokens (sum of `output_chars` from manifest / 4)
 
