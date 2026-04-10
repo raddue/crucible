@@ -951,6 +951,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Active work time (merge overlapping parallel intervals — NOT naive sum)
 - Wall clock time (first dispatch to final completion)
 - Quality gate rounds (per gate: design, plan, implementation)
+- Siege status (dispatched with agent count, rounds, and final severity counts — or skipped with signal count and reason)
 - Estimated input tokens (sum of `input_chars` from manifest / 4)
 - Estimated output tokens (sum of `output_chars` from manifest / 4)
 
