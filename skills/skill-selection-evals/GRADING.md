@@ -44,6 +44,24 @@ Selection eval results are reported alongside execution eval metrics:
 
 The selection accuracy metric answers: "When the agent receives a prompt, how often does it route to the correct skill?" This complements the execution delta which answers: "Once the correct skill is invoked, how much better is the output?"
 
+## Difficulty Stratification
+
+Each eval includes a `difficulty` field (easy, medium, hard) based on how ambiguous the routing decision is:
+
+- **Easy**: Clear trigger words or explicit skill references. Agent should always get these right.
+- **Medium**: Reasonable ambiguity where context matters. Errors here indicate weak disambiguation.
+- **Hard**: Same verb maps to different skills, or the correct skill is counter-intuitive. Errors here are expected at baseline and improvement targets.
+
+Report accuracy stratified by difficulty:
+
+| Difficulty | Count | Pass | Partial | Fail | Accuracy |
+|-----------|-------|------|---------|------|----------|
+| Easy | 9 | - | - | - | - |
+| Medium | 8 | - | - | - | - |
+| Hard | 6 | - | - | - | - |
+
+Difficulty-stratified accuracy reveals whether improvements are lifting hard cases (valuable) or just confirming easy cases already work (low signal).
+
 ## Interpreting Results
 
 - **Low selection accuracy on a boundary** indicates the disambiguation guidance for those skills needs improvement (SKILL.md triggers, getting-started routing table).

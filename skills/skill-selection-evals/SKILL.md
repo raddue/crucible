@@ -26,6 +26,10 @@ Crucible's 49 execution evals measure quality once a skill is invoked. Selection
 4. **completion-claims** — verify vs finish
 5. **bug-handling** — debugging vs verify vs audit
 
+## Difficulty Ratings
+
+Each eval is rated easy/medium/hard based on routing ambiguity. This enables stratified baseline measurement — distinguishing between improvements that lift hard cases (high value) vs confirming easy cases already work (low signal).
+
 ## See Also
 
 - `evals/evals.json` — the eval data
