@@ -167,6 +167,95 @@ Determine the artifact type and build the target manifest.
 
 **USER GATE:** Present the manifest and intelligence summary to the user. "Siege scope: [N files]. Intelligence: [summary of findings]. Proceed?" User may adjust scope. Write `scratch/<run-id>/gate-approved.md` on confirmation.
 
+### Step 2.5: Attack Surface Enumeration (Outside-In Recon)
+
+Before agents are dispatched, enumerate the application's externally reachable endpoints via static pattern matching. This builds an "actually exposed" map independent of the file manifest, then cross-references the two to surface coverage gaps. Runs at orchestrator level (Sonnet) -- no agent dispatch.
+
+**Artifact-type guard:** Step 2.5 requires source files to grep. Skip entirely for `design` and `plan` artifact types (no code to scan). Run only for `code` and `mixed`. Note in scope limitations: "Attack surface enumeration skipped -- artifact type [design|plan] has no source files to scan."
+
+**Sub-step A -- Framework Detection:**
+
+Scan manifest files and project configuration to detect which web framework(s) the project uses:
+
+| Signal | Framework |
+|--------|-----------|
+| `package.json` with `express` dependency | Express.js |
+| `package.json` with `fastify` dependency | Fastify |
+| `package.json` with `@nestjs/core` dependency | NestJS |
+| `package.json` with `next` dependency | Next.js |
+| `requirements.txt` or `pyproject.toml` with `flask` | Flask |
+| `requirements.txt` or `pyproject.toml` with `fastapi` | FastAPI |
+| `requirements.txt` or `pyproject.toml` with `django` | Django |
+| `*.csproj` with `Microsoft.AspNetCore` | ASP.NET Core |
+| `Gemfile` with `rails` | Rails |
+| `pom.xml` or `build.gradle` with `spring-boot` | Spring Boot |
+| `go.mod` with `gin-gonic/gin` | Gin (Go) |
+| `go.mod` with `gorilla/mux` | Gorilla Mux (Go) |
+| `Cargo.toml` with `actix-web` | Actix Web (Rust) |
+
+If no framework is detected, skip the rest of Step 2.5 and note in scope limitations: "No recognized web framework detected -- attack surface enumeration skipped." Multiple frameworks: enumerate all.
+
+**Sub-step B -- Route/Endpoint Enumeration:**
+
+For each detected framework, grep project files using these patterns to extract registered routes:
+
+| Framework | Grep Pattern | Example Match |
+|-----------|-------------|---------------|
+| Express.js | `(app\|router)\.(get\|post\|put\|patch\|delete\|all\|use)\s*\(` | `app.get('/api/users', ...)` |
+| Fastify | `(fastify\|server)\.(get\|post\|put\|patch\|delete\|all)\s*\(` | `fastify.post('/login', ...)` |
+| NestJS | `@(Get\|Post\|Put\|Patch\|Delete\|All)\s*\(` | `@Get('users/:id')` |
+| Next.js | Files under `app/` or `pages/api/` (convention-based routing) | `app/api/users/route.ts` |
+| Flask | `@(app\|blueprint)\.(route\|get\|post\|put\|delete)\s*\(` | `@app.route('/login', methods=['POST'])` |
+| FastAPI | `@(app\|router)\.(get\|post\|put\|patch\|delete)\s*\(` | `@router.get('/items/{id}')` |
+| Django | `path\(\s*['"]` or `url\(\s*['"]` in `urls.py` files | `path('api/users/', views.user_list)` |
+| ASP.NET Core | `\[Http(Get\|Post\|Put\|Patch\|Delete)\]` or `\[Route\(` or `Map(Get\|Post\|Put\|Delete)\(` | `[HttpGet("api/users/{id}")]` |
+| Rails | `(get\|post\|put\|patch\|delete\|resources\|resource)\s` in `config/routes.rb` | `resources :users` |
+| Spring Boot | `@(GetMapping\|PostMapping\|PutMapping\|PatchMapping\|DeleteMapping\|RequestMapping)\s*\(` | `@GetMapping("/api/users")` |
+| Gin (Go) | `(r\|router\|group)\.(GET\|POST\|PUT\|PATCH\|DELETE\|Any)\s*\(` | `r.GET("/api/users", ...)` |
+| Gorilla Mux (Go) | `(r\|router)\.HandleFunc\s*\(` | `r.HandleFunc("/api/users", handler)` |
+| Actix Web (Rust) | `\.(route\|resource)\s*\(` or `#\[(get\|post\|put\|patch\|delete)\]` | `#[get("/api/users")]` |
+
+For each match, extract: HTTP method (or "ANY" if indeterminate), route path (raw string), source file path, line number, framework name.
+
+**Auth-signal heuristic (best-effort):** For each endpoint, scan surrounding context (same file, same route registration block) for auth middleware or decorator patterns: `[Authorize]`, `@RequireAuth`, `authenticate`, `isAuthenticated`, `requireLogin`, `@login_required`, `@permission_required`, `auth_guard`, `AuthGuard`, `before_action :authenticate`. Classify each endpoint as `auth: yes | no | unknown`. This is approximate -- false negatives are expected (auth applied at router level may not appear near the route). The classification feeds the exposure map's "Auth" column and helps prioritize: `auth: no` endpoints are highest priority for Boundary Attacker partitioning.
+
+**Limitations (documented in exposure map):**
+- Dynamic route registration (method/path from variables) is not captured
+- Middleware-only mounts (e.g., `app.use('/api', ...)`) are recorded as "middleware mount", not individual endpoints
+- Convention-based routing (Next.js file-based, Rails `resources` expansion) produces approximate routes
+- Auth-signal heuristic is best-effort: router-level or middleware-chain auth may not appear near the route definition, producing false `auth: unknown` classifications
+
+**Sub-step C -- Exposure Map and Cross-Reference:**
+
+Build the exposure map and cross-reference with `manifest.md`:
+
+1. For each enumerated endpoint, check if its source file appears in the manifest
+2. Endpoints whose source file is NOT in the manifest are flagged as **coverage gaps**
+3. Gap files are automatically appended to `manifest.md` with the tag `[attack-surface-gap]`. Log each addition: "Attack surface gap: added [file] to manifest ([N] endpoints not in original scope)." This is post-USER-GATE, so the user sees what changed before agent dispatch.
+4. Write the full exposure map to `scratch/<run-id>/exposure-map.md`:
+
+```markdown
+# Attack Surface Exposure Map
+**Framework(s):** [detected frameworks]
+**Enumeration method:** Static pattern matching
+**Endpoint count:** [N]
+
+## Endpoints
+| # | Method | Route | File | Line | Auth | In Manifest |
+|---|--------|-------|------|------|------|-------------|
+| 1 | GET | /api/users | src/controllers/UserController.ts | 42 | yes | Yes |
+| 2 | DELETE | /admin/purge | src/admin/maintenance.ts | 88 | no | NO -- GAP |
+
+## Coverage Gaps
+- `/admin/purge` (src/admin/maintenance.ts:88) -- file not in Siege manifest
+[list all gaps]
+
+## Scope Limitations
+[framework-specific limitations from sub-step B]
+```
+
+**Line budget:** The exposure map summary appended to Tier 1 context (Step 1 of Automated Context Assembly) is capped at **15 lines**: endpoint count, gap count, and the gap list. The full endpoint table remains in `scratch/<run-id>/exposure-map.md` only.
+
 ### Step 3: Load Persistent Threat Model
 
 Read `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` if it exists. Extract:
@@ -190,6 +279,7 @@ Adopts audit's tiered context model with security-specific partitioning.
 - Intelligence summary (50 lines, from Step 1)
 - Prior threat context (30 lines, from Step 3)
 - Trust boundary diagram (if available from threat model)
+- Exposure map summary (15 lines, from Step 2.5 -- endpoint count, gap count, gap list)
 - Target: **300 lines**. Flexible up to 500 for complex multi-service architectures.
 
 **Tier 2 -- Deep dive (per-agent partitioning):**
@@ -214,13 +304,14 @@ The orchestrator builds context programmatically. Manual file reading and pastin
 1. Read the manifest from `scratch/<run-id>/manifest.md`
 2. Read `scratch/<run-id>/intelligence-summary.md`
 3. If threat model exists, extract Trust Boundaries and Attack Surfaces sections (30-line budget)
-4. Concatenate into a single Tier 1 block. If >500 lines, summarize the manifest to file-name + role (one line each)
-5. Write to `scratch/<run-id>/tier1-context.md`
+4. If `scratch/<run-id>/exposure-map.md` exists, extract exposure map summary: endpoint count, gap count, and gap file list (15-line budget). Append to the Tier 1 block so all agents know what is externally reachable.
+5. Concatenate into a single Tier 1 block. If >500 lines, summarize the manifest to file-name + role (one line each)
+6. Write to `scratch/<run-id>/tier1-context.md`
 
 **Step 2 — Build Tier 2 partitions (per-agent):**
 1. Calculate Tier 2 budget: `1500 - len(Tier 1) - len(prompt template) - len(intelligence)` lines
 2. For each agent, select files from the manifest using the security-domain mapping:
-   - Boundary Attacker: API routes, input parsers, URL routing, file upload handlers, deserialization
+   - Boundary Attacker: API routes, input parsers, URL routing, file upload handlers, deserialization. Files tagged `[attack-surface-gap]` from Step 2.5 are highest priority -- these register externally-reachable endpoints but were not in the original manifest.
    - Insider Threat: auth middleware, RBAC, user-facing endpoints, data access layers
    - Infrastructure Prober: config files, env handling, middleware setup, logging config, Docker/CI
    - Betrayed Consumer: data models, serialization/response shaping, logging, session management, cache
@@ -555,7 +646,8 @@ Updated at the end of every Siege run (Phase 5). Accumulates across sessions.
 - [boundary]: [description, files involved]
 
 ## Attack Surfaces
-- [surface]: [exposure level, last reviewed date]
+- [surface]: [exposure level, last reviewed date, source: exposure-map | manual]
+<!-- Phase 5 updates this from exposure-map.md: new endpoints not in prior model are flagged "new attack surface"; endpoints in prior model but absent from current enumeration are flagged "retired surface" in the Threat Model Delta section of the report. -->
 
 ## Historical Findings
 ### [date] -- [target]
@@ -655,6 +747,7 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 |------|-------------|---------|
 | `commit-anchor.md` | Phase 1 start | TOCTOU prevention |
 | `manifest.md` | Phase 1 Step 2 | Scoped file list |
+| `exposure-map.md` | Phase 1 Step 2.5 | Enumerated endpoints with manifest cross-reference |
 | `gate-approved.md` | User confirms scope | Compaction recovery marker |
 | `intelligence-summary.md` | Phase 1 Step 1 | Pre-fetched intelligence (50 lines) |
 | `<agent>-partition.md` | Before each agent dispatch | Files sent as full source |
@@ -718,7 +811,7 @@ After the security gate passes (or user accepts risks and proceeds):
 
 1. Read existing `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` (or create if first run)
 2. Merge new findings into Historical Findings (resolved findings from fix rounds, accepted risks, open items)
-3. Update Trust Boundaries and Attack Surfaces based on analysis
+3. Update Trust Boundaries and Attack Surfaces based on analysis. If `scratch/<run-id>/exposure-map.md` exists, merge its endpoints into Attack Surfaces: new endpoints not in the prior model are flagged "new attack surface"; endpoints present in the prior model but absent from the current enumeration are flagged "retired surface" in the Threat Model Delta.
 4. Record the Threat Model Delta in the report
 5. Write updated threat model to disk
 6. **Copy the final report** from `scratch/<run-id>/report.md` to `memory/security-audit/reports/<date>-<target>.md` for persistent access. Scratch directories are cleaned up on subsequent runs; the report copy ensures findings survive cleanup.
