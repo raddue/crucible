@@ -1,0 +1,172 @@
+version: "1.0"
+ticket: "#158"
+epic: "#158"
+title: "Consensus code quality fixes from audit"
+date: "2026-04-11"
+
+api_surface:
+  - name: "parse_aggregation_output"
+    type: "function"
+    signature: "def parse_aggregation_output(raw: str) -> dict"
+    params:
+      - name: "raw"
+        type: "str"
+        required: true
+    returns: "dict"
+    description: "Extract structured JSON from aggregator response using raw_decode instead of greedy regex"
+
+  - name: "ConsensusResult"
+    type: "class"
+    signature: "class ConsensusResult"
+    params:
+      - name: "status"
+        type: "str"
+        required: true
+      - name: "error"
+        type: "str | None"
+        required: false
+    returns: "ConsensusResult"
+    description: "Status field now uses 'complete' | 'partial' | 'unavailable'. New optional 'error' field populated in failure paths for debugging."
+
+  - name: "dispatch_all"
+    type: "function"
+    signature: "async def dispatch_all(providers: list[BaseProvider], prompt: str, context: str, timeout_seconds: int) -> list[ModelResponse]"
+    params:
+      - name: "providers"
+        type: "list[BaseProvider]"
+        required: true
+      - name: "prompt"
+        type: "str"
+        required: true
+      - name: "context"
+        type: "str"
+        required: true
+      - name: "timeout_seconds"
+        type: "int"
+        required: true
+    returns: "list[ModelResponse]"
+    description: "Now takes list[BaseProvider] instead of list[tuple[BaseProvider, ModelConfig]]"
+
+  - name: "BaseProvider"
+    type: "interface"
+    signature: "class BaseProvider(Protocol)"
+    params:
+      - name: "config"
+        type: "ModelConfig"
+        required: true
+    returns: "BaseProvider"
+    description: "Protocol now includes config attribute for provider metadata access"
+
+  - name: "ServerState"
+    type: "class"
+    signature: "class ServerState"
+    params:
+      - name: "config"
+        type: "ConsensusConfig | None"
+        required: true
+      - name: "providers"
+        type: "list[BaseProvider]"
+        required: true
+      - name: "project_dir"
+        type: "str"
+        required: true
+      - name: "external_config"
+        type: "ExternalReviewConfig | None"
+        required: true
+      - name: "external_providers"
+        type: "list[BaseProvider]"
+        required: true
+    returns: "ServerState"
+    description: "New dataclass encapsulating all server state previously held in module-level globals"
+
+  - name: "aggregate"
+    type: "function"
+    signature: "async def aggregate(responses, prompt, context, mode, config, prompts_dir, aggregator_provider=None) -> ConsensusResult"
+    params:
+      - name: "responses"
+        type: "list[ModelResponse]"
+        required: true
+      - name: "prompt"
+        type: "str"
+        required: true
+      - name: "context"
+        type: "str"
+        required: true
+      - name: "mode"
+        type: "str"
+        required: true
+      - name: "config"
+        type: "ConsensusConfig"
+        required: true
+      - name: "prompts_dir"
+        type: "str"
+        required: true
+      - name: "aggregator_provider"
+        type: "BaseProvider | None"
+        required: false
+    returns: "ConsensusResult"
+    description: "Aggregator fallback now uses first available model (any provider) instead of first Anthropic model"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "No greedy regex for JSON extraction in aggregator"
+      verification: "aggregator.py must not contain re.search(r'\\{.*\\}' pattern"
+      check_method: "grep"
+    - id: "INV-2"
+      description: "Status value 'consensus' must not appear in ConsensusResult assignments or skill docs"
+      verification: "No assignment of status = 'consensus' in aggregator.py; no 'consensus' status references in skills/consensus/SKILL.md or skills/quality-gate/SKILL.md"
+      check_method: "grep"
+    - id: "INV-3"
+      description: "No module-level mutable globals in server.py except _state; _get_state() returns None (not raises) when uninitialized"
+      verification: "server.py has at most one module-level mutable variable (_state); _get_state returns None, callers check and return graceful unavailable"
+      check_method: "code-inspection"
+    - id: "INV-4"
+      description: "timeout_seconds validated in config loading"
+      verification: "Both load_config and load_external_review_config check 1 <= timeout_seconds <= 600"
+      check_method: "code-inspection"
+    - id: "INV-5"
+      description: "ExternalReviewConfig has no temperature field"
+      verification: "temperature not in ExternalReviewConfig.__dataclass_fields__"
+      check_method: "code-inspection"
+    - id: "INV-6"
+      description: "dispatch_all does not accept tuple parameters"
+      verification: "dispatch_all signature uses list[BaseProvider], not list[tuple[...]]"
+      check_method: "code-inspection"
+  testable:
+    - id: "INV-7"
+      description: "parse_aggregation_output handles multi-object responses correctly"
+      verification: "Test with input containing multiple JSON objects separated by text"
+      test_tag: "contract:parsing:inv-7"
+    - id: "INV-8"
+      description: "timeout_seconds boundary validation rejects out-of-range values"
+      verification: "ConfigError raised for timeout_seconds=0 and timeout_seconds=601"
+      test_tag: "contract:config:inv-8"
+
+integration_points: []
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Use json.JSONDecoder().raw_decode() instead of balanced-brace counting"
+    confidence: "high"
+    alternatives: ["Balanced-brace counter", "Multiple regex attempts with non-greedy patterns"]
+    reasoning: "raw_decode is stdlib, handles strings with braces correctly, returns exact parse boundary"
+    reversibility: "High — localized to one function"
+  - id: "AMB-2"
+    decision: "Rename status 'consensus' to 'complete' (breaking change)"
+    confidence: "high"
+    alternatives: ["Keep 'consensus' and add separate 'agreement' field", "Use 'all_responded' as status"]
+    reasoning: "Internal-only server with no external consumers. 'complete' accurately describes the semantics. Adding a separate agreement field adds complexity for a feature not currently used."
+    reversibility: "Medium — requires updating any skill that reads the status field"
+  - id: "AMB-3a"
+    decision: "Add error field to ConsensusResult for failure path diagnostics (from innovate)"
+    confidence: "high"
+    alternatives: ["Log-only without field", "Return error in synthesis string"]
+    reasoning: "With provider-agnostic fallback (AMB-3), new failure modes appear. Without distinguishing unavailable reasons, debugging is a guessing game. One dataclass field is minimal scope."
+    reversibility: "High — additive, no behavioral change for existing consumers"
+  - id: "AMB-3"
+    decision: "Use first available model as aggregator fallback, not first Anthropic model"
+    confidence: "high"
+    alternatives: ["Require explicit aggregator_model config field", "Use a dedicated aggregator provider class"]
+    reasoning: "All providers implement the same query interface. The aggregation prompt is model-agnostic. A dedicated config field adds configuration burden for no current benefit."
+    reversibility: "High — can add config field later if provider-specific aggregation logic needed"

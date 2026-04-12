@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from mcp.server import Server, InitializationOptions, NotificationOptions
@@ -11,7 +12,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from config import load_config, ConfigError, ConsensusConfig, ExternalReviewConfig, load_external_review_config
-from providers import create_provider, dispatch_all, ModelResponse
+from providers import BaseProvider, create_provider, dispatch_all, ModelResponse
 from aggregator import aggregate, ConsensusResult
 
 logger = logging.getLogger("crucible-consensus")
@@ -19,57 +20,70 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 server = Server("crucible-consensus")
 
-# Global state initialized on startup
-_config: ConsensusConfig | None = None
-_providers: list = []
-_project_dir: str = ""
-_external_config: ExternalReviewConfig | None = None
-_external_providers: list = []
+
+@dataclass
+class ServerState:
+    """Encapsulates all mutable server state."""
+    config: ConsensusConfig | None = None
+    providers: list[BaseProvider] = field(default_factory=list)
+    project_dir: str = ""
+    external_config: ExternalReviewConfig | None = None
+    external_providers: list[BaseProvider] = field(default_factory=list)
+
+
+_state: ServerState | None = None
+
+
+def _get_state() -> ServerState | None:
+    """Return current server state, or None if uninitialized."""
+    return _state
 
 
 def initialize():
     """Load config and create providers on startup."""
-    global _config, _providers, _project_dir, _external_config, _external_providers
-    _project_dir = os.environ.get("PROJECT_DIR", os.getcwd())
+    global _state
+    project_dir = os.environ.get("PROJECT_DIR", os.getcwd())
+
+    state = ServerState(project_dir=project_dir)
 
     # Load consensus config (optional — don't crash if missing)
     try:
-        _config = load_config(_project_dir)
+        state.config = load_config(project_dir)
     except ConfigError as e:
-        _config = None
+        state.config = None
         logger.warning(f"Consensus config not loaded: {e}")
 
-    if _config is not None and not _config.enabled:
+    if state.config is not None and not state.config.enabled:
         logger.info("Consensus is disabled in config")
 
-    if _config is not None and _config.enabled:
-        _providers = []
-        for model_config in _config.models:
+    if state.config is not None and state.config.enabled:
+        for model_config in state.config.models:
             try:
                 provider = create_provider(model_config)
-                _providers.append((provider, model_config))
+                state.providers.append(provider)
                 logger.info(f"Initialized {model_config.provider}/{model_config.model_id}")
             except Exception as e:
                 logger.warning(f"Failed to initialize {model_config.provider}/{model_config.model_id}: {e}")
 
-        logger.info(f"Consensus server ready: {len(_providers)} providers, min_models={_config.min_models}")
+        logger.info(f"Consensus server ready: {len(state.providers)} providers, min_models={state.config.min_models}")
 
     # Load external review config (may raise ConfigError on malformed config)
     try:
-        _external_config = load_external_review_config(_project_dir)
+        state.external_config = load_external_review_config(project_dir)
     except ConfigError as e:
-        _external_config = ExternalReviewConfig()
+        state.external_config = ExternalReviewConfig()
         logger.warning(f"External review config not loaded: {e}")
-    _external_providers = []
-    if _external_config.enabled and _external_config.models:
-        for model_config in _external_config.models:
+    if state.external_config.enabled and state.external_config.models:
+        for model_config in state.external_config.models:
             try:
                 provider = create_provider(model_config)
-                _external_providers.append((provider, model_config))
+                state.external_providers.append(provider)
                 logger.info(f"External review: initialized {model_config.provider}/{model_config.model_id}")
             except Exception as e:
                 logger.warning(f"External review: failed to initialize {model_config.provider}/{model_config.model_id}: {e}")
-        logger.info(f"External review ready: {len(_external_providers)} providers")
+        logger.info(f"External review ready: {len(state.external_providers)} providers")
+
+    _state = state
 
 
 @server.list_tools()
@@ -131,10 +145,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 
 async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
-    if _config is None:
+    state = _get_state()
+    if state is None or state.config is None:
         return [TextContent(type="text", text='{"status": "unavailable", "synthesis": "Consensus not configured"}')]
 
-    if not _config.enabled:
+    if not state.config.enabled:
         result = ConsensusResult(status="unavailable")
         return [TextContent(type="text", text=json.dumps(result.to_dict()))]
 
@@ -152,14 +167,14 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps({"status": "unavailable", "synthesis": f"Invalid mode: {mode}"}))]
 
     # Check if this mode is enabled
-    if not _config.modes.get(mode, True):
+    if not state.config.modes.get(mode, True):
         result = ConsensusResult(status="unavailable")
         return [TextContent(type="text", text=json.dumps(result.to_dict()))]
 
-    logger.info(f"Consensus query: mode={mode}, providers={len(_providers)}")
+    logger.info(f"Consensus query: mode={mode}, providers={len(state.providers)}")
 
     # Dispatch to all providers in parallel
-    responses = await dispatch_all(_providers, prompt, context, _config.timeout_seconds)
+    responses = await dispatch_all(state.providers, prompt, context, state.config.timeout_seconds)
 
     # Inject additional external review responses if provided
     additional_responses = arguments.get("additional_responses")
@@ -184,13 +199,13 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
                 logger.warning(f"Skipping malformed additional_response: {e}")
 
     # Aggregate responses
-    prompts_dir = str(Path(_project_dir) / "skills" / "consensus")
+    prompts_dir = str(Path(state.project_dir) / "skills" / "consensus")
     result = await aggregate(
         responses=responses,
         prompt=prompt,
         context=context,
         mode=mode,
-        config=_config,
+        config=state.config,
         prompts_dir=prompts_dir,
     )
 
@@ -200,22 +215,28 @@ async def _handle_consensus_query(arguments: dict) -> list[TextContent]:
 
 
 async def _handle_external_review(arguments: dict) -> list[TextContent]:
-    if _external_config is None or not _external_config.enabled:
+    state = _get_state()
+    if state is None or state.external_config is None or not state.external_config.enabled:
         return [TextContent(type="text", text=json.dumps({"status": "unavailable"}))]
 
-    if not _external_providers:
+    if not state.external_providers:
         return [TextContent(type="text", text=json.dumps({"status": "unavailable"}))]
 
     # Per-skill toggle: if caller declares a skill, check whether it's enabled
     # Normalize hyphenated names to underscored to match config keys
     skill = (arguments.get("skill") or "").replace("-", "_") or None
-    if skill and not _external_config.skills.get(skill, True):
+    if skill and not state.external_config.skills.get(skill, True):
         return [TextContent(type="text", text=json.dumps({"status": "unavailable", "reason": f"external review disabled for skill '{skill}'"}))]
 
     prompt = arguments["prompt"]
     context = arguments["context"]
 
-    responses = await dispatch_all(_external_providers, prompt, context, _external_config.timeout_seconds)
+    # Input size limits to prevent DoS / API credit burn (matches consensus_query)
+    MAX_INPUT_SIZE = 500_000  # 500KB
+    if len(prompt) > MAX_INPUT_SIZE or len(context) > MAX_INPUT_SIZE:
+        return [TextContent(type="text", text=json.dumps({"status": "unavailable", "reason": "Input exceeds size limit (500KB max)"}))]
+
+    responses = await dispatch_all(state.external_providers, prompt, context, state.external_config.timeout_seconds)
 
     models_responded = sum(1 for r in responses if r.error is None)
     models_queried = len(responses)

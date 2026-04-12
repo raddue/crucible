@@ -247,10 +247,7 @@ async def test_dispatch_all_parallel(anthropic_config, google_config):
         latency_ms=200,
     ))
 
-    providers = [
-        (mock_provider_a, anthropic_config),
-        (mock_provider_b, google_config),
-    ]
+    providers = [mock_provider_a, mock_provider_b]
     results = await dispatch_all(providers, "prompt", "context", timeout_seconds=30)
 
     assert len(results) == 2
@@ -277,6 +274,7 @@ async def test_dispatch_all_timeout(anthropic_config, google_config):
 
     mock_slow = MagicMock()
     mock_slow.query = slow_query
+    mock_slow.config = anthropic_config
 
     mock_fast = MagicMock()
     mock_fast.query = AsyncMock(return_value=ModelResponse(
@@ -285,11 +283,9 @@ async def test_dispatch_all_timeout(anthropic_config, google_config):
         content="fast response",
         latency_ms=50,
     ))
+    mock_fast.config = google_config
 
-    providers = [
-        (mock_slow, anthropic_config),
-        (mock_fast, google_config),
-    ]
+    providers = [mock_slow, mock_fast]
     # Use a very short timeout so the test runs quickly
     results = await dispatch_all(providers, "prompt", "context", timeout_seconds=1)
 

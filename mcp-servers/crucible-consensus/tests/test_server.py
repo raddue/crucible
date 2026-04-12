@@ -10,7 +10,7 @@ from providers import ModelResponse
 from aggregator import ConsensusResult
 
 import server as server_mod
-from server import call_tool, list_tools
+from server import call_tool, list_tools, ServerState
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ def _make_config(enabled: bool = True, modes: dict | None = None) -> ConsensusCo
 
 def _make_consensus_result(**kwargs) -> ConsensusResult:
     defaults = {
-        "status": "consensus",
+        "status": "complete",
         "models_queried": 2,
         "models_responded": 2,
         "synthesis": "All models agree.",
@@ -66,9 +66,11 @@ def _make_consensus_result(**kwargs) -> ConsensusResult:
 @patch("server.dispatch_all", new_callable=AsyncMock)
 async def test_call_tool_success(mock_dispatch, mock_aggregate):
     """Valid consensus_query returns JSON with correct status and fields."""
-    server_mod._config = _make_config()
-    server_mod._providers = [("mock_provider", "mock_config")]
-    server_mod._project_dir = "/tmp/test-project"
+    server_mod._state = ServerState(
+        config=_make_config(),
+        providers=["mock_provider"],
+        project_dir="/tmp/test-project",
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="anthropic", model_id="claude-sonnet-4-20250514", content="good", latency_ms=100),
@@ -84,7 +86,7 @@ async def test_call_tool_success(mock_dispatch, mock_aggregate):
 
     assert len(result) == 1
     parsed = json.loads(result[0].text)
-    assert parsed["status"] == "consensus"
+    assert parsed["status"] == "complete"
     assert parsed["models_queried"] == 2
     assert parsed["models_responded"] == 2
     assert parsed["synthesis"] == "All models agree."
@@ -102,9 +104,10 @@ async def test_call_tool_success(mock_dispatch, mock_aggregate):
 
 async def test_call_tool_disabled():
     """When config.enabled is False, returns status='unavailable'."""
-    server_mod._config = _make_config(enabled=False)
-    server_mod._providers = []
-    server_mod._project_dir = "/tmp/test-project"
+    server_mod._state = ServerState(
+        config=_make_config(enabled=False),
+        project_dir="/tmp/test-project",
+    )
 
     result = await call_tool("consensus_query", {
         "prompt": "Review this",
@@ -124,9 +127,10 @@ async def test_call_tool_disabled():
 
 async def test_call_tool_invalid_mode():
     """Invalid mode returns error response with status='unavailable'."""
-    server_mod._config = _make_config()
-    server_mod._providers = []
-    server_mod._project_dir = "/tmp/test-project"
+    server_mod._state = ServerState(
+        config=_make_config(),
+        project_dir="/tmp/test-project",
+    )
 
     result = await call_tool("consensus_query", {
         "prompt": "Review this",
@@ -147,13 +151,14 @@ async def test_call_tool_invalid_mode():
 
 async def test_call_tool_mode_disabled():
     """When a specific mode is disabled in config, returns status='unavailable'."""
-    server_mod._config = _make_config(modes={
-        "review": False,
-        "verdict": True,
-        "investigate": True,
-    })
-    server_mod._providers = []
-    server_mod._project_dir = "/tmp/test-project"
+    server_mod._state = ServerState(
+        config=_make_config(modes={
+            "review": False,
+            "verdict": True,
+            "investigate": True,
+        }),
+        project_dir="/tmp/test-project",
+    )
 
     result = await call_tool("consensus_query", {
         "prompt": "Review this",
@@ -233,8 +238,10 @@ def _make_external_config(enabled: bool = True) -> ExternalReviewConfig:
 @patch("server.dispatch_all", new_callable=AsyncMock)
 async def test_external_review_success_one_model(mock_dispatch):
     """Single external model responds successfully."""
-    server_mod._external_config = _make_external_config()
-    server_mod._external_providers = [("mock_provider", "mock_config")]
+    server_mod._state = ServerState(
+        external_config=_make_external_config(),
+        external_providers=["mock_provider"],
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="openai", model_id="gpt-4o", content="Looks good", latency_ms=200),
@@ -267,8 +274,10 @@ async def test_external_review_success_two_models(mock_dispatch):
         ],
         timeout_seconds=180,
     )
-    server_mod._external_config = ext_config
-    server_mod._external_providers = [("mock1", "cfg1"), ("mock2", "cfg2")]
+    server_mod._state = ServerState(
+        external_config=ext_config,
+        external_providers=["mock1", "mock2"],
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="openai", model_id="gpt-4o", content="Review A", latency_ms=150),
@@ -289,8 +298,9 @@ async def test_external_review_success_two_models(mock_dispatch):
 
 async def test_external_review_disabled():
     """When external review is disabled, returns unavailable."""
-    server_mod._external_config = _make_external_config(enabled=False)
-    server_mod._external_providers = []
+    server_mod._state = ServerState(
+        external_config=_make_external_config(enabled=False),
+    )
 
     result = await call_tool("external_review", {
         "prompt": "Review this",
@@ -312,8 +322,10 @@ async def test_external_review_timeout_partial(mock_dispatch):
         ],
         timeout_seconds=180,
     )
-    server_mod._external_config = ext_config
-    server_mod._external_providers = [("mock1", "cfg1"), ("mock2", "cfg2")]
+    server_mod._state = ServerState(
+        external_config=ext_config,
+        external_providers=["mock1", "mock2"],
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="openai", model_id="gpt-4o", content="Review OK", latency_ms=150),
@@ -343,8 +355,10 @@ async def test_external_review_all_errored_returns_error_status(mock_dispatch):
         ],
         timeout_seconds=180,
     )
-    server_mod._external_config = ext_config
-    server_mod._external_providers = [("mock1", "cfg1"), ("mock2", "cfg2")]
+    server_mod._state = ServerState(
+        external_config=ext_config,
+        external_providers=["mock1", "mock2"],
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="openai", model_id="gpt-4o", content="", latency_ms=180000, error="timeout"),
@@ -364,8 +378,9 @@ async def test_external_review_all_errored_returns_error_status(mock_dispatch):
 
 async def test_external_review_no_config():
     """When _external_config is None, returns unavailable."""
-    server_mod._external_config = None
-    server_mod._external_providers = []
+    server_mod._state = ServerState(
+        external_config=None,
+    )
 
     result = await call_tool("external_review", {
         "prompt": "Review this",
@@ -380,9 +395,11 @@ async def test_external_review_no_config():
 @patch("server.dispatch_all", new_callable=AsyncMock)
 async def test_consensus_with_additional_responses(mock_dispatch, mock_aggregate):
     """additional_responses are appended before aggregation."""
-    server_mod._config = _make_config()
-    server_mod._providers = [("mock_provider", "mock_config")]
-    server_mod._project_dir = "/tmp/test-project"
+    server_mod._state = ServerState(
+        config=_make_config(),
+        providers=["mock_provider"],
+        project_dir="/tmp/test-project",
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="anthropic", model_id="claude-sonnet-4-20250514", content="good", latency_ms=100),
@@ -405,7 +422,7 @@ async def test_consensus_with_additional_responses(mock_dispatch, mock_aggregate
 
     assert len(result) == 1
     parsed = json.loads(result[0].text)
-    assert parsed["status"] == "consensus"
+    assert parsed["status"] == "complete"
 
     # Verify aggregate was called with the combined responses
     call_args = mock_aggregate.call_args
@@ -431,8 +448,10 @@ async def test_external_review_skill_disabled():
         timeout_seconds=180,
         skills={"inquisitor": False, "code_review": True},
     )
-    server_mod._external_config = ext_config
-    server_mod._external_providers = [("mock_provider", "mock_config")]
+    server_mod._state = ServerState(
+        external_config=ext_config,
+        external_providers=["mock_provider"],
+    )
 
     result = await call_tool("external_review", {
         "prompt": "Review this",
@@ -456,8 +475,10 @@ async def test_external_review_skill_enabled(mock_dispatch):
         timeout_seconds=180,
         skills={"code_review": True},
     )
-    server_mod._external_config = ext_config
-    server_mod._external_providers = [("mock_provider", "mock_config")]
+    server_mod._state = ServerState(
+        external_config=ext_config,
+        external_providers=["mock_provider"],
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="openai", model_id="gpt-4o", content="Looks good", latency_ms=200),
@@ -485,8 +506,10 @@ async def test_external_review_unknown_skill_defaults_enabled(mock_dispatch):
         timeout_seconds=180,
         skills={"code_review": True},
     )
-    server_mod._external_config = ext_config
-    server_mod._external_providers = [("mock_provider", "mock_config")]
+    server_mod._state = ServerState(
+        external_config=ext_config,
+        external_providers=["mock_provider"],
+    )
 
     mock_dispatch.return_value = [
         ModelResponse(provider="openai", model_id="gpt-4o", content="OK", latency_ms=100),

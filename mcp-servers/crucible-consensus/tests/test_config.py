@@ -271,7 +271,6 @@ def test_external_review_one_model(tmp_path, monkeypatch):
 
     assert config.enabled is True
     assert config.timeout_seconds == 200
-    assert config.temperature == 0.4
     assert len(config.models) == 1
     assert config.models[0].provider == "openai"
     assert config.models[0].model_id == "gpt-4o"
@@ -412,6 +411,81 @@ def test_external_review_temperature_precedence(tmp_path, monkeypatch):
     project_dir = _write_config(tmp_path, data)
     config = load_external_review_config(str(project_dir))
 
-    assert config.temperature == 0.5
     assert config.models[0].temperature == 0.9  # per-model override
     assert config.models[1].temperature == 0.5  # section-level default
+
+
+# ---------------------------------------------------------------------------
+# Timeout validation tests
+# ---------------------------------------------------------------------------
+
+
+def test_consensus_timeout_zero_raises(tmp_path, monkeypatch):
+    """timeout_seconds=0 raises ConfigError."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    data = {
+        "enabled": True,
+        "min_models": 1,
+        "timeout_seconds": 0,
+        "models": [
+            {"provider": "anthropic", "model_id": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY"},
+        ],
+    }
+    project_dir = _write_config(tmp_path, data)
+    with pytest.raises(ConfigError, match="timeout_seconds"):
+        load_config(str(project_dir))
+
+
+def test_consensus_timeout_601_raises(tmp_path, monkeypatch):
+    """timeout_seconds=601 raises ConfigError."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    data = {
+        "enabled": True,
+        "min_models": 1,
+        "timeout_seconds": 601,
+        "models": [
+            {"provider": "anthropic", "model_id": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY"},
+        ],
+    }
+    project_dir = _write_config(tmp_path, data)
+    with pytest.raises(ConfigError, match="timeout_seconds"):
+        load_config(str(project_dir))
+
+
+def test_consensus_timeout_boundary_valid(tmp_path, monkeypatch):
+    """timeout_seconds=1 and timeout_seconds=600 are both valid."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    for timeout in (1, 600):
+        data = {
+            "enabled": True,
+            "min_models": 1,
+            "timeout_seconds": timeout,
+            "models": [
+                {"provider": "anthropic", "model_id": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY"},
+            ],
+        }
+        project_dir = _write_config(tmp_path, data)
+        config = load_config(str(project_dir))
+        assert config.timeout_seconds == timeout
+
+
+def test_external_review_timeout_zero_raises(tmp_path, monkeypatch):
+    """External review timeout_seconds=0 raises ConfigError."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    data = {
+        "external_review": {
+            "enabled": True,
+            "timeout_seconds": 0,
+            "models": [
+                {"provider": "openai", "model_id": "gpt-4o", "api_key_env": "OPENAI_API_KEY"},
+            ],
+        },
+    }
+    project_dir = _write_config(tmp_path, data)
+    with pytest.raises(ConfigError, match="timeout_seconds"):
+        load_external_review_config(str(project_dir))
+
+
+def test_external_review_config_no_temperature_field():
+    """ExternalReviewConfig no longer has a temperature field."""
+    assert "temperature" not in ExternalReviewConfig.__dataclass_fields__

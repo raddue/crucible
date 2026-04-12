@@ -242,7 +242,7 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
    - metadata: { artifact_type, round_number, score_progression }
 
 2. Read the consensus response:
-   - If `status: "consensus"` or `status: "partial"`:
+   - If `status: "complete"` or `status: "partial"`:
      - Use the `synthesis` verdict (PROGRESS/STAGNATION/DIMINISHING_RETURNS)
      - If the verdict is STAGNATION or DIMINISHING_RETURNS and disagreements
        exist, include the dissent summary in the escalation message:

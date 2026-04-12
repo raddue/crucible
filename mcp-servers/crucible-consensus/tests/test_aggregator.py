@@ -110,7 +110,7 @@ async def test_aggregate_all_success_returns_consensus(tmp_path, monkeypatch):
         aggregator_provider=mock_agg,
     )
 
-    assert result.status == "consensus"
+    assert result.status == "complete"
     assert result.models_queried == 2
     assert result.models_responded == 2
     assert result.synthesis == "Models agree on key issues."
@@ -336,3 +336,75 @@ async def test_aggregator_call_failure_returns_unavailable(tmp_path, monkeypatch
     assert len(result.per_model) == 2
     assert result.per_model[0]["responded"] is True
     assert result.per_model[1]["responded"] is True
+
+
+# ---------------------------------------------------------------------------
+# test_parse_aggregation_output_multiple_json_objects
+# ---------------------------------------------------------------------------
+
+
+def test_parse_aggregation_output_multiple_json_objects():
+    """Multiple JSON objects in text — first valid one with expected keys wins."""
+    preamble_json = json.dumps({"unrelated": "data", "count": 42})
+    target_json = json.dumps({
+        "synthesis": "Correct object.",
+        "agreements": [{"finding": "Match"}],
+        "disagreements": [],
+        "unique_findings": [],
+    })
+    raw = f"Here is some data: {preamble_json} and the real result: {target_json} end."
+
+    result = parse_aggregation_output(raw)
+
+    assert result["synthesis"] == "Correct object."
+    assert len(result["agreements"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# test_consensus_result_error_field
+# ---------------------------------------------------------------------------
+
+
+def test_consensus_result_error_field_in_to_dict():
+    """ConsensusResult.error is included in to_dict() when set."""
+    result = ConsensusResult(status="unavailable", error="Test error message")
+    d = result.to_dict()
+    assert d["error"] == "Test error message"
+
+
+def test_consensus_result_no_error_in_to_dict():
+    """ConsensusResult.error is omitted from to_dict() when None."""
+    result = ConsensusResult(status="complete")
+    d = result.to_dict()
+    assert "error" not in d
+
+
+# ---------------------------------------------------------------------------
+# test_aggregate_error_populated_on_failure
+# ---------------------------------------------------------------------------
+
+
+async def test_aggregate_error_populated_on_too_few_models(tmp_path, monkeypatch):
+    """When too few models respond, error field explains why."""
+    monkeypatch.setenv("TEST_ANTHROPIC_KEY", "key")
+    monkeypatch.setenv("TEST_GOOGLE_KEY", "key")
+
+    responses = [
+        _make_response(provider="anthropic", content="review from claude"),
+        _make_response(provider="google", model_id="gemini-2.5-pro", error="timeout"),
+    ]
+
+    config = _make_config(min_models=2)
+
+    result = await aggregate(
+        responses=responses,
+        prompt="Review this code",
+        context="def foo(): pass",
+        mode="review",
+        config=config,
+        prompts_dir=str(tmp_path),
+    )
+
+    assert result.status == "unavailable"
+    assert result.error is not None
+    assert "Too few models responded" in result.error
