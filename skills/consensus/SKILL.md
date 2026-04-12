@@ -31,7 +31,7 @@ Dispatches a prompt to all configured models in parallel, collects responses, an
 
 | Field              | Type   | Description |
 |--------------------|--------|-------------|
-| `status`           | enum   | `"consensus"` (all models responded), `"partial"` (some models responded, count >= min_models), `"unavailable"` (fewer than min_models responded or tool not configured). |
+| `status`           | enum   | `"complete"` (all models responded), `"partial"` (some models responded, count >= min_models), `"unavailable"` (fewer than min_models responded or tool not configured). |
 | `models_queried`   | int    | Number of models the query was dispatched to. |
 | `models_responded` | int    | Number of models that returned a valid response within the timeout. |
 | `synthesis`        | string | Aggregated result text, formatted according to the selected mode. |
@@ -112,7 +112,7 @@ consensus:
 | Field                       | Type    | Default | Description |
 |-----------------------------|---------|---------|-------------|
 | `consensus.enabled`         | boolean | `false` | Master switch. When false, all `consensus_query` calls immediately return `status: "unavailable"`. |
-| `consensus.min_models`      | int     | `2`     | Minimum number of models that must respond for the result to be `"consensus"` or `"partial"`. If fewer respond, status is `"unavailable"`. Must be >= 2. |
+| `consensus.min_models`      | int     | `2`     | Minimum number of models that must respond for the result to be `"complete"` or `"partial"`. If fewer respond, status is `"unavailable"`. Must be >= 2. |
 | `consensus.timeout_seconds` | int     | `120`   | Maximum time (seconds) to wait for all models to respond. Models exceeding this are marked `responded: false`. Must be >= 10 and <= 600. |
 | `consensus.models`          | list    | `[]`    | List of model configurations. At least `min_models` entries required. |
 | `consensus.models[].provider`    | string | —  | Provider identifier. Must be one of the shipped providers (`anthropic`, `google`) or a planned provider once available. |
@@ -134,7 +134,7 @@ consensus:
 
 The consensus system is designed to never break existing workflows. Degradation follows a strict hierarchy:
 
-1. **Consensus available** — All configured models respond within the timeout. `status: "consensus"`. Full multi-model synthesis is returned to the calling skill.
+1. **Consensus available** — All configured models respond within the timeout. `status: "complete"`. Full multi-model synthesis is returned to the calling skill.
 
 2. **Partially available** — Some models fail or time out, but the number of successful responses is >= `min_models`. `status: "partial"`. Aggregation proceeds with available responses. The `models_queried` and `models_responded` fields indicate the gap.
 

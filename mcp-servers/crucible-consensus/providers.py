@@ -33,6 +33,7 @@ class ModelResponse:
 
 class BaseProvider(Protocol):
     """Protocol for model provider adapters."""
+    config: ModelConfig
     async def query(self, prompt: str, context: str) -> ModelResponse: ...
 
 
@@ -181,7 +182,7 @@ def create_provider(config: ModelConfig) -> BaseProvider:
 
 
 async def dispatch_all(
-    providers: list[tuple[BaseProvider, ModelConfig]],
+    providers: list[BaseProvider],
     prompt: str,
     context: str,
     timeout_seconds: int,
@@ -189,7 +190,7 @@ async def dispatch_all(
     """Dispatch prompt to all providers in parallel with per-provider timeout."""
 
     async def _query_with_timeout(
-        provider: BaseProvider, config: ModelConfig
+        provider: BaseProvider,
     ) -> ModelResponse:
         try:
             return await asyncio.wait_for(
@@ -198,12 +199,12 @@ async def dispatch_all(
             )
         except asyncio.TimeoutError:
             return ModelResponse(
-                provider=config.provider,
-                model_id=config.model_id,
+                provider=provider.config.provider,
+                model_id=provider.config.model_id,
                 content="",
                 latency_ms=timeout_seconds * 1000,
                 error="timeout",
             )
 
-    tasks = [_query_with_timeout(p, c) for p, c in providers]
+    tasks = [_query_with_timeout(p) for p in providers]
     return list(await asyncio.gather(*tasks))

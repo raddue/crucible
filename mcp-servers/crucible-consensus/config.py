@@ -26,7 +26,6 @@ class ExternalReviewConfig:
     enabled: bool = False
     models: list[ModelConfig] = field(default_factory=list)
     timeout_seconds: int = 180
-    temperature: float = 0.3
     skills: dict[str, bool] = field(default_factory=lambda: {
         "code_review": True,
         "quality_gate": True,
@@ -112,6 +111,12 @@ def load_config(project_dir: str) -> ConsensusConfig:
         }),
     )
 
+    # Validate timeout_seconds
+    if not (1 <= config.timeout_seconds <= 600):
+        raise ConfigError(
+            f"timeout_seconds ({config.timeout_seconds}) must be between 1 and 600"
+        )
+
     # Validate min_models
     if config.min_models < 1:
         raise ConfigError(
@@ -189,10 +194,15 @@ def load_external_review_config(project_dir: str) -> ExternalReviewConfig:
     }
     skills = {**default_skills, **section.get("skills", {})}
 
+    # Validate timeout_seconds
+    if not (1 <= timeout_seconds <= 600):
+        raise ConfigError(
+            f"timeout_seconds ({timeout_seconds}) must be between 1 and 600"
+        )
+
     return ExternalReviewConfig(
         enabled=True,
         models=models,
         timeout_seconds=timeout_seconds,
-        temperature=section_temperature,
         skills=skills,
     )
