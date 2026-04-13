@@ -51,7 +51,7 @@ Tamper-evident audit trail for phase transitions and gate verdicts. This is defe
 
 **File location:** `~/.claude/projects/<project-hash>/memory/build-gate-ledger.md`
 
-**Relationship to pipeline-status.md:** pipeline-status.md is ambient user awareness (overwritten at every narration point). build-gate-ledger.md is the gate verdict audit trail (append-style updates per phase). Both are needed; neither replaces the other.
+**Relationship to pipeline-status.md:** pipeline-status.md is ambient user awareness (overwritten at every narration point). build-gate-ledger.md is the gate verdict audit trail (updated per phase as gates pass). Both are needed; neither replaces the other.
 
 ### PipelineID Generation
 
@@ -455,7 +455,8 @@ Build's existing compaction step must read the Compression State FIRST (step 0 f
 1. **Read `/tmp/crucible-build-mode.md`** — recover mode and baseline commit SHA.
 2. **If file is missing:** Default to feature mode and warn.
 3. **If mode is `refactor`:** Verify baseline commit SHA exists.
-4. **After mode is recovered:** Proceed with general state reconstruction (task list, phase, health).
+4. **Read `build-gate-ledger.md`** — if it exists, apply Gate Ledger Compaction Recovery (see Compaction Recovery subsection under Gate Ledger Protocol). Use the ledger's phase statuses to determine the resume point. If the ledger is missing but handoff manifests exist, reconstruct with INFERRED status.
+5. **After mode and ledger are recovered:** Proceed with general state reconstruction (task list, phase, health).
 
 ## Phase 1: Design (Interactive)
 
@@ -692,12 +693,7 @@ The quality gate handles the iterative red-team loop — fresh review each round
 
 ### Phase Handoff: 2 → 3
 
-Before creating the team and task list, verify the gate ledger and write a handoff manifest. Sequencing is critical for compaction safety:
-
-1. **Verify verdict marker** for Phase 2 (already done in Step 3.4 above)
-2. **Write Phase 2 PASS** to the gate ledger (already done in Step 3.4 above)
-3. **Delete verdict marker** (already done in Step 3.4 above)
-4. **Write handoff manifest** — the PASS must be committed to the ledger before the handoff is written, so that compaction recovery finds a consistent state.
+Before creating the team and task list, write a handoff manifest. Step 3.4 above already verified the verdict marker, wrote PASS to the ledger, and deleted the marker. The handoff manifest is written AFTER the ledger PASS — this sequencing ensures compaction recovery finds a consistent state (ledger shows PASS, handoff exists).
 
 Write a handoff manifest:
 
