@@ -70,6 +70,14 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     5. Self-review (see checklist below)
     6. Report back to the lead
 
+    ## File Operations Safety
+
+    - NEVER delete files unless the task explicitly requires deletion
+    - When cleanup is needed, report what you'd like to remove and wait for confirmation from the lead
+    - Prefer simple approaches over clever ones — no tombstone files, no overwriting files with empty content as a "soft delete"
+    - If you encounter files that seem unnecessary, note them in your report — do NOT remove them
+    - When in doubt about whether to modify or delete a file: ask the lead first
+
     <!-- CANONICAL: shared/implementer-common.md — Self-Review Checklist -->
     ## Self-Review Checklist
 

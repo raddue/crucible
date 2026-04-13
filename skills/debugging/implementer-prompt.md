@@ -122,6 +122,14 @@ Agent tool (subagent_type: "general-purpose", model: opus):
     - If the regression is a pre-existing failure, note it clearly
     - Do NOT fix regressions by changing other code — report them
 
+    ## File Operations Safety
+
+    - NEVER delete files unless the hypothesis explicitly requires deletion
+    - When cleanup is needed, report what you'd like to remove and wait for confirmation
+    - Prefer simple approaches over clever ones — no tombstone files, no overwriting files with empty content
+    - If you encounter files that seem unnecessary, note them in your report — do NOT remove them
+    - ONE fix only — do NOT bundle file removals with bug fixes
+
     <!-- CANONICAL: shared/implementer-common.md — Self-Review Checklist (adapted for debugging) -->
     ### Step 6: Self-Review
 

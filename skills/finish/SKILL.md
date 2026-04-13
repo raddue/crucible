@@ -131,6 +131,31 @@ Which option?
 
 **Don't add explanation** - keep options concise.
 
+## MANDATORY CHECKPOINT - DO NOT SKIP
+
+### Step 5.5: Pre-Push Validation
+
+**Before pushing code (Option 2) or merging (Option 1), validate locally:**
+
+```bash
+# Run type-check (if applicable)
+npx tsc --noEmit 2>/dev/null || echo "No TypeScript"
+
+# Run linter (if applicable)  
+npx eslint . 2>/dev/null || npm run lint 2>/dev/null || echo "No linter configured"
+
+# Run test suite
+npm test || cargo test || pytest || go test ./...
+```
+
+**If any validation fails:** STOP. Fix the issues before pushing. Never push code that fails local validation.
+
+**After pushing (Option 2 only):** Check CI status immediately:
+```bash
+gh pr checks <pr-number>
+```
+Wait for results. If CI fails, diagnose and fix before reporting success to the user. Do NOT push and move on.
+
 ### Step 6: Execute Choice
 
 #### Option 1: Merge Locally
@@ -155,6 +180,13 @@ git branch -d <feature-branch>
 Then: If using a worktree, clean it up (Step 7)
 
 #### Option 2: Push and Create PR
+
+**Repository Safety Check (before push):**
+```bash
+# Check if repo is public
+IS_PRIVATE=$(gh repo view --json isPrivate -q .isPrivate)
+```
+If the repo is public: scan the PR title, body, and commit messages for proprietary company information, internal names, internal URLs, or sensitive data. STOP and confirm with the user if anything looks sensitive. This check is mandatory — a prior incident involved filing proprietary information to a public repo.
 
 ```bash
 # Push branch
@@ -280,3 +312,17 @@ git worktree remove <worktree-path>
 **Recommended:**
 - **crucible:test-coverage** — Test alignment audit between code review and red-team (Step 2.5)
 - **crucible:forge** — Retrospective between test audit and red-team (Step 2.75)
+- **crucible:merge-pr** — Handles merge execution with CI verification (Step 6, Option 2)
+
+## Gate Execution Ledger
+
+Before completing this skill, confirm every mandatory checkpoint was executed:
+
+- [ ] Test verification
+- [ ] Code review
+- [ ] Test alignment audit (if applicable)
+- [ ] Red-team review
+- [ ] Pre-push validation passed
+- [ ] Repository safety checked (if public repo, Option 2)
+
+**If any checkbox is unchecked, STOP. Go back and execute the missed gate.**

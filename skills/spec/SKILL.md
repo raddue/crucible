@@ -656,6 +656,7 @@ All tickets in an epic commit to a single branch: `spec/<epic-number>`. This avo
 - **No per-teammate worktrees:** Teammates do not use git worktrees. Each teammate writes all outputs to its isolated scratch directory. Teammates perform no git operations.
 - **Orchestrator handles git:** After each wave completes, the orchestrator copies outputs from per-ticket scratch directories to `docs/plans/`, then commits to the `spec/<epic-number>` branch. All git operations are serialized through the orchestrator. If the orchestrator needs a worktree for the epic branch (e.g., the user's working tree is on a different branch), it creates a single worktree for its own use.
 - **Commit ordering:** Within a wave, the orchestrator commits each ticket's outputs sequentially. Across waves, commits are naturally sequential.
+- **Repository safety check (before PR creation):** Before creating the PR, run `gh repo view --json isPrivate -q .isPrivate`. If the repo is public, scan all commit messages and the PR body for proprietary company information, internal names, or sensitive data. STOP and confirm with the user if anything looks sensitive. This is especially critical for /spec because it runs largely autonomously and files multiple issues in batch.
 - **PR creation:** A single PR is created (if user opted in) from the `spec/<epic-number>` branch after all tickets complete.
 
 ## Contract Format

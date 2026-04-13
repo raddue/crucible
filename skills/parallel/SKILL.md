@@ -63,6 +63,49 @@ Each agent gets:
 - **Constraints:** Don't change other code
 - **Expected output:** Summary of what you found and fixed
 
+### 2.5. Pre-Dispatch File Overlap Analysis
+
+Before spawning agents, determine which files each task will modify:
+
+1. **Build a file-touch map** — For each task, use grep/read to check imports, references, and likely edit targets:
+   ```
+   Task A → [src/agents/abort.ts, src/agents/abort.test.ts]
+   Task B → [src/batch/completion.ts, src/batch/completion.test.ts]
+   Task C → [src/agents/abort.ts, src/agents/approval.ts]
+   ```
+2. **Check for overlaps** — If ANY files appear in more than one task's list, those tasks CANNOT run in parallel. Either sequence them (run one after the other) or merge them into a single agent.
+3. **Present the map to the user before dispatching:**
+   ```
+   "Tasks A and C overlap on src/agents/abort.ts — sequencing C after A."
+   ```
+
+Do NOT proceed to dispatch until the file-touch map is clear and all overlaps are resolved.
+
+## MANDATORY CHECKPOINT - DO NOT SKIP
+
+### 2.6. Confirm Dispatch Plan
+
+Present the file-touch map, branch plan, and sequencing decisions to the user:
+```
+Dispatch plan:
+- Agent 1 (parallel/fix-abort): [src/agents/abort.ts, abort.test.ts]
+- Agent 2 (parallel/fix-batch): [src/batch/completion.ts, completion.test.ts]
+- Agent 3 (parallel/fix-approval): [src/agents/approval.ts] — sequenced after Agent 1 (overlap on abort.ts)
+
+Proceed? (y/n)
+```
+
+**STOP. Wait for explicit user confirmation before dispatching agents.** Do not proceed on silence or assume approval.
+
+### 2.75. Branch Isolation
+
+Each parallel agent MUST work on an isolated branch:
+
+1. **One branch per agent** — Create a dedicated branch before dispatch. Naming convention: `parallel/<task-name>` (e.g., `parallel/fix-abort-tests`, `parallel/fix-batch-completion`).
+2. **NEVER have two agents write to the same branch.**
+3. **Explicit file-scope boundary** — Each agent's prompt MUST include: "You may ONLY modify these files: [list]. Do NOT touch any other files."
+4. **Scope enforcement** — After an agent completes, verify its changes. If it touched files outside its assigned scope, reject the output and reassign the task with stricter constraints. The file-touch map is a best-effort prediction — agents MUST include their actual files-modified list in their output summary so the orchestrator can detect unexpected overlaps before merging.
+
 ### 3. Dispatch in Parallel
 
 Use disk-mediated dispatch (see `shared/dispatch-convention.md`) to write dispatch files, then spawn agents:
@@ -85,6 +128,18 @@ When agents return:
 - Verify fixes don't conflict
 - Run full test suite
 - Integrate all changes
+
+#### Sequential Merge Protocol
+
+Merge agent branches one at a time to catch regressions early:
+
+1. **Confirm the merge approach with the user before starting parallel work.**
+2. After each agent completes, merge branches ONE AT A TIME: `git merge parallel/<task-name>`
+3. Between each merge, run the full test suite locally.
+4. If the project has CI configured, push and verify CI passes before proceeding to the next merge. If CI between every merge is impractical, at minimum run CI after the final merge.
+5. If merge conflicts arise, resolve them before starting the next merge.
+6. If tests fail after a merge, identify which agent's changes caused the regression and fix before continuing.
+7. Only proceed to the next branch merge after the current one is green.
 
 ## Agent Prompt Structure
 
@@ -134,6 +189,7 @@ Return: Summary of what you found and what you fixed.
 **Need full context:** Understanding requires seeing entire system
 **Exploratory debugging:** You don't know what's broken yet
 **Shared state:** Agents would interfere (editing same files, using same resources)
+**Overlapping files:** Agents would modify overlapping files (sequence them instead)
 
 ## Real Example from Session
 
@@ -176,6 +232,18 @@ After agents return:
 2. **Check for conflicts** - Did agents edit same code?
 3. **Run full suite** - Verify all fixes work together
 4. **Spot check** - Agents can make systematic errors
+
+## Gate Execution Ledger
+
+Before completing this skill, confirm every mandatory checkpoint was executed:
+
+- [ ] File overlap analysis completed
+- [ ] Dispatch plan confirmed by user
+- [ ] Branch isolation verified (one branch per agent)
+- [ ] Review and integrate (conflict check + full suite)
+- [ ] Sequential merge with tests between each
+
+**If any checkbox is unchecked, STOP. Go back and execute the missed gate.**
 
 ## Real-World Impact
 
