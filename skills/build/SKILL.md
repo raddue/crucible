@@ -45,6 +45,184 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 
 **If you find yourself about to skip a gate:** STOP. Re-read this section. The gate exists because skipping it has caused real production incidents and hours of wasted time. Run the gate.
 
+## Gate Ledger Protocol
+
+Tamper-evident audit trail for phase transitions and gate verdicts. This is defense-in-depth — it raises the cost of gate-skipping from zero to nonzero by requiring structured state to be maintained and verified. An external enforcement hook (`gate-ledger-guard.sh`) provides mechanical enforcement by blocking unauthorized PASS writes.
+
+**File location:** `~/.claude/projects/<project-hash>/memory/build-gate-ledger.md`
+
+**Relationship to pipeline-status.md:** pipeline-status.md is ambient user awareness (overwritten at every narration point). build-gate-ledger.md is the gate verdict audit trail (updated per phase as gates pass). Both are needed; neither replaces the other.
+
+### PipelineID Generation
+
+At pipeline start, generate a PipelineID via `date -u +build-%Y%m%d-%H%M%S`. This ID:
+- Is persisted in the ledger header
+- Is passed to quality-gate invocations as `pipeline_id`
+- Is used by the enforcement hook to cross-check verdict markers
+- Is unique per build run (timestamp-based)
+
+### Ledger Format
+
+```
+# Build Gate Ledger
+Run: <ISO-8601 timestamp>
+PipelineID: <build-YYYYMMDD-HHMMSS>
+Goal: <user request>
+Mode: <feature | refactor>
+
+## Phase 1: Design
+Status: NOT_STARTED
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED
+```
+
+**Format constraints:**
+- One key-value pair per line: `Key: value`
+- Fixed key names: `Status`, `Gate`, `Artifact`, `Tasks`, `Reason`, `Acknowledged`, `PipelineID`
+- Status values: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `COMPLETE`, `FAIL`, `SKIPPED`, `INFERRED`
+- Phase headers are `## Phase N: Name` — always 4 phases, always in order
+- No prose, no paragraphs, no nested structure
+
+### Ledger Initialization
+
+Runs during build startup, after mode detection but before Phase 1 begins:
+
+1. Check for existing ledger at canonical path
+2. If found: run Run Isolation checks (see below)
+3. If not found (or user chose "start fresh"): write new ledger including `Run`, `PipelineID`, `Goal`, and `Mode` header fields, then all four phases with `Status: NOT_STARTED`
+4. The ledger MUST exist before Phase 1 transitions to `IN_PROGRESS`
+
+After writing any ledger (fresh or reconstructed), immediately re-read the ledger header to extract the PipelineID into the active in-memory state. This is a defensive consistency practice — ensures the in-memory value always matches the persisted value.
+
+### Run Isolation
+
+Stale detection prevents cross-run contamination:
+
+1. **Compaction recovery (same run):** If pipeline-status.md `Started` timestamp matches the ledger's `Run` timestamp, this is the same build run recovering from compaction. Auto-resume without prompting.
+2. **New session with existing ledger:** If the ledger exists but pipeline-status.md is missing or its `Started` timestamp doesn't match the ledger's `Run`, prompt: "Found existing ledger for '[goal]' (started [timestamp], Phase N [status]). Resume this run? [y/n]". On "no", archive the old ledger via Bash `mv` to `build-gate-ledger-<old-timestamp>.md`. If the target filename already exists, append a counter suffix (`-2`, `-3`, etc.).
+3. **No existing ledger:** Create fresh.
+
+### Orphan Cleanup
+
+**Requires:** Active PipelineID established (from Ledger Initialization + Run Isolation). This step runs AFTER the resume/fresh decision is resolved.
+
+Scan `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md` for verdict markers. Delete any whose `PipelineID` does not match the active PipelineID. If resuming: use the resumed build's PipelineID (from the existing ledger). If starting fresh: use the newly generated PipelineID.
+
+Note: If the session is recovering via INFERRED reconstruction (new PipelineID generated), markers from the old run will be cleaned up. This is intentional — the design requires a fresh QG run for INFERRED→PASS upgrade, not reuse of old markers.
+
+### Timestamps and File Operations
+
+- **Timestamps:** Obtained via Bash `date -u +%Y-%m-%dT%H:%M:%S` (Bash is allowed for `date` commands that don't reference `.claude/` paths)
+- **Ledger archival (rename):** Uses Bash `mv` since Write/Read/Edit/Glob have no rename capability
+- **All other ledger operations** (create, read, update): MUST use Write and Read tools, NOT Bash. This is a hard constraint due to `.claude/` path restrictions.
+
+### Enforcement Rules
+
+Before each phase transition, read `build-gate-ledger.md` and check the previous phase's status:
+
+- **Gate check:** If the previous phase's Status is NOT in {`PASS`, `COMPLETE` (Phase 3 only), `SKIPPED` with `Acknowledged: true`}, output:
+  ```
+  PHASE GATE BLOCKED: Cannot start Phase N — Phase N-1 gate has not passed.
+  Current state: [status]
+  Run the quality gate on Phase N-1's artifact before proceeding.
+  ```
+  This means `INFERRED`, `IN_PROGRESS`, `FAIL`, and `NOT_STARTED` all trigger BLOCKED.
+
+- **Phase 1 exception:** Phase 1 (Design) has no predecessor gate — it always starts.
+- **Phase 3 exception:** Phase 3 transitions to `COMPLETE` (not `PASS`) when all tasks are done and per-task code reviews pass. `COMPLETE` satisfies the gate requirement for Phase 4. No verdict marker is required for Phase 3.
+
+### Verdict Marker Verification
+
+After quality-gate returns with a verdict, verify the verdict marker before writing to the ledger:
+
+1. Glob for verdict markers: `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md`
+2. Filter by `PipelineID` match — only markers with the current build's PipelineID
+3. Sort by the `Timestamp` field value inside the marker file (parsed as ISO-8601), take the most recent
+4. Verify: marker exists, `Verdict` is `PASS`, `PipelineID` matches current build's PipelineID
+5. If verification passes: write `PASS` to the ledger with `Gate` timestamp and `Artifact` path
+6. If verification fails:
+   - **Normal flow** (marker missing/mismatched after a just-run gate): do NOT write PASS. Output warning and re-invoke quality-gate on the same artifact.
+   - **INFERRED recovery** (PipelineID mismatch or missing marker on an INFERRED phase): prompt the user for the artifact path, then offer to run the gate or type SKIP GATE.
+7. After writing the ledger entry, delete the verdict marker (it has served its purpose). This applies to all verdict outcomes — PASS, FAIL, STAGNATION, and ESCALATED markers are all deleted after the corresponding ledger entry is written. [PLAN ADDITION — extends the design doc's PASS-only deletion to all verdict outcomes for cleanliness.]
+
+### Skip Escape Hatch
+
+If the user explicitly wants to bypass a gate:
+
+**Example of a SKIPPED phase in the ledger:**
+```
+## Phase 2: Plan
+Status: SKIPPED
+Gate: 2026-04-13T15:00:00
+Reason: User requested skip
+Acknowledged: true
+```
+
+**Confirmation protocol:** [Default: option (a) — separate-turn required, matching the design doc's two-step flow. User may override to option (b) before implementation.]
+
+1. The orchestrator outputs: "Gate skip requested. Type `SKIP GATE` to confirm. This will be logged."
+2. The orchestrator halts execution and waits. The user's NEXT message must contain exactly `SKIP GATE`. A `SKIP GATE` token in the same message as the skip request does NOT satisfy the confirmation requirement.
+3. The orchestrator writes `Status: SKIPPED` with `Reason` field to the ledger.
+
+**Per-phase acknowledgment:** SKIPPED requires one acknowledgment per phase, not per boundary. Before starting Phase N, the orchestrator checks all prior phases. Any prior phase with `Status: SKIPPED` that has not yet been `Acknowledged: true` triggers the BLOCKED message. The user types `SKIP GATE` once per skipped phase, and the ledger records `Acknowledged: true`. Subsequent boundaries do not re-prompt for already-acknowledged skips.
+
+**Missing artifact handling:** If a phase was SKIPPED because no artifact was produced, retroactive gating requires the user to supply the artifact path: "To run the gate on Phase N, provide the artifact path." If no artifact exists, retroactive gating is not possible — the phase remains SKIPPED.
+
+**Recovery from SKIPPED:** If the user later wants to properly gate a skipped phase, they can ask to "run the gate on Phase N." The orchestrator transitions `SKIPPED → IN_PROGRESS`, runs the quality gate on the phase's artifact, and writes the result normally.
+
+**Phase 4 completion warning:** If ANY prior phase has `Status: SKIPPED`, Phase 4 outputs a prominent warning listing all skipped gates before presenting finish options.
+
+### State Machine
+
+```
+Phase 1: Design
+  NOT_STARTED → IN_PROGRESS (design skill starts)
+  IN_PROGRESS → PASS (quality gate verdict marker verified)
+  IN_PROGRESS → FAIL (quality gate escalates — stagnation/regression)
+  FAIL → IN_PROGRESS (user directs re-work)
+  * → SKIPPED (user types SKIP GATE — does NOT unlock next phase without acknowledgment)
+  SKIPPED → IN_PROGRESS (user asks to run the gate retroactively)
+  INFERRED → IN_PROGRESS (user runs gate after compaction recovery)
+  INFERRED → SKIPPED (user types SKIP GATE after compaction recovery)
+
+Phase 2: Plan
+  NOT_STARTED → IN_PROGRESS (requires Phase 1 Status = PASS or SKIPPED+Acknowledged)
+  [same transitions as Phase 1]
+
+Phase 3: Execute (no quality gate — uses COMPLETE instead of PASS)
+  NOT_STARTED → IN_PROGRESS (requires Phase 2 Status = PASS or SKIPPED+Acknowledged)
+  IN_PROGRESS → COMPLETE (all tasks done, per-task reviews passed, verification gates green)
+  IN_PROGRESS → FAIL (task failures, user escalation)
+  FAIL → IN_PROGRESS (user directs re-work)
+  * → SKIPPED (user types SKIP GATE)
+  SKIPPED → IN_PROGRESS (user asks to run retroactively)
+  Note: Phase 3 has no QG invocation. COMPLETE satisfies Phase 4's gate requirement.
+
+Phase 4: Completion
+  NOT_STARTED → IN_PROGRESS (requires Phase 3 Status = COMPLETE or SKIPPED+Acknowledged. PASS is unreachable for Phase 3.)
+  IN_PROGRESS → PASS (quality gate verdict marker verified)
+  IN_PROGRESS → FAIL (quality gate escalates)
+  FAIL → IN_PROGRESS (user directs re-work)
+  * → SKIPPED (user types SKIP GATE)
+  SKIPPED → IN_PROGRESS (user asks to run retroactively)
+  IN_PROGRESS includes: emit skip warnings if any prior phase SKIPPED
+```
+
+### Compaction Recovery (Ledger)
+
+build-gate-ledger.md is on disk and survives compaction. Recovery precedence when state is partial:
+
+- **Ledger exists, handoff manifest missing:** Use ledger to determine which phase to resume from. Prompt: "Gate ledger shows Phase N passed, but the phase handoff context was lost. Confirm resume from Phase N+1?" If PASS but no handoff, also prompt for Phase N inputs (design doc path, plan path, etc.) before proceeding.
+- **Handoff manifest exists, ledger missing:** Reconstruct ledger from manifests. Mark the current phase as `INFERRED` (not `PASS`). Mark predecessor phases as `PASS` (handoff existence proves the boundary was crossed). Generate a new PipelineID and write it to the reconstructed ledger header. After writing, re-read the ledger header to extract the PipelineID into active state. INFERRED phases trigger the gate-blocked check — the orchestrator must run a fresh quality gate (with matching PipelineID) or the user must type SKIP GATE.
+- **Both missing:** Fresh start. Prompt user.
+
 ## Quality Gate Requirement (Non-Negotiable)
 
 **Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on task size, complexity, or scope.
@@ -277,7 +455,8 @@ Build's existing compaction step must read the Compression State FIRST (step 0 f
 1. **Read `/tmp/crucible-build-mode.md`** — recover mode and baseline commit SHA.
 2. **If file is missing:** Default to feature mode and warn.
 3. **If mode is `refactor`:** Verify baseline commit SHA exists.
-4. **After mode is recovered:** Proceed with general state reconstruction (task list, phase, health).
+4. **Read `build-gate-ledger.md`** — if it exists, apply Gate Ledger Compaction Recovery (see Compaction Recovery subsection under Gate Ledger Protocol). Use the ledger's phase statuses to determine the resume point. If the ledger is missing but handoff manifests exist, reconstruct with INFERRED status.
+5. **After mode and ledger are recovered:** Proceed with general state reconstruction (task list, phase, health).
 
 ## Phase 1: Design (Interactive)
 
@@ -300,6 +479,8 @@ Before any design or dispatch work, check for a crashed prior pipeline:
 **Marker updates during pipeline:** Update the `phase` field in `.pipeline-active` at each phase boundary (1->2, 2->3, 3->4) to track progress for crash detection.
 
 **Marker cleanup:** Delete `.pipeline-active` at Phase 4 step 12 (after finish skill completes).
+
+**Gate Ledger Initialization:** After the pipeline-active marker is written (or recovered) and mode detection is complete, run the Gate Ledger Protocol's Ledger Initialization and Orphan Cleanup steps. The ledger must exist before Phase 1 transitions to IN_PROGRESS.
 
 ### Step 0: Pre-Existing Doc Detection
 
@@ -344,9 +525,11 @@ After the user approves the design and before starting Phase 2:
 **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-design-gate" before dispatching innovate and quality-gate on the design doc.
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
-2. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design". Iterates until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
-3. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
-4. Design doc is now finalized — proceed to acceptance tests.
+2. **Write Phase 1 IN_PROGRESS** to the gate ledger (after ledger initialization).
+3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design". Include in the dispatch context: `Phase: design` and `PipelineID: <current PipelineID>`. Iterates until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
+4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
+5. **Verify verdict marker and write Phase 1 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
+6. Design doc is now finalized — proceed to acceptance tests.
 
 ### Step 2.5: Generate PRD
 
@@ -444,8 +627,9 @@ The impact manifest records which gaps the user chose to leave uncovered.
 
 ### Phase Handoff: 1 → 2
 
-Before dispatching the Plan Writer, write a handoff manifest to the scratch directory:
+Before dispatching the Plan Writer, verify the gate ledger and write a handoff manifest:
 
+0. **Gate ledger check:** Read `build-gate-ledger.md` and verify Phase 1 Status is `PASS`. If not, follow Enforcement Rules.
 1. Write `handoff-1-to-2.md` with:
    - **Goal:** original user request, verbatim
    - **Mode:** feature or refactor
@@ -500,14 +684,18 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 
 **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-plan-gate" before dispatching innovate and quality-gate on the plan.
 
-1. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
-2. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan". Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
+1. **Write Phase 2 IN_PROGRESS** to the gate ledger.
+2. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
+3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan". Include in the dispatch context: `Phase: plan` and `PipelineID: <current PipelineID>`. Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
+4. **Verify verdict marker and write Phase 2 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 
 The quality gate handles the iterative red-team loop — fresh review each round, weighted stagnation detection, 15-round safety limit, escalation. See `crucible:quality-gate` for details.
 
 ### Phase Handoff: 2 → 3
 
-Before creating the team and task list, write a handoff manifest:
+Before creating the team and task list, write a handoff manifest. Step 3.4 above already verified the verdict marker, wrote PASS to the ledger, and deleted the marker. The handoff manifest is written AFTER the ledger PASS — this sequencing ensures compaction recovery finds a consistent state (ledger shows PASS, handoff exists).
+
+Write a handoff manifest:
 
 1. Write `handoff-2-to-3.md` with:
    - **Goal:** original user request, verbatim
@@ -541,6 +729,10 @@ Before creating the team and task list, write a handoff manifest:
      - Unresolved siblings list (always — these are known live defects; produces a stronger warning)
      - Non-match companion files are NOT loaded for implementers
   5. **`Last loaded` update:** Loading is pure-read. After all implementer dispatches for the current phase complete, batch-update the `Last loaded` field to today on all signatures that were loaded. Do NOT update during dispatch — defer to after all subagents are dispatched.
+
+### Step 0.5: Gate Ledger — Phase 3 Start
+
+**Write Phase 3 IN_PROGRESS** to the gate ledger (after Phase 2 PASS verification).
 
 ### Step 1: Create Team and Task List
 
@@ -849,9 +1041,17 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 - Minor concerns → adjust prompts for remaining tasks
 - All clear → continue
 
+### Gate Ledger — Phase 3 Complete
+
+After the last task wave's verification gate passes and all tasks are marked complete — but BEFORE the Phase 3→4 handoff — write `Status: COMPLETE` and `Tasks: N/N complete` to the Phase 3 ledger entry. If any task is in a retry/re-dispatch loop, COMPLETE is NOT written until retries resolve.
+
 ### Phase Handoff: 3 → 4
 
-Before running acceptance tests and code review, write a handoff manifest:
+Before running acceptance tests and code review, verify the gate ledger and write a handoff manifest:
+
+0. **Gate ledger check:** Read `build-gate-ledger.md` and verify Phase 3 Status is `COMPLETE`. If not, follow Enforcement Rules.
+
+Write the handoff manifest:
 
 1. Write `handoff-3-to-4.md` with:
    - **Goal:** original user request, verbatim
@@ -868,6 +1068,8 @@ Before running acceptance tests and code review, write a handoff manifest:
 ## Phase 4: Completion
 
 After all tasks complete:
+
+0. **Write Phase 4 IN_PROGRESS** to the gate ledger (after Phase 3 COMPLETE verification).
 
 1. **Feature mode:** Run acceptance tests from Phase 1 Step 3 — verify they **PASS** (GREEN). **Refactor mode:** Run all contract tests from Phase 1 — verify they **PASS** (GREEN).
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
@@ -912,7 +1114,8 @@ After all tasks complete:
       - `--force-siege` — Dispatch siege regardless of signal count. Maps to siege's `--force` flag. Decision journal: `security-review | choice=force-dispatch | reason=user --force-siege flag`
       - `--skip-siege` — Suppress siege even when signals/contract require it. Maps to siege's `--skip` flag. Decision journal: `security-review | choice=force-skip | reason=user --skip-siege flag`
 6. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-impl-gate" before dispatching the implementation quality gate. If gate fix rounds degrade the code, this is the rollback target.
-6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code", iterative until clean) **(Non-negotiable — see Quality Gate Requirement.)**
+6. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on full implementation (artifact type: "code"). Include in the dispatch context: `Phase: code` and `PipelineID: <current PipelineID>`. Iterates until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
+6b. **Verify verdict marker and write Phase 4 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 7. **RECOMMENDED SUB-SKILL:** Use crucible:forge (retrospective mode) — capture what happened vs what was planned
 7.5. **Chronicle signal fallback:** If forge retrospective was skipped (user declined, session ending),
    append a minimal chronicle signal directly:

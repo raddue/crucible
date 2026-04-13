@@ -68,3 +68,60 @@ Remove the `PostToolUse` entry from your `settings.json`. Existing session index
 
 - `jq` must be installed and on the PATH
 - `sha256sum` (standard on Linux, available via coreutils on macOS)
+
+## Gate Ledger Guard
+
+External enforcement hook for the build pipeline's gate ledger. Blocks unauthorized `Status: PASS` writes to `build-gate-ledger.md` when no matching quality-gate verdict marker exists. This is the mechanical enforcement layer — Claude cannot bypass it because it runs as an external process.
+
+### Setup
+
+Add the following to your `.claude/settings.json` (project-level) or `~/.claude/settings.json` (user-level):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "command": "bash hooks/gate-ledger-guard.sh",
+        "timeout": 500
+      }
+    ]
+  }
+}
+```
+
+> **Note:** No `matcher` field — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated.
+
+### Verification
+
+After enabling the hook, test it by attempting to write a PASS status to a gate ledger without a verdict marker. The hook should block with:
+
+```
+BLOCKED: Cannot write PASS to gate ledger — no matching verdict marker found.
+```
+
+### How It Works
+
+1. **PreToolUse hook** (`gate-ledger-guard.sh`) fires before every Write/Edit tool call
+2. Checks if the write target is `build-gate-ledger.md` — exits 0 (allows) for all other files
+3. Compares incoming content against the existing file to detect new `Status: PASS` entries per phase
+4. If a new PASS is detected, cross-checks against verdict markers in `~/.claude/projects/<hash>/memory/quality-gate/`:
+   - PipelineID must match between the ledger content and the verdict marker
+   - Verdict must be `PASS`
+   - Phase field must match (Phase 1 = "design", Phase 2 = "plan", Phase 4 = "code")
+5. Blocks Phase 3 PASS writes (Phase 3 uses COMPLETE, not PASS)
+6. **Graceful degradation:** On any infrastructure failure (missing `jq`, missing directories, malformed JSON), exits 0 to avoid blocking legitimate work
+
+### Testing
+
+Run the test suite:
+
+```bash
+bash hooks/tests/test-gate-ledger-guard.sh
+```
+
+17 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, and PipelineID change detection.
+
+### Dependencies
+
+- `jq` must be installed and on the PATH (gracefully degrades if missing)

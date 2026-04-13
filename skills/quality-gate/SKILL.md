@@ -568,7 +568,33 @@ Emit a Compression State Block at:
 
 **Dead-end handoff (step 5, code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 1+ round entries, copy its contents to `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective. On stagnation/escalation exit paths, also write the handoff file before escalating — stagnated sessions produce the highest-value dead-end data.
 
-**Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation).
+**Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation). Do NOT delete verdict marker files (`gate-verdict-<run-id>.md`) — the build orchestrator is responsible for their lifecycle.
+
+## Verdict Marker
+
+After Minor Issue Handling completes and before cleanup begins, write a verdict marker file to a stable location outside the scratch directory. This marker survives scratch cleanup and serves as a cross-skill consistency signal for the build orchestrator's gate ledger.
+
+**When:** After Minor Issue Handling (the quick-fix pass on consolidated minors) and before cleanup. Written on ALL exit paths — PASS, FAIL, STAGNATION, and ESCALATED. The Verdict field reflects the actual outcome.
+
+**Path:** `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-<run-id>.md`
+
+**Format:** Key-value pairs, one per line:
+
+```
+Verdict: PASS | FAIL | STAGNATION | ESCALATED
+Phase: <phase name from invoking orchestrator, omit if standalone>
+PipelineID: <pipeline-id from invoking orchestrator, omit if standalone>
+Rounds: <total round count>
+FinalScore: <weighted score from last round>
+Timestamp: <ISO-8601>
+RunID: <quality-gate run-id>
+```
+
+**Tool:** Write tool (not Bash) since the path is under `.claude/`.
+
+**Standalone invocations:** When quality-gate is invoked directly (not by build), the `Phase` and `PipelineID` fields are omitted. The marker is still written — it serves as a completion record even without pipeline context.
+
+**Stale cleanup exclusion:** Verdict markers are NOT subject to the 2-hour stale cleanup that applies to scratch directories. They are deleted by the build orchestrator after writing the corresponding gate ledger entry. Orphaned markers (from crashed runs) are cleaned up during the build skill's ledger initialization.
 
 ## Invocation Convention
 
@@ -587,6 +613,12 @@ Build is the outermost orchestrator and controls all quality gates:
 - **Phase 1 (after design):** Quality gate on design doc (artifact type: design)
 - **Phase 2 (after plan review):** Quality gate on plan (artifact type: plan)
 - **Phase 4 (after implementation):** Quality gate on full implementation (artifact type: code)
+
+**Context from invoking orchestrator:** When build invokes quality-gate, it includes a "Context from invoking orchestrator" block in the dispatch prompt containing:
+- `Phase: <phase name>` — "design", "plan", or "code"
+- `PipelineID: <pipeline-id>` — the build's PipelineID (format: `build-YYYYMMDD-HHMMSS`)
+
+Quality-gate reads these values from its dispatch context and includes them in the verdict marker. These are dispatch context values, not tool arguments — quality-gate is a skill, not an API.
 
 ### Artifact Types
 
