@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=18
+TOTAL=20
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -401,6 +401,58 @@ Status: PASS"
 JSON="$(make_json "$LEDGER_PATH" "$MALFORMED_CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 18 "Malformed phase header bypass blocked" 2 "$RC"
+
+# ========================================================================
+# Test 19: Edit old_string multi-phase PASS masking blocked (exit 2)
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+# Existing ledger: Phase 1 IN_PROGRESS, Phase 2 PASS (legitimately)
+EXISTING="$(make_ledger "build-test-019" "IN_PROGRESS" "PASS" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+# Edit old_string spans Phase 1 and Phase 2 — Phase 2's PASS is in old_string
+# This should NOT mask Phase 1's new PASS
+EDIT_JSON="$(jq -nc --arg fp "$LEDGER_PATH" \
+  --arg old "Status: IN_PROGRESS
+
+## Phase 2: Plan
+Status: PASS" \
+  --arg new "Status: PASS
+
+## Phase 2: Plan
+Status: PASS" \
+  '{"tool":"Edit","input":{"file_path":$fp,"old_string":$old,"new_string":$new}}')"
+set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
+check 19 "Edit multi-phase old_string PASS masking blocked" 2 "$RC"
+
+# ========================================================================
+# Test 20: Indented Status line blocked (exit 2)
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+EXISTING="$(make_ledger "build-test-020" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+# Content with indented Status line — should still be detected
+INDENTED_CONTENT="# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-020
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+  Status: PASS
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED"
+JSON="$(make_json "$LEDGER_PATH" "$INDENTED_CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 20 "Indented Status line blocked" 2 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""

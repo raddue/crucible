@@ -55,11 +55,10 @@ if [ "$IS_EDIT" = "true" ]; then
   if ! echo "$EDIT_NEW" | grep -q 'Status:[[:space:]]*PASS'; then
     exit 0
   fi
-  # If old_string already had PASS for the same line, this isn't a new PASS
-  if echo "$EDIT_OLD" | grep -q 'Status:[[:space:]]*PASS'; then
-    exit 0
-  fi
-  # A PASS is being introduced via Edit — read the existing file for full context
+  # Always simulate the full edit result and run phase-aware analysis.
+  # Do NOT early-exit based on old_string containing PASS — multi-phase
+  # old_strings can mask new PASS introductions in other phases.
+  # Read the existing file for full context
   RESOLVED_EDIT_PATH="${FILE_PATH/#\~/$HOME}"
   if [ -f "$RESOLVED_EDIT_PATH" ]; then
     CONTENT="$(cat "$RESOLVED_EDIT_PATH" 2>/dev/null)" || true
@@ -123,8 +122,8 @@ parse_phase_statuses() {
       sub(/[^0-9].*/, "", line)
       phase = line
     }
-    /^Status:/ && phase != "" {
-      gsub(/^Status:[[:space:]]*/, "")
+    /^[[:space:]]*Status:/ && phase != "" {
+      gsub(/^[[:space:]]*Status:[[:space:]]*/, "")
       gsub(/[[:space:]]+$/, "")
       print phase ":" $0
       phase = ""
@@ -233,8 +232,9 @@ for PHASE_NUM in $NEW_PASS_PHASES; do
 
   EXPECTED_PHASE="$(phase_name "$PHASE_NUM")"
   if [ -z "$EXPECTED_PHASE" ]; then
-    # Unknown phase number — graceful degradation
-    continue
+    # Unknown phase number — block rather than allow unrecognized phases
+    echo "BLOCKED: Unrecognized phase $PHASE_NUM gaining PASS — not in known phase set {1,2,4}." >&2
+    exit 2
   fi
 
   # Scan verdict markers
