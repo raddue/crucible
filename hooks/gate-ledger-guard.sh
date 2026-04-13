@@ -105,7 +105,7 @@ fi
 # ── New PASS detected — verify verdict markers ─────────────────────────
 
 # Extract PipelineID from incoming content
-PIPELINE_ID="$(echo "$CONTENT" | grep -m1 '^PipelineID:' | sed 's/^PipelineID:[[:space:]]*//')"
+PIPELINE_ID="$(echo "$CONTENT" | grep -m1 '^PipelineID:' | sed 's/^PipelineID:[[:space:]]*//;s/[[:space:]]*$//')"
 if [ -z "$PIPELINE_ID" ]; then
   # Can't verify without a PipelineID — graceful degradation
   exit 0
@@ -115,19 +115,23 @@ fi
 # Path format: .../.claude/projects/<hash>/memory/build-gate-ledger.md
 PROJECT_HASH="$(echo "$RESOLVED_PATH" | sed -n 's|.*\.claude/projects/\([^/]*\)/memory/.*|\1|p')"
 if [ -z "$PROJECT_HASH" ]; then
-  # Can't determine project hash — graceful degradation
-  exit 0
+  echo "BLOCKED: Cannot determine project from ledger path — ensure the ledger is at the canonical path under .claude/projects/." >&2
+  exit 2
 fi
 
 VERDICT_DIR="$HOME/.claude/projects/$PROJECT_HASH/memory/quality-gate"
 
-# If the verdict directory doesn't exist at all, graceful degradation
+# If the verdict directory doesn't exist, block — QG was never run
 if [ ! -d "$VERDICT_DIR" ]; then
-  exit 0
+  echo "BLOCKED: quality-gate verdict directory does not exist — run the quality gate before marking this phase as passed." >&2
+  exit 2
 fi
 
 # ── Check each phase that gained PASS ───────────────────────────────────
 # Phase name mapping: 1=design, 2=plan, 4=code
+# Note: "code" is the QG artifact type for Phase 4 (displayed as "Completion" in the
+# ledger). This value must match the Phase field written in verdict markers by the
+# quality-gate skill, NOT the human-facing phase display name.
 phase_name() {
   case "$1" in
     1) echo "design" ;;
@@ -154,9 +158,9 @@ for PHASE_NUM in $NEW_PASS_PHASES; do
   FOUND_MATCH=false
   for MARKER in "$VERDICT_DIR"/gate-verdict-*.md; do
     [ -f "$MARKER" ] || continue
-    MARKER_PID="$(grep -m1 '^PipelineID:' "$MARKER" 2>/dev/null | sed 's/^PipelineID:[[:space:]]*//')"
-    MARKER_VERDICT="$(grep -m1 '^Verdict:' "$MARKER" 2>/dev/null | sed 's/^Verdict:[[:space:]]*//')"
-    MARKER_PHASE="$(grep -m1 '^Phase:' "$MARKER" 2>/dev/null | sed 's/^Phase:[[:space:]]*//')"
+    MARKER_PID="$(grep -m1 '^PipelineID:' "$MARKER" 2>/dev/null | sed 's/^PipelineID:[[:space:]]*//;s/[[:space:]]*$//')"
+    MARKER_VERDICT="$(grep -m1 '^Verdict:' "$MARKER" 2>/dev/null | sed 's/^Verdict:[[:space:]]*//;s/[[:space:]]*$//')"
+    MARKER_PHASE="$(grep -m1 '^Phase:' "$MARKER" 2>/dev/null | sed 's/^Phase:[[:space:]]*//;s/[[:space:]]*$//')"
 
     if [ "$MARKER_PID" = "$PIPELINE_ID" ] && [ "$MARKER_VERDICT" = "PASS" ] && [ "$MARKER_PHASE" = "$EXPECTED_PHASE" ]; then
       FOUND_MATCH=true

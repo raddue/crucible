@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 11 test cases validating allow/block behavior.
+# Runs 13 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=11
+TOTAL=13
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -30,11 +30,9 @@ mkdir -p "$MEMORY_DIR"
 # ── Helper: run hook with given JSON, return exit code ──────────────────
 run_hook() {
   local json="$1"
-  local original_home="$HOME"
+  # HOME is set per-subprocess via prefix assignment, so no save/restore needed
   HOME="$FAKE_HOME" bash "$HOOK" <<< "$json"
-  local rc=$?
-  HOME="$original_home"
-  return $rc
+  return $?
 }
 
 # ── Helper: report result ──────────────────────────────────────────────
@@ -192,9 +190,9 @@ rm -rf "$NO_JQ_BIN"
 check 6 "Missing jq" 0 "$RC"
 
 # ========================================================================
-# Test 7: Missing memory directory (exit 0)
+# Test 7: Missing verdict directory with PASS write (exit 2)
 # ========================================================================
-# The quality-gate verdict directory does not exist — graceful degradation (exit 0)
+# The quality-gate verdict directory does not exist — should block (QG never ran)
 reset_state
 # reset_state removes VERDICT_DIR, so it won't exist
 EXISTING="$(make_ledger "build-test-006" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
@@ -202,7 +200,7 @@ echo "$EXISTING" > "$LEDGER_PATH"
 CONTENT="$(make_ledger "build-test-006" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
 JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
-check 7 "Missing memory directory" 0 "$RC"
+check 7 "Missing verdict directory blocks PASS write" 2 "$RC"
 
 # ========================================================================
 # Test 8: Malformed JSON stdin (exit 0)
@@ -248,6 +246,33 @@ CONTENT="$(make_ledger "build-test-009" "PASS" "PASS" "PASS" "NOT_STARTED")"
 JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 11 "Phase 3 PASS write blocked" 2 "$RC"
+
+# ========================================================================
+# Test 12: First-run bypass — no ledger, no verdict dir, PASS write (exit 2)
+# ========================================================================
+# Exercises Finding 1 fix: when no existing ledger and no verdict directory
+# exist, a write that introduces PASS should be blocked (QG was never run).
+reset_state
+# Do NOT create ledger or verdict dir — simulates first-ever run
+CONTENT="$(make_ledger "build-test-010" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 12 "First-run bypass: no ledger, no verdict dir, PASS blocked" 2 "$RC"
+
+# ========================================================================
+# Test 13: INFERRED to PASS without verdict marker (exit 2)
+# ========================================================================
+# Existing ledger has INFERRED for Phase 1, incoming has PASS for Phase 1,
+# but no verdict marker exists — should block the promotion.
+reset_state
+EXISTING="$(make_ledger "build-test-011" "INFERRED" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+# Create verdict dir but leave it empty (no markers)
+mkdir -p "$VERDICT_DIR"
+CONTENT="$(make_ledger "build-test-011" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 13 "INFERRED to PASS without verdict marker blocked" 2 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
