@@ -45,6 +45,84 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 
 **If you find yourself about to skip a gate:** STOP. Re-read this section. The gate exists because skipping it has caused real production incidents and hours of wasted time. Run the gate.
 
+## Gate Ledger Protocol
+
+Tamper-evident audit trail for phase transitions and gate verdicts. This is defense-in-depth — it raises the cost of gate-skipping from zero to nonzero by requiring structured state to be maintained and verified. An external enforcement hook (`gate-ledger-guard.sh`) provides mechanical enforcement by blocking unauthorized PASS writes.
+
+**File location:** `~/.claude/projects/<project-hash>/memory/build-gate-ledger.md`
+
+**Relationship to pipeline-status.md:** pipeline-status.md is ambient user awareness (overwritten at every narration point). build-gate-ledger.md is the gate verdict audit trail (append-style updates per phase). Both are needed; neither replaces the other.
+
+### PipelineID Generation
+
+At pipeline start, generate a PipelineID via `date -u +build-%Y%m%d-%H%M%S`. This ID:
+- Is persisted in the ledger header
+- Is passed to quality-gate invocations as `pipeline_id`
+- Is used by the enforcement hook to cross-check verdict markers
+- Is unique per build run (timestamp-based)
+
+### Ledger Format
+
+```
+# Build Gate Ledger
+Run: <ISO-8601 timestamp>
+PipelineID: <build-YYYYMMDD-HHMMSS>
+Goal: <user request>
+Mode: <feature | refactor>
+
+## Phase 1: Design
+Status: NOT_STARTED
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED
+```
+
+**Format constraints:**
+- One key-value pair per line: `Key: value`
+- Fixed key names: `Status`, `Gate`, `Artifact`, `Tasks`, `Reason`, `Acknowledged`, `PipelineID`
+- Status values: `NOT_STARTED`, `IN_PROGRESS`, `PASS`, `COMPLETE`, `FAIL`, `SKIPPED`, `INFERRED`
+- Phase headers are `## Phase N: Name` — always 4 phases, always in order
+- No prose, no paragraphs, no nested structure
+
+### Ledger Initialization
+
+Runs during build startup, after mode detection but before Phase 1 begins:
+
+1. Check for existing ledger at canonical path
+2. If found: run Run Isolation checks (see below)
+3. If not found (or user chose "start fresh"): write new ledger including `Run`, `PipelineID`, `Goal`, and `Mode` header fields, then all four phases with `Status: NOT_STARTED`
+4. The ledger MUST exist before Phase 1 transitions to `IN_PROGRESS`
+
+After writing any ledger (fresh or reconstructed), immediately re-read the ledger header to extract the PipelineID into the active in-memory state. This is a defensive consistency practice — ensures the in-memory value always matches the persisted value.
+
+### Run Isolation
+
+Stale detection prevents cross-run contamination:
+
+1. **Compaction recovery (same run):** If pipeline-status.md `Started` timestamp matches the ledger's `Run` timestamp, this is the same build run recovering from compaction. Auto-resume without prompting.
+2. **New session with existing ledger:** If the ledger exists but pipeline-status.md is missing or its `Started` timestamp doesn't match the ledger's `Run`, prompt: "Found existing ledger for '[goal]' (started [timestamp], Phase N [status]). Resume this run? [y/n]". On "no", archive the old ledger via Bash `mv` to `build-gate-ledger-<old-timestamp>.md`. If the target filename already exists, append a counter suffix (`-2`, `-3`, etc.).
+3. **No existing ledger:** Create fresh.
+
+### Orphan Cleanup
+
+**Requires:** Active PipelineID established (from Ledger Initialization + Run Isolation). This step runs AFTER the resume/fresh decision is resolved.
+
+Scan `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md` for verdict markers. Delete any whose `PipelineID` does not match the active PipelineID. If resuming: use the resumed build's PipelineID (from the existing ledger). If starting fresh: use the newly generated PipelineID.
+
+Note: If the session is recovering via INFERRED reconstruction (new PipelineID generated), markers from the old run will be cleaned up. This is intentional — the design requires a fresh QG run for INFERRED→PASS upgrade, not reuse of old markers.
+
+### Timestamps and File Operations
+
+- **Timestamps:** Obtained via Bash `date -u +%Y-%m-%dT%H:%M:%S` (Bash is allowed for `date` commands that don't reference `.claude/` paths)
+- **Ledger archival (rename):** Uses Bash `mv` since Write/Read/Edit/Glob have no rename capability
+- **All other ledger operations** (create, read, update): MUST use Write and Read tools, NOT Bash. This is a hard constraint due to `.claude/` path restrictions.
+
 ## Quality Gate Requirement (Non-Negotiable)
 
 **Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on task size, complexity, or scope.
@@ -300,6 +378,8 @@ Before any design or dispatch work, check for a crashed prior pipeline:
 **Marker updates during pipeline:** Update the `phase` field in `.pipeline-active` at each phase boundary (1->2, 2->3, 3->4) to track progress for crash detection.
 
 **Marker cleanup:** Delete `.pipeline-active` at Phase 4 step 12 (after finish skill completes).
+
+**Gate Ledger Initialization:** After the pipeline-active marker is written (or recovered) and mode detection is complete, run the Gate Ledger Protocol's Ledger Initialization and Orphan Cleanup steps. The ledger must exist before Phase 1 transitions to IN_PROGRESS.
 
 ### Step 0: Pre-Existing Doc Detection
 
