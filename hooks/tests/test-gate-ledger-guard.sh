@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 13 test cases validating allow/block behavior.
+# Runs 17 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=13
+TOTAL=17
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -84,6 +84,15 @@ make_json() {
   local file_path="$1"
   local content="$2"
   jq -nc --arg fp "$file_path" --arg c "$content" '{"tool":"Write","input":{"file_path":$fp,"content":$c}}'
+}
+
+# ── Helper: build Edit JSON ────────────────────────────────────────────
+make_edit_json() {
+  local file_path="$1"
+  local old_string="$2"
+  local new_string="$3"
+  jq -nc --arg fp "$file_path" --arg os "$old_string" --arg ns "$new_string" \
+    '{"tool":"Edit","input":{"file_path":$fp,"old_string":$os,"new_string":$ns}}'
 }
 
 # ── Helper: create verdict marker ──────────────────────────────────────
@@ -273,6 +282,96 @@ CONTENT="$(make_ledger "build-test-011" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_
 JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 13 "INFERRED to PASS without verdict marker blocked" 2 "$RC"
+
+# ========================================================================
+# Test 14: Edit tool introducing PASS → blocked (exit 2)
+# ========================================================================
+reset_state
+# Set up existing ledger with IN_PROGRESS
+EXISTING="$(make_ledger "build-test-012" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+# Create verdict dir but no matching marker
+mkdir -p "$VERDICT_DIR"
+# Edit: change "Status: IN_PROGRESS" to "Status: PASS" for Phase 1
+JSON="$(make_edit_json "$LEDGER_PATH" "Status: IN_PROGRESS" "Status: PASS")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 14 "Edit tool introducing PASS blocked" 2 "$RC"
+
+# ========================================================================
+# Test 15: Trailing space on PASS status → blocked (exit 2)
+# ========================================================================
+reset_state
+EXISTING="$(make_ledger "build-test-013" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+mkdir -p "$VERDICT_DIR"
+# Build content with trailing space after PASS
+CONTENT="$(cat <<EOF
+# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-013
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: PASS
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED
+EOF
+)"
+JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 15 "Trailing space on PASS status blocked" 2 "$RC"
+
+# ========================================================================
+# Test 16: PASS write with no PipelineID → blocked (exit 2)
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+# Build content with PASS but no PipelineID line
+CONTENT="$(cat <<EOF
+# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: PASS
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED
+EOF
+)"
+JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 16 "PASS write with no PipelineID blocked" 2 "$RC"
+
+# ========================================================================
+# Test 17: PipelineID changed, existing Phase 1 PASS → requires marker (exit 2)
+# ========================================================================
+reset_state
+# Existing ledger has Phase 1 PASS under old PipelineID
+EXISTING="$(make_ledger "build-OLD-pipeline" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+# Create marker for OLD pipeline — should NOT satisfy new pipeline
+create_marker "run-005" "build-OLD-pipeline" "PASS" "design"
+# Incoming content changes PipelineID but keeps Phase 1 PASS
+CONTENT="$(make_ledger "build-NEW-pipeline" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 17 "PipelineID changed, existing PASS requires new marker" 2 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""

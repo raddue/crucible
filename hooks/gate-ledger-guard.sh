@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # hooks/gate-ledger-guard.sh
-# PreToolUse hook for Write — blocks unauthorized PASS writes to build-gate-ledger.md.
+# PreToolUse hook for Write/Edit — blocks unauthorized PASS writes to build-gate-ledger.md.
 # Receives JSON on stdin: {"tool":"Write","input":{"file_path":"/path","content":"..."}}
+#   or for Edit: {"tool":"Edit","input":{"file_path":"/path","old_string":"...","new_string":"..."}}
 # Exit 0 = allow, non-zero = block (reason on stderr).
 #
 # Configured in .claude/settings.json:
@@ -18,6 +19,7 @@ fi
 
 # ── Dependency check (jq required) ─────────────────────────────────────
 if ! command -v jq &>/dev/null; then
+  echo "WARNING: jq not found — gate-ledger-guard is disabled" >&2
   exit 0
 fi
 
@@ -27,17 +29,78 @@ if [ -z "$TOOL" ]; then
   exit 0
 fi
 
-# Only gate Write operations
-if [ "$TOOL" != "Write" ]; then
+# Gate Write and Edit operations
+IS_EDIT=false
+if [ "$TOOL" = "Edit" ]; then
+  IS_EDIT=true
+elif [ "$TOOL" != "Write" ]; then
   exit 0
 fi
 
 # ── Extract file_path and content ───────────────────────────────────────
 FILE_PATH="$(echo "$INPUT" | jq -r '.input.file_path // empty' 2>/dev/null)"
-CONTENT="$(echo "$INPUT" | jq -r '.input.content // empty' 2>/dev/null)"
 
-if [ -z "$FILE_PATH" ] || [ -z "$CONTENT" ]; then
+if [ -z "$FILE_PATH" ]; then
   exit 0
+fi
+
+if [ "$IS_EDIT" = "true" ]; then
+  # Edit tool: check if new_string introduces "Status: PASS" where old_string didn't have it
+  EDIT_OLD="$(echo "$INPUT" | jq -r '.input.old_string // empty' 2>/dev/null)"
+  EDIT_NEW="$(echo "$INPUT" | jq -r '.input.new_string // empty' 2>/dev/null)"
+  if [ -z "$EDIT_NEW" ]; then
+    exit 0
+  fi
+  # If the edit isn't introducing a new PASS, allow it
+  if ! echo "$EDIT_NEW" | grep -q 'Status:[[:space:]]*PASS'; then
+    exit 0
+  fi
+  # If old_string already had PASS for the same line, this isn't a new PASS
+  if echo "$EDIT_OLD" | grep -q 'Status:[[:space:]]*PASS'; then
+    exit 0
+  fi
+  # A PASS is being introduced via Edit — read the existing file for full context
+  RESOLVED_EDIT_PATH="${FILE_PATH/#\~/$HOME}"
+  if [ -f "$RESOLVED_EDIT_PATH" ]; then
+    CONTENT="$(cat "$RESOLVED_EDIT_PATH" 2>/dev/null)" || true
+    # Simulate the edit result: replace old_string with new_string
+    # Use awk for literal string replacement (no regex interpretation)
+    CONTENT="$(awk -v old="$EDIT_OLD" -v new="$EDIT_NEW" '
+      BEGIN { found=0; split(old, old_lines, "\n"); n=length(old_lines) }
+      {
+        lines[NR] = $0
+      }
+      END {
+        for (i=1; i<=NR; i++) {
+          if (found == 0 && lines[i] == old_lines[1]) {
+            match_all = 1
+            for (j=2; j<=n; j++) {
+              if (i+j-1 > NR || lines[i+j-1] != old_lines[j]) {
+                match_all = 0
+                break
+              }
+            }
+            if (match_all) {
+              printf "%s", new
+              if (i+n-1 < NR) printf "\n"
+              i = i + n - 1
+              found = 1
+              continue
+            }
+          }
+          print lines[i]
+        }
+      }
+    ' "$RESOLVED_EDIT_PATH")"
+  else
+    # File doesn't exist yet — use new_string as content
+    CONTENT="$EDIT_NEW"
+  fi
+else
+  CONTENT="$(echo "$INPUT" | jq -r '.input.content // empty' 2>/dev/null)"
+  if [ -z "$CONTENT" ]; then
+    exit 0
+  fi
 fi
 
 # Only gate writes to build-gate-ledger.md
@@ -59,6 +122,7 @@ parse_phase_statuses() {
     }
     /^Status:/ && phase != "" {
       gsub(/^Status:[[:space:]]*/, "")
+      gsub(/[[:space:]]+$/, "")
       print phase ":" $0
       phase = ""
     }
@@ -78,18 +142,34 @@ if [ -f "$RESOLVED_PATH" ]; then
   fi
 fi
 
+# ── Detect PipelineID change ────────────────────────────────────────────
+# If the PipelineID changed between existing and incoming, ALL PASS values are "new"
+PIPELINE_CHANGED=false
+if [ -f "$RESOLVED_PATH" ] && [ -n "$EXISTING_CONTENT" ]; then
+  EXISTING_PID="$(echo "$EXISTING_CONTENT" | grep -m1 '^PipelineID:' | sed 's/^PipelineID:[[:space:]]*//;s/[[:space:]]*$//')"
+  INCOMING_PID="$(echo "$CONTENT" | grep -m1 '^PipelineID:' | sed 's/^PipelineID:[[:space:]]*//;s/[[:space:]]*$//')"
+  if [ -n "$EXISTING_PID" ] && [ -n "$INCOMING_PID" ] && [ "$EXISTING_PID" != "$INCOMING_PID" ]; then
+    PIPELINE_CHANGED=true
+  fi
+fi
+
 # ── Compare: find phases gaining a new PASS ─────────────────────────────
 NEW_PASS_PHASES=""
 while IFS=: read -r phase status; do
   [ -z "$phase" ] && continue
   if [ "$status" = "PASS" ]; then
-    # Check if existing file had this phase as PASS already
-    OLD_STATUS=""
-    if [ -n "$EXISTING_PHASES" ]; then
-      OLD_STATUS="$(echo "$EXISTING_PHASES" | grep "^${phase}:" | head -1 | cut -d: -f2)"
-    fi
-    if [ "$OLD_STATUS" != "PASS" ]; then
+    if [ "$PIPELINE_CHANGED" = "true" ]; then
+      # PipelineID changed — treat ALL PASS values as new
       NEW_PASS_PHASES="${NEW_PASS_PHASES} ${phase}"
+    else
+      # Check if existing file had this phase as PASS already
+      OLD_STATUS=""
+      if [ -n "$EXISTING_PHASES" ]; then
+        OLD_STATUS="$(echo "$EXISTING_PHASES" | grep "^${phase}:" | head -1 | cut -d: -f2)"
+      fi
+      if [ "$OLD_STATUS" != "PASS" ]; then
+        NEW_PASS_PHASES="${NEW_PASS_PHASES} ${phase}"
+      fi
     fi
   fi
 done <<< "$INCOMING_PHASES"
@@ -107,8 +187,8 @@ fi
 # Extract PipelineID from incoming content
 PIPELINE_ID="$(echo "$CONTENT" | grep -m1 '^PipelineID:' | sed 's/^PipelineID:[[:space:]]*//;s/[[:space:]]*$//')"
 if [ -z "$PIPELINE_ID" ]; then
-  # Can't verify without a PipelineID — graceful degradation
-  exit 0
+  echo "BLOCKED: PipelineID missing from ledger content — cannot verify quality gate." >&2
+  exit 2
 fi
 
 # Extract project hash from the file path

@@ -103,7 +103,7 @@ BLOCKED: Cannot write PASS to gate ledger — no matching verdict marker found.
 
 ### How It Works
 
-1. **PreToolUse hook** (`gate-ledger-guard.sh`) fires before every Write tool call
+1. **PreToolUse hook** (`gate-ledger-guard.sh`) fires before every Write/Edit tool call
 2. Checks if the write target is `build-gate-ledger.md` — exits 0 (allows) for all other files
 3. Compares incoming content against the existing file to detect new `Status: PASS` entries per phase
 4. If a new PASS is detected, cross-checks against verdict markers in `~/.claude/projects/<hash>/memory/quality-gate/`:
@@ -121,7 +121,7 @@ Run the test suite:
 bash hooks/tests/test-gate-ledger-guard.sh
 ```
 
-11 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, and Phase 3 PASS blocking.
+17 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, and PipelineID change detection.
 
 ### Dependencies
 
