@@ -82,7 +82,6 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write",
         "command": "bash hooks/gate-ledger-guard.sh",
         "timeout": 500
       }
@@ -91,7 +90,7 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
 }
 ```
 
-> **Note:** Verify that the `matcher` field is supported in your Claude Code version. If not, remove it — the hook itself checks the tool name from stdin JSON and exits 0 for non-Write operations.
+> **Note:** No `matcher` field — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated.
 
 ### Verification
 

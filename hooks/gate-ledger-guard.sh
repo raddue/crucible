@@ -114,11 +114,14 @@ esac
 parse_phase_statuses() {
   local text="$1"
   echo "$text" | awk '
-    /^## Phase [0-9]+:/ {
-      split($0, a, " ")
-      # a[3] is "N:" — strip the colon
-      gsub(/:/, "", a[3])
-      phase = a[3]
+    /^## Phase [0-9]+/ {
+      # Extract just the phase number — robust against malformed headers
+      # like "## Phase 4:Completion" (no space after colon).
+      # Uses sub() to isolate the number (portable across awk versions).
+      line = $0
+      sub(/^## Phase /, "", line)
+      sub(/[^0-9].*/, "", line)
+      phase = line
     }
     /^Status:/ && phase != "" {
       gsub(/^Status:[[:space:]]*/, "")

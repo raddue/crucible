@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=17
+TOTAL=18
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -372,6 +372,35 @@ CONTENT="$(make_ledger "build-NEW-pipeline" "PASS" "NOT_STARTED" "NOT_STARTED" "
 JSON="$(make_json "$LEDGER_PATH" "$CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 17 "PipelineID changed, existing PASS requires new marker" 2 "$RC"
+
+# ========================================================================
+# Test 18: Malformed phase header bypass blocked (exit 2)
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+EXISTING="$(make_ledger "build-test-018" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+# Malformed content: "## Phase 4:Completion" (no space after colon)
+MALFORMED_CONTENT="# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-018
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: IN_PROGRESS
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4:Completion
+Status: PASS"
+JSON="$(make_json "$LEDGER_PATH" "$MALFORMED_CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 18 "Malformed phase header bypass blocked" 2 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
