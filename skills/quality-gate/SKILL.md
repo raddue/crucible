@@ -158,6 +158,18 @@ The fix agent receives: (a) the current artifact, (b) the red-team findings, (c)
 
 The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
 
+## Scope Anchoring for Fix Agents
+
+Fix agents are prone to drift — addressing findings by adding unrequested features, restructuring documents, or expanding scope beyond what was asked. This costs real time in re-anchoring and rework.
+
+**Before dispatching each fix agent, the orchestrator MUST include in the fix prompt:**
+
+1. **Scope statement:** "You are fixing ONLY the findings listed below. Do not add features, restructure the document, or make changes outside the scope of these findings."
+2. **Change boundary:** List the specific sections/files the fix agent is allowed to modify. If a finding requires changes outside these boundaries, the fix agent must flag it rather than making the change.
+3. **Drift detection:** After the fix agent completes, the orchestrator checks whether the fix touched files or sections not listed in the change boundary. If out-of-scope changes are detected: reject the entire fix round output, re-dispatch the fix agent with explicit instructions to omit the out-of-scope changes, and include the out-of-scope items as context for the next red-team round.
+
+**Why this matters:** The #1 user friction with the quality gate is fix agents drifting from the original design by adding unrequested content. Scope anchoring turns "stop. skipping. steps." into a structural guardrail.
+
 ## Fix Memory
 
 Anti-anchoring is a property of **review**, not **remediation**. Reviewers need fresh eyes to avoid confirmation bias. Fix agents need institutional memory to avoid repeating failed strategies.
@@ -622,6 +634,7 @@ Three exit modes beyond clean approval:
 - Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking)
 - Skipping the fix verifier dispatch after a fix agent completes (every fix round gets verified)
 - Passing verifier output to the red-team reviewer (verifier is on the remediation path only)
+- Allowing fix agents to drift outside the declared change boundary without flagging
 - Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round)
 - Skipping Compression State Block emission at checkpoint boundaries
 - Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)

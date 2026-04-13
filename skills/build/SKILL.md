@@ -37,6 +37,14 @@ Every status update must include:
 
 **This requirement exists because:** Long-running autonomous pipelines can run for hours. Without narration, the user sees nothing but a spinner. They can't assess progress, can't decide whether to intervene, and can't learn from the pipeline's decisions.
 
+## Pipeline Discipline (Non-Negotiable)
+
+NEVER skip quality gate steps. Every artifact must pass its quality gate before proceeding to the next phase. No exceptions, no shortcuts.
+
+**BLOCK semantics:** Phase transitions are gated. You CANNOT proceed from Phase 1→2, 2→3, or 3→4 without the gate for that phase passing. If a gate fails, fix the issues and re-run the gate. Do not silently skip a gate because "it looks fine" or "we already reviewed it."
+
+**If you find yourself about to skip a gate:** STOP. Re-read this section. The gate exists because skipping it has caused real production incidents and hours of wasted time. Run the gate.
+
 ## Quality Gate Requirement (Non-Negotiable)
 
 **Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on task size, complexity, or scope.
