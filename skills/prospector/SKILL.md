@@ -1,6 +1,6 @@
 ---
 name: prospector
-description: "Explore a codebase for architectural friction and propose competing redesigns. Triggers on 'prospector', 'find improvements', 'architecture friction', 'what should I refactor', 'where are the structural problems', or any task requesting discovery of codebase improvement opportunities."
+description: "Explores a codebase for architectural friction — identifies coupling hotspots, detects circular dependencies, flags god classes, and proposes competing redesigns with trade-off analysis. Triggers on 'prospector', 'find improvements', 'architecture friction', 'what should I refactor', 'where are the structural problems', or any task requesting discovery of codebase improvement opportunities."
 ---
 
 # Prospector
@@ -15,6 +15,8 @@ Explores a codebase organically, surfaces architectural friction, and proposes c
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
 **Purpose:** Discover structural improvement opportunities in a codebase. Distinct from audit (which finds bugs in a specific subsystem) -- prospector finds what could be better across the entire codebase. Audit finds what's broken. Prospector finds what could be better.
+
+**Write-on-complete convention:** Every agent's output is written to the scratch directory immediately upon completion. Do not hold results in context memory only — always persist to disk. Specific paths are listed in the Scratch Directory section.
 
 **Model:** Opus (orchestrator, organic explorer, competing design agents). Sonnet (genealogists, structured analysis). If the orchestrator session is not running Opus, warn: "Prospector requires Opus-level reasoning for exploration and design phases. Results may be degraded."
 
@@ -185,8 +187,6 @@ The explorer outputs a structured list of friction points (capped at **top 8**, 
 - **Severity:** How much this friction would slow down a developer working in this area (High/Medium/Low)
 - **Frequency estimate:** How often a developer would hit this friction (daily, weekly, rarely)
 
-**Write-on-complete:** The orchestrator writes the explorer's output to `scratch/<run-id>/explorer-findings.md` immediately upon agent completion. Do not hold results in context memory only — always persist to disk.
-
 ### Explorer Context Budget
 
 The explorer should target 50% of its context window for exploration, reserving the remainder for output generation. For large codebases:
@@ -254,8 +254,6 @@ Each agent classifies the friction's origin:
 
 **Graceful degradation:** Genealogy enriches when available but is never required. If git history is too shallow or all results are Indeterminate, downstream phases proceed without genealogy data.
 
-**Write-on-complete:** The orchestrator writes each genealogist's output to `scratch/<run-id>/genealogy-<n>.md` immediately upon agent completion.
-
 ## Phase 2: Root Cause Analysis
 
 Root cause analysis runs in parallel with genealogy. Root cause looks at code structure ("why is this designed this way?"), genealogy traces git history ("how did it get this way?"). Both feed into Phase 2.5 convergence, then Phase 3.
@@ -295,8 +293,6 @@ Each agent uses the competing causal hypotheses method: generates 2-3 plausible 
 - **Codebase boundary:** If hypothesis testing leads outside the codebase (into framework internals, language runtime, or third-party library code), stop at the codebase boundary. Record the external dependency as the terminal cause.
 - **Hypothesis count:** 2-3 hypotheses per friction point. Stop when one hypothesis survives falsification, or when all hypotheses have been tested.
 
-**Write-on-complete:** The orchestrator writes each root cause agent's output to `scratch/<run-id>/root-cause-<n>.md` immediately upon agent completion.
-
 ## Phase 2.5: Root Cause Convergence
 
 After all root cause agents and genealogy agents complete, the orchestrator checks whether multiple friction points share the same root cause. When they do, it collapses them into a single "friction cluster" with a unified remediation scope. This prevents producing interfering partial fixes for what is really a single architectural problem.
@@ -307,22 +303,13 @@ After all root cause agents and genealogy agents complete, the orchestrator chec
 
 1. Read all `root-cause-<n>.md` outputs
 2. Group by: same root cause type AND surviving hypothesis root cause statements describe the same architectural decision (semantic match, not string equality)
-3. **Merge threshold:** Two friction points merge only when they share the same root cause type AND their root cause statements describe the same underlying architectural decision or missing pattern. Overlapping symptoms or co-located files alone are not sufficient.
-4. **Split criterion:** Before merging, ask: "Would a single design change plausibly fix BOTH friction points?" If no, do not merge even if root cause type and statement match.
-
-### Merge Confidence
-
-- **High confidence:** Same root cause type, same architectural decision, AND a single design change would plausibly fix both. High-confidence merges auto-approve (no user confirmation needed).
-- **Low confidence:** Same root cause type and similar statements, but unclear whether a single design change covers both (e.g., similar root causes in different subsystems). Low-confidence merges require explicit user confirmation.
-
-### Medium/Low Finding Overlap Check
-
-Before writing the draft, the orchestrator also checks whether any Medium/Low-severity finding (which did not receive a root cause agent) has symptom descriptions and file locations that overlap with a High-severity finding's root cause scope. Overlaps are flagged as Low-confidence potential merges for user confirmation.
+3. Apply merge threshold and split criterion rules (see [REFERENCE.md](REFERENCE.md) — Convergence Logic section)
+4. Also check whether any Medium/Low-severity finding overlaps with a High-severity finding's root cause scope — flag overlaps as Low-confidence merges
 
 ### Two-Step Convergence (Compaction-Safe)
 
-1. **Draft step:** Write proposed groupings to `scratch/<run-id>/convergence-draft.md`. Each proposed merge includes its confidence rating (High/Low) and the split criterion assessment. This is a checkpoint — if compaction occurs, the draft survives.
-2. **Confirmation step:** Present the draft to the user. High-confidence merges auto-approve; the user decides on Low-confidence merges (approve or split). The user may also split any auto-approved merge or force-merge missed connections. After confirmation, write the final `scratch/<run-id>/convergence.md`.
+1. **Draft step:** Write proposed groupings to `scratch/<run-id>/convergence-draft.md` with confidence ratings (High/Low) and split criterion assessments. This is a checkpoint — survives compaction.
+2. **Confirmation step:** Present draft to user. High-confidence merges auto-approve; user decides on Low-confidence merges (approve or split). User may also split auto-approved merges or force-merge missed connections. Write final `scratch/<run-id>/convergence.md`.
 
 ### Downstream Impact
 
@@ -350,101 +337,23 @@ The trajectory status and a one-line metric summary ("change freq: monthly→wee
 
 **Track Only resurfacing:** If a friction point was previously `track-only` but its trajectory is now ACCELERATING, the orchestrator flags it for the user at the exploration review gate: "Friction point [X] was Track Only in the last run but is now accelerating. Recommend upgrading to High severity for root cause analysis."
 
-Each analysis agent receives:
-- The friction point description and file locations (or cluster of merged friction points with combined scope)
-- Genealogy classification and key commits (if available)
-- Root cause summary (max 10 lines, mechanically extracted — see below)
-- Framework context block (from Phase 0.5)
-- Change metrics from genealogy (change frequency and bug-fix commit counts, aggregated per Git Metrics Aggregation rules)
-- Relevant source files (subject to 2000-line hard cap — increased from 1500 to accommodate four new output sections)
-- The relevant REFERENCE.md section for the friction type being analyzed
+Each analysis agent receives: friction point description and file locations (or merged cluster with combined scope), genealogy classification and key commits, root cause summary (max 10 lines, mechanically extracted), framework context block, change metrics (aggregated per Git Metrics Aggregation rules), relevant source files (2000-line hard cap), and the relevant REFERENCE.md section for the friction type.
 
 ### Root Cause Summary Extraction
 
-The orchestrator produces the root cause summary by extracting four fields **verbatim** from the root cause agent's output — no summarization, no paraphrasing:
-
-1. **Root cause type** (1 line) — copied verbatim from "Type:" field
-2. **Root cause statement** (1 line) — copied verbatim from "Root cause statement:" field
-3. **Pattern-level fix** (1-2 lines) — copied verbatim from "Pattern-level fix:" field
-4. **Framework-native solution** (1-2 lines) — copied verbatim from "Framework-native solution:" field
-
-For convergence clusters, append: "Cluster scope: merged from friction points #X, #Y, #Z — addresses shared root cause as a unit."
-
-For Medium/Low-severity findings without a dedicated root cause agent: use either a one-line note from a neighboring High-severity finding (if applicable) or "Root cause not analyzed -- severity below threshold."
+The orchestrator extracts four fields **verbatim** from the root cause agent's output (no summarization): root cause type, root cause statement, pattern-level fix, and framework-native solution. For convergence clusters, append cluster scope. For Medium/Low findings: use a one-line note from a neighboring High-severity finding or "Root cause not analyzed -- severity below threshold." See `./analysis-prompt.md` for the full extraction format.
 
 ### Source Prioritization for Convergence Clusters
 
-When an analysis agent processes a convergence cluster:
-1. **Full source** for the highest-severity constituent finding's files
-2. **Interface-only excerpts** (function signatures, class declarations, public API surfaces) for other constituent findings' files
-3. If the cluster still exceeds the 2000-line cap after prioritization, the orchestrator **splits the cluster** into sub-clusters that each fit. The orchestrator warns the user: "Cluster [X] exceeds context budget and was split into sub-clusters. This partially reduces the convergence benefit." The decision journal logs the split and rationale. Sub-cluster analysis results are re-merged in the Phase 4 candidate presentation.
+Full source for the highest-severity constituent finding's files; interface-only excerpts for others. If the cluster exceeds the 2000-line cap, split into sub-clusters (warn user, log to decision journal, re-merge results in Phase 4).
 
-Each analysis agent outputs:
-- **Friction type classification** — which category from the reference doc
-- **Applicable philosophy/framework** — which architectural philosophy best explains this friction
-- **Causal origin** — from genealogy (if available), factored into effort estimate
-- **Cluster:** Which modules/concepts are involved
-- **Why they're coupled:** Shared types, call patterns, co-ownership
-- **Dependency category:** In-process, local-substitutable, remote-but-owned, or true external
-- **Estimated improvement impact:** High/Medium/Low
-- **Estimated effort:** High/Medium/Low — refined by genealogy
-- **Friction dimensions** — comprehension friction (High/Medium/Low), modification friction (High/Medium/Low), primary dimension
-- **ROI assessment** — leverage score with justification, change frequency, bug correlation
-- **Framework check** — framework patterns available, pattern evidence source, applicability
-- **Cost of inaction** — change frequency (hottest file + range), bug origin rate, blocking planned work, inaction assessment
-- **Interface surface summary** — current public API
-- **Top caller patterns** — 3-5 most common usage patterns
-- **Structural summary** — module boundaries, data flow direction, dependency graph fragment
+### Analysis Output
 
-The last three fields form the **design brief** consumed by Phase 6 competing design agents.
-
-**Write-on-complete:** The orchestrator writes each analysis agent's output to `scratch/<run-id>/analysis-<n>.md` immediately upon agent completion. (Analysis agents are Task tool dispatches — they return text to the orchestrator, who persists it.)
+Each agent outputs: friction type classification, applicable philosophy, causal origin, cluster scope, coupling rationale, dependency category, impact/effort estimates, friction dimensions (comprehension + modification), ROI assessment, framework check, and cost of inaction. The last three output fields — **interface surface summary**, **top caller patterns**, and **structural summary** — form the design brief consumed by Phase 6. See `./analysis-prompt.md` for the complete field specification.
 
 The orchestrator reads all analysis results from disk and synthesizes into a ranked candidate list using the formula `leverage_score x modification_friction_score` (High=3, Medium=2, Low=1). Ties are broken by comprehension friction score. Effort is shown separately as a cost indicator, not included in the ranking formula. Candidates where inaction is defensible are demoted to a "Track Only" section. Writes to `scratch/<run-id>/candidates.md`.
 
-**USER GATE: Candidate Selection** — Present candidates to the user. Do not proceed until user picks one:
-
-```
-### Prospector Candidates
-
-#### Active Candidates (ranked by leverage x modification_friction)
-
-1. **[Score: 9] [Effort: Medium] [Full analysis] Payment processing cluster**
-   - Friction: Understanding payment flow requires reading 8 files across 3 directories
-   - Root cause: Missing or underused pattern -- no aggregate module, each concern handled individually
-   - Origin: Incomplete Migration (commit abc123)
-   - Comprehension: High | Modification: High | Leverage: High
-   - Framework check: None identified
-   - Cost of inaction: Modified weekly, 4 bug-fix commits in 6 months. Not defensible.
-   - Trajectory: STABLE (2 runs)
-
-2. **[Score: 6] [Effort: Low] [Limited -- no root cause] Auth middleware duplication**
-   - Friction: Auth checks duplicated across 4 route handlers
-   - Root cause: Root cause not analyzed -- severity below threshold
-   - Origin: Accretion (no single commit)
-   - Comprehension: Medium | Modification: High | Leverage: Medium
-   - Framework check: Express middleware pattern (framework hint only -- pattern usage not verified)
-   - Cost of inaction: Modified weekly, 2 bug-fix commits in 6 months. Not defensible.
-   - Trajectory: NEW
-
----
-
-#### Track Only (inaction defensible -- low modification friction or low leverage)
-
-3. **[Score: 3] [Effort: Low] [Limited -- no root cause] GameBootstrap god-class**
-   - Friction: Hard to read (2,393 lines) but modification pattern is clear (~5 lines per change)
-   - Root cause: Missing or underused pattern -- no self-registration, but modification cost is low
-   - Comprehension: High | Modification: Low | Leverage: Low
-   - Framework check: VContainer IInitializable would solve this (framework hint only -- pattern usage not verified)
-   - Cost of inaction: Modified monthly, 0 bug-fix commits. Defensible -- rarely modified, clear patterns.
-   - Trajectory: STABLE (4 runs)
-```
-
-### Data Quality Indicators
-
-Each candidate is tagged with:
-- **`[Full analysis]`** — High-severity finding that received a dedicated root cause agent. Framework check is based on code-level investigation.
-- **`[Limited -- no root cause]`** — Medium/Low-severity finding that did not receive a root cause agent. Framework check is based on Phase 0.5 hint only.
+**USER GATE: Candidate Selection** — Present candidates to the user. Do not proceed until user picks one. Each candidate shows: score (leverage x modification_friction), effort, data quality tag (`[Full analysis]` or `[Limited -- no root cause]`), friction summary, root cause, origin, friction dimensions, framework check, cost of inaction, and trajectory status. Active candidates are ranked by score; candidates where inaction is defensible appear in a separate "Track Only" section below. See [REFERENCE.md](REFERENCE.md) for the full candidate presentation format and example.
 
 ### Constraint-Driven Root Cause Warning
 
@@ -475,19 +384,7 @@ Write to `scratch/<run-id>/problem-frame.md`.
 
 ### Constraint Selection
 
-The orchestrator selects 3 design constraints from a deterministic mapping in [REFERENCE.md](REFERENCE.md). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.**
-
-**Friction-type-to-constraint mapping (canonical, in REFERENCE.md):**
-
-| Friction Type | Constraint 1 | Constraint 2 | Constraint 3 |
-|--------------|--------------|--------------|--------------|
-| Shallow modules | Minimize interface (1-3 entry points) | Optimize for most common caller | Hide maximum implementation detail |
-| Coupling/shotgun surgery | Consolidate into single module | Introduce facade pattern | Extract shared abstraction with clean boundary |
-| Leaky abstraction | Seal the abstraction (hide all internals) | Replace with simpler direct approach | Ports & adapters (injectable boundary) |
-| Testability barrier | Boundary-test-friendly interface | Dependency-injectable design | Pure-function extraction with integration wrapper |
-| Scattered domain | Aggregate into domain module | Event-driven decoupling | Layered with clear ownership per layer |
-
-If a friction point doesn't match any defined type, the orchestrator falls back to a generic set: "Minimize interface," "Maximize flexibility," "Optimize for most common caller." The decision journal must log which constraint set was selected and why.
+The orchestrator selects 3 design constraints from the deterministic friction-type-to-constraint mapping in [REFERENCE.md](REFERENCE.md) (see Constraint Menu section). The mapping is keyed by friction type classification (from Phase 3 analysis). Each friction type has exactly 3 associated constraints — the orchestrator looks up the friction type and uses its constraints. This is a **routing decision, not a creative one.** If a friction point doesn't match any defined type, the orchestrator falls back to the generic constraint set in REFERENCE.md. The decision journal must log which constraint set was selected and why.
 
 ### Dynamic Constraint Overrides
 
@@ -530,8 +427,6 @@ Each agent receives (subject to 2000-line hard cap):
 - Framework context block (from Phase 0.5)
 - Its assigned design constraint
 - The applicable architectural philosophy and why it applies
-
-**Write-on-complete:** The orchestrator writes each design agent's output to `scratch/<run-id>/design-<n>.md` immediately upon agent completion.
 
 Each agent outputs:
 1. **Interface signature** — types, methods, params
@@ -587,16 +482,7 @@ At the end of every run — regardless of whether the user proceeds to build, fi
 
 **File:** `~/.claude/projects/<project-hash>/memory/prospector/trajectory.jsonl`
 
-Each approved friction point (from the exploration review gate) becomes one JSONL line:
-
-~~~json
-{"timestamp": "2026-03-23T14:30:00", "fingerprint": {"files": ["src/GameBootstrap.cs", "src/Services/"], "friction_type": "Coupling / shotgun surgery", "root_cause_type": "Missing or underused pattern"}, "metrics": {"change_freq": "weekly", "bug_fix_count": 4, "modification_friction": "High", "leverage": "High"}, "disposition": "selected-for-design", "run_id": "2026-03-23T14-30-00"}
-~~~
-
-Fields:
-- **fingerprint:** Primary file paths (sorted, normalized) + friction type + root cause type. Used for cross-run matching.
-- **metrics:** Change frequency, bug-fix count, modification friction, leverage — from Phase 3 analysis.
-- **disposition:** `selected-for-design` | `track-only` | `pruned-by-user` — what happened to this finding.
+Each approved friction point becomes one JSONL line containing: fingerprint (file paths + friction type + root cause type), metrics (change frequency, bug-fix count, modification friction, leverage), disposition (`selected-for-design` | `track-only` | `pruned-by-user`), and run ID. See [REFERENCE.md](REFERENCE.md) for the full JSONL schema and field definitions.
 - **run_id:** Links back to the scratch directory for full details.
 
 Fingerprint matching across runs uses: same friction type AND overlapping file paths (>50% overlap). Root cause type is included for context but not required to match (root cause classification may evolve as the codebase changes).
@@ -629,21 +515,7 @@ Delete `scratch/<run-id>/` after all Phase 8 actions are complete (design doc sa
 
 After Phase 8, dispatch `crucible:cartographer` (record mode) with the user-approved friction points from the exploration review gate. Record only friction point locations and classifications — not raw explorer observations or unconfirmed speculation.
 
-## Dependency Categories
-
-Classification system for the target code's dependencies:
-
-### 1. In-Process
-Pure computation, in-memory state, no I/O. Always improvable — merge modules and test directly.
-
-### 2. Local-Substitutable
-Dependencies with local test stand-ins (e.g., SQLite for Postgres, in-memory filesystem). Improvable if the stand-in exists.
-
-### 3. Remote but Owned (Ports & Adapters)
-Your own services across a network boundary. Define a port at the module boundary; inject transport. Tests use an in-memory adapter.
-
-### 4. True External (Mock)
-Third-party services you don't control (Stripe, Twilio, etc.). Mock at the boundary via injected port.
+**Dependency Categories:** See [REFERENCE.md](REFERENCE.md) for the four dependency categories (In-Process, Local-Substitutable, Remote but Owned, True External) and their testing implications.
 
 ## Compaction Recovery
 
@@ -727,4 +599,4 @@ After context compaction:
 - `./root-cause-prompt.md` — Phase 2 competing causal hypotheses agent dispatch
 - `./analysis-prompt.md` — Phase 3 structured friction analysis dispatch (enhanced with ROI, friction dimensions, framework check, cost of inaction)
 - `./design-competitor-prompt.md` — Phase 6 competing design agent dispatch (enhanced with root cause integration)
-- `./REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria
+- `./REFERENCE.md` — Friction taxonomy, philosophy mappings, constraint menu, dependency categories, origin type definitions, root cause type taxonomy, ROI scoring, framework check guidance, cost-of-inaction criteria, convergence logic, candidate presentation format, trajectory JSONL schema

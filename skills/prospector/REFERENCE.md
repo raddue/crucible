@@ -474,3 +474,106 @@ Trajectory status directly informs the cost-of-inaction assessment:
 - ACCELERATING overrides the "Defensible — low-activity code" inaction rule if the acceleration trend shows the code becoming high-activity
 - STABLE across 3+ runs suggests the friction is permanent without intervention
 - DECLINING may make a finding eligible for Track Only even if current metrics are above the threshold
+
+---
+
+## Convergence Logic
+
+Detailed merge and split criteria used by the orchestrator in Phase 2.5 when collapsing friction points that share a root cause.
+
+### Merge Threshold
+
+Two friction points merge only when they share the same root cause type AND their root cause statements describe the same underlying architectural decision or missing pattern. Overlapping symptoms or co-located files alone are not sufficient.
+
+### Split Criterion
+
+Before merging, ask: "Would a single design change plausibly fix BOTH friction points?" If no, do not merge even if root cause type and statement match.
+
+### Merge Confidence
+
+- **High confidence:** Same root cause type, same architectural decision, AND a single design change would plausibly fix both. High-confidence merges auto-approve (no user confirmation needed).
+- **Low confidence:** Same root cause type and similar statements, but unclear whether a single design change covers both (e.g., similar root causes in different subsystems). Low-confidence merges require explicit user confirmation.
+
+### Medium/Low Finding Overlap Check
+
+Before writing the draft, the orchestrator also checks whether any Medium/Low-severity finding (which did not receive a root cause agent) has symptom descriptions and file locations that overlap with a High-severity finding's root cause scope. Overlaps are flagged as Low-confidence potential merges for user confirmation.
+
+---
+
+## Candidate Presentation Format
+
+The format used by the orchestrator when presenting ranked candidates at the Phase 4 user gate.
+
+### Structure
+
+Active candidates are ranked by `leverage_score x modification_friction_score`. Candidates where inaction is defensible appear in a separate "Track Only" section below, not as low-scoring entries in the main list.
+
+### Data Quality Tags
+
+- **`[Full analysis]`** — High-severity finding that received a dedicated root cause agent. Framework check is based on code-level investigation.
+- **`[Limited -- no root cause]`** — Medium/Low-severity finding that did not receive a root cause agent. Framework check is based on Phase 0.5 hint only.
+
+### Example
+
+```
+### Prospector Candidates
+
+#### Active Candidates (ranked by leverage x modification_friction)
+
+1. **[Score: 9] [Effort: Medium] [Full analysis] Payment processing cluster**
+   - Friction: Understanding payment flow requires reading 8 files across 3 directories
+   - Root cause: Missing or underused pattern -- no aggregate module, each concern handled individually
+   - Origin: Incomplete Migration (commit abc123)
+   - Comprehension: High | Modification: High | Leverage: High
+   - Framework check: None identified
+   - Cost of inaction: Modified weekly, 4 bug-fix commits in 6 months. Not defensible.
+   - Trajectory: STABLE (2 runs)
+
+2. **[Score: 6] [Effort: Low] [Limited -- no root cause] Auth middleware duplication**
+   - Friction: Auth checks duplicated across 4 route handlers
+   - Root cause: Root cause not analyzed -- severity below threshold
+   - Origin: Accretion (no single commit)
+   - Comprehension: Medium | Modification: High | Leverage: Medium
+   - Framework check: Express middleware pattern (framework hint only -- pattern usage not verified)
+   - Cost of inaction: Modified weekly, 2 bug-fix commits in 6 months. Not defensible.
+   - Trajectory: NEW
+
+---
+
+#### Track Only (inaction defensible -- low modification friction or low leverage)
+
+3. **[Score: 3] [Effort: Low] [Limited -- no root cause] GameBootstrap god-class**
+   - Friction: Hard to read (2,393 lines) but modification pattern is clear (~5 lines per change)
+   - Root cause: Missing or underused pattern -- no self-registration, but modification cost is low
+   - Comprehension: High | Modification: Low | Leverage: Low
+   - Framework check: VContainer IInitializable would solve this (framework hint only -- pattern usage not verified)
+   - Cost of inaction: Modified monthly, 0 bug-fix commits. Defensible -- rarely modified, clear patterns.
+   - Trajectory: STABLE (4 runs)
+```
+
+---
+
+## Trajectory JSONL Schema
+
+Each approved friction point (from the exploration review gate) is recorded as one JSONL line in `trajectory.jsonl`.
+
+### Example Record
+
+```json
+{"timestamp": "2026-03-23T14:30:00", "fingerprint": {"files": ["src/GameBootstrap.cs", "src/Services/"], "friction_type": "Coupling / shotgun surgery", "root_cause_type": "Missing or underused pattern"}, "metrics": {"change_freq": "weekly", "bug_fix_count": 4, "modification_friction": "High", "leverage": "High"}, "disposition": "selected-for-design", "run_id": "2026-03-23T14-30-00"}
+```
+
+### Field Definitions
+
+- **timestamp:** ISO 8601 timestamp of the run.
+- **fingerprint:** Used for cross-run matching.
+  - **files:** Primary file paths (sorted, normalized).
+  - **friction_type:** Classification from the friction taxonomy.
+  - **root_cause_type:** Included for context but not required for fingerprint matching.
+- **metrics:** From Phase 3 analysis output.
+  - **change_freq:** Change frequency classification (monthly/weekly/daily).
+  - **bug_fix_count:** Number of bug-fix commits in the analysis window.
+  - **modification_friction:** High/Medium/Low.
+  - **leverage:** High/Medium/Low.
+- **disposition:** What happened to this finding: `selected-for-design` | `track-only` | `pruned-by-user`.
+- **run_id:** Links back to the scratch directory for full details.

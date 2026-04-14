@@ -1,6 +1,6 @@
 ---
 name: recon
-description: "Standalone codebase investigation. Produces a layered Investigation Brief with core findings (structure, patterns, scope, prior art) plus optional depth modules. Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before any task requiring codebase understanding."
+description: "Explores and analyzes a codebase to produce a structured Investigation Brief covering repository structure, code patterns, scope boundaries, and prior art. Dispatches parallel scouts to map project layout and discover conventions, then synthesizes findings into a layered report. Use when you need to understand how a repository is organized, analyze code architecture before making changes, get a repository overview for onboarding, or explore code structure for design and migration tasks."
 ---
 
 # Recon
@@ -35,64 +35,17 @@ Structured, parallel codebase investigation with a layered output model. Produce
 
 ### Parameters
 
-**`task`** (optional)
-Free-text description of the task being investigated. Scouts focus exploration on task-relevant areas. Omit for a full repository scan.
+**`task`** (optional) — Free-text task description. Scouts focus on task-relevant areas. Omit for full repo scan.
 
-**`context`** (optional)
-Structured prior decisions from a parent skill (e.g., accumulated design choices from `/design`'s dimension loop). Passed to scouts alongside the task. Scouts consider these decisions during investigation — avoiding areas already decided, focusing on interfaces affected by prior choices.
+**`context`** (optional) — Structured prior decisions from a parent skill. Passed to scouts alongside the task. Budget: 4,000 tokens default; total scout input (task + context + cartographer) should stay under 8,000 tokens. Recognized keys: `decisions`, `constraints`, `target` (for `consumer-registry`, falls back to `task:` if absent).
 
-- **Input budget:** 4,000 tokens default. Parent skills should compact decisions before passing — each decision as a key-value pair with one-sentence rationale plus affected interfaces.
-- **Exceeding budget:** Orchestrator warns but does not reject. Caller proceeds at the cost of reduced scout context budget.
-- **Total scout input:** task + context + cartographer should stay under 8,000 tokens for effective exploration.
+**`session_id`** (optional) — Enables cross-invocation caching. Structure Scout report is cached and reused on subsequent invocations with the same session_id. Pattern Scout always runs fresh.
 
-Distinct from `task:` which describes *what* to investigate; `context:` describes *what's already been decided*.
+**`modules`** (optional) — Depth modules to produce after core synthesis: `impact-analysis` (Opus), `consumer-registry` (Sonnet), `friction-scan` (Opus), `subsystem-manifest` (Sonnet), `diagnostic-context` (Opus), `execution-readiness` (Sonnet). Most invocations request 0-1 modules.
 
-**Recognized context keys:**
-- `decisions` — list of prior design/implementation decisions
-- `constraints` — list of constraints affecting investigation
-- `target` — specific symbol/module for `consumer-registry` depth module (used by `/migrate`). Falls back to the `task:` string if absent.
+**`scope`** (optional) — Directory constraint. Overrides scout scope suggestions entirely.
 
-**`session_id`** (optional)
-Enables cross-invocation caching within a session. When provided, the Structure Scout report is cached and reused on subsequent invocations with the same session_id. Pattern Scout always runs fresh (its output varies with cascading context). Parent skills generate the session_id (e.g., `/design` uses its run timestamp). Without a session_id, no caching occurs.
-
-**`modules`** (optional)
-List of depth modules to produce after core synthesis. Valid values:
-
-| Module | Agent | Model | Primary Consumer |
-|---|---|---|---|
-| `impact-analysis` | Impact Analyst | Opus | `/design`, `/build` |
-| `consumer-registry` | Consumer Mapper | Sonnet | `/migrate` |
-| `friction-scan` | Friction Scanner | Opus | `/prospector` |
-| `subsystem-manifest` | Manifest Builder | Sonnet | `/audit` |
-| `diagnostic-context` | Diagnostic Gatherer | Opus | `/debugging` |
-| `execution-readiness` | Readiness Checker | Sonnet | `/build` |
-
-Most invocations request 0-1 depth modules. Omit for core-only output (cheapest).
-
-**`scope`** (optional)
-Directory constraint. When provided, overrides scout scope suggestions entirely — scouts constrain exploration to the given path(s). Cheaper, faster.
-
-### Behavior Matrix
-
-| Configuration | Behavior |
-|---|---|
-| With task | Scouts focus on task-relevant areas |
-| With context | Prior decisions passed to scouts alongside task |
-| Without task | Full repo recon for audit/project-init cold starts |
-| With scope | Explicit scope overrides scout suggestions |
-| With modules | Depth agents dispatched after core synthesis |
-| No modules | Core layer only — cheapest possible recon |
-| With session_id | Structure Scout cached, Pattern Scout always fresh |
-
-### Cost Profile
-
-| Configuration | Agents | Models | Relative Cost |
-|---|---|---|---|
-| Core only | 2 | 2x Sonnet | Low |
-| Core + 1 mechanical module | 3 | 3x Sonnet | Low |
-| Core + 1 judgment module | 3 | 2x Sonnet + 1x Opus | Medium |
-| Core + 2 modules (mixed) | 4 | 2-3x Sonnet + 1-2x Opus | Medium-High |
-| Full repo, no task | 2 | 2x Sonnet | Low (but slower) |
+See `INTEGRATION.md` for the full behavior matrix and cost profile.
 
 ## Communication Requirements (Non-Negotiable)
 
@@ -232,8 +185,6 @@ When scouts report `cartographer-conflict` findings, apply this adjudication tab
 | Both agree, no supporting evidence | Yes | Neither | **Unresolved** — agreement alone insufficient (correlated input priors) |
 | Deletion from cartographer | Yes or No | Any | **Always unresolved** — requires user confirmation |
 | Single scout only | No | Any | **Unresolved** — prevents single-scout hallucination |
-
-**Why agreement alone is insufficient:** Both scouts receive the same cartographer context and task description as input. Their exploration is correlated, not independent. Two correlated errors do not constitute independent verification. Auto-update requires agreement PLUS verifiable evidence.
 
 For auto-update actions: queue the update for Phase 5 (Cartographer Feedback).
 For unresolved actions: surface in the `## Conflicts` section of the brief.
@@ -505,33 +456,7 @@ File presence is the completion signal — no health state machine needed.
 
 ## Brief Schema Stability
 
-The Investigation Brief is consumed by 6+ skills. Section headers are the contract surface — consumers parse by header to extract relevant sections.
-
-**Stable (changing requires updating all consumer templates):**
-- Brief metadata fields: `Brief version`, `Task`, `Scope`, `Depth modules`, `Cartographer state`, `Commit`
-- Core section headers: `## Project Structure`, `## Existing Patterns`, `## Scope Boundaries`, `## Prior Art`, `## Conflicts`
-
-**Semi-stable (additive, consumers opt-in):**
-- `## Open Questions` — present when scouts report unknowns. Consumers that need it parse for it; consumers that don't can ignore it. Not yet validated by consumer integration — promoted to stable once 2+ consumers confirm they consume it.
-
-**Semi-stable (consumers that request specific modules depend on these):**
-- Depth module section headers: `## Impact Analysis`, `## Consumer Registry`, `## Friction Scan`, `## Subsystem Manifest`, `## Diagnostic Context`, `## Execution Readiness`
-- Execution Readiness structured subfields: `Test command`, `Lint command`, `CI checks`, `Manual verification` — parsed by `/build`, must not be renamed without updating consumers
-
-**Unstable (internal content, not parsed by header):**
-- Content within sections — formatting, subheadings, bullet structure may evolve
-
-**Process:** Any change to a stable or semi-stable header is a breaking change. The PR must update all consumer skill templates that reference the changed header. Adding new depth modules is non-breaking.
-
-## Design Principles
-
-- **Read-only** — `/recon` never modifies the codebase
-- **Cartographer-aware** — consults first, feeds back after
-- **Layered** — core is cheap and universal; depth is on-demand and consumer-specific
-- **Evidence-grounded** — produces constraints and evidence, not opinions
-- **Prior art is first-class** — finding existing patterns to follow is the single biggest quality lever
-- **Assumptions are explicit** — annotated inline on relevant findings, not in a standalone block
-- **Token-efficient** — structured markdown, no JSON boilerplate, Sonnet for mechanical work
+See `SCHEMA.md` for the full schema stability contract (stable, semi-stable, and unstable headers).
 
 ## Guardrails / Red Flags
 
@@ -544,22 +469,4 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 
 ## Integration
 
-**Dispatches:**
-- `structure-scout-prompt.md` — Structure Scout (Sonnet, Explore)
-- `pattern-scout-prompt.md` — Pattern Scout (Sonnet, Explore)
-- `impact-analyst-prompt.md` — Impact Analyst (Opus)
-- `consumer-mapper-prompt.md` — Consumer Mapper (Sonnet)
-- `friction-scanner-prompt.md` — Friction Scanner (Opus)
-- `manifest-builder-prompt.md` — Manifest Builder (Sonnet)
-- `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer (Opus)
-- `readiness-checker-prompt.md` — Readiness Checker (Sonnet)
-
-**Consults:** `crucible:cartographer` (consult mode — direct file read of `map.md`)
-
-**Records to:** `crucible:cartographer` (recorder dispatch after investigation, using `skills/cartographer-skill/recorder-prompt.md`)
-
-**Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/migrate` (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
-
-**Not called by (investigated, not a fit):** `/debugging` (specialized investigation pipeline), `/build` (inherits via /design), `/prospector` (organic exploration is different), `/project-init` (bootstraps cartographer, complementary purpose). See #147 for rationale.
-
-**Pairs with:** `/assay` (sequential — recon produces evidence, assay evaluates options)
+See `INTEGRATION.md` for the full integration map (dispatches, consumers, cost profile, and behavior matrix).

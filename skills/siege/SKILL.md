@@ -16,28 +16,6 @@ Full-lifecycle security audit. Dispatches 6 parallel Opus agents across distinct
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
-## Why This Exists
-
-Audit finds bugs, robustness gaps, and architecture issues. Quality-gate iterates artifacts to convergence. Inquisitor hunts cross-component integration bugs. None of these operate from an attacker's perspective. Security is a discipline -- it requires threat modeling, attack surface enumeration, exploitation scenario analysis, and chain-of-vulnerability reasoning that generalist review skills are not equipped to perform. A robustness finding ("missing input validation") and a security finding ("this missing validation enables SQL injection via the /api/users endpoint, escalating to full database read") are categorically different in blast radius, urgency, and remediation strategy.
-
-## Distinction from Related Skills
-
-| Skill | Perspective | Scope | Output | Security Depth |
-|-------|-------------|-------|--------|----------------|
-| audit | Code quality reviewer | Existing subsystems | Findings report (no fixes) | Incidental: flags missing validation, not exploitation chains |
-| inquisitor | Integration tester | Cross-component diffs | Executable tests | None: tests functional correctness, not attacker behavior |
-| red-team | Devil's advocate | Single artifact | Written findings per round | Surface: flags "consider auth" without modeling attack paths |
-| quality-gate | Iterative reviewer | Any artifact | Converged artifact | None: quality convergence, not security convergence |
-| **siege** | 6 distinct attackers | Design docs, plans, AND code | Threat model + verified findings + accepted-risks log | Full: exploitation scenarios, blast radius, chain analysis, persistent threat model |
-
-**What Siege catches that others cannot:**
-- Multi-step attack chains spanning multiple components
-- Trust boundary violations that require attacker-perspective reasoning
-- Threat model drift (new surfaces introduced since last audit)
-- Supply chain and dependency vulnerabilities via live intelligence
-- Insider threat scenarios (authorized user abusing legitimate access)
-- TOCTOU and race-condition exploits (distinct from correctness race conditions -- these require attacker-controlled timing)
-
 ## Activation Heuristic
 
 <!-- CANONICAL: shared/security-signals.md — consumption-optimized keyword lists for build/spec/audit -->
@@ -173,88 +151,16 @@ Before agents are dispatched, enumerate the application's externally reachable e
 
 **Artifact-type guard:** Step 2.5 requires source files to grep. Skip entirely for `design` and `plan` artifact types (no code to scan). Run only for `code` and `mixed`. Note in scope limitations: "Attack surface enumeration skipped -- artifact type [design|plan] has no source files to scan."
 
-**Sub-step A -- Framework Detection:**
+**Sub-steps A-C:** Detect frameworks, enumerate routes/endpoints via grep patterns, classify auth status, and build an exposure map cross-referenced against the manifest. See `siege-attack-surface-reference.md` for framework detection tables, grep patterns, auth-signal heuristics, limitations, and exposure map format.
 
-Scan manifest files and project configuration to detect which web framework(s) the project uses:
-
-| Signal | Framework |
-|--------|-----------|
-| `package.json` with `express` dependency | Express.js |
-| `package.json` with `fastify` dependency | Fastify |
-| `package.json` with `@nestjs/core` dependency | NestJS |
-| `package.json` with `next` dependency | Next.js |
-| `requirements.txt` or `pyproject.toml` with `flask` | Flask |
-| `requirements.txt` or `pyproject.toml` with `fastapi` | FastAPI |
-| `requirements.txt` or `pyproject.toml` with `django` | Django |
-| `*.csproj` with `Microsoft.AspNetCore` | ASP.NET Core |
-| `Gemfile` with `rails` | Rails |
-| `pom.xml` or `build.gradle` with `spring-boot` | Spring Boot |
-| `go.mod` with `gin-gonic/gin` | Gin (Go) |
-| `go.mod` with `gorilla/mux` | Gorilla Mux (Go) |
-| `Cargo.toml` with `actix-web` | Actix Web (Rust) |
-
-If no framework is detected, skip the rest of Step 2.5 and note in scope limitations: "No recognized web framework detected -- attack surface enumeration skipped." Multiple frameworks: enumerate all.
-
-**Sub-step B -- Route/Endpoint Enumeration:**
-
-For each detected framework, grep project files using these patterns to extract registered routes:
-
-| Framework | Grep Pattern | Example Match |
-|-----------|-------------|---------------|
-| Express.js | `(app\|router)\.(get\|post\|put\|patch\|delete\|all\|use)\s*\(` | `app.get('/api/users', ...)` |
-| Fastify | `(fastify\|server)\.(get\|post\|put\|patch\|delete\|all)\s*\(` | `fastify.post('/login', ...)` |
-| NestJS | `@(Get\|Post\|Put\|Patch\|Delete\|All)\s*\(` | `@Get('users/:id')` |
-| Next.js | Files under `app/` or `pages/api/` (convention-based routing) | `app/api/users/route.ts` |
-| Flask | `@(app\|blueprint)\.(route\|get\|post\|put\|delete)\s*\(` | `@app.route('/login', methods=['POST'])` |
-| FastAPI | `@(app\|router)\.(get\|post\|put\|patch\|delete)\s*\(` | `@router.get('/items/{id}')` |
-| Django | `path\(\s*['"]` or `url\(\s*['"]` in `urls.py` files | `path('api/users/', views.user_list)` |
-| ASP.NET Core | `\[Http(Get\|Post\|Put\|Patch\|Delete)\]` or `\[Route\(` or `Map(Get\|Post\|Put\|Delete)\(` | `[HttpGet("api/users/{id}")]` |
-| Rails | `(get\|post\|put\|patch\|delete\|resources\|resource)\s` in `config/routes.rb` | `resources :users` |
-| Spring Boot | `@(GetMapping\|PostMapping\|PutMapping\|PatchMapping\|DeleteMapping\|RequestMapping)\s*\(` | `@GetMapping("/api/users")` |
-| Gin (Go) | `(r\|router\|group)\.(GET\|POST\|PUT\|PATCH\|DELETE\|Any)\s*\(` | `r.GET("/api/users", ...)` |
-| Gorilla Mux (Go) | `(r\|router)\.HandleFunc\s*\(` | `r.HandleFunc("/api/users", handler)` |
-| Actix Web (Rust) | `\.(route\|resource)\s*\(` or `#\[(get\|post\|put\|patch\|delete)\]` | `#[get("/api/users")]` |
-
-For each match, extract: HTTP method (or "ANY" if indeterminate), route path (raw string), source file path, line number, framework name.
-
-**Auth-signal heuristic (best-effort):** For each endpoint, scan surrounding context (same file, same route registration block) for auth middleware or decorator patterns: `[Authorize]`, `@RequireAuth`, `authenticate`, `isAuthenticated`, `requireLogin`, `@login_required`, `@permission_required`, `auth_guard`, `AuthGuard`, `before_action :authenticate`. Classify each endpoint as `auth: yes | no | unknown`. This is approximate -- false negatives are expected (auth applied at router level may not appear near the route). The classification feeds the exposure map's "Auth" column and helps prioritize: `auth: no` endpoints are highest priority for Boundary Attacker partitioning.
-
-**Limitations (documented in exposure map):**
-- Dynamic route registration (method/path from variables) is not captured
-- Middleware-only mounts (e.g., `app.use('/api', ...)`) are recorded as "middleware mount", not individual endpoints
-- Convention-based routing (Next.js file-based, Rails `resources` expansion) produces approximate routes
-- Auth-signal heuristic is best-effort: router-level or middleware-chain auth may not appear near the route definition, producing false `auth: unknown` classifications
-
-**Sub-step C -- Exposure Map and Cross-Reference:**
-
-Build the exposure map and cross-reference with `manifest.md`:
+**Exposure map cross-reference logic:**
 
 1. For each enumerated endpoint, check if its source file appears in the manifest
 2. Endpoints whose source file is NOT in the manifest are flagged as **coverage gaps**
-3. Gap files are automatically appended to `manifest.md` with the tag `[attack-surface-gap]`. Log each addition: "Attack surface gap: added [file] to manifest ([N] endpoints not in original scope)." This is post-USER-GATE, so the user sees what changed before agent dispatch.
-4. Write the full exposure map to `scratch/<run-id>/exposure-map.md`:
+3. Gap files are automatically appended to `manifest.md` with the tag `[attack-surface-gap]`. Log each addition: "Attack surface gap: added [file] to manifest ([N] endpoints not in original scope)."
+4. Write the full exposure map to `scratch/<run-id>/exposure-map.md` (format in `siege-attack-surface-reference.md`)
 
-```markdown
-# Attack Surface Exposure Map
-**Framework(s):** [detected frameworks]
-**Enumeration method:** Static pattern matching
-**Endpoint count:** [N]
-
-## Endpoints
-| # | Method | Route | File | Line | Auth | In Manifest |
-|---|--------|-------|------|------|------|-------------|
-| 1 | GET | /api/users | src/controllers/UserController.ts | 42 | yes | Yes |
-| 2 | DELETE | /admin/purge | src/admin/maintenance.ts | 88 | no | NO -- GAP |
-
-## Coverage Gaps
-- `/admin/purge` (src/admin/maintenance.ts:88) -- file not in Siege manifest
-[list all gaps]
-
-## Scope Limitations
-[framework-specific limitations from sub-step B]
-```
-
-**Line budget:** The exposure map summary appended to Tier 1 context (Step 1 of Automated Context Assembly) is capped at **15 lines**: endpoint count, gap count, and the gap list. The full endpoint table remains in `scratch/<run-id>/exposure-map.md` only.
+**Line budget:** The exposure map summary appended to Tier 1 context is capped at **15 lines**: endpoint count, gap count, and the gap list. The full endpoint table remains in `scratch/<run-id>/exposure-map.md` only.
 
 ### Step 3: Load Persistent Threat Model
 
@@ -530,101 +436,9 @@ If the fix agent or user identifies a finding as a false positive:
 
 ## Finding Format
 
-### Initial Findings (Per-Agent Output) -- 5 Lines Max
+All finding templates (5-line per-agent format, structured dedup fields, full report format for Critical/High, and final report template) are in `siege-formats.md`.
 
-```
-**[ID]** [severity] [Active|Hardening] -- [title]
-File: [path]:[line_range] | Agent: [agent_name]
-Attack: [1-sentence exploitation scenario]
-Evidence: [specific code reference or design element]
-Verification: [concrete test or check that confirms the vulnerability]
-```
-
-Agents output findings in this format only. No blast radius, no extended analysis. This keeps per-agent output under 30 lines for a typical 5-finding set.
-
-### Structured Dedup Fields
-
-For mechanical deduplication before steel-manning, each finding also includes structured metadata as a comment block:
-
-```
-<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->
-```
-
-The orchestrator uses these fields for first-pass mechanical dedup: same file + overlapping line range + same CWE = merge. Steel-man-then-kill runs only on the deduplicated set, reducing synthesis cost.
-
-### Full Report Findings (Critical and High Only) -- Phase 3 Output
-
-Critical and High findings are expanded in the Phase 3 report:
-
-```
-### [ID]: [title]
-**Severity:** [Critical|High] | **Exploitability:** [Active|Hardening] | **Agent:** [agent_name] | **Chain:** [yes/no]
-**File:** [path]:[line_range]
-
-**Exploitation Scenario:**
-[2-4 sentences: who attacks, how, what they gain]
-
-**Blast Radius:**
-- Data exposure: [what data is at risk]
-- User impact: [how many users, what they experience]
-- System impact: [lateral movement, persistence, escalation potential]
-
-**Verification Criteria:**
-1. [Concrete test or reproduction step]
-2. [Expected result that confirms the fix]
-
-**Steel-Man (why this might not be exploitable):**
-[1-2 sentences: strongest case for false positive, and why it was rejected]
-```
-
-Medium and Low findings remain in the 5-line initial format in the final report.
-
-## Output Format (Final Report)
-
-Written to `scratch/<run-id>/report.md` and presented to the user.
-
-```markdown
-# Siege Security Audit Report
-**Target:** [subsystem/artifact name]
-**Commit Anchor:** [full SHA]
-**Date:** [ISO-8601]
-**Intelligence:** [sources consulted, gaps noted]
-**Artifact Type:** [design|plan|code|mixed]
-
-## Scope Limitations
-[What Siege cannot detect -- see Known Limitations. Always present.]
-
-## Attack Chains
-[Multi-step chains identified by Chain Analyst, with full exploitation narrative. Chains are the highest-signal output — present them first so the reviewer sees composed threats before individual findings.
-Chains inherit exploitability from their weakest link: if ANY step in the chain requires a future change to become exploitable, the entire chain is Hardening. A chain is Active only when every step is independently exploitable today.]
-
-## Critical Findings
-### Active Vulnerabilities
-[Full report format for each, or "None"]
-### Hardening
-[Full report format for each, or "None"]
-
-## High Findings
-### Active Vulnerabilities
-[Full report format for each, or "None"]
-### Hardening
-[Full report format for each, or "None"]
-
-## Medium Findings
-[Initial 5-line format for each, or "None". Medium and Low use the compact 5-line format which includes the exploitability tag per-finding. No Active/Hardening sub-grouping — these severities do not block the gate, so triage ordering is less critical.]
-
-## Low Findings
-[Initial 5-line format for each, or "None"]
-
-## Accepted Risks
-[Any findings the user acknowledged with rationale, or "None"]
-
-## Threat Model Delta
-[New surfaces, retired surfaces, drift from prior model]
-
-## Agent Coverage
-[Which agents examined which files -- partition summary]
-```
+Key rules: Agents output 5-line initial format only. Critical/High findings are expanded in Phase 3. Medium/Low stay in compact format. Each finding includes a `<!-- dedup: ... -->` comment for mechanical dedup.
 
 ## Persistence
 
@@ -741,64 +555,9 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 
 **Tool constraint:** All scratch directory operations (create, read, list, delete) must use Write, Read, and Glob tools — NOT Bash. Safety hooks block Bash commands referencing `.claude/` paths.
 
-### File Inventory
+### File Inventory, Recovery Procedure, and Checkpoint Timing
 
-| File | Written When | Purpose |
-|------|-------------|---------|
-| `commit-anchor.md` | Phase 1 start | TOCTOU prevention |
-| `manifest.md` | Phase 1 Step 2 | Scoped file list |
-| `exposure-map.md` | Phase 1 Step 2.5 | Enumerated endpoints with manifest cross-reference |
-| `gate-approved.md` | User confirms scope | Compaction recovery marker |
-| `intelligence-summary.md` | Phase 1 Step 1 | Pre-fetched intelligence (50 lines) |
-| `<agent>-partition.md` | Before each agent dispatch | Files sent as full source |
-| `<agent>-findings.md` | On agent completion | Per-agent findings |
-| `coverage-map.md` | Before Chain Analyst dispatch | Agent coverage for chain analysis |
-| `tier1-context.md` | Phase 2 Step 1 | Shared Tier 1 context block |
-| `dedup-summary.md` | Phase 3 Step 4 | Raw → deduplicated finding counts and merge log |
-| `report.md` | Phase 3 | Synthesized findings |
-| `fix-journal.md` | Phase 4, per fix round | Cumulative fix history |
-| `round-N-score.md` | Phase 4, per round | Weighted score snapshot |
-| `round-N-findings.md` | Phase 4, per round | Findings per gate round |
-| `round-N-comparison.md` | Phase 4, when judge dispatched | Stagnation judge output |
-| `accepted-risks.md` | Phase 4, on user override | Accepted findings with rationale |
-| `expected-head.md` | Phase 4, after each fix commit | Current expected HEAD SHA after fix rounds |
-| `round-N-verification.md` | Phase 4, after every fix round | Fix verification results per round |
-
-### Recovery Procedure
-
-After compaction:
-1. Glob for `active-run-*.md` to locate scratch directory
-2. Read `commit-anchor.md`. If `round-N-score.md` files exist (Phase 4 in progress), read `expected-head.md` and verify HEAD against that instead. If no Phase 4 files exist, verify HEAD against commit-anchor.md. Mismatch = abort.
-3. Determine phase from file presence:
-   - No `gate-approved.md` -> re-present manifest
-   - `<agent>-findings.md` files -> count completed agents, dispatch remaining
-   - `coverage-map.md` without `chain-analyst-findings.md` -> dispatch Chain Analyst
-   - `report.md` without `round-1-score.md` -> enter Phase 4
-   - `round-N-score.md` files -> resume gate at round N+1
-4. Read `pipeline-status.md` to recover Started timestamp and Recent Events
-5. Output status to user before continuing
-
-### Checkpoint Timing
-
-Emit a Compression State Block at each of the following points:
-- Phase transitions (1→2, 2→3, 3→4, 4→5)
-- Every 2 gate rounds in Phase 4
-- Before stagnation judge dispatch
-- On health transitions (GREEN→YELLOW, YELLOW→RED, etc.)
-
-**Block content:**
-```
-## Compression State
-- Goal: [current siege objective]
-- Skill: siege
-- Phase: [current phase and step]
-- Health: [GREEN|YELLOW|RED]
-- Key Decisions: [severity judgments from Phase 3, accepted risks, stagnation outcomes]
-- Active Constraints: [commit anchor SHA, expected-head SHA, gate round, score trajectory]
-- Next Steps: [immediate next action]
-```
-
-**Recovery step 0:** Before file-based recovery (Recovery Procedure step 1), read the Compression State from `pipeline-status.md` to re-establish context.
+See `siege-recovery.md` for the complete file inventory table, recovery procedure after compaction, and compression state block timing/format.
 
 ### Session Tracking
 
