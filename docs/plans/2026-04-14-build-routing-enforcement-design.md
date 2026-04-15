@@ -79,6 +79,12 @@ verbose examples to a linked sub-doc (e.g.
 section terse — the inline form must preserve the STOP / "/build's
 job" / "COMBINATION is the anti-pattern" beats.
 
+**Token budget math (MIN-6-R7).** Budget is 150 TOKENS (not lines),
+measured via a tokenizer compatible with Claude's (e.g., `tiktoken`
+with cl100k encoding as a rough approximation). Implementer must
+count; line count is a weak proxy and MAY NOT be used as the budget
+mechanism.
+
 ### Part 2: warn-only hook (soft structural)
 
 PreToolUse hook registered on the subagent-dispatch tool. The matcher
@@ -97,7 +103,11 @@ classification produced a potential trigger.
 Throughout Part 2, **`$PROJECT_MEMORY`** resolves to
 `~/.claude/projects/<project-hash>/memory/` (Min-3) — derived
 identically to how existing pipeline skills resolve their scratch
-directory.
+directory. **`$PROJECT_MEMORY` derivation (MIN-1-R7):** the hook
+derives `$PROJECT_MEMORY` via
+`~/.claude/projects/$(pwd | sha256sum | cut -c1-16)/memory/` —
+matching `hooks/session-index.sh` which uses the same
+`sha256sum | cut -c1-16` of `pwd` derivation.
 
 The hook:
 
@@ -115,7 +125,10 @@ The hook:
 4. Classifies the prompt against three keyword categories using
    **word-boundary regex** (`\b...\b`) so short tokens don't match
    substrings (`plan` vs `planning`, `commit` vs `commitment`,
-   `ship` vs `shipping`, `code` vs `codebase`) (S2-R2):
+   `ship` vs `shipping`, `code` vs `codebase`) (S2-R2). **Case
+   sensitivity (MIN-2-R7):** all keyword matching uses `grep -iE`
+   for case-insensitive word-boundary regex. `PR` and `pr` both
+   match; `ship` and `SHIP` both match.
    - Design: `\b(design|spec|plan)\b` (S3-R4: dropped
      `architect|architecture` — in review/audit prompts these are
      ubiquitous; the Implement-required rule below tolerates the
@@ -272,6 +285,12 @@ The hook:
    invocation, not continuously — so the state file is not rewritten
    merely because a day turned over with no activity.
 
+   **Reset precision (MIN-5-R7).** On each advisory-eligible
+   invocation, the hook compares today's date against the MOST RECENT
+   of (`last-honored` date, `last-advisory-at` date). If neither
+   field exists OR the most recent date < today, `fires-today` resets
+   to 0 before incrementing.
+
    **Auto-expiry (S2-R3, M3-R4).** If the sentinel file contains a
    `disabled-until: YYYY-MM-DD` line, the hook treats the switch as
    inactive on or after that date (parses line, compares to today in
@@ -283,10 +302,20 @@ The hook:
    - **Malformed or unparseable dates treat the kill switch as
      PERMANENTLY DISABLED** (fail-safe: honor the user's disable
      intent; never silently re-enable on parse error).
+   - **Matching-line definition (MIN-3-R7):** a matching line is one
+     beginning with `disabled-until:` at column 0 — no leading
+     whitespace, no comment skipping. Lines not matching
+     `^disabled-until: ` (literal, with trailing space) are ignored.
 
    Users get a natural ratchet back to default-on when a valid
    future date is set and reached; malformed dates preserve the
    user's explicit disable.
+
+**Dedup write-write race (MIN-4-R7).** State file writes use
+last-writer-wins — no `flock` or atomic rename. Concurrent
+dispatches may race counter increments by ±1 and may transiently
+flicker `last-advisory-fingerprint`. Acceptable for warn-only
+operation.
 
 **Dedup across parallel scouts (Min-9).** To prevent a single
 parallel-scout dispatch batch from producing N identical advisories
@@ -309,6 +338,15 @@ automatically suppresses during any pipeline skill — **no source
 changes to those skills are required**. The round-1 design stated
 `/spec` would need updating; that premise was factually wrong and is
 retracted here.
+
+**F1 retraction + marker-write invariant reconciled (SIG-3-R7):** The
+F1 retraction means no NEW marker-writing logic is required in
+`/spec`, `/debugging`, or `/migrate`. If the
+marker-write-before-first-dispatch integration test (see AC) discovers
+a skill dispatches before its marker-write call, that is a
+docstring-ordering fix within the existing `Pipeline-Active Marker`
+section of that skill — reordering existing steps, not introducing
+new behavior. The F1 retraction stands.
 
 The Implement-required trigger (S3-R4) with single-phase disclaimers
 plus advisory framing plus pipeline-skill-active suppression keeps
