@@ -23,7 +23,7 @@ The 10-test acceptance suite at `hooks/tests/test-build-routing-advisor.sh` (alr
 
 - All paths absolute under `/mnt/e/Coding/crucible/`.
 - Bash style follows `hooks/gate-ledger-guard.sh`: `set +e`, jq null-safety with `// empty`, graceful `exit 0` on any utility failure, stdin via `INPUT="$(cat)"`.
-- `$PROJECT_MEMORY` derivation: `~/.claude/projects/$(echo "$(pwd)" | sha256sum | cut -c1-16)/memory/` (mirrors `hooks/session-index.sh`).
+- `$PROJECT_MEMORY` derivation: `~/.claude/projects/$(echo -n "$(pwd)" | sha256sum | cut -c1-16)/memory/` (mirrors `hooks/session-index.sh:38-39` EXACTLY — `echo -n`, no trailing newline). **CRITICAL:** using `echo` without `-n` produces a different SHA-256 hash (trailing newline included), silently directing the hook to an empty directory and breaking marker suppression during real `/build` runs. Any code path deriving this hash MUST use `echo -n`.
 - `docs/plans/` and `hooks/tests/fixtures/` paths are gitignored — every commit in those paths uses `git add -f` (existing branch convention).
 - Token budgeting for Part 1 uses `tiktoken` cl100k locally; no CI gate.
 - Tests must use `set +e` patterns where the hook's `set +e` matters; capture stderr with `2> "$stderr_file"`.
@@ -31,14 +31,14 @@ The 10-test acceptance suite at `hooks/tests/test-build-routing-advisor.sh` (alr
 ## Dependency Graph
 
 ```
-T1 (fixture) ─> T2 (hook impl) ─> T3 (RED → GREEN ack tests) ─> T7 (dogfood + perf) ─> T8 (marker-write integration)
-     │                │                                              ^
-     └──────> T6 (README) ────────────────────────────────────────── ┘
+T1 (fixture) ─> T2 (hook impl) ─> T3 (RED → GREEN ack tests) ─> T3.5 (extended AC coverage) ─> T7 (dogfood + perf) ─> T8 (marker-write integration)
+     │                │                                                                             ^
+     └──────> T6 (README) ─────────────────────────────────────────────────────────────────────── ┘
 
 T4 (SKILL.md Part 1, independent) ─> T5 (routing eval)
 ```
 
-Edges: T1 → T2; T2 → T3; T3 → T7; T7 → T8; T1 → T6; T2 → T6; T6 → T7; T4 → T5.
+Edges: T1 → T2; T2 → T3; T3 → T3.5; T3.5 → T7; T7 → T8; T1 → T6; T2 → T6; T6 → T7; T4 → T5.
 
 No circular deps. T4 is independent of T2/T3 and can land at any time; T5 gates on T4 only. T7's README perf numbers require T6's structure to exist first (T6 → T7).
 
@@ -114,9 +114,10 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 0. **Matcher registration (prerequisite, verified by T2 step list):** register `build-routing-advisor` in **`~/.claude/settings.json` (user-global scope, identical to `gate-ledger-guard` per #168 README)** under `PreToolUse` with `matcher: "Task"` (primary; fallback `Agent` per T1 finding) and `timeout: 500` (ms). Verify the entry does NOT conflict with `gate-ledger-guard`'s null-matcher registration — the two entries coexist as separate hooks, one null-matcher (gate-ledger-guard) and one `Task`-matcher (build-routing-advisor).
 1. `set +e`. Read stdin into `INPUT`. Exit 0 on empty stdin.
-2. **Kill switch** (before any other work):
-   - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → update state file `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0.
-   - Compute `$PROJECT_MEMORY` (sha256 of pwd, first 16 chars).
+2. **Step 1a — Compute `$PROJECT_MEMORY` FIRST** (before kill-switch block below, so the switch can reference `$PROJECT_MEMORY` without ambiguity): `PROJECT_HASH="$(echo -n "$(pwd)" | sha256sum | cut -c1-16)"` then `PROJECT_MEMORY="$HOME/.claude/projects/$PROJECT_HASH/memory"`. **Derivation MUST match `hooks/session-index.sh:38-39` exactly: `echo -n "$(pwd)" | sha256sum | cut -c1-16`.** Trailing-newline mismatch (using `echo` without `-n`) produces a different hash, silently directs the hook to an empty directory, and is a suppression-bug — MUST be caught by the T3.5 trailing-newline canary.
+
+   **Kill switch** (runs after `$PROJECT_MEMORY` is computed):
+   - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → update state file at `$PROJECT_MEMORY/build-routing-advisor-state.md` with `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0.
    - If sentinel `$PROJECT_MEMORY/.build-routing-advisor-disabled` exists:
      - **Matching-line definition (MIN-3-R7):** a matching line is one beginning with `disabled-until:` at column 0 — no leading whitespace, no comment skipping. Use literal regex `^disabled-until: ` (trailing space required).
      - Parse FIRST matching line. If the file contains multiple matching lines, use only the FIRST; ignore the rest.
@@ -127,7 +128,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 3. **Dependency check:** `command -v jq` — if missing, exit 0 silently.
 4. **Tool name extraction:** `TOOL=$(echo "$INPUT" | jq -r '.tool // .tool_name // empty')`. If `TOOL` not in `Task|Agent`, exit 0.
 5. **Prompt + subagent extraction:** use the canonical path discovered in T1. Try `.tool_input.prompt` first, then `.input.prompt`. Same for `subagent_type`. If both null, exit 0 (malformed JSON path covered).
-6. **Allowlist:** if `subagent_type` is set AND not equal to `general-purpose`, exit 0.
+6. **Allowlist:** if `subagent_type` is set AND not equal to `general-purpose`, exit 0. Implementer note: an empty-string `subagent_type` is treated as SPECIALTY (not `general-purpose`) and the advisor suppresses — rationale: a missing/empty type is indistinguishable from MCP types in the allowlist contract.
 7. **Disclaimer skip:** case-insensitive grep for any of `just the design`, `design only`, `no implementation`, `review only`, `audit only`, `spec only`, `recon only`. If matched, exit 0.
 8. **Classification (BEFORE any git subprocess; Min-7).** Use EXACTLY ONE method — pinned (no alternatives):
    - `DESIGN_HITS=$(echo "$PROMPT" | grep -ioE '\b(design|spec|plan)\b' | wc -l)`
@@ -204,6 +205,8 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 **Critical boundary:** the test file at `hooks/tests/test-build-routing-advisor.sh` is pre-existing (RED canary committed 1450ed3). T3's job is to make the HOOK pass the tests, NOT to modify the tests. **Tests are the spec.** If a test appears wrong, ESCALATE to the user rather than modifying it.
 
+**Pre-authorized exception (F4 correctness fix):** the test harness line 30 currently reads `PROJECT_HASH="$(echo "$FAKE_PROJECT" | sha256sum | cut -c1-16)"` (missing `-n`). This is a reviewer-confirmed bug — the canonical `hooks/session-index.sh:38-39` uses `echo -n`, and the real pipeline skills write markers under the `echo -n` hash. T3 MUST update line 30 to `PROJECT_HASH="$(echo -n "$FAKE_PROJECT" | sha256sum | cut -c1-16)"` (and remove/update the now-inaccurate line 29 comment about pwd trailing newline — replace with a comment stating "match session-index.sh exactly: echo -n, no trailing newline"). Also delete the unused line-28 `printf` assignment that's immediately overwritten. This is the ONLY pre-authorized test edit in T3; all other test concerns still ESCALATE.
+
 ### Steps
 
 1. Run `bash /mnt/e/Coding/crucible/hooks/tests/test-build-routing-advisor.sh`.
@@ -213,7 +216,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
    - Fix the **hook** (never the test — tests are spec).
 3. Common likely failures and fixes:
    - **Test 1 (motivating canary):** classification regex must catch `spec`, `implement`, `PR` with word boundaries; total distinct = 3 ≥ 2 satisfies trigger.
-   - **Test 3 (marker suppression):** marker path uses fake `$HOME` per test harness. Hook must derive `$PROJECT_MEMORY` from `pwd | sha256sum | cut -c1-16` consistently — test does this same derivation at line 30.
+   - **Test 3 (marker suppression):** marker path uses fake `$HOME` per test harness. Hook must derive `$PROJECT_MEMORY` from `echo -n "$(pwd)" | sha256sum | cut -c1-16` (matching `hooks/session-index.sh:38-39`) — test harness line 30 must also use `echo -n` (see pre-authorized exception above).
    - **Test 5 (stale marker):** ensure `start_time` 24h check uses `date -d` parsing or epoch math; `48 hours ago` must NOT suppress.
    - **Test 6 (different branch):** `.branch != $CUR_BRANCH` → not active. Verify `git -C "$(pwd)" branch --show-current` against `test-branch` value from the fake repo.
    - **Test 7 (disclaimer):** "design only" must hit the disclaimer regex BEFORE classification.
@@ -260,11 +263,19 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 13. **Kill-switch toggle preserves dedup fields:** sequence — (a) emit an advisory (fingerprint + timestamp recorded in state); (b) set kill switch (env var or sentinel); (c) invoke hook → honored, dedup fields preserved per Min-1-R6; (d) remove kill switch; (e) re-trigger within 5-min dedup window with the same prompt → second trigger MUST be deduped (fingerprint preserved across the toggle, no second advisory emitted).
 14. **Literal `build-shaped` regression guard:** trivial assertion that the advisory stderr contains the exact literal token `build-shaped` (`grep -Fq "build-shaped"`). Catches future copy edits that might drop or rename the token (the tests grep for it; the README documents it; the dogfood scripts grep for it).
 15. **State-file bounded growth ≤5 lines:** run a sequence of (advisory emit + kill-switch set + sentinel with `disabled-until` expiry + reset/eligible re-fire), then assert `[ "$(wc -l < $STATE_FILE)" -le 5 ]`. Schema must remain ≤5 lines across all state transitions; this catches accidental appends/duplicate-key bloat.
+16. **Trailing-newline regression canary (F4):** fixture writes a valid pipeline-active marker at `$HOME/.claude/projects/<echo-n hash>/memory/.pipeline-active` (computed with `echo -n "$(pwd)" | sha256sum | cut -c1-16`). Pipe a build-shaped prompt to the hook; assert the hook FINDS the marker and suppresses (exit 0, empty stderr). If the hook were to use `echo` without `-n`, it would look in a DIFFERENT directory, miss the marker, and emit an advisory — this test fails. Fail message must mention "PROJECT_HASH echo -n mismatch" to make the diagnosis obvious.
+17. **Real-fixture pass-through:** `bash hooks/build-routing-advisor.sh < hooks/tests/fixtures/agent-pretooluse-sample.json` — hook exits 0; stderr either empty (fixture's prompt is non-build-shaped) OR contains `ADVISORY:` (fixture's prompt is build-shaped). Either outcome passes; the assertion is that the hook does not crash and the extraction path returns the prompt.
+18. **Trigger-classification (a) Implement+Design, density=2:** prompt `"implement refactor of design"` → Implement=2 distinct (implement, refactor), Design=1, Ship=0, TOTAL_DISTINCT ≥2 → advisory emits. Comment cites Trigger-Classification rule "Implement≥1 AND (Design≥1 OR Ship≥1) AND total-distinct≥2".
+19. **Trigger-classification (b) Implement+Design+Ship (all three):** prompt `"design, implement, and commit"` → all three categories =1, TOTAL_DISTINCT=3 → advisory emits.
+20. **Trigger-classification (c) Design+Ship, no Implement:** prompt `"design doc + merge PR"` → Design=1, Ship=2, Implement=0 → NO advisory (Implement-required rule).
+21. **Trigger-classification (d) Only-Implement, multiple distinct:** prompt `"implement and code and refactor"` → Implement=3, Design=0, Ship=0 → NO advisory (single-category-only fails; Design≥1 OR Ship≥1 required).
+22. **Trigger-classification (e) Implement+Ship, Implement=1 Ship=2:** prompt `"implement X and commit, push"` → Implement=1, Ship=2 distinct → advisory emits.
 
 ### Steps
 
-1. APPEND cases to `hooks/tests/test-build-routing-advisor.sh`. Do NOT create a separate extended file. Original 10 cases remain unmodified at the top of the file; new cases follow as additional test functions invoked by the same runner.
-2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `pwd`-derived `$PROJECT_MEMORY`, stderr capture via `2>&1` or `2> "$stderr_file"`, exit-code assertion).
+1. APPEND cases to `hooks/tests/test-build-routing-advisor.sh`. Do NOT create a separate extended file. Original 10 cases remain unmodified at the top of the file (except the F4 line-30 `echo -n` fix authorized in T3); new cases follow as additional test functions invoked by the same runner.
+1a. **Dynamic TOTAL:** update the harness's `TOTAL` to be computed at the end as `TOTAL=$((PASSED + FAILED))` rather than hardcoded to 10. This avoids drift whenever T3.5 appends cases (and any future additions). The final `Results: X/Y passed` line MUST use the computed TOTAL.
+2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `pwd`-derived `$PROJECT_MEMORY` using `echo -n`, stderr capture via `2>&1` or `2> "$stderr_file"`, exit-code assertion).
 3. Run until all appended cases pass alongside the original 10.
 4. Commit: `git commit -m "test(hooks): extended AC coverage for build-routing-advisor (#174)"`.
 
@@ -289,7 +300,7 @@ Add a ≤150-token (cl100k) section under existing skill-selection guidance per 
 
 ### Prerequisites
 
-- `tiktoken` Python package available for token counting (`pip install tiktoken`). If not installable in the execution environment, FALLBACK to either (a) the `claude` CLI tokenizer if it exposes one, or (b) a word-based proxy calibrated once against a known 150-token cl100k sample (e.g., measure word-count-to-token ratio on a representative crucible doc and apply with a 15% safety margin — aim ≤130 words to leave headroom).
+- `tiktoken` Python package available for token counting (`pip install tiktoken`). If not installable in the execution environment, FALLBACK to either (a) the `claude` CLI tokenizer if it exposes one, or (b) a word-based proxy calibrated once against a known cl100k sample. **Concrete calibration procedure:** measure the current `## When Skills Apply (Always Invoke)` section of `skills/getting-started/SKILL.md` with tiktoken cl100k — record token count T and word count W; the calibration ratio is T/W. Apply this ratio to the Part 1 addition's word count as the tiktoken-free proxy, with a 15% safety margin (aim for proxy-tokens ≤128 so actual ≤150).
 
 ### Steps
 
@@ -390,7 +401,7 @@ Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledg
 - `### State File`: schema and bounded growth (≤5 lines).
 - `### Performance`: combined budget with `gate-ledger-guard` ≤200ms P95 over ≥20 dispatches; record measured numbers from T7.
 - `### Graceful Degradation`: missing jq, malformed JSON, missing utilities → exit 0 silently.
-- `### Testing`: `bash hooks/tests/test-build-routing-advisor.sh` (10 cases).
+- `### Testing`: `bash hooks/tests/test-build-routing-advisor.sh` — case count is dynamic; insert the current count by running `grep -c '^test_' hooks/tests/test-build-routing-advisor.sh` at README-update time and embedding that number (or phrase as "see test file for current count"). Do NOT hardcode "10 cases" — T3.5 appends more.
 
 Append to "Gate Ledger Guard" section a brief note (Min-5-R6):
 > Registered in user-global `~/.claude/settings.json`. Matcher: none — this hook intercepts every PreToolUse event and filters internally for Write/Edit. By contrast, `build-routing-advisor` registers `matcher: "Task"` in the SAME `~/.claude/settings.json`. Both hooks' scope (user-global) and matcher choices are documented for parity.
@@ -440,6 +451,7 @@ Validate two ACs:
      - Verify Implement-required rule is enforced (re-check classification logic).
      - If still exceeded, raise total-distinct threshold from ≥2 to ≥3 in T2 hook (one-line change).
 4. Commit perf numbers in README update: `git commit -am "docs(hooks): record measured advisor perf numbers (#174)"`.
+5. **Manual verification (if T3.5 case 9 dropped):** if the missing-hook-script graceful path (T3.5 case 9) was dropped per its explicit drop criterion, perform it manually here: rename `hooks/build-routing-advisor.sh` to `hooks/build-routing-advisor.sh.disabled` temporarily; run one Task dispatch in an interactive Claude Code session; verify Claude Code's hook dispatcher handles the missing-script case (either advisory silently absent, or CC logs an error — document which). Restore the script. Record the observed behavior as a `### Missing-script behavior` subsection under `## Build Routing Advisor` in `hooks/README.md`.
 
 ### Acceptance
 
@@ -471,7 +483,7 @@ Per AC S2-R6: assert no advisory fires from Phase 1 Step -1 onward of `/build`, 
    - Locate the Pipeline-Active Marker section (around line 468 for build).
    - Reorder the documented steps so marker-write precedes any subagent dispatch.
    - **Docstring-ordering fix only** — no behavioral logic change (per SIG-3-R7).
-3. Repeat for `/spec` (line 276), `/debugging` (line 295), `/migrate` (line 187).
+3. Repeat for `/spec` (line 276), `/debugging` (line 295), `/migrate` (line 187). **"Lightweight smoke run" (operational definition):** either (a) stub one test scenario for each skill — a minimal invocation that reaches the first subagent-dispatch point, assert the marker is written BEFORE any Task PreToolUse fires, and assert no advisory was emitted during that first dispatch; OR (b) if stub scenarios are too heavy, degrade to static analysis — read each SKILL.md and verify the Pipeline-Active Marker write instruction appears textually BEFORE the first `Task tool` invocation in the document (use `grep -n` to show the line numbers and assert marker-write line number < first Task-dispatch line number). Record which method (a or b) was used in the T8 commit message.
 4. Re-run the relevant pipeline skill on a tiny scratch change for each that needed reordering. Confirm 0 advisories.
 5. If no reordering needed, document the verification in the commit message:
    - `test(integration): verified marker-write-before-dispatch invariant for /build /spec /debugging /migrate (#174)`
