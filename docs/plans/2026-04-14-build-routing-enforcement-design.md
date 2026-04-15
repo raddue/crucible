@@ -85,6 +85,11 @@ with cl100k encoding as a rough approximation). Implementer must
 count; line count is a weak proxy and MAY NOT be used as the budget
 mechanism.
 
+**Token-budget drift (M-6-R8).** No CI check currently enforces the
+150-token Part 1 budget; drift is detected at future design-doc QG
+iterations. If Part 1 inflates meaningfully, add a CI check as a
+follow-up.
+
 ### Part 2: warn-only hook (soft structural)
 
 PreToolUse hook registered on the subagent-dispatch tool. The matcher
@@ -182,7 +187,9 @@ The hook:
      zombie-marker upper bound)
    - `.branch` equals the output of
      `git -C "$PROJECT_ROOT" branch --show-current` at hook
-     invocation time (S1-R4: SAME command as the marker-write side
+     invocation time, where `$PROJECT_ROOT = $(pwd)` at hook entry
+     (same convention as `gate-ledger-guard.sh` and `session-index.sh`)
+     (S1-R4: SAME command as the marker-write side
      for symmetric canonicalization — NOT `rev-parse --abbrev-ref
      HEAD`, which returns the literal string `HEAD` on detached HEAD
      while `branch --show-current` returns empty, so the two never
@@ -301,7 +308,10 @@ The hook:
    - If multiple `disabled-until:` lines are present, use the FIRST.
    - **Malformed or unparseable dates treat the kill switch as
      PERMANENTLY DISABLED** (fail-safe: honor the user's disable
-     intent; never silently re-enable on parse error).
+     intent; never silently re-enable on parse error). When honoring
+     a malformed date, the hook writes a line
+     `disabled-until-parse-error: <raw value>` into the state file
+     alongside `last-honored` for user visibility on typo'd dates.
    - **Matching-line definition (MIN-3-R7):** a matching line is one
      beginning with `disabled-until:` at column 0 — no leading
      whitespace, no comment skipping. Lines not matching
@@ -311,11 +321,12 @@ The hook:
    future date is set and reached; malformed dates preserve the
    user's explicit disable.
 
-**Dedup write-write race (MIN-4-R7).** State file writes use
-last-writer-wins — no `flock` or atomic rename. Concurrent
-dispatches may race counter increments by ±1 and may transiently
-flicker `last-advisory-fingerprint`. Acceptable for warn-only
-operation.
+**State file writes (MIN-4-R7, M-3-R8).** The hook writes the full
+state block to `build-routing-advisor-state.md.tmp` then `mv`s it
+into place atomically (per-process atomicity; cross-process is still
+last-writer-wins as documented). Concurrent dispatches may race
+counter increments by ±1 and may transiently flicker
+`last-advisory-fingerprint`. Acceptable for warn-only operation.
 
 **Dedup across parallel scouts (Min-9).** To prevent a single
 parallel-scout dispatch batch from producing N identical advisories
@@ -389,6 +400,7 @@ what make the trigger sustainable.
   - **6h-old marker with MISMATCHED branch → advisory STILL emitted** (Min-3, closes zombie-marker window under branch-match check)
   - **Detached-HEAD symmetric fallback: marker `.branch=""` (written under detached HEAD) AND hook also sees detached HEAD (`branch --show-current` returns empty) AND `.pipeline_id == $CLAUDE_SESSION_ID` → marker active, advisory suppressed** (S1-R4)
   - **Asymmetric detached: marker `.branch=""` AND hook sees non-empty branch (or vice versa) → advisory STILL emits** (S1-R4 fail-open)
+  - **Branch-switch-mid-pipeline: `/build` with a `/checkpoint` restore that changes branch mid-run — advisory fires on post-checkout dispatches where current branch ≠ marker `.branch`; behavior is intentional (warn-only, kill-switch available)** (M-2-R8)
 
   *Graceful degradation:*
   - Malformed JSON → graceful exit 0
@@ -414,7 +426,7 @@ what make the trigger sustainable.
 - [ ] **Marker-write-before-first-dispatch invariant (S2-R6).** Integration test: dispatch `/build` end-to-end on a small real change (reusable with the dogfood AC) and assert that NO advisory is emitted from Phase 1 Step -1 onward, including any dispatches in Phase 1 Step 0 (pre-existing doc detection) or Phase 2 plan-writer dispatch. If any Phase 1 subagent dispatch occurs before the marker write completes, the test fails and `/build` Step -1 must be reordered to write the marker FIRST, no exceptions. Mirror this invariant for `/spec`, `/debugging`, `/migrate` — their marker-write must precede any subagent dispatch.
 - [ ] **Dogfood (non-pipeline, S2-R4): during implementation, run a representative NON-PIPELINE session (recon or audit/review on this codebase — no `/build`/`/spec`/`/debugging`/`/migrate` active) and count advisory emissions. Cap: ≤2 advisories per hour of active dispatch activity. If exceeded, tighten trigger (verify S3-R4 Implement-required is working first; if still exceeded, reconsider the total-distinct ≥2 threshold, e.g. raise to ≥3)**
 - [ ] **Advisory copy is ≤ 2 lines** (S2-R4, cut from prior 3-line form to reduce per-firing token cost)
-- [ ] **Combined PreToolUse hook overhead per Task dispatch (`build-routing-advisor` + `gate-ledger-guard`) MUST be ≤ 200ms measured empirically; if exceeded, profile and optimize the advisor (most-common suppression path must be fast)** (M5-R4, threshold upgrade from observational)
+- [ ] **Combined PreToolUse hook overhead per Task dispatch (`build-routing-advisor` + `gate-ledger-guard`) MUST be ≤ 200ms P95 measured over ≥20 Task dispatches in a single `/build` run; if exceeded, profile and optimize the advisor (most-common suppression path must be fast)** (M5-R4, threshold upgrade from observational; M-5-R8 clarifies measurement protocol)
 - [ ] `hooks/README.md` documents the new hook: matcher name, JSON extraction path (plus `.tool`-field fallback per M1-R4), allowlist, suppression rules (including symmetric branch-equality check and detached-HEAD `.pipeline_id` fallback), and graceful-degradation behavior. **Also (Min-5-R6):** document `gate-ledger-guard`'s null-matcher registration (runs on every PreToolUse) in the SAME document so both hooks' matcher choices are documented side-by-side for reader parity.
 - [ ] Hook is registered as warn-only (exits 0, no blocking) with advisory (not accusatory) copy (M2)
 
