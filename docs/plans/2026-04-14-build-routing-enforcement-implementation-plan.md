@@ -71,7 +71,7 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    } >> /tmp/pretooluse-capture.log
    exit 0
    ```
-3. Temporarily register it in `.claude/settings.json` under `PreToolUse` (no matcher), invoking `bash /tmp/capture-pretooluse.sh`.
+3. Temporarily register it in **`~/.claude/settings.json`** (user-global, matching the scope of `gate-ledger-guard` per #168 README) under `PreToolUse` (no matcher), invoking `bash /tmp/capture-pretooluse.sh`. Revert this exact registration line before commit.
 4. In an interactive Claude Code session, dispatch a single `general-purpose` subagent with any test prompt (e.g. "echo hello").
 5. Inspect `/tmp/pretooluse-capture.log`. Identify:
    - Top-level tool field: `.tool` vs `.tool_name`
@@ -87,8 +87,9 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    # Subagent type path: .tool_input.subagent_type
    # CLAUDE_SESSION_ID exported: yes/no
    ```
-8. Remove the temporary capture hook from `.claude/settings.json`. Delete `/tmp/capture-pretooluse.sh` and `/tmp/pretooluse-capture.log`.
-9. Commit fixture: `git add -f hooks/tests/fixtures/agent-pretooluse-sample.json && git commit -m "test(hooks): pin PreToolUse Task fixture for #174"`.
+8. Remove the temporary capture hook from `~/.claude/settings.json`. Delete `/tmp/capture-pretooluse.sh` and `/tmp/pretooluse-capture.log`.
+9. **Settings-diff guard:** Before committing the fixture commit, run `git diff -- ~/.claude/settings.json` (or equivalent inspection of that file vs. its pre-T1 state — e.g. `diff` against a backup taken in step 1). Verify the temporary registration was reverted; no settings-diff should appear in the working tree associated with this commit. If a diff remains, restore the original settings before proceeding.
+10. Commit fixture: `git add -f hooks/tests/fixtures/agent-pretooluse-sample.json && git commit -m "test(hooks): pin PreToolUse Task fixture for #174"`.
 
 ### Acceptance
 
@@ -111,7 +112,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 ### Required behavior (in execution order)
 
-0. **Matcher registration (prerequisite, verified by T2 step list):** register `build-routing-advisor` in `~/.claude/settings.json` under `PreToolUse` with `matcher: "Task"` (primary; fallback `Agent` per T1 finding) and `timeout: 500` (ms). Verify the entry does NOT conflict with `gate-ledger-guard`'s null-matcher registration — the two entries coexist as separate hooks, one null-matcher (gate-ledger-guard) and one `Task`-matcher (build-routing-advisor).
+0. **Matcher registration (prerequisite, verified by T2 step list):** register `build-routing-advisor` in **`~/.claude/settings.json` (user-global scope, identical to `gate-ledger-guard` per #168 README)** under `PreToolUse` with `matcher: "Task"` (primary; fallback `Agent` per T1 finding) and `timeout: 500` (ms). Verify the entry does NOT conflict with `gate-ledger-guard`'s null-matcher registration — the two entries coexist as separate hooks, one null-matcher (gate-ledger-guard) and one `Task`-matcher (build-routing-advisor).
 1. `set +e`. Read stdin into `INPUT`. Exit 0 on empty stdin.
 2. **Kill switch** (before any other work):
    - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → update state file `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0.
@@ -128,18 +129,19 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 5. **Prompt + subagent extraction:** use the canonical path discovered in T1. Try `.tool_input.prompt` first, then `.input.prompt`. Same for `subagent_type`. If both null, exit 0 (malformed JSON path covered).
 6. **Allowlist:** if `subagent_type` is set AND not equal to `general-purpose`, exit 0.
 7. **Disclaimer skip:** case-insensitive grep for any of `just the design`, `design only`, `no implementation`, `review only`, `audit only`, `spec only`, `recon only`. If matched, exit 0.
-8. **Classification (BEFORE any git subprocess; Min-7).** Use `grep -iEc` with word boundaries:
-   - Design: `\b(design|spec|plan)\b`
-   - Implement: `\b(implement|code|create|refactor)\b`
-   - Ship: `\b(PR|commit|merge|push|land|ship)\b`
-   - Per-category hit counts: `IMPLEMENT_HITS`, `DESIGN_HITS`, `SHIP_HITS` via `grep -iEc` (count of matching lines) — OR use the distinct-word count per category if preferred; both behave equivalently for the trigger rule below since the trigger only needs ≥1 per category.
-   - **Total distinct computation (precise):** concatenate the `grep -ioE` matches from ALL THREE category regexes into a single stream, pipe through `tr '[:upper:]' '[:lower:]' | sort -u | wc -l`. Assign the result to `TOTAL_DISTINCT`. This is the distinct-keyword count ACROSS categories, lowercased to collapse case variants.
-   - **Trigger condition:** `TOTAL_DISTINCT >= 2` AND `IMPLEMENT_HITS >= 1` AND (`DESIGN_HITS >= 1` OR `SHIP_HITS >= 1`).
+8. **Classification (BEFORE any git subprocess; Min-7).** Use EXACTLY ONE method — pinned (no alternatives):
+   - `DESIGN_HITS=$(echo "$PROMPT" | grep -ioE '\b(design|spec|plan)\b' | wc -l)`
+   - `IMPLEMENT_HITS=$(echo "$PROMPT" | grep -ioE '\b(implement|code|create|refactor)\b' | wc -l)`
+   - `SHIP_HITS=$(echo "$PROMPT" | grep -ioE '\b(PR|commit|merge|push|land|ship)\b' | wc -l)`
+   - `TOTAL_DISTINCT=$(echo "$PROMPT" | grep -ioE '\b(design|spec|plan|implement|code|create|refactor|PR|commit|merge|push|land|ship)\b' | tr '[:upper:]' '[:lower:]' | sort -u | wc -l)`
+   - **Trigger condition:** `IMPLEMENT_HITS >= 1` AND (`DESIGN_HITS >= 1` OR `SHIP_HITS >= 1`) AND `TOTAL_DISTINCT >= 2`.
+   - Worked example (comment in source): `# "spec + implement + PR" → DESIGN=1, IMPLEMENT=1, SHIP=1, TOTAL_DISTINCT=3 → fires`.
    - If trigger does not fire, exit 0.
 9. **Pipeline-active marker check** (only reached if trigger fires):
    - `MARKER="$PROJECT_MEMORY/.pipeline-active"`. If absent → marker not active.
    - Parse with jq. Require `.skill` present and in `{build, spec, debugging, migrate}`.
-   - Require `.start_time` parseable AND within 24h of `date -u +%s`.
+   - **`.start_time` format pin:** per `skills/build/SKILL.md:468`, the marker writes `start_time` as ISO-8601 via `date -u +%Y-%m-%dT%H:%M:%S`. Parse via `START_EPOCH=$(date -d "$START_TIME" +%s 2>/dev/null)`. If parse fails (empty/non-zero exit), treat marker as STALE → marker not active → advisory still emits (do not silently honor a marker with an unparseable timestamp).
+   - Require parsed `.start_time` within 24h of `date -u +%s`.
    - Read current branch: `CUR_BRANCH=$(git -C "$(pwd)" branch --show-current 2>/dev/null)`.
    - **Branch comparison (explicit branches — no accidental-correctness via `"" == ""`):**
      - If BOTH `.branch` and `$CUR_BRANCH` are non-empty AND equal → active (proceed to 24h + skill checks above).
@@ -157,6 +159,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
     Else prefer /build (or /spec then /build) for gate coverage.
     ```
 13. **State file update (atomic write):**
+    - **First line of this step:** `mkdir -p "$PROJECT_MEMORY"` (ensures parent exists before any tmp-file write).
     - Increment `fires-today` and `fires-total`.
     - Set `last-advisory-at: <ISO-8601 UTC>`.
     - Set `last-advisory-fingerprint: <hash>`.
@@ -175,9 +178,9 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 ### Implementation notes
 
 - All `git`, `jq`, `sha256sum`, `date` failures → exit 0 silently. Never fatal.
-- Use `mkdir -p "$PROJECT_MEMORY"` before any state write.
+- **`mkdir -p` placement (explicit):** the FIRST line of step 13 is `mkdir -p "$PROJECT_MEMORY"`. Do NOT place it elsewhere; do NOT rely on this note alone — the prologue belongs in the step body.
 - If T1 found `$CLAUDE_SESSION_ID` is NOT exported, replace step 9's detached-HEAD fallback with a `.start_time`-within-60-seconds session-proxy check and document the reduction in T6.
-- Performance: classification uses one `grep -iEc` per category against `<<< "$PROMPT"` — no temp files. Target ≤50ms per invocation.
+- Performance: classification uses one `grep -ioE` per category against `<<< "$PROMPT"` — no temp files. Target ≤50ms per invocation.
 
 ### Acceptance
 
@@ -229,18 +232,19 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 ## Task 3.5 — Extended AC coverage (close 10-case vs ~25+ design-AC gap)
 
-**Files:** 1 (`hooks/tests/test-build-routing-advisor-extended.sh`, new file; or append cases to the existing test harness as a second `RESULTS` block, implementer's choice)
+**Files:** 1 (`hooks/tests/test-build-routing-advisor.sh` — APPEND cases; do NOT create a new test file)
 **Complexity:** Medium
 **Review-Tier:** 2
 **Dependencies:** Task 3
 
 ### Goal
 
-Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decision: **expand coverage via a supplementary harness** so the plan does not rely on dogfood + manual for AC classes that are cheaply automatable. The original 10-case file remains the authoritative GREEN contract; T3.5 adds the remainder.
+Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decision: **APPEND extended cases to `hooks/tests/test-build-routing-advisor.sh`** so the plan does not rely on dogfood + manual for AC classes that are cheaply automatable. The original 10 cases remain the authoritative GREEN contract; T3.5 cases are added to the SAME file. The test runner stays single-file. **Do NOT create `test-build-routing-advisor-extended.sh`** — earlier draft language allowing that is rescinded.
 
-### Required additional cases (each either a new test function in an extended harness or an added case to the original file)
+### Required additional cases (each appended to the existing single-file harness)
 
 1. **Dedup-across-parallel-scouts (Min-9):** two near-simultaneous invocations with identical prompt → exactly ONE advisory emitted (stderr check across both captures); `fires-total` reflects both (count-all), `last-advisory-fingerprint` matches, second invocation's stderr is empty.
+   - **Race tolerance (per Min-4-R7):** under parallel invocation, the second invocation should observe the first's `last-advisory-fingerprint` and suppress. `fires-total` may race ±1 under concurrency — the test ACCEPTS `fires-total ∈ {1, 2}` after two parallel dispatches of the same prompt. The exactly-one-emission stderr assertion is the hard contract; the counter is best-effort.
 2. **Kill-switch auto-expiry:** sentinel with `disabled-until: <yesterday>` → advisor proceeds normally (trigger fires if classification matches); state records expiry path.
 3. **Malformed `disabled-until` fail-safe:** sentinel with `disabled-until: not-a-date` → PERMANENTLY DISABLED; stderr empty; state records `disabled-until-parse-error`.
 4. **Multiple `disabled-until:` lines:** sentinel with two `disabled-until:` lines (first = future, second = past) → FIRST wins; advisor honored.
@@ -248,14 +252,20 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 6. **Branch-switch-mid-pipeline:** marker written on branch A; test runs with current branch B → NOT active; advisory fires.
 7. **Substring decoys (negative cases):** prompts containing `planning`, `commitment`, `shipping`, `codebase` as substrings (not whole-word matches) → classification does NOT fire on these alone; verify word-boundary regex correctness. One test case per decoy (4 cases) or a single combined case asserting all four do not trigger.
 8. **`subagent_type` non-allowlist cases (all four):** separate cases for `code-reviewer`, `researcher`, arbitrary `custom-agent`, and `""` (empty string) → all exit 0 without emission. (The existing 10-case suite covers `general-purpose`; this extends to the other branches of the allowlist gate.)
-9. **Missing-hook-script graceful path:** rename the hook temporarily and invoke via the registered matcher in a sandboxed settings.json → Claude Code does not hard-fail; document Claude Code's observed behavior (this is a harness-level check rather than a hook-level assertion — if not cheaply automatable, convert to a documented manual-verification note in T7 dogfood and REMOVE from T3.5).
+9. **Missing-hook-script graceful path:** rename the hook temporarily and invoke via the registered matcher in a sandboxed settings.json → Claude Code does not hard-fail; document Claude Code's observed behavior.
+   - **Drop criterion (explicit):** if this case cannot be implemented in <30 lines of bash without modifying Claude Code's hook dispatcher, DROP from T3.5 and move to T7 dogfood as a documented manual verification step. Do not allow this case to balloon the harness.
 10. **Perf P95 (informational precursor to T7):** run 20 back-to-back advisor invocations against the fixture, capture wall-clock via `time`, assert P95 ≤100ms for advisor-alone (combined check stays in T7). Uses external timing per revision #12.
+11. **Stderr `2>&1` capture assertion (programmatic):** explicit case asserting that the advisor's ADVISORY string is captured via `2>&1` (or equivalent stderr-to-file redirection) in the test harness and matched via `grep -F "ADVISORY:"`. No manual inspection — the assertion is `grep -Fq "ADVISORY:" "$captured"` against the redirected output.
+12. **Matcher-neither-Task-nor-Agent fallback:** verify behavior when neither matcher name is correct — the hook falls back to `jq -r '.tool'` (or `.tool_name`) grep on stdin; if that ALSO fails (returns null/empty), the hook exits 0 silently with no stderr. Test asserts: exit code 0, empty stderr, no state-file mutation.
+13. **Kill-switch toggle preserves dedup fields:** sequence — (a) emit an advisory (fingerprint + timestamp recorded in state); (b) set kill switch (env var or sentinel); (c) invoke hook → honored, dedup fields preserved per Min-1-R6; (d) remove kill switch; (e) re-trigger within 5-min dedup window with the same prompt → second trigger MUST be deduped (fingerprint preserved across the toggle, no second advisory emitted).
+14. **Literal `build-shaped` regression guard:** trivial assertion that the advisory stderr contains the exact literal token `build-shaped` (`grep -Fq "build-shaped"`). Catches future copy edits that might drop or rename the token (the tests grep for it; the README documents it; the dogfood scripts grep for it).
+15. **State-file bounded growth ≤5 lines:** run a sequence of (advisory emit + kill-switch set + sentinel with `disabled-until` expiry + reset/eligible re-fire), then assert `[ "$(wc -l < $STATE_FILE)" -le 5 ]`. Schema must remain ≤5 lines across all state transitions; this catches accidental appends/duplicate-key bloat.
 
 ### Steps
 
-1. Create `hooks/tests/test-build-routing-advisor-extended.sh` OR append cases to the existing harness (implementer's choice; preserve the original 10-case file unmodified if choosing the former).
-2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `pwd`-derived `$PROJECT_MEMORY`, stderr capture, exit-code assertion).
-3. Run until all extended cases pass alongside the original 10.
+1. APPEND cases to `hooks/tests/test-build-routing-advisor.sh`. Do NOT create a separate extended file. Original 10 cases remain unmodified at the top of the file; new cases follow as additional test functions invoked by the same runner.
+2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `pwd`-derived `$PROJECT_MEMORY`, stderr capture via `2>&1` or `2> "$stderr_file"`, exit-code assertion).
+3. Run until all appended cases pass alongside the original 10.
 4. Commit: `git commit -m "test(hooks): extended AC coverage for build-routing-advisor (#174)"`.
 
 ### Acceptance
@@ -283,7 +293,7 @@ Add a ≤150-token (cl100k) section under existing skill-selection guidance per 
 
 ### Steps
 
-1. **Placement (section-heading reference, not line numbers):** insert the new `###` subsection AFTER the existing `## When Skills Apply (Always Invoke)` section and BEFORE the existing `## When Skills Don't Apply` section. If the exact heading text differs in the current HEAD, use the closest stable semantic anchor — the placement requirement is "adjacent to skill-selection guidance, between always-invoke and doesn't-apply heuristics."
+1. **Placement (section-heading reference, not line numbers):** BEFORE inserting, verify the section headings `## When Skills Apply (Always Invoke)` and `## When Skills Don't Apply` exist in the current `skills/getting-started/SKILL.md` (e.g. `grep -nE '^## When Skills (Apply|Don'\''t)' skills/getting-started/SKILL.md`). If both exist, insert the new `###` subsection AFTER `## When Skills Apply (Always Invoke)` and BEFORE `## When Skills Don't Apply`. If EITHER heading is missing or the text has drifted, **ESCALATE to the plan reviewer with a proposed alternative placement** (the closest stable semantic anchor adjacent to skill-selection guidance) — do not silently insert at a different location.
 2. Draft the inline section (target ~120 tokens; keep margin under 150):
    ```markdown
    ### Build-shaped work routes through /build
@@ -344,7 +354,8 @@ N≥10 selection-eval prompts that present build-shaped intents; expected_skill 
 3. Run the eval per the existing harness 3 times (different seeds).
 4. Compute median pass rate.
 5. If median <8/10: iterate Part 1 wording (T4) ONCE, rerun with FRESH 3 seeds. If still <8/10: iterate Part 1 ONCE more, rerun. If still <8/10 after two wording iterations → STOP and ESCALATE to user per F3-R5.
-   - **ESCALATE operational definition:** (a) do NOT commit a weakened threshold; (b) do NOT loop-tune Part 1 wording beyond 2 iterations; (c) write the eval transcript (per-seed pass/fail breakdown, failing prompts, reasoning traces) to a file under `docs/plans/` (git-add-forced); (d) surface the decision to the user in the plan-execution narration with the transcript path; (e) leave the build pipeline BLOCKED until the user decides one of: (i) raise threshold expectation, (ii) accept lower score, (iii) revise Part 1 further with justification.
+   - **ESCALATE operational definition:** (a) do NOT commit a weakened threshold; (b) do NOT loop-tune Part 1 wording beyond 2 iterations; (c) write the eval transcript (per-seed pass/fail breakdown, failing prompts, reasoning traces) to a file under `docs/plans/` (git-add-forced); (d) surface the decision to the user via the failure path below.
+   - **Operational mechanics (no 'blocked-on-user' state in `/build`):** `/build` does NOT support a "blocked-on-user-decision" state. The implementer EXITS T5 with a non-zero exit code and a clear error message that points to the eval transcript path. The orchestrator (Phase 3 runner) surfaces the failure to the user. The user then decides one of: (i) accept a lower threshold via manual override recorded in the plan (new sub-task in this plan, not a silent edit); (ii) revise Part 1 further as a new sub-plan task; (iii) close the ticket. There is no in-pipeline pause — the failure is the signal.
 6. If variance between seeds in any iteration is >2 points, expand to 5 seeds before interpreting median (Min-6-R6).
 7. Commit: `git commit -am "eval(skills): routing eval for build-shaped dispatches (#174)"`.
 
@@ -365,13 +376,13 @@ N≥10 selection-eval prompts that present build-shaped intents; expected_skill 
 
 ### Goal
 
-Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledger-guard`'s null-matcher registration in the same doc (Min-5-R6).
+Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledger-guard`'s null-matcher registration in the same doc (Min-5-R6). **Both hooks are registered in user-global `~/.claude/settings.json` (identical scope)** — document them side-by-side as such.
 
 ### Required content (new section after "Gate Ledger Guard")
 
 - Heading: `## Build Routing Advisor`
 - One-paragraph summary: warn-only PreToolUse hook on `Task` matcher; emits ADVISORY when subagent dispatch looks build-shaped and no pipeline marker matches.
-- `### Setup`: settings.json snippet with `matcher: "Task"` (and fallback note for `Agent` if T1 found that name) and `timeout: 500`.
+- `### Setup`: **user-global `~/.claude/settings.json`** snippet with `matcher: "Task"` (and fallback note for `Agent` if T1 found that name) and `timeout: 500`. Note explicitly: same scope as `gate-ledger-guard` (per #168 README), not `.claude/settings.json` at the repo root.
 - `### How It Works`: ordered list of execution steps (kill switch → allowlist → disclaimer skip → classify → marker check → dedup → emit), naming the three classification categories and the Implement-required + total-distinct ≥2 trigger rule.
 - `### JSON Extraction Path`: cite the canonical path from T1's fixture header (e.g. `.tool_input.prompt`, `.tool_input.subagent_type`, `.tool` for tool name) and the `.tool`-field fallback (M1-R4).
 - `### Suppression Rules`: marker must have `.skill` in {build, spec, debugging, migrate}, `.start_time` <24h, `.branch == git branch --show-current`. Symmetric detached-HEAD `.pipeline_id == $CLAUDE_SESSION_ID` fallback.
@@ -382,7 +393,7 @@ Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledg
 - `### Testing`: `bash hooks/tests/test-build-routing-advisor.sh` (10 cases).
 
 Append to "Gate Ledger Guard" section a brief note (Min-5-R6):
-> Matcher: none — this hook intercepts every PreToolUse event and filters internally for Write/Edit. By contrast, `build-routing-advisor` registers `matcher: "Task"`. Both hooks' matcher choices are documented for parity.
+> Registered in user-global `~/.claude/settings.json`. Matcher: none — this hook intercepts every PreToolUse event and filters internally for Write/Edit. By contrast, `build-routing-advisor` registers `matcher: "Task"` in the SAME `~/.claude/settings.json`. Both hooks' scope (user-global) and matcher choices are documented for parity.
 
 ### Acceptance
 
@@ -413,6 +424,7 @@ Validate two ACs:
    - Run `/build`. Count advisory emissions in transcripts (`grep -c "build-shaped"`).
    - Assert count == 0. If not, investigate: marker write-before-first-dispatch ordering (see T8) or classification false positives.
 2. **Perf measurement during pipeline dogfood (EXTERNAL timing — do NOT modify the hook source):**
+   - **Cache warmup:** before the measurement window, run 2 warmup invocations of EACH hook against the fixture (4 total invocations) and DISCARD their timings. This warms the FS cache and avoids cold-cache bias. Record the measurement section in `hooks/README.md` under the heading **"P95 (warm cache, N=20)"** to make the methodology explicit.
    - Wrap hook invocations with external timing via `time bash hooks/build-routing-advisor.sh < fixture` (and same for `gate-ledger-guard`) over ≥20 dispatches during a real `/build` run. Alternative: use `/usr/bin/time -f '%e'` for machine-parseable seconds, or `date +%s%N` before/after the `bash` invocation in a wrapper script — the key constraint is **the hook source file is NOT modified for measurement**.
    - Capture per-invocation wall-clock into `/tmp/hook-perf.log` (wrapper-level), one line per invocation: `advisor:<ms>` and `guard:<ms>`.
    - Compute two P95 numbers:
