@@ -31,16 +31,16 @@ The 10-test acceptance suite at `hooks/tests/test-build-routing-advisor.sh` (alr
 ## Dependency Graph
 
 ```
-T1 (fixture) ─┬─> T2 (hook impl) ─> T3 (RED → GREEN ack tests)
-              │                       │
-              └──> T6 (README)        ├──> T4 (SKILL.md Part 1) ─> T5 (routing eval)
-                                      │
-                                      └──> T7 (dogfood + perf)
-                                                  │
-                                                  └──> T8 (marker-write integration test)
+T1 (fixture) ─> T2 (hook impl) ─> T3 (RED → GREEN ack tests) ─> T7 (dogfood + perf) ─> T8 (marker-write integration)
+     │                │                                              ^
+     └──────> T6 (README) ────────────────────────────────────────── ┘
+
+T4 (SKILL.md Part 1, independent) ─> T5 (routing eval)
 ```
 
-No circular deps. T1 unblocks both T2 and T6 (extraction path documentation). T4 and T5 are gated on T3 only insofar as the eval runs after Part 1 lands; technically T4 could land in parallel with T2/T3.
+Edges: T1 → T2; T2 → T3; T3 → T7; T7 → T8; T1 → T6; T2 → T6; T6 → T7; T4 → T5.
+
+No circular deps. T4 is independent of T2/T3 and can land at any time; T5 gates on T4 only. T7's README perf numbers require T6's structure to exist first (T6 → T7).
 
 ---
 
@@ -111,15 +111,17 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 ### Required behavior (in execution order)
 
+0. **Matcher registration (prerequisite, verified by T2 step list):** register `build-routing-advisor` in `~/.claude/settings.json` under `PreToolUse` with `matcher: "Task"` (primary; fallback `Agent` per T1 finding) and `timeout: 500` (ms). Verify the entry does NOT conflict with `gate-ledger-guard`'s null-matcher registration — the two entries coexist as separate hooks, one null-matcher (gate-ledger-guard) and one `Task`-matcher (build-routing-advisor).
 1. `set +e`. Read stdin into `INPUT`. Exit 0 on empty stdin.
 2. **Kill switch** (before any other work):
    - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → update state file `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0.
    - Compute `$PROJECT_MEMORY` (sha256 of pwd, first 16 chars).
    - If sentinel `$PROJECT_MEMORY/.build-routing-advisor-disabled` exists:
-     - Parse FIRST `^disabled-until: ` line.
+     - **Matching-line definition (MIN-3-R7):** a matching line is one beginning with `disabled-until:` at column 0 — no leading whitespace, no comment skipping. Use literal regex `^disabled-until: ` (trailing space required).
+     - Parse FIRST matching line. If the file contains multiple matching lines, use only the FIRST; ignore the rest.
      - If date parses AND today's local date < parsed date → honor switch, update `last-honored`, exit 0.
-     - If date parses AND today >= parsed date → switch expired, continue.
-     - If date does NOT parse → write `disabled-until-parse-error: <raw>` to state, honor switch (PERMANENTLY DISABLED fail-safe), exit 0.
+     - If date parses AND today >= parsed date → switch expired (auto-expiry path), continue with advisor flow.
+     - If date does NOT parse → write `disabled-until-parse-error: <raw>` to state, honor switch (PERMANENTLY DISABLED fail-safe per malformed `disabled-until`), exit 0.
      - If sentinel exists with no `disabled-until:` line → honor switch indefinitely, update `last-honored`, exit 0.
 3. **Dependency check:** `command -v jq` — if missing, exit 0 silently.
 4. **Tool name extraction:** `TOOL=$(echo "$INPUT" | jq -r '.tool // .tool_name // empty')`. If `TOOL` not in `Task|Agent`, exit 0.
@@ -130,22 +132,25 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
    - Design: `\b(design|spec|plan)\b`
    - Implement: `\b(implement|code|create|refactor)\b`
    - Ship: `\b(PR|commit|merge|push|land|ship)\b`
-   - Compute distinct keyword counts per category by extracting matched words via `grep -ioE` then `sort -u`.
-   - Trigger condition: `implement_count >= 1` AND (`design_count >= 1` OR `ship_count >= 1`) AND `total_distinct_across_categories >= 2`.
+   - Per-category hit counts: `IMPLEMENT_HITS`, `DESIGN_HITS`, `SHIP_HITS` via `grep -iEc` (count of matching lines) — OR use the distinct-word count per category if preferred; both behave equivalently for the trigger rule below since the trigger only needs ≥1 per category.
+   - **Total distinct computation (precise):** concatenate the `grep -ioE` matches from ALL THREE category regexes into a single stream, pipe through `tr '[:upper:]' '[:lower:]' | sort -u | wc -l`. Assign the result to `TOTAL_DISTINCT`. This is the distinct-keyword count ACROSS categories, lowercased to collapse case variants.
+   - **Trigger condition:** `TOTAL_DISTINCT >= 2` AND `IMPLEMENT_HITS >= 1` AND (`DESIGN_HITS >= 1` OR `SHIP_HITS >= 1`).
    - If trigger does not fire, exit 0.
 9. **Pipeline-active marker check** (only reached if trigger fires):
    - `MARKER="$PROJECT_MEMORY/.pipeline-active"`. If absent → marker not active.
    - Parse with jq. Require `.skill` present and in `{build, spec, debugging, migrate}`.
    - Require `.start_time` parseable AND within 24h of `date -u +%s`.
    - Read current branch: `CUR_BRANCH=$(git -C "$(pwd)" branch --show-current 2>/dev/null)`.
-   - Require `.branch == $CUR_BRANCH`.
-   - **Detached-HEAD fallback:** if both marker `.branch` and `$CUR_BRANCH` are empty AND `.pipeline_id == $CLAUDE_SESSION_ID` → marker active. Otherwise asymmetric empty → not active.
+   - **Branch comparison (explicit branches — no accidental-correctness via `"" == ""`):**
+     - If BOTH `.branch` and `$CUR_BRANCH` are non-empty AND equal → active (proceed to 24h + skill checks above).
+     - Else if BOTH are empty AND `.pipeline_id == $CLAUDE_SESSION_ID` → active (detached-HEAD symmetric fallback).
+     - Otherwise (asymmetric empty, or non-empty mismatch) → NOT active.
    - If marker is active, exit 0.
 10. **Dedup check (Min-9):**
     - Read state file `$PROJECT_MEMORY/build-routing-advisor-state.md`.
     - Compute fingerprint: `echo "$PROMPT" | sha256sum | cut -c1-16`.
     - If `last-advisory-fingerprint` matches AND `last-advisory-at` is within 5 minutes → suppressed: increment `fires-total` only, do NOT emit, write state atomically, exit 0.
-11. **Reset `fires-today`:** compare today's local date against most recent of (`last-honored` date, `last-advisory-at` date). If neither exists OR most recent < today → reset `fires-today` to 0.
+11. **Lazy `fires-today` reset (Min-3-R6):** reset is LAZY — performed ONLY on advisory-eligible invocation (this step is reached only after trigger fires, marker not active, dedup not suppressed), never continuously. On each eligible invocation, compare today's local date against the MOST RECENT of (`last-honored` date, `last-advisory-at` date). If neither exists OR the most recent is older than today → reset `fires-today` to 0 BEFORE incrementing in step 13.
 12. **Emit advisory** to stderr (exactly 2 lines, includes literal `build-shaped`):
     ```
     ADVISORY: Dispatch looks build-shaped. If single-phase, ignore.
@@ -164,6 +169,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
       last-advisory-at: <ISO-8601 or empty>
       last-advisory-fingerprint: <hash or empty>
       ```
+    - **Atomic-write race note (MIN-4-R7):** per-process atomicity is via temp-file + `mv`; cross-process is last-writer-wins. ±1 counter races and fingerprint flicker across concurrent processes are ACCEPTED. Do NOT add `flock` or any file locking. The state file is advisory telemetry, not a correctness-critical ledger.
 14. `exit 0`.
 
 ### Implementation notes
@@ -193,6 +199,8 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 `bash hooks/tests/test-build-routing-advisor.sh` reports `Results: 10/10 passed` and exits 0.
 
+**Critical boundary:** the test file at `hooks/tests/test-build-routing-advisor.sh` is pre-existing (RED canary committed 1450ed3). T3's job is to make the HOOK pass the tests, NOT to modify the tests. **Tests are the spec.** If a test appears wrong, ESCALATE to the user rather than modifying it.
+
 ### Steps
 
 1. Run `bash /mnt/e/Coding/crucible/hooks/tests/test-build-routing-advisor.sh`.
@@ -215,6 +223,46 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 - `Results: 10/10 passed` printed.
 - Test script exit code 0.
 - Hook diff committed.
+- **T3 is NOT considered complete** until T3.5's extended-coverage cases also pass (see below).
+
+---
+
+## Task 3.5 — Extended AC coverage (close 10-case vs ~25+ design-AC gap)
+
+**Files:** 1 (`hooks/tests/test-build-routing-advisor-extended.sh`, new file; or append cases to the existing test harness as a second `RESULTS` block, implementer's choice)
+**Complexity:** Medium
+**Review-Tier:** 2
+**Dependencies:** Task 3
+
+### Goal
+
+Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decision: **expand coverage via a supplementary harness** so the plan does not rely on dogfood + manual for AC classes that are cheaply automatable. The original 10-case file remains the authoritative GREEN contract; T3.5 adds the remainder.
+
+### Required additional cases (each either a new test function in an extended harness or an added case to the original file)
+
+1. **Dedup-across-parallel-scouts (Min-9):** two near-simultaneous invocations with identical prompt → exactly ONE advisory emitted (stderr check across both captures); `fires-total` reflects both (count-all), `last-advisory-fingerprint` matches, second invocation's stderr is empty.
+2. **Kill-switch auto-expiry:** sentinel with `disabled-until: <yesterday>` → advisor proceeds normally (trigger fires if classification matches); state records expiry path.
+3. **Malformed `disabled-until` fail-safe:** sentinel with `disabled-until: not-a-date` → PERMANENTLY DISABLED; stderr empty; state records `disabled-until-parse-error`.
+4. **Multiple `disabled-until:` lines:** sentinel with two `disabled-until:` lines (first = future, second = past) → FIRST wins; advisor honored.
+5. **Asymmetric detached-HEAD:** marker `.branch` empty, current branch `feat/x` (or vice versa) → NOT active; advisory fires.
+6. **Branch-switch-mid-pipeline:** marker written on branch A; test runs with current branch B → NOT active; advisory fires.
+7. **Substring decoys (negative cases):** prompts containing `planning`, `commitment`, `shipping`, `codebase` as substrings (not whole-word matches) → classification does NOT fire on these alone; verify word-boundary regex correctness. One test case per decoy (4 cases) or a single combined case asserting all four do not trigger.
+8. **`subagent_type` non-allowlist cases (all four):** separate cases for `code-reviewer`, `researcher`, arbitrary `custom-agent`, and `""` (empty string) → all exit 0 without emission. (The existing 10-case suite covers `general-purpose`; this extends to the other branches of the allowlist gate.)
+9. **Missing-hook-script graceful path:** rename the hook temporarily and invoke via the registered matcher in a sandboxed settings.json → Claude Code does not hard-fail; document Claude Code's observed behavior (this is a harness-level check rather than a hook-level assertion — if not cheaply automatable, convert to a documented manual-verification note in T7 dogfood and REMOVE from T3.5).
+10. **Perf P95 (informational precursor to T7):** run 20 back-to-back advisor invocations against the fixture, capture wall-clock via `time`, assert P95 ≤100ms for advisor-alone (combined check stays in T7). Uses external timing per revision #12.
+
+### Steps
+
+1. Create `hooks/tests/test-build-routing-advisor-extended.sh` OR append cases to the existing harness (implementer's choice; preserve the original 10-case file unmodified if choosing the former).
+2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `pwd`-derived `$PROJECT_MEMORY`, stderr capture, exit-code assertion).
+3. Run until all extended cases pass alongside the original 10.
+4. Commit: `git commit -m "test(hooks): extended AC coverage for build-routing-advisor (#174)"`.
+
+### Acceptance
+
+- All extended cases pass.
+- Original 10-case suite still passes (no regression).
+- T3 + T3.5 together constitute the GREEN bar for Phase 3; Phase 3 cannot close T3 until T3.5 is also green.
 
 ---
 
@@ -229,9 +277,13 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 Add a ≤150-token (cl100k) section under existing skill-selection guidance per Min-6 placement note.
 
+### Prerequisites
+
+- `tiktoken` Python package available for token counting (`pip install tiktoken`). If not installable in the execution environment, FALLBACK to either (a) the `claude` CLI tokenizer if it exposes one, or (b) a word-based proxy calibrated once against a known 150-token cl100k sample (e.g., measure word-count-to-token ratio on a representative crucible doc and apply with a 15% safety margin — aim ≤130 words to leave headroom).
+
 ### Steps
 
-1. Identify placement: insert after the "When Skills Apply (Always Invoke)" table (line 35) but before "When Skills Don't Apply" (line 37). This keeps it adjacent to skill-selection guidance.
+1. **Placement (section-heading reference, not line numbers):** insert the new `###` subsection AFTER the existing `## When Skills Apply (Always Invoke)` section and BEFORE the existing `## When Skills Don't Apply` section. If the exact heading text differs in the current HEAD, use the closest stable semantic anchor — the placement requirement is "adjacent to skill-selection guidance, between always-invoke and doesn't-apply heuristics."
 2. Draft the inline section (target ~120 tokens; keep margin under 150):
    ```markdown
    ### Build-shaped work routes through /build
@@ -291,7 +343,8 @@ N≥10 selection-eval prompts that present build-shaped intents; expected_skill 
    - 2 boundary cases that should still pick `build` (e.g. "design and ship the new auth flow").
 3. Run the eval per the existing harness 3 times (different seeds).
 4. Compute median pass rate.
-5. If median <8/10: iterate Part 1 wording (T4) ONCE, rerun with FRESH 3 seeds. If still <8/10: iterate Part 1 ONCE more, rerun. If still <8/10 after two wording iterations → STOP and ESCALATE to user with eval transcript per F3-R5.
+5. If median <8/10: iterate Part 1 wording (T4) ONCE, rerun with FRESH 3 seeds. If still <8/10: iterate Part 1 ONCE more, rerun. If still <8/10 after two wording iterations → STOP and ESCALATE to user per F3-R5.
+   - **ESCALATE operational definition:** (a) do NOT commit a weakened threshold; (b) do NOT loop-tune Part 1 wording beyond 2 iterations; (c) write the eval transcript (per-seed pass/fail breakdown, failing prompts, reasoning traces) to a file under `docs/plans/` (git-add-forced); (d) surface the decision to the user in the plan-execution narration with the transcript path; (e) leave the build pipeline BLOCKED until the user decides one of: (i) raise threshold expectation, (ii) accept lower score, (iii) revise Part 1 further with justification.
 6. If variance between seeds in any iteration is >2 points, expand to 5 seeds before interpreting median (Min-6-R6).
 7. Commit: `git commit -am "eval(skills): routing eval for build-shaped dispatches (#174)"`.
 
@@ -359,17 +412,14 @@ Validate two ACs:
    - Pick a small real change (e.g. typo fix or one-line README edit on a scratch branch).
    - Run `/build`. Count advisory emissions in transcripts (`grep -c "build-shaped"`).
    - Assert count == 0. If not, investigate: marker write-before-first-dispatch ordering (see T8) or classification false positives.
-2. **Perf measurement during pipeline dogfood:**
-   - Wrap each PreToolUse hook invocation with timing. Add temporary instrumentation:
-     ```bash
-     T0=$(date +%s%N)
-     # ... existing hook body ...
-     T1=$(date +%s%N); echo "advisor: $(( (T1-T0)/1000000 ))ms" >> /tmp/hook-perf.log
-     ```
-   - Same for `gate-ledger-guard`. Run a `/build` invocation that produces ≥20 Task dispatches.
-   - Compute P95 of summed (advisor + guard) per dispatch.
-   - Assert P95 ≤200ms. If exceeded, profile and optimize the most-common path (early-exit when no classification match). Remove instrumentation before commit.
-   - Record measured P95 numbers in the `### Performance` section of `hooks/README.md` (T6).
+2. **Perf measurement during pipeline dogfood (EXTERNAL timing — do NOT modify the hook source):**
+   - Wrap hook invocations with external timing via `time bash hooks/build-routing-advisor.sh < fixture` (and same for `gate-ledger-guard`) over ≥20 dispatches during a real `/build` run. Alternative: use `/usr/bin/time -f '%e'` for machine-parseable seconds, or `date +%s%N` before/after the `bash` invocation in a wrapper script — the key constraint is **the hook source file is NOT modified for measurement**.
+   - Capture per-invocation wall-clock into `/tmp/hook-perf.log` (wrapper-level), one line per invocation: `advisor:<ms>` and `guard:<ms>`.
+   - Compute two P95 numbers:
+     - **`build-routing-advisor` alone** (informational).
+     - **`build-routing-advisor` + `gate-ledger-guard` combined** per dispatch — HARD threshold ≤200ms P95 (M5-R8).
+   - If combined P95 exceeds 200ms, profile and optimize the most-common path (e.g. earlier exit when `TOOL` not in allowlist, or skipping state-file reads when trigger cannot fire). No instrumentation to remove because none was added to the hook source.
+   - Record BOTH measured P95 numbers (advisor-alone AND combined) in the `### Performance` section of `hooks/README.md` via T7's README edit step below. Advisor-alone is informational context; combined is the gated number.
 3. **Non-pipeline dogfood:**
    - Run a representative recon/audit session on this codebase (no `/build`/`/spec`/`/debugging`/`/migrate`).
    - Track elapsed wall-clock with active dispatch.
@@ -392,7 +442,9 @@ Validate two ACs:
 
 **Files:** 0–4 (potentially `skills/build/SKILL.md`, `skills/spec/SKILL.md`, `skills/debugging/SKILL.md`, `skills/migrate/SKILL.md` — docstring-ordering only if bug found)
 **Complexity:** Medium
-**Review-Tier:** 2
+**Review-Tier:** **Conditional Tier 3** — Tier 2 if T8 is verification-only (no SKILL.md edits); Tier 3 if any reordering is required in any of the four pipeline-skill `SKILL.md` files. Even docstring-only changes to those four files have outsized blast radius (every `/build`, `/spec`, `/debugging`, `/migrate` invocation reads them). **The implementer MUST declare the applicable tier at the END of T8 Step 1** based on whether any advisory fired during the T7 dogfood run:
+- If T7 dogfood emitted 0 advisories from Phase 1 Step -1 onward → T8 is a no-op verification → **Tier 2**.
+- If any advisory fired, forcing reordering in ≥1 SKILL.md → **Tier 3** (cross-system review required before merge).
 **Dependencies:** Task 7
 
 ### Goal
