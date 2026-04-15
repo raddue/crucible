@@ -261,3 +261,45 @@ Current case count: **34** (10 RED canary + 24 T3.5 extended); see the test file
 ### Static-analysis fallback (T8) — known brittleness (M6)
 
 T8's method-(b) static-analysis check greps line-numbers in pipeline-skill `SKILL.md` files (marker-write line number vs. first Task-dispatch line number). This check is **brittle against future markdown reorganization**: if pipeline-skill `SKILL.md` files are restructured (headings renamed, sections reordered, Task invocation documented in a different syntax), the check can silently pass on broken ordering or fail on correct ordering. **Future pipeline-skill refactors MUST update this check alongside the SKILL.md change** to keep the ordering invariant enforced.
+
+## Post-Merge Reconciler (T9)
+
+Read-only telemetry utility at `hooks/tests/tools/build-routing-reconcile.sh`. For each merged PR in a configurable window, it answers the binary question: **"Did this PR's branch write `Status: PASS` to `build-gate-ledger.md`?"** — the #174 ground-truth oracle. PRs with no gate-ledger PASS are flagged as candidates for the #174 failure mode (branch merged without `/build` running).
+
+### Invocation
+
+```bash
+# Markdown report to stdout (default)
+bash hooks/tests/tools/build-routing-reconcile.sh --since "14 days ago"
+
+# JSON, to a file, for an arbitrary repo
+bash hooks/tests/tools/build-routing-reconcile.sh --repo /path/to/repo --since 2026-04-01 --json --output report.json
+
+# Append to the local /forge scratchpad
+bash hooks/tests/tools/build-routing-reconcile.sh --forge
+```
+
+Arguments: `--since <date>`, `--repo <path>`, `--output <file>`, `--json`, `--forge`. The tool is READ-ONLY: it never mutates repo state, never registers as a hook, and never gates anything. It is intended for manual invocation by the maintainer (or a periodic cron/CI job).
+
+### Testing
+
+```bash
+bash hooks/tests/tools/test-build-routing-reconcile.sh
+```
+
+Synthetic 2-PR fixture: one branch seeds `Status: PASS` in the ledger, one does not. Asserts flagged count == 1.
+
+### Degraded mode (M10-R4) — honest limits
+
+This reconciler currently runs in **gate-ledger-audit-only mode** because `hooks/session-index.sh` does NOT index `Task` tool invocations (verified via `grep -nE 'Task|subagent_type' hooks/session-index.sh` → no matches). The following honest-limits statement is reproduced verbatim from the plan's T9 M10-R4 requirement:
+
+> In degraded mode, T9's output is an INPUT to manual maintainer review — NOT an actionable automated signal for the "remove Part 2 if cost > value" decision promised by the design's Honest-about-limits clause. That decision requires archived advisor state + session-index Task coverage, neither of which exists yet. Deferral to a separate PR with archived advisor state is the prerequisite for automating that decision.
+
+Two capabilities MUST be added before the reconciler can support the promised precision/recall / cost-value decision path:
+
+1. **Session-index `Task` tool indexing** — so per-PR `general-purpose` dispatch counts can be computed (plan step 7).
+2. **State-file archiving** for `build-routing-advisor-state.md` — so per-PR advisor fire counts can be correlated historically (plan step 6; the live state file is overwritten, so historical enrichment is unavailable at first run).
+
+### PR discovery path
+
+Primary: `gh pr list --state merged --search "base:main merged:>=<SINCE>"` (handles squash-merged PRs uniformly). Fallback: `git log --merges --since=<SINCE>` (misses squash-merges; reports `pr_discovery_path: git-log-fallback` in the output so consumers know the coverage).
