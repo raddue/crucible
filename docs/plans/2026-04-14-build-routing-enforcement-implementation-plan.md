@@ -19,6 +19,10 @@ Implement the two-part defense from the design doc:
 
 The 10-test acceptance suite at `hooks/tests/test-build-routing-advisor.sh` (already RED) is the GREEN contract. All other ACs from the design doc are layered around that core.
 
+## Innovation proposal (#174 T9)
+
+Per the innovate pass, a post-merge reconciler (T9) is appended to convert the advisor from heuristic-unverifiable to empirically-tunable. The reconciler answers a discrete binary question for each merged PR in a window: did the branch write `Status: PASS` to `build-gate-ledger.md`? The conjunction `(merged PR) ∧ (no gate-ledger PASS)` is the exact #174 failure mode — a ground-truth oracle that makes the design's "remove Part 2 if telemetry shows cost > value" clause actionable. T9 is a standalone read-only utility (no cross-system impact) and may land in the same PR as T1–T8 or a follow-up.
+
 ## Conventions
 
 - All paths absolute under `/mnt/e/Coding/crucible/`.
@@ -34,13 +38,24 @@ The 10-test acceptance suite at `hooks/tests/test-build-routing-advisor.sh` (alr
 T1 (fixture) ─> T2 (hook impl) ─> T3 (RED → GREEN ack tests) ─> T3.5 (extended AC coverage) ─> T7 (dogfood + perf) ─> T8 (marker-write integration)
      │                │                                                                             ^
      └──────> T6 (README) ─────────────────────────────────────────────────────────────────────── ┘
+                    │        │
+                    └────────┴───> T9 (post-merge reconciler, standalone)
 
 T4 (SKILL.md Part 1, independent) ─> T5 (routing eval)
 ```
 
-Edges: T1 → T2; T2 → T3; T3 → T3.5; T3.5 → T7; T7 → T8; T1 → T6; T2 → T6; T6 → T7; T4 → T5.
+Edges: T1 → T2; T2 → T3; T3 → T3.5; T3.5 → T7; T7 → T8; T1 → T6; T2 → T6; T6 → T7; T4 → T5; T2 → T9; T6 → T9.
 
-No circular deps. T4 is independent of T2/T3 and can land at any time; T5 gates on T4 only. T7's README perf numbers require T6's structure to exist first (T6 → T7).
+No circular deps. T4 is independent of T2/T3 and can land at any time; T5 gates on T4 only. T7's README perf numbers require T6's structure to exist first (T6 → T7). T9 consumes the state file written by T2 and is documented in the README produced by T6; it does NOT gate T7 or T8 and may defer to a follow-up PR after #174 merges.
+
+### Subagent wave grouping
+
+- **Wave A:** T1, T2, T3 (fixture + hook + RED→GREEN)
+- **Wave B:** T4, T5 (SKILL.md Part 1 + routing eval, independent track)
+- **Wave C:** T6, T7, T8 (README + dogfood/perf + marker-write integration)
+- **Wave D:** T9 (post-merge reconciler, standalone) — optional late-wave task; if time/context is tight, defer to a follow-up PR after #174 merges. Explicitly documented as deferrable.
+
+T3.5 runs between Wave A and Wave C (it extends T3 coverage before dogfood).
 
 ---
 
@@ -495,6 +510,54 @@ Per AC S2-R6: assert no advisory fires from Phase 1 Step -1 onward of `/build`, 
 - `/build` end-to-end on a small real change emits 0 advisories from Phase 1 Step -1 onward.
 - `/spec`, `/debugging`, `/migrate` verified analogously (lightweight smoke run for each).
 - Any reordering fix is docstring-only; no new behavior introduced.
+
+---
+
+## Task 9 — Post-Merge Reconciler (`hooks/tests/tools/build-routing-reconcile.sh`)
+
+**Files:** `hooks/tests/tools/build-routing-reconcile.sh` (new, ~100 LOC) — 1 file
+**Complexity:** Low-Medium (git + jq + text aggregation, read-only)
+**Review-Tier:** 2 (Standard — single-system behavioral change, but read-only utility with no cross-system impact; keeps Tier 2 per escalation rules since it introduces a new tool)
+**Dependencies:** T2 (hook writes state file consumed by reconciler), T6 (README documents tool)
+
+### Purpose
+
+Convert advisor warnings into discrete, verifiable post-hoc signal. For each merged PR in a window, answer the binary question: "Did this PR's branch write `Status: PASS` to `build-gate-ledger.md`?" — the exact #168 signal. If NO → #174 failure mode occurred (branch merged without /build running). Combine with advisor fire counts from `build-routing-advisor-state.md` and session-index `general-purpose` Task dispatch counts to produce a precision/recall estimate.
+
+### Why this task exists
+
+Design's Honest-about-limits states: "If post-launch telemetry shows Part 2's cost exceeds value, removal is a clean follow-up." That telemetry is hollow without a ground-truth oracle. The reconciler IS the oracle. Without it, the advisor is unverifiable forever and the design's removal clause is unactionable.
+
+### Steps
+
+1. **Create tool directory:** `mkdir -p hooks/tests/tools/`. Create `hooks/tests/tools/build-routing-reconcile.sh`. Start with standard crucible bash header (`set +e`, graceful degradation on missing utilities).
+
+2. **Accept arguments:** `--since <date>` (default: 14 days ago), `--repo <path>` (default: cwd), `--output <file>` (default: stdout). Validate inputs; on bad args print usage and exit 2.
+
+3. **Enumerate merged PRs in window:** `git -C "$REPO" log --merges --since="$SINCE" --pretty=format:'%H|%s|%cI'`. Parse each merge commit; extract PR branch via `git show --first-parent <sha>` or `git log <sha>^1..<sha>^2`. Skip merges that aren't PR-shaped.
+
+4. **For each PR branch, check gate-ledger signal:** Run `git -C "$REPO" log <branch-tip> -- build-gate-ledger.md` OR equivalently grep the ledger's git history for a commit on the branch that wrote `Status: PASS`. Binary outcome: HAS_GATE_PASS=true|false.
+
+5. **If HAS_GATE_PASS=false, flag the PR:** Record PR number, branch name, merge date, commits on branch count. This is the #174 failure-mode signal.
+
+6. **Enrich with advisor fire data:** For each flagged PR, check `$PROJECT_MEMORY/build-routing-advisor-state.md` snapshots (if available — the state file is overwritten, so historical data is in session-index or git-committed retros). Count advisory fires during the branch's lifetime.
+
+7. **Enrich with session-index Task dispatch data:** Grep `~/.claude/projects/<hash>/memory/session-index/*/events.jsonl` for `Task` tool invocations with `subagent_type=general-purpose` within the branch's timeframe. Count.
+
+8. **Emit markdown report:** For each flagged PR: `- PR #N (branch: X, merged YYYY-MM-DD): M advisories fired, K general-purpose dispatches, L commits on branch.` Aggregate at the end: total flagged PRs, total PRs in window, approximate advisor precision (flagged-with-advisory / total-advisories-in-window).
+
+9. **Output modes:** plain markdown (default), JSON (`--json`), append to `/forge` scratchpad (`--forge`).
+
+10. **Test with a synthetic 2-PR fixture:** write a tiny test that exercises the tool against a temp repo with 2 merge commits (one with gate-ledger PASS, one without). Assert the flagged count is exactly 1.
+
+11. **Commit:** `feat: post-merge reconciler for build-routing advisor telemetry (#174)`. Use `git add -f` for the hook-tests path.
+
+### Acceptance
+
+- Tool runs cleanly against the crucible repo with `--since "14 days ago"` and exits 0.
+- Synthetic 2-PR fixture test passes: exactly 1 flagged PR.
+- Report is well-formed markdown (or valid JSON with `--json`).
+- T9 does NOT block T7 or T8; may defer to a follow-up PR.
 
 ---
 
