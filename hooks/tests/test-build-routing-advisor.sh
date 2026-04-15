@@ -24,10 +24,12 @@ mkdir -p "$FAKE_PROJECT"
 ( cd "$FAKE_PROJECT" && git init -q -b test-branch >/dev/null 2>&1 \
   && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 ) || true
 
-# Match advisor's $PROJECT_MEMORY derivation: sha256sum of pwd, first 16 chars
-PROJECT_HASH="$(printf '%s' "$FAKE_PROJECT" | sha256sum | cut -c1-16 2>/dev/null || echo deadbeefdeadbeef)"
-# pwd output includes trailing newline normally; mirror what advisor does:
-PROJECT_HASH="$(echo "$FAKE_PROJECT" | sha256sum | cut -c1-16)"
+# Match Claude Code's native marker-writer convention: tr '/' '-' on the
+# absolute path. (Previous sha256 derivation was incorrect — see S3-R1.)
+# The echo-n-vs-echo concern (historical F4) is moot under the tr derivation.
+# Note: variable name stays PROJECT_HASH for readability, but the VALUE is now
+# a dash-sanitized path segment, not a hash.
+PROJECT_HASH="$(echo "$FAKE_PROJECT" | tr '/' '-')"
 MEMORY_DIR="$FAKE_HOME/.claude/projects/$PROJECT_HASH/memory"
 MARKER_PATH="$MEMORY_DIR/.pipeline-active"
 SENTINEL_PATH="$MEMORY_DIR/.build-routing-advisor-disabled"
