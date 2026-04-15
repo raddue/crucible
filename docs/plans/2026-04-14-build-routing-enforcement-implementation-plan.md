@@ -96,6 +96,7 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    c. Register the capture hook in **`~/.claude/settings.json`** (user-global, matching the scope of `gate-ledger-guard` per #168 README) under `PreToolUse` with `matcher: "Task"` (NOT null-matcher — this limits blast radius to Task dispatches only; a global null-matcher registration leaked by a crash would impact every future session's every tool call), invoking `bash /tmp/capture-pretooluse.sh`.
    d. Perform the capture-dispatch sequence (steps 4–7). The trap auto-reverts on normal exit or any error.
 4. In an interactive Claude Code session, dispatch a single `general-purpose` subagent with any test prompt (e.g. "echo hello").
+5a. **MANDATORY `/build` dispatch (marker-path verification):** Dispatch `/build` on a trivial no-op change (e.g., add a single space to README and revert it, or use `/build` in `--dry-run` mode if available). The goal is ONLY to trigger `/build` Phase 1 Step -1 marker write. Wait for the marker to appear at the expected path. This step is MANDATORY — do NOT proceed to step 5/6 without a verified on-disk marker path. Running only `echo hello` via a raw subagent does NOT exercise `/build`'s marker writer and leaves the path derivation unvalidated.
 5. Inspect `/tmp/pretooluse-capture.log`. **Verify non-empty payload FIRST:**
    - Assert `[ -s /tmp/pretooluse-capture.log ]` (size > 0 bytes) AND the log contains the literal string `=== payload ===`.
    - If empty after 2 dispatch attempts, ESCALATE — do NOT proceed to fixture commit with an empty or fabricated payload.
@@ -115,8 +116,10 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    # Tool name field: .tool
    # Prompt path: .tool_input.prompt
    # Subagent type path: .tool_input.subagent_type
-   # CLAUDE_SESSION_ID exported: yes/no
+   # CLAUDE_SESSION_ID exported: yes|no
+   # verified on-disk marker path: <absolute path to .pipeline-active observed during T1 step 5a /build dispatch>
    ```
+   Both `CLAUDE_SESSION_ID exported:` and `verified on-disk marker path:` fields are MANDATORY. If either is unknown, record `(not verified)` and ESCALATE — do NOT commit the fixture with unverified fields (T3 step 0 pre-check will reject it).
 8. Remove the temporary capture hook from `~/.claude/settings.json` (normally handled by the EXIT trap from step 3b; the trap also removes the backup and the capture log). Delete `/tmp/capture-pretooluse.sh`. **Size cap (S1-R2):** before removing the capture log, verify `[ $(stat -c%s /tmp/pretooluse-capture.log) -le 10485760 ]` (≤10MB). If the log exceeded 10MB, record the size in the fixture header (investigate — the payload should be ≤1MB per dispatch). The log is deleted regardless of success/failure by the EXIT trap.
 9. **Settings-diff guard (post-trap verification):** Before committing the fixture commit:
    - Run `diff <(cat ~/.claude/settings.json) <(cat ~/.claude/settings.json.bak-pretooluse-capture 2>/dev/null || cat ~/.claude/settings.json)` — the backup SHOULD no longer exist (trap deleted it). The expected state is: settings.json matches its pre-T1 content AND the backup file is absent. Assert `[ ! -f ~/.claude/settings.json.bak-pretooluse-capture ]` — catches the case where the trap used the backup to revert but didn't delete it.
@@ -127,6 +130,7 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
 ### Acceptance
 
 - Fixture file exists at the path above and parses as JSON.
+- The on-disk `.pipeline-active` verification at step 5 is MANDATORY — an implementer MUST run a real `/build` dispatch (step 5a, not `echo hello`) to confirm the marker's actual on-disk path before committing the fixture.
 - Capture log was verified non-empty (size > 0, contains `=== payload ===`); one of `.tool_input.prompt` / `.input.prompt` / `.prompt` is present. Otherwise ESCALATED (no fabricated fixture committed).
 - Header comment records the canonical extraction path AND the `$CLAUDE_SESSION_ID` availability finding.
 - Header comment records the verified on-disk `.pipeline-active` path during a real `/build` dispatch and confirms it matches `~/.claude/projects/$(echo "$(git rev-parse --show-toplevel)" | tr '/' '-')/memory/.pipeline-active`. Any divergence is flagged and resolved before T2 begins.
@@ -146,6 +150,26 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
 
 Implement the full advisor flow per design Part 2. Single bash script; no helper modules. Mirrors `gate-ledger-guard.sh` style.
 
+### Execution-order overview (MIN-3 lazy derivation)
+
+To keep the non-trigger hot path as cheap as possible, `$PROJECT_ROOT` / `$PROJECT_MEMORY` are derived LAZILY — only after classification has confirmed the dispatch is build-shaped. The canonical ordering is:
+
+1. `set +e`; read stdin into `INPUT`; exit 0 on empty.
+2. **Kill-switch env-var check** (no `$PROJECT_ROOT` needed): if `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1`, perform the S4-R2 short-circuit / RMW flow. The env-var branch derives `$PROJECT_ROOT` / `$PROJECT_MEMORY` internally (to locate the state file) — that derivation is scoped to the kill-switch branch only.
+3. `command -v jq` dependency check.
+4. Tool-name, prompt, subagent-type extraction; allowlist gate; disclaimer skip.
+5. **Classification** (grep-only on `$PROMPT`; no git subprocess).
+6. **Early exit if trigger does not fire.**
+7. **ONLY NOW** derive `PROJECT_ROOT="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)"` and `PROJECT_MEMORY="$HOME/.claude/projects/$(echo "$PROJECT_ROOT" | tr '/' '-')/memory"`.
+8. Sentinel-file kill-switch branch (needs `$PROJECT_MEMORY`).
+9. Pipeline-active marker check.
+10. Dedup check + lazy `fires-today` reset.
+11. Emit advisory (stderr, 2 lines).
+12. Atomic state-file update.
+13. `exit 0`.
+
+The numbered list below (`Required behavior (in execution order)`) describes the DETAILS of each branch. Where the detailed text still references `$PROJECT_MEMORY` BEFORE step 7 above, that is scoped to the kill-switch env-var branch only — the non-kill-switch hot path must NOT touch `$PROJECT_ROOT` until classification fires.
+
 ### Required behavior (in execution order)
 
 0. **Matcher registration (prerequisite, verified by T2 step list):** register `build-routing-advisor` in **`~/.claude/settings.json` (user-global scope, identical to `gate-ledger-guard` per #168 README)** under `PreToolUse` with `matcher: "Task"` (primary; fallback `Agent` per T1 finding) and `timeout: 500` (ms). Verify the entry does NOT conflict with `gate-ledger-guard`'s null-matcher registration — the two entries coexist as separate hooks, one null-matcher (gate-ledger-guard) and one `Task`-matcher (build-routing-advisor).
@@ -161,7 +185,27 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
      STATE_FILE="$PROJECT_MEMORY/build-routing-advisor-state.md"
      grep -q "^last-honored: $(date +%Y-%m-%d)$" "$STATE_FILE" 2>/dev/null && exit 0
      ```
-     Otherwise, update state file with `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0. **Rationale:** kill-switch is honored ~50–90× per `/build` run; without this elision the state file is rewritten on every honored invocation causing no-op write amplification. `last-honored` has DATE granularity only — within the same day, repeated kill-switch invocations are no-op short-circuits. This is intentional for perf.
+     Otherwise, perform an explicit read-modify-write to update `last-honored` while PRESERVING dedup fields and counters per Min-1-R6. RMW preserves dedup fields across kill-switch toggles per Min-1-R6. Short-circuit elision (S4-R2) skips this block when `last-honored` already equals today's date.
+     ```bash
+     # Read existing values (default to empty/0 if absent)
+     FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 || echo 0)"
+     FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 || echo 0)"
+     LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2- || echo '')"
+     LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 || echo '')"
+
+     # Construct full 5-line block; write via tmp+mv per step 13 atomic-write pattern
+     mkdir -p "$PROJECT_MEMORY"
+     cat > "$STATE_FILE.tmp" <<EOF
+     last-honored: $(date +%Y-%m-%d)
+     fires-today: $FIRES_TODAY
+     fires-total: $FIRES_TOTAL
+     last-advisory-at: $LAST_ADV_AT
+     last-advisory-fingerprint: $LAST_ADV_FP
+     EOF
+     mv "$STATE_FILE.tmp" "$STATE_FILE"
+     exit 0
+     ```
+     **Rationale:** kill-switch is honored ~50–90× per `/build` run; without the elision above the state file is rewritten on every honored invocation causing no-op write amplification. `last-honored` has DATE granularity only — within the same day, repeated kill-switch invocations are no-op short-circuits (this is intentional for perf). The explicit RMW is ONLY executed on the first kill-switch invocation of each new day; naive `echo > $STATE_FILE` would wipe dedup state on that first invocation and silently break Min-1-R6.
    - If sentinel `$PROJECT_MEMORY/.build-routing-advisor-disabled` exists:
      - **Matching-line definition (MIN-3-R7):** a matching line is one beginning with `disabled-until:` at column 0 — no leading whitespace, no comment skipping. Use literal regex `^disabled-until: ` (trailing space required).
      - Parse FIRST matching line. If the file contains multiple matching lines, use only the FIRST; ignore the rest.
@@ -211,14 +255,16 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
     - Set `last-advisory-at: <ISO-8601 UTC>`.
     - Set `last-advisory-fingerprint: <hash>`.
     - Write to `$PROJECT_MEMORY/build-routing-advisor-state.md.tmp` then `mv` into place.
-    - Schema (≤5 lines):
+    - Schema (≤5 required lines, plus 1 optional schema-version line):
       ```
       last-honored: YYYY-MM-DD
       fires-today: N
       fires-total: N
       last-advisory-at: <ISO-8601 or empty>
       last-advisory-fingerprint: <hash or empty>
+      schema-version: 1          # OPTIONAL 6th line; reserved for future breaking-schema changes
       ```
+    - **Schema versioning (MIN-6):** the optional 6th line `schema-version: 1` is ignored by the current hook. The hook accepts files with OR without this line. Future schema changes MAY bump the version and use it to detect incompatible fields. The T3.5 case 15 "state-file bounded growth ≤5 lines" check is relaxed to ≤6 lines to accommodate the optional schema-version line when present.
     - **Atomic-write race note (MIN-4-R7):** per-process atomicity is via temp-file + `mv`; cross-process is last-writer-wins. ±1 counter races and fingerprint flicker across concurrent processes are ACCEPTED. Do NOT add `flock` or any file locking. The state file is advisory telemetry, not a correctness-critical ledger.
 14. `exit 0`.
 
@@ -258,6 +304,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 ### Steps
 
+0. **T3 fixture pre-check (mandatory before test run):** Before running the test harness, T3 verifies the fixture header at `hooks/tests/fixtures/agent-pretooluse-sample.json` records `CLAUDE_SESSION_ID exported: yes|no` AND `verified on-disk marker path: <path>`. If either field is missing OR set to `(not verified)`, ESCALATE — T1 was not completed correctly (the mandatory `/build` dispatch at T1 step 5a was skipped); do NOT attempt to make tests GREEN on an unvalidated fixture.
 1. Run `bash /mnt/e/Coding/crucible/hooks/tests/test-build-routing-advisor.sh`.
 2. For each failing test:
    - Read the test's setup, prompt, and expected behavior.
@@ -295,8 +342,8 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 
 ### Required additional cases (each appended to the existing single-file harness)
 
-1. **Dedup-across-parallel-scouts (Min-9):** two near-simultaneous invocations with identical prompt → exactly ONE advisory emitted (stderr check across both captures); `fires-total` reflects both (count-all), `last-advisory-fingerprint` matches, second invocation's stderr is empty.
-   - **Race tolerance (per Min-4-R7):** under parallel invocation, the second invocation should observe the first's `last-advisory-fingerprint` and suppress. `fires-total` may race ±1 under concurrency — the test ACCEPTS `fires-total ∈ {1, 2}` after two parallel dispatches of the same prompt. The exactly-one-emission stderr assertion is the hard contract; the counter is best-effort.
+1. **Dedup-across-parallel-scouts (Min-9):** two near-simultaneous invocations with identical prompt → assert 1 OR 2 advisories (±1 race tolerance per Min-4-R7) emitted across both captures; `last-advisory-fingerprint` matches the prompt hash. Parallel invocation deduplication is best-effort under last-writer-wins; both advisories firing is acceptable.
+   - **Race tolerance (per Min-4-R7):** under parallel invocation, the second invocation MAY observe the first's `last-advisory-fingerprint` and suppress, but if the two invocations interleave between the read and the atomic `mv` both may emit. The test ACCEPTS advisory-count ∈ {1, 2} and `fires-total ∈ {1, 2}`. Neither an exact-1 nor exact-2 assertion is a correctness requirement — the advisor is warn-only and best-effort deduplication is the contract. Do NOT add locking to tighten this; it would violate Min-4-R7.
 2. **Kill-switch auto-expiry:** sentinel with `disabled-until: <yesterday>` → advisor proceeds normally (trigger fires if classification matches); state records expiry path.
 3. **Malformed `disabled-until` fail-safe:** sentinel with `disabled-until: not-a-date` → PERMANENTLY DISABLED; stderr empty; state records `disabled-until-parse-error`.
 4. **Multiple `disabled-until:` lines:** sentinel with two `disabled-until:` lines (first = future, second = past) → FIRST wins; advisor honored.
@@ -311,7 +358,7 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 12. **Matcher-neither-Task-nor-Agent fallback:** verify behavior when neither matcher name is correct — the hook falls back to `jq -r '.tool'` (or `.tool_name`) grep on stdin; if that ALSO fails (returns null/empty), the hook exits 0 silently with no stderr. Test asserts: exit code 0, empty stderr, no state-file mutation.
 13. **Kill-switch toggle preserves dedup fields:** sequence — (a) emit an advisory (fingerprint + timestamp recorded in state); (b) set kill switch (env var or sentinel); (c) invoke hook → honored, dedup fields preserved per Min-1-R6; (d) remove kill switch; (e) re-trigger within 5-min dedup window with the same prompt → second trigger MUST be deduped (fingerprint preserved across the toggle, no second advisory emitted).
 14. **Literal `build-shaped` regression guard:** trivial assertion that the advisory stderr contains the exact literal token `build-shaped` (`grep -Fq "build-shaped"`). Catches future copy edits that might drop or rename the token (the tests grep for it; the README documents it; the dogfood scripts grep for it). **Two-line assertion (M5):** same case also asserts the ADVISORY stderr is EXACTLY 2 lines: `[ "$(grep -c '^' "$stderr_file")" -eq 2 ]`. Catches future copy bloat (multi-line advisories cost context budget across every dispatch and break the 200ms budget accounting).
-15. **State-file bounded growth ≤5 lines:** run a sequence of (advisory emit + kill-switch set + sentinel with `disabled-until` expiry + reset/eligible re-fire), then assert `[ "$(wc -l < $STATE_FILE)" -le 5 ]`. Schema must remain ≤5 lines across all state transitions; this catches accidental appends/duplicate-key bloat.
+15. **State-file bounded growth ≤6 lines:** run a sequence of (advisory emit + kill-switch set + sentinel with `disabled-until` expiry + reset/eligible re-fire), then assert `[ "$(wc -l < $STATE_FILE)" -le 6 ]`. Schema must remain ≤5 required lines plus an optional 6th `schema-version:` line (MIN-6) across all state transitions; this catches accidental appends/duplicate-key bloat.
 16. **PROJECT_HASH derivation canary (S3-R1; supersedes F4):** fixture writes a valid pipeline-active marker at `$HOME/.claude/projects/<tr-sanitized path>/memory/.pipeline-active` (computed with `echo "$PROJECT_ROOT" | tr '/' '-'` where `PROJECT_ROOT` is the fake project path under the harness's fake `$HOME`). Pipe a build-shaped prompt to the hook; assert the hook FINDS the marker and suppresses (exit 0, empty stderr). If the hook were to use ANY sha256-based derivation (either `echo` or `echo -n` variant), or any other scheme, it would look in a DIFFERENT directory, miss the marker, and emit an advisory — this test fails. Fail message must mention "PROJECT_HASH derivation mismatch: hook must look at `~/.claude/projects/$(echo $PROJECT_ROOT | tr '/' '-')/memory/.pipeline-active`" to make the diagnosis obvious. (Historical note: earlier drafts named this the "trailing-newline canary" / "F4 canary"; S3-R1 rescopes it to the tr derivation.)
 17. **Real-fixture pass-through:** `bash hooks/build-routing-advisor.sh < hooks/tests/fixtures/agent-pretooluse-sample.json` — hook exits 0; stderr either empty (fixture's prompt is non-build-shaped) OR contains `ADVISORY:` (fixture's prompt is build-shaped). Either outcome passes; the assertion is that the hook does not crash and the extraction path returns the prompt.
 18. **Trigger-classification (a) Implement+Design, density=2:** prompt `"implement refactor of design"` → Implement=2 distinct (implement, refactor), Design=1, Ship=0, TOTAL_DISTINCT ≥2 → advisory emits. Comment cites Trigger-Classification rule "Implement≥1 AND (Design≥1 OR Ship≥1) AND total-distinct≥2".
@@ -417,7 +464,7 @@ N≥10 selection-eval prompts that present build-shaped intents; expected_skill 
 4. Compute median pass rate.
 5. If median <8/10: iterate Part 1 wording (T4) ONCE, rerun with FRESH 3 seeds. If still <8/10: iterate Part 1 ONCE more, rerun. If still <8/10 after two wording iterations → STOP and ESCALATE per F3-R5 / S3-R2.
    - **ESCALATE operational definition (S3-R2 — does NOT rely on orchestrator exit-code semantics):** the escalation is surfaced via TWO durable artifacts that the user can find regardless of orchestrator retry behavior:
-     1. **Sentinel file (primary):** write `docs/plans/ESCALATION-174-T5-routing-eval.md` containing the eval transcript — median score, per-seed pass/fail breakdown, per-prompt results, failing prompts with reasoning traces, and the exact wording iterations tried (diffs of the Part 1 section across iterations). Commit with `git add -f`.
+     1. **Sentinel file (primary):** write `docs/plans/ESCALATION-174-T5-routing-eval.md` containing the eval transcript — median score, per-seed pass/fail breakdown, per-prompt results, failing prompts with reasoning traces, and the exact wording iterations tried (diffs of the Part 1 section across iterations). Before `exit 2`, COMMIT the sentinel so it is preserved across branch-switch: `git add -f docs/plans/ESCALATION-174-T5-routing-eval.md && git commit -q -m 'chore: record T5 routing-eval escalation (#174)'`. An uncommitted sentinel will be lost if the orchestrator checks out a different branch before the user inspects the working tree.
      2. **Decision journal entry:** append to `/tmp/crucible-decisions-<session-id>.log` (session id from `$CLAUDE_SESSION_ID` if set, else `$$`): `[<ISO-8601 timestamp>] DECISION: routing-eval | choice=escalate-after-2-iterations | reason=median <8/10 after 2 wording iterations | alternatives=none`.
      3. **Exit code:** exit with code 2 (distinguishes from ordinary failure exit 1). The orchestrator MAY retry on non-zero exit — that is fine; the SENTINEL FILE is the source of truth for the user-facing escalation, not the exit code.
      4. **Stderr message:** the message printed to stderr MUST reference BOTH the sentinel file path (`docs/plans/ESCALATION-174-T5-routing-eval.md`) AND the decision journal entry (`/tmp/crucible-decisions-<session-id>.log`). Example: `T5 ESCALATE after 2 wording iterations. Sentinel: docs/plans/ESCALATION-174-T5-routing-eval.md. Decision journal: /tmp/crucible-decisions-<session-id>.log. Median <8/10; do NOT silently lower threshold.`
@@ -456,7 +503,7 @@ Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledg
 - `### JSON Extraction Path`: cite the canonical path from T1's fixture header (e.g. `.tool_input.prompt`, `.tool_input.subagent_type`, `.tool` for tool name) and the `.tool`-field fallback (M1-R4).
 - `### Suppression Rules`: marker must have `.skill` in {build, spec, debugging, migrate}, `.start_time` <24h, `.branch == git branch --show-current`. Symmetric detached-HEAD `.pipeline_id == $CLAUDE_SESSION_ID` fallback.
 - `### Kill Switch`: env var `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` and sentinel `$PROJECT_MEMORY/.build-routing-advisor-disabled` (with optional `disabled-until: YYYY-MM-DD` line; malformed → permanently disabled fail-safe).
-- `### Cross-project firing (M6)`: "This hook is registered user-globally in `~/.claude/settings.json`. It fires on subagent dispatches from ANY project where the user works. Outside crucible, there is no `.pipeline-active` marker so suppression never applies; a build-shaped dispatch in an unrelated project will emit the advisory. If this is undesirable, disable via kill switch (`CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1`) in that project's shell init (`.envrc`, direnv, etc.). The design accepts this cross-project fire surface as a tradeoff for the broader enforcement."
+- `### Cross-project firing (M6)`: "This hook is registered user-globally in `~/.claude/settings.json`. It fires on subagent dispatches from ANY project where the user works. Outside crucible, there is no `.pipeline-active` marker so suppression never applies; a build-shaped dispatch in an unrelated project will emit the advisory. For per-project disable, create the sentinel file `<project-root>/.build-routing-advisor-disabled` (preferred — does not require shell init). The env-var path `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` requires the user's shell init (e.g. `.bashrc`, `.zshrc`, or a shell-init wrapper) since hook subprocesses do NOT auto-source `.envrc` or direnv hooks — a `.envrc`-only export will NOT propagate. The design accepts this cross-project fire surface as a tradeoff for the broader enforcement."
 - `### State File`: schema and bounded growth (≤5 lines).
 - `### Performance`: combined budget with `gate-ledger-guard` ≤200ms P95 over ≥20 dispatches; record measured numbers from T7.
 - `### Graceful Degradation`: missing jq, malformed JSON, missing utilities → exit 0 silently.
@@ -464,7 +511,10 @@ Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledg
 - `### Static-analysis fallback (T8) — known brittleness (M6)`: note that T8's method (b) static-analysis check (grep line-number of marker-write < grep line-number of first Task dispatch in each pipeline skill's SKILL.md) is brittle against future markdown reorganization. If pipeline-skill SKILL.md files are restructured (headings renamed, sections reordered, Task invocation documented in a different syntax), this check can silently pass on broken ordering or fail on correct ordering. Future pipeline-skill refactors MUST update this check alongside the SKILL.md change.
 
 Append to "Gate Ledger Guard" section a brief note (Min-5-R6):
-> Registered in user-global `~/.claude/settings.json`. Matcher: none — this hook intercepts every PreToolUse event and filters internally for Write/Edit. By contrast, `build-routing-advisor` registers `matcher: "Task"` in the SAME `~/.claude/settings.json`. Both hooks' scope (user-global) and matcher choices are documented for parity.
+
+**MIN-5 pre-documentation step:** Before documenting `gate-ledger-guard`'s matcher, READ `~/.claude/settings.json` and record the ACTUAL matcher value (null/empty, `Write|Edit`, or other). Document the VERIFIED value. Do NOT claim `null-matcher` without verification. If the actual matcher is something other than null (e.g. `Write|Edit`), the parity note below MUST be updated to reflect reality.
+
+> Registered in user-global `~/.claude/settings.json`. Matcher: <VERIFIED VALUE — read from settings.json before writing this paragraph>. If null/empty: this hook intercepts every PreToolUse event and filters internally for Write/Edit. If a concrete matcher is set (e.g. `Write|Edit`): Claude Code filters upstream, no internal filtering needed. By contrast, `build-routing-advisor` registers `matcher: "Task"` in the SAME `~/.claude/settings.json`. Both hooks' scope (user-global) and matcher choices are documented for parity.
 
 ### Acceptance
 
@@ -592,7 +642,7 @@ Design's Honest-about-limits states: "If post-launch telemetry shows Part 2's co
 
 5. **If HAS_GATE_PASS=false, flag the PR:** Record PR number, branch name, merge date, commits on branch count. This is the #174 failure-mode signal.
 
-6. **Enrich with advisor fire data:** For each flagged PR, check `$PROJECT_MEMORY/build-routing-advisor-state.md` snapshots (if available — the state file is overwritten, so historical data is in session-index or git-committed retros). `$PROJECT_MEMORY` is derived per S3-R1 via `~/.claude/projects/$(echo "$REPO_ROOT" | tr '/' '-')/memory/` (NOT sha256). Count advisory fires during the branch's lifetime.
+6. **State-file historical enrichment is NOT available at first run:** the state file is overwritten (no archive mechanism exists). Reconciler output relies on `(merged PR) ∧ (no gate-ledger PASS)` alone (step 4's binary outcome). State-file archiving is a follow-up; do not attempt per-PR advisor-fire enrichment from the live state file.
 
 7. **Enrich with session-index Task dispatch data:** session-index writes under a DIFFERENT directory than the marker-writer (pre-existing divergence — session-index uses sha256 of pwd). Grep `~/.claude/projects/<session-index-dir>/memory/session-index/*/events.jsonl` for `Task` tool invocations with `subagent_type=general-purpose` within the branch's timeframe. Count. Document this directory split inline as a comment in the reconciler: the two data sources live in different subdirectories under `~/.claude/projects/` and both must be consulted.
 
