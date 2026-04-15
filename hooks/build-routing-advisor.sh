@@ -21,12 +21,56 @@ if [ -z "$INPUT" ]; then
   exit 0
 fi
 
-# ── 2. Dependency check (jq required) ─────────────────────────────────
+# ── 2. Env-var kill-switch (plan lines 181–195, step 2 — before jq etc.)
+# Scoped PROJECT_ROOT / PROJECT_MEMORY derivation internal to this branch.
+# FIX 3: This now runs BEFORE jq dep check and tool/prompt extraction so
+# that non-Task/non-Agent calls still honor the kill-switch, and the honor
+# path pays no jq/extraction cost needlessly.
+if [ "${CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR:-}" = "1" ]; then
+  _PROJECT_ROOT="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)"
+  _PROJECT_DIR_SAFE="$(echo "$_PROJECT_ROOT" | tr '/' '-')"
+  _PROJECT_MEMORY="$HOME/.claude/projects/$_PROJECT_DIR_SAFE/memory"
+  _STATE_FILE="$_PROJECT_MEMORY/build-routing-advisor-state.md"
+
+  # Short-circuit: if state file already records today's date as last-honored,
+  # exit 0 without rewriting (kill-switch fires ~50-90× per /build run).
+  grep -q "^last-honored: $(date +%Y-%m-%d)$" "$_STATE_FILE" 2>/dev/null && exit 0
+
+  # Explicit RMW preserves dedup fields + counters across kill-switch toggles.
+  # FIX 1: tr -d '\r' on every state-file read to tolerate CRLF line endings.
+  _FIRES_TODAY="$(grep '^fires-today:' "$_STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+  [ -z "$_FIRES_TODAY" ] && _FIRES_TODAY=0
+  _FIRES_TOTAL="$(grep '^fires-total:' "$_STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+  [ -z "$_FIRES_TOTAL" ] && _FIRES_TOTAL=0
+  _LAST_ADV_AT="$(grep '^last-advisory-at:' "$_STATE_FILE" 2>/dev/null | cut -d' ' -f2- | tr -d '\r')"
+  _LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$_STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+
+  mkdir -p "$_PROJECT_MEMORY"
+  cat > "$_STATE_FILE.tmp" <<EOF
+last-honored: $(date +%Y-%m-%d)
+fires-today: $_FIRES_TODAY
+fires-total: $_FIRES_TOTAL
+last-advisory-at: $_LAST_ADV_AT
+last-advisory-fingerprint: $_LAST_ADV_FP
+EOF
+  mv "$_STATE_FILE.tmp" "$_STATE_FILE"
+
+  # Self-check (S2-R4): assert column-0 anchoring — if the heredoc body was
+  # accidentally indented (common footgun), the first line will not match.
+  # 2P-3-R5: preserve state file for forensics on regression; warn-only hook.
+  grep -q '^last-honored: ' "$_STATE_FILE" || {
+    echo "advisor: state-file column-0 invariant broken; preserving for forensics" >&2
+    exit 0
+  }
+  exit 0
+fi
+
+# ── 3. Dependency check (jq required) ─────────────────────────────────
 if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
-# ── 3. Tool-name extraction (accept both .tool_name and legacy .tool) ──
+# ── 4. Tool-name extraction (accept both .tool_name and legacy .tool) ──
 # T1 finding: canonical field is .tool_name, canonical value is "Agent".
 # Legacy alias "Task" is honored for back-compat / test payloads.
 TOOL="$(echo "$INPUT" | jq -r '.tool_name // .tool // empty' 2>/dev/null)"
@@ -35,7 +79,7 @@ case "$TOOL" in
   *) exit 0 ;;
 esac
 
-# ── 4. Prompt + subagent extraction ────────────────────────────────────
+# ── 5. Prompt + subagent extraction ────────────────────────────────────
 PROMPT="$(echo "$INPUT" | jq -r '.tool_input.prompt // .input.prompt // empty' 2>/dev/null)"
 SUBAGENT="$(echo "$INPUT" | jq -r '.tool_input.subagent_type // .input.subagent_type // empty' 2>/dev/null)"
 if [ -z "$PROMPT" ] && [ -z "$SUBAGENT" ]; then
@@ -45,7 +89,7 @@ fi
 # Session id (payload, not env var — $CLAUDE_SESSION_ID is NOT exported per T1).
 SESSION_ID="$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 
-# ── 5. Allowlist gate — only general-purpose dispatches are advised ────
+# ── 6. Allowlist gate — only general-purpose dispatches are advised ────
 # Empty subagent_type treated as SPECIALTY (indistinguishable from MCP types).
 if [ -n "$SUBAGENT" ] && [ "$SUBAGENT" != "general-purpose" ]; then
   exit 0
@@ -54,13 +98,16 @@ if [ -z "$SUBAGENT" ]; then
   exit 0
 fi
 
-# ── 6. Disclaimer skip ────────────────────────────────────────────────
-# Case-insensitive match against explicit single-phase disclaimers.
-if echo "$PROMPT" | grep -qiE 'just the design|design only|no implementation|review only|audit only|spec only|recon only'; then
+# ── 7. Disclaimer skip ────────────────────────────────────────────────
+# FIX 5: Anchored regex — disclaimer must appear at start-of-prompt or after
+# a sentence-boundary punctuator (newline / colon / semicolon / dash). This
+# preserves plan line 262's single-phase intent while preventing mid-prompt
+# false-negatives like "Build feature: ... audit only if time permits."
+if echo "$PROMPT" | grep -qiE '(^|[[:space:]]*[:;[:cntrl:]-][[:space:]]*)(just the design|design only|no implementation|review only|audit only|spec only|recon only)\b'; then
   exit 0
 fi
 
-# ── 7. Classification (grep-only; NO git subprocess yet — Min-7) ───────
+# ── 8. Classification (grep-only; NO git subprocess yet — Min-7) ───────
 # "spec + implement + PR" → DESIGN=1, IMPLEMENT=1, SHIP=1, TOTAL_DISTINCT=3 → fires.
 # TOTAL_DISTINCT uses 'tr [:upper:] [:lower:] | sort -u | wc -l' to count DISTINCT
 # lowercased hits across all three categories. sort -u is sound (dedup is per-line
@@ -82,62 +129,19 @@ if [ "$IMPLEMENT_HITS" -ge 1 ] 2>/dev/null; then
   fi
 fi
 
-# Kill-switch env var path must honor even when trigger does not fire, because
-# the switch records last-honored state. So we do kill-switch BEFORE the
-# trigger-exit — but only derive PROJECT_ROOT here (lazy MIN-3 deferred until
-# either kill-switch branch or post-trigger path).
-if [ "$TRIGGER" -ne 1 ] && [ "${CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR:-}" != "1" ]; then
-  # Cheapest hot-path: no trigger, no kill-switch → done.
+# FIX 3: No env-var check here — already handled at step 2 above. If trigger
+# did not fire AND env-var is unset (reached here), exit cheapest path.
+if [ "$TRIGGER" -ne 1 ]; then
   exit 0
 fi
 
-# ── 8. Lazy PROJECT_ROOT / PROJECT_MEMORY derivation (MIN-3) ──────────
+# ── 9. Lazy PROJECT_ROOT / PROJECT_MEMORY derivation (MIN-3) ──────────
 # Walks upward via git-toplevel so cwd drift between dispatches doesn't break
 # derivation. If not inside a git repo, falls back to pwd.
 PROJECT_ROOT="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROJECT_DIR_SAFE="$(echo "$PROJECT_ROOT" | tr '/' '-')"
 PROJECT_MEMORY="$HOME/.claude/projects/$PROJECT_DIR_SAFE/memory"
 STATE_FILE="$PROJECT_MEMORY/build-routing-advisor-state.md"
-
-# ── 9. Kill-switch env var (S4-R2 write-elision short-circuit) ────────
-if [ "${CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR:-}" = "1" ]; then
-  # Short-circuit: if state file already records today's date as last-honored,
-  # exit 0 without rewriting (kill-switch fires ~50-90× per /build run).
-  grep -q "^last-honored: $(date +%Y-%m-%d)$" "$STATE_FILE" 2>/dev/null && exit 0
-
-  # Explicit RMW preserves dedup fields + counters across kill-switch toggles.
-  FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-  [ -z "$FIRES_TODAY" ] && FIRES_TODAY=0
-  FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-  [ -z "$FIRES_TOTAL" ] && FIRES_TOTAL=0
-  LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2-)"
-  LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-
-  mkdir -p "$PROJECT_MEMORY"
-  cat > "$STATE_FILE.tmp" <<EOF
-last-honored: $(date +%Y-%m-%d)
-fires-today: $FIRES_TODAY
-fires-total: $FIRES_TOTAL
-last-advisory-at: $LAST_ADV_AT
-last-advisory-fingerprint: $LAST_ADV_FP
-EOF
-  mv "$STATE_FILE.tmp" "$STATE_FILE"
-
-  # Self-check (S2-R4): assert column-0 anchoring — if the heredoc body was
-  # accidentally indented (common footgun), the first line will not match.
-  # 2P-3-R5: preserve state file for forensics on regression; warn-only hook.
-  grep -q '^last-honored: ' "$STATE_FILE" || {
-    echo "advisor: state-file column-0 invariant broken; preserving for forensics" >&2
-    exit 0
-  }
-  exit 0
-fi
-
-# Trigger did not fire (but we're here because we had to check kill-switch
-# env var which turned out to be unset) — exit.
-if [ "$TRIGGER" -ne 1 ]; then
-  exit 0
-fi
 
 # ── 10. Sentinel-file kill switch ──────────────────────────────────────
 SENTINEL="$PROJECT_MEMORY/.build-routing-advisor-disabled"
@@ -150,51 +154,60 @@ if [ -f "$SENTINEL" ]; then
     TODAY_EPOCH="$(date +%s)"
     if [ -n "$DISABLED_EPOCH" ]; then
       if [ "$TODAY_EPOCH" -lt "$DISABLED_EPOCH" ] 2>/dev/null; then
-        # Honored — update last-honored and exit
-        _honor_exit() {
-          FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-          [ -z "$FIRES_TODAY" ] && FIRES_TODAY=0
-          FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-          [ -z "$FIRES_TOTAL" ] && FIRES_TOTAL=0
-          LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2-)"
-          LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-          mkdir -p "$PROJECT_MEMORY"
-          cat > "$STATE_FILE.tmp" <<EOF
+        # Honored — update last-honored and exit (preserve counters + dedup).
+        # FIX 1: tr -d '\r' on each read to tolerate CRLF state files.
+        FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+        [ -z "$FIRES_TODAY" ] && FIRES_TODAY=0
+        FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+        [ -z "$FIRES_TOTAL" ] && FIRES_TOTAL=0
+        LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2- | tr -d '\r')"
+        LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+        mkdir -p "$PROJECT_MEMORY"
+        cat > "$STATE_FILE.tmp" <<EOF
 last-honored: $(date +%Y-%m-%d)
 fires-today: $FIRES_TODAY
 fires-total: $FIRES_TOTAL
 last-advisory-at: $LAST_ADV_AT
 last-advisory-fingerprint: $LAST_ADV_FP
 EOF
-          mv "$STATE_FILE.tmp" "$STATE_FILE"
-          exit 0
-        }
-        _honor_exit
+        mv "$STATE_FILE.tmp" "$STATE_FILE"
+        exit 0
       fi
       # Else: switch expired (auto-expiry) — fall through to advisor flow.
     else
-      # Parse error → PERMANENTLY DISABLED fail-safe, record raw value
+      # Parse error → PERMANENTLY DISABLED fail-safe, record raw value.
+      # FIX 4: preserve existing counters + dedup + schema-version instead of
+      # wiping them (Min-1-R6 / 2P-3-R5). Schema now has up to 7 lines.
+      FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+      [ -z "$FIRES_TODAY" ] && FIRES_TODAY=0
+      FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+      [ -z "$FIRES_TOTAL" ] && FIRES_TOTAL=0
+      LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2- | tr -d '\r')"
+      LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+      SCHEMA_VERSION_LINE="$(grep '^schema-version:' "$STATE_FILE" 2>/dev/null | tr -d '\r')"
       mkdir -p "$PROJECT_MEMORY"
-      cat > "$STATE_FILE.tmp" <<EOF
-last-honored: $(date +%Y-%m-%d)
-fires-today: 0
-fires-total: 0
-last-advisory-at:
-last-advisory-fingerprint:
-disabled-until-parse-error: $DISABLED_UNTIL_RAW
-EOF
+      {
+        [ -n "$SCHEMA_VERSION_LINE" ] && echo "$SCHEMA_VERSION_LINE"
+        echo "last-honored: $(date +%Y-%m-%d)"
+        echo "fires-today: $FIRES_TODAY"
+        echo "fires-total: $FIRES_TOTAL"
+        echo "last-advisory-at: $LAST_ADV_AT"
+        echo "last-advisory-fingerprint: $LAST_ADV_FP"
+        echo "disabled-until-parse-error: $DISABLED_UNTIL_RAW"
+      } > "$STATE_FILE.tmp"
       mv "$STATE_FILE.tmp" "$STATE_FILE"
       exit 0
     fi
   else
-    # Sentinel exists but no disabled-until: line → honor indefinitely
+    # Sentinel exists but no disabled-until: line → honor indefinitely.
+    # FIX 1: tr -d '\r' applied to all reads.
     mkdir -p "$PROJECT_MEMORY"
-    FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
+    FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
     [ -z "$FIRES_TODAY" ] && FIRES_TODAY=0
-    FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
+    FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
     [ -z "$FIRES_TOTAL" ] && FIRES_TOTAL=0
-    LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2-)"
-    LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
+    LAST_ADV_AT="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2- | tr -d '\r')"
+    LAST_ADV_FP="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
     cat > "$STATE_FILE.tmp" <<EOF
 last-honored: $(date +%Y-%m-%d)
 fires-today: $FIRES_TODAY
@@ -223,36 +236,42 @@ if [ -f "$MARKER" ]; then
   esac
 
   if [ "$SKILL_OK" = "1" ] && [ -n "$MARKER_START" ]; then
-    START_EPOCH="$(date -d "$MARKER_START" +%s 2>/dev/null)"
-    NOW_EPOCH="$(date -u +%s 2>/dev/null)"
-    if [ -n "$START_EPOCH" ] && [ -n "$NOW_EPOCH" ]; then
-      AGE=$((NOW_EPOCH - START_EPOCH))
-      # Within 24h window
-      if [ "$AGE" -ge 0 ] 2>/dev/null && [ "$AGE" -le 86400 ] 2>/dev/null; then
-        CUR_BRANCH="$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null)"
-        # Branch comparison:
-        #   both non-empty and equal → active
-        #   both empty AND session_id == pipeline_id → active (detached-HEAD
-        #     symmetric fallback, using payload .session_id per T1)
-        #   else → not active
-        if [ -n "$MARKER_BRANCH" ] && [ -n "$CUR_BRANCH" ] && [ "$MARKER_BRANCH" = "$CUR_BRANCH" ]; then
-          MARKER_ACTIVE=1
-        elif [ -z "$MARKER_BRANCH" ] && [ -z "$CUR_BRANCH" ]; then
-          # Detached-HEAD symmetric fallback. Per T1 finding, $CLAUDE_SESSION_ID
-          # is NOT exported — use payload .session_id. Per plan line 317, when
-          # session-id match is unavailable, fall back to 5-minute .start_time
-          # session-proxy window (M9-R4).
-          if [ -n "$SESSION_ID" ] && [ -n "$MARKER_PID" ] && [ "$SESSION_ID" = "$MARKER_PID" ]; then
+    # FIX 2: Validate start_time is ISO-8601-like before date -d. Plan line 275
+    # mandates unparseable timestamps are treated as STALE, not silently honored.
+    # A numeric-literal start_time (e.g. "0") parses via GNU date -d but means
+    # "today local midnight" → would spuriously suppress advisory.
+    if echo "$MARKER_START" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
+      START_EPOCH="$(date -d "$MARKER_START" +%s 2>/dev/null)"
+      NOW_EPOCH="$(date -u +%s 2>/dev/null)"
+      if [ -n "$START_EPOCH" ] && [ -n "$NOW_EPOCH" ]; then
+        AGE=$((NOW_EPOCH - START_EPOCH))
+        # Within 24h window
+        if [ "$AGE" -ge 0 ] 2>/dev/null && [ "$AGE" -le 86400 ] 2>/dev/null; then
+          CUR_BRANCH="$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null)"
+          # Branch comparison:
+          #   both non-empty and equal → active
+          #   both empty AND session_id == pipeline_id → active (detached-HEAD
+          #     symmetric fallback, using payload .session_id per T1)
+          #   else → not active
+          if [ -n "$MARKER_BRANCH" ] && [ -n "$CUR_BRANCH" ] && [ "$MARKER_BRANCH" = "$CUR_BRANCH" ]; then
             MARKER_ACTIVE=1
-          elif [ "$AGE" -le 300 ] 2>/dev/null; then
-            MARKER_ACTIVE=1
+          elif [ -z "$MARKER_BRANCH" ] && [ -z "$CUR_BRANCH" ]; then
+            # Detached-HEAD symmetric fallback. Per T1 finding, $CLAUDE_SESSION_ID
+            # is NOT exported — use payload .session_id. Per plan line 317, when
+            # session-id match is unavailable, fall back to 5-minute .start_time
+            # session-proxy window (M9-R4).
+            if [ -n "$SESSION_ID" ] && [ -n "$MARKER_PID" ] && [ "$SESSION_ID" = "$MARKER_PID" ]; then
+              MARKER_ACTIVE=1
+            elif [ "$AGE" -le 300 ] 2>/dev/null; then
+              MARKER_ACTIVE=1
+            fi
           fi
+          # Explicit branch mismatch OR asymmetric empty → NOT active (plan S3).
         fi
-        # Explicit branch mismatch OR asymmetric empty → NOT active (plan S3).
+        # Else: stale marker (>24h) → MARKER_ACTIVE stays 0 → advisory fires.
       fi
-      # Else: stale marker (>24h) → MARKER_ACTIVE stays 0 → advisory fires.
     fi
-    # Else: unparseable timestamp → treat as stale → advisory fires.
+    # Else: unparseable (or non-ISO-8601) timestamp → treat as stale → advisory fires.
   fi
 fi
 
@@ -267,13 +286,14 @@ if command -v sha256sum &>/dev/null; then
   FINGERPRINT="$(echo "$PROMPT" | sha256sum 2>/dev/null | cut -c1-16)"
 fi
 
-LAST_ADV_AT_EXISTING="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2-)"
-LAST_ADV_FP_EXISTING="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
-FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
+# FIX 1: tr -d '\r' on all state-file reads.
+LAST_ADV_AT_EXISTING="$(grep '^last-advisory-at:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2- | tr -d '\r')"
+LAST_ADV_FP_EXISTING="$(grep '^last-advisory-fingerprint:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
+FIRES_TODAY="$(grep '^fires-today:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
 [ -z "$FIRES_TODAY" ] && FIRES_TODAY=0
-FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
+FIRES_TOTAL="$(grep '^fires-total:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
 [ -z "$FIRES_TOTAL" ] && FIRES_TOTAL=0
-LAST_HONORED_EXISTING="$(grep '^last-honored:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2)"
+LAST_HONORED_EXISTING="$(grep '^last-honored:' "$STATE_FILE" 2>/dev/null | cut -d' ' -f2 | tr -d '\r')"
 
 SUPPRESS=0
 if [ -n "$FINGERPRINT" ] && [ -n "$LAST_ADV_FP_EXISTING" ] && [ "$FINGERPRINT" = "$LAST_ADV_FP_EXISTING" ] && [ -n "$LAST_ADV_AT_EXISTING" ]; then
