@@ -130,16 +130,34 @@ The hook:
      audit-only prompts that mention PR are protected by the
      Implement-required rule below.
 
-   **Implement-required trigger (S3-R4).** Trigger fires only when
-   ALL of: Implement has ≥1 word-boundary hit, AND (Design OR Ship)
-   has ≥1 hit, AND at least one matched category has **2+ distinct
-   keyword hits** (density check, S2-R2). This replaces the prior
-   "any 2 of 3" rule. Rationale: build-shaped work by definition
-   involves producing code. A prompt without Implement-category words
-   is review/recon/audit; those are legitimate single-phase tasks by
-   this design's own Part 1 anti-pattern list. Design+Ship alone
-   ("review PR #123 for design correctness") is review work and must
-   not fire.
+   **Implement-required trigger (S3-R4, density rule revised S3-R6).**
+   Trigger fires only when ALL of: Implement has ≥1 word-boundary hit,
+   AND (Design OR Ship) has ≥1 hit, AND **the total number of distinct
+   matched keywords across ALL matched categories is ≥2** (total-distinct
+   rule, S3-R6). This replaces the earlier "at least one category with
+   2+ distinct keyword hits" density rule, which had a correctness bug:
+   the design's own verbatim motivating prompt "spec + implement + PR"
+   (Part 1 line 16) produces Design=1 (spec), Implement=1 (implement),
+   Ship=1 (PR) — no single category reaches 2, so the prior rule failed
+   to fire on the exact scenario this issue was opened to address. The
+   total-distinct formulation still demands multi-category breadth
+   (Implement + (Design OR Ship)) so single-category spam cannot trip
+   it, while ensuring the motivating example fires.
+
+   Worked examples under the revised rule:
+   - "spec + implement + PR" → distinct keywords = 3, Implement ≥1,
+     Design ≥1 → **fires** (motivating example canary)
+   - "implement X" alone → Design/Ship both 0 → no advisory
+   - "implement and code" → Design/Ship both 0 → no advisory
+   - "design doc review" → Implement 0 → no advisory
+
+   Rationale: build-shaped work by definition involves producing code.
+   A prompt without Implement-category words is review/recon/audit;
+   those are legitimate single-phase tasks by this design's own Part 1
+   anti-pattern list. Design+Ship alone ("review PR #123 for design
+   correctness") is review work and must not fire. Total-distinct ≥2
+   catches the motivating example while still requiring multi-category
+   breadth to avoid single-category noise.
 5. Checks the pipeline-active marker (`$PROJECT_MEMORY/.pipeline-active`
    or equivalent). Treat marker as **active** ONLY when ALL THREE of:
    - File exists and is parseable JSON, `.skill` field is present and
@@ -218,18 +236,41 @@ The hook:
    **Discoverability (S2-R3, M2-R4).** Whenever the kill switch is
    honored, the hook **overwrites** (not appends)
    `$PROJECT_MEMORY/build-routing-advisor-state.md` with a small
-   fixed-schema block (Min-5):
+   fixed-schema block (Min-5; schema revised Min-8-R6):
    ```
    last-honored: YYYY-MM-DD
    fires-today: N
    fires-total: N
+   last-advisory-at: <ISO-8601 timestamp or empty>
+   last-advisory-fingerprint: <hash or empty>
    ```
+   **State file schema (Min-8-R6).** The state file schema is **up to
+   5 fixed lines**: `last-honored`, `fires-today`, `fires-total`,
+   `last-advisory-at`, `last-advisory-fingerprint`. Prior text stating
+   "fixed 3-line block" (rounds ≤5) is superseded here. Any future
+   fields require a schema version bump.
+
+   **Kill-switch dedup preservation (Min-1-R6).** When the kill switch
+   is honored, the state file is NOT wiped wholesale — only the
+   `last-honored` field is updated; dedup fields (`last-advisory-at`,
+   `last-advisory-fingerprint`) and the `fires-today`/`fires-total`
+   counters persist across toggle events so dedup windows and
+   measurement are not reset by a brief disable/re-enable.
    `fires-today` is incremented each time the hook emits an advisory
    (reset on date change); `fires-total` is incremented on every
    advisory emission. Both fields are overwritten in place (not
    appended) so the file stays small. This gives users a concrete
-   measurement of actual firing rate. One-line-total state growth is
-   still bounded — the file remains ≤4 lines.
+   measurement of actual firing rate. State growth is bounded — the
+   file remains ≤5 lines (Min-8-R6).
+
+   **`fires-today` reset mechanism (Min-3-R6).** The hook reads the
+   state file on every advisory candidate; if the date-stamp tracking
+   (either `last-honored`'s date field or an internal last-advisory
+   date derived from `last-advisory-at`) does not match today's local
+   date, the `fires-today` counter resets to 0 before any increment.
+   This reset is lazy — it happens on the next advisory-eligible
+   invocation, not continuously — so the state file is not rewritten
+   merely because a day turned over with no activity.
 
    **Auto-expiry (S2-R3, M3-R4).** If the sentinel file contains a
    `disabled-until: YYYY-MM-DD` line, the hook treats the switch as
@@ -281,6 +322,7 @@ what make the trigger sustainable.
 - [ ] `getting-started/SKILL.md` has a section on build-shaped work routing with the anti-pattern list and `/build` redirect, framed as **write-time** guidance (M4)
 - [ ] `hooks/build-routing-advisor.sh` hook implemented with Implement-required keyword check (S3-R4), single-phase disclaimer skip, `subagent_type` allowlist, and time-bounded/branch-scoped pipeline-skill-active suppression (three-condition: `.skill` known, fresh <24h, `.branch` matches current branch via `git branch --show-current` on BOTH sides)
 - [ ] A real PreToolUse stdin payload is captured during implementation and committed to `hooks/tests/fixtures/agent-pretooluse-sample.json`; the hook extraction path is verified against this fixture in tests. Cover BOTH possible tool names (`Task` and `Agent`) — whichever Claude Code emits in this version is the registered matcher; the other is documented in the hook README as a fallback (S1, M3)
+- [ ] **`$CLAUDE_SESSION_ID` availability probe (S1-R6).** During S1 fixture capture (the acceptance criterion for real PreToolUse payload), the hook must ALSO log `env | grep CLAUDE_SESSION_ID` output to verify `$CLAUDE_SESSION_ID` is exported to the PreToolUse subprocess environment. If it is NOT set/exported in the hook env, the detached-HEAD fallback and all `pipeline_id`-based checks are non-functional. In that case: replace the detached-HEAD fallback with a `.start_time`-based session-proxy check (same-minute marker write implies same session in practice) and document the reduced protection in `hooks/README.md`. An alternative: source `$PROJECT_MEMORY/.pipeline-active`'s full content and use the `pipeline_id` field alongside any Claude-Code-provided session tracking helper. Because `gate-ledger-guard.sh` already reads `$CLAUDE_SESSION_ID` successfully in this repo, the expected outcome is that the advisor can do the same; this AC exists to confirm that empirically rather than assume it.
 - [ ] **If neither `Task` nor `Agent` is the hook matcher in this Claude Code version, `hooks/README.md` documents the fallback (grep on stdin `.tool` field) and the test suite covers it** (M1-R4)
 - [ ] Hook matcher is explicitly registered: `build-routing-advisor` uses matcher `Task`; `gate-ledger-guard` runs on every PreToolUse (no matcher restriction). Both hooks execute on every Task dispatch, but their behavior is scoped — `gate-ledger-guard` early-exits on non-Write/Edit tools (O(1) cost). Combined budget applies (M5-R4) (Min-4)
 - [ ] Test confirms advisor suppresses when an active marker exists with ANY recognized pipeline skill (`build`, `spec`, `debugging`, `migrate`). **No source changes to `/spec`, `/debugging`, or `/migrate` required** — those skills already write the marker (F1)
@@ -289,12 +331,13 @@ what make the trigger sustainable.
 
   *Trigger classification:*
   - Single-category prompt (no advisory)
-  - Implement+Design+density with no marker (advisory emitted)
+  - Implement+Design with total distinct ≥2 and no marker (advisory emitted)
   - Implement+Design+Ship (all three) without marker → advisory emitted
+  - **MOTIVATING-EXAMPLE CANARY: prompt "spec + implement + PR" (verbatim from Part 1 line 16) → advisory emits** (S3-R6; guarantees the trigger catches its reason-for-existing — Design=1, Implement=1, Ship=1, total distinct=3)
   - **Design+Ship, NO Implement → no advisory** (S3-R4 Implement-required rule)
-  - **Implement+Design, density=2 in Implement → advisory emits** (S3-R4)
-  - **Implement+Ship, density=2 in Ship → advisory emits** (S3-R4)
-  - **Prompt with exactly one hit per matched category (below density threshold) → no advisory** (S2-R2)
+  - **Implement+Design, two distinct Implement words + one Design word → advisory emits** (S3-R4 / S3-R6)
+  - **Implement+Ship, two distinct Ship words + one Implement word → advisory emits** (S3-R4 / S3-R6)
+  - **Only one category matches (e.g. "implement and code and refactor") → no advisory** (S3-R6; Implement-required satisfied but Design/Ship both 0, so multi-category breadth fails — replaces prior single-hit-per-category test whose framing conflicts with the new total-distinct rule)
   - **Substring decoy: prompt contains `planning`, `commitment`, `shipping`, `codebase` only → no category match, no advisory** (S2-R2)
   - Trigger prompt with a single-phase disclaimer phrase (e.g. "design only") → no advisory (S2)
   - Trigger prompt with non-`general-purpose` `subagent_type` → no advisory (SP2)
@@ -327,13 +370,14 @@ what make the trigger sustainable.
 
   *Dogfood:* (see dedicated dogfood ACs below)
 - [ ] Hook test asserts that the ADVISORY string is written to stderr (captured via `2>&1` redirection in the test harness) — programmatic, not manual (M1-R2)
-- [ ] At least one skill-selection/routing eval (e.g. under `skills/getting-started/evals/` or a comparable location) verifies the model prefers `/build` over raw dispatch for build-shaped prompts; **N ≥ 10 prompts; reported pass rate is the median of 3 runs; pass threshold ≥ 8/10 on the median** for the eval to count as satisfying the AC (SP-3-R2, Min-1). **If the routing eval reports <8/10 median after two wording iterations of Part 1, ESCALATE to the user with the eval transcript before landing. Do NOT loop-tune Part 1 wording indefinitely and do NOT silently weaken the ≥8/10 threshold** (F3-R5)
-- [ ] **Part 1 addition to `getting-started/SKILL.md` is ≤ 150 tokens (approximately 20–25 lines); if longer, extract verbose examples to a linked reference doc and keep the inline section terse** (S4-R3)
+- [ ] At least one skill-selection/routing eval (e.g. under `skills/getting-started/evals/` or a comparable location) verifies the model prefers `/build` over raw dispatch for build-shaped prompts; **N ≥ 10 prompts; reported pass rate is the median of 3 runs; pass threshold ≥ 8/10 on the median** for the eval to count as satisfying the AC (SP-3-R2, Min-1). **If the routing eval reports <8/10 median after two wording iterations of Part 1, ESCALATE to the user with the eval transcript before landing. Do NOT loop-tune Part 1 wording indefinitely and do NOT silently weaken the ≥8/10 threshold** (F3-R5). **Iteration calibration (Min-6-R6):** both wording iterations MUST use a FRESH run of 3 seeds. If variance is >2 points between seeds within a single iteration, expand to 5 seeds before interpreting the median — this bounds interpretation risk from a low-N sample.
+- [ ] **Part 1 addition to `getting-started/SKILL.md` is ≤ 150 tokens (approximately 20–25 lines); if longer, extract verbose examples to a linked reference doc and keep the inline section terse** (S4-R3). **Compression guidance (Min-4-R6):** if the three beats (STOP / `/build`'s job / COMBINATION) cannot fit under 150 tokens while keeping the 5-bullet anti-pattern list readable, move the 5-bullet list to the linked sub-doc and keep only the first three beats inline. This is the recommended compression path.
 - [ ] **Dogfood (pipeline): during implementation, run `/build` on a small real change and assert 0 advisories are emitted during normal `/build` operation** (Min-6)
-- [ ] **Dogfood (non-pipeline, S2-R4): during implementation, run a representative NON-PIPELINE session (recon or audit/review on this codebase — no `/build`/`/spec`/`/debugging`/`/migrate` active) and count advisory emissions. Cap: ≤2 advisories per hour of active dispatch activity. If exceeded, tighten trigger (verify S3-R4 Implement-required is working first; if still exceeded, reconsider density threshold)**
+- [ ] **Marker-write-before-first-dispatch invariant (S2-R6).** Integration test: dispatch `/build` end-to-end on a small real change (reusable with the dogfood AC) and assert that NO advisory is emitted from Phase 1 Step -1 onward, including any dispatches in Phase 1 Step 0 (pre-existing doc detection) or Phase 2 plan-writer dispatch. If any Phase 1 subagent dispatch occurs before the marker write completes, the test fails and `/build` Step -1 must be reordered to write the marker FIRST, no exceptions. Mirror this invariant for `/spec`, `/debugging`, `/migrate` — their marker-write must precede any subagent dispatch.
+- [ ] **Dogfood (non-pipeline, S2-R4): during implementation, run a representative NON-PIPELINE session (recon or audit/review on this codebase — no `/build`/`/spec`/`/debugging`/`/migrate` active) and count advisory emissions. Cap: ≤2 advisories per hour of active dispatch activity. If exceeded, tighten trigger (verify S3-R4 Implement-required is working first; if still exceeded, reconsider the total-distinct ≥2 threshold, e.g. raise to ≥3)**
 - [ ] **Advisory copy is ≤ 2 lines** (S2-R4, cut from prior 3-line form to reduce per-firing token cost)
 - [ ] **Combined PreToolUse hook overhead per Task dispatch (`build-routing-advisor` + `gate-ledger-guard`) MUST be ≤ 200ms measured empirically; if exceeded, profile and optimize the advisor (most-common suppression path must be fast)** (M5-R4, threshold upgrade from observational)
-- [ ] `hooks/README.md` documents the new hook: matcher name, JSON extraction path (plus `.tool`-field fallback per M1-R4), allowlist, suppression rules (including symmetric branch-equality check and detached-HEAD `.pipeline_id` fallback), and graceful-degradation behavior
+- [ ] `hooks/README.md` documents the new hook: matcher name, JSON extraction path (plus `.tool`-field fallback per M1-R4), allowlist, suppression rules (including symmetric branch-equality check and detached-HEAD `.pipeline_id` fallback), and graceful-degradation behavior. **Also (Min-5-R6):** document `gate-ledger-guard`'s null-matcher registration (runs on every PreToolUse) in the SAME document so both hooks' matcher choices are documented side-by-side for reader parity.
 - [ ] Hook is registered as warn-only (exits 0, no blocking) with advisory (not accusatory) copy (M2)
 
 ## Honest about limits
@@ -357,7 +401,7 @@ hook is self-contained and disabling it affects no other system).
 **Self-firing during bootstrap (F2-R5).** During the implementation of
 this very hook, subagent dispatches with prompts like "Implement the
 advisor and open a PR" WILL legitimately trip the trigger (Implement
-≥1 + Ship ≥1 + density ≥2 in Ship via open/merge/PR). This is
+≥1 + Ship ≥1 + total distinct ≥2 via e.g. implement/open/merge/PR). This is
 expected and acceptable: (a) the implementer dispatches are few (one
 or two scouts during bootstrap); (b) this IS build-shaped work and
 SHOULD have routed through `/build` per the policy the hook enforces;
