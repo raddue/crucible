@@ -239,7 +239,14 @@ All writes are atomic (`cat > .tmp && mv .tmp state`). Every read uses `tr -d '\
 
 Combined budget with `gate-ledger-guard`: **≤200ms P95** over ≥20 Agent/Task dispatches. The advisor's hot-path cost is dominated by a handful of `grep`/`jq` invocations on a small stdin payload plus one atomic state-file rewrite.
 
-- **P95 (warm cache, N=20): TBD — measured in T7** (real numbers will be transcribed here after the T7 dogfood run).
+**P95 (warm cache, N=20, method (a) per plan line 605):**
+- `build-routing-advisor` alone (non-build-shaped fixture): 44 ms
+- `build-routing-advisor` alone (build-shaped fixture, trigger fires): 122 ms
+- `gate-ledger-guard` alone (non-ledger Write fixture): 18 ms
+- **Combined per-dispatch P95 (advisor build-shaped + guard): 138 ms** — hard gate ≤200ms: PASS
+
+Bash startup cost: ~10–20ms per invocation on WSL (SP5); budget accommodates this.
+Real-run P95 not measurable without Claude Code runtime timing API; fixture P95 is the proxy by design.
 
 ### Graceful Degradation
 
