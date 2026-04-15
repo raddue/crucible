@@ -31,6 +31,7 @@ Per the innovate pass, a post-merge reconciler (T9) is appended to convert the a
 - `docs/plans/` and `hooks/tests/fixtures/` paths are gitignored — every commit in those paths uses `git add -f` (existing branch convention).
 - Token budgeting for Part 1 uses `tiktoken` cl100k locally; no CI gate.
 - Tests must use `set +e` patterns where the hook's `set +e` matters; capture stderr with `2> "$stderr_file"`.
+- **tr lossiness (M1 acknowledgment):** `tr '/' '-'` is a lossy sanitization (Claude Code's convention, not this plan's choice). If two absolute paths would collide post-sanitization (e.g. `/a/b-c` and `/a-b/c` both map to `-a-b-c`), they map to the same memory dir. Not a crucible-specific concern — inherited from Claude Code's path convention.
 
 ## Dependency Graph
 
@@ -86,7 +87,14 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    } >> /tmp/pretooluse-capture.log
    exit 0
    ```
-3. Temporarily register it in **`~/.claude/settings.json`** (user-global, matching the scope of `gate-ledger-guard` per #168 README) under `PreToolUse` (no matcher), invoking `bash /tmp/capture-pretooluse.sh`. Revert this exact registration line before commit.
+3. **Hook registration with EXIT-trap auto-revert (S1-R2):**
+   a. FIRST, copy current settings to a NAMED backup: `cp ~/.claude/settings.json ~/.claude/settings.json.bak-pretooluse-capture`.
+   b. Install a bash EXIT trap BEFORE registration so that a crash/interrupt between registration and revert cannot leak the hook globally:
+      ```bash
+      trap 'cp ~/.claude/settings.json.bak-pretooluse-capture ~/.claude/settings.json && rm -f ~/.claude/settings.json.bak-pretooluse-capture && rm -f /tmp/pretooluse-capture.log' EXIT
+      ```
+   c. Register the capture hook in **`~/.claude/settings.json`** (user-global, matching the scope of `gate-ledger-guard` per #168 README) under `PreToolUse` with `matcher: "Task"` (NOT null-matcher — this limits blast radius to Task dispatches only; a global null-matcher registration leaked by a crash would impact every future session's every tool call), invoking `bash /tmp/capture-pretooluse.sh`.
+   d. Perform the capture-dispatch sequence (steps 4–7). The trap auto-reverts on normal exit or any error.
 4. In an interactive Claude Code session, dispatch a single `general-purpose` subagent with any test prompt (e.g. "echo hello").
 5. Inspect `/tmp/pretooluse-capture.log`. **Verify non-empty payload FIRST:**
    - Assert `[ -s /tmp/pretooluse-capture.log ]` (size > 0 bytes) AND the log contains the literal string `=== payload ===`.
@@ -109,8 +117,11 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    # Subagent type path: .tool_input.subagent_type
    # CLAUDE_SESSION_ID exported: yes/no
    ```
-8. Remove the temporary capture hook from `~/.claude/settings.json`. Delete `/tmp/capture-pretooluse.sh` and `/tmp/pretooluse-capture.log`.
-9. **Settings-diff guard:** Before committing the fixture commit, run `git diff -- ~/.claude/settings.json` (or equivalent inspection of that file vs. its pre-T1 state — e.g. `diff` against a backup taken in step 1). Verify the temporary registration was reverted; no settings-diff should appear in the working tree associated with this commit. If a diff remains, restore the original settings before proceeding.
+8. Remove the temporary capture hook from `~/.claude/settings.json` (normally handled by the EXIT trap from step 3b; the trap also removes the backup and the capture log). Delete `/tmp/capture-pretooluse.sh`. **Size cap (S1-R2):** before removing the capture log, verify `[ $(stat -c%s /tmp/pretooluse-capture.log) -le 10485760 ]` (≤10MB). If the log exceeded 10MB, record the size in the fixture header (investigate — the payload should be ≤1MB per dispatch). The log is deleted regardless of success/failure by the EXIT trap.
+9. **Settings-diff guard (post-trap verification):** Before committing the fixture commit:
+   - Run `diff <(cat ~/.claude/settings.json) <(cat ~/.claude/settings.json.bak-pretooluse-capture 2>/dev/null || cat ~/.claude/settings.json)` — the backup SHOULD no longer exist (trap deleted it). The expected state is: settings.json matches its pre-T1 content AND the backup file is absent. Assert `[ ! -f ~/.claude/settings.json.bak-pretooluse-capture ]` — catches the case where the trap used the backup to revert but didn't delete it.
+   - If the backup file still exists: the trap was interrupted mid-run. Manually run `cp ~/.claude/settings.json.bak-pretooluse-capture ~/.claude/settings.json && rm ~/.claude/settings.json.bak-pretooluse-capture` to restore, then retry.
+   - If a diff remains against pre-T1 state, restore manually before proceeding. No settings-diff may appear in the working tree associated with this commit.
 10. Commit fixture: `git add -f hooks/tests/fixtures/agent-pretooluse-sample.json && git commit -m "test(hooks): pin PreToolUse Task fixture for #174"`.
 
 ### Acceptance
@@ -120,6 +131,7 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
 - Header comment records the canonical extraction path AND the `$CLAUDE_SESSION_ID` availability finding.
 - Header comment records the verified on-disk `.pipeline-active` path during a real `/build` dispatch and confirms it matches `~/.claude/projects/$(echo "$(git rev-parse --show-toplevel)" | tr '/' '-')/memory/.pipeline-active`. Any divergence is flagged and resolved before T2 begins.
 - If `$CLAUDE_SESSION_ID` is **not** exported, T2's design changes per AC S1-R6 (note in T2 step list).
+- Capture log verified ≤10MB before deletion (via `stat -c%s`); EXIT trap confirmed to have deleted both the log and the named backup file `~/.claude/settings.json.bak-pretooluse-capture`.
 
 ---
 
@@ -144,7 +156,12 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
    - **Rationale (S3-R1 supersedes F4):** the previous plan used sha256(pwd) matching `hooks/session-index.sh:38-39`, but empirical verification showed `/build` writes `.pipeline-active` to the dash-sanitized Claude-native path (e.g. `~/.claude/projects/-mnt-e-Coding-crucible/memory/.pipeline-active`). `session-index.sh` writes its own session-index artifacts to a DIFFERENT directory under a sha256 hash — a pre-existing divergence unrelated to this ticket. The advisor MUST match the MARKER-WRITER's convention (`tr '/' '-'`), not session-index's. The echo-n-vs-echo trailing-newline concern (F4) is moot under this derivation; F4 is historical.
 
    **Kill switch** (runs after `$PROJECT_MEMORY` is computed):
-   - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → update state file at `$PROJECT_MEMORY/build-routing-advisor-state.md` with `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0.
+   - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → **write-elision short-circuit (S4-R2):** if the state file already records today's date as `last-honored`, exit 0 WITHOUT rewriting the file:
+     ```bash
+     STATE_FILE="$PROJECT_MEMORY/build-routing-advisor-state.md"
+     grep -q "^last-honored: $(date +%Y-%m-%d)$" "$STATE_FILE" 2>/dev/null && exit 0
+     ```
+     Otherwise, update state file with `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0. **Rationale:** kill-switch is honored ~50–90× per `/build` run; without this elision the state file is rewritten on every honored invocation causing no-op write amplification. `last-honored` has DATE granularity only — within the same day, repeated kill-switch invocations are no-op short-circuits. This is intentional for perf.
    - If sentinel `$PROJECT_MEMORY/.build-routing-advisor-disabled` exists:
      - **Matching-line definition (MIN-3-R7):** a matching line is one beginning with `disabled-until:` at column 0 — no leading whitespace, no comment skipping. Use literal regex `^disabled-until: ` (trailing space required).
      - Parse FIRST matching line. If the file contains multiple matching lines, use only the FIRST; ignore the rest.
@@ -181,6 +198,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
     - Read state file `$PROJECT_MEMORY/build-routing-advisor-state.md`.
     - Compute fingerprint: `echo "$PROMPT" | sha256sum | cut -c1-16`.
     - If `last-advisory-fingerprint` matches AND `last-advisory-at` is within 5 minutes → suppressed: increment `fires-total` only, do NOT emit, write state atomically, exit 0.
+    - **Fingerprint identity (SP1):** fingerprint is SHA256 of the FULL prompt text. Near-identical prompts (differing by scout index, timestamp, or single character) produce DIFFERENT fingerprints → both fire. This is an ACCEPTED LIMITATION — the advisor is warn-only, and false duplicates are preferable to false suppressions (which would silently hide the #174 failure mode). Do not introduce fuzzy matching; the SP2 5-min dedup window concern about silencing a second build-shaped dispatch is subsumed by this — different-prompt second dispatches are expected to fire again.
 11. **Lazy `fires-today` reset (Min-3-R6):** reset is LAZY — performed ONLY on advisory-eligible invocation (this step is reached only after trigger fires, marker not active, dedup not suppressed), never continuously. On each eligible invocation, compare today's local date against the MOST RECENT of (`last-honored` date, `last-advisory-at` date). If neither exists OR the most recent is older than today → reset `fires-today` to 0 BEFORE incrementing in step 13.
 12. **Emit advisory** to stderr (exactly 2 lines, includes literal `build-shaped`):
     ```
@@ -236,6 +254,8 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 **Pre-authorized exception (S3-R1 correctness fix — supersedes F4):** the test harness currently derives `PROJECT_HASH` via `sha256sum` (either with or without `echo -n`). S3-R1 supersedes the earlier F4 `echo` vs `echo -n` fix entirely: the sha256 derivation is WRONG regardless of echo variant. `/build` writes `.pipeline-active` to Claude Code's native dash-sanitized path (`~/.claude/projects/-mnt-e-Coding-crucible/memory/.pipeline-active`), not any sha256-hashed path. T3 MUST update the harness to use `PROJECT_HASH="$(echo "$FAKE_PROJECT" | tr '/' '-')"` (note: `tr`, NOT `sha256sum`; the variable name is retained for readability but the value is now a dash-sanitized path segment, not a hash). Update the adjacent comment to state: "Match Claude Code's native marker-writer convention: tr '/' '-' on the absolute path. (Previous sha256 derivation was incorrect — see S3-R1.) The echo-n-vs-echo concern (historical F4) is moot under the tr derivation." Also delete any unused overwritten `printf`/`echo` assignments. This is the ONLY pre-authorized test edit in T3; all other test concerns still ESCALATE.
 
+**S2-R2 pre-authorized exception (third-derivation case):** If T1's on-disk `.pipeline-active` verification finds a derivation OTHER than `tr '/' '-'` (e.g. a future Claude Code version changes the convention — sha256 returns, or some new scheme appears), the implementer IS authorized to update the derivation consistently across: the hook source (T2), the T3 test harness, T3.5 case 16 (PROJECT_HASH canary), and T6 README — in a SINGLE ATOMIC COMMIT. The new canonical derivation is recorded in the fixture header (T1 step 7) and in a note appended to the plan's Conventions section. Any OTHER test modifications still require escalation. This exception exists because the derivation is empirically load-bearing and a version-drift discovery during T1 must not stall the whole plan; it is narrowly scoped to the derivation change alone.
+
 ### Steps
 
 1. Run `bash /mnt/e/Coding/crucible/hooks/tests/test-build-routing-advisor.sh`.
@@ -290,7 +310,7 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 11. **Stderr `2>&1` capture assertion (programmatic):** explicit case asserting that the advisor's ADVISORY string is captured via `2>&1` (or equivalent stderr-to-file redirection) in the test harness and matched via `grep -F "ADVISORY:"`. No manual inspection — the assertion is `grep -Fq "ADVISORY:" "$captured"` against the redirected output.
 12. **Matcher-neither-Task-nor-Agent fallback:** verify behavior when neither matcher name is correct — the hook falls back to `jq -r '.tool'` (or `.tool_name`) grep on stdin; if that ALSO fails (returns null/empty), the hook exits 0 silently with no stderr. Test asserts: exit code 0, empty stderr, no state-file mutation.
 13. **Kill-switch toggle preserves dedup fields:** sequence — (a) emit an advisory (fingerprint + timestamp recorded in state); (b) set kill switch (env var or sentinel); (c) invoke hook → honored, dedup fields preserved per Min-1-R6; (d) remove kill switch; (e) re-trigger within 5-min dedup window with the same prompt → second trigger MUST be deduped (fingerprint preserved across the toggle, no second advisory emitted).
-14. **Literal `build-shaped` regression guard:** trivial assertion that the advisory stderr contains the exact literal token `build-shaped` (`grep -Fq "build-shaped"`). Catches future copy edits that might drop or rename the token (the tests grep for it; the README documents it; the dogfood scripts grep for it).
+14. **Literal `build-shaped` regression guard:** trivial assertion that the advisory stderr contains the exact literal token `build-shaped` (`grep -Fq "build-shaped"`). Catches future copy edits that might drop or rename the token (the tests grep for it; the README documents it; the dogfood scripts grep for it). **Two-line assertion (M5):** same case also asserts the ADVISORY stderr is EXACTLY 2 lines: `[ "$(grep -c '^' "$stderr_file")" -eq 2 ]`. Catches future copy bloat (multi-line advisories cost context budget across every dispatch and break the 200ms budget accounting).
 15. **State-file bounded growth ≤5 lines:** run a sequence of (advisory emit + kill-switch set + sentinel with `disabled-until` expiry + reset/eligible re-fire), then assert `[ "$(wc -l < $STATE_FILE)" -le 5 ]`. Schema must remain ≤5 lines across all state transitions; this catches accidental appends/duplicate-key bloat.
 16. **PROJECT_HASH derivation canary (S3-R1; supersedes F4):** fixture writes a valid pipeline-active marker at `$HOME/.claude/projects/<tr-sanitized path>/memory/.pipeline-active` (computed with `echo "$PROJECT_ROOT" | tr '/' '-'` where `PROJECT_ROOT` is the fake project path under the harness's fake `$HOME`). Pipe a build-shaped prompt to the hook; assert the hook FINDS the marker and suppresses (exit 0, empty stderr). If the hook were to use ANY sha256-based derivation (either `echo` or `echo -n` variant), or any other scheme, it would look in a DIFFERENT directory, miss the marker, and emit an advisory — this test fails. Fail message must mention "PROJECT_HASH derivation mismatch: hook must look at `~/.claude/projects/$(echo $PROJECT_ROOT | tr '/' '-')/memory/.pipeline-active`" to make the diagnosis obvious. (Historical note: earlier drafts named this the "trailing-newline canary" / "F4 canary"; S3-R1 rescopes it to the tr derivation.)
 17. **Real-fixture pass-through:** `bash hooks/build-routing-advisor.sh < hooks/tests/fixtures/agent-pretooluse-sample.json` — hook exits 0; stderr either empty (fixture's prompt is non-build-shaped) OR contains `ADVISORY:` (fixture's prompt is build-shaped). Either outcome passes; the assertion is that the hook does not crash and the extraction path returns the prompt.
@@ -299,10 +319,12 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 20. **Trigger-classification (c) Design+Ship, no Implement:** prompt `"design doc + merge PR"` → Design=1, Ship=2, Implement=0 → NO advisory (Implement-required rule).
 21. **Trigger-classification (d) Only-Implement, multiple distinct:** prompt `"implement and code and refactor"` → Implement=3, Design=0, Ship=0 → NO advisory (single-category-only fails; Design≥1 OR Ship≥1 required).
 22. **Trigger-classification (e) Implement+Ship, Implement=1 Ship=2:** prompt `"implement X and commit, push"` → Implement=1, Ship=2 distinct → advisory emits.
+23. **Kill-switch same-day skip-write (S4-R2):** set `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1`. (a) First invocation: state file absent or stale → advisor honors switch, writes `last-honored: <today>`, exits 0; capture the state file's mtime as `MTIME1`. (b) Sleep 1 second. (c) Second invocation (same day): advisor must short-circuit WITHOUT writing — assert `stat -c%Y $STATE_FILE` equals `MTIME1` (mtime unchanged). (d) Exit code 0 both times; no stderr from either. Fail message must mention "write-elision short-circuit on same-day kill-switch — expected no state-file write, got mtime change".
 
 ### Steps
 
 1. APPEND cases to `hooks/tests/test-build-routing-advisor.sh`. Do NOT create a separate extended file. Original 10 cases remain unmodified at the top of the file (except the F4 line-30 `echo -n` fix authorized in T3); new cases follow as additional test functions invoked by the same runner.
+1a. **Per-case isolation (M2):** between every test case, `rm -rf "$FAKE_HOME"` and recreate from scratch. The harness's test dispatcher MUST enforce this in a shared setUp/tearDown wrapper that wraps each case — no case may leak state (state files, sentinels, markers) into the next case. Add this wrapper once; reference it from each appended case.
 1a. **Dynamic TOTAL:** update the harness's `TOTAL` to be computed at the end as `TOTAL=$((PASSED + FAILED))` rather than hardcoded to 10. This avoids drift whenever T3.5 appends cases (and any future additions). The final `Results: X/Y passed` line MUST use the computed TOTAL.
 2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `$PROJECT_MEMORY` derived via `echo "$PROJECT_ROOT" | tr '/' '-'` against the fake project path per S3-R1, stderr capture via `2>&1` or `2> "$stderr_file"`, exit-code assertion).
 3. Run until all appended cases pass alongside the original 10.
@@ -393,9 +415,15 @@ N≥10 selection-eval prompts that present build-shaped intents; expected_skill 
    - 2 boundary cases that should still pick `build` (e.g. "design and ship the new auth flow").
 3. Run the eval per the existing harness 3 times (different seeds).
 4. Compute median pass rate.
-5. If median <8/10: iterate Part 1 wording (T4) ONCE, rerun with FRESH 3 seeds. If still <8/10: iterate Part 1 ONCE more, rerun. If still <8/10 after two wording iterations → STOP and ESCALATE to user per F3-R5.
-   - **ESCALATE operational definition:** (a) do NOT commit a weakened threshold; (b) do NOT loop-tune Part 1 wording beyond 2 iterations; (c) write the eval transcript (per-seed pass/fail breakdown, failing prompts, reasoning traces) to a file under `docs/plans/` (git-add-forced); (d) surface the decision to the user via the failure path below.
-   - **Operational mechanics (no 'blocked-on-user' state in `/build`):** `/build` does NOT support a "blocked-on-user-decision" state. The implementer EXITS T5 with a non-zero exit code and a clear error message that points to the eval transcript path. The orchestrator (Phase 3 runner) surfaces the failure to the user. The user then decides one of: (i) accept a lower threshold via manual override recorded in the plan (new sub-task in this plan, not a silent edit); (ii) revise Part 1 further as a new sub-plan task; (iii) close the ticket. There is no in-pipeline pause — the failure is the signal.
+5. If median <8/10: iterate Part 1 wording (T4) ONCE, rerun with FRESH 3 seeds. If still <8/10: iterate Part 1 ONCE more, rerun. If still <8/10 after two wording iterations → STOP and ESCALATE per F3-R5 / S3-R2.
+   - **ESCALATE operational definition (S3-R2 — does NOT rely on orchestrator exit-code semantics):** the escalation is surfaced via TWO durable artifacts that the user can find regardless of orchestrator retry behavior:
+     1. **Sentinel file (primary):** write `docs/plans/ESCALATION-174-T5-routing-eval.md` containing the eval transcript — median score, per-seed pass/fail breakdown, per-prompt results, failing prompts with reasoning traces, and the exact wording iterations tried (diffs of the Part 1 section across iterations). Commit with `git add -f`.
+     2. **Decision journal entry:** append to `/tmp/crucible-decisions-<session-id>.log` (session id from `$CLAUDE_SESSION_ID` if set, else `$$`): `[<ISO-8601 timestamp>] DECISION: routing-eval | choice=escalate-after-2-iterations | reason=median <8/10 after 2 wording iterations | alternatives=none`.
+     3. **Exit code:** exit with code 2 (distinguishes from ordinary failure exit 1). The orchestrator MAY retry on non-zero exit — that is fine; the SENTINEL FILE is the source of truth for the user-facing escalation, not the exit code.
+     4. **Stderr message:** the message printed to stderr MUST reference BOTH the sentinel file path (`docs/plans/ESCALATION-174-T5-routing-eval.md`) AND the decision journal entry (`/tmp/crucible-decisions-<session-id>.log`). Example: `T5 ESCALATE after 2 wording iterations. Sentinel: docs/plans/ESCALATION-174-T5-routing-eval.md. Decision journal: /tmp/crucible-decisions-<session-id>.log. Median <8/10; do NOT silently lower threshold.`
+     5. (a) do NOT commit a weakened threshold; (b) do NOT loop-tune Part 1 wording beyond 2 iterations; (c) both artifacts above MUST be in place before exit.
+   - **Acceptance contract:** the sentinel file and decision journal entry are the primary escalation artifacts. Exit code 2 is advisory only — the orchestrator MAY retry, but the sentinel file is the source of truth for the user-facing escalation. This removes the dependency on orchestrator-specific exit-code handling (which may conflict with /build's auto-retry semantics).
+   - **Operational mechanics (no 'blocked-on-user' state in `/build`):** `/build` does NOT support a "blocked-on-user-decision" state. The implementer EXITS T5 (code 2) after writing artifacts. The orchestrator surfaces the failure to the user via the transcript; the user finds the sentinel file. The user then decides one of: (i) accept a lower threshold via manual override recorded in the plan (new sub-task in this plan, not a silent edit); (ii) revise Part 1 further as a new sub-plan task; (iii) close the ticket. There is no in-pipeline pause — the artifacts are the signal.
 6. If variance between seeds in any iteration is >2 points, expand to 5 seeds before interpreting median (Min-6-R6).
 6a. **Iteration ceiling (M2):** maximum 3 evaluation rounds × 5 seeds = ≤15 eval runs total before escalation. Do NOT loop indefinitely on borderline scores — once the ceiling is hit, ESCALATE per step 5.
 7. Commit: `git commit -am "eval(skills): routing eval for build-shaped dispatches (#174)"`.
@@ -428,6 +456,7 @@ Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledg
 - `### JSON Extraction Path`: cite the canonical path from T1's fixture header (e.g. `.tool_input.prompt`, `.tool_input.subagent_type`, `.tool` for tool name) and the `.tool`-field fallback (M1-R4).
 - `### Suppression Rules`: marker must have `.skill` in {build, spec, debugging, migrate}, `.start_time` <24h, `.branch == git branch --show-current`. Symmetric detached-HEAD `.pipeline_id == $CLAUDE_SESSION_ID` fallback.
 - `### Kill Switch`: env var `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` and sentinel `$PROJECT_MEMORY/.build-routing-advisor-disabled` (with optional `disabled-until: YYYY-MM-DD` line; malformed → permanently disabled fail-safe).
+- `### Cross-project firing (M6)`: "This hook is registered user-globally in `~/.claude/settings.json`. It fires on subagent dispatches from ANY project where the user works. Outside crucible, there is no `.pipeline-active` marker so suppression never applies; a build-shaped dispatch in an unrelated project will emit the advisory. If this is undesirable, disable via kill switch (`CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1`) in that project's shell init (`.envrc`, direnv, etc.). The design accepts this cross-project fire surface as a tradeoff for the broader enforcement."
 - `### State File`: schema and bounded growth (≤5 lines).
 - `### Performance`: combined budget with `gate-ledger-guard` ≤200ms P95 over ≥20 dispatches; record measured numbers from T7.
 - `### Graceful Degradation`: missing jq, malformed JSON, missing utilities → exit 0 silently.
@@ -469,6 +498,7 @@ Validate two ACs:
    - **Method (a) — fixture-based P95:** `time bash hook < fixture` over 20 warm-cache runs (the cold-and-process-fork baseline; the proxy that is actually measurable).
    - **Method (b) — real-run P95:** during a real `/build` run, measure combined hook overhead via Claude Code's internal telemetry if available. If NOT available (likely — no public runtime hook-timing API), explicitly note in the README: "real-run P95 not empirically measurable without Claude Code runtime support — fixture-based P95 (method a) is the proxy."
    - The hard ≤200ms combined P95 gate uses method (a). Method (b) is recorded if measurable, otherwise the absence is documented.
+   - **Bash startup cost (SP5):** method (a) measurements include bash startup (~10–20ms on WSL) per invocation. The 200ms combined-overhead budget is sized to accommodate this. Advisor-alone logic time (isolated from shell startup) is NOT measurable without Claude Code internal instrumentation — out of scope. Record the bash-startup component in the README measurement section as a note so the number is interpretable.
    - **Cache warmup:** before the measurement window, run 2 warmup invocations of EACH hook against the fixture (4 total invocations) and DISCARD their timings. This warms the FS cache and avoids cold-cache bias. Record the measurement section in `hooks/README.md` under the heading **"P95 (warm cache, N=20)"** to make the methodology explicit.
    - Wrap hook invocations with external timing via `time bash hooks/build-routing-advisor.sh < fixture` (and same for `gate-ledger-guard`) over ≥20 dispatches during a real `/build` run. Alternative: use `/usr/bin/time -f '%e'` for machine-parseable seconds, or `date +%s%N` before/after the `bash` invocation in a wrapper script — the key constraint is **the hook source file is NOT modified for measurement**.
    - Capture per-invocation wall-clock into `/tmp/hook-perf.log` (wrapper-level), one line per invocation: `advisor:<ms>` and `guard:<ms>`.
@@ -517,7 +547,7 @@ Per AC S2-R6: assert no advisory fires from Phase 1 Step -1 onward of `/build`, 
    - Locate the Pipeline-Active Marker section (around line 468 for build).
    - Reorder the documented steps so marker-write precedes any subagent dispatch.
    - **Docstring-ordering fix only** — no behavioral logic change (per SIG-3-R7).
-3. Repeat for `/spec` (line 276), `/debugging` (line 295), `/migrate` (line 187). **"Lightweight smoke run" (operational definition):** either (a) stub one test scenario for each skill — a minimal invocation that reaches the first subagent-dispatch point, assert the marker is written BEFORE any Task PreToolUse fires, and assert no advisory was emitted during that first dispatch; OR (b) if stub scenarios are too heavy, degrade to static analysis — read each SKILL.md and verify the Pipeline-Active Marker write instruction appears textually BEFORE the first `Task tool` invocation in the document (use `grep -n` to show the line numbers and assert marker-write line number < first Task-dispatch line number). Record which method (a or b) was used in the T8 commit message.
+3. Repeat for `/spec` (line 276), `/debugging` (line 295), `/migrate` (line 187). **"Lightweight smoke run" (operational definition):** either (a) stub one test scenario for each skill — a minimal invocation that reaches the first subagent-dispatch point, assert the marker is written BEFORE any Task PreToolUse fires, and assert no advisory was emitted during that first dispatch; OR (b) if stub scenarios are too heavy, degrade to static analysis — read each SKILL.md and verify the Pipeline-Active Marker write instruction appears textually BEFORE the first dispatch invocation. **Specific grep pattern (SP4):** use `grep -nE 'subagent_type|Agent tool.*dispatch|dispatch.*Agent' $SKILL_FILE` as the first-dispatch match pattern — NOT a bare `grep -n 'Task'`, which matches the word in any prose context (e.g. a markdown heading "Task decomposition") and produces false positives. Assert marker-write line number < first-matched-dispatch line number. Record which method (a or b) was used in the T8 commit message.
 4. Re-run the relevant pipeline skill on a tiny scratch change for each that needed reordering. Confirm 0 advisories.
 5. If no reordering needed, document the verification in the commit message:
    - `test(integration): verified marker-write-before-dispatch invariant for /build /spec /debugging /migrate (#174)`
@@ -551,6 +581,7 @@ Design's Honest-about-limits states: "If post-launch telemetry shows Part 2's co
 
 ### Steps
 
+0. **Verify session-index Task-dispatch coverage (M3):** before relying on session-index for general-purpose dispatch counts, confirm `hooks/session-index.sh` actually indexes `Task` tool invocations. Run `grep -nE 'Task|subagent_type' hooks/session-index.sh` and inspect the logic. If Task dispatches are NOT indexed by session-index, T9's general-purpose-dispatch-count enrichment is UNAVAILABLE — in that case, scope T9 down to the `(merged PR) ∧ (no gate-ledger PASS)` signal only (step 4's binary outcome), without the session-index enrichment in step 7. Document the scoping decision inline in the reconciler's header comment.
 1. **Create tool directory:** `mkdir -p hooks/tests/tools/`. Create `hooks/tests/tools/build-routing-reconcile.sh`. Start with standard crucible bash header (`set +e`, graceful degradation on missing utilities).
 
 2. **Accept arguments:** `--since <date>` (default: 14 days ago), `--repo <path>` (default: cwd), `--output <file>` (default: stdout). Validate inputs; on bad args print usage and exit 2.
