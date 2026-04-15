@@ -27,7 +27,7 @@ Per the innovate pass, a post-merge reconciler (T9) is appended to convert the a
 
 - All paths absolute under `/mnt/e/Coding/crucible/`.
 - Bash style follows `hooks/gate-ledger-guard.sh`: `set +e`, jq null-safety with `// empty`, graceful `exit 0` on any utility failure, stdin via `INPUT="$(cat)"`.
-- `$PROJECT_MEMORY` derivation: `~/.claude/projects/$(echo -n "$(pwd)" | sha256sum | cut -c1-16)/memory/` (mirrors `hooks/session-index.sh:38-39` EXACTLY — `echo -n`, no trailing newline). **CRITICAL:** using `echo` without `-n` produces a different SHA-256 hash (trailing newline included), silently directing the hook to an empty directory and breaking marker suppression during real `/build` runs. Any code path deriving this hash MUST use `echo -n`.
+- `$PROJECT_MEMORY` derivation: `~/.claude/projects/$(echo "$PROJECT_ROOT" | tr '/' '-')/memory/` (Claude Code's native dash-sanitized-path convention — empirically verified). **CRITICAL (S3-R1 supersedes F4):** the previous plan used `echo -n "$(pwd)" | sha256sum | cut -c1-16` matching `hooks/session-index.sh`, but empirical verification showed `/build` writes markers to the dash-sanitized Claude-native path (e.g. `~/.claude/projects/-mnt-e-Coding-crucible/memory/.pipeline-active`). `session-index.sh`'s sha256 derivation writes its OWN session-index artifacts to a DIFFERENT directory — that divergence is pre-existing and unrelated to this ticket. The advisor MUST match the marker-writer's convention, not session-index's. Any code path deriving `$PROJECT_MEMORY` MUST use `tr '/' '-'` against the git-toplevel-resolved `$PROJECT_ROOT`. `PROJECT_ROOT` resolution: `PROJECT_ROOT="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)"` — walks upward to the repo root so cwd drift does not break derivation.
 - `docs/plans/` and `hooks/tests/fixtures/` paths are gitignored — every commit in those paths uses `git add -f` (existing branch convention).
 - Token budgeting for Part 1 uses `tiktoken` cl100k locally; no CI gate.
 - Tests must use `set +e` patterns where the hook's `set +e` matters; capture stderr with `2> "$stderr_file"`.
@@ -88,7 +88,14 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
    ```
 3. Temporarily register it in **`~/.claude/settings.json`** (user-global, matching the scope of `gate-ledger-guard` per #168 README) under `PreToolUse` (no matcher), invoking `bash /tmp/capture-pretooluse.sh`. Revert this exact registration line before commit.
 4. In an interactive Claude Code session, dispatch a single `general-purpose` subagent with any test prompt (e.g. "echo hello").
-5. Inspect `/tmp/pretooluse-capture.log`. Identify:
+5. Inspect `/tmp/pretooluse-capture.log`. **Verify non-empty payload FIRST:**
+   - Assert `[ -s /tmp/pretooluse-capture.log ]` (size > 0 bytes) AND the log contains the literal string `=== payload ===`.
+   - If empty after 2 dispatch attempts, ESCALATE — do NOT proceed to fixture commit with an empty or fabricated payload.
+   - If non-empty but the payload JSON lacks any `.tool_input.prompt` OR `.input.prompt` OR `.prompt` field, ESCALATE — the extraction path is fundamentally unknown; do not guess.
+   - Also log `git -C "$(pwd)" rev-parse --show-toplevel` output during the real capture dispatch and verify it resolves to the crucible repo root (`/mnt/e/Coding/crucible`). If it does not, the hook's `PROJECT_ROOT` resolution will be wrong at runtime.
+   - **Also verify on-disk pipeline-active marker location:** during (or just after) a real `/build` dispatch, assert that `.pipeline-active` exists at `~/.claude/projects/$(echo "$(git rev-parse --show-toplevel)" | tr '/' '-')/memory/.pipeline-active`. If the actual on-disk path uses a DIFFERENT scheme (e.g. sha256 or something novel), the advisor's derivation MUST match whatever `/build` actually writes — update T2's derivation and flag in the fixture header. The `tr '/' '-'` convention is the current empirically verified derivation; future Claude Code versions could change it.
+
+   Identify in the payload:
    - Top-level tool field: `.tool` vs `.tool_name`
    - Prompt path: `.tool_input.prompt` vs `.input.prompt`
    - Subagent type path: `.tool_input.subagent_type` vs equivalent
@@ -109,7 +116,9 @@ Pin the exact JSON shape Claude Code sends to PreToolUse for `Task` (or `Agent`)
 ### Acceptance
 
 - Fixture file exists at the path above and parses as JSON.
+- Capture log was verified non-empty (size > 0, contains `=== payload ===`); one of `.tool_input.prompt` / `.input.prompt` / `.prompt` is present. Otherwise ESCALATED (no fabricated fixture committed).
 - Header comment records the canonical extraction path AND the `$CLAUDE_SESSION_ID` availability finding.
+- Header comment records the verified on-disk `.pipeline-active` path during a real `/build` dispatch and confirms it matches `~/.claude/projects/$(echo "$(git rev-parse --show-toplevel)" | tr '/' '-')/memory/.pipeline-active`. Any divergence is flagged and resolved before T2 begins.
 - If `$CLAUDE_SESSION_ID` is **not** exported, T2's design changes per AC S1-R6 (note in T2 step list).
 
 ---
@@ -129,7 +138,10 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 0. **Matcher registration (prerequisite, verified by T2 step list):** register `build-routing-advisor` in **`~/.claude/settings.json` (user-global scope, identical to `gate-ledger-guard` per #168 README)** under `PreToolUse` with `matcher: "Task"` (primary; fallback `Agent` per T1 finding) and `timeout: 500` (ms). Verify the entry does NOT conflict with `gate-ledger-guard`'s null-matcher registration — the two entries coexist as separate hooks, one null-matcher (gate-ledger-guard) and one `Task`-matcher (build-routing-advisor).
 1. `set +e`. Read stdin into `INPUT`. Exit 0 on empty stdin.
-2. **Step 1a — Compute `$PROJECT_MEMORY` FIRST** (before kill-switch block below, so the switch can reference `$PROJECT_MEMORY` without ambiguity): `PROJECT_HASH="$(echo -n "$(pwd)" | sha256sum | cut -c1-16)"` then `PROJECT_MEMORY="$HOME/.claude/projects/$PROJECT_HASH/memory"`. **Derivation MUST match `hooks/session-index.sh:38-39` exactly: `echo -n "$(pwd)" | sha256sum | cut -c1-16`.** Trailing-newline mismatch (using `echo` without `-n`) produces a different hash, silently directs the hook to an empty directory, and is a suppression-bug — MUST be caught by the T3.5 trailing-newline canary.
+2. **Step 1a — Compute `$PROJECT_ROOT` then `$PROJECT_MEMORY` FIRST** (before kill-switch block below, so the switch can reference `$PROJECT_MEMORY` without ambiguity):
+   - `PROJECT_ROOT="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)"` — walks upward via git-toplevel so cwd drift between dispatches does not break derivation. If not inside a git repo, falls back to `pwd` (advisor will then see no marker and fire if classification triggers — correct behavior for raw dispatches outside any repo).
+   - `PROJECT_DIR_SAFE="$(echo "$PROJECT_ROOT" | tr '/' '-')"` then `PROJECT_MEMORY="$HOME/.claude/projects/$PROJECT_DIR_SAFE/memory"`.
+   - **Rationale (S3-R1 supersedes F4):** the previous plan used sha256(pwd) matching `hooks/session-index.sh:38-39`, but empirical verification showed `/build` writes `.pipeline-active` to the dash-sanitized Claude-native path (e.g. `~/.claude/projects/-mnt-e-Coding-crucible/memory/.pipeline-active`). `session-index.sh` writes its own session-index artifacts to a DIFFERENT directory under a sha256 hash — a pre-existing divergence unrelated to this ticket. The advisor MUST match the MARKER-WRITER's convention (`tr '/' '-'`), not session-index's. The echo-n-vs-echo trailing-newline concern (F4) is moot under this derivation; F4 is historical.
 
    **Kill switch** (runs after `$PROJECT_MEMORY` is computed):
    - If `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → update state file at `$PROJECT_MEMORY/build-routing-advisor-state.md` with `last-honored: $(date +%Y-%m-%d)` (preserving dedup fields and counters per Min-1-R6) then exit 0.
@@ -152,13 +164,14 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
    - `TOTAL_DISTINCT=$(echo "$PROMPT" | grep -ioE '\b(design|spec|plan|implement|code|create|refactor|PR|commit|merge|push|land|ship)\b' | tr '[:upper:]' '[:lower:]' | sort -u | wc -l)`
    - **Trigger condition:** `IMPLEMENT_HITS >= 1` AND (`DESIGN_HITS >= 1` OR `SHIP_HITS >= 1`) AND `TOTAL_DISTINCT >= 2`.
    - Worked example (comment in source): `# "spec + implement + PR" → DESIGN=1, IMPLEMENT=1, SHIP=1, TOTAL_DISTINCT=3 → fires`.
+   - **TOTAL_DISTINCT soundness note (M5, inline comment in hook source):** `# TOTAL_DISTINCT uses 'tr [:upper:] [:lower:] | sort -u | wc -l' to count DISTINCT lowercased hits across all three categories. The review confirmed 'sort -u' is sound for this purpose (dedup is per-line and category words are single-token, so no subword overlap risk). Do not replace with per-category wc -l addition — that would double-count words that appear in multiple categories, which none currently do, but the sort -u form is future-proof.`
    - If trigger does not fire, exit 0.
 9. **Pipeline-active marker check** (only reached if trigger fires):
    - `MARKER="$PROJECT_MEMORY/.pipeline-active"`. If absent → marker not active.
    - Parse with jq. Require `.skill` present and in `{build, spec, debugging, migrate}`.
    - **`.start_time` format pin:** per `skills/build/SKILL.md:468`, the marker writes `start_time` as ISO-8601 via `date -u +%Y-%m-%dT%H:%M:%S`. Parse via `START_EPOCH=$(date -d "$START_TIME" +%s 2>/dev/null)`. If parse fails (empty/non-zero exit), treat marker as STALE → marker not active → advisory still emits (do not silently honor a marker with an unparseable timestamp).
    - Require parsed `.start_time` within 24h of `date -u +%s`.
-   - Read current branch: `CUR_BRANCH=$(git -C "$(pwd)" branch --show-current 2>/dev/null)`.
+   - Read current branch: `CUR_BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null)`. (Uses `$PROJECT_ROOT` — the git-toplevel-resolved root from step 1a — not raw `$(pwd)`, which could drift.)
    - **Branch comparison (explicit branches — no accidental-correctness via `"" == ""`):**
      - If BOTH `.branch` and `$CUR_BRANCH` are non-empty AND equal → active (proceed to 24h + skill checks above).
      - Else if BOTH are empty AND `.pipeline_id == $CLAUDE_SESSION_ID` → active (detached-HEAD symmetric fallback).
@@ -195,7 +208,8 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 - All `git`, `jq`, `sha256sum`, `date` failures → exit 0 silently. Never fatal.
 - **`mkdir -p` placement (explicit):** the FIRST line of step 13 is `mkdir -p "$PROJECT_MEMORY"`. Do NOT place it elsewhere; do NOT rely on this note alone — the prologue belongs in the step body.
-- If T1 found `$CLAUDE_SESSION_ID` is NOT exported, replace step 9's detached-HEAD fallback with a `.start_time`-within-60-seconds session-proxy check and document the reduction in T6.
+- If T1 found `$CLAUDE_SESSION_ID` is NOT exported, replace step 9's detached-HEAD fallback with a `.start_time`-within-**5-minute** session-proxy check (not 60 seconds — avoids the brief-gap false positive noted in SP1). 5-minute window is a pragmatic compromise between stale-marker safety (covered by the 24h upper bound and S3 branch/pipeline_id checks) and legitimate-gap tolerance across consecutive dispatches. Document the reduction in T6.
+- **Worktree state sharing (SP3):** the advisor state file lives in `$PROJECT_MEMORY/` which is shared across worktrees of the same repo (all worktrees resolve to the same `$PROJECT_ROOT` via git-toplevel). Dedup fingerprints will consequently be shared across concurrent worktree sessions. This is ACCEPTABLE: the advisor is warn-only and the shared fingerprint just coalesces duplicate advisories (not a correctness issue). Worktree-specific dedup would require per-worktree state files — out of scope.
 - Performance: classification uses one `grep -ioE` per category against `<<< "$PROMPT"` — no temp files. Target ≤50ms per invocation.
 
 ### Acceptance
@@ -220,7 +234,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
 
 **Critical boundary:** the test file at `hooks/tests/test-build-routing-advisor.sh` is pre-existing (RED canary committed 1450ed3). T3's job is to make the HOOK pass the tests, NOT to modify the tests. **Tests are the spec.** If a test appears wrong, ESCALATE to the user rather than modifying it.
 
-**Pre-authorized exception (F4 correctness fix):** the test harness line 30 currently reads `PROJECT_HASH="$(echo "$FAKE_PROJECT" | sha256sum | cut -c1-16)"` (missing `-n`). This is a reviewer-confirmed bug — the canonical `hooks/session-index.sh:38-39` uses `echo -n`, and the real pipeline skills write markers under the `echo -n` hash. T3 MUST update line 30 to `PROJECT_HASH="$(echo -n "$FAKE_PROJECT" | sha256sum | cut -c1-16)"` (and remove/update the now-inaccurate line 29 comment about pwd trailing newline — replace with a comment stating "match session-index.sh exactly: echo -n, no trailing newline"). Also delete the unused line-28 `printf` assignment that's immediately overwritten. This is the ONLY pre-authorized test edit in T3; all other test concerns still ESCALATE.
+**Pre-authorized exception (S3-R1 correctness fix — supersedes F4):** the test harness currently derives `PROJECT_HASH` via `sha256sum` (either with or without `echo -n`). S3-R1 supersedes the earlier F4 `echo` vs `echo -n` fix entirely: the sha256 derivation is WRONG regardless of echo variant. `/build` writes `.pipeline-active` to Claude Code's native dash-sanitized path (`~/.claude/projects/-mnt-e-Coding-crucible/memory/.pipeline-active`), not any sha256-hashed path. T3 MUST update the harness to use `PROJECT_HASH="$(echo "$FAKE_PROJECT" | tr '/' '-')"` (note: `tr`, NOT `sha256sum`; the variable name is retained for readability but the value is now a dash-sanitized path segment, not a hash). Update the adjacent comment to state: "Match Claude Code's native marker-writer convention: tr '/' '-' on the absolute path. (Previous sha256 derivation was incorrect — see S3-R1.) The echo-n-vs-echo concern (historical F4) is moot under the tr derivation." Also delete any unused overwritten `printf`/`echo` assignments. This is the ONLY pre-authorized test edit in T3; all other test concerns still ESCALATE.
 
 ### Steps
 
@@ -231,7 +245,7 @@ Implement the full advisor flow per design Part 2. Single bash script; no helper
    - Fix the **hook** (never the test — tests are spec).
 3. Common likely failures and fixes:
    - **Test 1 (motivating canary):** classification regex must catch `spec`, `implement`, `PR` with word boundaries; total distinct = 3 ≥ 2 satisfies trigger.
-   - **Test 3 (marker suppression):** marker path uses fake `$HOME` per test harness. Hook must derive `$PROJECT_MEMORY` from `echo -n "$(pwd)" | sha256sum | cut -c1-16` (matching `hooks/session-index.sh:38-39`) — test harness line 30 must also use `echo -n` (see pre-authorized exception above).
+   - **Test 3 (marker suppression):** marker path uses fake `$HOME` per test harness. Hook must derive `$PROJECT_MEMORY` from `echo "$PROJECT_ROOT" | tr '/' '-'` (Claude Code's native dash-sanitized-path convention — matches `/build`'s actual marker-writer location) — test harness must also use the `tr '/' '-'` derivation (see pre-authorized exception above).
    - **Test 5 (stale marker):** ensure `start_time` 24h check uses `date -d` parsing or epoch math; `48 hours ago` must NOT suppress.
    - **Test 6 (different branch):** `.branch != $CUR_BRANCH` → not active. Verify `git -C "$(pwd)" branch --show-current` against `test-branch` value from the fake repo.
    - **Test 7 (disclaimer):** "design only" must hit the disclaimer regex BEFORE classification.
@@ -278,7 +292,7 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 13. **Kill-switch toggle preserves dedup fields:** sequence — (a) emit an advisory (fingerprint + timestamp recorded in state); (b) set kill switch (env var or sentinel); (c) invoke hook → honored, dedup fields preserved per Min-1-R6; (d) remove kill switch; (e) re-trigger within 5-min dedup window with the same prompt → second trigger MUST be deduped (fingerprint preserved across the toggle, no second advisory emitted).
 14. **Literal `build-shaped` regression guard:** trivial assertion that the advisory stderr contains the exact literal token `build-shaped` (`grep -Fq "build-shaped"`). Catches future copy edits that might drop or rename the token (the tests grep for it; the README documents it; the dogfood scripts grep for it).
 15. **State-file bounded growth ≤5 lines:** run a sequence of (advisory emit + kill-switch set + sentinel with `disabled-until` expiry + reset/eligible re-fire), then assert `[ "$(wc -l < $STATE_FILE)" -le 5 ]`. Schema must remain ≤5 lines across all state transitions; this catches accidental appends/duplicate-key bloat.
-16. **Trailing-newline regression canary (F4):** fixture writes a valid pipeline-active marker at `$HOME/.claude/projects/<echo-n hash>/memory/.pipeline-active` (computed with `echo -n "$(pwd)" | sha256sum | cut -c1-16`). Pipe a build-shaped prompt to the hook; assert the hook FINDS the marker and suppresses (exit 0, empty stderr). If the hook were to use `echo` without `-n`, it would look in a DIFFERENT directory, miss the marker, and emit an advisory — this test fails. Fail message must mention "PROJECT_HASH echo -n mismatch" to make the diagnosis obvious.
+16. **PROJECT_HASH derivation canary (S3-R1; supersedes F4):** fixture writes a valid pipeline-active marker at `$HOME/.claude/projects/<tr-sanitized path>/memory/.pipeline-active` (computed with `echo "$PROJECT_ROOT" | tr '/' '-'` where `PROJECT_ROOT` is the fake project path under the harness's fake `$HOME`). Pipe a build-shaped prompt to the hook; assert the hook FINDS the marker and suppresses (exit 0, empty stderr). If the hook were to use ANY sha256-based derivation (either `echo` or `echo -n` variant), or any other scheme, it would look in a DIFFERENT directory, miss the marker, and emit an advisory — this test fails. Fail message must mention "PROJECT_HASH derivation mismatch: hook must look at `~/.claude/projects/$(echo $PROJECT_ROOT | tr '/' '-')/memory/.pipeline-active`" to make the diagnosis obvious. (Historical note: earlier drafts named this the "trailing-newline canary" / "F4 canary"; S3-R1 rescopes it to the tr derivation.)
 17. **Real-fixture pass-through:** `bash hooks/build-routing-advisor.sh < hooks/tests/fixtures/agent-pretooluse-sample.json` — hook exits 0; stderr either empty (fixture's prompt is non-build-shaped) OR contains `ADVISORY:` (fixture's prompt is build-shaped). Either outcome passes; the assertion is that the hook does not crash and the extraction path returns the prompt.
 18. **Trigger-classification (a) Implement+Design, density=2:** prompt `"implement refactor of design"` → Implement=2 distinct (implement, refactor), Design=1, Ship=0, TOTAL_DISTINCT ≥2 → advisory emits. Comment cites Trigger-Classification rule "Implement≥1 AND (Design≥1 OR Ship≥1) AND total-distinct≥2".
 19. **Trigger-classification (b) Implement+Design+Ship (all three):** prompt `"design, implement, and commit"` → all three categories =1, TOTAL_DISTINCT=3 → advisory emits.
@@ -290,7 +304,7 @@ Reconcile the 10-case RED canary against the ~25+ design-enumerated ACs. Decisio
 
 1. APPEND cases to `hooks/tests/test-build-routing-advisor.sh`. Do NOT create a separate extended file. Original 10 cases remain unmodified at the top of the file (except the F4 line-30 `echo -n` fix authorized in T3); new cases follow as additional test functions invoked by the same runner.
 1a. **Dynamic TOTAL:** update the harness's `TOTAL` to be computed at the end as `TOTAL=$((PASSED + FAILED))` rather than hardcoded to 10. This avoids drift whenever T3.5 appends cases (and any future additions). The final `Results: X/Y passed` line MUST use the computed TOTAL.
-2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `pwd`-derived `$PROJECT_MEMORY` using `echo -n`, stderr capture via `2>&1` or `2> "$stderr_file"`, exit-code assertion).
+2. Implement each case above using the same harness conventions as the RED canary (fake `$HOME`, `$PROJECT_MEMORY` derived via `echo "$PROJECT_ROOT" | tr '/' '-'` against the fake project path per S3-R1, stderr capture via `2>&1` or `2> "$stderr_file"`, exit-code assertion).
 3. Run until all appended cases pass alongside the original 10.
 4. Commit: `git commit -m "test(hooks): extended AC coverage for build-routing-advisor (#174)"`.
 
@@ -383,6 +397,7 @@ N≥10 selection-eval prompts that present build-shaped intents; expected_skill 
    - **ESCALATE operational definition:** (a) do NOT commit a weakened threshold; (b) do NOT loop-tune Part 1 wording beyond 2 iterations; (c) write the eval transcript (per-seed pass/fail breakdown, failing prompts, reasoning traces) to a file under `docs/plans/` (git-add-forced); (d) surface the decision to the user via the failure path below.
    - **Operational mechanics (no 'blocked-on-user' state in `/build`):** `/build` does NOT support a "blocked-on-user-decision" state. The implementer EXITS T5 with a non-zero exit code and a clear error message that points to the eval transcript path. The orchestrator (Phase 3 runner) surfaces the failure to the user. The user then decides one of: (i) accept a lower threshold via manual override recorded in the plan (new sub-task in this plan, not a silent edit); (ii) revise Part 1 further as a new sub-plan task; (iii) close the ticket. There is no in-pipeline pause — the failure is the signal.
 6. If variance between seeds in any iteration is >2 points, expand to 5 seeds before interpreting median (Min-6-R6).
+6a. **Iteration ceiling (M2):** maximum 3 evaluation rounds × 5 seeds = ≤15 eval runs total before escalation. Do NOT loop indefinitely on borderline scores — once the ceiling is hit, ESCALATE per step 5.
 7. Commit: `git commit -am "eval(skills): routing eval for build-shaped dispatches (#174)"`.
 
 ### Acceptance
@@ -417,6 +432,7 @@ Document the new hook side-by-side with `gate-ledger-guard`. Document `gate-ledg
 - `### Performance`: combined budget with `gate-ledger-guard` ≤200ms P95 over ≥20 dispatches; record measured numbers from T7.
 - `### Graceful Degradation`: missing jq, malformed JSON, missing utilities → exit 0 silently.
 - `### Testing`: `bash hooks/tests/test-build-routing-advisor.sh` — case count is dynamic; insert the current count by running `grep -c '^test_' hooks/tests/test-build-routing-advisor.sh` at README-update time and embedding that number (or phrase as "see test file for current count"). Do NOT hardcode "10 cases" — T3.5 appends more.
+- `### Static-analysis fallback (T8) — known brittleness (M6)`: note that T8's method (b) static-analysis check (grep line-number of marker-write < grep line-number of first Task dispatch in each pipeline skill's SKILL.md) is brittle against future markdown reorganization. If pipeline-skill SKILL.md files are restructured (headings renamed, sections reordered, Task invocation documented in a different syntax), this check can silently pass on broken ordering or fail on correct ordering. Future pipeline-skill refactors MUST update this check alongside the SKILL.md change.
 
 Append to "Gate Ledger Guard" section a brief note (Min-5-R6):
 > Registered in user-global `~/.claude/settings.json`. Matcher: none — this hook intercepts every PreToolUse event and filters internally for Write/Edit. By contrast, `build-routing-advisor` registers `matcher: "Task"` in the SAME `~/.claude/settings.json`. Both hooks' scope (user-global) and matcher choices are documented for parity.
@@ -449,7 +465,10 @@ Validate two ACs:
    - Pick a small real change (e.g. typo fix or one-line README edit on a scratch branch).
    - Run `/build`. Count advisory emissions in transcripts (`grep -c "build-shaped"`).
    - Assert count == 0. If not, investigate: marker write-before-first-dispatch ordering (see T8) or classification false positives.
-2. **Perf measurement during pipeline dogfood (EXTERNAL timing — do NOT modify the hook source):**
+2. **Perf measurement during pipeline dogfood (EXTERNAL timing — do NOT modify the hook source). Measurement honesty (M4) — record BOTH methods in README:**
+   - **Method (a) — fixture-based P95:** `time bash hook < fixture` over 20 warm-cache runs (the cold-and-process-fork baseline; the proxy that is actually measurable).
+   - **Method (b) — real-run P95:** during a real `/build` run, measure combined hook overhead via Claude Code's internal telemetry if available. If NOT available (likely — no public runtime hook-timing API), explicitly note in the README: "real-run P95 not empirically measurable without Claude Code runtime support — fixture-based P95 (method a) is the proxy."
+   - The hard ≤200ms combined P95 gate uses method (a). Method (b) is recorded if measurable, otherwise the absence is documented.
    - **Cache warmup:** before the measurement window, run 2 warmup invocations of EACH hook against the fixture (4 total invocations) and DISCARD their timings. This warms the FS cache and avoids cold-cache bias. Record the measurement section in `hooks/README.md` under the heading **"P95 (warm cache, N=20)"** to make the methodology explicit.
    - Wrap hook invocations with external timing via `time bash hooks/build-routing-advisor.sh < fixture` (and same for `gate-ledger-guard`) over ≥20 dispatches during a real `/build` run. Alternative: use `/usr/bin/time -f '%e'` for machine-parseable seconds, or `date +%s%N` before/after the `bash` invocation in a wrapper script — the key constraint is **the hook source file is NOT modified for measurement**.
    - Capture per-invocation wall-clock into `/tmp/hook-perf.log` (wrapper-level), one line per invocation: `advisor:<ms>` and `guard:<ms>`.
@@ -528,6 +547,8 @@ Convert advisor warnings into discrete, verifiable post-hoc signal. For each mer
 
 Design's Honest-about-limits states: "If post-launch telemetry shows Part 2's cost exceeds value, removal is a clean follow-up." That telemetry is hollow without a ground-truth oracle. The reconciler IS the oracle. Without it, the advisor is unverifiable forever and the design's removal clause is unactionable.
 
+**T9 vs Min-7 reconciliation (SP4):** T9 is post-hoc telemetry, NOT a gate. The Min-7 PR-creation hook was rejected because it proposed GATING merges; T9's read-only post-hoc audit does not gate anything — it surfaces historical data to `/forge` for eventual tuning decisions. This distinction is load-bearing for the deferral rationale: T9 may land in the same PR as #174 or as a follow-up, but it never blocks anything.
+
 ### Steps
 
 1. **Create tool directory:** `mkdir -p hooks/tests/tools/`. Create `hooks/tests/tools/build-routing-reconcile.sh`. Start with standard crucible bash header (`set +e`, graceful degradation on missing utilities).
@@ -540,11 +561,11 @@ Design's Honest-about-limits states: "If post-launch telemetry shows Part 2's co
 
 5. **If HAS_GATE_PASS=false, flag the PR:** Record PR number, branch name, merge date, commits on branch count. This is the #174 failure-mode signal.
 
-6. **Enrich with advisor fire data:** For each flagged PR, check `$PROJECT_MEMORY/build-routing-advisor-state.md` snapshots (if available — the state file is overwritten, so historical data is in session-index or git-committed retros). Count advisory fires during the branch's lifetime.
+6. **Enrich with advisor fire data:** For each flagged PR, check `$PROJECT_MEMORY/build-routing-advisor-state.md` snapshots (if available — the state file is overwritten, so historical data is in session-index or git-committed retros). `$PROJECT_MEMORY` is derived per S3-R1 via `~/.claude/projects/$(echo "$REPO_ROOT" | tr '/' '-')/memory/` (NOT sha256). Count advisory fires during the branch's lifetime.
 
-7. **Enrich with session-index Task dispatch data:** Grep `~/.claude/projects/<hash>/memory/session-index/*/events.jsonl` for `Task` tool invocations with `subagent_type=general-purpose` within the branch's timeframe. Count.
+7. **Enrich with session-index Task dispatch data:** session-index writes under a DIFFERENT directory than the marker-writer (pre-existing divergence — session-index uses sha256 of pwd). Grep `~/.claude/projects/<session-index-dir>/memory/session-index/*/events.jsonl` for `Task` tool invocations with `subagent_type=general-purpose` within the branch's timeframe. Count. Document this directory split inline as a comment in the reconciler: the two data sources live in different subdirectories under `~/.claude/projects/` and both must be consulted.
 
-8. **Emit markdown report:** For each flagged PR: `- PR #N (branch: X, merged YYYY-MM-DD): M advisories fired, K general-purpose dispatches, L commits on branch.` Aggregate at the end: total flagged PRs, total PRs in window, approximate advisor precision (flagged-with-advisory / total-advisories-in-window).
+8. **Emit markdown report:** For each flagged PR: `- PR #N (branch: X, merged YYYY-MM-DD): M advisories fired, K general-purpose dispatches, L commits on branch.` Aggregate at the end: total flagged PRs, total PRs in window, **flagged PR count and enrichment data (actual advisor precision requires archived advisor state; the current implementation shows last-known state only — the state file is overwritten between runs, so historical fire counts per-PR are approximate at best)** (M3 scope honesty).
 
 9. **Output modes:** plain markdown (default), JSON (`--json`), append to `/forge` scratchpad (`--forge`).
 
