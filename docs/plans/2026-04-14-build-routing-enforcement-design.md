@@ -64,7 +64,11 @@ Zero false positives. Precise. Educational. (M4)
 This section is added under an appropriate existing heading in
 `getting-started/SKILL.md` (e.g. alongside skill-selection guidance)
 rather than as a floating top-level section. The implementer chooses
-placement to match the existing document structure (M4-R2).
+placement to match the existing document structure (M4-R2). **Part 1's
+placement is chosen by the implementer under existing skill-selection
+guidance headers, not as a standalone top-level section** (Min-6):
+this improves the likelihood the guidance is read alongside related
+routing material.
 
 **Token budget (S4-R3).** `getting-started/SKILL.md` loads into every
 session, so every added line has recurring cost. The Part 1 addition
@@ -83,6 +87,17 @@ is `Task` in current Claude Code; earlier/alternative versions may use
 version's matcher at install time (M2-R2). The hook MUST register a
 matcher distinct from `gate-ledger-guard` (which uses `Write|Edit`);
 see M3. The discovery step in S1 below pins the correct matcher.
+
+The hook executes in the order below. **Classification runs BEFORE
+the git subprocess call** (Min-7): most dispatches produce no
+classification match, so the common-case cost is early-exit with no
+git subprocess fork. The git-current-branch call only runs if
+classification produced a potential trigger.
+
+Throughout Part 2, **`$PROJECT_MEMORY`** resolves to
+`~/.claude/projects/<project-hash>/memory/` (Min-3) — derived
+identically to how existing pipeline skills resolve their scratch
+directory.
 
 The hook:
 
@@ -151,6 +166,14 @@ The hook:
    warning is the safe default). This is the single documented
    fallback case.
 
+   *Why session-ID equality is safe here (Min-1).* The session-ID
+   equality fallback was rejected as primary suppression mechanism
+   (F1-R3) due to runtime semantics uncertainty across subagent
+   dispatches. Its use here is narrowly gated on BOTH sides being
+   detached (no branch available), making session-ID the only
+   remaining identity signal — if that also fails, the advisor fires,
+   which is the correct fail-open for heuristic warnings.
+
    Otherwise the marker is treated as absent — a stale, cross-branch,
    or non-pipeline-skill marker does NOT suppress the advisory.
 
@@ -194,15 +217,27 @@ The hook:
 
    **Discoverability (S2-R3, M2-R4).** Whenever the kill switch is
    honored, the hook **overwrites** (not appends)
-   `$PROJECT_MEMORY/build-routing-advisor-state.md` with a SINGLE
-   line: `last-honored: YYYY-MM-DD`. One-line-total state avoids
-   unbounded growth from a kill switch that stays enabled for weeks.
+   `$PROJECT_MEMORY/build-routing-advisor-state.md` with a small
+   fixed-schema block (Min-5):
+   ```
+   last-honored: YYYY-MM-DD
+   fires-today: N
+   fires-total: N
+   ```
+   `fires-today` is incremented each time the hook emits an advisory
+   (reset on date change); `fires-total` is incremented on every
+   advisory emission. Both fields are overwritten in place (not
+   appended) so the file stays small. This gives users a concrete
+   measurement of actual firing rate. One-line-total state growth is
+   still bounded — the file remains ≤4 lines.
 
    **Auto-expiry (S2-R3, M3-R4).** If the sentinel file contains a
    `disabled-until: YYYY-MM-DD` line, the hook treats the switch as
    inactive on or after that date (parses line, compares to today in
    local time, re-enables automatically). Parse rules:
-   - Timezones are ignored; the comparison uses local date.
+   - Timezones are ignored; the comparison uses local date (Min-2:
+     date comparison is timezone-naive — no hour resolution. The
+     hook README documents this).
    - If multiple `disabled-until:` lines are present, use the FIRST.
    - **Malformed or unparseable dates treat the kill switch as
      PERMANENTLY DISABLED** (fail-safe: honor the user's disable
@@ -211,6 +246,18 @@ The hook:
    Users get a natural ratchet back to default-on when a valid
    future date is set and reached; malformed dates preserve the
    user's explicit disable.
+
+**Dedup across parallel scouts (Min-9).** To prevent a single
+parallel-scout dispatch batch from producing N identical advisories
+in one breath: if the advisor emits an advisory and no active
+pipeline marker is established within 5 minutes, subsequent
+identical advisories in the same session are suppressed for 5
+minutes. State is kept in
+`$PROJECT_MEMORY/build-routing-advisor-state.md` (same file as the
+kill-switch state), using additional fields (`last-advisory-at`,
+`last-advisory-fingerprint`) overwritten in place. Suppressed
+dispatches still increment `fires-total` (so measurement remains
+honest) but do not emit to stderr.
 
 **`/spec` marker writing (F1 — corrected).** `/spec`, `/debugging`,
 and `/migrate` already write `.pipeline-active` with their respective
@@ -235,38 +282,52 @@ what make the trigger sustainable.
 - [ ] `hooks/build-routing-advisor.sh` hook implemented with Implement-required keyword check (S3-R4), single-phase disclaimer skip, `subagent_type` allowlist, and time-bounded/branch-scoped pipeline-skill-active suppression (three-condition: `.skill` known, fresh <24h, `.branch` matches current branch via `git branch --show-current` on BOTH sides)
 - [ ] A real PreToolUse stdin payload is captured during implementation and committed to `hooks/tests/fixtures/agent-pretooluse-sample.json`; the hook extraction path is verified against this fixture in tests. Cover BOTH possible tool names (`Task` and `Agent`) — whichever Claude Code emits in this version is the registered matcher; the other is documented in the hook README as a fallback (S1, M3)
 - [ ] **If neither `Task` nor `Agent` is the hook matcher in this Claude Code version, `hooks/README.md` documents the fallback (grep on stdin `.tool` field) and the test suite covers it** (M1-R4)
-- [ ] Hook matcher is explicitly registered and does NOT overlap with `gate-ledger-guard` (Write|Edit) (M3)
+- [ ] Hook matcher is explicitly registered: `build-routing-advisor` uses matcher `Task`; `gate-ledger-guard` runs on every PreToolUse (no matcher restriction). Both hooks execute on every Task dispatch, but their behavior is scoped — `gate-ledger-guard` early-exits on non-Write/Edit tools (O(1) cost). Combined budget applies (M5-R4) (Min-4)
 - [ ] Test confirms advisor suppresses when an active marker exists with ANY recognized pipeline skill (`build`, `spec`, `debugging`, `migrate`). **No source changes to `/spec`, `/debugging`, or `/migrate` required** — those skills already write the marker (F1)
 - [ ] Hook test asserts marker suppression requires ALL THREE of (`.skill` present and naming a known pipeline skill, `.start_time` within 24h, `.branch` equals current branch from `git branch --show-current`); any missing condition → advisory still emits (F1-R3 / F2-R3, M4-R4)
-- [ ] Hook test suite with cases:
+- [ ] Hook test suite with cases (grouped by coverage area for readability — Min-8; no change to coverage, presentation only):
+
+  *Trigger classification:*
   - Single-category prompt (no advisory)
-  - Implement+Design trigger with `skill: "build"` marker active, fresh, branch matches (no advisory)
-  - Implement+Ship trigger with `skill: "spec"` marker active, fresh, branch matches (no advisory)
-  - Implement+Design or Implement+Ship with `skill: "debugging"` or `"migrate"` marker active, fresh, branch matches (no advisory, F1)
   - Implement+Design+density with no marker (advisory emitted)
-  - Implement+Ship trigger with **stale** marker (`start_time > 24h` old) → advisory STILL emitted (S3, M3-R2, M4-R4)
-  - **Trigger with marker from a DIFFERENT branch (fresh, valid `.skill`, within 24h) → advisory STILL emitted** (F1-R3 / F2-R3)
-  - **6h-old marker with MISMATCHED branch → advisory STILL emitted** (Min-3, closes zombie-marker window under branch-match check)
-  - Trigger prompt with a single-phase disclaimer phrase (e.g. "design only") → no advisory (S2)
-  - Trigger prompt with non-`general-purpose` `subagent_type` → no advisory (SP2)
   - Implement+Design+Ship (all three) without marker → advisory emitted
   - **Design+Ship, NO Implement → no advisory** (S3-R4 Implement-required rule)
   - **Implement+Design, density=2 in Implement → advisory emits** (S3-R4)
   - **Implement+Ship, density=2 in Ship → advisory emits** (S3-R4)
   - **Prompt with exactly one hit per matched category (below density threshold) → no advisory** (S2-R2)
   - **Substring decoy: prompt contains `planning`, `commitment`, `shipping`, `codebase` only → no category match, no advisory** (S2-R2)
+  - Trigger prompt with a single-phase disclaimer phrase (e.g. "design only") → no advisory (S2)
+  - Trigger prompt with non-`general-purpose` `subagent_type` → no advisory (SP2)
+
+  *Marker suppression:*
+  - Implement+Design trigger with `skill: "build"` marker active, fresh, branch matches (no advisory)
+  - Implement+Ship trigger with `skill: "spec"` marker active, fresh, branch matches (no advisory)
+  - Implement+Design or Implement+Ship with `skill: "debugging"` or `"migrate"` marker active, fresh, branch matches (no advisory, F1)
+  - Implement+Ship trigger with **stale** marker (`start_time > 24h` old) → advisory STILL emitted (S3, M3-R2, M4-R4)
+  - **Trigger with marker from a DIFFERENT branch (fresh, valid `.skill`, within 24h) → advisory STILL emitted** (F1-R3 / F2-R3)
+  - **6h-old marker with MISMATCHED branch → advisory STILL emitted** (Min-3, closes zombie-marker window under branch-match check)
   - **Detached-HEAD symmetric fallback: marker `.branch=""` (written under detached HEAD) AND hook also sees detached HEAD (`branch --show-current` returns empty) AND `.pipeline_id == $CLAUDE_SESSION_ID` → marker active, advisory suppressed** (S1-R4)
   - **Asymmetric detached: marker `.branch=""` AND hook sees non-empty branch (or vice versa) → advisory STILL emits** (S1-R4 fail-open)
+
+  *Graceful degradation:*
   - Malformed JSON → graceful exit 0
   - Missing/non-executable hook script → tool call proceeds (M5)
+
+  *Kill switch:*
   - **Kill switch: `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` → hook exits 0 silently even on Implement+Design+Ship prompts** (M5-R2)
   - **Kill switch: sentinel file `$PROJECT_MEMORY/.build-routing-advisor-disabled` present → hook exits 0 silently** (M5-R2)
-  - **Kill-switch discoverability: when honored, `build-routing-advisor-state.md` is OVERWRITTEN with a single line `last-honored: YYYY-MM-DD` (no append growth, no duplicate entries)** (S2-R3, M2-R4)
+  - **Kill-switch discoverability: when honored, `build-routing-advisor-state.md` is OVERWRITTEN with the fixed-schema block (`last-honored`, `fires-today`, `fires-total`; no append growth, no duplicate entries)** (S2-R3, M2-R4, Min-5)
+  - **Firing counters: on each advisory emission, `fires-today` and `fires-total` increment; `fires-today` resets on date change** (Min-5)
   - **Kill-switch auto-expiry: sentinel file with `disabled-until: YYYY-MM-DD` in the past → advisor re-enables and emits normally** (S2-R3)
   - **Kill-switch malformed-date fail-safe: sentinel file with unparseable `disabled-until:` value → advisor treats switch as PERMANENTLY DISABLED (no silent re-enable)** (M3-R4)
   - **Kill-switch multiple `disabled-until:` lines → FIRST line wins** (M3-R4)
+
+  *Dedup:*
+  - **Dedup: if the advisor emits and no active pipeline marker is established within 5 minutes, subsequent identical advisories in the same session are suppressed for 5 minutes. State is kept in `$PROJECT_MEMORY/build-routing-advisor-state.md` (same file as kill-switch). Test: two back-to-back trigger dispatches in one batch produce exactly ONE advisory, not N** (Min-9)
+
+  *Dogfood:* (see dedicated dogfood ACs below)
 - [ ] Hook test asserts that the ADVISORY string is written to stderr (captured via `2>&1` redirection in the test harness) — programmatic, not manual (M1-R2)
-- [ ] At least one skill-selection/routing eval (e.g. under `skills/getting-started/evals/` or a comparable location) verifies the model prefers `/build` over raw dispatch for build-shaped prompts; **N ≥ 10 prompts; reported pass rate is the median of 3 runs; pass threshold ≥ 8/10 on the median** for the eval to count as satisfying the AC (SP-3-R2, Min-1)
+- [ ] At least one skill-selection/routing eval (e.g. under `skills/getting-started/evals/` or a comparable location) verifies the model prefers `/build` over raw dispatch for build-shaped prompts; **N ≥ 10 prompts; reported pass rate is the median of 3 runs; pass threshold ≥ 8/10 on the median** for the eval to count as satisfying the AC (SP-3-R2, Min-1). **If the routing eval reports <8/10 median after two wording iterations of Part 1, ESCALATE to the user with the eval transcript before landing. Do NOT loop-tune Part 1 wording indefinitely and do NOT silently weaken the ≥8/10 threshold** (F3-R5)
 - [ ] **Part 1 addition to `getting-started/SKILL.md` is ≤ 150 tokens (approximately 20–25 lines); if longer, extract verbose examples to a linked reference doc and keep the inline section terse** (S4-R3)
 - [ ] **Dogfood (pipeline): during implementation, run `/build` on a small real change and assert 0 advisories are emitted during normal `/build` operation** (Min-6)
 - [ ] **Dogfood (non-pipeline, S2-R4): during implementation, run a representative NON-PIPELINE session (recon or audit/review on this codebase — no `/build`/`/spec`/`/debugging`/`/migrate` active) and count advisory emissions. Cap: ≤2 advisories per hour of active dispatch activity. If exceeded, tighten trigger (verify S3-R4 Implement-required is working first; if still exceeded, reconsider density threshold)**
@@ -282,6 +343,29 @@ Even both parts combined won't protect against a determined Claude that rational
 - A prompt-level guardrail that makes the anti-pattern explicit
 - An ambient warning that creates visibility without friction
 - A shared vocabulary (`build-shaped work`) for the failure mode
+
+**Scope decision: ship Part 1 + Part 2 together (F1-R5).** An earlier
+iteration of this design considered shipping Part 1 alone and
+deferring Part 2 until empirical evidence of need from the routing
+eval. That option was rejected in favor of shipping both parts
+together: Part 1 provides write-time guidance, Part 2 provides
+retrospective signal, and the two complement each other rather than
+Part 2 being strictly downstream of Part 1. If post-launch telemetry
+shows Part 2's cost exceeds value, removal is a clean follow-up (the
+hook is self-contained and disabling it affects no other system).
+
+**Self-firing during bootstrap (F2-R5).** During the implementation of
+this very hook, subagent dispatches with prompts like "Implement the
+advisor and open a PR" WILL legitimately trip the trigger (Implement
+≥1 + Ship ≥1 + density ≥2 in Ship via open/merge/PR). This is
+expected and acceptable: (a) the implementer dispatches are few (one
+or two scouts during bootstrap); (b) this IS build-shaped work and
+SHOULD have routed through `/build` per the policy the hook enforces;
+(c) the advisory is retrospective — the dispatch still runs. The
+implementer is instructed to run `/build` on a small real change
+AFTER the hook lands for the dogfood AC, not during bootstrap. The
+bootstrap trigger events are noted and expected, not counted against
+the non-pipeline ≤2/hr dogfood cap.
 
 **Part 2 is observational telemetry, not in-flight shaping (S3-R3).**
 The advisor fires AFTER the subagent dispatch has been committed by
