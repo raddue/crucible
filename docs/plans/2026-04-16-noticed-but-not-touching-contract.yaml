@@ -1,0 +1,82 @@
+---
+ticket: "#179"
+epic: "#179"
+title: "'Noticed but not touching' scope discipline pattern"
+date: "2026-04-16"
+source: "spec"
+---
+
+version: "1.0"
+ticket: "#179"
+epic: "#179"
+title: "'Noticed but not touching' scope discipline pattern"
+date: "2026-04-16"
+
+api_surface:
+  - name: "Noticed But Not Touching (report format)"
+    type: "interface"
+    signature: "### Noticed But Not Touching\n\n- **file:** `path:L<start>-L<end>`\n  **noticed:** <desc>\n  **why it matters:** <risk/opportunity>\n  **suggested follow-up:** <optional>"
+    params:
+      - name: "file_path_with_line_range"
+        type: "string"
+        required: true
+      - name: "noticed"
+        type: "prose"
+        required: true
+      - name: "why_it_matters"
+        type: "prose"
+        required: true
+      - name: "suggested_follow_up"
+        type: "prose"
+        required: false
+    description: "Structured entry for out-of-scope observations surfaced during implementation. Appears as a required section in every build implementer report. If no observations, implementer writes `*(none)*`."
+
+  - name: "docs/plans/<pipeline-id>-noticed.md"
+    type: "interface"
+    signature: "Markdown file containing aggregated Noticed entries from all implementers in a /build pipeline"
+    params: []
+    description: "Per-pipeline artifact written by the build orchestrator after implementer reconciliation. Committed with the PR. Skipped if zero entries across all implementers."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "/build implementer prompt template contains 'Noticed But Not Touching' section"
+      verification: "grep -q 'Noticed But Not Touching' skills/build/build-implementer-prompt.md"
+      check_method: "grep"
+    - id: "INV-2"
+      description: "/build SKILL.md documents the noticed.md reconciliation"
+      verification: "grep -q 'noticed.md' skills/build/SKILL.md"
+      check_method: "grep"
+    - id: "INV-5"
+      description: "/finish SKILL.md references noticed.md for optional issue conversion"
+      verification: "grep -q 'noticed.md' skills/finish/SKILL.md"
+      check_method: "grep"
+
+  testable:
+    - id: "INV-3"
+      description: "Implementer given an out-of-scope observation writes a Noticed entry AND does not modify the out-of-scope file"
+      verification: "Fixture test: stub implementer, out-of-scope issue in fixture, assert Noticed entry present + file hash unchanged pre/post"
+      test_tag: "contract:scope-discipline:inv-3"
+    - id: "INV-4"
+      description: "Aggregated noticed.md contains deduped entries from each implementer's report"
+      verification: "Integration test: 2 implementers each produce 1 Noticed entry (1 unique, 1 duplicate); assert reconciled file has 1 deduped entry"
+      test_tag: "contract:integration:inv-4"
+
+integration_points:
+  - contract: "2026-04-16-anti-rationalization-tables-contract.yaml"
+    ticket: "#176"
+    relationship: "adjacent"
+    surface: "skills/build/SKILL.md"
+    notes: "Both tickets modify /build's SKILL.md; coordinate section placement to avoid merge collisions"
+  - contract: "2026-04-16-context-trust-hierarchy-contract.yaml"
+    ticket: "#180"
+    relationship: "adjacent"
+    surface: "skills/build/SKILL.md"
+    notes: "#180 also touches /build; three tickets sit alongside in the same SKILL.md"
+  - contract: "skills/finish/SKILL.md"
+    ticket: "#179"
+    relationship: "downstream"
+    surface: "skills/finish/SKILL.md"
+    notes: "/finish consumes docs/plans/*-noticed.md to offer optional GitHub issue conversion"
+
+ambiguity_resolutions: []

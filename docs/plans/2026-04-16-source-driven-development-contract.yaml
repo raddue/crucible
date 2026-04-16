@@ -1,0 +1,65 @@
+---
+ticket: "#177"
+epic: "#177"
+title: "Source-driven development skill"
+date: "2026-04-16"
+source: "spec"
+---
+version: "1.0"
+ticket: "#177"
+epic: "#177"
+title: "Source-driven development skill"
+date: "2026-04-16"
+api_surface:
+  - name: "source-driven-development"
+    type: "interface"
+    signature: "Skill invocation: /source-driven-development [--framework <name>] [--url <url>]"
+    params:
+      - name: "framework"
+        type: "string"
+        required: false
+      - name: "url"
+        type: "string"
+        required: false
+    description: "Skill that enforces Detect → Fetch → Implement → Cite protocol"
+  - name: "build-integration-hook"
+    type: "interface"
+    signature: "Injection point in skills/build/build-implementer-prompt.md"
+    params: []
+    description: "Hook that invokes source-driven-development when external API usage detected"
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Skill file exists at skills/source-driven-development/SKILL.md"
+      verification: "test -f skills/source-driven-development/SKILL.md"
+      check_method: "file-structure"
+    - id: "INV-2"
+      description: "/build implementer prompt references source-driven-development"
+      verification: "grep -q 'source-driven-development' skills/build/build-implementer-prompt.md"
+      check_method: "grep"
+  testable:
+    - id: "INV-3"
+      description: "When an eval prompt requires external API usage, source-driven-development is invoked"
+      verification: "Skill selection eval — expected_skill includes source-driven-development"
+      test_tag: "contract:routing:inv-3"
+integration_points:
+  - contract: "2026-04-16-anti-rationalization-tables-contract.yaml"
+    ticket: "#176"
+    relationship: "adjacent"
+    surface: "SKILL.md additions"
+    notes: "Both tickets add to skills; coordinate positions within /build SKILL.md"
+security_review:
+  status: "recommended"
+  signals_detected:
+    - category: "external_input"
+      evidence: "skill fetches external web content via WebFetch; content is ingested into agent context"
+    - category: "dependencies"
+      evidence: "skill introduces implicit trust in external docs domains"
+  deployment_context: "public"
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Both standalone skill + /build integration hook"
+    confidence: "medium"
+    alternatives: ["standalone only", "/build phase only"]
+    reasoning: "Maximizes coverage (build + debug + migrate) while retaining invocation flexibility"
+    reversibility: "high — integration hook can be removed without deleting the skill"
