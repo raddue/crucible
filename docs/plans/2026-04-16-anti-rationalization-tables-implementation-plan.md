@@ -35,8 +35,8 @@ table, verify).
 - **Verification:**
   1. `grep -n 'Anti-Rationalization' skills/build/SKILL.md` returns a line in
      the 47–50 range.
-  2. `grep -c '^| ' skills/build/SKILL.md` — count increases by the number of
-     data rows + 1 (header) + 1 (separator).
+  2. The awk block in the post-impl Verification Checklist (AC-2) reports
+     `5 ≤ data-row-count ≤ 8` for `skills/build/SKILL.md`.
 - **Rollback:** `git checkout -- skills/build/SKILL.md`.
 
 ### T2: Insert table into `skills/spec/SKILL.md`
@@ -96,12 +96,44 @@ table, verify).
 
 ## Verification Checklist (post-implementation)
 
-- [ ] AC-1: `for f in skills/{build,spec,quality-gate,design}/SKILL.md; do
+- [ ] AC-1: `for f in skills/build/SKILL.md skills/spec/SKILL.md skills/quality-gate/SKILL.md skills/design/SKILL.md; do
   grep -l 'Anti-Rationalization' "$f"; done` prints all 4 paths.
-- [ ] AC-2: Each table has ≥5 data rows (counted between the heading and the
-  next `## ` heading, subtracting 2 for header+separator).
-- [ ] AC-3: Each table is in `SKILL.md`, not a sidecar file.
-- [ ] AC-4: Each table precedes the first procedural section.
+- [ ] AC-2: For each of the 4 files, the awk block below prints a data-row
+  count of 5–8 (inclusive) between the `## Anti-Rationalization Table` heading
+  and the next `## ` heading:
+
+  ```bash
+  for f in skills/build/SKILL.md skills/spec/SKILL.md skills/quality-gate/SKILL.md skills/design/SKILL.md; do
+    awk '
+      /^## Anti-Rationalization Table/ {in_tbl=1; next}
+      in_tbl && /^## / {in_tbl=0}
+      in_tbl && /^\|/ {n++}
+      END {print FILENAME": "(n>=2?n-2:0)" data rows"}
+    ' "$f"
+  done
+  ```
+
+  (Subtracts 2 for the header row and the `|---|` separator row; asserts
+  `5 ≤ count ≤ 8` per DEC-5.)
+- [ ] AC-3: All 4 paths in AC-1 end in `SKILL.md` (not a sidecar file).
+- [ ] AC-4: For each file, the line number of `## Anti-Rationalization Table`
+  is less than the line number of the first procedural heading listed in
+  INV-4 of the contract. Quick check:
+
+  ```bash
+  for f in skills/build/SKILL.md skills/spec/SKILL.md skills/quality-gate/SKILL.md skills/design/SKILL.md; do
+    tbl=$(grep -n '^## Anti-Rationalization Table' "$f" | head -1 | cut -d: -f1)
+    proc=$(grep -nE '^## (The Process|Gate Ledger Protocol|Pipeline Status|Orchestration Flow|How It Works|Phase [0-9])' "$f" | head -1 | cut -d: -f1)
+    echo "$f: table@${tbl} proc@${proc}"
+    [ -n "$tbl" ] && [ -n "$proc" ] && [ "$tbl" -lt "$proc" ] || echo "  FAIL"
+  done
+  ```
+- [ ] AC-5 (heading format, load-bearing): exactly one match per file for the
+  em-dash heading — `grep -c '^## Anti-Rationalization Table — ' <file>`
+  returns `1` for all 4 files. ASCII `--` will fail this check, protecting
+  INV from accidental ASCII substitution.
+- [ ] INV-5 (additive-only): `git diff HEAD~N -- skills/*/SKILL.md` on the
+  #176 commits shows no deletions inside existing `## Red Flags` blocks.
 - [ ] Quality gate dispatched on the changed docs before commit (per
   `feedback_quality_gate_always`).
 - [ ] Innovate + red-team run on the final set (per `feedback_never_skip_gates`).
