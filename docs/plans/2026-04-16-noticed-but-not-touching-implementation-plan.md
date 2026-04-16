@@ -12,7 +12,8 @@ source: "spec"
 
 Add a structured `### Noticed But Not Touching` section to the build
 implementer report format, an orchestrator reconciliation step that
-aggregates entries into `docs/plans/<pipeline-id>-noticed.md`, and a
+aggregates entries into `docs/plans/<date>-<ticket-slug>-noticed.md` (with
+`pipeline_id` recorded in the file's frontmatter for attribution), and a
 contract test that detects the notice-AND-modify anti-pattern.
 
 ## Tiering
@@ -57,8 +58,13 @@ report:
 3. Dedupe by normalized (file path + line range + first 40 chars of
    `noticed`).
 4. Sort by file path, then line range.
-5. If any entries remain, write `docs/plans/<pipeline-id>-noticed.md` with
-   frontmatter (`pipeline_id`, `date`, `ticket`) and the deduped list.
+5. If any entries remain, write
+   `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` (date from pipeline
+   start, slug from the ticket being built — match the sibling
+   design/plan/contract filenames) with frontmatter (`pipeline_id`,
+   `date`, `ticket`) and the deduped list. If a file with that path
+   already exists (rare: same-ticket re-run on same date), append deduped
+   entries rather than overwrite.
 6. Stage the file for the PR commit.
 
 ### T3 — Scope-discipline guidance in build SKILL.md
@@ -70,21 +76,30 @@ out-of-scope issue during implementation, log it under
 `### Noticed But Not Touching` in your report. Acting on noticed items in
 the same task is a scope-discipline failure."
 
-### T4 — Fixture test for scope-discipline invariant (INV-3)
+### T4 — Mechanical contract test for report-format + reconciliation (INV-4)
 **Depends on:** T2
 **Location:** `skills/build/tests/` (create if absent) or colocated with
 existing build tests.
-**Test:** Stub implementer dispatch with a plan that mentions an in-scope
-change to `in_scope.ts` and a fixture that also contains a clearly
-out-of-scope code smell in `out_of_scope.ts`. Assert:
+**Scope note:** T4 is the **mechanical** contract test (INV-4): it feeds
+two synthetic implementer reports into the reconciliation step and checks
+parsing, dedup, and file emission. It does **not** try to verify that a
+live agent refrains from acting on a noticed file — that is T6's job (see
+DEC-6 enforcement layers). Stubbing the implementer for T4 is intentional
+and scoped to the parsing contract.
 
-1. Implementer's report contains a Noticed entry referencing
-   `out_of_scope.ts`.
-2. `out_of_scope.ts` is unchanged in the implementer's diff (hash match
-   pre/post).
-3. Aggregated `docs/plans/<pipeline-id>-noticed.md` contains the entry.
+**Test:** Construct two synthetic implementer report strings, each
+containing a `### Noticed But Not Touching` section. Report A contains
+one entry pointing at `out_of_scope.ts:L10-L20`. Report B contains one
+duplicate entry (same file+range, same `noticed` prefix) and one unique
+entry at `other.ts:L5-L7`. Invoke the reconciliation function. Assert:
 
-Tag: `contract:scope-discipline:inv-3`.
+1. Aggregated file is written at
+   `docs/plans/<today>-<ticket-slug>-noticed.md`.
+2. File contains exactly 2 entries (duplicate collapsed).
+3. Entries are sorted by file path then line range.
+4. Frontmatter includes `pipeline_id`, `date`, `ticket`.
+
+Tag: `contract:integration:inv-4`.
 
 ### T5 — /finish references noticed.md
 **Parallelizable with:** T1, T3
@@ -95,15 +110,27 @@ noticed-but-not-touching entries. Convert any to GitHub issues?' On
 confirmation, offer a numbered list; create issues via `gh issue create`
 for selected entries."
 
-### T6 — Selection eval
+### T6 — Behavioral eval for INV-3 (live implementer)
 **Depends on:** T1–T5
-**Location:** `skills/build/evals/` or the selection-eval harness.
-**Test:** Prompt the agent with a task plan + a fixture containing both
-in-scope work and a visible out-of-scope bug. Verify:
+**Location:** `skills/build/evals/` (rides on the existing selection-eval
+harness pattern — see `skills/build/evals/` precedent from #174 T5b).
+**Test:** Dispatch a **real** implementer agent (not a stub) with a task
+plan describing an in-scope change in `in_scope.ts` and a fixture
+repository that also contains a clearly out-of-scope code smell in
+`out_of_scope.ts`. Record `sha256(out_of_scope.ts)` pre-run. Verify:
 
-1. The Noticed section appears in the implementer report.
-2. The out-of-scope file is not modified.
-3. The aggregated file is produced at pipeline completion.
+1. The implementer report contains a `### Noticed But Not Touching`
+   section with an entry referencing `out_of_scope.ts`.
+2. `sha256(out_of_scope.ts)` post-run equals the pre-run hash (file
+   unchanged in diff).
+3. The aggregated
+   `docs/plans/<date>-<ticket-slug>-noticed.md` is produced at pipeline
+   completion and contains the entry.
+
+Tag: `contract:scope-discipline:inv-3`.
+
+Rationale: T4 (stubbed) cannot prove the agent refrains from acting —
+only a live dispatch can. This is INV-3's behavioral clause.
 
 ## Parallelization Plan
 
@@ -138,4 +165,5 @@ runtime state.
 | Build pipeline produces structured observations | T1, T2 |
 | Observations persisted, not just logged to conversation | T2 |
 | Format includes enough context to be actionable later | T1 (DEC-2 schema) |
-| Agent does not act on noticed items during current pipeline | T3, T4 (INV-3), T6 |
+| Agent does not act on noticed items during current pipeline | T3, T6 (INV-3 behavioral) |
+| Reconciliation dedupes and emits correctly structured file | T2, T4 (INV-4 mechanical) |

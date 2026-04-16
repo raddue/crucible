@@ -52,7 +52,7 @@ invariants:
       check_method: "grep"
     - id: "INV-4"
       description: "Each table precedes the first procedural/process walkthrough section of its skill."
-      verification: "Line number of '## Anti-Rationalization Table' is less than the line number of the first of: '## The Process', '## Gate Ledger Protocol', '## Orchestration Flow', '## How It Works', '## Phase 1'."
+      verification: "Line number of '## Anti-Rationalization Table' is less than the line number of the first of these procedural/walkthrough sections present in the skill: '## The Process' (design), '## Gate Ledger Protocol' (build), '## Pipeline Status' / '## Orchestration Flow' (spec), '## How It Works' (quality-gate), or any '## Phase N' heading."
       check_method: "code-inspection"
     - id: "INV-5"
       description: "Existing '## Red Flags' sections are not modified by this change (additive-only)."

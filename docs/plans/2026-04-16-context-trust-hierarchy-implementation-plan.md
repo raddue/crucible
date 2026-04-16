@@ -79,15 +79,22 @@ If #177 has landed, annotate the WebFetch-result handling path as L4. If #177 is
 
 ### T7 — Cross-links
 
-Add a one-line reference from `CLAUDE.md` (if it exists at repo root) or top-level skills README pointing at the hierarchy.
+Add a one-line reference pointing at `skills/getting-started/trust-hierarchy.md` from the highest-reaching always-loaded entry point available, resolved in this order:
+
+1. `/mnt/e/Coding/crucible/CLAUDE.md` if present at repo root (currently NOT present as of 2026-04-16 — skip).
+2. `/mnt/e/Coding/crucible/skills/README.md` if present.
+3. Otherwise, add the reference inside `skills/getting-started/SKILL.md` only (already covered by T2) and mark T7 as satisfied-by-T2.
+
+Document the chosen target in the PR description so reviewers can verify.
 
 ## Invariants (verification checklist)
 
 - INV-1: trust-hierarchy.md has exactly 5 `## L[1-5]` headings.
 - INV-2: getting-started/SKILL.md mentions `trust-hierarchy`.
 - INV-3: each of `skills/{build,design,recon}/SKILL.md` contains `TRUST:` at least once.
+- INV-4: every `TRUST:` marker in the annotated SKILL.md files includes an `L<N>` classification — `grep -E 'TRUST:' skills/{build,design,recon}/SKILL.md` lines each match `TRUST:.*L[1-5]`.
 
-All three are plain grep checks — suitable for quality-gate.
+All four are plain grep checks — suitable for quality-gate.
 
 ## Risks / Mitigations
 

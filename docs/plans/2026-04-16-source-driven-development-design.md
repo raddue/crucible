@@ -80,8 +80,10 @@ Source hierarchy (DEC-2, **high confidence**):
 1. **Official docs** — `docs.<framework>.com`, `<framework>.readthedocs.io`,
    canonical `/docs` on the project's own site.
 2. **Official blog / release notes** — for recent/breaking API changes.
-3. **Web standards** — MDN, w3c, whatwg specs for browser/platform APIs.
-4. **Compatibility tables** — caniuse, kangax compat-table for feature support.
+3. **Upstream source / type definitions** — public API source in the framework's own
+   repo (e.g., `.d.ts` files, exported module signatures). Use when docs lag a release.
+4. **Web standards** — MDN, w3c, whatwg specs for browser/platform APIs.
+5. **Compatibility tables** — caniuse, kangax compat-table for feature support.
 
 **Explicitly banned as primary sources:**
 - Stack Overflow answers
@@ -91,6 +93,12 @@ Source hierarchy (DEC-2, **high confidence**):
 
 Banned sources may be used *only* as secondary corroboration after an official source is
 consulted, and must never be cited as the authority.
+
+**Detecting training-data recall** (the hardest to enforce): the skill requires that
+*every* non-obvious external API call in the diff carries either (a) a citation footer
+or inline comment with a URL + fetch date, or (b) appears already elsewhere in project
+code. Absence of both is the signal that the agent wrote the call from recall. This is
+checkable by the selection eval (INV-3) and spot-checkable by reviewers.
 
 Fetch via `WebFetch` tool. Capture URL + fetch date.
 
@@ -119,8 +127,9 @@ Citations must include the fetch date so a future reader can detect doc drift.
 The skill auto-triggers when **all** are true:
 - Prompt or change context mentions a framework/library by name, OR files being modified
   import one.
-- The change is ≥ 5 LOC (DEC-4, **low confidence** — heuristic threshold, flag for
-  review).
+- The change is ≥ 5 LOC of **non-test, non-comment** code touching the external API
+  surface (DEC-4, **low confidence** — heuristic threshold, flag for review; tune via T5
+  evals).
 
 Trivial changes (typo fixes, formatting, rename-only refactors) skip the skill.
 
@@ -152,7 +161,9 @@ DEC-1 and DEC-4 are flagged for user review.
   Mitigation: source hierarchy constrains domains; banned-sources list reduces
   prompt-injection attack surface from random blogs.
 - **Implicit trust**: skill trusts docs domains. Mitigation: DEC-5 — add domains to
-  `WebFetch` allowlist incrementally, not a blanket grant.
+  `WebFetch` allowlist incrementally in `.claude/settings.local.json` (current allow
+  list only grants `WebFetch(domain:github.com)`; T3 must extend it per the T2 seed
+  table), not a blanket grant.
 - Recommend running `siege` on this skill before merge given external-input surface.
 
 ## Open questions

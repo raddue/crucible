@@ -41,8 +41,9 @@ table, verify).
 
 ### T2: Insert table into `skills/spec/SKILL.md`
 
-- **Insertion point:** after line 39 (end of `## Communication Requirement
-  (Non-Negotiable)` section body) and before line 40 (`## Pipeline Status`).
+- **Insertion point:** after the `## Communication Requirement
+  (Non-Negotiable)` section body (ends at line 38 with the example-narration
+  blockquote; line 39 is blank) and before line 40 (`## Pipeline Status`).
 - **Action:** Edit tool. Insert the table under heading
   `## Anti-Rationalization Table — spec`.
 - **Verification:**
@@ -56,10 +57,13 @@ table, verify).
 - **Insertion point:** after line 97 (end of `## External Model Review
   (Optional)` / Graceful Degradation section) and before line 99 (`## How It
   Works`). This places it immediately before the procedural walkthrough.
-  (If the skill is re-read at implementation time and a `## Non-Skippability`
-  section lives closer to the top, prefer placing the table immediately after
-  `## Non-Skippability` and before `## Fix Mechanism` — whichever is closer to
-  the transition from framing to procedure. Re-verify during implementation.)
+  Verified headings (line numbers as of HEAD `4b8eb02`): `## Consensus
+  Detection` (20), `## External Model Review (Optional)` (40), `## How It
+  Works` (99), `## Non-Skippability` (134). Note: `## Non-Skippability` sits
+  AFTER `## How It Works`, so the before-`## How It Works` placement is the
+  correct framing/procedure boundary. If lines have shifted at implementation
+  time, re-locate the first heading whose body begins the procedural
+  walkthrough and insert immediately before it.
 - **Action:** Edit tool. Insert the table under heading
   `## Anti-Rationalization Table — quality-gate`.
 - **Verification:** as in T1/T2.

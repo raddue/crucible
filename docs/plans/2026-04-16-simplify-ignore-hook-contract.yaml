@@ -50,6 +50,21 @@ invariants:
 
 integration_points: []
 
+acceptance_criteria:
+  - ac: "AC-1: Marked blocks survive simplification passes unchanged"
+    invariants: ["INV-1", "INV-2", "INV-3", "INV-4"]
+  - ac: "AC-2: Multi-syntax comment support (JS, HTML, CSS, shell/Python/YAML)"
+    invariants: ["INV-1"]
+    note: "Covered by T4 marker-syntax-coverage fixtures (one per language family)"
+  - ac: "AC-3: Atomic backup/restore — no data loss on crash"
+    invariants: []
+    note: >
+      Vacuously satisfied under Option B: protected regions are never rewritten, so no
+      backup/restore mechanism is required. If upgraded to Option A, this AC activates
+      and requires atomic-lock + restore invariants to be added.
+  - ac: "AC-4: Warning diagnostics for malformed markers"
+    invariants: ["INV-5"]
+
 ambiguity_resolutions:
   - id: "AMB-1"
     decision: "Option B (skill-level marker respect) for MVP; Option A (PreToolUse hook) as documented follow-up"

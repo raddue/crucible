@@ -124,6 +124,13 @@ The `simplify` orchestrator emits diagnostics in two situations:
 
 ## Follow-ups
 
-- If/when we observe the failure mode outside `simplify`, upgrade to Option A (PreToolUse hook)
-  with the same marker syntax. Estimated effort: ~2 days including the atomic-lock +
-  backup/restore plumbing.
+- **Upgrade to Option A (PreToolUse/PostToolUse hook)** — trigger when any of the following are
+  observed:
+  1. A non-`simplify` skill (e.g. `/build` refactor mode, `/migrate`) modifies a marked region.
+  2. A manual agent edit (user-invoked Write/Edit) destroys a marked region and the author reports
+     surprise.
+  3. The `simplify` diff-validation gate rejects > 5% of diffs across a rolling 30-day window,
+     suggesting the subagent can't self-exclude reliably from prompt alone.
+  With the same marker syntax and semantics reused verbatim. Estimated effort: ~2 days including
+  the atomic-lock + backup/restore plumbing. No migration needed — existing marked files Just Work
+  under Option A.

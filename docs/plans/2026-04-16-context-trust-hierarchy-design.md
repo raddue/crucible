@@ -42,7 +42,7 @@ Inspired by addyosmani/agent-skills' `context-engineering` five-level trust hier
 - **Sources:** design docs, implementation plans, contract YAMLs under `docs/plans/`; dispatch manifests and scratch artifacts under the scratch dir; recon briefs; decisions.md files.
 - **Property:** Produced by a prior pipeline stage that ran its own gates (quality-gate, red-team, siege). Trusted within the pipeline context that produced them.
 - **Freshness tie-breaker:** when two L2 artifacts disagree, prefer the more recent one.
-- **Cross-session memory:** `~/.claude/projects/<hash>/memory/` entries tagged current and dated within 30 days are L2.
+- **Cross-session memory:** `~/.claude/projects/<hash>/memory/` entries tagged current and dated within 30 days are L2. "Dated" = the `date:` field in the entry's frontmatter if present, else the file's mtime as reported by `stat`. "Within 30 days" = `(now - date) < 30 * 86400 seconds`. The check is performed at load time, not cached.
 
 ### L3 — Source (ground truth for "what the code does")
 - **Sources:** project source code (all languages), test files, fixtures, hook script bodies, CI config.
@@ -86,6 +86,25 @@ Skills that load external content embed a canonical inline comment adjacent to t
 ```
 
 The marker is a load-bearing comment: downstream auditors grep for `TRUST:` to verify skills handle external content correctly (INV-3).
+
+**Format grammar (canonical):**
+
+```
+<!-- TRUST: <subject> is L<N> — <action-hint>. -->
+```
+
+- `<subject>` — the content being loaded (e.g., "WebFetch result", "subagent report", "user-quoted snippet"). Free text, but must name the source.
+- `L<N>` — literal `L1`, `L2`, `L3`, `L4`, or `L5`. The level classification is REQUIRED and grep-checkable via `TRUST:.*L[1-5]`.
+- `<action-hint>` — imperative guidance (e.g., "verify against project source (L3) before acting"). Required; a bare classification without action is non-conforming.
+- The em-dash separator (` — `) is recommended but not required; `-` and `:` are acceptable substitutes for grep-parity with ASCII-only environments.
+
+## Acceptance Criteria
+
+- AC-1: `skills/getting-started/trust-hierarchy.md` exists and contains exactly 5 level headings matching `^## L[1-5]` (INV-1).
+- AC-2: `skills/getting-started/SKILL.md` references `trust-hierarchy` by filename (INV-2).
+- AC-3: Each of `skills/build/SKILL.md`, `skills/design/SKILL.md`, `skills/recon/SKILL.md` contains at least one `TRUST:` annotation (INV-3).
+- AC-4: Every `TRUST:` marker in the three annotated SKILL.md files matches the format grammar above (subject, `L<N>`, action-hint); verifiable via `grep -E 'TRUST:.*L[1-5]'`.
+- AC-5: Design, plan, and contract artifacts exist under `docs/plans/` with the `2026-04-16-context-trust-hierarchy-*` prefix.
 
 ## Placement Decision
 

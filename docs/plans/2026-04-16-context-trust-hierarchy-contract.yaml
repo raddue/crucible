@@ -48,6 +48,10 @@ invariants:
       description: "/build, /design, /recon SKILL.md files reference trust hierarchy at least once"
       verification: "for s in build design recon; do grep -q 'TRUST:' skills/$s/SKILL.md || fail; done"
       check_method: "grep"
+    - id: "INV-4"
+      description: "every TRUST: marker in annotated SKILL.md files carries an L1-L5 classification"
+      verification: "for s in build design recon; do grep 'TRUST:' skills/$s/SKILL.md | grep -vE 'L[1-5]' && fail; done; true"
+      check_method: "grep"
   testable: []
 
 integration_points:

@@ -72,8 +72,10 @@ Cases:
   inside the marked range after the pass.
 - **INV-4 validation.** Feed a synthetic diff hunk targeting a protected line to the T3
   validator; assert it rejects.
-- **Marker syntax coverage.** One fixture per language family (JS, CSS, HTML, shell) confirming
-  the pre-scan recognizes each start/end pair.
+- **Marker syntax coverage.** One fixture per language family, named explicitly:
+  `protected-region.js`, `protected-region.css`, `protected-region.html`, `protected-region.sh`.
+  Each fixture contains one start/end pair around lines 5–10 with deliberately verbose content;
+  test asserts pre-scan returns `{start_line: 5, end_line: 10}` for each.
 - **Malformed markers.** Fixture with unclosed start → assert warning emitted and pre-scan falls
   back to marker-to-EOF protection.
 

@@ -31,11 +31,11 @@ api_surface:
         required: false
     description: "Structured entry for out-of-scope observations surfaced during implementation. Appears as a required section in every build implementer report. If no observations, implementer writes `*(none)*`."
 
-  - name: "docs/plans/<pipeline-id>-noticed.md"
+  - name: "docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md"
     type: "interface"
-    signature: "Markdown file containing aggregated Noticed entries from all implementers in a /build pipeline"
+    signature: "Markdown file containing aggregated Noticed entries from all implementers in a /build pipeline. Filename uses date + ticket-slug (matching sibling design/plan/contract artifacts); pipeline_id is recorded in the file's frontmatter."
     params: []
-    description: "Per-pipeline artifact written by the build orchestrator after implementer reconciliation. Committed with the PR. Skipped if zero entries across all implementers."
+    description: "Per-pipeline artifact written by the build orchestrator after implementer reconciliation. Committed with the PR. Skipped if zero entries across all implementers. Frontmatter fields: pipeline_id, date, ticket."
 
 invariants:
   checkable:
@@ -54,12 +54,12 @@ invariants:
 
   testable:
     - id: "INV-3"
-      description: "Implementer given an out-of-scope observation writes a Noticed entry AND does not modify the out-of-scope file"
-      verification: "Fixture test: stub implementer, out-of-scope issue in fixture, assert Noticed entry present + file hash unchanged pre/post"
+      description: "A live implementer agent given a task plan plus a fixture containing a clearly out-of-scope bug writes a Noticed entry referencing that file AND does not modify the file (sha256 unchanged pre/post)"
+      verification: "Behavioral eval (T6): dispatch real implementer agent against fixture, assert Noticed entry present AND sha256(out_of_scope_file) unchanged pre/post. Stubbed implementers cannot verify this invariant — must be a live dispatch."
       test_tag: "contract:scope-discipline:inv-3"
     - id: "INV-4"
-      description: "Aggregated noticed.md contains deduped entries from each implementer's report"
-      verification: "Integration test: 2 implementers each produce 1 Noticed entry (1 unique, 1 duplicate); assert reconciled file has 1 deduped entry"
+      description: "Reconciliation aggregates and dedupes Noticed entries across multiple implementer reports into a single docs/plans/<date>-<slug>-noticed.md with sorted, deduped entries and correct frontmatter"
+      verification: "Mechanical contract test (T4): feed 2 synthetic reports (1 duplicate entry, 1 unique) into reconciliation; assert output file path uses <date>-<slug>-noticed.md format, contains exactly 2 entries, sorted by file path then line range, frontmatter has pipeline_id/date/ticket."
       test_tag: "contract:integration:inv-4"
 
 integration_points:

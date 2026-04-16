@@ -49,13 +49,22 @@ so implementers can **notice-and-log** without acting.
 ### DEC-1 (high): Storage location — per-pipeline file
 
 **Decision:** Write aggregated observations to
-`docs/plans/<pipeline-id>-noticed.md`, committed with the PR.
+`docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md`, committed with the PR.
+The date and ticket slug match the convention used by sibling design /
+plan / contract artifacts (e.g. `2026-04-16-noticed-but-not-touching-*.md`),
+so noticed files sort alongside their originating pipeline's other docs.
+The pipeline's `pipeline_id` (session-ID-based, per
+`skills/build/SKILL.md` lines 467–469) is recorded **inside** the file's
+frontmatter for attribution, not in the filename — raw session IDs are
+long opaque hashes and would break `ls`-sort alignment with date-prefixed
+siblings.
 
 **Alternatives considered:**
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| Per-pipeline file (`docs/plans/<pipeline-id>-noticed.md`) | Bounded scope; attribution is implicit; travels with PR | One more file per build | **chosen** |
+| Date+slug file (`docs/plans/<date>-<slug>-noticed.md`, pipeline_id in frontmatter) | Sorts with sibling plan artifacts; human-readable; bounded scope; attribution preserved | Requires orchestrator to know the ticket slug (already known — design/plan files use it) | **chosen** |
+| Raw pipeline-id file (`docs/plans/<pipeline-id>-noticed.md`) | Collision-proof across parallel builds on same date | Ugly opaque filenames; breaks docs/plans sort order | rejected |
 | Cross-pipeline `docs/plans/noticed.md` | Single dashboard view | Unbounded growth; no pipeline attribution; merge conflicts across parallel builds | rejected |
 | Dispatch-only artifact (never committed) | Zero repo noise | Observations die with the pipeline — defeats the purpose | rejected |
 | GitHub issues (auto-created) | Durable, actionable | Loses per-pipeline grouping; explicitly out-of-scope per ticket | rejected |
@@ -107,9 +116,25 @@ to GitHub issues?" Conversion remains a human-confirmed action.
 
 **Decision:** If an implementer writes a Noticed entry pointing at `foo.ts`
 **and** modifies `foo.ts` in the same task, that is a scope-discipline
-failure. The contract test (INV-3) detects this: given a fixture with an
-out-of-scope observation, assert the Noticed entry exists AND the file is
-unchanged in the implementer's diff.
+failure.
+
+Enforcement has two layers:
+
+1. **Static (INV-3 grep-style contract check):** the implementer prompt
+   template contains the Self-Review Checklist question "Did I notice
+   anything out-of-scope? If yes, is it in the Noticed section and NOT in
+   my diff?". INV-1/INV-2 grep-verify the prompt text.
+2. **Behavioral (INV-3 selection eval, covered by T6):** dispatch a real
+   implementer agent against a fixture with a visible out-of-scope bug and
+   assert (a) a Noticed entry references the out-of-scope file, and
+   (b) the out-of-scope file's hash is unchanged pre/post. A stubbed
+   implementer cannot verify this invariant — only a live agent run can.
+
+T4 is the **narrow mechanical contract test** (report-format parsing +
+aggregation), T6 is the **behavioral invariant test**. Both are required
+because a stubbed implementer can be made to emit any report, so INV-3's
+"does the agent actually refrain from acting" clause must ride on a live
+dispatch.
 
 This closes the loophole where an agent might claim "I noticed it" as
 cover for fixing it anyway.
@@ -124,7 +149,8 @@ Implementer N ──► report with ### Noticed But Not Touching         │
                                                       Dedupe + sort by file path
                                                                    │
                                                                    ▼
-                                       docs/plans/<pipeline-id>-noticed.md
+                                 docs/plans/<date>-<ticket-slug>-noticed.md
+                                       (pipeline_id in frontmatter)
                                                        │
                                                        ▼
                                                  committed with PR
