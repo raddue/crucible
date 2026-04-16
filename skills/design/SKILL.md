@@ -14,6 +14,17 @@ Turn ideas into fully formed designs through investigated, collaborative dialogu
 
 Every significant design question is backed by parallel investigation agents that research the codebase, explore approaches, and assess impact BEFORE the question reaches the user. Questions arrive informed, not naive.
 
+## Anti-Rationalization Table — design
+
+| Rationalization | Rebuttal | Rule |
+|---|---|---|
+| "This decision is obvious, I can skip the hypothesis step." | The hypothesis step is a forcing function for noticing surprises — the most valuable output of investigation. Skipping it loses the contrast. | Write the hypothesis before dispatching investigation agents, even when the answer feels obvious. |
+| "One investigation agent is enough, I don't need the Challenger." | The Challenger catches assumption blind spots that the recommendation agent inherited. Skipping it is how bad designs ship. | Deep Dive dimensions always dispatch the Challenger (or multi-model consensus challenge when available). |
+| "Quick scan is fine for this data-model decision." | Data-model decisions always warrant Deep Dive — schema outlives the application. Quick scans have repeatedly missed grain/durability issues. | Any dimension touching schema/data model/persistent storage is Deep Dive, not Quick scan. |
+| "The recommendation is clear, I can skip presenting alternatives." | Presenting 2–3 options keeps the user in the decision loop. Auto-resolving without alternatives is only allowed when investigation proves a single viable path. | Present 2–3 options per dimension unless the investigation explicitly shows one viable path; record the justification. |
+| "The feature obviously belongs in this system, skip the scope absorption test." | The test is cheap (4 yes/no questions) and has repeatedly flagged features that didn't belong. | Run the scope absorption test whenever adding a feature to an existing system. |
+| "The user is still deliberating, I'll keep asking for more analysis." | After 2 non-resolving user responses, the stall-breaker protocol (eliminate / reversibility / ship-sooner) applies. | Activate the stall-breaker protocol on the 3rd user exchange on the same dimension without resolution. |
+
 ## The Process
 
 ### Phase 1: Context Gathering
