@@ -164,6 +164,12 @@ DEC-1 and DEC-4 are flagged for user review.
   `WebFetch` allowlist incrementally in `.claude/settings.local.json` (current allow
   list only grants `WebFetch(domain:github.com)`; T3 must extend it per the T2 seed
   table), not a blanket grant.
+- **Trust classification (per #180 trust-hierarchy)**: WebFetch results are **L4
+  Verify-first** content. The skill must not treat fetched docs as authoritative
+  absent verification against L3 (code/tests) or L2 (design/plan) evidence. The
+  SDD skill's citation + "implement from source" protocol is the verify-before-use
+  duty — citations record the L4 source; implementation still has to match actual
+  call-site behavior the agent can run or read.
 - Recommend running `siege` on this skill before merge given external-input surface.
 
 ## Open questions
