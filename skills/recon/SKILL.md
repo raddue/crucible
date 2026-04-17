@@ -10,6 +10,8 @@ description: "Standalone codebase investigation. Produces a layered Investigatio
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
+
 Structured, parallel codebase investigation with a layered output model. Produces a core Investigation Brief that all consumers share, plus optional depth modules for consumer-specific needs.
 
 **Skill type:** Rigid — follow exactly, no shortcuts.
@@ -179,6 +181,7 @@ Agent tool (subagent_type: Explore, model: sonnet):
 - Template: `./pattern-scout-prompt.md`
 - Fill placeholders: `[TASK]`, `[SCOPE]`, `[CONTEXT]`, `[CARTOGRAPHER]`
 
+<!-- TRUST: scout report is L4 — cross-check paths against L3 before synthesis. -->
 On completion, write raw scout reports to scratch directory:
 - `<scratch>/structure-scout-report.md`
 - `<scratch>/pattern-scout-report.md`
@@ -187,6 +190,7 @@ Narrate: "Scouts complete. Synthesizing core brief. [N conflicts detected.]"
 
 ## Phase 3: Core Synthesis (Orchestrator-Local)
 
+<!-- TRUST: synthesis input is L4 until cross-verified against L3 source. -->
 **No synthesis subagent.** The orchestrator reads both scout reports and assembles the Investigation Brief directly.
 
 ### Scope Merging

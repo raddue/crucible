@@ -76,6 +76,10 @@ When multiple skills could apply:
 
 The skill itself tells you which.
 
+## Trust Hierarchy
+
+Skills load content from many sources — SKILL.md files, docs, source code, tool output, WebFetch results, subagent reports, and post-compaction summaries. When sources disagree, a five-level trust framework determines which wins. See [trust-hierarchy.md](./trust-hierarchy.md) for the full framework.
+
 ## User Instructions
 
 Instructions say WHAT, not HOW. "Add X" or "Fix Y" doesn't mean skip workflows.
