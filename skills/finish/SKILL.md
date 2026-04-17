@@ -219,23 +219,40 @@ EOF
 )"
 ```
 
-**Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns the PR URL, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch command below.
+**Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch + empty-check assertion below.
+
+First, capture the PR number deterministically — `gh pr create` emits a URL, not an integer, and relying on branch-to-PR mapping is fragile on repos with multiple open PRs per branch:
 
 ```bash
-# Primary: --watch streams status and returns aggregate exit code
-# (0 = all pass, non-zero = at least one failure/cancellation).
-gh pr checks <pr-number> --watch
+PR_NUMBER=$(gh pr view --json number -q .number)
 ```
 
-**Fallback (if `--watch` cannot run):** poll until all checks reach a terminal state, then assert the bucket set is a subset of `{pass, skipping}` (allow-list, not deny-list — an unknown future bucket value must fail closed). Use gh's normalized `bucket` field, not raw `state` values, to avoid missing edge states like `NEUTRAL`, `ACTION_REQUIRED`, or lowercase legacy commit-status values. Capture `gh`'s own exit code and interpret it per its documented contract (0 = all terminal, 8 = at least one pending, other non-zero = gh itself errored).
+Then watch the checks:
+
+```bash
+# Primary: --watch streams status and returns aggregate exit code.
+# Exit 0 = all terminal passes OR no checks configured (must disambiguate below).
+# Non-zero = at least one failure/cancellation.
+gh pr checks "$PR_NUMBER" --watch
+
+# --watch on a PR with zero checks exits 0 silently — guard against
+# vacuously satisfying the "CI passed" requirement.
+if [ "$(gh pr checks "$PR_NUMBER" --json bucket --jq 'length')" = "0" ]; then
+  echo "No CI checks configured — record in final report and recommend adding CI"
+fi
+```
+
+**Fallback (if `--watch` cannot run):** poll until all checks reach a terminal state, then assert the bucket set is a subset of `{pass, skipping}` (allow-list, not deny-list — an unknown future bucket value must fail closed). Use gh's normalized `bucket` field, not raw `state` values, to avoid missing edge states like `NEUTRAL`, `ACTION_REQUIRED`, or lowercase legacy commit-status values.
+
+**gh exit-code contract:** per gh's own documentation, `gh pr checks` exits 0 when all checks terminal-passed, 1 when at least one check terminal-failed, 8 when at least one is still pending, and other values for tool errors (auth, network, rate-limit). Both 0 and 1 are terminal — the fallback's assertion block disambiguates pass from fail via the bucket set. 8 means continue polling. Anything else means gh itself couldn't determine state.
 
 ```bash
 while true; do
-  BUCKETS=$(gh pr checks <pr-number> --json bucket --jq '[.[].bucket] | unique')
+  BUCKETS=$(gh pr checks "$PR_NUMBER" --json bucket --jq '[.[].bucket] | unique')
   RC=$?
   echo "CI buckets: $BUCKETS"
   case "$RC" in
-    0|1) break ;;                                 # 0 = all pass, 1 = at least one failed; both terminal — let assertion classify
+    0|1) break ;;                                 # 0 = all pass, 1 = at least one failed; both terminal — assertion classifies
     8) sleep 20 ;;                                # at least one pending — keep polling
     *) echo "gh pr checks errored (rc=$RC) — cannot determine CI state"; exit 1 ;;
   esac
@@ -251,7 +268,7 @@ else
 fi
 ```
 
-If the exit is non-zero (either via `--watch` or the explicit assertion): diagnose from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks <pr-number>`), dispatch a fix, **re-run Step 5.5's full validation matrix** (the fix can regress local checks), push, and re-watch. Do NOT report success on a red PR. Do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
+If the exit is non-zero (either via `--watch` or the explicit assertion): diagnose from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks "$PR_NUMBER"`), dispatch a fix, **re-run Step 5.5's full validation matrix** (the fix can regress local checks), push, and re-watch. Do NOT report success on a red PR. Do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
 
 If the block exits with the "No CI checks configured" message, record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
 
