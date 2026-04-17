@@ -52,6 +52,19 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     <!-- CANONICAL: shared/implementer-common.md — TDD Discipline -->
     **REQUIRED SUB-SKILL:** Use `crucible:test-driven-development`
 
+    **Source Consultation.** When the task touches external frameworks/libraries
+    AND the planned change exceeds the triviality threshold (see
+    `skills/source-driven-development/detect-stack.md`, or Canonical Constants
+    DEC-4 in the implementation plan — ≥ 5 LOC of added/modified non-test,
+    non-generated source touching a detected framework's `import`/`require`/`using`),
+    invoke `crucible:source-driven-development` before implementing. Cite fetched
+    sources per the skill's Cite phase (commit footer or inline comment with URL
+    + fetch date).
+
+    **Definition-of-Done addition:** Non-trivial external API usage carries a
+    citation (`Source: <url> (YYYY-MM-DD)`) in the commit footer or as an inline
+    comment directly above the call site.
+
     - If a "Known Defect Patterns" section is present above, before writing
       your first test, scan your task's target files for each listed pattern.
       If any pattern applies to code you are writing or modifying, write a
