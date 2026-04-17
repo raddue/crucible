@@ -22,11 +22,11 @@ from typing import List, Tuple
 NONE_MARKER = "*(none)*"
 SECTION_HEADER_RE = re.compile(r"^###\s+Noticed But Not Touching\s*$", re.MULTILINE)
 ENTRY_RE = re.compile(
-    r"-\s+\*\*file:\*\*\s+`(?P<path>[^:`]+):(?P<range>L\d+-L\d+)`\s*\n"
-    r"\s+\*\*noticed:\*\*\s+(?P<noticed>.+?)\n"
-    r"\s+\*\*why it matters:\*\*\s+(?P<why>.+?)(?:\n\s+\*\*suggested follow-up:\*\*\s+(?P<follow>.+?))?"
-    r"(?=\n\s*-\s+\*\*file:\*\*|\n\s*###|\n\s*$|\Z)",
-    re.DOTALL,
+    r"-\s+\*\*file:\*\*\s+`(?P<path>.+?):(?P<range>L\d+-L\d+)`\s*\n"
+    r"\s+\*\*noticed:\*\*\s+(?P<noticed>[^\n]+)\n"
+    r"\s+\*\*why it matters:\*\*\s+(?P<why>[^\n]+)"
+    r"(?:\n\s+\*\*suggested follow-up:\*\*\s+(?P<follow>[^\n]+))?"
+    r"(?=\n\s*-\s+\*\*file:\*\*|\n\s*###|\n\s*\n|\Z)",
 )
 
 
