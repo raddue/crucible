@@ -10,6 +10,46 @@ source: "spec"
 
 Complexity: **Tier 2 (Medium)**. Six tasks, moderate coupling to `/build` prompt templates.
 
+## Canonical Constants
+
+Copy verbatim across T1, T3, T5. Drift will be flagged by the contract grep
+invariants.
+
+**Citation regex (INV-5) — dual-dialect:**
+
+```
+ERE (grep -E / BSD grep, authoritative for CI):
+  Source: https?://[^ ]+ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)
+
+PCRE (grep -P / ripgrep, equivalent):
+  Source: https?://\S+ \(\d{4}-\d{2}-\d{2}\)
+```
+
+Use the ERE form in any script that runs on portable `grep`. `\d` is PCRE-only
+and silently matches nothing under `grep -E`.
+
+**Triviality threshold (DEC-4):**
+
+> LOC = count of added + modified lines in **non-test, non-generated source
+> files** that touch an `import` / `require` / `using` of a detected
+> framework, measured via `git diff --numstat` post-filter. Threshold: **≥ 5
+> LOC**.
+
+**Sibling-ticket merge order:**
+
+```
+#176 → #179 → #180 → #177
+```
+
+#176 lands anti-rationalization rows first so #177's citation rule can reference
+them. #180's L4 TRUST marker must precede #177 so the SDD WebFetch step can carry
+the canonical marker verbatim.
+
+**Scope of this ticket's /build-integration hook:** `skills/build/build-implementer-prompt.md`
+**only**. `/debugging` and `/migrate` integration is **deferred** to a
+follow-up ticket — do NOT edit those skills in this PR. (Resolves design's
+Open Question #1.)
+
 ## Tasks
 
 ### T1 — Create `skills/source-driven-development/SKILL.md`
@@ -77,6 +117,15 @@ Add eval cases to `skills/skill-selection-evals/evals/evals.json` and run them v
 `skills/skill-selection-evals/scripts/run_selection_eval.py` (runner introduced by
 #174 T5b at commit `605bbaa`). **Prerequisite:** rebase `spec/176-180` onto `main`
 before T5 so the runner is available on this branch.
+
+**Precondition guard (hard gate):** Before writing eval cases, run
+`test -f skills/skill-selection-evals/scripts/run_selection_eval.py`. If absent,
+abort T5 with the error `SDD T5 blocked: run_selection_eval.py not on this branch
+— rebase onto main first.` Do NOT attempt to re-implement the runner locally.
+
+**Boundary coverage:** eval cases must include at least one case each at 4 LOC
+(should NOT trigger) and 6 LOC (should trigger) to exercise the DEC-4 threshold
+from Canonical Constants.
 
 The new eval cases must:
 - Prompt the agent to implement against a named external API (e.g., "add a React 19
