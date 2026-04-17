@@ -143,28 +143,34 @@ Which option?
 
 ## MANDATORY CHECKPOINT - DO NOT SKIP
 
-### Step 5.5: Pre-Push Validation
+### Step 5.5: Pre-Push Validation (Non-Negotiable)
 
-**Before pushing code (Option 2) or merging (Option 1), validate locally:**
+**BLOCK semantics:** you CANNOT proceed to Option 1 (merge) or Option 2 (push + PR) until local validation passes. A failing check is a hard stop. Do not push "then fix in CI"; do not merge "then fix on main."
 
-```bash
-# Run type-check (if applicable)
-npx tsc --noEmit 2>/dev/null || echo "No TypeScript"
+**Detect the project's toolchain first** by reading manifest files at repo root: `package.json`, `Cargo.toml`, `pyproject.toml` / `requirements.txt`, `go.mod`, `*.csproj` / `*.sln`, `Gemfile`, `build.gradle` / `pom.xml`. Run only the checks that actually apply.
 
-# Run linter (if applicable)  
-npx eslint . 2>/dev/null || npm run lint 2>/dev/null || echo "No linter configured"
+- **Monorepo / polyglot root:** if multiple manifests coexist at root (e.g., a Rust product with a Node.js tooling script), scope validation to whichever ecosystem owns the files changed in the diff (`git diff --name-only <base>...HEAD`). If ambiguous, ask the user before running the full matrix.
+- **Nested manifests:** if the diff touches files under a subdirectory with its own manifest, scope to that subdirectory.
 
-# Run test suite
-npm test || cargo test || pytest || go test ./...
-```
+Silently-missing tools are NOT a pass — they are an "unknown." Either run the real tool, or narrate the skip ("no type-check configured — skipping"), or ask the user. Never mask a failure with `|| true` or `2>/dev/null`.
 
-**If any validation fails:** STOP. Fix the issues before pushing. Never push code that fails local validation.
+**Validation matrix (run every applicable check; each must exit 0 unless its documented exit-code contract says otherwise):**
 
-**After pushing (Option 2 only):** Check CI status immediately:
-```bash
-gh pr checks <pr-number>
-```
-Wait for results. If CI fails, diagnose and fix before reporting success to the user. Do NOT push and move on.
+| Ecosystem | Type-check | Lint | Format | Tests |
+|---|---|---|---|---|
+| TypeScript/Node | `npx tsc --noEmit` (if `tsconfig.json`) | `npm run lint` / `pnpm lint` / `biome check` (whichever the repo configures) | `prettier --check .` / `biome format --check` (whichever configured) | `npm test` / `pnpm test` / `vitest run` / `jest` |
+| Rust | `cargo check --all-targets --all-features` | `cargo clippy --all-targets --all-features -- -D warnings` | `cargo fmt -- --check` | `cargo test --workspace --all-features` |
+| Python | `mypy` or `pyright` (if configured) | `ruff check` / `flake8` (whichever configured) | `ruff format --check` / `black --check` (whichever configured) | `pytest` |
+| Go | (compiler via `go build ./...`) | `go vet ./...` (add `golangci-lint run` if configured) | `out=$(gofmt -l .) && [ -z "$out" ]` (preserves gofmt exit code AND fails non-zero on drift) | `go test ./...` |
+| .NET | `dotnet build -p:TreatWarningsAsErrors=true` (portable across Linux/macOS/Windows; covers type + warnings-as-errors) | Roslyn analyzers via the same `-p:TreatWarningsAsErrors=true` + any configured analyzer package | `dotnet format --verify-no-changes` | `dotnet test` |
+| Ruby | (runtime only) | `bundle exec rubocop` (covers Layout + Style + Lint) | covered by Lint (or `bundle exec standardrb` if configured instead of rubocop) | `bundle exec rspec` / `bundle exec rake test` |
+| Java/Kotlin | (compiler via `./gradlew build`) | `./gradlew checkstyleMain spotbugsMain` or `./mvnw spotbugs:check` (if configured) | `./gradlew spotlessCheck` (if configured) | `./gradlew test` or `./mvnw test` |
+
+For ecosystems not in this matrix, extend it: manifest → type-check → lint → format-check → test. Do not skip an ecosystem because it isn't listed.
+
+**Exit-code interpretation:** treat each tool's documented exit-code contract authoritatively, not just 0 vs non-0. Example: `gh pr checks` exits 8 for "checks pending" — a legitimate non-terminal state, not a failure. The rule is "never mask an exit code without interpreting it," not "non-zero is always failure." If a tool's contract is unclear, treat non-zero as failure and ask the user.
+
+**On ANY unhandled non-zero exit (after exit-code interpretation): STOP.** Report the failure, dispatch a fix, and re-run the full matrix from scratch. Do not partially re-run — a fix in one layer can regress another.
 
 ### Step 6: Execute Choice
 
@@ -202,16 +208,79 @@ If the repo is public: scan the PR title, body, and commit messages for propriet
 # Push branch
 git push -u origin <feature-branch>
 
-# Create PR
-gh pr create --title "<title>" --body "$(cat <<'EOF'
+# Create PR and capture the URL gh emits (the PR it just created).
+# This is the only deterministic PR reference — using `gh pr view`
+# instead would use branch-to-PR mapping, which breaks on repos
+# with multiple open PRs per branch.
+PR_URL=$(gh pr create --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <2-3 bullets of what changed>
 
 ## Test Plan
 - [ ] <verification steps>
 EOF
-)"
+)")
+PR_NUMBER="${PR_URL##*/}"
+
+# Guard: if gh pr create failed (e.g., a PR already exists for this branch),
+# PR_URL is empty — surface the real diagnostic instead of falling through
+# into CI monitoring and emitting a misleading "CI failed" message.
+if [ -z "$PR_URL" ] || [ -z "$PR_NUMBER" ]; then
+  echo "gh pr create did not return a PR URL — possible duplicate PR. Inspect: gh pr list --head <feature-branch>"
+  exit 1
+fi
 ```
+
+**Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch + empty-check assertion below. Fail closed on any non-zero result that isn't the "no CI configured" case:
+
+```bash
+# Primary: --watch streams status and returns aggregate exit code.
+# Exit 0 = all terminal passes OR no checks configured (must disambiguate).
+# Non-zero = at least one check failed/cancelled.
+gh pr checks "$PR_NUMBER" --watch
+WATCH_RC=$?
+
+# Disambiguate the no-CI case from real success.
+CHECK_COUNT=$(gh pr checks "$PR_NUMBER" --json bucket --jq 'length')
+
+if [ "$CHECK_COUNT" = "0" ]; then
+  echo "No CI checks configured — record in final report and recommend adding CI"
+elif [ "$WATCH_RC" -ne 0 ]; then
+  echo "CI failed (watch exit $WATCH_RC)"; exit 1
+else
+  echo "CI green"
+fi
+```
+
+**Fallback (if `--watch` cannot run):** poll until all checks reach a terminal state, then assert the bucket set is a subset of `{pass, skipping}` (allow-list, not deny-list — an unknown future bucket value must fail closed). Use gh's normalized `bucket` field, not raw `state` values, to avoid missing edge states like `NEUTRAL`, `ACTION_REQUIRED`, or lowercase legacy commit-status values.
+
+**gh exit-code contract:** per gh's own documentation, `gh pr checks` exits 0 when all checks terminal-passed, 1 when at least one check terminal-failed, 8 when at least one is still pending, and other values for tool errors (auth, network, rate-limit). Both 0 and 1 are terminal — the fallback's assertion block disambiguates pass from fail via the bucket set. 8 means continue polling. Anything else means gh itself couldn't determine state.
+
+```bash
+while true; do
+  BUCKETS=$(gh pr checks "$PR_NUMBER" --json bucket --jq '[.[].bucket] | unique')
+  RC=$?
+  echo "CI buckets: $BUCKETS"
+  case "$RC" in
+    0|1) break ;;                                 # 0 = all pass, 1 = at least one failed; both terminal — assertion classifies
+    8) sleep 20 ;;                                # at least one pending — keep polling
+    *) echo "gh pr checks errored (rc=$RC) — cannot determine CI state"; exit 1 ;;
+  esac
+done
+
+# Three terminal cases: empty (no CI), all allow-list (green), or anything else (red).
+if [ "$BUCKETS" = "[]" ]; then
+  echo "No CI checks configured — record in final report and recommend adding CI"
+elif echo "$BUCKETS" | jq -e 'all(. == "pass" or . == "skipping")' >/dev/null; then
+  echo "CI green"
+else
+  echo "CI not all-green: $BUCKETS"; exit 1
+fi
+```
+
+If the exit is non-zero (either via `--watch` or the explicit assertion): diagnose from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks "$PR_NUMBER"`), dispatch a fix, **re-run Step 5.5's full validation matrix** (the fix can regress local checks), push, and re-watch. Do NOT report success on a red PR. Do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
+
+If the block exits with the "No CI checks configured" message, record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
 
 Then: If using a worktree, clean it up (Step 7)
 
@@ -291,6 +360,18 @@ git worktree remove <worktree-path>
 - **Problem:** Accidentally delete work
 - **Fix:** Require typed "discard" confirmation
 
+**Skipping pre-push validation**
+- **Problem:** "Tests passed during /build so this should be fine" — but refactors between Phase 3 and finish, plus drift in companion files, can silently break the build. Pushing broken code wastes CI minutes and creates a red PR for reviewers.
+- **Fix:** Always run Step 5.5's full validation matrix before Option 1 merge or Option 2 push. Every applicable check must exit 0.
+
+**Silencing validation failures**
+- **Problem:** `2>/dev/null || true` patterns hide tool failures and make "no output" indistinguishable from "tool missing" — a failing tsc looks identical to a repo without TypeScript.
+- **Fix:** Detect the toolchain from manifest files first, then run only the checks that apply with strict exit-code discipline. Explicitly narrate skipped checks rather than silencing errors.
+
+**Pushing and moving on**
+- **Problem:** `git push` returns, `gh pr create` returns a URL, task feels done. CI runs later, fails, and nobody notices until the next review session.
+- **Fix:** Block on `gh pr checks <pr-number> --watch` (or equivalent poll loop). Treat a red PR as a hard stop — never report success to the user on a failing PR.
+
 ## Red Flags
 
 **Never:**
@@ -300,12 +381,19 @@ git worktree remove <worktree-path>
 - Merge without verifying tests on result
 - Delete work without confirmation
 - Force-push without explicit request
+- Push code that has not passed the full local validation matrix in Step 5.5
+- Mask a non-zero exit code without interpreting it against the tool's documented contract (e.g., `|| true`, `2>/dev/null`). Known non-failure non-zero codes must be matched to their meaning — `gh pr checks` exit 8 is "checks pending," not failure. When a tool's contract is unclear, treat non-zero as failure.
+- Report success to the user after `gh pr create` without confirming all CI checks pass
+- Abandon a watched PR to work on something else — a red PR is an actionable blocker
 
 **Always:**
 - Verify tests before code review
 - Run full code review before presenting options
 - Run red-team after code review passes, before presenting options
 - Fix Critical/Important review findings before proceeding
+- Detect the project toolchain from manifest files before Step 5.5 dispatch
+- Run every applicable validation check with strict exit-code discipline
+- Watch CI to completion after push (`gh pr checks --watch`) before declaring Option 2 done
 - Present exactly 4 options
 - Get typed confirmation for Option 4
 - Clean up worktree (if applicable) for Options 1, 2 & 4 only
@@ -334,5 +422,6 @@ Before completing this skill, confirm every mandatory checkpoint was executed:
 - [ ] Red-team review
 - [ ] Pre-push validation passed
 - [ ] Repository safety checked (if public repo, Option 2)
+- [ ] Post-push CI monitoring completed green (Option 2 only)
 
 **If any checkbox is unchecked, STOP. Go back and execute the missed gate.**
