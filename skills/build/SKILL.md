@@ -45,6 +45,18 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 
 **If you find yourself about to skip a gate:** STOP. Re-read this section. The gate exists because skipping it has caused real production incidents and hours of wasted time. Run the gate.
 
+## Anti-Rationalization Table — build
+
+| Rationalization | Rebuttal | Rule |
+|---|---|---|
+| "This task is small/simple/trivial, the quality gate would just find nits." | Small changes have the same bug density per line as large ones. QG has never run on a Crucible artifact without finding at least one real issue. | Run the quality gate on every phase artifact, regardless of size. |
+| "Phase N looks fine, I can skip the gate and move on." | Self-assessment of artifact quality is exactly the bias the gate exists to counter. "Looks fine" is the failure mode, not a pass criterion. | Phase transitions are BLOCKED without a verified PASS verdict marker for the prior phase. |
+| "The fix agent addressed the findings, so the gate is done." | Fixing is not passing. Fix rounds routinely introduce new issues or incompletely resolve old ones. A clean verification round is required. | The gate is only complete after a fresh red-team round returns 0 Fatal, 0 Significant. |
+| "The user said 'looks good' / 'move on' — that's approval to skip the gate." | General feedback is not skip approval. Only an unambiguous instruction that explicitly references the gate counts. | Require literal `SKIP GATE` (or equivalent explicit phrase) before recording `Status: SKIPPED`. |
+| "I can fix this one finding myself instead of dispatching a fix agent." | Orchestrator-applied fixes conflate coordination with remediation and bypass the fix journal. Every fix — even trivial — goes through a fix agent. | Orchestrator never edits the artifact directly; always dispatch the fix agent. |
+| "Innovate/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovate is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run innovate and red-team on every artifact, every time. |
+| "I'll just finish the task list and narrate at the end." | Long-running autonomous pipelines are invisible without narration. Silent runs prevent the user from intervening or learning. | Narrate before every dispatch and after every completion — non-negotiable. |
+
 ## Gate Ledger Protocol
 
 Tamper-evident audit trail for phase transitions and gate verdicts. This is defense-in-depth — it raises the cost of gate-skipping from zero to nonzero by requiring structured state to be maintained and verified. An external enforcement hook (`gate-ledger-guard.sh`) provides mechanical enforcement by blocking unauthorized PASS writes.

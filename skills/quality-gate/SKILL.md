@@ -96,6 +96,18 @@ would create non-deterministic stagnation behavior.
 - External review timeout or failure never blocks or delays the host red-team
   round.
 
+## Anti-Rationalization Table — quality-gate
+
+| Rationalization | Rebuttal | Rule |
+|---|---|---|
+| "This finding is minor, I'll just fix it inline instead of dispatching a fix agent." | Orchestrator-applied fixes break separation of concerns and corrupt the fix journal. Fix-agent overhead for trivial fixes is negligible; the risk of conflation is not. | All fixes route through the fix agent — no exceptions, no matter how small. |
+| "Round N fixed everything, I can return PASS without another red-team round." | Fixing is not passing. A fresh red-team round is the verification step. Skipping it is a skip disguised as a pass. | The gate is only PASS after a fresh red-team round returns 0 Fatal, 0 Significant. |
+| "The red-team finding is wrong / overblown, I'll mark it resolved without a fix." | Rationalizing away findings defeats the point of adversarial review. If a finding is wrong, the fix agent explicitly justifies dismissal in the fix journal — the orchestrator does not dismiss findings unilaterally. | Every Fatal/Significant finding is either fixed or documented as dismissed by the fix agent with reasoning. |
+| "The score went up but I can tell it's close, skip the stagnation judge." | Stagnation detection uses weighted score, not orchestrator intuition. Score-based inline judgment is the exact failure the judge exists to catch. | Dispatch the stagnation judge whenever score is not strictly lower than the prior round. |
+| "Round 15 hit — I'll squeeze in one more round, surely the next will pass." | The 15-round limit is a circuit breaker, not a suggestion. Exceeding it silently is how runaway loops happen. | At round 15, escalate to the user with full round history — never silently continue. |
+| "Pre-flight dependency audit is noise for this artifact, skip it." | The audit only runs on `code` artifacts, and on code artifacts it's mandatory. Dependency drift is a documented source of shipped bugs. | Run the dependency audit on every `code` artifact; skip silently only for non-code types. |
+| "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
+
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
