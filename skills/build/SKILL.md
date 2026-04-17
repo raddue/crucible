@@ -1305,6 +1305,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task
+- **crucible:source-driven-development** — Detect → Fetch → Implement → Cite loop for non-trivial external API usage (≥ 5 LOC touching a detected framework); invoked by the implementer prompt's Source Consultation block. Recommended — skipped for pure internal refactors or trivial edits.
 
 **Contract consumption:**
 - **crucible:spec** — Consumes contract YAML files produced by `/spec` (schema version 1.0). Contracts are read from `docs/plans/*-contract.yaml` and feed into pre-existing doc detection (Phase 1 Step 0), implementer dispatch (Phase 3), reviewer checks (Phase 3), and quality gate verification (all gate points). See the contract schema in `crucible:spec` for field definitions.
