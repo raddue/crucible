@@ -221,6 +221,14 @@ PR_URL=$(gh pr create --title "<title>" --body "$(cat <<'EOF'
 EOF
 )")
 PR_NUMBER="${PR_URL##*/}"
+
+# Guard: if gh pr create failed (e.g., a PR already exists for this branch),
+# PR_URL is empty — surface the real diagnostic instead of falling through
+# into CI monitoring and emitting a misleading "CI failed" message.
+if [ -z "$PR_URL" ] || [ -z "$PR_NUMBER" ]; then
+  echo "gh pr create did not return a PR URL — possible duplicate PR. Inspect: gh pr list --head <feature-branch>"
+  exit 1
+fi
 ```
 
 **Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch + empty-check assertion below. Fail closed on any non-zero result that isn't the "no CI configured" case:
