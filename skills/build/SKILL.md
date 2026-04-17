@@ -1053,6 +1053,40 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 - Minor concerns → adjust prompts for remaining tasks
 - All clear → continue
 
+### Noticed Reconciliation
+
+After all implementers in Phase 3 report back and before writing the Phase 3 COMPLETE ledger entry, aggregate their `### Noticed But Not Touching` sections into a single `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` artifact.
+
+**Scope discipline:** Notice, do not act. If an implementer sees an out-of-scope issue during implementation, it must be logged under `### Noticed But Not Touching` in their report — NOT fixed in their diff. Acting on noticed items in the same task is a scope-discipline failure. The orchestrator enforces this via reconciliation: noticed entries are surfaced here and converted to follow-up tickets later (see `/finish`).
+
+**7-step reconciliation process:**
+
+1. Collect each implementer's `### Noticed But Not Touching` section from every Phase 3 implementer report.
+2. Skip any section whose body is `*(none)*`.
+3. Dedupe entries using the canonical dedupe key: `sha256( normalize(file_path) + "|" + line_range + "|" + noticed[:40] )`, where `normalize(file_path)` is the repo-relative POSIX path lowercased.
+4. Sort the deduped entries by file path, then line range.
+5. If any entries remain, write `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` matching the canonical filename regex `^docs/plans/\d{4}-\d{2}-\d{2}-[a-z0-9-]+-noticed\.md$`. Use the date embedded in the sibling plan filename (not wall-clock date) so all sibling artifacts share a date; slug matches the ticket being built. Frontmatter and body must follow the Canonical Constants template exactly:
+
+   ```markdown
+   ---
+   pipeline_id: "<build-YYYYMMDD-HHMMSS>"
+   date: "YYYY-MM-DD"
+   ticket: "#NNN"
+   ---
+
+   # Noticed But Not Touching — <ticket-slug>
+
+   - **file:** `path:L<start>-L<end>`
+     **noticed:** <desc>
+     **why it matters:** <risk/opportunity>
+     **suggested follow-up:** <optional>
+   ```
+
+6. **Idempotent overwrite:** If the target `-noticed.md` already exists (same-ticket re-run on the same date), merge the existing entries with the newly collected entries, run the full dedupe (same key), sort, and overwrite the file in one write. No append-mode; the on-disk file is always the full deduped set for that date+ticket.
+7. Stage the `-noticed.md` file so it lands in the PR commit.
+
+Skip the write entirely if zero entries remain after dedupe — do not produce an empty `-noticed.md`.
+
 ### Gate Ledger — Phase 3 Complete
 
 After the last task wave's verification gate passes and all tasks are marked complete — but BEFORE the Phase 3→4 handoff — write `Status: COMPLETE` and `Tasks: N/N complete` to the Phase 3 ledger entry. If any task is in a retry/re-dispatch loop, COMPLETE is NOT written until retries resolve.

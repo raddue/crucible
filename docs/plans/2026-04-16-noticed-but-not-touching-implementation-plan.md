@@ -21,6 +21,47 @@ contract test that detects the notice-AND-modify anti-pattern.
 Tier 2 (multi-file prompt-template change with fixture test). Not Tier 3
 because no new infrastructure, no cross-skill orchestration refactor.
 
+## Canonical Constants
+
+Copy these verbatim across T1, T2, T4, T5. If any drift, the grep
+invariants in the contract will flag it.
+
+**Filename regex (INV-6):**
+
+```
+^docs/plans/\d{4}-\d{2}-\d{2}-[a-z0-9-]+-noticed\.md$
+```
+
+**Frontmatter + heading template (T2 writer must emit exactly this shape):**
+
+```markdown
+---
+pipeline_id: "<build-YYYYMMDD-HHMMSS>"
+date: "YYYY-MM-DD"
+ticket: "#NNN"
+---
+
+# Noticed But Not Touching — <ticket-slug>
+
+- **file:** `path:L<start>-L<end>`
+  **noticed:** <desc>
+  **why it matters:** <risk/opportunity>
+  **suggested follow-up:** <optional>
+```
+
+**Dedupe key:**
+
+```
+sha256( normalize(file_path) + "|" + line_range + "|" + noticed[:40] )
+```
+
+where `normalize(file_path)` = repo-relative POSIX path, lowercased.
+
+**Contract tag strings (T4, T6 must use verbatim):**
+
+- `contract:integration:inv-4` (T4 mechanical)
+- `contract:scope-discipline:inv-3` (T6 behavioral)
+
 ## Tasks
 
 ### T1 — Add Noticed section to implementer report format
@@ -59,13 +100,18 @@ report:
    `noticed`).
 4. Sort by file path, then line range.
 5. If any entries remain, write
-   `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` (date from pipeline
-   start, slug from the ticket being built — match the sibling
-   design/plan/contract filenames) with frontmatter (`pipeline_id`,
-   `date`, `ticket`) and the deduped list. If a file with that path
-   already exists (rare: same-ticket re-run on same date), append deduped
-   entries rather than overwrite.
-6. Stage the file for the PR commit.
+   `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` matching the
+   Canonical Constants filename regex. Use the date embedded in the
+   sibling plan filename (not wall-clock date) so all four sibling
+   artifacts share a date; slug matches the ticket being built.
+   Frontmatter + body follow the Canonical Constants template exactly.
+6. **Idempotent overwrite:** if the target file already exists (rare:
+   same-ticket re-run on same date), merge its existing entries with the
+   newly collected entries, run full dedupe (same key as Canonical
+   Constants), sort, and overwrite the file in one write. No append-mode;
+   the on-disk file is always the full deduped set for that
+   date+ticket.
+7. Stage the file for the PR commit.
 
 ### T3 — Scope-discipline guidance in build SKILL.md
 **Parallelizable with:** T1, T5
@@ -99,7 +145,11 @@ entry at `other.ts:L5-L7`. Invoke the reconciliation function. Assert:
 3. Entries are sorted by file path then line range.
 4. Frontmatter includes `pipeline_id`, `date`, `ticket`.
 
-Tag: `contract:integration:inv-4`.
+5. Re-invoke with the same two reports (simulating same-date re-run);
+   assert the resulting file is byte-identical to the first run (proves
+   idempotent overwrite).
+
+Tag: `contract:integration:inv-4` (verbatim from Canonical Constants).
 
 ### T5 — /finish references noticed.md
 **Parallelizable with:** T1, T3
@@ -127,7 +177,7 @@ repository that also contains a clearly out-of-scope code smell in
    `docs/plans/<date>-<ticket-slug>-noticed.md` is produced at pipeline
    completion and contains the entry.
 
-Tag: `contract:scope-discipline:inv-3`.
+Tag: `contract:scope-discipline:inv-3` (verbatim from Canonical Constants).
 
 Rationale: T4 (stubbed) cannot prove the agent refrains from acting —
 only a live dispatch can. This is INV-3's behavioral clause.

@@ -105,6 +105,16 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 
 **Do NOT skip this step.** Code review checks quality; red-teaming checks whether the system will actually work and survive real use.
 
+### Step 3.5: Noticed But Not Touching — Optional Issue Conversion
+
+Check for `docs/plans/*-noticed.md` files matching the current pipeline (date + ticket-slug). If one exists and contains entries, prompt:
+
+```
+Found <N> noticed-but-not-touching entries in <noticed.md path>. Convert any to GitHub issues?
+```
+
+On confirmation, display a numbered list of entries and ask which to convert. For each selected entry, create an issue via `gh issue create` using the entry's `noticed`, `why it matters`, and `suggested follow-up` fields. Skip silently if no matching `-noticed.md` file exists.
+
 ### Step 4: Determine Base Branch
 
 ```bash
