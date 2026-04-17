@@ -90,7 +90,14 @@ Task tool (general-purpose, model: opus):
        only their CONFIGURATION: signature-verification on webhooks,
        rate-limit settings, DLQ/max-redelivery for queues, overlap-run
        guards for crons. Runtime fetch/iteration bounds inside handler
-       bodies are Boundary Attacker's scope — do not file those here.
+       bodies are Boundary Attacker's scope in the NORMAL case. **Cross-scope
+       fallback:** if a file in your partition contains handler-body
+       code AND the manifest does not show that file tagged
+       `[external-trigger-detected]` or matching a webhook-pattern (i.e.
+       Boundary Attacker likely does NOT have this file), file the
+       runtime DoS finding yourself and tag `cross-scope-fallback` in
+       Evidence. Do not drop a finding because "another agent should
+       cover this" without evidence they actually received the file.
 
     5. **Deep dependency scan.** Go beyond top-level packages:
        - **Transitive dependencies:** Run framework-specific commands for transitive vulnerability checks:

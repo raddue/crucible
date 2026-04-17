@@ -125,8 +125,14 @@ Task tool (general-purpose, model: opus):
        - **Python:** `asyncio.gather(*<unbounded>)` without semaphore;
          no `asyncio.timeout()` or `async_timeout` around outbound I/O;
          paginator without `limit` argument
-       - **Go:** `context.Background()` instead of `context.WithTimeout`
-         on outbound HTTP; unbounded `for range` over channel with no
+       - **Go:** outbound HTTP/RPC calls where the context passed to
+         `client.Do` / `http.NewRequestWithContext` traces back to
+         `context.Background()` or `context.TODO()` with no
+         `context.WithTimeout` / `context.WithDeadline` wrap on the
+         call path (do NOT flag mere presence of `context.Background()`
+         — the idiomatic pattern is `ctx := context.Background()`
+         immediately followed by `ctx, cancel := context.WithTimeout(ctx, ...)`);
+         unbounded `for range` over a channel with no
          `select { case <-ctx.Done(): }`
        - **.NET:** `Task.WhenAll` over unbounded `IEnumerable`; missing
          `CancellationToken` on HTTP client; `Parallel.ForEach` with no
