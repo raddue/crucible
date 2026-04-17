@@ -280,6 +280,6 @@ This skill produces **design docs**. When used standalone, invoke `crucible:qual
 
 **Recon/Assay dispatch:** Recon is dispatched once at Phase 2 start (Step 0) with `modules: ["impact-analysis"]` and a session-level `session_id`. Assay is dispatched per Deep Dive dimension during synthesis (Step 5) with `decision_type: "architecture"`. Both include fallback to existing behavior on failure.
 
-**Contract schema:** Shared with `/spec` — see `skills/spec/SKILL.md` for the canonical contract YAML schema (version 1.0). Both `/design` and `/spec` emit contracts that `/build` consumes.
+**Contract schema:** Shared with `/spec` — see `skills/spec/contract-schema.md` for the canonical contract YAML schema (version 1.0). Both `/design` and `/spec` emit contracts that `/build` consumes.
 
 **Prompt templates:** `design/investigation-prompts.md`

@@ -456,11 +456,11 @@ Same frontmatter as design doc (`ticket`, `epic`, `title`, `date`, `source` fiel
 
 **c. Contract** (`YYYY-MM-DD-<topic>-contract.yaml`):
 
-See Contract Format section below for the full schema.
+See [`contract-schema.md`](contract-schema.md) for the full schema.
 
 ### Step 5: Contract Schema Validation
 
-After generating the contract YAML, validate against the schema:
+After generating the contract YAML, validate against the schema. The rules below must stay consistent with the field definitions in [`contract-schema.md`](contract-schema.md) — if the schema changes, update both.
 
 1. **Required fields present:** Verify `version`, `ticket`, `epic`, `title`, `date`, `api_surface`, and `invariants` all exist.
 2. **Field value validation:**

@@ -807,7 +807,7 @@ For each task (or wave of parallel tasks):
 
 #### Contract-Aware Implementer Guidance
 
-When a contract YAML exists for the current ticket (detected during Step 0 or produced by `/spec`), the implementer receives the contract alongside the design doc and task description. The contract uses the schema defined in `crucible:spec` (version `1.0`). Implementers must treat contract elements as follows:
+When a contract YAML exists for the current ticket (detected during Step 0 or produced by `/spec`), the implementer receives the contract alongside the design doc and task description. The contract uses the schema defined in [`crucible:spec/contract-schema.md`](../spec/contract-schema.md) (version `1.0`). Implementers must treat contract elements as follows:
 
 1. **`api_surface` declarations are binding.** The implementer must match the declared function signatures, class interfaces, endpoint shapes, parameter names, types, and return types exactly. Deviations from the contract's API surface are implementation errors.
 
@@ -1358,4 +1358,4 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:source-driven-development** — Detect → Fetch → Implement → Cite loop for non-trivial external API usage (≥ 5 LOC touching a detected framework); invoked by the implementer prompt's Source Consultation block. Recommended — skipped for pure internal refactors or trivial edits.
 
 **Contract consumption:**
-- **crucible:spec** — Consumes contract YAML files produced by `/spec` (schema version 1.0). Contracts are read from `docs/plans/*-contract.yaml` and feed into pre-existing doc detection (Phase 1 Step 0), implementer dispatch (Phase 3), reviewer checks (Phase 3), and quality gate verification (all gate points). See the contract schema in `crucible:spec` for field definitions.
+- **crucible:spec** — Consumes contract YAML files produced by `/spec` (schema version 1.0). Contracts are read from `docs/plans/*-contract.yaml` and feed into pre-existing doc detection (Phase 1 Step 0), implementer dispatch (Phase 3), reviewer checks (Phase 3), and quality gate verification (all gate points). See [`crucible:spec/contract-schema.md`](../spec/contract-schema.md) for field definitions.

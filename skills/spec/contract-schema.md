@@ -1,8 +1,6 @@
 # Contract Schema (version 1.0)
 
-Machine-readable contracts solve the core challenge of two async agents communicating about interdependent work. Prose is ambiguous — two LLMs reading the same paragraph extract different implications. Contracts make the seams structural.
-
-This file is the canonical schema reference for `/spec` contracts. `/design` emits contracts using the same schema. `/build` consumes contracts via this schema.
+Machine-readable contracts solve the core challenge of two async agents communicating about interdependent work. Prose is ambiguous -- two LLMs reading the same paragraph extract different implications. Contracts make the seams structural.
 
 ## Schema
 
