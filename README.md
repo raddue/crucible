@@ -2,7 +2,7 @@
 
 A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), [OpenAI Codex](https://openai.com/codex/), [Amp](https://amp.dev), [Cline](https://cline.bot), and any platform that supports the SKILL.md format.
 
-Covers the full development lifecycle: design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 39 skills across pipeline, implementation, quality, security, debugging, knowledge, and utilities. Every skill is [eval-tested](#eval-results) with measured A/B deltas.
+Covers the full development lifecycle: design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 40 skills across pipeline, implementation, quality, security, debugging, knowledge, and utilities. Every skill is [eval-tested](#eval-results) with measured A/B deltas.
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged. Pipeline checkpoint system, auto skill extraction, structured context compression, and trajectory capture inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
@@ -101,6 +101,8 @@ These settings are specific to Claude Code. Other platforms have equivalent conf
 
 See `hooks/README.md` for details on storage layout, the outbox pattern, and hook dependencies.
 
+**Build Routing Advisor (hooks)** — Optional PreToolUse hook (`hooks/build-routing-advisor.sh`) that warns — without blocking — when a raw-agent dispatch looks like it should have gone through `/build`, `/spec`, `/debugging`, or `/migrate`. Warn-only and tier-aware (matches Claude Code's skill-trigger vocabulary). Enable via `.claude/settings.json` with a `PreToolUse` matcher on `Agent`. The post-merge reconciler (`hooks/tests/tools/build-routing-reconcile.sh`) provides a read-only audit of dispatches in recent session index data.
+
 **External Model Review (MCP)** — For independent code review from non-Anthropic models (Gemini, OpenAI, etc.), configure `.claude/consensus-config.yaml` using the example at `consensus-config-example.yaml` and register the MCP server in `.mcp.json`. See the consensus and external review skill descriptions for details.
 
 ## Recommended CLAUDE.md Additions
@@ -122,7 +124,7 @@ You have 40,000 characters — use them. The more context you provide about your
 
 | Skill | Description |
 |-------|-------------|
-| **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. Auto-generates a stakeholder-facing PRD after design approval. Live pipeline status file with health indicators for ambient awareness. Shadow git checkpoints at 7 pipeline boundaries for structured rollback on regression. Structured Compression State Blocks for resilient compaction recovery. Pipeline-active markers enable automatic crash detection and resume via `/replay`. Token efficiency tracking enriches dispatch manifests for cost visibility. One command, idea to completion. |
+| **build** | End-to-end development pipeline: interactive design, autonomous planning with quality gates, team-based execution with per-task code and test review. Auto-generates a stakeholder-facing PRD after design approval. Live pipeline status file with health indicators for ambient awareness. Shadow git checkpoints at 7 pipeline boundaries for structured rollback on regression. Structured Compression State Blocks for resilient compaction recovery. Pipeline-active markers enable automatic crash detection and resume via `/replay`. Token efficiency tracking enriches dispatch manifests for cost visibility. Implementers record out-of-scope observations in a "Noticed But Not Touching" section that the orchestrator reconciles into a per-pipeline `docs/plans/*-noticed.md` file, preserving scope discipline without losing signal. One command, idea to completion. |
 | **spec** | Autonomous epic-to-spec pipeline. Takes a GitHub epic with child tickets and produces design docs, implementation plans, and machine-readable contracts (API surface, checkable/testable invariants) for each ticket without human interaction. Dispatches /recon per ticket for investigation context and /assay for architectural decisions with confidence-based autonomous routing. Contract-based handoff to build. |
 | **prd** | Generates a stakeholder-facing Product Requirements Document from a finalized design doc. Transforms technical design decisions into problem statements, user stories, requirements, scope, and success metrics. Also runs automatically in the build pipeline. |
 | **design** | Interactive design refinement with quality gate on completed designs. Dispatches /recon at Phase 2 start for structural context, then explores dimensions via Domain Researcher + Impact Analyst. Deep Dive dimensions use /assay for structured evaluation with constraint_fit scoring, kill criteria, and confidence grounded by recon's Open Questions. Produces a design doc. |
@@ -136,6 +138,7 @@ You have 40,000 characters — use them. The more context you provide about your
 | Skill | Description |
 |-------|-------------|
 | **test-driven-development** | Red-green-refactor discipline. Write failing test first, minimal implementation, refactor. Enforced rigorously with rationalization counters. |
+| **source-driven-development** | Enforces a Detect → Fetch → Implement → Cite loop when touching third-party APIs. Consults official docs (not Stack Overflow, Medium, or training-data recall), classifies WebFetch results as L4 Verify-first per the trust hierarchy, and records a `Source: <url> (YYYY-MM-DD)` citation at the call site so doc drift is detectable later. Auto-dispatched by build when an implementer touches external frameworks above a LOC threshold. |
 | **checkpoint** | Shadow git checkpoint system for pipeline rollback. Snapshots working directory state at pipeline boundaries using isolated shadow repositories (GIT_DIR/GIT_WORK_TREE). Supports create, list, restore (full directory or single file), deduplication, eviction (50 max), and pre-restore safety snapshots. Consumed by build, quality-gate, and debugging. |
 | **worktree** | Create isolated git worktrees for feature work with smart directory selection and safety verification. |
 | **parallel** | Dispatch independent tasks to parallel subagents to work without shared state or sequential dependencies. |
@@ -187,7 +190,7 @@ You have 40,000 characters — use them. The more context you provide about your
 |-------|-------------|
 | **stocktake** | Audits all crucible skills for overlap, staleness, broken references, and quality. Quick scan, full evaluation, or efficiency report modes. Efficiency mode reads chronicle signals to produce per-skill token cost breakdowns, dispatch tier distribution, and structural baseline comparisons. |
 | **skill-creator** | Create, edit, and evaluate skills. Run A/B evals to measure skill performance with variance analysis. Optimize skill descriptions for better triggering accuracy. |
-| **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. |
+| **getting-started** | Skill discovery and invocation discipline. Objective test for when skills apply, scoped exceptions for pure information retrieval, and anti-rationalization red flags. Includes the five-level trust hierarchy (L1 Trusted → L5 Untrusted) framework for resolving conflicts between loaded content from different sources. |
 
 ### Unity UI (Domain-Specific)
 
