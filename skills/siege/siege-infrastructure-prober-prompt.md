@@ -32,15 +32,12 @@ Task tool (general-purpose, model: opus):
     - Information leakage (server version headers, technology fingerprinting)
     - Dependency vulnerabilities (CVEs from dependency scan output below)
     - Supply chain risks (postinstall scripts, abandoned packages, typosquatting)
-    - **Unbounded resource consumption on external-trigger paths** —
-      webhook handlers, scheduled jobs, queue consumers, event
-      subscribers. Look for: missing `MAX_FILES` / `MAX_SIZE` /
-      `MAX_ITEMS` caps on iteration over attacker-sized inputs; ignored
-      truncation flags from paginated upstream APIs (only logged, not
-      acted on); serial I/O inside a trigger handler without a
-      concurrency budget; missing request-level deadlines when
-      downstream calls can compose. Absence of a hard cap IS the
-      finding — no exploit demo required. (CWE-400, CWE-770)
+    - **External-trigger CONFIG** — webhook registration without HMAC
+      verification, cron-job config with no per-run rate limit, queue
+      consumer config with no DLQ / no max-redelivery cap, scheduler
+      config permitting overlapping runs. (CWE-770, configuration
+      aspects only — runtime iteration/fetch bounds are Boundary
+      Attacker's scope.)
 
     **What you are NOT hunting for:**
     - Input injection (Boundary Attacker)
@@ -88,19 +85,22 @@ Task tool (general-purpose, model: opus):
        path actually reachable in this codebase? CISA KEV matches are
        automatic Critical — these are actively exploited in the wild.
 
-    4.5. **External-trigger enumeration.** List every handler reachable
-       from an external trigger: webhook routes, cron jobs, queue
-       consumers, pub/sub subscribers, scheduled tasks. For each, trace
-       its I/O fan-out: does it recursively list resources, serially
-       fetch each one, deserialize, or spawn work per input item?
-       Identify the attacker-controllable dimension (file count in a
-       repo, event payload size, queue depth). Flag any path that scales
-       with that dimension without a hard cap (`MAX_FILES`, size limit,
-       iteration budget, concurrency limit, deadline). Truncation flags
-       from upstream APIs that are only logged but not enforced are
-       findings. Handler files may be shared with Boundary Attacker's
-       scope — that is expected; DoS surfaces and injection surfaces
-       overlap on trigger handlers.
+    4.5. **External-trigger config review.** For webhook routes, cron
+       jobs, queue consumers, and scheduler configs in scope, check
+       only their CONFIGURATION: signature-verification on webhooks,
+       rate-limit settings, DLQ/max-redelivery for queues, overlap-run
+       guards for crons. Runtime fetch/iteration bounds inside handler
+       bodies are Boundary Attacker's scope in the NORMAL case.
+       **Cross-scope fallback:** if a file in your partition contains
+       handler-body code AND its filename matches NONE of the BA
+       routing patterns (`*api*`, `*route*`, `*handler*`, `*controller*`,
+       `*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`,
+       `*subscriber*`, `*scheduler*`) AND the manifest does not tag it
+       `[external-trigger-detected]` or `[attack-surface-gap]` — then
+       Boundary Attacker definitely does NOT have this file. In that
+       case, file the runtime DoS finding yourself and tag
+       `cross-scope-fallback` in Evidence. If ANY of those conditions
+       fail to hold, trust that BA has the file and do not duplicate.
 
     5. **Deep dependency scan.** Go beyond top-level packages:
        - **Transitive dependencies:** Run framework-specific commands for transitive vulnerability checks:

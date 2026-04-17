@@ -41,6 +41,20 @@ Task tool (general-purpose, model: opus):
       entity-expansion limits (CWE-611), JSON/YAML without depth or
       input-size caps (CWE-400). Any parser invoked on attacker-controllable
       content using library defaults is a finding.
+    - **Taint sources beyond HTTP request bodies:** content from
+      committed YAML/JSON/proto files, files fetched via webhook,
+      config blobs received via API, repository trees walked by
+      external-trigger handlers. Any file parsed or interpreted after
+      arriving from outside the server's own code is attacker-influenced.
+    - **Unbounded resource consumption on external-trigger paths:**
+      webhook handlers, queue consumers, cron jobs, event subscribers,
+      scheduled tasks. Flag any handler whose iteration or I/O scales
+      with attacker-controllable input size (file count, payload size,
+      queue depth) without a hard cap — `MAX_FILES`, max-payload-size,
+      concurrency budget, request deadline, `AbortController` /
+      `CancellationToken` / `context.WithTimeout`. Ignored truncation
+      flags from paginated upstream APIs count as findings. Absence of
+      a cap IS the finding — no exploit demo required. (CWE-400, CWE-770)
 
     **What you are NOT hunting for:**
     - Authentication or authorization logic (that's the Insider Threat agent)
@@ -96,6 +110,40 @@ Task tool (general-purpose, model: opus):
        (alias bomb), CWE-611 (entity expansion), CWE-400 (resource
        exhaustion) in Evidence.
 
+    2.7. **External-trigger DoS check.** Enumerate every handler
+       reachable from an external trigger: webhook routes, cron jobs,
+       queue consumers, pub/sub subscribers, scheduled tasks. Identify
+       handlers by route decorators (`app.post('/webhook'`, `@webhook`,
+       Next.js `route.ts` under `/api/webhooks/`), queue-consumer
+       signatures (`.on('message'`, `@queueHandler`, Celery `@task`),
+       and cron configs (`cron.schedule`, cronspec strings). For each
+       handler, grep for concrete unbounded patterns:
+       - **JS/TS:** `Promise.all(<unbounded array>)` without `pLimit` /
+         `p-map`; `for await (... of <paginator>)` with no `take` / cap;
+         `recursive: true` on directory walks; missing `AbortController`
+         on outbound `fetch`
+       - **Python:** `asyncio.gather(*<unbounded>)` without semaphore;
+         no `asyncio.timeout()` or `async_timeout` around outbound I/O;
+         paginator without `limit` argument
+       - **Go:** outbound HTTP/RPC calls where the context passed to
+         `client.Do` / `http.NewRequestWithContext` traces back to
+         `context.Background()` or `context.TODO()` with no
+         `context.WithTimeout` / `context.WithDeadline` wrap on the
+         call path (do NOT flag mere presence of `context.Background()`
+         — the idiomatic pattern is `ctx := context.Background()`
+         immediately followed by `ctx, cancel := context.WithTimeout(ctx, ...)`);
+         unbounded `for range` over a channel with no
+         `select { case <-ctx.Done(): }`
+       - **.NET:** `Task.WhenAll` over unbounded `IEnumerable`; missing
+         `CancellationToken` on HTTP client; `Parallel.ForEach` with no
+         `MaxDegreeOfParallelism`
+       - **Universal:** truncation/pagination flags from upstream APIs
+         that are logged but not acted on (`if (response.truncated)
+         log(...)` without re-fetch or abort); missing `MAX_FILES`,
+         `MAX_SIZE`, `MAX_ITEMS` constants referenced in the loop
+       Absence of a cap IS the finding. Reference CWE-400 (resource
+       exhaustion), CWE-770 (allocation without limits) in Evidence.
+
     3. **For each finding, construct a concrete attack.** Not "this could
        be vulnerable" — describe the exact payload and what it achieves.
 
@@ -112,6 +160,17 @@ Task tool (general-purpose, model: opus):
        specific, reasonable future change that would make it exploitable.
        Speculative findings about hypothetical future endpoints or
        unwritten code without a named trigger are not findings.
+       **Prioritization under cap pressure** — when you have more than 5
+       candidate findings, select in this order:
+       (1) Injection with concrete exploit (SQLi, XSS, command, SSRF,
+           path traversal, deserialization) — Active tier
+       (2) Parser-config / deserialization RCE-adjacent findings where
+           a malicious payload causes code execution or system compromise
+       (3) Authn-boundary and input-validation Active findings
+       (4) Non-HTML sink injection (Markdown, SARIF, log aggregator)
+       (5) DoS / cap-absence Hardening findings (cheapest to detect —
+           drop these FIRST when over budget)
+       Note dropped findings and their count in the Summary.
 
     ## What You Must NOT Do
 
