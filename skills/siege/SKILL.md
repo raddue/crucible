@@ -310,15 +310,22 @@ The orchestrator builds context programmatically. Manual file reading and pastin
 
 **Step 2 — Build Tier 2 partitions (per-agent):**
 1. Calculate Tier 2 budget: `1500 - len(Tier 1) - len(prompt template) - len(intelligence)` lines
-2. For each agent, select files from the manifest using the security-domain mapping:
-   - Boundary Attacker: API routes, input parsers, URL routing, file upload handlers, deserialization. Files tagged `[attack-surface-gap]` from Step 2.5 are highest priority -- these register externally-reachable endpoints but were not in the original manifest.
+2. **Content-based handler detection (runs before pattern partitioning).** For every manifest file whose filename matches `*api*`, `*route*`, `*handler*`, `*controller*`, `*server*`, `*index*`, or `*config*` but does NOT already match an external-trigger pattern (`*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`, `*subscriber*`, `*scheduler*`), run a content grep for any of the following signals (use `rg -l` with a combined alternation):
+   - **Webhook signature headers:** `x-(hub|stripe|slack|twilio|shopify|github|gitlab|linear)-signature`, `signature-256`, `verifyWebhookSignature`
+   - **Message/event listener decorators and methods:** `@(webhook|queueHandler|KafkaListener|SqsListener|SnsListener|RabbitListener|EventListener|PubsubListener|Subscribe)`, `@(shared_task|app\.task|celery\.task|dramatiq\.actor|task)\b`, `\.consume\(`, `\.subscribe\(`, `channel\.consume`, `socket\.on\(`
+   - **Cron / scheduler registration:** `cron\.schedule`, `@Cron\(`, `@Scheduled\(`, YAML `schedule:\s*"` (for GitHub Actions / K8s CronJob)
+   - **Route handlers with webhook-like paths:** `(app|router|route)\.(post|put|delete|patch)\(["'\''][^"'\'']*(webhook|event|hook|callback|notify)`
+
+   Tool assumption: `rg` (ripgrep) on PATH. **Fallback when rg unavailable:** skip content-based detection, log "rg unavailable — content-based handler detection skipped", and recommend `--agents 6` to force Infrastructure Prober inclusion. Matching files are tagged `[external-trigger-detected]` in the manifest and treated by the heuristic in the next step as if they matched the `*webhook*` pattern. Budget: 15 s across all candidate files AND 500 ms per file; on per-file timeout, skip that file and log. If the total budget is exceeded, tag only the matches found so far and log "content-based detection budget exceeded — recommend `--agents 6`". Known gaps (not matched by filename or content): Lambda/Functions handlers specified only in deployment manifests (`serverless.yml`, `template.yaml`), gRPC subscription handlers, GraphQL subscriptions — document in scope limitations if the target depends on these.
+3. For each agent, select files from the manifest using the security-domain mapping (below) and the content-based tags from step 2:
+   - Boundary Attacker: API routes, input parsers, URL routing, file upload handlers, deserialization. Files tagged `[attack-surface-gap]` from Step 2.5 are highest priority -- these register externally-reachable endpoints but were not in the original manifest. Files tagged `[external-trigger-detected]` are added here for the DoS / injection check.
    - Insider Threat: auth middleware, RBAC, user-facing endpoints, data access layers
-   - Infrastructure Prober: config files, env handling, middleware setup, logging config, Docker/CI
+   - Infrastructure Prober: config files, env handling, middleware setup, logging config, Docker/CI. Files tagged `[external-trigger-detected]` are added here for the config-aspect check.
    - Betrayed Consumer: data models, serialization/response shaping, logging, session management, cache
    - Fresh Attacker: random 40% sample (deterministic seed = hash of run-id + manifest content)
    - Chain Analyst: trust boundary files from threat model + manifest API surface files
-3. Read selected files. If total lines exceed Tier 2 budget, include highest-priority files as full source and remainder as 2-3 line summaries
-4. Write each partition to `scratch/<run-id>/<agent>-partition.md`
+4. Read selected files. If total lines exceed Tier 2 budget, include highest-priority files as full source and remainder as 2-3 line summaries
+5. Write each partition to `scratch/<run-id>/<agent>-partition.md`
 
 **Step 3 — Assemble dispatch prompt (per-agent):**
 1. Read the agent's prompt template from `./siege-<agent>-prompt.md`
@@ -326,7 +333,7 @@ The orchestrator builds context programmatically. Manual file reading and pastin
 3. Verify total prompt ≤ 1500 lines. If over, truncate Tier 2 with overflow summaries
 4. Dispatch the assembled prompt — agents receive a complete, ready-to-analyze context with no manual intervention
 
-**File-type heuristic for domain mapping:** When manifest files don't have obvious security-domain labels, use filename/path patterns: `*auth*`, `*login*`, `*session*`, `*permission*` → Insider Threat; `*route*`, `*handler*`, `*controller*`, `*api*` → Boundary Attacker; `*config*`, `*.env*`, `*docker*`, `*nginx*`, `*.yml` → Infrastructure Prober; `*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`, `*subscriber*`, `*scheduler*` → **both Boundary Attacker and Infrastructure Prober** (external-trigger handlers are DoS + injection surfaces); `*model*`, `*schema*`, `*log*`, `*serial*` → Betrayed Consumer. Files matching multiple domains go to all matched agents (within budget).
+**File-type heuristic for domain mapping:** When manifest files don't have obvious security-domain labels, use filename/path patterns: `*auth*`, `*login*`, `*session*`, `*permission*` → Insider Threat; `*route*`, `*handler*`, `*controller*`, `*api*` → Boundary Attacker (includes external-trigger DoS / injection analysis); `*config*`, `*.env*`, `*docker*`, `*nginx*`, `*.yml` → Infrastructure Prober; `*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`, `*subscriber*`, `*scheduler*` → Boundary Attacker (handler bodies: injection + DoS) AND Infrastructure Prober (config aspects: signature verification, rate limits, DLQ); `*model*`, `*schema*`, `*log*`, `*serial*` → Betrayed Consumer. **Pattern resolution:** a file is evaluated against every pattern; the final agent set is the de-duplicated union of all matches. Multi-match files are NOT assigned to any agent twice. **Content-based fallback:** for handler files with generic names (`api.ts`, `routes.ts`, `server.js`, Next.js `app/api/.../route.ts`), grep for webhook/trigger signatures (`req.headers['x-hub-signature']`, `verifyWebhookSignature`, `@webhook`, queue-consumer decorators) and promote matches to the external-trigger pattern set. If a codebase's handlers cannot be detected by filename or content, recommend `--agents 6` scope override to force Infrastructure Prober inclusion.
 
 ### The 6 Agents
 
@@ -401,11 +408,11 @@ Orchestrator reads all 6 findings files from `scratch/<run-id>/`. Steel-man-then
 
    The orchestrator runs dedup before steel-manning. This is deterministic and requires no LLM reasoning.
 
-   **Step 1 — Parse:** Read all `<agent>-findings.md` files from `scratch/<run-id>/`. Extract the `<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->` metadata from each finding into a structured list.
+   **Step 1 — Parse:** Read all `<agent>-findings.md` files from `scratch/<run-id>/`. Extract the `<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID(,CWE-ID)*] agent=[agent_name(,agent_name)*] -->` metadata from each finding into a structured list. Split the `cwe` and `agent` values on `,` to support multi-CWE clusters and multi-agent attribution.
 
-   **Step 2 — Exact dedup:** Group findings by `(file, cwe)`. Within each group, merge findings whose line ranges overlap (e.g., lines 10-25 and lines 15-30 overlap). Keep the finding with the highest severity as the primary; append other agent names as "also flagged by: [agents]". Write merged finding count to the report.
+   **Step 2 — Exact dedup:** Group findings by `(file, any-shared-cwe)`. Two findings group together when their `cwe` sets intersect (after splitting the comma list). Within each group, merge findings whose line ranges overlap (e.g., lines 10-25 and lines 15-30 overlap). Keep the finding with the highest severity as the primary; append other agent names as "also flagged by: [agents]". Write merged finding count to the report.
 
-   **Step 3 — Fuzzy dedup (same root cause, different CWEs):** Within the same file, findings from different agents that reference the same function or code block (overlapping line ranges, any CWE) are likely the same root cause seen from different perspectives. Group these as a "cluster" — present as a single finding with the highest severity, noting the multiple CWEs and perspectives. Example: Boundary Attacker flags CWE-89 (SQL injection) on line 42, Betrayed Consumer flags CWE-200 (information exposure) on line 44 of the same function — these are one root cause (unsanitized input reaches a query that leaks data), not two findings.
+   **Step 3 — Fuzzy dedup (same root cause, different CWEs):** Within the same file, findings that are either (a) at overlapping line ranges OR (b) within a **proximity threshold of 10 lines** OR (c) explicitly annotated as the same function/block by either agent, are likely the same root cause seen from different perspectives — across agents OR within a single agent's multi-category checks. Group these as a "cluster": present as a single finding, noting the multiple CWEs and perspectives. Unlike Step 2, Step 3 does NOT require CWE overlap — any pair of CWEs may cluster if the location criterion is met. **Distance metric:** nearest-edge distance = `max(0, max(A.start, B.start) - min(A.end, B.end))`. **Clustering rule:** pairwise against a cluster anchor (the first record in the cluster), NOT transitive — a finding joins the cluster only if it is within threshold of the anchor. This prevents unbounded chain growth (e.g., findings at lines 10, 19, 28 do NOT transitively cluster). Examples: (a) Boundary Attacker flags CWE-89 (SQL injection) on line 42, Betrayed Consumer flags CWE-200 (information exposure) on line 44 of the same function — within the 10-line proximity threshold, one root cause, not two findings. (b) Same Boundary Attacker run files CWE-776 (alias bomb) on line 100 from the parser-config check and CWE-400 (resource exhaustion) on line 102 from the external-trigger DoS check, both on the same YAML-parsing webhook handler — within proximity threshold, one cluster. **Cluster emission:** emit the merged finding with `cwe=[CWE-A,CWE-B,...]` as a comma-separated list inside the brackets so downstream parsers see every root-cause category. Severity = `max(cluster)`; on severity ties, sort cluster members by `(file, line-start, agent-name)` ascending and keep the first. Agent attribution lists every contributing agent.
 
    **Step 4 — Write dedup summary:** Write `scratch/<run-id>/dedup-summary.md` with: raw finding count, exact-dedup merges, fuzzy-dedup clusters, final deduplicated count. This is the set that enters steel-man-then-kill.
 1b. **Design-phase cross-reference:** If this Siege run targets code that had a prior design-phase red-team or Siege run on the design doc, check the threat model's Historical Findings for matches. Tag findings that were already flagged at design time: "Previously flagged in design review — implementation did not address." This helps triage: design-flagged findings that persist into code are higher priority than net-new findings.
@@ -547,10 +554,10 @@ Agents output findings in this format only. No blast radius, no extended analysi
 For mechanical deduplication before steel-manning, each finding also includes structured metadata as a comment block:
 
 ```
-<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->
+<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID(,CWE-ID)*] agent=[agent_name(,agent_name)*] -->
 ```
 
-The orchestrator uses these fields for first-pass mechanical dedup: same file + overlapping line range + same CWE = merge. Steel-man-then-kill runs only on the deduplicated set, reducing synthesis cost.
+The `cwe` and `agent` fields accept either a single value or a comma-separated list (no spaces inside the brackets). Individual-agent findings emit single values; orchestrator-merged clusters emit lists. The orchestrator uses these fields for first-pass mechanical dedup: same file + overlapping line range + any CWE overlap = merge. Downstream parsers MUST split the `cwe` value on `,` before matching. Steel-man-then-kill runs only on the deduplicated set, reducing synthesis cost.
 
 ### Full Report Findings (Critical and High Only) -- Phase 3 Output
 

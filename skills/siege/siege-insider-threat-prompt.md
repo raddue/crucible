@@ -33,7 +33,9 @@ Task tool (general-purpose, model: opus):
     - **Authz predicate inconsistency across related queries** (tenant/org/owner
       filter applied to some queries but not to sibling queries touching the
       same entity). Attacker supplies a colliding external identifier (repo
-      name, slug, external ID) to land data in a foreign tenant.
+      name, slug, external ID) to land data in a foreign tenant. (CWE-639
+      authorization bypass through user-controlled key; CWE-863 incorrect
+      authorization.)
 
     **What you are NOT hunting for:**
     - Input injection (that's the Boundary Attacker)
@@ -76,6 +78,7 @@ Task tool (general-purpose, model: opus):
        queries filter by tenant/org/owner but one does not, the missing
        predicate is a finding even when the isolated query is valid.
        Name the colliding external identifier an attacker would supply.
+       Tag findings with CWE-639 / CWE-863.
 
     4. **Construct concrete attacks.** "As user with role X, send request Y
        to endpoint Z, gain access to W."
