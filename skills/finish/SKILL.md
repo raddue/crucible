@@ -161,7 +161,7 @@ Silently-missing tools are NOT a pass — they are an "unknown." Either run the 
 | TypeScript/Node | `npx tsc --noEmit` (if `tsconfig.json`) | `npm run lint` / `pnpm lint` / `biome check` (whichever the repo configures) | `prettier --check .` / `biome format --check` (whichever configured) | `npm test` / `pnpm test` / `vitest run` / `jest` |
 | Rust | `cargo check --all-targets --all-features` | `cargo clippy --all-targets --all-features -- -D warnings` | `cargo fmt -- --check` | `cargo test --workspace --all-features` |
 | Python | `mypy` or `pyright` (if configured) | `ruff check` / `flake8` (whichever configured) | `ruff format --check` / `black --check` (whichever configured) | `pytest` |
-| Go | (compiler via `go build ./...`) | `go vet ./...` (add `golangci-lint run` if configured) | `test -z "$(gofmt -l .)"` (fails non-zero on drift) | `go test ./...` |
+| Go | (compiler via `go build ./...`) | `go vet ./...` (add `golangci-lint run` if configured) | `out=$(gofmt -l .) && [ -z "$out" ]` (preserves gofmt exit code AND fails non-zero on drift) | `go test ./...` |
 | .NET | `dotnet build -p:TreatWarningsAsErrors=true` (portable across Linux/macOS/Windows; covers type + warnings-as-errors) | Roslyn analyzers via the same `-p:TreatWarningsAsErrors=true` + any configured analyzer package | `dotnet format --verify-no-changes` | `dotnet test` |
 | Ruby | (runtime only) | `bundle exec rubocop` (covers Layout + Style + Lint) | covered by Lint (or `bundle exec standardrb` if configured instead of rubocop) | `bundle exec rspec` / `bundle exec rake test` |
 | Java/Kotlin | (compiler via `./gradlew build`) | `./gradlew checkstyleMain spotbugsMain` or `./mvnw spotbugs:check` (if configured) | `./gradlew spotlessCheck` (if configured) | `./gradlew test` or `./mvnw test` |
@@ -235,7 +235,7 @@ while true; do
   RC=$?
   echo "CI buckets: $BUCKETS"
   case "$RC" in
-    0) break ;;                                   # all terminal — exit loop
+    0|1) break ;;                                 # 0 = all pass, 1 = at least one failed; both terminal — let assertion classify
     8) sleep 20 ;;                                # at least one pending — keep polling
     *) echo "gh pr checks errored (rc=$RC) — cannot determine CI state"; exit 1 ;;
   esac
