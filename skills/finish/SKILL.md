@@ -143,28 +143,48 @@ Which option?
 
 ## MANDATORY CHECKPOINT - DO NOT SKIP
 
-### Step 5.5: Pre-Push Validation
+### Step 5.5: Pre-Push Validation (Non-Negotiable)
 
-**Before pushing code (Option 2) or merging (Option 1), validate locally:**
+**BLOCK semantics:** you CANNOT proceed to Option 1 (merge) or Option 2 (push + PR) until local validation passes. A failing check is a hard stop. Do not push "then fix in CI"; do not merge "then fix on main."
+
+**Detect the project's toolchain once** (read `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc. before running anything). Run only the checks that actually apply. Silently-missing tools are NOT a pass — they are an "unknown" that must be resolved by either running the real tool or explicitly documenting its absence. Never use `2>/dev/null || true` patterns that hide failures.
+
+**Validation matrix (run every applicable check; each must exit 0):**
+
+| Ecosystem | Type-check | Lint | Tests |
+|---|---|---|---|
+| TypeScript/Node | `npx tsc --noEmit` (if `tsconfig.json` present) | `npm run lint` or `pnpm lint` or `biome check` (whichever the repo configures) | `npm test` / `pnpm test` / `vitest run` / `jest` |
+| Rust | (compiler via test) | `cargo clippy --all-targets -- -D warnings` | `cargo test --all` |
+| Python | `mypy` or `pyright` (if configured) | `ruff check` or `flake8` (whichever is configured) | `pytest` |
+| Go | (compiler via test) | `go vet ./...` | `go test ./...` |
+
+**If a check is not configured for this repo, say so explicitly in the narration** ("no type-check configured — skipping") rather than silencing the command. If uncertain whether a check is configured, ask the user; do not assume.
+
+**On ANY non-zero exit code: STOP.** Report the failure, dispatch a fix, and re-run the full matrix from scratch. Do not partially re-run — a fix in one layer can regress another.
+
+### Step 5.6: Post-Push CI Monitoring (Option 2 only)
+
+**BLOCK semantics:** after `gh pr create` returns the PR URL, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done."
 
 ```bash
-# Run type-check (if applicable)
-npx tsc --noEmit 2>/dev/null || echo "No TypeScript"
-
-# Run linter (if applicable)  
-npx eslint . 2>/dev/null || npm run lint 2>/dev/null || echo "No linter configured"
-
-# Run test suite
-npm test || cargo test || pytest || go test ./...
+# Watch checks to completion — blocks until all checks resolve
+gh pr checks <pr-number> --watch
 ```
 
-**If any validation fails:** STOP. Fix the issues before pushing. Never push code that fails local validation.
+`--watch` streams check status and exits with the final aggregate code (0 = all pass, non-zero = at least one failure/cancellation). If `--watch` is unavailable in the installed `gh` version, poll:
 
-**After pushing (Option 2 only):** Check CI status immediately:
 ```bash
-gh pr checks <pr-number>
+while true; do
+  STATUS=$(gh pr checks <pr-number> --json state --jq '[.[] | .state] | unique')
+  echo "$STATUS"
+  echo "$STATUS" | grep -qE '"PENDING"|"QUEUED"|"IN_PROGRESS"' || break
+  sleep 20
+done
 ```
-Wait for results. If CI fails, diagnose and fix before reporting success to the user. Do NOT push and move on.
+
+**If any check fails:** diagnose the failure from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks <pr-number>`), dispatch a fix, push, and re-watch. Do NOT report success on a red PR, and do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
+
+**If checks are entirely absent** (repo has no CI configured): record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
 
 ### Step 6: Execute Choice
 
@@ -291,6 +311,18 @@ git worktree remove <worktree-path>
 - **Problem:** Accidentally delete work
 - **Fix:** Require typed "discard" confirmation
 
+**Skipping pre-push validation**
+- **Problem:** "Tests passed during /build so this should be fine" — but refactors between Phase 3 and finish, plus drift in companion files, can silently break the build. Pushing broken code wastes CI minutes and creates a red PR for reviewers.
+- **Fix:** Always run Step 5.5's full validation matrix before Option 1 merge or Option 2 push. Every applicable check must exit 0.
+
+**Silencing validation failures**
+- **Problem:** `2>/dev/null || true` patterns hide tool failures and make "no output" indistinguishable from "tool missing" — a failing tsc looks identical to a repo without TypeScript.
+- **Fix:** Detect the toolchain from manifest files first, then run only the checks that apply with strict exit-code discipline. Explicitly narrate skipped checks rather than silencing errors.
+
+**Pushing and moving on**
+- **Problem:** `git push` returns, `gh pr create` returns a URL, task feels done. CI runs later, fails, and nobody notices until the next review session.
+- **Fix:** Block on `gh pr checks <pr-number> --watch` (or equivalent poll loop). Treat a red PR as a hard stop — never report success to the user on a failing PR.
+
 ## Red Flags
 
 **Never:**
@@ -300,12 +332,19 @@ git worktree remove <worktree-path>
 - Merge without verifying tests on result
 - Delete work without confirmation
 - Force-push without explicit request
+- Push code that has not passed the full local validation matrix in Step 5.5
+- Use `|| true` or `2>/dev/null` to silence a validation check — skipped checks must be narrated, not hidden
+- Report success to the user after `gh pr create` without confirming all CI checks pass
+- Abandon a watched PR to work on something else — a red PR is an actionable blocker
 
 **Always:**
 - Verify tests before code review
 - Run full code review before presenting options
 - Run red-team after code review passes, before presenting options
 - Fix Critical/Important review findings before proceeding
+- Detect the project toolchain from manifest files before Step 5.5 dispatch
+- Run every applicable validation check with strict exit-code discipline
+- Watch CI to completion after push (`gh pr checks --watch`) before declaring Option 2 done
 - Present exactly 4 options
 - Get typed confirmation for Option 4
 - Clean up worktree (if applicable) for Options 1, 2 & 4 only
