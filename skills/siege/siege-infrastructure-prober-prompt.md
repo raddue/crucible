@@ -32,6 +32,15 @@ Task tool (general-purpose, model: opus):
     - Information leakage (server version headers, technology fingerprinting)
     - Dependency vulnerabilities (CVEs from dependency scan output below)
     - Supply chain risks (postinstall scripts, abandoned packages, typosquatting)
+    - **Unbounded resource consumption on external-trigger paths** —
+      webhook handlers, scheduled jobs, queue consumers, event
+      subscribers. Look for: missing `MAX_FILES` / `MAX_SIZE` /
+      `MAX_ITEMS` caps on iteration over attacker-sized inputs; ignored
+      truncation flags from paginated upstream APIs (only logged, not
+      acted on); serial I/O inside a trigger handler without a
+      concurrency budget; missing request-level deadlines when
+      downstream calls can compose. Absence of a hard cap IS the
+      finding — no exploit demo required. (CWE-400, CWE-770)
 
     **What you are NOT hunting for:**
     - Input injection (Boundary Attacker)
@@ -78,6 +87,20 @@ Task tool (general-purpose, model: opus):
     4. **Review the dependency scan.** For each CVE: is the vulnerable code
        path actually reachable in this codebase? CISA KEV matches are
        automatic Critical — these are actively exploited in the wild.
+
+    4.5. **External-trigger enumeration.** List every handler reachable
+       from an external trigger: webhook routes, cron jobs, queue
+       consumers, pub/sub subscribers, scheduled tasks. For each, trace
+       its I/O fan-out: does it recursively list resources, serially
+       fetch each one, deserialize, or spawn work per input item?
+       Identify the attacker-controllable dimension (file count in a
+       repo, event payload size, queue depth). Flag any path that scales
+       with that dimension without a hard cap (`MAX_FILES`, size limit,
+       iteration budget, concurrency limit, deadline). Truncation flags
+       from upstream APIs that are only logged but not enforced are
+       findings. Handler files may be shared with Boundary Attacker's
+       scope — that is expected; DoS surfaces and injection surfaces
+       overlap on trigger handlers.
 
     5. **Deep dependency scan.** Go beyond top-level packages:
        - **Transitive dependencies:** Run framework-specific commands for transitive vulnerability checks:
