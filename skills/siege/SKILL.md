@@ -310,7 +310,13 @@ The orchestrator builds context programmatically. Manual file reading and pastin
 
 **Step 2 — Build Tier 2 partitions (per-agent):**
 1. Calculate Tier 2 budget: `1500 - len(Tier 1) - len(prompt template) - len(intelligence)` lines
-2. **Content-based handler detection (runs before pattern partitioning).** For every manifest file whose filename matches `*api*`, `*route*`, `*handler*`, `*controller*`, `*server*`, `*index*`, or `*config*` but does NOT already match an external-trigger pattern (`*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`, `*subscriber*`, `*scheduler*`), run `rg -l '(x-hub-signature|verifyWebhookSignature|@webhook|@queueHandler|\.on\(["'\'']message|@task|cron\.schedule|app\.(post|put|delete)\(["'\'']\/webhook)' <file>`. Matching files are tagged `[external-trigger-detected]` in the manifest and treated by the heuristic in the next step as if they matched the `*webhook*` pattern. Budget: 15 s across all candidate files; if the grep pass exceeds that, tag only the first 20 matches and log "content-based detection budget exceeded — recommend `--agents 6`".
+2. **Content-based handler detection (runs before pattern partitioning).** For every manifest file whose filename matches `*api*`, `*route*`, `*handler*`, `*controller*`, `*server*`, `*index*`, or `*config*` but does NOT already match an external-trigger pattern (`*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`, `*subscriber*`, `*scheduler*`), run a content grep for any of the following signals (use `rg -l` with a combined alternation):
+   - **Webhook signature headers:** `x-(hub|stripe|slack|twilio|shopify|github|gitlab|linear)-signature`, `signature-256`, `verifyWebhookSignature`
+   - **Message/event listener decorators and methods:** `@(webhook|queueHandler|KafkaListener|SqsListener|SnsListener|RabbitListener|EventListener|PubsubListener|Subscribe)`, `@(shared_|app\.|dramatiq\.actor|celery\.|task)task`, `\.consume\(`, `\.subscribe\(`, `channel\.consume`, `socket\.on\(`
+   - **Cron / scheduler registration:** `cron\.schedule`, `@Cron\(`, `@Scheduled\(`, YAML `schedule:\s*"` (for GitHub Actions / K8s CronJob)
+   - **Route handlers with webhook-like paths:** `(app|router|route)\.(post|put|delete|patch)\(["'\''][^"'\'']*(webhook|event|hook|callback|notify)`
+
+   Tool assumption: `rg` (ripgrep) on PATH. **Fallback when rg unavailable:** skip content-based detection, log "rg unavailable — content-based handler detection skipped", and recommend `--agents 6` to force Infrastructure Prober inclusion. Matching files are tagged `[external-trigger-detected]` in the manifest and treated by the heuristic in the next step as if they matched the `*webhook*` pattern. Budget: 15 s across all candidate files AND 500 ms per file; on per-file timeout, skip that file and log. If the total budget is exceeded, tag only the matches found so far and log "content-based detection budget exceeded — recommend `--agents 6`". Known gaps (not matched by filename or content): Lambda/Functions handlers specified only in deployment manifests (`serverless.yml`, `template.yaml`), gRPC subscription handlers, GraphQL subscriptions — document in scope limitations if the target depends on these.
 3. For each agent, select files from the manifest using the security-domain mapping (below) and the content-based tags from step 2:
    - Boundary Attacker: API routes, input parsers, URL routing, file upload handlers, deserialization. Files tagged `[attack-surface-gap]` from Step 2.5 are highest priority -- these register externally-reachable endpoints but were not in the original manifest. Files tagged `[external-trigger-detected]` are added here for the DoS / injection check.
    - Insider Threat: auth middleware, RBAC, user-facing endpoints, data access layers
@@ -402,9 +408,9 @@ Orchestrator reads all 6 findings files from `scratch/<run-id>/`. Steel-man-then
 
    The orchestrator runs dedup before steel-manning. This is deterministic and requires no LLM reasoning.
 
-   **Step 1 — Parse:** Read all `<agent>-findings.md` files from `scratch/<run-id>/`. Extract the `<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->` metadata from each finding into a structured list.
+   **Step 1 — Parse:** Read all `<agent>-findings.md` files from `scratch/<run-id>/`. Extract the `<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID(,CWE-ID)*] agent=[agent_name(,agent_name)*] -->` metadata from each finding into a structured list. Split the `cwe` and `agent` values on `,` to support multi-CWE clusters and multi-agent attribution.
 
-   **Step 2 — Exact dedup:** Group findings by `(file, cwe)`. Within each group, merge findings whose line ranges overlap (e.g., lines 10-25 and lines 15-30 overlap). Keep the finding with the highest severity as the primary; append other agent names as "also flagged by: [agents]". Write merged finding count to the report.
+   **Step 2 — Exact dedup:** Group findings by `(file, any-shared-cwe)`. Two findings group together when their `cwe` sets intersect (after splitting the comma list). Within each group, merge findings whose line ranges overlap (e.g., lines 10-25 and lines 15-30 overlap). Keep the finding with the highest severity as the primary; append other agent names as "also flagged by: [agents]". Write merged finding count to the report.
 
    **Step 3 — Fuzzy dedup (same root cause, different CWEs):** Within the same file, findings that reference the same function or code block (overlapping line ranges, any CWE) are likely the same root cause seen from different perspectives — across agents OR within a single agent's multi-category checks. Group these as a "cluster": present as a single finding, noting the multiple CWEs and perspectives. Examples: (a) Boundary Attacker flags CWE-89 (SQL injection) on line 42, Betrayed Consumer flags CWE-200 (information exposure) on line 44 of the same function — these are one root cause, not two findings. (b) Same Boundary Attacker run files CWE-776 (alias bomb) on line 100 from the parser-config check and CWE-400 (resource exhaustion) on line 102 from the external-trigger DoS check, both on the same YAML-parsing webhook handler — one cluster. **Cluster emission:** emit the merged finding with `cwe=[CWE-A,CWE-B,...]` as a comma-separated list inside the brackets so downstream parsers see every root-cause category. Severity = `max(cluster)`; on ties, keep the first-emitted record's severity. Agent attribution lists every contributing agent.
 
@@ -548,10 +554,10 @@ Agents output findings in this format only. No blast radius, no extended analysi
 For mechanical deduplication before steel-manning, each finding also includes structured metadata as a comment block:
 
 ```
-<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID] agent=[agent_name] -->
+<!-- dedup: file=[path] line=[start-end] cwe=[CWE-ID(,CWE-ID)*] agent=[agent_name(,agent_name)*] -->
 ```
 
-The orchestrator uses these fields for first-pass mechanical dedup: same file + overlapping line range + same CWE = merge. Steel-man-then-kill runs only on the deduplicated set, reducing synthesis cost.
+The `cwe` and `agent` fields accept either a single value or a comma-separated list (no spaces inside the brackets). Individual-agent findings emit single values; orchestrator-merged clusters emit lists. The orchestrator uses these fields for first-pass mechanical dedup: same file + overlapping line range + any CWE overlap = merge. Downstream parsers MUST split the `cwe` value on `,` before matching. Steel-man-then-kill runs only on the deduplicated set, reducing synthesis cost.
 
 ### Full Report Findings (Critical and High Only) -- Phase 3 Output
 

@@ -160,6 +160,17 @@ Task tool (general-purpose, model: opus):
        specific, reasonable future change that would make it exploitable.
        Speculative findings about hypothetical future endpoints or
        unwritten code without a named trigger are not findings.
+       **Prioritization under cap pressure** — when you have more than 5
+       candidate findings, select in this order:
+       (1) Injection with concrete exploit (SQLi, XSS, command, SSRF,
+           path traversal, deserialization) — Active tier
+       (2) Parser-config / deserialization RCE-adjacent findings where
+           a malicious payload causes code execution or system compromise
+       (3) Authn-boundary and input-validation Active findings
+       (4) Non-HTML sink injection (Markdown, SARIF, log aggregator)
+       (5) DoS / cap-absence Hardening findings (cheapest to detect —
+           drop these FIRST when over budget)
+       Note dropped findings and their count in the Summary.
 
     ## What You Must NOT Do
 
