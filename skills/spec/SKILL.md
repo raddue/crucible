@@ -37,6 +37,17 @@ Every status update must include:
 **Example of GOOD narration:**
 > "Wave 2 complete. 3/3 tickets committed. 1 medium-confidence alert on #45 (chose Redis over Postgres for session store). #67 re-queued to Wave 3 (new dependency on #45 discovered). Overall: 7/12 tickets done, 5 remaining across 2 waves."
 
+## Anti-Rationalization Table — spec
+
+| Rationalization | Rebuttal | Rule |
+|---|---|---|
+| "This ticket is small, I can skip the per-document quality gate." | Ticket size does not predict specification defects. Small tickets frequently hide ambiguity that only QG surfaces. | Run the quality gate on every design doc and every implementation plan, regardless of ticket size. |
+| "All per-document gates passed, the integration check is unnecessary." | Per-document PASS does not imply cross-ticket consistency. Contracts drift between tickets even when each is individually clean. | Always run the end-of-run integration quality gate after the per-ticket gates pass. |
+| "The ticket body looks clear, I can skip the investigation and go straight to writing." | Ticket bodies consistently under-specify. Without investigation, autonomous decisions are made without grounding and surface as block-confidence alerts downstream. | Investigate the codebase before writing any design content; cite investigation artifacts in the design doc. |
+| "The decision looks obvious, I'll record it as high-confidence without alternatives." | Listing alternatives is a forcing function for honest confidence calibration. Skipping it hides the fact that no alternatives were considered. | Every decision logs ≥1 alternative or is explicitly marked `no-alternatives: true` with justification. |
+| "I can save state in context memory instead of the scratch directory." | Context is lost on compaction. Scratch-directory state is load-bearing for recovery. | Every orchestrator state change writes to the scratch directory before narrating. |
+| "The user's general 'looks good' counts as approval to skip a gate." | Only an unambiguous instruction specifically referencing the gate is skip approval. | Record `Status: SKIPPED` only after explicit gate-referencing skip instruction. |
+
 ## Pipeline Status
 
 Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.

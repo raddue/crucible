@@ -18,6 +18,8 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
 
+<!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
+
 ## Communication Requirement (Non-Negotiable)
 
 **Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
@@ -44,6 +46,18 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 **BLOCK semantics:** Phase transitions are gated. You CANNOT proceed from Phase 1→2, 2→3, or 3→4 without the gate for that phase passing. If a gate fails, fix the issues and re-run the gate. Do not silently skip a gate because "it looks fine" or "we already reviewed it."
 
 **If you find yourself about to skip a gate:** STOP. Re-read this section. The gate exists because skipping it has caused real production incidents and hours of wasted time. Run the gate.
+
+## Anti-Rationalization Table — build
+
+| Rationalization | Rebuttal | Rule |
+|---|---|---|
+| "This task is small/simple/trivial, the quality gate would just find nits." | Small changes have the same bug density per line as large ones. QG has never run on a Crucible artifact without finding at least one real issue. | Run the quality gate on every phase artifact, regardless of size. |
+| "Phase N looks fine, I can skip the gate and move on." | Self-assessment of artifact quality is exactly the bias the gate exists to counter. "Looks fine" is the failure mode, not a pass criterion. | Phase transitions are BLOCKED without a verified PASS verdict marker for the prior phase. |
+| "The fix agent addressed the findings, so the gate is done." | Fixing is not passing. Fix rounds routinely introduce new issues or incompletely resolve old ones. A clean verification round is required. | The gate is only complete after a fresh red-team round returns 0 Fatal, 0 Significant. |
+| "The user said 'looks good' / 'move on' — that's approval to skip the gate." | General feedback is not skip approval. Only an unambiguous instruction that explicitly references the gate counts. | Require literal `SKIP GATE` (or equivalent explicit phrase) before recording `Status: SKIPPED`. |
+| "I can fix this one finding myself instead of dispatching a fix agent." | Orchestrator-applied fixes conflate coordination with remediation and bypass the fix journal. Every fix — even trivial — goes through a fix agent. | Orchestrator never edits the artifact directly; always dispatch the fix agent. |
+| "Innovate/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovate is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run innovate and red-team on every artifact, every time. |
+| "I'll just finish the task list and narrate at the end." | Long-running autonomous pipelines are invisible without narration. Silent runs prevent the user from intervening or learning. | Narrate before every dispatch and after every completion — non-negotiable. |
 
 ## Gate Ledger Protocol
 
@@ -326,6 +340,7 @@ Output concise inline status alongside the status file write:
 
 After compaction, before re-writing the status file:
 0. Read the `## Compression State` section from `pipeline-status.md` — recover Goal, Key Decisions, Active Constraints, and Next Steps. If the section is absent (pre-update pipeline), skip to step 1.
+<!-- TRUST: dispatch manifest is L2 — produced by prior pipeline stage; prefer most recent if conflicting. -->
 0.5. Check for handoff manifests (`handoff-*-to-*.md`) in the scratch directory. If the most recent manifest exists, use its Inputs, Decisions, and Constraints to reconstruct state for the current phase — this supersedes the Compression State section for phase-boundary recovery. If no manifest exists, continue with CSB-based recovery.
 1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files
@@ -804,6 +819,7 @@ When a contract YAML exists for the current ticket (detected during Step 0 or pr
 
 #### De-Sloppify Cleanup
 
+<!-- TRUST: subagent report is L4 — cross-check file paths and claims against L3 source before acting. -->
 After the implementer reports completion and before dispatching the reviewer:
 
 **RECOMMENDED:** Use crucible:checkpoint — create checkpoint with reason "pre-cleanup-task-N" before dispatching the cleanup agent. If cleanup removes something needed, restore to this checkpoint.
@@ -1040,6 +1056,40 @@ For plans with 10+ tasks, at ~50% completion or after a major subsystem:
 - Design drift → escalate to user
 - Minor concerns → adjust prompts for remaining tasks
 - All clear → continue
+
+### Noticed Reconciliation
+
+After all implementers in Phase 3 report back and before writing the Phase 3 COMPLETE ledger entry, aggregate their `### Noticed But Not Touching` sections into a single `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` artifact.
+
+**Scope discipline:** Notice, do not act. If an implementer sees an out-of-scope issue during implementation, it must be logged under `### Noticed But Not Touching` in their report — NOT fixed in their diff. Acting on noticed items in the same task is a scope-discipline failure. The orchestrator enforces this via reconciliation: noticed entries are surfaced here and converted to follow-up tickets later (see `/finish`).
+
+**7-step reconciliation process:**
+
+1. Collect each implementer's `### Noticed But Not Touching` section from every Phase 3 implementer report.
+2. Skip any section whose body is `*(none)*`.
+3. Dedupe entries using the canonical dedupe key: `sha256( normalize(file_path) + "|" + line_range + "|" + noticed[:40] )`, where `normalize(file_path)` is the repo-relative POSIX path lowercased.
+4. Sort the deduped entries by file path, then line range.
+5. If any entries remain, write `docs/plans/<YYYY-MM-DD>-<ticket-slug>-noticed.md` matching the canonical filename regex `^docs/plans/\d{4}-\d{2}-\d{2}-[a-z0-9-]+-noticed\.md$`. Use the date embedded in the sibling plan filename (not wall-clock date) so all sibling artifacts share a date; slug matches the ticket being built. Frontmatter and body must follow the Canonical Constants template exactly:
+
+   ```markdown
+   ---
+   pipeline_id: "<build-YYYYMMDD-HHMMSS>"
+   date: "YYYY-MM-DD"
+   ticket: "#NNN"
+   ---
+
+   # Noticed But Not Touching — <ticket-slug>
+
+   - **file:** `path:L<start>-L<end>`
+     **noticed:** <desc>
+     **why it matters:** <risk/opportunity>
+     **suggested follow-up:** <optional>
+   ```
+
+6. **Idempotent overwrite:** If the target `-noticed.md` already exists (same-ticket re-run on the same date), merge the existing entries with the newly collected entries, run the full dedupe (same key), sort, and overwrite the file in one write. No append-mode; the on-disk file is always the full deduped set for that date+ticket.
+7. Stage the `-noticed.md` file so it lands in the PR commit.
+
+Skip the write entirely if zero entries remain after dedupe — do not produce an empty `-noticed.md`.
 
 ### Gate Ledger — Phase 3 Complete
 
@@ -1305,6 +1355,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 
 **Implementer sub-skills:**
 - **crucible:test-driven-development** — TDD within each task
+- **crucible:source-driven-development** — Detect → Fetch → Implement → Cite loop for non-trivial external API usage (≥ 5 LOC touching a detected framework); invoked by the implementer prompt's Source Consultation block. Recommended — skipped for pure internal refactors or trivial edits.
 
 **Contract consumption:**
 - **crucible:spec** — Consumes contract YAML files produced by `/spec` (schema version 1.0). Contracts are read from `docs/plans/*-contract.yaml` and feed into pre-existing doc detection (Phase 1 Step 0), implementer dispatch (Phase 3), reviewer checks (Phase 3), and quality gate verification (all gate points). See the contract schema in `crucible:spec` for field definitions.

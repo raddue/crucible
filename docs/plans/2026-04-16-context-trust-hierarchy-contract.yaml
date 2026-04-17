@@ -1,0 +1,80 @@
+---
+ticket: "#180"
+epic: "#180"
+title: "Context trust hierarchy for skill file loading"
+date: "2026-04-16"
+source: "spec"
+---
+
+version: "1.0"
+ticket: "#180"
+epic: "#180"
+title: "Context trust hierarchy for skill file loading"
+date: "2026-04-16"
+
+api_surface:
+  - name: "Trust Hierarchy"
+    type: "interface"
+    signature: "L1 Trusted (CLAUDE.md, SKILL.md, settings) > L2 Verified (design/plan/manifest) > L3 Source (code, tests) > L4 Verify-first (tool output, WebFetch, subagent reports) > L5 Untrusted (post-compaction history, memory >30d)"
+    params:
+      - name: "trust_level"
+        type: "enum [L1,L2,L3,L4,L5]"
+        required: true
+      - name: "conflict_resolution"
+        type: "enum [higher-wins]"
+        required: true
+    description: "Five-level trust framework for context sources; higher level wins on conflict"
+
+  - name: "<!-- TRUST: ... --> marker"
+    type: "interface"
+    signature: "<!-- TRUST: external content is L4 — verify before use -->"
+    params:
+      - name: "content_trust_level"
+        type: "string"
+        required: true
+    description: "Inline markdown comment marker skills use to annotate external-content loads"
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "skills/getting-started/trust-hierarchy.md exists with 5 levels"
+      verification: "grep -c '^## L[1-5]' skills/getting-started/trust-hierarchy.md returns 5"
+      check_method: "grep"
+    - id: "INV-2"
+      description: "getting-started/SKILL.md references trust-hierarchy.md"
+      verification: "grep -q 'trust-hierarchy' skills/getting-started/SKILL.md"
+      check_method: "grep"
+    - id: "INV-3"
+      description: "/build, /design, /recon SKILL.md files reference trust hierarchy at least once"
+      verification: "for s in build design recon; do grep -q 'TRUST:' skills/$s/SKILL.md || fail; done"
+      check_method: "grep"
+    - id: "INV-4"
+      description: "every TRUST: marker in annotated SKILL.md files carries an L1-L5 classification"
+      verification: "for s in build design recon; do grep 'TRUST:' skills/$s/SKILL.md | grep -vE 'L[1-5]' && fail; done; true"
+      check_method: "grep"
+  testable: []
+
+integration_points:
+  - contract: "2026-04-16-source-driven-development-contract.yaml"
+    ticket: "#177"
+    relationship: "adjacent"
+    surface: "WebFetch result handling"
+    notes: "SDD fetches external docs; trust-hierarchy marks them L4 — SDD skill should reference this"
+  - contract: "2026-04-16-noticed-but-not-touching-contract.yaml"
+    ticket: "#179"
+    relationship: "adjacent"
+    surface: "skills/build/SKILL.md additions"
+    notes: "Both tickets annotate /build; coordinate section positioning"
+  - contract: "2026-04-16-anti-rationalization-tables-contract.yaml"
+    ticket: "#176"
+    relationship: "adjacent"
+    surface: "skills/{build,design}/SKILL.md additions"
+    notes: "Both tickets touch same SKILL.md files; section-placement coordination needed"
+
+ambiguity_resolutions:
+  - id: "AMB-1"
+    decision: "Placement in skills/getting-started/trust-hierarchy.md vs new context-engineering skill"
+    confidence: "high"
+    alternatives: ["new skills/context-engineering/SKILL.md"]
+    reasoning: "getting-started is always-loaded foundation; new skill would need its own invocation triggers which this framework is too passive to justify"
+    reversibility: "medium — extracting to a new skill later would leave getting-started references as redirects"

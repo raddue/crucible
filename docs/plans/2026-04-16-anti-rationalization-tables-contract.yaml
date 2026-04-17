@@ -1,0 +1,83 @@
+---
+ticket: "#176"
+epic: "#176"
+title: "Anti-rationalization tables for skill hardening"
+date: "2026-04-16"
+source: "spec"
+---
+version: "1.0"
+ticket: "#176"
+epic: "#176"
+title: "Anti-rationalization tables for skill hardening"
+date: "2026-04-16"
+
+api_surface:
+  - name: "Anti-Rationalization Table (markdown section)"
+    type: "interface"
+    signature: |
+      ## Anti-Rationalization Table — <skill name>
+
+      | Rationalization | Rebuttal | Rule |
+      |---|---|---|
+      | <rationalization-1> | <rebuttal-1> | <rule-1> |
+      | ... | ... | ... |
+    params:
+      - name: "rationalization"
+        type: "prose"
+        required: true
+        description: "A specific excuse the agent might invent to skip a required step of this skill."
+      - name: "rebuttal"
+        type: "prose"
+        required: true
+        description: "The counter-argument — why the rationalization is wrong for this skill specifically."
+      - name: "rule"
+        type: "prose"
+        required: true
+        description: "The binding rule that closes the loophole — phrased as a non-negotiable directive."
+    description: "A 3-column markdown table co-loaded with each targeted SKILL.md. Preventive control that intercepts rationalizations before they produce skipped work."
+
+invariants:
+  checkable:
+    - id: "INV-1"
+      description: "Each of the 4 target SKILL.md files contains an Anti-Rationalization Table section."
+      verification: "grep -l 'Anti-Rationalization' skills/build/SKILL.md skills/spec/SKILL.md skills/quality-gate/SKILL.md skills/design/SKILL.md returns all 4 paths."
+      check_method: "grep"
+    - id: "INV-2"
+      description: "Each table has >=5 data rows (excluding header and separator)."
+      verification: "Between the '## Anti-Rationalization Table' heading and the next '## ' heading, count lines starting with '|', subtract 2 (header + separator), assert >=5. Cap at 8 per DEC-5."
+      check_method: "code-inspection"
+    - id: "INV-3"
+      description: "Tables are inline in SKILL.md, not in sidecar reference files."
+      verification: "Paths matched by INV-1 all end in SKILL.md."
+      check_method: "grep"
+    - id: "INV-4"
+      description: "Each table precedes the first procedural/process walkthrough section of its skill."
+      verification: "Line number of '## Anti-Rationalization Table' is less than the line number of the first of these procedural/walkthrough sections present in the skill: '## The Process' (design), '## Gate Ledger Protocol' (build), '## Pipeline Status' / '## Orchestration Flow' (spec), '## How It Works' (quality-gate), or any '## Phase N' heading."
+      check_method: "code-inspection"
+    - id: "INV-5"
+      description: "Existing '## Red Flags' sections are not modified by this change (additive-only)."
+      verification: "git diff --stat on the commits for #176 shows only insertions, no deletions inside existing '## Red Flags' blocks."
+      check_method: "code-inspection"
+  testable: []
+
+integration_points:
+  - name: "quality-gate"
+    type: "defense-in-depth"
+    description: "The tables are preventive; quality-gate remains the detective control. No change to quality-gate behavior."
+  - name: "Red Flags sections"
+    type: "coexistence"
+    description: "Existing Red Flags sections remain. The table supplies the rationalization+rebuttal+rule triple; Red Flags supplies the behavior checklist. Both co-exist intentionally."
+
+ambiguity_resolutions:
+  - id: "AR-1"
+    question: "Should all tables share a canonical entry set or be skill-specific?"
+    resolution: "Skill-specific. Ticket AC line 3 mandates entries that address each skill's own failure modes. Shared/generic entries would dilute signal."
+  - id: "AR-2"
+    question: "What is the exact placement rule within each SKILL.md?"
+    resolution: "After the non-negotiable preamble (Communication Requirement / Pipeline Discipline / Non-Skippability) and before the first procedural section. For design/, which has no preamble, after Overview and before The Process. Specific line numbers recorded per-task in the implementation plan."
+  - id: "AR-3"
+    question: "Do we remove Red Flags in favor of the table?"
+    resolution: "No. DEC-6 retains Red Flags as a behavior checklist. The table is additive."
+  - id: "AR-4"
+    question: "What is the minimum row count?"
+    resolution: "5 rows per ticket AC. Maximum 8 per DEC-5 to preserve signal density."

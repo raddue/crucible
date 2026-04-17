@@ -52,6 +52,19 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     <!-- CANONICAL: shared/implementer-common.md — TDD Discipline -->
     **REQUIRED SUB-SKILL:** Use `crucible:test-driven-development`
 
+    **Source Consultation.** When the task touches external frameworks/libraries
+    AND the planned change exceeds the triviality threshold (see
+    `skills/source-driven-development/detect-stack.md`, or Canonical Constants
+    DEC-4 in the implementation plan — ≥ 5 LOC of added/modified non-test,
+    non-generated source touching a detected framework's `import`/`require`/`using`),
+    invoke `crucible:source-driven-development` before implementing. Cite fetched
+    sources per the skill's Cite phase (commit footer or inline comment with URL
+    + fetch date).
+
+    **Definition-of-Done addition:** Non-trivial external API usage carries a
+    citation (`Source: <url> (YYYY-MM-DD)`) in the commit footer or as an inline
+    comment directly above the call site.
+
     - If a "Known Defect Patterns" section is present above, before writing
       your first test, scan your task's target files for each listed pattern.
       If any pattern applies to code you are writing or modifying, write a
@@ -99,6 +112,7 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     - Did I follow existing patterns in the codebase?
     - Are my changes limited to the minimum necessary files?
     - No unrelated changes snuck in?
+    - Did I notice anything out-of-scope? If yes, is it in the Noticed section and NOT in my diff?
 
     **Testing (TDD Evidence):**
     - For each test: can I name the failure message I saw during RED? If not, I skipped RED.
@@ -164,4 +178,34 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     Example entries:
     - `DamageCalculator_CriticalHit_DoublesDamage` -- RED: "Assert.AreEqual failed. Expected: 20, Got: 0" -> GREEN: pass
     - `DamageCalculator_ZeroDamage_ReturnsZero` -- RED: "NullReferenceException" (test error, not failure -- fixed setup, re-ran) -> RED: "Assert.AreEqual failed. Expected: 0, Got: 10" -> GREEN: pass
+
+    ### Noticed But Not Touching
+
+    Out-of-scope observations surfaced during this task. Do NOT act on these;
+    log and move on. If nothing noticed, write `*(none)*`.
+
+    Format (one entry per observation):
+
+    - **file:** `path:L<start>-L<end>`
+      **noticed:** <what you observed>
+      **why it matters:** <risk or opportunity, 1–2 lines>
+      **suggested follow-up:** <optional 1-line suggestion>
 ```
+
+## Canonical Report Sections
+
+The sections below are canonical references for the contract grep invariants.
+Their content is embedded verbatim inside the dispatched prompt (see Report
+Format region above).
+
+### Noticed But Not Touching
+
+Out-of-scope observations surfaced during this task. Do NOT act on these;
+log and move on. If nothing noticed, write `*(none)*`.
+
+Format (one entry per observation):
+
+- **file:** `path:L<start>-L<end>`
+  **noticed:** <what you observed>
+  **why it matters:** <risk or opportunity, 1–2 lines>
+  **suggested follow-up:** <optional 1-line suggestion>
