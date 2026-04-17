@@ -326,7 +326,7 @@ The orchestrator builds context programmatically. Manual file reading and pastin
 3. Verify total prompt ≤ 1500 lines. If over, truncate Tier 2 with overflow summaries
 4. Dispatch the assembled prompt — agents receive a complete, ready-to-analyze context with no manual intervention
 
-**File-type heuristic for domain mapping:** When manifest files don't have obvious security-domain labels, use filename/path patterns: `*auth*`, `*login*`, `*session*`, `*permission*` → Insider Threat; `*route*`, `*handler*`, `*controller*`, `*api*` → Boundary Attacker; `*config*`, `*.env*`, `*docker*`, `*nginx*`, `*.yml` → Infrastructure Prober; `*model*`, `*schema*`, `*log*`, `*serial*` → Betrayed Consumer. Files matching multiple domains go to all matched agents (within budget).
+**File-type heuristic for domain mapping:** When manifest files don't have obvious security-domain labels, use filename/path patterns: `*auth*`, `*login*`, `*session*`, `*permission*` → Insider Threat; `*route*`, `*handler*`, `*controller*`, `*api*` → Boundary Attacker; `*config*`, `*.env*`, `*docker*`, `*nginx*`, `*.yml` → Infrastructure Prober; `*webhook*`, `*trigger*`, `*cron*`, `*job*`, `*consumer*`, `*subscriber*`, `*scheduler*` → **both Boundary Attacker and Infrastructure Prober** (external-trigger handlers are DoS + injection surfaces); `*model*`, `*schema*`, `*log*`, `*serial*` → Betrayed Consumer. Files matching multiple domains go to all matched agents (within budget).
 
 ### The 6 Agents
 

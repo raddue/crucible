@@ -30,6 +30,10 @@ Task tool (general-purpose, model: opus):
     - Session fixation or hijacking vectors
     - CSRF on state-changing operations
     - Forced browsing to unlinked but accessible admin endpoints
+    - **Authz predicate inconsistency across related queries** (tenant/org/owner
+      filter applied to some queries but not to sibling queries touching the
+      same entity). Attacker supplies a colliding external identifier (repo
+      name, slug, external ID) to land data in a foreign tenant.
 
     **What you are NOT hunting for:**
     - Input injection (that's the Boundary Attacker)
@@ -65,6 +69,13 @@ Task tool (general-purpose, model: opus):
 
     3. **For every data access, ask:** Does the query filter by the
        authenticated user? Or can I change an ID to access someone else's data?
+
+    3.5. **Cross-query predicate consistency:** For each tenant-scoped
+       entity (orgs, workspaces, accounts, projects), enumerate every
+       query that touches it. Compare authz predicates. If sibling
+       queries filter by tenant/org/owner but one does not, the missing
+       predicate is a finding even when the isolated query is valid.
+       Name the colliding external identifier an attacker would supply.
 
     4. **Construct concrete attacks.** "As user with role X, send request Y
        to endpoint Z, gain access to W."
