@@ -208,37 +208,39 @@ If the repo is public: scan the PR title, body, and commit messages for propriet
 # Push branch
 git push -u origin <feature-branch>
 
-# Create PR
-gh pr create --title "<title>" --body "$(cat <<'EOF'
+# Create PR and capture the URL gh emits (the PR it just created).
+# This is the only deterministic PR reference — using `gh pr view`
+# instead would use branch-to-PR mapping, which breaks on repos
+# with multiple open PRs per branch.
+PR_URL=$(gh pr create --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <2-3 bullets of what changed>
 
 ## Test Plan
 - [ ] <verification steps>
 EOF
-)"
+)")
+PR_NUMBER="${PR_URL##*/}"
 ```
 
-**Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch + empty-check assertion below.
-
-First, capture the PR number deterministically — `gh pr create` emits a URL, not an integer, and relying on branch-to-PR mapping is fragile on repos with multiple open PRs per branch:
-
-```bash
-PR_NUMBER=$(gh pr view --json number -q .number)
-```
-
-Then watch the checks:
+**Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch + empty-check assertion below. Fail closed on any non-zero result that isn't the "no CI configured" case:
 
 ```bash
 # Primary: --watch streams status and returns aggregate exit code.
-# Exit 0 = all terminal passes OR no checks configured (must disambiguate below).
-# Non-zero = at least one failure/cancellation.
+# Exit 0 = all terminal passes OR no checks configured (must disambiguate).
+# Non-zero = at least one check failed/cancelled.
 gh pr checks "$PR_NUMBER" --watch
+WATCH_RC=$?
 
-# --watch on a PR with zero checks exits 0 silently — guard against
-# vacuously satisfying the "CI passed" requirement.
-if [ "$(gh pr checks "$PR_NUMBER" --json bucket --jq 'length')" = "0" ]; then
+# Disambiguate the no-CI case from real success.
+CHECK_COUNT=$(gh pr checks "$PR_NUMBER" --json bucket --jq 'length')
+
+if [ "$CHECK_COUNT" = "0" ]; then
   echo "No CI checks configured — record in final report and recommend adding CI"
+elif [ "$WATCH_RC" -ne 0 ]; then
+  echo "CI failed (watch exit $WATCH_RC)"; exit 1
+else
+  echo "CI green"
 fi
 ```
 
