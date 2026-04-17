@@ -40,16 +40,20 @@ api_surface:
 invariants:
   checkable:
     - id: "INV-1"
-      description: "/build implementer prompt template contains 'Noticed But Not Touching' section"
-      verification: "grep -q 'Noticed But Not Touching' skills/build/build-implementer-prompt.md"
+      description: "/build implementer prompt template contains the 'Noticed But Not Touching' section as a level-3 heading"
+      verification: "grep -qE '^### Noticed But Not Touching$' skills/build/build-implementer-prompt.md"
       check_method: "grep"
     - id: "INV-2"
-      description: "/build SKILL.md documents the noticed.md reconciliation"
-      verification: "grep -q 'noticed.md' skills/build/SKILL.md"
+      description: "/build SKILL.md documents the noticed.md reconciliation step under a heading"
+      verification: "grep -qE '^#+ .*[Nn]oticed [Rr]econciliation' skills/build/SKILL.md && grep -qE '-noticed\\.md' skills/build/SKILL.md"
       check_method: "grep"
     - id: "INV-5"
-      description: "/finish SKILL.md references noticed.md for optional issue conversion"
-      verification: "grep -q 'noticed.md' skills/finish/SKILL.md"
+      description: "/finish SKILL.md references noticed.md via the canonical filename pattern"
+      verification: "grep -qE '-noticed\\.md' skills/finish/SKILL.md"
+      check_method: "grep"
+    - id: "INV-6"
+      description: "Canonical noticed filename regex is specified in the plan so writer (T2) and readers (T4, /finish) share one pattern"
+      verification: "grep -qE '\\^docs/plans/\\\\d\\{4\\}-\\\\d\\{2\\}-\\\\d\\{2\\}-\\[a-z0-9-\\]\\+-noticed' docs/plans/2026-04-16-noticed-but-not-touching-implementation-plan.md"
       check_method: "grep"
 
   testable:
