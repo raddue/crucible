@@ -161,10 +161,10 @@ Silently-missing tools are NOT a pass — they are an "unknown." Either run the 
 | TypeScript/Node | `npx tsc --noEmit` (if `tsconfig.json`) | `npm run lint` / `pnpm lint` / `biome check` (whichever the repo configures) | `prettier --check .` / `biome format --check` (whichever configured) | `npm test` / `pnpm test` / `vitest run` / `jest` |
 | Rust | `cargo check --all-targets --all-features` | `cargo clippy --all-targets --all-features -- -D warnings` | `cargo fmt -- --check` | `cargo test --workspace --all-features` |
 | Python | `mypy` or `pyright` (if configured) | `ruff check` / `flake8` (whichever configured) | `ruff format --check` / `black --check` (whichever configured) | `pytest` |
-| Go | (compiler via `go build ./...`) | `go vet ./...` (add `golangci-lint run` if configured) | `gofmt -l .` (output must be empty) | `go test ./...` |
+| Go | (compiler via `go build ./...`) | `go vet ./...` (add `golangci-lint run` if configured) | `test -z "$(gofmt -l .)"` (fails non-zero on drift) | `go test ./...` |
 | .NET | `dotnet build -warnaserror` (covers type + warnings-as-errors) | Roslyn analyzers via `-warnaserror` + any configured analyzer package | `dotnet format --verify-no-changes` | `dotnet test` |
-| Ruby | (runtime only) | `bundle exec rubocop` | `bundle exec rubocop --only Layout` or `bundle exec standardrb` (whichever configured) | `bundle exec rspec` / `bundle exec rake test` |
-| Java/Kotlin | (compiler via `./gradlew build`) | `./gradlew check` (runs linters + tests) or `./mvnw verify` | `./gradlew spotlessCheck` (if configured) | covered by `check` / `verify` |
+| Ruby | (runtime only) | `bundle exec rubocop` (covers Layout + Style + Lint) | covered by Lint (or `bundle exec standardrb` if configured instead of rubocop) | `bundle exec rspec` / `bundle exec rake test` |
+| Java/Kotlin | (compiler via `./gradlew build`) | `./gradlew checkstyleMain spotbugsMain` or `./mvnw spotbugs:check` (if configured) | `./gradlew spotlessCheck` (if configured) | `./gradlew test` or `./mvnw test` |
 
 For ecosystems not in this matrix, extend it: manifest → type-check → lint → format-check → test. Do not skip an ecosystem because it isn't listed.
 
@@ -227,22 +227,33 @@ EOF
 gh pr checks <pr-number> --watch
 ```
 
-**Fallback (if `--watch` cannot run):** poll until all checks reach a terminal state, then assert the bucket set is a subset of `{pass, skipping}`. The `bucket` field is the GitHub-normalized coalescence of raw states — use it instead of raw `state` values to avoid missing edge states like `NEUTRAL`, `ACTION_REQUIRED`, or lowercase legacy commit-status values.
+**Fallback (if `--watch` cannot run):** poll until all checks reach a terminal state, then assert the bucket set is a subset of `{pass, skipping}` (allow-list, not deny-list — an unknown future bucket value must fail closed). Use gh's normalized `bucket` field, not raw `state` values, to avoid missing edge states like `NEUTRAL`, `ACTION_REQUIRED`, or lowercase legacy commit-status values. Capture `gh`'s own exit code and interpret it per its documented contract (0 = all terminal, 8 = at least one pending, other non-zero = gh itself errored).
 
 ```bash
 while true; do
   BUCKETS=$(gh pr checks <pr-number> --json bucket --jq '[.[].bucket] | unique')
+  RC=$?
   echo "$BUCKETS"
+  if [ "$RC" -ne 0 ] && [ "$RC" -ne 8 ]; then
+    echo "gh pr checks errored (rc=$RC) — cannot determine CI state"; exit 1
+  fi
   echo "$BUCKETS" | grep -q '"pending"' || break
   sleep 20
 done
-# Assert the final bucket set is only {pass, skipping}
-echo "$BUCKETS" | grep -qE '"fail"|"cancel"' && { echo "CI failed"; exit 1; }
+
+# Three terminal cases: empty (no CI), all allow-list (green), or anything else (red).
+if [ "$BUCKETS" = "[]" ]; then
+  echo "No CI checks configured — record in final report and recommend adding CI"
+elif echo "$BUCKETS" | jq -e 'all(. == "pass" or . == "skipping")' >/dev/null; then
+  echo "CI green"
+else
+  echo "CI not all-green: $BUCKETS"; exit 1
+fi
 ```
 
-If the exit is non-zero (either via `--watch` or the explicit assertion): diagnose from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks <pr-number>`), dispatch a fix, push, and re-watch. Do NOT report success on a red PR. Do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
+If the exit is non-zero (either via `--watch` or the explicit assertion): diagnose from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks <pr-number>`), dispatch a fix, **re-run Step 5.5's full validation matrix** (the fix can regress local checks), push, and re-watch. Do NOT report success on a red PR. Do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
 
-If checks are entirely absent (repo has no CI configured): record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
+If the block exits with the "No CI checks configured" message, record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
 
 Then: If using a worktree, clean it up (Step 7)
 
