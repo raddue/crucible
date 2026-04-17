@@ -147,44 +147,30 @@ Which option?
 
 **BLOCK semantics:** you CANNOT proceed to Option 1 (merge) or Option 2 (push + PR) until local validation passes. A failing check is a hard stop. Do not push "then fix in CI"; do not merge "then fix on main."
 
-**Detect the project's toolchain once** (read `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc. before running anything). Run only the checks that actually apply. Silently-missing tools are NOT a pass — they are an "unknown" that must be resolved by either running the real tool or explicitly documenting its absence. Never use `2>/dev/null || true` patterns that hide failures.
+**Detect the project's toolchain first** by reading manifest files at repo root: `package.json`, `Cargo.toml`, `pyproject.toml` / `requirements.txt`, `go.mod`, `*.csproj` / `*.sln`, `Gemfile`, `build.gradle` / `pom.xml`. Run only the checks that actually apply.
 
-**Validation matrix (run every applicable check; each must exit 0):**
+- **Monorepo / polyglot root:** if multiple manifests coexist at root (e.g., a Rust product with a Node.js tooling script), scope validation to whichever ecosystem owns the files changed in the diff (`git diff --name-only <base>...HEAD`). If ambiguous, ask the user before running the full matrix.
+- **Nested manifests:** if the diff touches files under a subdirectory with its own manifest, scope to that subdirectory.
 
-| Ecosystem | Type-check | Lint | Tests |
-|---|---|---|---|
-| TypeScript/Node | `npx tsc --noEmit` (if `tsconfig.json` present) | `npm run lint` or `pnpm lint` or `biome check` (whichever the repo configures) | `npm test` / `pnpm test` / `vitest run` / `jest` |
-| Rust | (compiler via test) | `cargo clippy --all-targets -- -D warnings` | `cargo test --all` |
-| Python | `mypy` or `pyright` (if configured) | `ruff check` or `flake8` (whichever is configured) | `pytest` |
-| Go | (compiler via test) | `go vet ./...` | `go test ./...` |
+Silently-missing tools are NOT a pass — they are an "unknown." Either run the real tool, or narrate the skip ("no type-check configured — skipping"), or ask the user. Never mask a failure with `|| true` or `2>/dev/null`.
 
-**If a check is not configured for this repo, say so explicitly in the narration** ("no type-check configured — skipping") rather than silencing the command. If uncertain whether a check is configured, ask the user; do not assume.
+**Validation matrix (run every applicable check; each must exit 0 unless its documented exit-code contract says otherwise):**
 
-**On ANY non-zero exit code: STOP.** Report the failure, dispatch a fix, and re-run the full matrix from scratch. Do not partially re-run — a fix in one layer can regress another.
+| Ecosystem | Type-check | Lint | Format | Tests |
+|---|---|---|---|---|
+| TypeScript/Node | `npx tsc --noEmit` (if `tsconfig.json`) | `npm run lint` / `pnpm lint` / `biome check` (whichever the repo configures) | `prettier --check .` / `biome format --check` (whichever configured) | `npm test` / `pnpm test` / `vitest run` / `jest` |
+| Rust | `cargo check --all-targets --all-features` | `cargo clippy --all-targets --all-features -- -D warnings` | `cargo fmt -- --check` | `cargo test --workspace --all-features` |
+| Python | `mypy` or `pyright` (if configured) | `ruff check` / `flake8` (whichever configured) | `ruff format --check` / `black --check` (whichever configured) | `pytest` |
+| Go | (compiler via `go build ./...`) | `go vet ./...` (add `golangci-lint run` if configured) | `gofmt -l .` (output must be empty) | `go test ./...` |
+| .NET | `dotnet build -warnaserror` (covers type + warnings-as-errors) | Roslyn analyzers via `-warnaserror` + any configured analyzer package | `dotnet format --verify-no-changes` | `dotnet test` |
+| Ruby | (runtime only) | `bundle exec rubocop` | `bundle exec rubocop --only Layout` or `bundle exec standardrb` (whichever configured) | `bundle exec rspec` / `bundle exec rake test` |
+| Java/Kotlin | (compiler via `./gradlew build`) | `./gradlew check` (runs linters + tests) or `./mvnw verify` | `./gradlew spotlessCheck` (if configured) | covered by `check` / `verify` |
 
-### Step 5.6: Post-Push CI Monitoring (Option 2 only)
+For ecosystems not in this matrix, extend it: manifest → type-check → lint → format-check → test. Do not skip an ecosystem because it isn't listed.
 
-**BLOCK semantics:** after `gh pr create` returns the PR URL, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done."
+**Exit-code interpretation:** treat each tool's documented exit-code contract authoritatively, not just 0 vs non-0. Example: `gh pr checks` exits 8 for "checks pending" — a legitimate non-terminal state, not a failure. The rule is "never mask an exit code without interpreting it," not "non-zero is always failure." If a tool's contract is unclear, treat non-zero as failure and ask the user.
 
-```bash
-# Watch checks to completion — blocks until all checks resolve
-gh pr checks <pr-number> --watch
-```
-
-`--watch` streams check status and exits with the final aggregate code (0 = all pass, non-zero = at least one failure/cancellation). If `--watch` is unavailable in the installed `gh` version, poll:
-
-```bash
-while true; do
-  STATUS=$(gh pr checks <pr-number> --json state --jq '[.[] | .state] | unique')
-  echo "$STATUS"
-  echo "$STATUS" | grep -qE '"PENDING"|"QUEUED"|"IN_PROGRESS"' || break
-  sleep 20
-done
-```
-
-**If any check fails:** diagnose the failure from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks <pr-number>`), dispatch a fix, push, and re-watch. Do NOT report success on a red PR, and do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
-
-**If checks are entirely absent** (repo has no CI configured): record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
+**On ANY unhandled non-zero exit (after exit-code interpretation): STOP.** Report the failure, dispatch a fix, and re-run the full matrix from scratch. Do not partially re-run — a fix in one layer can regress another.
 
 ### Step 6: Execute Choice
 
@@ -232,6 +218,31 @@ gh pr create --title "<title>" --body "$(cat <<'EOF'
 EOF
 )"
 ```
+
+**Post-Push CI Monitoring (Non-Negotiable):** after `gh pr create` returns the PR URL, you CANNOT report success to the user until CI has finished AND passed. "Pushed" is not "done." BLOCK on the watch command below.
+
+```bash
+# Primary: --watch streams status and returns aggregate exit code
+# (0 = all pass, non-zero = at least one failure/cancellation).
+gh pr checks <pr-number> --watch
+```
+
+**Fallback (if `--watch` cannot run):** poll until all checks reach a terminal state, then assert the bucket set is a subset of `{pass, skipping}`. The `bucket` field is the GitHub-normalized coalescence of raw states — use it instead of raw `state` values to avoid missing edge states like `NEUTRAL`, `ACTION_REQUIRED`, or lowercase legacy commit-status values.
+
+```bash
+while true; do
+  BUCKETS=$(gh pr checks <pr-number> --json bucket --jq '[.[].bucket] | unique')
+  echo "$BUCKETS"
+  echo "$BUCKETS" | grep -q '"pending"' || break
+  sleep 20
+done
+# Assert the final bucket set is only {pass, skipping}
+echo "$BUCKETS" | grep -qE '"fail"|"cancel"' && { echo "CI failed"; exit 1; }
+```
+
+If the exit is non-zero (either via `--watch` or the explicit assertion): diagnose from CI logs (`gh run view <run-id> --log-failed` or `gh pr checks <pr-number>`), dispatch a fix, push, and re-watch. Do NOT report success on a red PR. Do NOT leave the watch running while moving on to another task — CI failure is an actionable blocker that takes precedence.
+
+If checks are entirely absent (repo has no CI configured): record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
 
 Then: If using a worktree, clean it up (Step 7)
 
@@ -333,7 +344,7 @@ git worktree remove <worktree-path>
 - Delete work without confirmation
 - Force-push without explicit request
 - Push code that has not passed the full local validation matrix in Step 5.5
-- Use `|| true` or `2>/dev/null` to silence a validation check — skipped checks must be narrated, not hidden
+- Mask a non-zero exit code without interpreting it against the tool's documented contract (e.g., `|| true`, `2>/dev/null`). Known non-failure non-zero codes must be matched to their meaning — `gh pr checks` exit 8 is "checks pending," not failure. When a tool's contract is unclear, treat non-zero as failure.
 - Report success to the user after `gh pr create` without confirming all CI checks pass
 - Abandon a watched PR to work on something else — a red PR is an actionable blocker
 
@@ -373,5 +384,6 @@ Before completing this skill, confirm every mandatory checkpoint was executed:
 - [ ] Red-team review
 - [ ] Pre-push validation passed
 - [ ] Repository safety checked (if public repo, Option 2)
+- [ ] Post-push CI monitoring completed green (Option 2 only)
 
 **If any checkbox is unchecked, STOP. Go back and execute the missed gate.**
