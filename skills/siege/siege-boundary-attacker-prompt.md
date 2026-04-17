@@ -29,6 +29,18 @@ Task tool (general-purpose, model: opus):
     - Open redirects (user-controlled redirect targets)
     - Regex denial of service (ReDoS) (user input matched against catastrophic patterns)
     - Input validation gaps (missing type checks, length limits, format validation at system boundaries)
+    - **Injection into non-HTML rendering surfaces:** content from parsed
+      files (YAML/JSON/proto/CSV) or external inputs flowing unescaped into
+      Markdown (PR/issue comments, chat messages), SARIF `message.text` or
+      `location.message.text`, log aggregators that render markup, or any
+      sink consumed by a UI that applies non-plaintext grammar. Pipe
+      characters corrupt Markdown tables; HTML renders in GitHub comments;
+      SARIF feeds code-scanning dashboards.
+    - **Parser-library misconfiguration on untrusted input:** YAML parsed
+      without `maxAliasCount` (billion-laughs / CWE-776), XML without
+      entity-expansion limits (CWE-611), JSON/YAML without depth or
+      input-size caps (CWE-400). Any parser invoked on attacker-controllable
+      content using library defaults is a finding.
 
     **What you are NOT hunting for:**
     - Authentication or authorization logic (that's the Insider Threat agent)
@@ -64,10 +76,25 @@ Task tool (general-purpose, model: opus):
     1. **Trace every input.** From the public-facing surface (endpoint,
        form, API parameter, file upload, URL) through the code to where
        it is used (query, command, file path, response, redirect).
+       **Taint sources include parsed-file content** — YAML/JSON/proto
+       committed to the repo, files fetched via webhook, config blobs
+       received via API — not only HTTP request bodies.
 
     2. **At each usage point, ask:** Is this input sanitized, validated,
        parameterized, or encoded appropriately for its context? If not,
-       what can an attacker inject?
+       what can an attacker inject? **Identify the sink's rendering
+       grammar** (HTML, Markdown, SARIF, shell, SQL, log aggregator) and
+       verify escaping matches that grammar. HTML escaping does not
+       protect Markdown; Markdown escaping does not protect SARIF.
+
+    2.5. **Parser config check.** For each parser invocation on external
+       or file-sourced input, identify the library (e.g. `js-yaml`,
+       `PyYAML`, `xml.etree`, `lxml`, `serde_yaml`). Check its call
+       sites for hardening flags: `maxAliasCount`, `safeLoad`,
+       entity-expansion limits, depth caps, size caps. Parsers using
+       defaults on untrusted input are findings. Reference CWE-776
+       (alias bomb), CWE-611 (entity expansion), CWE-400 (resource
+       exhaustion) in Evidence.
 
     3. **For each finding, construct a concrete attack.** Not "this could
        be vulnerable" — describe the exact payload and what it achieves.
