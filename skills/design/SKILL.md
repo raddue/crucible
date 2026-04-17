@@ -10,6 +10,8 @@ description: "You MUST use this before any creative work - creating features, bu
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
+
 Turn ideas into fully formed designs through investigated, collaborative dialogue.
 
 Every significant design question is backed by parallel investigation agents that research the codebase, explore approaches, and assess impact BEFORE the question reaches the user. Questions arrive informed, not naive.
@@ -51,6 +53,7 @@ Store the Investigation Brief in the design session's scratch directory. The bri
 
 **Narration:** "Dispatching recon for design context [with session_id: X]."
 
+<!-- TRUST: recon brief is L2 — prior-stage artifact; prefer L3 source on any code-behavior conflict. -->
 **On success:** The brief is available as `[RECON_BRIEF]` context for all subsequent dimension investigations. Quick scan dimensions read the brief directly (no agent dispatch). Deep dive dimensions pass relevant sections to the Domain Researcher and Impact Analyst.
 
 **On failure:** "Recon failed: [reason]. Falling back to inline investigation." Proceed without recon context -- dimension investigations explore from scratch (existing behavior). All subsequent steps work identically, just without the acceleration that recon provides.

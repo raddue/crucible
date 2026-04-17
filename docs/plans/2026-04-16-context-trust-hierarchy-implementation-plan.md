@@ -36,6 +36,19 @@ Create the canonical framework doc. Must contain:
 - Conflict resolution rules (higher wins + per-level tie-breakers).
 - Annotation convention (`<!-- TRUST: ... -->` marker) with three example stanzas.
 - Short "When to re-verify" checklist.
+- **Canonical Markers for Crucible Load Points** — an authoritative table the T3–T6 annotators copy from verbatim. This keeps marker wording consistent across skills and makes INV-4 grep-deterministic. Table rows:
+
+  | Load point | Skill(s) | Canonical marker |
+  |---|---|---|
+  | Dispatch manifest consumption | /build | `<!-- TRUST: dispatch manifest is L2 — produced by prior pipeline stage; prefer most recent if conflicting. -->` |
+  | Implementer/subagent report | /build, /recon | `<!-- TRUST: subagent report is L4 — cross-check file paths and claims against L3 source before acting. -->` |
+  | WebFetch result | /build, /design, /source-driven-development | `<!-- TRUST: WebFetch result is L4 — verify against project source (L3) before acting; snippet may be stale. -->` |
+  | Recon brief consumption | /design | `<!-- TRUST: recon brief is L2 — prior-stage artifact; prefer L3 source on any code-behavior conflict. -->` |
+  | User-pasted / user-quoted snippet | /design | `<!-- TRUST: user-quoted snippet is L5 — confirm with user or re-fetch before acting. -->` |
+  | Scout dispatch report | /recon | `<!-- TRUST: scout report is L4 — cross-check paths against L3 before synthesis. -->` |
+  | Synthesis input | /recon | `<!-- TRUST: synthesis input is L4 until cross-verified against L3 source. -->` |
+
+  Annotators in T3–T6 SHOULD use these canonical strings. Deviation is allowed only when the load point is not listed; new rows must be added to this table in the same PR.
 
 **Verification:** `grep -c '^## L[1-5]' skills/getting-started/trust-hierarchy.md` returns 5.
 
@@ -48,9 +61,9 @@ Add a short new section ("Trust Hierarchy") near the bottom linking to `trust-hi
 ### T3 — Annotate `skills/build/SKILL.md`
 
 Add `<!-- TRUST: ... -->` markers at:
-- dispatch manifest consumption (L2)
-- implementer/subagent report consumption (L4)
-- any WebFetch reference (L4)
+- dispatch manifest consumption (L2) — use canonical string from T1 table.
+- implementer/subagent report consumption (L4) — use canonical string from T1 table.
+- WebFetch reference (L4) — only if one exists in the file today; skip silently if none. (Audit note: as of 2026-04-16 skills/build/SKILL.md contains no WebFetch reference, so this bullet is a no-op unless #177 or #176 lands first.)
 
 Add a one-line pointer near the top: "Trust framework: see `skills/getting-started/trust-hierarchy.md`."
 
@@ -112,5 +125,5 @@ All four are plain grep checks — suitable for quality-gate.
 ## Done When
 
 - 3 deliverable files (this design, this plan, contract) exist in `docs/plans/`.
-- T1–T5 complete; T6 complete or explicitly deferred with a note in #177's tracker; T7 complete.
-- INV-1, INV-2, INV-3 all pass.
+- T1–T5 complete; T6 complete or explicitly deferred with a note in #177's tracker; T7 complete (per fallback chain — expected resolution as of 2026-04-16 is option 3: satisfied-by-T2, since neither CLAUDE.md nor skills/README.md exists).
+- INV-1, INV-2, INV-3, INV-4 all pass.

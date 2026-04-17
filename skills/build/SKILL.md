@@ -18,6 +18,8 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
 
+<!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
+
 ## Communication Requirement (Non-Negotiable)
 
 **Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional — the user cannot see agent activity without your narration.
@@ -338,6 +340,7 @@ Output concise inline status alongside the status file write:
 
 After compaction, before re-writing the status file:
 0. Read the `## Compression State` section from `pipeline-status.md` — recover Goal, Key Decisions, Active Constraints, and Next Steps. If the section is absent (pre-update pipeline), skip to step 1.
+<!-- TRUST: dispatch manifest is L2 — produced by prior pipeline stage; prefer most recent if conflicting. -->
 0.5. Check for handoff manifests (`handoff-*-to-*.md`) in the scratch directory. If the most recent manifest exists, use its Inputs, Decisions, and Constraints to reconstruct state for the current phase — this supersedes the Compression State section for phase-boundary recovery. If no manifest exists, continue with CSB-based recovery.
 1. Read the rest of `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
 2. Reconstruct phase, health, and skill-specific body from internal state files
@@ -816,6 +819,7 @@ When a contract YAML exists for the current ticket (detected during Step 0 or pr
 
 #### De-Sloppify Cleanup
 
+<!-- TRUST: subagent report is L4 — cross-check file paths and claims against L3 source before acting. -->
 After the implementer reports completion and before dispatching the reviewer:
 
 **RECOMMENDED:** Use crucible:checkpoint — create checkpoint with reason "pre-cleanup-task-N" before dispatching the cleanup agent. If cleanup removes something needed, restore to this checkpoint.
