@@ -33,6 +33,14 @@ These actions ALWAYS have a matching skill — invoke it, no exceptions:
 | Receiving code review feedback | review-feedback |
 | Onboarding to an unfamiliar codebase | project-init |
 
+### Build-shaped work routes through /build
+
+BEFORE dispatching a subagent, check whether the prompt combines design + implementation + review/merge (e.g. "spec + implement + PR", "implement X and open a PR", "build this end-to-end"). STOP — that is /build's job.
+
+Dispatching it as a raw agent bypasses the gate ledger, skips quality gates, and leaves no audit trail. Use /build (or /spec then /build).
+
+Single-phase tasks (just a review, just a design, just a test audit) remain fine for raw dispatch. The anti-pattern is the COMBINATION.
+
 ## When Skills Don't Apply (Respond Directly)
 
 Do NOT invoke skills for:

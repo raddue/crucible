@@ -331,6 +331,116 @@
       "context": "User explicitly requests the full pipeline: design exploration, task planning, then implementation.",
       "reasoning": "The user spells out the three-phase cascade: design (explore options, investigate questions), planning (break into tasks with ordering), build (implement). Skipping to build alone misses design exploration. Design alone misses the planning phase that produces the task breakdown. The full sequence ensures each phase informs the next.",
       "difficulty": "hard"
+    },
+    {
+      "id": "build-routing-01",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Write a spec for a webhook retry queue, implement it, and open a PR.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "spec", "design"],
+      "context": "Build-shaped: spec + implement + ship in one prompt.",
+      "reasoning": "Combination of spec + implement + PR is the canonical build-shaped dispatch per #174 routing guidance. /build owns the full design-through-execution pipeline. A raw Task subagent or /spec alone would skip build's QG/red-team/innovate phases.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-02",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Spec out the new audit-log endpoint, implement it with tests, and push a PR.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "spec", "test-driven-development"],
+      "context": "Build-shaped: spec + implement + PR, with test emphasis.",
+      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG — invoking TDD or spec directly would bypass build's orchestration.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-03",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "I need a spec plus working implementation plus a PR for the CSV importer feature.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "spec", "planning"],
+      "context": "Build-shaped: explicit spec + implement + PR combination, restated form.",
+      "reasoning": "The 'spec + implementation + PR' triplet is the exact signature /build was designed to orchestrate per Part 1 of getting-started. Dispatching spec or planning standalone drops build's quality gates.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-04",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Implement a rate limiter for the public API and open a PR.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "test-driven-development"],
+      "context": "Build-shaped: implement + PR in one prompt.",
+      "reasoning": "Implement + PR together is a build-shaped dispatch — the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-05",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Implement SSO login via OIDC and open a PR when it's ready.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "design"],
+      "context": "Build-shaped: implement + PR, non-trivial feature.",
+      "reasoning": "Non-trivial feature work that explicitly ends in a PR is the canonical /build trigger. Design alone stops short of implementation; raw dispatch skips the full pipeline.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-06",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Please implement the CSV export endpoint and raise a pull request for review.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "test-driven-development"],
+      "context": "Build-shaped: implement + PR, polite phrasing with 'raise a pull request'.",
+      "reasoning": "Phrasing variant ('raise a pull request' vs 'open a PR') still signals the implement-to-shipped pipeline /build owns. The routing should not depend on surface wording.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "build-routing-07",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Build the notification preferences feature end-to-end.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "design", "planning"],
+      "context": "Build-shaped: explicit 'build end-to-end' framing.",
+      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build — it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-08",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Take the new analytics dashboard from idea to working code end-to-end.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "design", "planning"],
+      "context": "Build-shaped: idea-to-code end-to-end framing.",
+      "reasoning": "'From idea to working code' is verbatim build's description triggers. The full-pipeline framing rules out any single upstream skill.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "build-routing-09",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Design and ship the new passwordless auth flow.",
+      "expected_skill": "build",
+      "common_mistakes": ["design", "raw-dispatch"],
+      "context": "Boundary case: 'design and ship' reads like design but 'ship' implies full pipeline through PR.",
+      "reasoning": "'Ship' means land a PR, which combined with 'design' covers the full /build pipeline. Routing to /design alone would stop at the design doc and never implement or ship.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "build-routing-10",
+      "dimension": "direct",
+      "boundary": "build-vs-raw-dispatch",
+      "prompt": "Refactor the storage layer to use the new blob adapter and open a PR.",
+      "expected_skill": "build",
+      "common_mistakes": ["raw-dispatch", "simplify"],
+      "context": "Boundary case: refactor + PR. Refactor reads like /simplify but scope + PR makes it build-shaped.",
+      "reasoning": "Refactor with explicit PR at the end is still design-through-execution — particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
+      "difficulty": "medium"
     }
   ]
 }
