@@ -19,6 +19,9 @@ All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convent
 <!-- CANONICAL: shared/return-convention.md -->
 All subagent returns (the 6 attacker-perspective agents, synthesis, fix agents, stagnation judge) use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
 
+<!-- CANONICAL: shared/cairn-convention.md -->
+Siege maintains an Invariant Cairn per `shared/cairn-convention.md`. Each attack round is a cairn phase. See `## Cairn (Layer 3)` below.
+
 ## Receipt Linter (Ledger Return Protocol)
 
 Each attacker agent returns an Evidence Receipt whose ARTIFACTS include its findings file and whose WITNESS is the attack one-liner (or pattern) that would succeed if the defender's claimed fix is incomplete. After every Task return, apply this check before scoring findings or accepting a fix:
@@ -26,6 +29,16 @@ Each attacker agent returns an Evidence Receipt whose ARTIFACTS include its find
 **Tier 1 — Structural:** sections in order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT`. Every CLAIM citation resolves. Every EXEC has exit/dur/out; byte-ranges ≤ 4 KiB. Every DISPATCHED has a valid `rcpt-sha256` in `receipt-ledger.jsonl`. WITNESS mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard, ≥ 4 chars (exemptions: exit-clause forms; bare `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb.
 
 **Tier 2 — Witness verification:** PASS + TRACE#N → Read cited range (≤ 4 KiB); fail if witness would match `expect-fail`. FAIL + TRACE#N → reject only if no evidence of attack success is visible. SKIPPED/UNRUNNABLE → no read; record deferred obligation (e.g. `zap-cli unavailable` → orchestrator re-dispatches with tooling).
+
+## Cairn (Layer 3)
+
+Per `shared/cairn-convention.md`. Siege-specific bindings:
+
+- **Phase mapping.** One cairn phase per attack round: `round/1`, `round/2`, …. A round spans the 6-parallel-attacker dispatch through synthesis + optional fix. Attacker dispatches are internal to the round (one LEDGER line per round aggregating them).
+- **Phase transitions.** At each round-exit, LEDGER line `round/N | dispatches=<6+synth+fix> receipts=<same> verdict=<PASS|FAIL|MIXED> | <critical-count, high-count, fix-target>`. Terminal when zero Critical + zero High.
+- **Terminal phase.** Zero-Critical-zero-High achieved OR user escalation. Delete `active-run.md` on terminal; keep the cairn.
+- **Mandatory-invariant categories.** Each round-exit MUST capture: every Critical-or-High finding's summary (≤240 chars) as an invariant with `[ref: <attacker-receipt-prefix>]`; the attack one-liner for any blocked attacker (`UNRUNNABLE:tooling-absent`) as an OPEN_OBLIGATIONS entry so the user's out-of-sandbox verification is tracked across rounds.
+- **Reconciliation.** Full 5-rule pass. Rule 4 is load-bearing: when a fix-agent PASS-supersedes an attacker FAIL (Layer 2), the cairn MUST record a superseding invariant (e.g., "I-09 supersedes I-03: SQLi at /api/users closed by fix-agent in round/3 [ref: …]"). Skipping the supersession recording means the threat invariant stays live in context forever and bloats the cairn.
 
 ## Tripwire Manifest Sweep (Layer 2)
 
