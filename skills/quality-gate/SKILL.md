@@ -28,6 +28,24 @@ Every subagent dispatched by the gate (red-team agents, fix agents, judges) retu
 
 **Tier 2 — Witness verification:** for PASS+TRACE#N, Read the cited range (≤ 4 KiB) and fail if the witness would have matched `expect-fail`. For FAIL+TRACE#N (weak positive-evidence), reject only if no evidence of failure is visible in the range. For SKIPPED/UNRUNNABLE, no read; record the deferred obligation.
 
+## Tripwire Manifest Sweep (Layer 2)
+
+Starting with convention **v1.1**, every QG subagent (red-team, judge, fix-agent) returns a receipt carrying `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:` lines. Full grammar in `shared/return-convention.md`.
+
+**Manifest:** After each Task return (post-lint), append:
+
+```
+<rcpt-sha256-prefix-12>  <skill>/<dispatch-id>  <verdict>  TRIPWIRE: <predicates>  [SUPERSEDED_BY=<prefix>]  [keys=quality-gate:<k>:<v>,…]  [files=<path>:<h6>,…]
+```
+
+Namespace CLAIM-key discriminators as `quality-gate:<key>` (e.g. `quality-gate:severity-max:minor`) — prevents collision with `build`/`siege` keys.
+
+**Sweep (dispatch-loop clause):** The orchestrator MAY NOT dispatch the next round until it has: (1) linted; (2) appended; (3) processed SUPERSEDES; (4) evaluated self-checks; (5) evaluated forward-checks against every active prior entry (TRIPWIRE ∪ TRIPWIRE-CHILD); (6) Read each firing M's full receipt and narrated the re-read; (7) then dispatch.
+
+**Fix-agent supersession.** A QG fix-agent supersedes the prior FAIL red-team receipt. `SUPERSEDES: <fail-prefix>` + cited CLAIM + `exec`/`grep` witness with `ran=TRACE#N`. Tier-2 re-runs the witness against the fix — only survives if clean.
+
+**Stagnation-judge tripwires.** A stagnation judge's receipt declaring `TRIPWIRE: peer-dispatch-disagrees(count)` lets a later round's divergent issue-count fire a re-read, surfacing judge-vs-judge disagreement without a separate escalation channel.
+
 **Mandatory-work declarations for quality-gate subagent types:**
 
 - Red-team agent: `read-artifact`, `emit-findings`.

@@ -70,6 +70,34 @@ BLOCKED → no Tier-2; dispatch is not trusted for forward progress.
 
 **On lint failure:** treat the dispatch as structurally `BLOCKED` regardless of its declared VERDICT. Surface the specific failure to the narration log. Re-dispatch with the lint errors appended to the dispatch brief, or escalate. Do not surface the subagent's VERDICT or CLAIMS to the user until the receipt is valid.
 
+## Tripwire Manifest Sweep (Layer 2)
+
+Starting with convention **v1.1**, every subagent returns a receipt carrying `TRIPWIRE:`, `SUPERSEDES:`, and (if the subagent dispatched children) `TRIPWIRE-CHILD:` lines. The full grammar and predicate vocabulary live in `shared/return-convention.md`. This section defines how the orchestrator uses them.
+
+**Manifest:** After each Task return (post-lint), append one line to the in-context manifest:
+
+```
+<rcpt-sha256-prefix-12>  <skill>/<dispatch-id>  <verdict>  TRIPWIRE: <predicates>  [SUPERSEDED_BY=<prefix>]  [keys=<skill>:<k>:<v>,…]  [files=<path>:<h6>,…]
+```
+
+Extract `keys=` and `files=` discriminators at insertion time (severity-max, `*-count` CLAIM keys namespaced by skill; EDIT/WROTE paths with first 6 hex of post-edit hash). Truncate each list at 8; overflow becomes `more=<N>` and forces mandatory fire on `peer-dispatch-disagrees`.
+
+**Sweep (the dispatch-loop clause):** The orchestrator MAY NOT dispatch the next subagent until it has:
+
+1. Applied Layer 1 two-tier linter to the just-returned receipt. Lint failure → re-dispatch, DO NOT sweep.
+2. Appended the manifest entry.
+3. Processed `SUPERSEDES:` — marked each cited predecessor `SUPERSEDED_BY=<new-prefix>`.
+4. Evaluated self-checks (verdict=FAIL, exec-exit!=0, suspicion>=N-self) on the new receipt — no Read needed.
+5. Evaluated forward-checks against every active (not `SUPERSEDED_BY=*`) prior manifest entry, over the union of that entry's `TRIPWIRE` and `TRIPWIRE-CHILD` predicate sets:
+   - `claims-touch(glob)` / `wrote(glob)` / `read(glob)` — path-glob match against the new receipt's TRACE or CLAIMS citations.
+   - `suspicion>=N` — new receipt's SUSPICION ≥ N.
+   - `peer-dispatch-disagrees(<dim>)` — same-skill, same-target, discriminator mismatch (evaluated via manifest `keys=`/`files=`; `more=` overflow → mandatory fire).
+   - `always` — fires unconditionally.
+6. For each firing predicate on manifest entry M, `Read` M's full receipt from disk and narrate the re-read: *"tripwire `<predicate>` on <M-prefix> fired from <new-prefix>; re-read M."*
+7. Only then dispatch the next subagent.
+
+**Supersession fix-flow.** A fix-agent dispatched after a FAIL receipt normally supersedes that FAIL. Its receipt MUST cite the FAIL's hash-prefix in `SUPERSEDES:` and in at least one CLAIM `from=<prefix>#…`, AND its WITNESS must be `kind ∈ {exec, grep}` with `ran=TRACE#N` (not SKIPPED/UNRUNNABLE). Tier-2 then verifies the witness — supersession only survives if the original failure no longer reproduces.
+
 **Mandatory-work declarations for build's subagent types** (add to each dispatch template's `## Return Format` section):
 
 - Implementer (feature): `run-tests`, `apply-edits`.

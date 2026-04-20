@@ -42,10 +42,11 @@ def parse_receipt(text):
     lines = text.splitlines()
     if not lines:
         raise LintError("empty receipt")
-    # First line must be RCPT
-    if not lines[0].startswith("RCPT v1 "):
-        raise LintError("first line must start with 'RCPT v1 '")
-    sections = {"RCPT": [lines[0][len("RCPT v1 "):]]}
+    # First line must be RCPT v1 or v1.1
+    header_m = re.match(r"^RCPT v(1(?:\.1)?) (.+)$", lines[0])
+    if not header_m:
+        raise LintError("first line must start with 'RCPT v1 ' or 'RCPT v1.1 '")
+    sections = {"RCPT": [header_m.group(2)]}
     current = None
     for line in lines[1:]:
         stripped = line.lstrip()
@@ -241,6 +242,11 @@ def lint_receipt(text):
                 raise LintError(f"CLAIM citation TRACE#{idx} does not resolve")
         else:
             art_name = cit.split("#", 1)[0]
+            # Receipt-hash prefix citations (used by SUPERSEDES justification)
+            # are valid without appearing in ARTIFACTS. Layer 2 verifies the
+            # hash resolves in the manifest.
+            if re.match(r"^[0-9a-f]{12}$", art_name):
+                continue
             if art_name not in artifacts:
                 raise LintError(f"CLAIM citation artifact not listed: {art_name}")
     # WITNESS ran resolution + rules
