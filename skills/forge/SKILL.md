@@ -10,11 +10,24 @@ description: Use when a significant task completes and you need a retrospective,
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/cairn-convention.md -->
+Long retrospectives and multi-session forward-pass consultations maintain an Invariant Cairn per `shared/cairn-convention.md`. See `## Cairn (Layer 3)` below.
+
 Self-improving retrospective system. After tasks complete, runs structured retrospectives. Before tasks begin, consults accumulated lessons. Periodically proposes concrete skill edits based on evidence.
 
 **Core principle:** The agent that never reviews its own performance never improves. The Forge closes the loop.
 
 **Announce at start:** "I'm using the forge skill to [run a retrospective / consult past lessons / propose skill improvements]."
+
+## Cairn (Layer 3)
+
+Per `shared/cairn-convention.md`. Forge-specific bindings:
+
+- **Applies to long runs only.** Single-artifact retrospectives (~minutes) do not need a cairn. Multi-artifact retrospectives spanning multiple sessions, or mutation-proposal runs that consult >20 historical retrospectives, do.
+- **Phase mapping.** One cairn phase per forge "pass" (retro-pass, forward-pass, mutation-pass). Sub-dispatches within a pass are internal.
+- **Terminal phase.** The last pass completes and its output artifact (retro note / skill-edit proposal) is written.
+- **Mandatory-invariant categories.** Any pattern the forge identifies that RECURS across ≥ 3 retrospectives and would motivate a skill-edit mutation — pinned so the mutation-pass doesn't rediscover it.
+- **Reconciliation.** Full 5-rule pass. Forge's own retrospective corpus is not in `receipt-ledger.jsonl`; Rule 4 checks only that dispatched subagents' receipts are live.
 
 ## When to Use
 

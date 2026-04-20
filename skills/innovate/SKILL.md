@@ -10,11 +10,24 @@ description: Use when a design doc or implementation plan is finalized and you w
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/cairn-convention.md -->
+Sweep-mode runs (multiple innovate invocations against the same target) maintain an Invariant Cairn per `shared/cairn-convention.md`. Single-run invocations do NOT — they're too short. See `## Cairn (Layer 3)` below.
+
 Divergent creativity injection. Dispatches an Innovation subagent to propose the single most impactful addition to an artifact. One shot, not iterative — the red-team that follows is the quality gate.
 
 **Core principle:** The best ideas often come from asking "what's missing?" after you think you're done.
 
 **Announce at start:** "I'm using the innovate skill to explore potential improvements."
+
+## Cairn (Layer 3)
+
+Per `shared/cairn-convention.md`. Innovate-specific bindings:
+
+- **Applies to sweep mode only.** A single-invocation innovate run is one dispatch and doesn't need a cairn. Sweep mode (≥ 3 invocations against the same target, per the `sweep-id` context key) does.
+- **Phase mapping.** One cairn phase per sweep run: `run/1`, `run/2`, …. Each sweep run's `scratch/<run-id>/` directory already exists from the innovate convention; the cairn adds the cross-run continuity layer.
+- **Terminal phase.** The last sweep run seals its `ranked.md` view.
+- **Mandatory-invariant categories.** Each sweep run-exit MUST capture the run's proposal as an invariant (≤240 chars distillation) with `[ref: <innovate-run-id-as-receipt-prefix>]` — so later sweep runs can distinguish "already proposed" from "not yet" without re-reading every prior `proposal.md`.
+- **Reconciliation.** Full 5-rule pass. Rule 4 (invariant-receipt liveness) applies only to invariants that carry `[ref: <receipt-prefix-12>]`. Innovate doesn't produce Layer 2 receipts (the orchestrator writes `proposal.md`/`alternatives.md` directly), so sweep-run invariants should use a phase/counter-based `[ref:]` of the form documented in the cairn convention's explicit-discharge path, OR omit `[ref:]` entirely (which forfeits the shedding license for those invariants — acceptable since innovate runs are not context-constrained the way /build is).
 
 ## When to Use
 
