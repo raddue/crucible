@@ -9,6 +9,9 @@ origin: crucible
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/return-convention.md -->
+All subagent returns (red-team agents, judges, fix agents) use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
+
 Shared iterative red-teaming mechanism invoked at the end of artifact-producing skills. Provides rigorous adversarial review as the core quality mechanism.
 
 **Announce at start:** "Running quality gate on [artifact type]."
@@ -16,6 +19,22 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
 **Execution model:** When this skill is running, YOU are the orchestrator. You drive the loop, dispatch fix agents and reviewers as subagents, track scores, and make escalation decisions. All references to "the orchestrator" in this document refer to you.
+
+## Receipt Linter (Ledger Return Protocol)
+
+Every subagent dispatched by the gate (red-team agents, fix agents, judges) returns exactly one Evidence Receipt per `shared/return-convention.md`. After every Task return, apply this check before scoring findings or escalating.
+
+**Tier 1 — Structural (in-context):** parse sections in the order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT` (unknown headers after NEXT ignored). Every CLAIM citation must resolve. Every EXEC has `exit=/dur=/out=` and a listed `out=` artifact; byte-ranges ≤ 4 KiB. Every DISPATCHED carries a valid `rcpt-sha256` present in `receipt-ledger.jsonl`. WITNESS is mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard-only, ≥ 4 chars (exemptions: exit-clause forms; the bare token `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE: reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb (rule re-applied to receipt itself).
+
+**Tier 2 — Witness verification:** for PASS+TRACE#N, Read the cited range (≤ 4 KiB) and fail if the witness would have matched `expect-fail`. For FAIL+TRACE#N (weak positive-evidence), reject only if no evidence of failure is visible in the range. For SKIPPED/UNRUNNABLE, no read; record the deferred obligation.
+
+**Mandatory-work declarations for quality-gate subagent types:**
+
+- Red-team agent: `read-artifact`, `emit-findings`.
+- Judge agent: `read-findings`, `emit-scores`.
+- Fix agent: `read-findings`, `apply-edits`, `run-tests` (if tests exist for the artifact's subtree).
+
+**On lint failure:** treat as structurally `BLOCKED` regardless of declared VERDICT. Re-dispatch with lint errors appended to the brief, or escalate.
 
 ## Consensus Detection
 
