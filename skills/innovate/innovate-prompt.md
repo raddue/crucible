@@ -21,6 +21,15 @@ Task tool (general-purpose, model: opus):
 
     [Existing systems, constraints, tech stack, what this artifact is trying to accomplish]
 
+    <!-- SWEEP MODE ONLY: If sweep-id is set, include the section below with prior proposals filled in.
+         For single-run invocations, omit the entire "Prior Proposals in This Sweep" section including its header. -->
+
+    ## Prior Proposals in This Sweep (Diverge From These)
+
+    [LIST OF PRIOR PROPOSALS — one per prior run, each with its Single Best Addition and Impact]
+
+    The proposals above have already been made in this sweep. Your proposal must be materially distinct — a different angle, a different layer, or a different framing. Do not propose a near-duplicate of any prior entry.
+
     ## Your Job
 
     Propose the **single smartest, most radically innovative, accretive, useful, and compelling addition** you could make at this point.
