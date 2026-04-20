@@ -13,6 +13,9 @@ All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convent
 <!-- CANONICAL: shared/return-convention.md -->
 All subagent returns use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
 
+<!-- CANONICAL: shared/cairn-convention.md -->
+The orchestrator maintains a per-run Invariant Cairn at `~/.claude/projects/<project-hash>/memory/cairn/cairn-<run-id>.md` per `shared/cairn-convention.md`. See the `## Cairn (Layer 3)` section below for build-specific phase definitions, terminal condition, and mandatory-invariant categories.
+
 End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
@@ -69,6 +72,21 @@ BLOCKED → no Tier-2; dispatch is not trusted for forward progress.
 ```
 
 **On lint failure:** treat the dispatch as structurally `BLOCKED` regardless of its declared VERDICT. Surface the specific failure to the narration log. Re-dispatch with the lint errors appended to the dispatch brief, or escalate. Do not surface the subagent's VERDICT or CLAIMS to the user until the receipt is valid.
+
+## Cairn (Layer 3)
+
+The orchestrator maintains an Invariant Cairn per `shared/cairn-convention.md`. Build-specific bindings:
+
+- **Phase mapping.** The build pipeline's four phases (1 Design, 2 Plan, 3 Execute, 4 Completion) map 1:1 to cairn phases. Mid-phase sub-stages (e.g. Phase 3 Wave N, Phase 4 gate rounds) do NOT get their own cairn phase counter — they are internal to the owning phase and contribute a single LEDGER line when the owning phase completes.
+- **Phase transitions.** At every 1→2, 2→3, 3→4 transition, the orchestrator: (a) writes any correctness-critical phase-N invariants, (b) appends the phase-N LEDGER line with `dispatches=/receipts=/verdict=`, (c) single atomic Write advancing PHASE to phase N+1. Uses the phase handoff manifest (`handoff-N-to-M.md`) as input evidence for the invariants.
+- **Terminal phase.** Phase 4 sealing — after finish-skill completes and the pipeline-active marker is deleted. At terminal sealing, delete `active-run.md`; leave `cairn-<run-id>.md` in place.
+- **Mandatory-invariant categories for build.** Each phase-exit MUST capture:
+  - **Design exit:** the one-sentence architectural commitment, plus any RED-flag constraint surfaced by red-team that later phases must preserve.
+  - **Plan exit:** the task list's load-bearing dependencies (e.g. "Task 3 unblocks Tasks 5-7; T2 review tier"); any non-obvious refactoring risk.
+  - **Execute exit:** every `noticed-not-touching` entry that is correctness-critical for a future task or for post-merge review; every test-gap finding that the run chose to leave uncovered.
+  - **Completion exit:** acceptance-test outcome; siege dispatch decision + outcome; any skipped gate with `Acknowledged: true`.
+- **Reconciliation on phase entry.** Runs the full Reconciliation Pass (5 rules) against `receipt-ledger.jsonl` and the in-context Tripwire Manifest. Rule 1 local-repair is authorized for trailing-receipts-in-current-phase LEDGER under-count only.
+- **Composition with Phase Handoff Manifest.** The cairn and the existing Phase Handoff Manifest overlap in intent but not in scope: the handoff manifest is a per-transition snapshot of inputs for the next phase; the cairn is the cumulative load-bearing state across the whole run. Both are maintained; neither replaces the other. On Recovery Protocol invocation, the orchestrator reads the cairn first (authoritative for load-bearing state) then the most recent handoff manifest (authoritative for current-phase inputs).
 
 ## Tripwire Manifest Sweep (Layer 2)
 

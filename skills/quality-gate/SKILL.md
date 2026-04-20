@@ -12,6 +12,9 @@ All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convent
 <!-- CANONICAL: shared/return-convention.md -->
 All subagent returns (red-team agents, judges, fix agents) use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
 
+<!-- CANONICAL: shared/cairn-convention.md -->
+The gate maintains an Invariant Cairn per `shared/cairn-convention.md`. Each gate round is a cairn phase. See `## Cairn (Layer 3)` below.
+
 Shared iterative red-teaming mechanism invoked at the end of artifact-producing skills. Provides rigorous adversarial review as the core quality mechanism.
 
 **Announce at start:** "Running quality gate on [artifact type]."
@@ -27,6 +30,16 @@ Every subagent dispatched by the gate (red-team agents, fix agents, judges) retu
 **Tier 1 — Structural (in-context):** parse sections in the order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT` (unknown headers after NEXT ignored). Every CLAIM citation must resolve. Every EXEC has `exit=/dur=/out=` and a listed `out=` artifact; byte-ranges ≤ 4 KiB. Every DISPATCHED carries a valid `rcpt-sha256` present in `receipt-ledger.jsonl`. WITNESS is mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard-only, ≥ 4 chars (exemptions: exit-clause forms; the bare token `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE: reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb (rule re-applied to receipt itself).
 
 **Tier 2 — Witness verification:** for PASS+TRACE#N, Read the cited range (≤ 4 KiB) and fail if the witness would have matched `expect-fail`. For FAIL+TRACE#N (weak positive-evidence), reject only if no evidence of failure is visible in the range. For SKIPPED/UNRUNNABLE, no read; record the deferred obligation.
+
+## Cairn (Layer 3)
+
+Per `shared/cairn-convention.md`. Quality-gate-specific bindings:
+
+- **Phase mapping.** One cairn phase per gate round: `round/1`, `round/2`, …. A round begins at red-team dispatch, ends at judge verdict (either PASS/escalate or loop-again with score delta recorded).
+- **Phase transitions.** At each round-exit, append a LEDGER line `round/N | dispatches=<red-team+judge+fix> receipts=<same> verdict=<PASS|FAIL|MIXED> | <score delta + key finding>`. Advance PHASE to the next round on loop; advance to `terminal/N` on PASS or escalation.
+- **Terminal phase.** When the gate returns PASS to its caller, OR when it escalates (stagnation / 15-round limit / architectural concern). Delete `active-run.md` on terminal; keep `cairn-<run-id>.md`.
+- **Mandatory-invariant categories.** Each round-exit MUST capture any finding that survived into the fix journal with severity ≥ Significant and a note on why — these are the load-bearing constraints for any later round's red-team. Also capture the score trajectory (`score-delta: -2`) for stagnation-detection audit.
+- **Reconciliation.** Full 5-rule pass. Rule 4 (invariant-receipt liveness) drives the orchestrator to retire invariants whose originating finding was fixed by the fix-agent (via Layer 2 `SUPERSEDED_BY`) — keeping the invariants list from ballooning across long gates.
 
 ## Tripwire Manifest Sweep (Layer 2)
 
