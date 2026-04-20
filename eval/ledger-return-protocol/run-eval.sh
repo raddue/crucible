@@ -43,4 +43,17 @@ for shape in inject/shape-*.jsonl; do
 done
 
 echo
+echo "=== Check 4: Layer 2 tripwire scenarios must all pass ==="
+for s in tripwire/scenario-*.jsonl; do
+  echo "-- $s --"
+  python3 tripwire/sweep.py "$s" | tee /tmp/sweep-result.out
+  fails=$(grep -c "^  FAIL" /tmp/sweep-result.out || true)
+  if [[ "$fails" -ne 0 ]]; then
+    echo "FAIL: $fails tripwire check(s) failed in $s"
+    exit 1
+  fi
+done
+echo "PASS: all tripwire scenarios pass"
+echo
+
 echo "=== ALL CHECKS PASSED ==="

@@ -307,6 +307,197 @@ NEXT       (none)
 
 Any pilot skill applying the linter to this receipt records the failure, treats the dispatch as structurally `BLOCKED`, and re-dispatches with the lint errors appended.
 
+## Tripwire Manifest (Layer 2 — v1.1)
+
+Starting with convention version **v1.1** (identified by the receipt header `RCPT v1.1 …` instead of `RCPT v1 …`), every receipt carries two additional mandatory single-line sections appended after `NEXT`:
+
+```
+TRIPWIRE:   <predicate> [ | <predicate> ]*          or  TRIPWIRE: none
+SUPERSEDES: <hash-prefix-12> [, <hash-prefix-12> ]*  or  SUPERSEDES: none
+TRIPWIRE-CHILD: <predicate> [ | <predicate> ]*      or  TRIPWIRE-CHILD: none   (only present when the subagent dispatched its own children)
+```
+
+The **producer** declares, at receipt-emission time, the conditions under which the orchestrator is obligated to re-read this full receipt later in the run. The orchestrator keeps a tiny in-context **manifest** (one ~60-token line per dispatch) and runs a deterministic **sweep** after every new return — any firing tripwire mandates a bounded `Read` before the next dispatch is permitted.
+
+### Predicate Vocabulary (v1.1, closed)
+
+```
+suspicion>=<N>                fires when any receipt's SUSPICION field is ≥ N (N matches (0\.\d{2}|1\.00))
+claims-touch(<glob>)          fires when a later receipt's CLAIMS reference a path matching <glob>
+wrote(<glob>)                 fires when a later receipt has TRACE EDIT or WROTE matching <glob>
+read(<glob>)                  fires when a later receipt has TRACE READ matching <glob>  (does NOT subsume EDIT/WROTE)
+exec-exit!=0                  self-check: fires on THIS receipt at insertion if any EXEC had exit != 0
+peer-dispatch-disagrees(<dim>)
+                              forward-check: fires when a later same-skill receipt disagrees along <dim>
+                              (<dim> ∈ {verdict, same-file, severity, count})
+verdict=FAIL                  self-check: fires on THIS receipt at insertion if VERDICT=FAIL
+always                        fires unconditionally on every subsequent dispatch
+```
+
+**Glob subset:** `*` (one path segment), `**` (any number of segments), `?` (one char), `{a,b,c}` (≤ 8 entries after comma-shortcut expansion). No negation, no character classes. Bare names in the comma shortcut (`claims-touch(auth,payments)`) expand to `{auth,payments}/**`. Globs exceeding the 8-entry cap after expansion are a Tier-1 lint failure.
+
+**Path-suffix match semantics (intended behavior, not strict POSIX glob):** A glob matches a path iff the pattern matches the full path OR any suffix of the path obtained by dropping leading path segments. Example: `auth/**` matches `auth/login.ts`, `src/auth/login.ts`, and `packages/foo/src/auth/login.ts`. This suffix-sweep is intentional — Crucible repos use varied prefixes (`src/`, `packages/<name>/src/`, bare module roots) and subagents should not have to enumerate every possible rooting. To opt out of suffix-sweep and match only from the repo root, anchor the pattern with `/` at the front: `/src/auth/**` only matches paths starting exactly `src/auth/…`.
+
+**OR semantics:** multiple predicates on one TRIPWIRE line combine with OR. AND is not expressible in v1.1.
+
+**`TRIPWIRE: none`** is permitted **only** when `VERDICT=PASS` and `SUSPICION=0.00`. Any other combination is a Tier-1 lint failure (prevents silent omission).
+
+### SUPERSEDES — retiring stale tripwires
+
+A receipt `N` may retire one or more prior receipts by citing their hash-prefixes:
+
+```
+SUPERSEDES: a1b2c3d4e5f6, 9876543210ab
+```
+
+Tier-1 rules:
+
+- Each cited prefix MUST resolve to a **unique** active (not-yet-superseded) entry in the orchestrator's manifest. Ambiguity is a lint failure.
+- Each cited predecessor MUST appear as a `from=<prefix>#…` citation in at least one of `N`'s CLAIMS lines (justification requirement — prevents drive-by supersession).
+- A cited predecessor MUST NOT already carry `SUPERSEDED_BY=*` in the manifest (supersession is a DAG, never a thicket).
+- **Witness-evidence requirement:** if any cited predecessor had `VERDICT=FAIL` OR `SUSPICION ≥ 0.30`, then `N`'s WITNESS MUST have `kind ∈ {exec, grep}` (not `lint`) AND `ran=TRACE#N` (not `SKIPPED:` / `UNRUNNABLE:`). Tier-2 then verifies the witness normally — supersession only survives if the witness demonstrably does NOT match `expect-fail` (i.e., the original concern no longer reproduces). This closes the circular-supersession attack.
+
+Tier-2 does not add new checks beyond the WITNESS re-run that already runs for PASS receipts (and for FAIL receipts with `ran=TRACE#N`).
+
+### Recursive dispatch — TRIPWIRE-CHILD
+
+When a subagent dispatches its own children, its receipt's `TRIPWIRE-CHILD:` line is the OR-union of each child's **active** (not-yet-superseded-in-the-subagent's-local-manifest) TRIPWIRE predicates. Grammar and predicate vocabulary identical to `TRIPWIRE:`. If the subagent dispatched no children, the line is `TRIPWIRE-CHILD: none` (or omitted — absence is treated as `none`).
+
+The parent orchestrator evaluates `TRIPWIRE-CHILD` predicates alongside `TRIPWIRE` predicates in forward-checks for every manifest entry. This preserves cross-level recall without flattening recursion into the parent's manifest.
+
+### The Manifest
+
+The orchestrator maintains an in-context manifest line per dispatch:
+
+```
+<rcpt-sha256-prefix-12>  <skill>/<dispatch-id>  <verdict>  TRIPWIRE: <predicates>  [SUPERSEDED_BY=<prefix>]  [keys=<skill>:<k>:<v>,…]  [files=<path>:<h6>,…]
+```
+
+- `<rcpt-sha256-prefix-12>` is the first 12 hex chars of `sha256(normalize(receipt))` (normalize per Layer 1).
+- **Discriminators** (`keys=…` and `files=…`) are extracted at manifest-insertion time to make `peer-dispatch-disagrees` evaluable in-context without Reads. Keys are namespaced as `<skill>:<claim-key>` to prevent cross-skill collision. Files carry the first 6 hex chars of the post-edit/write hash. Both lists truncate at 8 entries; overflow becomes a trailing `more=<N>` token and for that entry `peer-dispatch-disagrees` fires mandatorily.
+- `SUPERSEDED_BY=<prefix>` is appended by the sweep when a later receipt supersedes this one; never removed.
+- ~60 tokens/line typical. 200 dispatches ≈ 12K tokens; 500 dispatches ≈ 30K tokens.
+
+### The Sweep (dispatch-loop clause)
+
+After every Task return, and before the orchestrator may dispatch again:
+
+```
+1. Apply Layer 1 two-tier linter to the just-returned receipt. If it fails lint,
+   treat as BLOCKED; re-dispatch with lint errors; DO NOT run the sweep.
+2. Append manifest entry {hash-prefix-12, skill/dispatch-id, verdict, tripwire,
+   discriminators} to the in-context manifest.
+3. Process SUPERSEDES: for each cited predecessor prefix:
+     - Tier-1 has already verified: uniqueness, CLAIMS justification, no-already-
+       superseded, witness-evidence (if applicable).
+     - Mark the predecessor's manifest entry with SUPERSEDED_BY=<new-prefix>.
+4. Evaluate self-checks on the new receipt:
+     verdict=FAIL             → fire if the receipt's VERDICT is FAIL
+     exec-exit!=0             → fire if any EXEC in the new TRACE has non-zero exit
+     suspicion>=N (self)      → fire if the receipt's SUSPICION >= N
+   Self-check firings do NOT trigger Reads (the receipt is already in context).
+5. Evaluate forward-checks against every active (NOT SUPERSEDED_BY=*) prior
+   manifest entry M, over the union of M's TRIPWIRE and TRIPWIRE-CHILD predicate
+   sets:
+     claims-touch(glob)       → fire if the new receipt's CLAIMS citation paths
+                                 or TRACE paths match glob (excluding M itself)
+     wrote(glob)              → fire if the new TRACE has EDIT/WROTE matching glob
+     read(glob)               → fire if the new TRACE has READ matching glob
+     suspicion>=N (forward)   → fire if the new receipt's SUSPICION >= N
+     peer-dispatch-disagrees(dim)
+                              → fire iff same-skill, same-target, and discriminator
+                                 mismatch — evaluated using manifest's keys=/files=
+                                 fields. On overflow (more=) the fire is mandatory.
+     always                   → fire unconditionally
+   For each firing predicate, record a mandatory Read obligation for M.
+6. For each obligation, Read the full receipt from disk and narrate the re-read
+   explicitly ("tripwire <predicate> on M fired from N; re-read M").
+7. Only after all obligations are satisfied may the orchestrator dispatch the
+   next subagent.
+```
+
+### Linter extension (Tier-1 additions for v1.1 receipts)
+
+```
+parse TRIPWIRE line
+fail if TRIPWIRE section absent  (v1.1 receipts)
+fail if predicate name not in closed vocabulary
+fail if glob subset violated (only * ** ? {a,b,c} ≤ 8 entries post-expansion; no negation, no classes)
+fail if TRIPWIRE=none but (verdict != PASS or suspicion != 0.00)
+
+parse SUPERSEDES line
+fail if SUPERSEDES section absent  (v1.1 receipts)
+if SUPERSEDES non-empty:
+  fail if any cited prefix does not resolve uniquely in the manifest
+  fail if any cited predecessor is already SUPERSEDED_BY=*
+  fail if any cited predecessor is not referenced by a CLAIMS `from=<prefix>#…`
+    citation in the same receipt (justification)
+  fail if any cited predecessor had VERDICT=FAIL or SUSPICION>=0.30 AND this
+    receipt's WITNESS is kind=lint OR has ran=SKIPPED: / ran=UNRUNNABLE:
+    (witness-evidence requirement; Tier-2 then verifies the witness)
+
+parse TRIPWIRE-CHILD line (if present)
+  same predicate vocabulary and glob rules as TRIPWIRE
+  permitted regardless of verdict (child tripwires may legitimately include
+  FAIL/high-suspicion conditions even when parent PASSes)
+  REQUIRED when this receipt's TRACE contains any DISPATCHED verb — a subagent
+    that dispatched children MUST emit TRIPWIRE-CHILD (possibly with `none` as
+    body if no child has an active tripwire). Absence when DISPATCHED is present
+    is a Tier-1 lint failure (prevents silent cross-level recall loss).
+```
+
+### Version handling
+
+- `RCPT v1 …` receipts follow Layer 1 rules only; TRIPWIRE/SUPERSEDES/TRIPWIRE-CHILD are not required (and not evaluated if present).
+- `RCPT v1.1 …` receipts require all Layer 2 sections. Pilot skills updated by this PR emit v1.1; mixed-version runs are supported.
+- **Mixed-version semantics:** a v1 receipt has no TRIPWIRE of its own and thus never contributes firings as the *prior* entry in the manifest. However, a v1 receipt's arrival DOES trigger the sweep over prior v1.1 entries — its TRACE/CLAIMS paths are evaluated against prior v1.1 tripwires normally. This is the intended behavior: once Layer 2 is active, every later dispatch is a potential trigger, regardless of whether it emits its own tripwires.
+
+### Example v1.1 receipts
+
+**PASS with active tripwire and no supersession:**
+
+```
+RCPT v1.1 build/21-implementer
+VERDICT  PASS  conf=0.90
+ARTIFACTS
+  patch.diff       sha256:4dd34a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f  2114
+  test-output.log  sha256:1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f  3200
+TRACE
+  1  EDIT  src/auth/token.ts  sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+  2  EXEC  `bun test src/auth/token.test.ts`  exit=0  dur=2.9s  out=test-output.log#L170-L190
+CLAIMS
+  tests-ran=true    from=TRACE#2
+  tests-pass=true   from=test-output.log#L180-L190  pattern="40 pass"
+WITNESS    exec:`bun test src/auth/token.test.ts`  expect-fail=/\d+ fail/  ran=TRACE#2
+SUSPICION  0.10
+NEXT       re-run WITNESS at merge-time
+TRIPWIRE:  claims-touch(auth/**,payments/**) | wrote(auth/**)
+SUPERSEDES: none
+```
+
+**Supersession of a prior FAIL tripwire:**
+
+```
+RCPT v1.1 build/42-implementer
+VERDICT  PASS  conf=0.92
+ARTIFACTS
+  patch.diff       sha256:bb33aa22ff11ee00dd99cc88bb77aa66998877665544332211009988776655443  1820
+  test-output.log  sha256:cc44bb33aa22ff11ee00dd99cc88bb77669988776655443322110099887766554  2400
+TRACE
+  1  EDIT  src/auth/token.ts  sha256:ee55dd44cc33bb22aa1199887766554433221100ffeeddccbbaa998877665544
+  2  EXEC  `bun test src/auth/`  exit=0  dur=3.1s  out=test-output.log#L60-L120
+CLAIMS
+  tests-pass=true   from=TRACE#2
+  fix-verified      from=21a1b2c3d4e5#L1-L10  pattern="token rotation"
+WITNESS    exec:`bun test src/auth/`  expect-fail=/\d+ fail/  ran=TRACE#2
+SUSPICION  0.05
+NEXT       (none)
+TRIPWIRE:  claims-touch(auth/**)
+SUPERSEDES: 21a1b2c3d4e5
+```
+
+(The CLAIM `from=21a1b2c3d4e5#L1-L10` supplies the justification; the WITNESS is `exec:` + `ran=TRACE#2`, satisfying the evidence requirement; Tier-2 confirms the test suite passes.)
+
 ## Integration Checklist for Pilot Skills
 
 Each pilot skill's dispatch prompt template and orchestrator body must:
@@ -326,3 +517,4 @@ Each pilot skill's dispatch prompt template and orchestrator body must:
 ## Version History
 
 - **v1** (2026-04-20) — Initial. Pilot in `/build`, `/quality-gate`, `/siege`. Bulk rollout across the other 39 skills is a follow-up after eval (see issue #202).
+- **v1.1** (2026-04-20) — Tripwire Manifest (#203). Adds `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:` mandatory sections, the closed predicate vocabulary, the in-context manifest format, the dispatch-loop sweep clause, and supersession rules. v1 and v1.1 receipts coexist in a single run; v1 receipts contribute no forward-check firings.

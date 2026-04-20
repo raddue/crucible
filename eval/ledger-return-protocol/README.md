@@ -11,6 +11,17 @@ This eval runs against a **hand-authored sample corpus** of five representative 
 
 **Full benchmark note.** The design doc (AC#4) calls for a full replay against a past `/build` run — that requires a prose-return capture mode in the pipeline harness which does not exist yet. Capturing prose returns at scale is tracked as a follow-up — see the PR body's "Follow-ups" section. This eval proves the protocol mechanics with a small corpus; scale measurement is the next step.
 
+## Layer 2 (Tripwire Manifest, #203)
+
+Layer 2 adds `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:` sections to receipts (identified by `RCPT v1.1 …` header). Four scenarios exercise the sweep:
+
+- `tripwire/scenario-regression-replay.jsonl` — M declares `claims-touch(auth/**) | wrote(auth/**)`; a later N edits `src/auth/login.ts`; both predicates fire.
+- `tripwire/scenario-silent-skip.jsonl` — `TRIPWIRE: none` on a FAIL receipt is rejected by Tier-1 (the silent-omission closure).
+- `tripwire/scenario-disagreement.jsonl` — two `/quality-gate` judges with opposite `severity-max`; first declares `peer-dispatch-disagrees(severity)`; sweep fires on the second's return.
+- `tripwire/scenario-supersession.jsonl` — M (FAIL, `claims-touch(auth/**)`) is superseded by K (PASS, same glob, cites M in CLAIMS, `exec` witness); later N edits `src/auth/login.ts`. M's tripwire does NOT fire (superseded); K's tripwire fires.
+
+The reference sweep is `tripwire/sweep.py`. Like `lint.py`, it's an eval artifact — the canonical linter + sweep lives as prose pseudocode in `skills/shared/return-convention.md` and the three pilot SKILL.md files.
+
 ## Files
 
 - `sample-corpus/prose-returns.jsonl` — 5 representative prose returns from real-shaped dispatches.

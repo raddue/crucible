@@ -27,6 +27,23 @@ Each attacker agent returns an Evidence Receipt whose ARTIFACTS include its find
 
 **Tier 2 — Witness verification:** PASS + TRACE#N → Read cited range (≤ 4 KiB); fail if witness would match `expect-fail`. FAIL + TRACE#N → reject only if no evidence of attack success is visible. SKIPPED/UNRUNNABLE → no read; record deferred obligation (e.g. `zap-cli unavailable` → orchestrator re-dispatches with tooling).
 
+## Tripwire Manifest Sweep (Layer 2)
+
+Starting with convention **v1.1**, every siege subagent (6 attackers, synthesis, fix-agent, stagnation judge) returns a receipt carrying `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:` lines. Full grammar in `shared/return-convention.md`.
+
+**Manifest:** After each Task return (post-lint), append:
+
+```
+<rcpt-sha256-prefix-12>  <skill>/<dispatch-id>  <verdict>  TRIPWIRE: <predicates>  [SUPERSEDED_BY=<prefix>]  [keys=siege:<k>:<v>,…]  [files=<path>:<h6>,…]
+```
+
+**Sweep:** Same 7-step clause as `/build` (Tripwire Manifest Sweep section in `skills/build/SKILL.md`). Siege-specific notes:
+
+- **Attacker tripwires** typically declare `TRIPWIRE: verdict=FAIL | wrote(<affected-files>) | claims-touch(<affected-files>)`. Any future dispatch that touches those files MUST re-Read the attacker's receipt before proceeding — so the live threat is not forgotten mid-run.
+- **Blocked attackers** (`VERDICT BLOCKED`, `ran=UNRUNNABLE:tooling-absent`) SHOULD declare `TRIPWIRE: always` — the concern is live and unverified; every subsequent dispatch must reconsult.
+- **Fix-agent supersession.** Siege fix-agents supersede the attacker FAIL. `SUPERSEDES: <attacker-prefix>` + CLAIM `from=<attacker-prefix>#…` + `exec:` WITNESS that re-runs the original attack one-liner. Tier-2 verifies the attack no longer succeeds; supersession only survives if the attack is genuinely closed.
+- **Peer-attacker disagreement.** Attackers of different perspectives may disagree on whether an endpoint is vulnerable. Attacker receipts declaring `TRIPWIRE: peer-dispatch-disagrees(verdict)` force a re-read when a later attacker reports PASS where this one reported FAIL (or vice versa) on the same target.
+
 **Mandatory-work declarations for siege subagent types:**
 
 - Attacker agent (each of the 6 perspectives): `read-target`, `enumerate-surfaces`, `emit-findings`. Optionally: `run-attack` (EXEC of attack one-liner) — if SKIPPED, WITNESS names the attack command and NEXT nominates it verbatim.
