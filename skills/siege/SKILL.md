@@ -16,6 +16,26 @@ Full-lifecycle security audit. Dispatches 6 parallel Opus agents across distinct
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/return-convention.md -->
+All subagent returns (the 6 attacker-perspective agents, synthesis, fix agents, stagnation judge) use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
+
+## Receipt Linter (Ledger Return Protocol)
+
+Each attacker agent returns an Evidence Receipt whose ARTIFACTS include its findings file and whose WITNESS is the attack one-liner (or pattern) that would succeed if the defender's claimed fix is incomplete. After every Task return, apply this check before scoring findings or accepting a fix:
+
+**Tier 1 — Structural:** sections in order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT`. Every CLAIM citation resolves. Every EXEC has exit/dur/out; byte-ranges ≤ 4 KiB. Every DISPATCHED has a valid `rcpt-sha256` in `receipt-ledger.jsonl`. WITNESS mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard, ≥ 4 chars (exemptions: exit-clause forms; bare `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb.
+
+**Tier 2 — Witness verification:** PASS + TRACE#N → Read cited range (≤ 4 KiB); fail if witness would match `expect-fail`. FAIL + TRACE#N → reject only if no evidence of attack success is visible. SKIPPED/UNRUNNABLE → no read; record deferred obligation (e.g. `zap-cli unavailable` → orchestrator re-dispatches with tooling).
+
+**Mandatory-work declarations for siege subagent types:**
+
+- Attacker agent (each of the 6 perspectives): `read-target`, `enumerate-surfaces`, `emit-findings`. Optionally: `run-attack` (EXEC of attack one-liner) — if SKIPPED, WITNESS names the attack command and NEXT nominates it verbatim.
+- Synthesis agent: `read-attacker-findings`, `emit-consolidated-report`.
+- Fix agent: `read-findings`, `apply-edits`, `run-tests` (security regression).
+- Stagnation judge: `read-round-history`, `emit-verdict`.
+
+**On lint failure:** structurally `BLOCKED` regardless of declared VERDICT. Re-dispatch with lint errors in brief, or escalate. Security-critical dispatches: if a fix agent's receipt fails lint, do NOT merge — the fix is unverified.
+
 ## Why This Exists
 
 Audit finds bugs, robustness gaps, and architecture issues. Quality-gate iterates artifacts to convergence. Inquisitor hunts cross-component integration bugs. None of these operate from an attacker's perspective. Security is a discipline -- it requires threat modeling, attack surface enumeration, exploitation scenario analysis, and chain-of-vulnerability reasoning that generalist review skills are not equipped to perform. A robustness finding ("missing input validation") and a security finding ("this missing validation enables SQL injection via the /api/users endpoint, escalating to full database read") are categorically different in blast radius, urgency, and remediation strategy.
