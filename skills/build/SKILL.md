@@ -10,6 +10,9 @@ description: Use when starting any feature development, building new functionali
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/return-convention.md -->
+All subagent returns use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
+
 End-to-end development pipeline: interactive design, autonomous planning with adversarial review, team-based execution with per-task code and test review. One command, idea to completion.
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
@@ -19,6 +22,62 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
 
 <!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
+
+## Receipt Linter (Ledger Return Protocol)
+
+Every subagent dispatched during the pipeline returns exactly one Evidence Receipt per `shared/return-convention.md`. After every Task return, apply this two-tier check before acting on the declared VERDICT.
+
+**Tier 1 — Structural (in-context, zero disk reads):**
+
+```
+parse receipt into sections by header (RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS,
+  WITNESS, SUSPICION, NEXT — in that order; unknown headers AFTER NEXT ignored)
+fail if any required section missing, duplicated, out of order, or has prose outside
+  its body (inline bracketed notes permitted by a field rule are body, not prose)
+for each CLAIM: citation must resolve to TRACE#N or to a listed artifact
+for each EXEC: exit=, dur=, out= all present; out= artifact listed in ARTIFACTS;
+  out= byte-range ≤ 4 KiB
+for each EDIT / WROTE: sha256 declared in ARTIFACTS
+for each DISPATCHED: rcpt-sha256 present AND (dispatch-id, rcpt-sha256, verdict)
+  triple present in receipt-ledger.jsonl
+mandatory-work: for every action this skill declares mandatory for the dispatch type
+  (tests run for implementers; red-team dispatched for QG; attack attempted for siege),
+  TRACE must contain the matching verb OR a SKIPPED <action> line
+witness: WITNESS absent or "(n/a)" → FAIL. kind in {exec, grep, lint}. expect-fail
+  non-empty, not wildcard-only, ≥4 chars (exemptions: exit-clause forms; the bare
+  token `match` which is valid only for kind=grep). PASS: ran=TRACE#N or
+  SKIPPED:<reason> (UNRUNNABLE not permitted on PASS). FAIL/BLOCKED UNRUNNABLE
+  reason must come from the closed vocabulary. ran=SKIPPED → NEXT must contain
+  witness payload verbatim. kind=lint rule-name in {all-claims-cited,
+  trace-consistent, skip-declared}. ran=TRACE#N verb-binding: exec → EXEC;
+  grep → EXEC/READ/WROTE; lint → any verb (rule re-applied to receipt).
+```
+
+**Tier 2 — Witness verification (bounded Read per verified verdict):**
+
+```
+PASS + ran=TRACE#N → Read the cited range (≤4 KiB). kind=exec: fail if exit or
+  content matches expect-fail. kind=grep: fail if pattern matches. kind=lint: fail
+  if rule fires.
+FAIL + ran=TRACE#N → Read the cited range. kind=exec: reject only if exit succeeded
+  AND content does NOT match expect-fail. kind=grep/lint: reject if pattern/rule
+  does NOT fire. (Weak positive-evidence — grounds-binding gap documented in the
+  shared convention.)
+ran=SKIPPED / UNRUNNABLE → no Tier-2; schedule re-run via Layer 3 Cairn (when Cairn
+  lands — today, record in pipeline-status.md Open Obligations).
+BLOCKED → no Tier-2; dispatch is not trusted for forward progress.
+```
+
+**On lint failure:** treat the dispatch as structurally `BLOCKED` regardless of its declared VERDICT. Surface the specific failure to the narration log. Re-dispatch with the lint errors appended to the dispatch brief, or escalate. Do not surface the subagent's VERDICT or CLAIMS to the user until the receipt is valid.
+
+**Mandatory-work declarations for build's subagent types** (add to each dispatch template's `## Return Format` section):
+
+- Implementer (feature): `run-tests`, `apply-edits`.
+- Implementer (refactor, atomic): `run-blast-radius-tests`, `apply-edits`.
+- Reviewer (code / test): `read-artifact`, `emit-findings`.
+- Cleanup agent: `read-diff`, `emit-recommendation`.
+- Plan writer / plan reviewer: `read-design`, `emit-artifact`.
+- Acceptance-test writer / test-gap writer / adversarial tester: `run-tests`, `emit-tests`.
 
 ## Communication Requirement (Non-Negotiable)
 
