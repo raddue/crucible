@@ -151,7 +151,7 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     ### Runtime Config Verification
     <!-- Only present if runtime-config load sites found -->
-    - [file:line load call] → [artifact path] — [found | absent | may-be-local-only] [confidence: high|medium|low]
+    - [file:line load call] → [artifact path] — [found | absent | may-be-local-only | dynamic — cannot verify statically] [confidence: high|medium|low]
 
     ### Suggested Scope
     #### In Scope

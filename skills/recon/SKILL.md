@@ -326,8 +326,14 @@ Build the Investigation Brief markdown with all core sections:
 - **[Description]** — [file paths] — [relevance to current task]
 
 <!-- If Pattern Scout emitted `### Prior Knowledge Documents`, merge those
-     entries in here, tagged `(handoff doc)` / `(postmortem)` / `(decision record)`
-     so consumers can distinguish code prior art from written prior knowledge.
+     entries in here with a source-derived tag so consumers can distinguish
+     code prior art from written prior knowledge. Tag by source directory:
+       docs/handoffs/ → (handoff doc)
+       docs/postmortems/ → (postmortem)
+       docs/retros/, docs/retrospectives/ → (retro)
+       docs/decisions/, docs/adr/ → (ADR)
+       docs/incidents/ → (incident)
+       repo-root HANDOFF.md / POSTMORTEM.md / DECISIONS.md → (handoff doc) / (postmortem) / (decision record)
      Preserve the quoted passage sub-bullet from the scout report. -->
 <!-- Only present if Pattern Scout returned Prior Knowledge Documents: -->
 - **(handoff doc) [Doc title]** — `path/to/doc.md` (mtime YYYY-MM-DD) — [relevance]

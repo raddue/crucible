@@ -46,8 +46,11 @@ Agent tool (subagent_type: Explore, model: sonnet):
         * `docs/decisions/*.md`, `docs/adr/*.md`
         * `docs/incidents/*.md`
         * `HANDOFF.md`, `POSTMORTEM.md`, `DECISIONS.md` at repo root
-      Glob each location. Sort matches by mtime (newest first; ties broken
-      alphabetically by path). Read each doc's title (the first `# ` heading,
+      Glob each location. Sort matches by git-authored date (newest first) —
+      use `git log -1 --format=%cs -- <path>` for a stable per-file date that
+      survives fresh clones; fall back to filesystem mtime only when the path
+      is not tracked. Ties broken alphabetically by path. Read each doc's
+      title (the first `# ` heading,
       or the filename without extension if no heading) plus its first
       non-empty paragraph (contiguous non-blank lines after the title).
 
