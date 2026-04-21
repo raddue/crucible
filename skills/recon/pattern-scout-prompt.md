@@ -38,6 +38,37 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     Search the codebase for:
 
+    - **Prior-knowledge documents (check FIRST, before grepping source)** —
+      scan for written prior knowledge in these locations:
+        * `docs/handoffs/*.md`
+        * `docs/postmortems/*.md`
+        * `docs/retros/*.md`, `docs/retrospectives/*.md`
+        * `docs/decisions/*.md`, `docs/adr/*.md`
+        * `docs/incidents/*.md`
+        * `HANDOFF.md`, `POSTMORTEM.md`, `DECISIONS.md` at repo root
+      Glob each location. Sort matches by git-authored date (newest first) —
+      use `git log -1 --format=%cs -- <path>` for a stable per-file date that
+      survives fresh clones; fall back to filesystem mtime only when the path
+      is not tracked. Ties broken alphabetically by path. Read each doc's
+      title (the first `# ` heading,
+      or the filename without extension if no heading) plus its first
+      non-empty paragraph (contiguous non-blank lines after the title).
+
+      Tokenize the task description and the combined title+paragraph text
+      the same way: lowercase, split on `\W+` (non-alphanumeric), discard
+      empty tokens. A doc MATCHES if ≥2 task tokens are present in the doc's
+      token set, where each matching token is ≥4 chars and is NOT in this
+      stoplist: {the, a, an, is, are, was, were, of, for, and, or, to, in,
+      on, with, this, that, add, fix, update, make, use, used, have, has,
+      had, should, will, would, can, could}. Exact-token match only —
+      no stemming, prefix, or plural normalization.
+
+      Read matching docs fully, capped at 5. List any additional matches
+      as open questions.
+      Prior-knowledge docs are often more current than cartographer and
+      frequently contain Open Questions or known-issue notes that resolve
+      the investigation cheaply. ALWAYS check them before grepping source
+      from scratch.
     - **Naming conventions** — files, functions, variables, classes
     - **Code organization patterns** — how similar features are structured
     - **Test patterns** — test file location, naming, framework usage, fixture patterns
@@ -52,6 +83,29 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     **Epistemic honesty:** If you look for something and can't determine it, report
     it as an open question. What you couldn't find is as valuable as what you did.
+
+    ## Confidence Labels
+
+    Tag every finding with `[confidence: high|medium|low]` based on HOW you
+    verified it (not subjective certainty):
+
+    - **high** — one of:
+        * File existence / absence directly verified via Glob or Read
+        * Pattern grepped with 2+ concrete examples cited (each as `path:line` — summaries like "many occurrences" count as medium, not high)
+        * Math or logic derivation included in the finding
+        * Two scouts independently reach the same finding (orchestrator will tag)
+    - **medium** — single source confirmed, not cross-verified:
+        * File exists but not read in detail
+        * Pattern observed in 1 location, generalization assumed
+        * Convention inferred from naming plus 1 example
+    - **low** — inferred or circumstantial:
+        * "Related fix exists, plausible cause"
+        * "Similar pattern in another module"
+        * Reasoning depends on assumed semantics not directly checked
+
+    Do not inflate labels. The orchestrator lint checks for evidence
+    independently of your self-label — unverified causal claims get demoted
+    regardless of tag.
 
     ## Scope Suggestions
 
@@ -104,9 +158,15 @@ Agent tool (subagent_type: Explore, model: sonnet):
     ### Existing Patterns
     [Conventions, naming, test patterns, abstractions]
     [Specific examples with file references]
+    [Tag each bullet with `[confidence: high|medium|low]` — see Confidence Labels above]
 
     ### Prior Art
-    - **[Description]** — [file paths] — [relevance to current task]
+    - **[Description]** — [file paths] — [relevance to current task] [confidence: high|medium|low]
+
+    ### Prior Knowledge Documents
+    <!-- Only present if matching docs found -->
+    - **[Doc title]** (`path/to/doc.md`, mtime YYYY-MM-DD) — [relevance to task] [confidence: high|medium|low]
+      - [Quote most relevant passage with line reference]
 
     ### Suggested Scope
     #### In Scope

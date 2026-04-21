@@ -43,11 +43,58 @@ Agent tool (subagent_type: Explore, model: sonnet):
     - **Build system** — package manager, build tool, CI configuration
     - **Key directories** — their responsibilities and what they contain
     - **Module boundaries** — where one subsystem ends and another begins
+    - **Runtime configuration verification** — when you find code that loads
+      configuration at runtime, verify the corresponding artifact exists on
+      disk. Detect these patterns (non-exhaustive):
+        * Unity/.NET: `Resources.Load<T>(path)`, `AssetDatabase.LoadAssetAtPath`,
+          `AssetBundle.LoadAsset`
+        * Config files: `File.ReadAllText(...)`, `yaml.load(open(...))`,
+          `json.load(...)`
+        * Env vars: `os.environ.get(VAR)`, `process.env.VAR`,
+          `System.getenv(...)`, `std::env::var(...)`
+        * Feature flags: `featureFlag.enabled(name)`,
+          `launchDarkly.variation(...)`, `growthbook.isOn(...)`
+        * DI containers: `container.Resolve<T>()`, `Get<T>()` fetched from
+          external scope
+      For each load site with a statically resolvable path (string literal
+      or resolvable constant), run a Glob or Read to check whether the
+      expected artifact exists. If the lookup path is dynamic (env var,
+      feature-flag name, runtime-resolved type, computed string), skip the
+      existence check and report status `dynamic — cannot verify statically`.
+      Report findings under `### Runtime Config Verification` with:
+        - Lookup site (file:line of the load call)
+        - Expected artifact path (or `<dynamic>` when not resolvable)
+        - Status: `found` | `absent` | `not in repo but may be local-only` | `dynamic — cannot verify statically`
+      Absent configuration silently routes execution to the default branch —
+      this is a common class of silent bug in config-gated systems.
 
     Cite specific paths for every finding. Do not make claims without path evidence.
 
     **Epistemic honesty:** If you look for something and can't determine it, report
     it as an open question. What you couldn't find is as valuable as what you did.
+
+    ## Confidence Labels
+
+    Tag every finding with `[confidence: high|medium|low]` based on HOW you
+    verified it (not subjective certainty):
+
+    - **high** — one of:
+        * File existence / absence directly verified via Glob or Read
+        * Pattern grepped with 2+ concrete examples cited (each as `path:line` — summaries like "many occurrences" count as medium, not high)
+        * Math or logic derivation included in the finding
+        * Two scouts independently reach the same finding (orchestrator will tag)
+    - **medium** — single source confirmed, not cross-verified:
+        * File exists but not read in detail
+        * Pattern observed in 1 location, generalization assumed
+        * Convention inferred from naming plus 1 example
+    - **low** — inferred or circumstantial:
+        * "Related fix exists, plausible cause"
+        * "Similar pattern in another module"
+        * Reasoning depends on assumed semantics not directly checked
+
+    Do not inflate labels. The orchestrator lint checks for evidence
+    independently of your self-label — unverified causal claims get demoted
+    regardless of tag.
 
     ## Scope Suggestions
 
@@ -100,6 +147,11 @@ Agent tool (subagent_type: Explore, model: sonnet):
     ### Project Structure
     [Module layout, entry points, build system, key directories]
     [Cite specific paths]
+    [Tag each bullet with `[confidence: high|medium|low]` — see Confidence Labels below]
+
+    ### Runtime Config Verification
+    <!-- Only present if runtime-config load sites found -->
+    - [file:line load call] → [artifact path] — [found | absent | may-be-local-only | dynamic — cannot verify statically] [confidence: high|medium|low]
 
     ### Suggested Scope
     #### In Scope
