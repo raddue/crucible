@@ -38,6 +38,24 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     Search the codebase for:
 
+    - **Prior-knowledge documents (check FIRST, before grepping source)** —
+      scan for written prior knowledge in these locations:
+        * `docs/handoffs/*.md`
+        * `docs/postmortems/*.md`
+        * `docs/retros/*.md`, `docs/retrospectives/*.md`
+        * `docs/decisions/*.md`, `docs/adr/*.md`
+        * `docs/incidents/*.md`
+        * `HANDOFF.md`, `POSTMORTEM.md`, `DECISIONS.md` at repo root
+      Glob each location. Sort matches by mtime (newest first). Read titles
+      and first paragraphs. If ≥2 content words (nouns, verbs, or identifiers
+      — excluding articles, prepositions, and auxiliary verbs like *the, a,
+      is, of, and*) from the task description appear in a doc's title or
+      first paragraph, read the doc fully. Read at most 5
+      matching docs fully; list any additional matches as open questions.
+      Prior-knowledge docs are often more current than cartographer and
+      frequently contain Open Questions or known-issue notes that resolve
+      the investigation cheaply. ALWAYS check them before grepping source
+      from scratch.
     - **Naming conventions** — files, functions, variables, classes
     - **Code organization patterns** — how similar features are structured
     - **Test patterns** — test file location, naming, framework usage, fixture patterns
@@ -52,6 +70,29 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
     **Epistemic honesty:** If you look for something and can't determine it, report
     it as an open question. What you couldn't find is as valuable as what you did.
+
+    ## Confidence Labels
+
+    Tag every finding with `[confidence: high|medium|low]` based on HOW you
+    verified it (not subjective certainty):
+
+    - **high** — one of:
+        * File existence / absence directly verified via Glob or Read
+        * Pattern grepped with 2+ concrete examples cited (each as `path:line` — summaries like "many occurrences" count as medium, not high)
+        * Math or logic derivation included in the finding
+        * Two scouts independently reach the same finding (orchestrator will tag)
+    - **medium** — single source confirmed, not cross-verified:
+        * File exists but not read in detail
+        * Pattern observed in 1 location, generalization assumed
+        * Convention inferred from naming plus 1 example
+    - **low** — inferred or circumstantial:
+        * "Related fix exists, plausible cause"
+        * "Similar pattern in another module"
+        * Reasoning depends on assumed semantics not directly checked
+
+    Do not inflate labels. The orchestrator lint checks for evidence
+    independently of your self-label — unverified causal claims get demoted
+    regardless of tag.
 
     ## Scope Suggestions
 
@@ -104,9 +145,15 @@ Agent tool (subagent_type: Explore, model: sonnet):
     ### Existing Patterns
     [Conventions, naming, test patterns, abstractions]
     [Specific examples with file references]
+    [Tag each bullet with `[confidence: high|medium|low]` — see Confidence Labels above]
 
     ### Prior Art
-    - **[Description]** — [file paths] — [relevance to current task]
+    - **[Description]** — [file paths] — [relevance to current task] [confidence: high|medium|low]
+
+    ### Prior Knowledge Documents
+    <!-- Only present if matching docs found -->
+    - **[Doc title]** (`path/to/doc.md`, mtime YYYY-MM-DD) — [relevance to task] [confidence: high|medium|low]
+      - [Quote most relevant passage with line reference]
 
     ### Suggested Scope
     #### In Scope

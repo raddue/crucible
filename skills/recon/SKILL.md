@@ -71,6 +71,8 @@ List of depth modules to produce after core synthesis. Valid values:
 
 Most invocations request 0-1 depth modules. Omit for core-only output (cheapest).
 
+**Auto-inclusion:** Debugging-keyword tasks automatically add `diagnostic-context` (see Phase 4 Auto-Inclusion). Pass `modules: []` (explicit empty list) to suppress auto-inclusion — omitting `modules:` does not suppress it.
+
 **`scope`** (optional)
 Directory constraint. When provided, overrides scout scope suggestions entirely — scouts constrain exploration to the given path(s). Cheaper, faster.
 
@@ -242,6 +244,34 @@ When scouts report `cartographer-conflict` findings, apply this adjudication tab
 For auto-update actions: queue the update for Phase 5 (Cartographer Feedback).
 For unresolved actions: surface in the `## Conflicts` section of the brief.
 
+### Causal Claim Verification
+
+After contradiction detection, scan both scout reports for causal language:
+
+    fixes, causes, is the bug, is the fix, will resolve, root cause is,
+    caused by, resolved by
+
+For each match, verify the finding has at least ONE of:
+
+  (a) Repro test cited (file + test name)
+  (b) Math or logic derivation included in the finding
+  (c) Both scouts reached the same finding independently
+
+If none of (a)/(b)/(c) hold, DEMOTE the finding to an Open Question with this
+format:
+
+    **Question:** [scout-name proposed: "X causes Y"]. Not verified.
+    **Why it matters:** If true, resolves Y; if false, misdirects investigation.
+    **Resolvable by:** [repro test / math derivation / second-scout corroboration]
+
+Causal claims that pass verification appear in their normal brief section
+(e.g., Project Structure, Existing Patterns) unchanged. Demoted claims appear
+in Open Questions with the verification gap explicit.
+
+Scout-supplied confidence labels are ADVISORY — this lint checks for evidence,
+not self-labels. A scout-tagged `[confidence: high]` claim without (a)/(b)/(c)
+is still demoted.
+
 ### Open Questions Aggregation
 
 After contradiction detection, aggregate open questions from both scout reports:
@@ -287,6 +317,11 @@ Build the Investigation Brief markdown with all core sections:
 [From Pattern Scout report]
 - **[Description]** — [file paths] — [relevance to current task]
 
+<!-- Merge Pattern Scout's `### Prior Knowledge Documents` sub-section in here,
+     tagged `(handoff doc)` / `(postmortem)` / `(decision record)` so consumers
+     can distinguish code prior art from written prior knowledge: -->
+- **(handoff doc) [Doc title]** — `path/to/doc.md` (mtime YYYY-MM-DD) — [relevance]
+
 ## Conflicts
 <!-- Only present if contradictions detected between scouts -->
 - **[Tension]** — Structure Scout: [claim + evidence]. Pattern Scout: [claim + evidence]. Confidence: [assessment].
@@ -319,7 +354,28 @@ Same policy applies to depth module outputs (3,000 token budget, 2,000 for readi
 
 ## Phase 4: Depth Module Dispatch
 
-Only if `modules:` parameter is non-empty. Dispatch **after** core synthesis completes — depth agents receive core findings as input context.
+Evaluate the caller's original `modules:` list for the empty-list opt-out FIRST (see Auto-Inclusion below — opt-out takes precedence over auto-inclusion). Then dispatch only if the resulting list is non-empty. Dispatch **after** core synthesis completes — depth agents receive core findings as input context.
+
+### Auto-Inclusion for Debugging Tasks
+
+If the caller-provided `task:` parameter contains any of these case-insensitive
+substrings, auto-include `diagnostic-context` as the FIRST entry in modules:
+
+    bug, bugs, crash, crashes, crashing, broken, breaks, wrong, incorrect,
+    regression, regressed, fail, failing, failure, error, investigate,
+    diagnose, why does, why is, glitch, inverted
+
+**Opt-out:** If caller passed `modules: []` (explicitly empty), suppress
+auto-inclusion — the empty list signals "core only, no auto-detection."
+
+**Idempotency:** Skip auto-inclusion if caller's modules list already contains
+`diagnostic-context`.
+
+**Narration:** When auto-including, narrate: "Debugging task detected (keyword:
+'[match]'). Auto-including diagnostic-context. Pass modules: [] to opt out."
+
+**Pipeline status:** Append under a new `## Auto-Included Modules` section in
+`pipeline-status.md`: `diagnostic-context | reason=keyword: '[match]'`.
 
 ### Dispatch
 
@@ -545,6 +601,8 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 - Never exceed context budgets without overflow handling
 - Never auto-update cartographer without both-scout agreement + verifiable evidence
 - Never return depth module output without the core brief
+- Never let an unverified causal claim reach the brief's main sections — demote to Open Questions per the Causal Claim Verification step
+- Never skip auto-inclusion of diagnostic-context on a debugging task unless caller explicitly passed `modules: []`
 
 ## Integration
 
