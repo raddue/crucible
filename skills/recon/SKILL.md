@@ -249,7 +249,15 @@ For unresolved actions: surface in the `## Conflicts` section of the brief.
 After contradiction detection, scan both scout reports for causal language:
 
     fixes, causes, is the bug, is the fix, will resolve, root cause is,
-    caused by, resolved by
+    caused by, resolved by, because, due to, leads to, responsible for,
+    the culprit, breaks because, stems from, triggers, originates,
+    accounts for, cascades from, propagates from, results in, arises from,
+    comes from, introduced by, source of, →, explains why, the reason *
+    is, is why * fails
+
+Keyword matching is case-insensitive with word-boundary semantics (the
+keyword must not be embedded inside a larger word). Phrase patterns with `*`
+allow up to 5 intervening words between the anchors.
 
 For each match, verify the finding has at least ONE of:
 
@@ -317,10 +325,13 @@ Build the Investigation Brief markdown with all core sections:
 [From Pattern Scout report]
 - **[Description]** — [file paths] — [relevance to current task]
 
-<!-- Merge Pattern Scout's `### Prior Knowledge Documents` sub-section in here,
-     tagged `(handoff doc)` / `(postmortem)` / `(decision record)` so consumers
-     can distinguish code prior art from written prior knowledge: -->
+<!-- If Pattern Scout emitted `### Prior Knowledge Documents`, merge those
+     entries in here, tagged `(handoff doc)` / `(postmortem)` / `(decision record)`
+     so consumers can distinguish code prior art from written prior knowledge.
+     Preserve the quoted passage sub-bullet from the scout report. -->
+<!-- Only present if Pattern Scout returned Prior Knowledge Documents: -->
 - **(handoff doc) [Doc title]** — `path/to/doc.md` (mtime YYYY-MM-DD) — [relevance]
+  - [Quoted passage with line reference]
 
 ## Conflicts
 <!-- Only present if contradictions detected between scouts -->
@@ -354,7 +365,15 @@ Same policy applies to depth module outputs (3,000 token budget, 2,000 for readi
 
 ## Phase 4: Depth Module Dispatch
 
-Evaluate the caller's original `modules:` list for the empty-list opt-out FIRST (see Auto-Inclusion below — opt-out takes precedence over auto-inclusion). Then dispatch only if the resulting list is non-empty. Dispatch **after** core synthesis completes — depth agents receive core findings as input context.
+Resolve the effective modules list by evaluating these branches in order:
+
+1. **Explicit empty list (`modules: []`)** — opt-out. Skip auto-inclusion
+   and dispatch nothing.
+2. **Otherwise, run Auto-Inclusion below** — this may prepend
+   `diagnostic-context` to the caller's list (or produce a singleton list
+   from an omitted `modules:`).
+3. **Dispatch** the resulting list if non-empty. Dispatch **after** core
+   synthesis completes — depth agents receive core findings as input context.
 
 ### Auto-Inclusion for Debugging Tasks
 
@@ -363,7 +382,17 @@ substrings, auto-include `diagnostic-context` as the FIRST entry in modules:
 
     bug, bugs, crash, crashes, crashing, broken, breaks, wrong, incorrect,
     regression, regressed, fail, failing, failure, error, investigate,
-    diagnose, why does, why is, glitch, inverted
+    diagnose, why does, why is, glitch, inverted behavior, appears inverted
+
+**Matching semantics:** Case-insensitive. Single-word keywords match with
+word-boundary semantics — `error` matches "fix this error" but NOT
+"error-handling"; `fail` matches "request fails" but NOT "failover". This
+reduces false positives on feature work that references error-adjacent
+domains.
+
+Multi-word keywords (`why does`, `why is`, etc.) match as contiguous token
+sequences, also case-insensitive, with word-boundaries anchored at each end
+of the phrase.
 
 **Opt-out:** If caller passed `modules: []` (explicitly empty), suppress
 auto-inclusion — the empty list signals "core only, no auto-detection."

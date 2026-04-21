@@ -46,12 +46,22 @@ Agent tool (subagent_type: Explore, model: sonnet):
         * `docs/decisions/*.md`, `docs/adr/*.md`
         * `docs/incidents/*.md`
         * `HANDOFF.md`, `POSTMORTEM.md`, `DECISIONS.md` at repo root
-      Glob each location. Sort matches by mtime (newest first). Read titles
-      and first paragraphs. If ≥2 content words (nouns, verbs, or identifiers
-      — excluding articles, prepositions, and auxiliary verbs like *the, a,
-      is, of, and*) from the task description appear in a doc's title or
-      first paragraph, read the doc fully. Read at most 5
-      matching docs fully; list any additional matches as open questions.
+      Glob each location. Sort matches by mtime (newest first; ties broken
+      alphabetically by path). Read each doc's title (the first `# ` heading,
+      or the filename without extension if no heading) plus its first
+      non-empty paragraph (contiguous non-blank lines after the title).
+
+      Tokenize the task description and the combined title+paragraph text
+      the same way: lowercase, split on `\W+` (non-alphanumeric), discard
+      empty tokens. A doc MATCHES if ≥2 task tokens are present in the doc's
+      token set, where each matching token is ≥4 chars and is NOT in this
+      stoplist: {the, a, an, is, are, was, were, of, for, and, or, to, in,
+      on, with, this, that, add, fix, update, make, use, used, have, has,
+      had, should, will, would, can, could}. Exact-token match only —
+      no stemming, prefix, or plural normalization.
+
+      Read matching docs fully, capped at 5. List any additional matches
+      as open questions.
       Prior-knowledge docs are often more current than cartographer and
       frequently contain Open Questions or known-issue notes that resolve
       the investigation cheaply. ALWAYS check them before grepping source
