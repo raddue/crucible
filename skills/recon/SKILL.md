@@ -533,9 +533,31 @@ When multiple modules are requested, dispatch them in parallel. Each depth agent
 
 ### Output Handling
 
-- Write each depth module output to scratch as individual files (e.g., `<scratch>/impact-analysis.md`)
-- Append completed depth module sections to the Investigation Brief after the core sections, separated by `---`
-- Narrate after each: "Depth module [name] complete. Returning Investigation Brief."
+- Write each depth module output to scratch as individual files (e.g.,
+  `<scratch>/impact-analysis.md`) as each module returns. Individual module
+  files are safe under parallel dispatch — each file has exactly one
+  writer.
+- **Serialize the brief re-write.** Do NOT re-write
+  `<scratch>/investigation-brief.md` incrementally after each module
+  returns — Phase 4 Dispatch runs depth modules in parallel, and
+  interleaved re-writes race. Instead:
+    1. Wait until ALL dispatched depth modules have completed (or failed
+       per the Depth Module Failure rules below).
+    2. Append all completed depth-module sections to the in-memory brief
+       after the core sections, separated by `---`, in a deterministic
+       order: the order modules appear in the resolved effective modules
+       list (see Phase 4 opening — the list produced by branches 1/2/3,
+       including any auto-inclusion prepend).
+    3. Perform exactly one re-write of `<scratch>/investigation-brief.md`
+       with the fully-assembled brief (core + all depth sections) AFTER
+       ALL depth modules complete. Per-module writes are forbidden.
+- This serialized-write rule satisfies INV-11 without requiring
+  cross-writer coordination. If Phase 4 is skipped (no depth modules
+  requested), the Phase 3 write from Ledger Assembly step 6 stands as
+  the final on-disk brief — no Phase 4 re-write occurs.
+- Narrate after each module's individual completion: "Depth module [name]
+  complete. Returning Investigation Brief." The brief re-write itself is
+  internal; no separate narration required.
 
 ### Depth Module Failure
 
