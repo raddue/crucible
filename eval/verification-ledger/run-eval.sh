@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end eval for the Verification Ledger (issue #213).
 #
-# Runs eight checks against the ledger_scorer reference implementation:
+# Runs nine checks against the ledger_scorer reference implementation:
 #   1.  Brief with 3 deduplicated causal claims -> 3 ledger entries (INV-7, N-count variant).
 #   1b. Minimal fixture: 2 identical causal claims -> exactly 1 ledger entry (INV-7, isolated-merge variant).
 #   2.  Brief with 0 causal keyword matches -> header + placeholder comment only (INV-8).
@@ -11,6 +11,7 @@
 #   6.  Phase 5 no-match fixture -> zero dispatches, silent skip (INV-10 negative case).
 #   7.  Re-run idempotence: same input assembled twice produces byte-identical output (innovate).
 #   8.  Structural-only tie-break suppresses dual-scout override (INV-9 variant).
+#   9.  Phase 5 grep ignores fenced code blocks (inquisitor fix).
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -59,4 +60,9 @@ if echo "$output" | grep -q 'method: `dual-scout`'; then echo "  FAIL dual-scout
 diff <(echo "$output") fixtures/fixture-structural-only-merge/expected.md
 echo "  PASS"
 
-echo "=== ALL CHECKS PASSED ==="
+echo "=== Check 9: Phase 5 grep ignores fenced code blocks (inquisitor fix) ==="
+hits=$(python3 ledger_scorer.py phase5-grep fixtures/phase5-grep-fenced | wc -l)
+[ "$hits" = "1" ] || { echo "  FAIL expected 1 hit (non-fenced only), got $hits"; exit 1; }
+echo "  PASS"
+
+echo "=== ALL CHECKS PASSED (9/9) ==="

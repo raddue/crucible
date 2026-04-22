@@ -285,7 +285,13 @@ def cmd_phase5_grep(directory: Path) -> list[str]:
             content = md.read_text(encoding="utf-8")
         except OSError:
             continue
+        in_fence = False
         for line in content.splitlines():
+            if re.match(r"^\s*`{3,}", line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
             cleaned = re.sub(r"^(\s*[-*+>]\s*)+", "", line).strip()
             if cleaned.startswith("Recon claim falsified:"):
                 hits.append(f"LANDMINE: {cleaned}")
