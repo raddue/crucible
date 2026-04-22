@@ -244,9 +244,13 @@ When scouts report `cartographer-conflict` findings, apply this adjudication tab
 For auto-update actions: queue the update for Phase 5 (Cartographer Feedback).
 For unresolved actions: surface in the `## Conflicts` section of the brief.
 
-### Causal Claim Verification
+### Causal Keyword Set
 
-After contradiction detection, scan both scout reports for causal language:
+The canonical list of causal-language keywords used by both the Causal Claim
+Verification step and the Phase 3 Ledger Assembly re-scan. Both steps MUST
+reference this set by name; do not re-list keywords inline. **This set is
+referenced by name from (a) Causal Claim Verification and (b) Ledger Assembly
+step (below) — update in both uses when modifying.**
 
     fixes, causes, is the bug, is the fix, will resolve, root cause is,
     caused by, resolved by, because, due to, leads to, responsible for,
@@ -259,11 +263,17 @@ Keyword matching is case-insensitive with word-boundary semantics (the
 keyword must not be embedded inside a larger word). Phrase patterns with `*`
 allow up to 5 intervening words between the anchors.
 
+### Causal Claim Verification
+
+After contradiction detection, scan both scout reports for causal language
+using the **Causal Keyword Set** defined above.
+
 For each match, verify the finding has at least ONE of:
 
   (a) Repro test cited (file + test name)
   (b) Math or logic derivation included in the finding
-  (c) Both scouts reached the same finding independently
+  (c) Both scouts reached the same claim independently, where "same claim"
+      is defined by the **Claim Equivalence** rule below.
 
 If none of (a)/(b)/(c) hold, DEMOTE the finding to an Open Question with this
 format:
@@ -279,6 +289,23 @@ in Open Questions with the verification gap explicit.
 Scout-supplied confidence labels are ADVISORY — this lint checks for evidence,
 not self-labels. A scout-tagged `[confidence: high]` claim without (a)/(b)/(c)
 is still demoted.
+
+#### Claim Equivalence
+
+Two causal claims A and B are "the same claim" if their normalized token sets
+satisfy **token Jaccard ≥ 0.70**:
+
+1. Normalize: lowercase, strip punctuation, split on whitespace → token set.
+2. Compute |A ∩ B| / |A ∪ B|. If ≥ 0.70, A and B are pairwise-equivalent.
+3. **Transitive closure (union-find).** Build a graph over all claims with an
+   edge for each pairwise-equivalent pair. The connected components
+   (computed via union-find) are the equivalence classes. This yields a
+   deterministic result independent of comparison order — if A ↔ B and
+   B ↔ C but A and C do not pairwise match, A, B, C still form one class.
+
+The same Claim Equivalence rule is used by the Phase 3 Ledger Assembly
+dedup step (see below). Criterion (c) and Ledger Assembly dedup share this
+one canonical definition.
 
 ### Open Questions Aggregation
 
