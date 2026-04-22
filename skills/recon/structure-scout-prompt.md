@@ -96,6 +96,30 @@ Agent tool (subagent_type: Explore, model: sonnet):
     independently of your self-label — unverified causal claims get demoted
     regardless of tag.
 
+    ## Evidence Tags
+
+    When you make a causal claim ("X causes Y", "X fixes Y", "because of",
+    "root cause is", etc.), annotate it with an evidence tag:
+
+        [evidence: <method>:<anchor>]
+
+    Methods:
+    - `grep` / `read` / `math` / `glob` — standard verification; anchor is
+      `file:line`, a glob pattern, or a one-line derivation
+    - `structural-only` — the structural fact is verified (file exists,
+      symbol present), but the causal link is hypothesis. Use this when you
+      want to keep the claim in the brief as "awaiting downstream
+      falsification" rather than suppress it.
+    - `none` — inferred without verification; anchor is the em-dash `—`
+
+    Do NOT emit `dual-scout` or `repro-test` yourself — the orchestrator
+    sets `dual-scout` when both scouts reach the same claim independently,
+    and propagates `repro-test` from the lint's (a) criterion.
+
+    The `[evidence:]` tag is independent of `[confidence:]` — emit both
+    where applicable. Ledger assembly reads only `[evidence:]`; other
+    bracketed tags are ignored.
+
     ## Scope Suggestions
 
     After your investigation, emit a `suggested_scope` section:
