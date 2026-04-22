@@ -574,6 +574,52 @@ On failure (timeout, error, or agent did not return useful output):
 
 After the Investigation Brief is assembled (core + any depth modules):
 
+### Falsification Grep (pre-recorder)
+
+Before the cartographer recorder dispatch, grep the following scopes
+(canonicalized from #211 doc-mining — see
+`skills/recon/pattern-scout-prompt.md`) for lines containing
+`Recon claim falsified:`:
+
+- `docs/handoffs/`
+- `docs/postmortems/`
+- `docs/retros/`, `docs/retrospectives/`
+- `docs/decisions/`, `docs/adr/`
+- `docs/incidents/`
+- Repo root: `HANDOFF.md`, `POSTMORTEM.md`, `DECISIONS.md`
+
+For each hit:
+
+1. Strip any leading markdown list prefix (`- `, `* `, `+ `), blockquote
+   marker (`> `), or leading whitespace from the matched line.
+2. Pass the stripped sentence payload to the cartographer recorder
+   (dispatched in the step below) as a new landmine:
+
+       "Recon previously claimed X; later falsified. Do not re-assert
+       without fresh evidence."
+
+   The inline claim text carried in each falsification sentence is the
+   load-bearing evidence — no round-trip verification to originating
+   briefs (AMB-5).
+
+3. If grep finds zero hits, skip silently — emit no landmine dispatch
+   for this step (INV-10 negative case).
+
+4. If a hit is malformed (missing run-id, garbled format), pass the raw
+   stripped line to the cartographer recorder with a best-effort note.
+   Do not abort.
+
+**Handoff-doc falsification sentence convention.** The grep target
+format is documented in `## Verification Ledger Convention` below.
+Consumer skills (e.g., `/build`, `/debugging`, `/design`) adopt the
+convention opportunistically in separate tickets.
+
+After the Falsification Grep step above, the rest of Phase 5 proceeds as
+documented: check for new information (step 1), dispatch cartographer
+recorder if needed (step 2). Falsification-grep landmines and new-info
+updates are both passed to the SAME recorder dispatch if one occurs — do
+not dispatch the recorder twice.
+
 1. **Check for new information:** Compare scout findings against cartographer context provided in Phase 1.
 2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder:
    ```
