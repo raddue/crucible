@@ -307,6 +307,73 @@ The same Claim Equivalence rule is used by the Phase 3 Ledger Assembly
 dedup step (see below). Criterion (c) and Ledger Assembly dedup share this
 one canonical definition.
 
+### Ledger Assembly
+
+After Causal Claim Verification, assemble the `## Verification Ledger`
+section of the Investigation Brief. The ledger covers Phase 3 core-scout
+causal claims only — depth-module (Phase 4) claims are out of scope.
+
+**Algorithm:**
+
+1. **Re-scan** both scout reports for causal-keyword matches using the
+   **Causal Keyword Set** defined above. For each match, check whether
+   the lint demoted the finding to Open Questions; this drives the
+   disposition.
+2. **Deduplicate** using the **Claim Equivalence** rule (token Jaccard
+   ≥ 0.70 + transitive-closure via union-find — same rule used by
+   Causal Claim Verification criterion (c)). Claims in one equivalence
+   class merge into a single ledger entry.
+3. **For each merged claim:**
+   - **(a) Evidence source.** Extract `[evidence: <method>:<anchor>]`
+     from the scout finding. If missing, fall back to lint-internal
+     evidence:
+       - If lint (a) cited a repro test (`file:test_name`) → `method:
+         repro-test`, `evidence: <file:test>`.
+       - If lint (b) cited a math/logic derivation → `method: math`,
+         `evidence: <one-line summary>`.
+       - If neither → `method: none`, `evidence: —` (em-dash U+2014).
+   - **(b) Dual-scout override.** If lint criterion (c) fired for this
+     merged claim, override to `method: dual-scout`, `evidence:
+     structure-scout, pattern-scout`. **Tie-break:** if EITHER scout
+     tagged `structural-only` for this claim, DO NOT override —
+     `structural-only` takes precedence, disposition stays `awaiting`.
+     **Merged-claim tag tie-break:** if dedup merged two claims and BOTH
+     scouts emitted non-structural-only `[evidence:]` tags (lint (c) did
+     not fire), use the Pattern Scout's tag (richer conventions anchor).
+   - **(c) Disposition:**
+       - `method: structural-only` → `awaiting` (overrides lint verdict;
+         `awaiting` has exactly one producer).
+       - Otherwise, lint passed (a/b/c) → `confirmed`.
+       - Otherwise → `demoted`.
+4. **Assign ordinal** `L-NN` (zero-padded 2 digits, monotonic within the
+   brief; continue as 3-digit `L-100+` if the brief exceeds 99 entries —
+   informational, not an error).
+5. **Append to the ledger section.** Per-entry format:
+
+       - **L-NN** — <claim text> — method: `<method>`, evidence: `<anchor>`, disposition: `<disposition>`
+
+   The ledger section is the **last core-brief section** (after
+   `## Open Questions`). Empty state (zero causal-keyword matches from
+   step 1) emits only the section header plus the canonical HTML-comment
+   placeholder:
+
+       ## Verification Ledger
+       <!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+
+   The same placeholder is used for both empty and populated states —
+   see `## Verification Ledger Convention`.
+
+6. **Write the assembled brief** (including the ledger) to
+   `<scratch>/investigation-brief.md` at the end of Phase 3. This is the
+   **core brief**. This step also closes an existing latent gap where
+   `investigation-brief.md` was referenced by Persisted Artifacts and
+   Compaction Recovery but no phase wrote it.
+
+   Phase 4's depth-module append is a recon-internal re-write of this
+   file, permitted by I-2 (consumer skills may not mutate it; recon
+   itself may). See Phase 4 Output Handling for the serialized re-write
+   rule.
+
 ### Open Questions Aggregation
 
 After contradiction detection, aggregate open questions from both scout reports:
@@ -373,6 +440,11 @@ Build the Investigation Brief markdown with all core sections:
 ## Open Questions
 <!-- Aggregated from scouts and depth modules — what recon couldn't determine -->
 - **[Question]** — [Why it matters] — Relevant to: [consumer list] — Resolvable by: [specific investigation or human input]
+
+## Verification Ledger
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+<!-- Populated entries, if any: -->
+- **L-NN** — [claim text] — method: `<method>`, evidence: `<anchor>`, disposition: `<confirmed | demoted | awaiting>`
 ```
 
 ## Overflow Handling
@@ -530,6 +602,10 @@ The brief follows the exact template from the design, including the metadata blo
 ...
 
 ## Open Questions
+...
+
+## Verification Ledger
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
 ...
 
 ---
