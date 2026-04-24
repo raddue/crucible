@@ -244,9 +244,13 @@ When scouts report `cartographer-conflict` findings, apply this adjudication tab
 For auto-update actions: queue the update for Phase 5 (Cartographer Feedback).
 For unresolved actions: surface in the `## Conflicts` section of the brief.
 
-### Causal Claim Verification
+### Causal Keyword Set
 
-After contradiction detection, scan both scout reports for causal language:
+The canonical list of causal-language keywords used by both the Causal Claim
+Verification step and the Phase 3 Ledger Assembly re-scan. Both steps MUST
+reference this set by name; do not re-list keywords inline. **This set is
+referenced by name from (a) Causal Claim Verification and (b) Ledger Assembly
+step (below) — update in both uses when modifying.**
 
     fixes, causes, is the bug, is the fix, will resolve, root cause is,
     caused by, resolved by, because, due to, leads to, responsible for,
@@ -259,11 +263,17 @@ Keyword matching is case-insensitive with word-boundary semantics (the
 keyword must not be embedded inside a larger word). Phrase patterns with `*`
 allow up to 5 intervening words between the anchors.
 
+### Causal Claim Verification
+
+After contradiction detection, scan both scout reports for causal language
+using the **Causal Keyword Set** defined above.
+
 For each match, verify the finding has at least ONE of:
 
   (a) Repro test cited (file + test name)
   (b) Math or logic derivation included in the finding
-  (c) Both scouts reached the same finding independently
+  (c) Both scouts reached the same claim independently, where "same claim"
+      is defined by the **Claim Equivalence** rule below.
 
 If none of (a)/(b)/(c) hold, DEMOTE the finding to an Open Question with this
 format:
@@ -279,6 +289,90 @@ in Open Questions with the verification gap explicit.
 Scout-supplied confidence labels are ADVISORY — this lint checks for evidence,
 not self-labels. A scout-tagged `[confidence: high]` claim without (a)/(b)/(c)
 is still demoted.
+
+#### Claim Equivalence
+
+Two causal claims A and B are "the same claim" if their normalized token sets
+satisfy **token Jaccard ≥ 0.70**:
+
+1. Normalize: lowercase, strip punctuation, split on whitespace → token set.
+2. Compute |A ∩ B| / |A ∪ B|. If ≥ 0.70, A and B are pairwise-equivalent.
+3. **Transitive closure (union-find).** Build a graph over all claims with an
+   edge for each pairwise-equivalent pair. The connected components
+   (computed via union-find) are the equivalence classes. This yields a
+   deterministic result independent of comparison order — if A ↔ B and
+   B ↔ C but A and C do not pairwise match, A, B, C still form one class.
+
+The same Claim Equivalence rule is used by the Phase 3 Ledger Assembly
+dedup step (see below). Criterion (c) and Ledger Assembly dedup share this
+one canonical definition.
+
+### Ledger Assembly
+
+After Causal Claim Verification, assemble the `## Verification Ledger`
+section of the Investigation Brief. The ledger covers Phase 3 core-scout
+causal claims only — depth-module (Phase 4) claims are out of scope.
+
+**Algorithm:**
+
+1. **Re-scan** both scout reports for causal-keyword matches using the
+   **Causal Keyword Set** defined above. For each match, check whether
+   the lint demoted the finding to Open Questions; this drives the
+   disposition.
+2. **Deduplicate** using the **Claim Equivalence** rule (token Jaccard
+   ≥ 0.70 + transitive-closure via union-find — same rule used by
+   Causal Claim Verification criterion (c)). Claims in one equivalence
+   class merge into a single ledger entry.
+3. **For each merged claim:**
+   - **(a) Evidence source.** Extract `[evidence: <method>:<anchor>]`
+     from the scout finding. If missing, fall back to lint-internal
+     evidence:
+       - If lint (a) cited a repro test (`file:test_name`) → `method:
+         repro-test`, `evidence: <file:test>`.
+       - If lint (b) cited a math/logic derivation → `method: math`,
+         `evidence: <one-line summary>`.
+       - If neither → `method: none`, `evidence: —` (em-dash U+2014).
+   - **(b) Dual-scout override.** If lint criterion (c) fired for this
+     merged claim, override to `method: dual-scout`, `evidence:
+     structure-scout, pattern-scout`. **Tie-break:** if EITHER scout
+     tagged `structural-only` for this claim, DO NOT override —
+     `structural-only` takes precedence, disposition stays `awaiting`.
+     **Merged-claim tag tie-break:** if dedup merged two claims and BOTH
+     scouts emitted non-structural-only `[evidence:]` tags (lint (c) did
+     not fire), use the Pattern Scout's tag (richer conventions anchor).
+   - **(c) Disposition:**
+       - `method: structural-only` → `awaiting` (overrides lint verdict;
+         `awaiting` has exactly one producer).
+       - Otherwise, lint passed (a/b/c) → `confirmed`.
+       - Otherwise → `demoted`.
+4. **Assign ordinal** `L-NN` (zero-padded 2 digits, monotonic within the
+   brief; continue as 3-digit `L-100+` if the brief exceeds 99 entries —
+   informational, not an error).
+5. **Append to the ledger section.** Per-entry format:
+
+       - **L-NN** — <claim text> — method: `<method>`, evidence: `<anchor>`, disposition: `<disposition>`
+
+   The ledger section is the **last core-brief section** (after
+   `## Open Questions`). Empty state (zero causal-keyword matches from
+   step 1) emits only the section header plus the canonical HTML-comment
+   placeholder:
+
+       ## Verification Ledger
+       <!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+
+   The same placeholder is used for both empty and populated states —
+   see `## Verification Ledger Convention`.
+
+6. **Write the assembled brief** (including the ledger) to
+   `<scratch>/investigation-brief.md` at the end of Phase 3. This is the
+   **core brief**. This step also closes an existing latent gap where
+   `investigation-brief.md` was referenced by Persisted Artifacts and
+   Compaction Recovery but no phase wrote it.
+
+   Phase 4's depth-module append is a recon-internal re-write of this
+   file, permitted by I-2 (consumer skills may not mutate it; recon
+   itself may). See Phase 4 Output Handling for the serialized re-write
+   rule.
 
 ### Open Questions Aggregation
 
@@ -346,6 +440,11 @@ Build the Investigation Brief markdown with all core sections:
 ## Open Questions
 <!-- Aggregated from scouts and depth modules — what recon couldn't determine -->
 - **[Question]** — [Why it matters] — Relevant to: [consumer list] — Resolvable by: [specific investigation or human input]
+
+## Verification Ledger
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+<!-- Populated entries, if any: -->
+- **L-NN** — [claim text] — method: `<method>`, evidence: `<anchor>`, disposition: `<confirmed | demoted | awaiting>`
 ```
 
 ## Overflow Handling
@@ -434,9 +533,31 @@ When multiple modules are requested, dispatch them in parallel. Each depth agent
 
 ### Output Handling
 
-- Write each depth module output to scratch as individual files (e.g., `<scratch>/impact-analysis.md`)
-- Append completed depth module sections to the Investigation Brief after the core sections, separated by `---`
-- Narrate after each: "Depth module [name] complete. Returning Investigation Brief."
+- Write each depth module output to scratch as individual files (e.g.,
+  `<scratch>/impact-analysis.md`) as each module returns. Individual module
+  files are safe under parallel dispatch — each file has exactly one
+  writer.
+- **Serialize the brief re-write.** Do NOT re-write
+  `<scratch>/investigation-brief.md` incrementally after each module
+  returns — Phase 4 Dispatch runs depth modules in parallel, and
+  interleaved re-writes race. Instead:
+    1. Wait until ALL dispatched depth modules have completed (or failed
+       per the Depth Module Failure rules below).
+    2. Append all completed depth-module sections to the in-memory brief
+       after the core sections, separated by `---`, in a deterministic
+       order: the order modules appear in the resolved effective modules
+       list (see Phase 4 opening — the list produced by branches 1/2/3,
+       including any auto-inclusion prepend).
+    3. Perform exactly one re-write of `<scratch>/investigation-brief.md`
+       with the fully-assembled brief (core + all depth sections) AFTER
+       ALL depth modules complete. Per-module writes are forbidden.
+- This serialized-write rule satisfies INV-11 without requiring
+  cross-writer coordination. If Phase 4 is skipped (no depth modules
+  requested), the Phase 3 write from Ledger Assembly step 6 stands as
+  the final on-disk brief — no Phase 4 re-write occurs.
+- Narrate after each module's individual completion: "Depth module [name]
+  complete. Returning Investigation Brief." The brief re-write itself is
+  internal; no separate narration required.
 
 ### Depth Module Failure
 
@@ -452,6 +573,52 @@ On failure (timeout, error, or agent did not return useful output):
 ## Phase 5: Cartographer Feedback
 
 After the Investigation Brief is assembled (core + any depth modules):
+
+### Falsification Grep (pre-recorder)
+
+Before the cartographer recorder dispatch, grep the following scopes
+(canonicalized from #211 doc-mining — see
+`skills/recon/pattern-scout-prompt.md`) for lines containing
+`Recon claim falsified:`:
+
+- `docs/handoffs/`
+- `docs/postmortems/`
+- `docs/retros/`, `docs/retrospectives/`
+- `docs/decisions/`, `docs/adr/`
+- `docs/incidents/`
+- Repo root: `HANDOFF.md`, `POSTMORTEM.md`, `DECISIONS.md`
+
+For each hit:
+
+1. Strip any leading markdown list prefix (`- `, `* `, `+ `), blockquote
+   marker (`> `), or leading whitespace from the matched line.
+2. Pass the stripped sentence payload to the cartographer recorder
+   (dispatched in the step below) as a new landmine:
+
+       "Recon previously claimed X; later falsified. Do not re-assert
+       without fresh evidence."
+
+   The inline claim text carried in each falsification sentence is the
+   load-bearing evidence — no round-trip verification to originating
+   briefs (AMB-5).
+
+3. If grep finds zero hits, skip silently — emit no landmine dispatch
+   for this step (INV-10 negative case).
+
+4. If a hit is malformed (missing run-id, garbled format), pass the raw
+   stripped line to the cartographer recorder with a best-effort note.
+   Do not abort.
+
+**Handoff-doc falsification sentence convention.** The grep target
+format is documented in `## Verification Ledger Convention` below.
+Consumer skills (e.g., `/build`, `/debugging`, `/design`) adopt the
+convention opportunistically in separate tickets.
+
+After the Falsification Grep step above, the rest of Phase 5 proceeds as
+documented: check for new information (step 1), dispatch cartographer
+recorder if needed (step 2). Falsification-grep landmines and new-info
+updates are both passed to the SAME recorder dispatch if one occurs — do
+not dispatch the recorder twice.
 
 1. **Check for new information:** Compare scout findings against cartographer context provided in Phase 1.
 2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder:
@@ -503,6 +670,10 @@ The brief follows the exact template from the design, including the metadata blo
 ...
 
 ## Open Questions
+...
+
+## Verification Ledger
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
 ...
 
 ---
@@ -608,6 +779,7 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 
 **Semi-stable (additive, consumers opt-in):**
 - `## Open Questions` — present when scouts report unknowns. Consumers that need it parse for it; consumers that don't can ignore it. Not yet validated by consumer integration — promoted to stable once 2+ consumers confirm they consume it.
+- `## Verification Ledger` — present in every brief (may contain only an HTML-comment placeholder when no causal claims detected). Consumers that do not parse the ledger can ignore it; the section is additive. The per-entry format is a reader-friendly convention, not a strict grammar.
 
 **Semi-stable (consumers that request specific modules depend on these):**
 - Depth module section headers: `## Impact Analysis`, `## Consumer Registry`, `## Friction Scan`, `## Subsystem Manifest`, `## Diagnostic Context`, `## Execution Readiness`
@@ -616,7 +788,108 @@ The Investigation Brief is consumed by 6+ skills. Section headers are the contra
 **Unstable (internal content, not parsed by header):**
 - Content within sections — formatting, subheadings, bullet structure may evolve
 
-**Process:** Any change to a stable or semi-stable header is a breaking change. The PR must update all consumer skill templates that reference the changed header. Adding new depth modules is non-breaking.
+**Process:** Any change to a stable or semi-stable header is a breaking change. The PR must update all consumer skill templates that reference the changed header. **Exception: adding a new semi-stable header is additive and non-breaking.** Consumers that don't parse the new section are unaffected. Renaming or semantically changing an existing header is still breaking. Adding new depth modules is non-breaking.
+
+## Verification Ledger Convention
+
+The `## Verification Ledger` section of the Investigation Brief is a
+reader-friendly markdown record of causal claims made by recon. Per
+DEC-2 / AMB-1, this is a **convention, not a regex-enforced contract** —
+consumers that eventually need machine parseability will add a regex
+contract then (flagged in the design's Open Questions).
+
+### Scope
+
+- Phase 3 core-scout causal claims only.
+- Depth-module (Phase 4) claims are OUT OF SCOPE in MVP. A follow-up
+  ticket may extend both the causal-lint and the ledger to depth modules.
+- The ledger is the last core-brief section (after `## Open Questions`).
+  Phase 4 depth modules are appended after the core brief, separated by
+  `---` per existing convention.
+
+### Per-entry format (reader-friendly, not a grammar)
+
+    - **L-NN** — <claim text> — method: `<method>`, evidence: `<anchor>`, disposition: `<disposition>`
+
+- **Ordinal `L-NN`** — zero-padded 2 digits, monotonic within the brief.
+  Overflows to 3-digit `L-100+` are informational (brief is unusually
+  large), not errors.
+- **method** — one of `grep | read | math | glob | repro-test |
+  dual-scout | structural-only | none`. A textual convention, not a
+  regex-enforced enum.
+- **evidence** — an anchor:
+    - `file:line` for `grep`, `read`, `structural-only`
+    - one-line derivation for `math`
+    - glob pattern for `glob`
+    - `<file>:<test>` for `repro-test`
+    - `structure-scout, pattern-scout` for `dual-scout` (note the comma
+      is part of the value, NOT a field separator — any future machine
+      parser MUST respect backtick quoting)
+    - em-dash `—` (U+2014) for `none` (plain hyphen also accepted by the
+      reader-friendly convention; canonical form is em-dash)
+- **disposition** — one of `confirmed | demoted | awaiting`.
+    - `confirmed` — Causal-lint (a/b/c) satisfied.
+    - `demoted` — lint failed; finding also moved to `## Open Questions`.
+      The ledger entry is retained so future runs see "recon knew this
+      was unverified."
+    - `awaiting` — produced ONLY by `[evidence: structural-only:<anchor>]`.
+      Claim is structurally verified but causally hypothetical; invites
+      downstream falsification. Lint silent-failures produce `demoted`
+      with a narrated warning, NOT `awaiting`.
+
+### Empty state
+
+If Phase 3's re-scan finds zero causal-keyword matches, the ledger is:
+
+```
+## Verification Ledger
+<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
+```
+
+The same placeholder comment is used for both empty and populated states
+(single canonical form). A brief with keyword matches that were all
+demoted by the lint still produces populated ledger entries with
+`disposition: demoted` — it is NOT empty state.
+
+### Handoff-doc falsification sentence (for consumer skills)
+
+Downstream skills that discover a ledger claim was wrong record the
+falsification in any markdown under the #211 doc-mining scopes
+(`docs/handoffs/`, `docs/postmortems/`, `docs/retros/`,
+`docs/retrospectives/`, `docs/decisions/`, `docs/adr/`, `docs/incidents/`,
+or `HANDOFF.md` / `POSTMORTEM.md` / `DECISIONS.md` at repo root).
+
+**Canonical sentence format (single line):**
+
+    Recon claim falsified: L-<NN> from brief <run-id> — `<claim text verbatim>` — evidence: <what proved it wrong>.
+
+Conventions:
+
+- Wrap claim text in backticks (markdown code syntax) — renders cleanly
+  even when claim text contains quotes or special characters. If claim
+  text contains a literal backtick, escape with `` \` `` or abbreviate
+  with `...` and reference the originating brief.
+- **Keep the sentence on a single line** (no hard wrap) — grep returns
+  one line per match. Abbreviate long claim text with `...`.
+- Inline claim text so the falsification survives brief pruning.
+- `<run-id>` is copy-pasted from the brief metadata block.
+- **No identifier hash required.** Sentence format is the contract.
+- Authoring skill may add its own signature (commit SHA, author) inline
+  as prose — not formalized.
+
+**Consumer contract:** briefs are write-once. Consumers never mutate
+recon scratch brief files — they record falsifications in handoff docs
+under their own control, which the next `/recon` run surfaces via Phase 5
+falsification-grep and doc-mining.
+
+### For recon maintainers
+
+- Ledger format and assembly: see Phase 3 `### Ledger Assembly`.
+- Disposition semantics and Claim Equivalence: see Phase 3
+  `### Causal Claim Verification` + `#### Claim Equivalence`.
+- Phase 5 grep-to-landmine flow: see Phase 5 `### Falsification Grep`.
+- Brief write location: `<scratch>/investigation-brief.md` (INV-6 /
+  INV-11).
 
 ## Design Principles
 
