@@ -576,7 +576,7 @@ Three exit modes beyond clean passage:
   2. Rationale is written to `scratch/<run-id>/accepted-risks.md` with timestamp, finding ID, severity, and user rationale
   3. Accepted risks are appended to the persistent threat model (Phase 5)
   4. Accepted findings are excluded from the gate score on subsequent rounds
-  5. Sentinel companion (see below) re-evaluates accepted risks weekly
+  5. Re-evaluate accepted risks manually on each subsequent Siege run (the planned Sentinel companion will automate this on a weekly cron once built — see below)
 
 ### False Positive Handling
 
@@ -713,7 +713,7 @@ Updated at the end of every Siege run (Phase 5). Accumulates across sessions.
 ## Accepted Risks
 - [finding ID]: [severity] [Active|Hardening] [title] -- Accepted [date] by [user]
   Rationale: [user-provided rationale]
-  Next review: [date, set by sentinel schedule]
+  Next review: [leave blank until Sentinel ships; until then, re-evaluate on next Siege run]
 ```
 
 ### Accepted Risks Security
@@ -875,9 +875,9 @@ After the security gate passes (or user accepts risks and proceeds):
 7. Verify `memory/security-audit/` is in `.gitignore`
 8. Delete scratch directory and active-run marker after Phase 5 completes. This is the final step of every Siege run.
 
-## Sentinel Companion (Separate Skill)
+## Sentinel Companion (Planned Future Skill)
 
-Sentinel is a **separate skill** (`crucible:sentinel`) running on a weekly cron. It is NOT part of Siege's execution -- it is a persistent watchdog that uses Siege's threat model.
+Sentinel is a **planned companion skill** — not yet implemented. When built, it will run on a weekly cron as a persistent watchdog that consumes Siege's threat model. It is NOT part of Siege's execution path. The design below documents the intended capability so the threat model artifact stays compatible; do not attempt to invoke `/sentinel` today.
 
 ### 4 Probes
 
@@ -943,7 +943,7 @@ Siege effectiveness is measured by:
 1. **False positive rate:** Track findings marked as false positives across runs. Target: <15% false positive rate.
 2. **Coverage:** Track which CWE categories are flagged vs. present in the codebase. Measure against OWASP Top 10 coverage.
 3. **Gate convergence:** Track rounds-to-zero-critical-high. Target: <5 rounds for code artifacts, <3 for design/plan.
-4. **Threat model utility:** Track how often sentinel catches real drift vs. noise.
+4. **Threat model utility (planned, post-Sentinel):** Once Sentinel ships, track how often it catches real drift vs. noise.
 5. **Steel-man accuracy:** Track how often steel-manned dismissals are later proven wrong (finding re-surfaces in production or in a later Siege run).
 
 ## Guardrails
