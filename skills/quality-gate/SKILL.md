@@ -25,11 +25,9 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 ## Receipt Linter (Ledger Return Protocol)
 
-Every subagent dispatched by the gate (red-team agents, fix agents, judges) returns exactly one Evidence Receipt per `shared/return-convention.md`. After every Task return, apply this check before scoring findings or escalating.
+Apply Tier 1 (structural) and Tier 2 (witness verification) lint per `shared/return-convention.md` to every Task return before acting on the declared VERDICT. The canonical grammar (CLAIM citations, WITNESS rules, verb-binding, byte-range limits, lint-failure handling) lives in that document. Build, siege, and audit apply the same linter.
 
-**Tier 1 — Structural (in-context):** parse sections in the order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT` (unknown headers after NEXT ignored). Every CLAIM citation must resolve. Every EXEC has `exit=/dur=/out=` and a listed `out=` artifact; byte-ranges ≤ 4 KiB. Every DISPATCHED carries a valid `rcpt-sha256` present in `receipt-ledger.jsonl`. WITNESS is mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard-only, ≥ 4 chars (exemptions: exit-clause forms; the bare token `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE: reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb (rule re-applied to receipt itself).
-
-**Tier 2 — Witness verification:** for PASS+TRACE#N, Read the cited range (≤ 4 KiB) and fail if the witness would have matched `expect-fail`. For FAIL+TRACE#N (weak positive-evidence), reject only if no evidence of failure is visible in the range. For SKIPPED/UNRUNNABLE, no read; record the deferred obligation.
+**Quality-gate-specific obligations:** Receipts from red-team, fix, judge, verifier, and dependency-audit subagents are all linted before their VERDICT is consumed. A lint failure is treated as structurally `BLOCKED` regardless of declared VERDICT — see "Lint failure handling" in the shared convention.
 
 ## Cairn (Layer 3)
 

@@ -17,17 +17,11 @@ Full-lifecycle security audit. Dispatches 6 parallel Opus agents across distinct
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
 <!-- CANONICAL: shared/return-convention.md -->
-All subagent returns (the 6 attacker-perspective agents, synthesis, fix agents, stagnation judge) use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (see the "Receipt Linter (Ledger Return Protocol)" section below) to every Task return before acting on the declared VERDICT.
+All subagent returns (the 6 attacker-perspective agents, synthesis, fix agents, stagnation judge) use the Ledger Return Protocol. Every subagent returns exactly one Evidence Receipt per `shared/return-convention.md`; the orchestrator applies the two-tier receipt linter (Tier 1 structural + Tier 2 witness verification — full grammar in the shared convention) to every Task return before acting on the declared VERDICT. A lint failure is treated as structurally `BLOCKED`.
+
+**Siege-specific obligation:** WITNESS for attacker agents is the attack one-liner (or pattern) that would succeed if the defender's claimed fix is incomplete. SKIPPED/UNRUNNABLE receipts (e.g. `zap-cli unavailable`) defer to Cairn for re-dispatch with tooling.
 
 <!-- CANONICAL: shared/cairn-convention.md -->
-Siege maintains an Invariant Cairn per `shared/cairn-convention.md`. Each attack round is a cairn phase. See `## Cairn (Layer 3)` below.
-
-## Receipt Linter (Ledger Return Protocol)
-
-Each attacker agent returns an Evidence Receipt whose ARTIFACTS include its findings file and whose WITNESS is the attack one-liner (or pattern) that would succeed if the defender's claimed fix is incomplete. After every Task return, apply this check before scoring findings or accepting a fix:
-
-**Tier 1 — Structural:** sections in order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT`. Every CLAIM citation resolves. Every EXEC has exit/dur/out; byte-ranges ≤ 4 KiB. Every DISPATCHED has a valid `rcpt-sha256` in `receipt-ledger.jsonl`. WITNESS mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard, ≥ 4 chars (exemptions: exit-clause forms; bare `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb.
-
 **Tier 2 — Witness verification:** PASS + TRACE#N → Read cited range (≤ 4 KiB); fail if witness would match `expect-fail`. FAIL + TRACE#N → reject only if no evidence of attack success is visible. SKIPPED/UNRUNNABLE → no read; record deferred obligation (e.g. `zap-cli unavailable` → orchestrator re-dispatches with tooling).
 
 ## Cairn (Layer 3)
