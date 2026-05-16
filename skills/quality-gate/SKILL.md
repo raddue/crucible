@@ -257,6 +257,20 @@ The fix agent receives: (a) the current artifact, (b) the red-team findings, (c)
 
 The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
 
+### No-Op Fix Detection
+
+A no-op fix is structural signal that the loop has zero forward momentum. The orchestrator detects no-op fixes via either of two conditions:
+
+1. **Byte-identical artifact:** The fix agent's returned artifact is byte-for-byte identical to the input artifact. Detect by SHA-256 comparison.
+2. **All-Unresolved verifier:** The fix verifier returns no Resolved findings (every targeted finding remains Unresolved).
+
+When either condition is met:
+- Record `no-op-fix: true` in `round-N-score.md`
+- **Escalate immediately**, regardless of round number — this overrides pre-round-10 suppression. Report: "No-op fix detected at round N: [byte-identical artifact | verifier marked all findings Unresolved]. The loop has zero forward momentum. Escalating."
+- Verdict: `ESCALATED` (a no-op is not architectural — the fix agent declined to engage, not declared structurally unfixable). If the no-op happened after the architectural-candidate flag was set (see Fix Verification), prefer the architectural exit instead.
+
+This rule is necessary because no-op rounds preserve the weighted score, which under pre-round-10 suppression would otherwise loop without escalation. No-op detection is orthogonal to score trajectory.
+
 ## Scope Anchoring for Fix Agents
 
 Fix agents are prone to drift — addressing findings by adding unrequested features, restructuring documents, or expanding scope beyond what was asked. This costs real time in re-anchoring and rework.
@@ -313,9 +327,11 @@ After each fix agent completes and before the next red-team round, dispatch a **
 **Reading the verdict:** The verifier returns a per-finding Resolved/Unresolved table and an overall PASS/FAIL.
 
 **Handling Unresolved findings:**
-- **Fatal-severity Unresolved:** Flagged as "prior unresolved Fatal — must address" in the next round's fix dispatch. This is binding with one-round grace: if the fix agent addresses it and the next red-team round does NOT re-raise the finding, the binding expires. If the verifier marks the same Fatal as Unresolved again (persistent disagreement), the verdict downgrades to informational. Sonnet should not permanently override Opus.
+- **Fatal-severity Unresolved:** Flagged as "prior unresolved Fatal — must address" in the next round's fix dispatch. This is binding with one-round grace: if the fix agent addresses it and the next red-team round does NOT re-raise the finding, the binding expires. If the verifier marks the same Fatal as Unresolved again (persistent disagreement), the verdict downgrades to informational AND the orchestrator marks the next round's fix dispatch as architectural-candidate (see below). Sonnet should not permanently override Opus, but persistent verifier-red-team agreement that a Fatal cannot be fixed is structural signal — route it to the architectural exit rather than letting it churn silently.
+- **Architectural-candidate flag (set on persistent-disagreement downgrade):** The next round's fix-agent prompt includes: "Round (N-2) and (N-1) verifier both marked Fatal `<id>` Unresolved while red-team has re-raised it. If you cannot resolve `<id>` within the change boundary on this round, return `VERDICT: ARCHITECTURAL_BLOCK` citing this finding (see Architectural Concerns Exit) instead of producing a no-op fix."
 - **Significant-severity Unresolved:** Appended to the fix journal as informational context. The next round's fix agent may address, disagree with, or deprioritize.
 - **All Resolved (PASS):** Proceed to next red-team round normally.
+- **All Unresolved (verifier-PASS=false, no Resolved findings):** This is structural signal that the fix round did no work. The orchestrator records `no-op-fix: true` in `round-N-score.md` and applies the No-Op Fix Detector rule (see Fix Mechanism > No-Op Fix Detection).
 
 **Fix journal integration:** The verifier's output is appended under a `### Verifier Assessment` heading in the fix journal, distinct from the `## Round N Fix` entry format. This keeps verifier assessments on the remediation path (fix agents see them) without contaminating the review path (red-team never sees them).
 
@@ -371,9 +387,17 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
 
 ### Judge Dispatch (only when first-pass check would trigger stagnation, round 10+)
 
-**Pre-round-10:** Skip judge dispatch entirely. Loop again regardless of score trajectory.
+**Pre-round-10 (rounds 1-6):** Skip judge dispatch entirely. Loop again regardless of score trajectory.
 
-At round 10 and later, if neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
+**Seed rounds (rounds 7, 8, 9):** When the first-pass check would trigger stagnation (same-or-higher score AND no Fatal count improvement), dispatch the judge in **silent mode**. Silent mode is identical to normal dispatch except:
+- The judge's verdict (PROGRESS/STAGNATION/DIMINISHING_RETURNS) is logged to `round-N-comparison.md` but does NOT route to the user
+- A `silent-mode: true` line is appended to the comparison file
+- The orchestrator loops again regardless of verdict
+- The judge's `suppressed-signal` reading is mirrored into `round-N-score.md` (e.g., `suppressed-signal: stagnation-would-fire`)
+
+Silent dispatch seeds the consecutive-round comparison history that the judge's prompt expects. Without seeding, the round-10 judge runs with no prior comparison files and the consecutive-round semantics never engage until round 12+ — leaving only 3-4 escalation-eligible rounds before the 15-round limit.
+
+**At round 10 and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
 
@@ -781,7 +805,8 @@ Exit modes beyond clean approval. **Single-round stagnation, single-round regres
 - Declaring the gate complete after fixing findings without a clean verification round — the iteration loop must run to completion (0 Fatal, 0 Significant on a fresh review)
 - Exceeding the 15-round safety limit without escalating
 - Escalating on single-round stagnation, regression, or diminishing returns before round 10 (suppression rule — these signals are recorded and looping continues)
-- Dispatching the stagnation judge before round 10 (skip the dispatch entirely; the verdict would be ignored)
+- Dispatching the stagnation judge on rounds 1-6 (skip entirely)
+- Routing a silent-mode judge verdict (rounds 7-9) to the user — silent dispatches log only, never escalate
 - Continuing to loop after detecting sustained regression (`score(N) > score(N-1) > score(N-2)`) — the sustained-regression hard exit overrides suppression at every round
 - Using the same red-team agent across rounds (always dispatch fresh)
 - Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
