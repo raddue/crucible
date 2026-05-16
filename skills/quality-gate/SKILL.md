@@ -25,11 +25,9 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 ## Receipt Linter (Ledger Return Protocol)
 
-Every subagent dispatched by the gate (red-team agents, fix agents, judges) returns exactly one Evidence Receipt per `shared/return-convention.md`. After every Task return, apply this check before scoring findings or escalating.
+Apply Tier 1 (structural) and Tier 2 (witness verification) lint per `shared/return-convention.md` to every Task return before acting on the declared VERDICT. The canonical grammar (CLAIM citations, WITNESS rules, verb-binding, byte-range limits, lint-failure handling) lives in that document. Build, siege, and audit apply the same linter.
 
-**Tier 1 — Structural (in-context):** parse sections in the order `RCPT, VERDICT, ARTIFACTS, TRACE, CLAIMS, WITNESS, SUSPICION, NEXT` (unknown headers after NEXT ignored). Every CLAIM citation must resolve. Every EXEC has `exit=/dur=/out=` and a listed `out=` artifact; byte-ranges ≤ 4 KiB. Every DISPATCHED carries a valid `rcpt-sha256` present in `receipt-ledger.jsonl`. WITNESS is mandatory (no `(n/a)`); `kind ∈ {exec, grep, lint}`; `expect-fail` non-empty, not wildcard-only, ≥ 4 chars (exemptions: exit-clause forms; the bare token `match` — valid only for kind=grep). PASS: `ran=TRACE#N` or `SKIPPED:<reason>`. FAIL/BLOCKED UNRUNNABLE: reason from closed vocabulary. `ran=SKIPPED` requires NEXT to contain the witness payload verbatim. `ran=TRACE#N` verb-binding: exec → EXEC; grep → EXEC/READ/WROTE; lint → any verb (rule re-applied to receipt itself).
-
-**Tier 2 — Witness verification:** for PASS+TRACE#N, Read the cited range (≤ 4 KiB) and fail if the witness would have matched `expect-fail`. For FAIL+TRACE#N (weak positive-evidence), reject only if no evidence of failure is visible in the range. For SKIPPED/UNRUNNABLE, no read; record the deferred obligation.
+**Quality-gate-specific obligations:** Receipts from red-team, fix, judge, verifier, and dependency-audit subagents are all linted before their VERDICT is consumed. A lint failure is treated as structurally `BLOCKED` regardless of declared VERDICT — see "Lint failure handling" in the shared convention.
 
 ## Cairn (Layer 3)
 
@@ -84,8 +82,11 @@ is available in the current environment:
 - Log warnings about missing consensus configuration
 - Change any scoring, stagnation, or escalation logic based on consensus availability
 
-Consensus is a transparent enhancement. Its presence improves coverage;
-its absence changes nothing.
+Consensus is a near-transparent enhancement. Its presence improves coverage;
+its absence preserves all standard exit paths. The one documented asymmetry:
+consensus presence enables one additional pre-threshold escalation path — see
+Pre-Threshold Consensus Carve-Out. This is the only place where consensus
+availability changes the gate's exit set.
 
 ## External Model Review (Optional)
 
@@ -103,7 +104,7 @@ Every red-team round, alongside the host red-team dispatch. Call
 - `skill`: `"quality_gate"` (top-level argument for per-skill toggle enforcement)
 - `metadata`: `{"skill": "quality_gate", "round": N}` (traceability)
 
-### Consensus Bridge (rounds 1, 4, 7, 10, 13)
+### Consensus Bridge (Round 1, then every `max(1, suppression_threshold // 3)` rounds, up to round 15)
 
 On consensus-eligible rounds where both `consensus_query` and `external_review`
 are available:
@@ -155,16 +156,54 @@ would create non-deterministic stagnation behavior.
 | "The red-team finding is wrong / overblown, I'll mark it resolved without a fix." | Rationalizing away findings defeats the point of adversarial review. If a finding is wrong, the fix agent explicitly justifies dismissal in the fix journal — the orchestrator does not dismiss findings unilaterally. | Every Fatal/Significant finding is either fixed or documented as dismissed by the fix agent with reasoning. |
 | "The score went up but I can tell it's close, skip the stagnation judge." | Stagnation detection uses weighted score, not orchestrator intuition. Score-based inline judgment is the exact failure the judge exists to catch. | Dispatch the stagnation judge whenever score is not strictly lower than the prior round. |
 | "Round 15 hit — I'll squeeze in one more round, surely the next will pass." | The 15-round limit is a circuit breaker, not a suggestion. Exceeding it silently is how runaway loops happen. | At round 15, escalate to the user with full round history — never silently continue. |
-| "Pre-flight dependency audit is noise for this artifact, skip it." | The audit only runs on `code` artifacts, and on code artifacts it's mandatory. Dependency drift is a documented source of shipped bugs. | Run the dependency audit on every `code` artifact; skip silently only for non-code types. |
+| "Score went up at round 4 — that's a regression, I should escalate now." | Pre-threshold suppression is deliberate: most artifacts converge within a few rounds and early escalation interrupts that. Record the regression in `round-N-score.md` and keep looping. Exception: if score increased at BOTH round 3→4 AND round 4→5, that's sustained regression — escalate. | Single-round regressions before `suppression_threshold` are suppressed; sustained regressions (2 consecutive strict increases) escalate at any round. |
+| "Round 6 scored higher than round 5, and round 5 scored higher than round 4 — but suppression should still apply, right?" | No. The sustained-regression hard exit overrides suppression. Two strict score increases running is a structural signal that further looping will not help. | At round 3+, check `score(N) > score(N-1) > score(N-2)` every round; if true, escalate immediately regardless of suppression. |
+| "We're at round 8 and stuck — the user would want to know." | The suppression rule exists precisely because intuition about "stuck" is often wrong before the threshold. Trust the rule; the loop continues unless one of the structural exits (sustained-regression, no-op-fix, architectural-block) fires. | Pre-threshold escalations require a structural exit or explicit user interrupt — orchestrator judgment does not qualify. |
+| "This is a hypothesis artifact and we're at round 4 — but pre-threshold suppression should apply." | No. Hypothesis artifacts default to `suppression_threshold: 3`. At round 4 the threshold has already been crossed; normal escalation applies. Always read the threshold from skill arguments, not from memory of the default for code. | Always read `suppression_threshold` from the current invocation's arguments, never assume 10. |
+| "This is a small auth fix, siege is overkill — skip it." | Detection exists because intuition about "small" security changes is unreliable. The cost of one siege dispatch is ~6 Opus agents; the cost of missing a regression in a security PR is unbounded. | Never skip siege when detection fires unless `skip_siege: true` is explicitly set with documented reason. |
+| "Detection fired on keywords in a design doc, but the doc isn't really about security." | The confidence threshold (≥2 categories OR keyword + dedicated `## Security` section) already filters single-word noise. If detection still fires, the doc has real security content. | Trust the confidence threshold. To override, set `skip_siege: true` with reason in the gate-verdict marker. |
 | "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
+
+## Skill Arguments
+
+| Argument | Type | Default | Effect |
+|---|---|---|---|
+| `suppression_threshold` | int | (artifact-type lookup, see below) | The round number at which suppressed escalations (single-round stagnation, single-round regression, diminishing returns) become live. Below this round, only sustained-regression, no-op-fix, architectural-block, and user-interrupt can exit pre-clean. Above it, all escalation logic applies. |
+| `interactive` | bool | `true` if invoked from a standalone session, `false` if invoked by a parent orchestrator (build, debugging, spec). **Detection:** The orchestrator infers `interactive` from the presence of the `Context from invoking orchestrator` block in its dispatch context: BOTH `Phase` AND `PipelineID` present → treated as sub-skill invocation (`interactive: false`). Either field alone or both absent → standalone (`interactive: true`). Sub-skill parents (debugging, spec) MUST follow the build pattern; any parent that fails to pass Phase+PipelineID will cause QG to default to `interactive: true` and emit between-rounds check-ins, which will hang non-interactive pipelines. Parent skills can also explicitly pass `interactive: false` to override detection if they do not have a natural Phase/PipelineID to provide. Explicit `interactive:` argument overrides detection in either direction. | When true, the orchestrator emits a between-rounds check-in at round `ceil(suppression_threshold/2)` offering the user options: continue, escalate-now, or skip. Non-interactive contexts skip this prompt. |
+| `force_siege` | bool | `false` | When true, always dispatch `crucible:siege` in parallel with the first red-team round regardless of security-surface detection. Use for: explicit security PRs, scheduled security audits, post-incident review. |
+| `skip_siege` | bool | `false` | When true, never dispatch siege even if security-surface detection fires. Use for: artifacts the user already siege-tested separately, or repeated re-runs after siege already passed. Mutually exclusive with `force_siege` — passing both is an error. |
+
+**Artifact-type-aware default for `suppression_threshold`:**
+
+| Artifact Type | Default Threshold | Rationale |
+|---|---|---|
+| `code` | 10 | Build-pipeline economics; large diffs benefit from sustained iteration |
+| `design` | 10 | Iterative refinement on complex documents |
+| `plan` | 10 | Same as design |
+| `hypothesis` | 3 | 1-2 sentence artifacts; 10 rounds is wildly disproportionate |
+| `mockup` | 3 | Visual artifact; convergence is fast |
+| `translation` | 3 | Mock-to-Unity translation; fast iteration loop |
+
+The threshold can be overridden per invocation. Build typically uses the defaults; debugging's Phase 3.5 hypothesis review uses the hypothesis default (3); a user running `/design` directly inherits the design default (10) unless they pass `--suppression-threshold N`.
+
+**Interactive check-in (when `interactive: true`):** After round `ceil(suppression_threshold/2)` (e.g., round 5 for threshold=10, round 2 for threshold=3) completes without clean pass, emit:
+
+> "Quality gate round N (suppression active until round T). Score progression: [list]. Continue, escalate now, or skip gate?"
+
+The user's response routes to: continue (loop with suppression intact), escalate now (treat the next round's stagnation/regression signal as live regardless of suppression), or skip (terminate with `Verdict: ESCALATED`, reason "user-skipped"). One check-in per gate run; not repeated.
 
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
-2. **Pre-flight dependency audit (code artifacts only).** If artifact type is `code`, run the pre-flight dependency audit (see Pre-Flight Dependency Audit below). If the result is BLOCKED and the user does not approve continuation, abort the gate. For all other artifact types, skip this step entirely — no scan, no output, no scratch files.
+2. **Pre-flight dependency audit (delegated).** As of 2026-05-16, dependency-vulnerability scanning is `crucible:dependency-audit`, invoked by the parent orchestrator in parallel with quality-gate. Quality-gate itself no longer runs this step. If invoked standalone on a code artifact and the user expects dependency scanning, point them to `/dependency-audit`.
+2.5. **Security surface detection and siege dispatch.** Run the detection heuristic (see Security Surface Detection and Siege Dispatch). If `security_surface: detected` AND `skip_siege: false`, OR if `force_siege: true`, dispatch `crucible:siege` in parallel with the first red-team round. The two skills proceed independently. The orchestrator awaits both before terminal verdict.
 3. Prepares the artifact for review (see Artifact Preparation below)
 4. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
-5. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Write final artifact to scratch directory, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
+5. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Order of operations on a clean red-team round (0 Fatal, 0 Significant) — see Awaiting siege for cross-reference:
+   1. Await siege completion (if dispatched and still running) — see Awaiting siege.
+   2. If `SiegeVerdict != PASS`: skip Minor Issue Handling, write verdict marker with `Verdict: ESCALATED, Reason: siege-blocked`, surface siege findings, and exit.
+   3. If `SiegeVerdict: PASS` or `SiegeDispatched: false`: proceed to Minor Issue Handling (quick-fix pass on consolidated minors). Minor Issue Handling does not re-trigger siege — it operates on a known-passed artifact.
+   4. After Minor Issue Handling: write final artifact to scratch directory, write verdict marker with `Verdict: PASS, Reason: clean-pass`, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
 6. If red-team finds Fatal or Significant issues:
    a. Dispatch a **separate fix agent** (see Fix Mechanism below) — receive revised artifact, append to fix journal
    b. Dispatch **Fix Verifier** (see Fix Verification below) — one Sonnet check per fix round
@@ -176,12 +215,17 @@ would create non-deterministic stagnation behavior.
    - **Strictly lower score** → progress, loop again
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
 8. Read the judge's verdict and act on it (see Stagnation Detection below)
-9. **Progress notification.** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause.
-10. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
+9. **Progress notification.** After round `ceil(suppression_threshold / 2)` and every `max(1, suppression_threshold // 3)` rounds thereafter (rounds 5, 8, 11, 14 for threshold 10; rounds 2, 3, 4, ... for threshold 3), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause. (Start round uses `ceil` — rounds up — so the first notification lands no earlier than the midpoint; cadence uses `max(1, // 3)` — floors with a 1-minimum — so worked examples match: threshold 10 yields cadence 3, threshold 3 yields cadence 1.)
+10. **Pre-threshold escalation suppression.** Before round `suppression_threshold` (default 10 for code/design/plan; 3 for hypothesis/mockup/translation — see Skill Arguments), the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched on rounds 1 through `suppression_threshold - 4` (i.e., rounds 1-6 for threshold 10). On rounds `max(1, suppression_threshold - 3)` through `suppression_threshold - 1` (rounds 7-9 for threshold 10), **and only when `suppression_threshold ≥ 6`**, the judge runs in silent mode to seed comparison history (see Stagnation Detection > Judge Dispatch). For thresholds < 6 (hypothesis, mockup, translation defaults), there are no silent-seed rounds — the judge dispatches only at round ≥ `suppression_threshold` in normal mode. Regression detection is recorded in the round notes but does not escalate on a single round.
+
+    **Sustained-regression hard exit (convergence guarantee).** Pre-threshold suppression does NOT extend to a regression that persists across two consecutive rounds. If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` (i.e., weighted score has strictly increased two rounds running), the gate escalates immediately regardless of round number. Report: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." This rule guarantees loop termination even under suppression — without it, an oscillating fix agent (score 4 ↔ 5 ↔ 4) could burn rounds 1-9 with zero progress. Two consecutive strict increases is a structural signal that no further looping will help; one increase remains suppressed because single-round noise is expected during convergence.
+
+    The only pre-threshold exits are: clean pass (0 Fatal, 0 Significant); architectural concerns declared via the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` receipt (see Architectural Concerns Exit); sustained-regression hard exit (defined above); no-op fix detection (see Fix Mechanism > No-Op Fix Detection); consensus-stagnation pre-threshold escalation (ONLY when `consensus_query` is available; see Pre-Threshold Consensus Carve-Out); or explicit user interrupt (including the interactive check-in's "escalate now" response, see Skill Arguments). Beginning at round `suppression_threshold`, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns). When two or more exits would fire on the same round, apply the precedence rules in Escalation > Exit Precedence (first match wins).
+11. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history. This limit applies regardless of the `suppression_threshold` rule.
 
 ### Multi-Model Red-Team Review (when available)
 
-**Applies to:** Round 1 and every 3rd round thereafter (rounds 1, 4, 7, 10, 13).
+**Applies to:** Round 1, and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15. For the default `suppression_threshold` of 10, this yields cadence 3 → rounds 1, 4, 7, 10, 13. For `suppression_threshold` of 3 (hypothesis/mockup/translation), this yields cadence 1 → rounds 1, 2, 3 (effectively every pre-threshold round — short-threshold artifacts have less room to converge, so multi-model coverage on every round is justified). The `max(1, ...)` floor handles thresholds 1-2 (rare) by collapsing to cadence 1.
 **Intermediate rounds:** Standard single-model red-team dispatch (no change).
 
 On consensus-eligible rounds:
@@ -193,6 +237,22 @@ On consensus-eligible rounds:
 **Cost control:** The consensus dispatch replaces (not supplements) the single-model dispatch on eligible rounds.
 **Fallback:** If consensus is unavailable on an eligible round, dispatch standard single-model red-team review.
 
+**At-threshold consensus (when consensus round == `suppression_threshold`):** Consensus dispatches normally and produces findings; the orchestrator computes the weighted score from those findings; the standard Multi-Model Consensus path in Stagnation Detection (single-judge dispatch replaced by `consensus_query(mode: 'verdict')`) consumes those findings for the stagnation judgment. The Pre-Threshold Consensus Carve-Out does NOT apply at-or-above threshold — `agreement_level` becomes informational metadata only at that point.
+
+### Pre-Threshold Consensus Carve-Out
+
+Consensus-eligible rounds inside the suppression window (i.e., consensus-eligible rounds < `suppression_threshold`) — for the default threshold of 10, these are rounds 4 and 7 — fall inside the suppression window. The red-team consensus dispatch still runs on these rounds and produces findings — but normally the stagnation signal it implies (e.g., score didn't improve) is suppressed.
+
+**Carve-out:** When a consensus-mode red-team dispatch on a pre-threshold round returns findings whose Fatal+Significant count is identical to the prior round's AND the weighted score did not strictly decrease AND the consensus aggregator reports `agreement_level >= 0.75` (75% of responding models converged on the same finding set), the orchestrator escalates immediately with verdict `ESCALATED`, reason "consensus-stagnation-pre-threshold". Report:
+
+> "Multi-model consensus at round N shows persistent findings with high model agreement (75%+). Suppression overridden — unanimity is stronger signal than the threshold heuristic. Escalating."
+
+This preserves the value of the pre-threshold consensus investment without giving every consensus call escape-hatch power. Without the carve-out, those rounds pay full consensus cost for signal the loop is contractually deaf to.
+
+**Fallback:** If `agreement_level` is unavailable in the consensus response, treat as < 0.75 (do not escalate).
+
+**Round-1 exclusion.** The carve-out requires at least one prior round of findings for the "identical to the prior round's" comparison. It does NOT fire on Round 1, regardless of `suppression_threshold`. For `suppression_threshold ≤ 3`, this means the earliest carve-out is Round 2 (consensus rounds 1, 2, 3; pre-threshold rounds 1 and 2; round 1 excluded by this rule); for `suppression_threshold = 10`, the earliest carve-out is Round 4 (consensus rounds 1, 4, 7, 10; round 1 excluded). In all cases Round 1 is structurally ineligible because no prior-round comparison exists.
+
 ## Non-Skippability
 
 **This gate cannot be bypassed without explicit user approval.** Task size, complexity, or scope is never a valid reason to skip. The invoking skill is responsible for always dispatching the gate AND letting it run to completion.
@@ -200,6 +260,35 @@ On consensus-eligible rounds:
 **The gate is not "done" until it completes with a clean round** (0 Fatal, 0 Significant on a fresh review). Fixing findings and moving on without a verification round is a skip, not a pass. The iteration loop exists because fix agents introduce new issues or incompletely resolve old ones — fresh-eyes re-review catches what the fixer missed.
 
 **The only valid skip** is an unambiguous user instruction specifically referencing the gate (e.g., "skip the quality gate"). General feedback like "looks good" or "move on" is not skip approval. Once a gate has run and presented findings to the user, the user's decision to proceed is authoritative.
+
+## Architectural Concerns Exit
+
+A fix agent may encounter a finding that cannot be resolved by editing within the declared change boundary — the artifact's structure itself is the problem. This is the only non-clean exit that bypasses suppression at any round.
+
+**Declarant:** The fix agent only. Red-team and verifier agents may flag architectural concerns in their output, but those route through normal severity (Fatal/Significant) — only the fix agent can declare an architectural exit.
+
+**Signal format:** The fix agent's return receipt includes a `VERDICT: ARCHITECTURAL_BLOCK` line and a mandatory `CLAIMS:` citation describing the structural barrier. Format:
+
+```
+VERDICT: ARCHITECTURAL_BLOCK
+CLAIMS:
+  - <Fatal/Significant finding id from the round's red-team findings>
+  - <one-sentence explanation of why this cannot be fixed within the change boundary>
+WITNESS:
+  - kind: lint
+  - expect-fail: "fixable-within-change-boundary"
+NEXT: orchestrator-escalate-architectural
+```
+
+**Orchestrator action on ARCHITECTURAL_BLOCK:**
+1. Verify the receipt parses per Tier 1 lint (see Receipt Linter).
+2. Write `gate-verdict-<run-id>.md` with `Verdict: ARCHITECTURAL` and the standard fields.
+3. Surface to the user: "Architectural concern declared at round N by fix agent. Citation: [CLAIMS]. The artifact requires structural changes beyond the current change boundary. Options: (a) expand change boundary and re-run gate, (b) escalate to the parent skill (design or planning), (c) accept findings as-is."
+4. Do NOT loop further. ARCHITECTURAL is a terminal verdict.
+
+**Carve-out from Non-Skippability.** Non-Skippability says "the gate is not done until 0 Fatal / 0 Significant on a fresh review." The ARCHITECTURAL exit is the documented exception: it acknowledges that some findings cannot be resolved without leaving the current artifact's scope. The exit is non-clean by design and routes the user to a parent-skill remediation rather than continued looping.
+
+**Anti-rationalization.** ARCHITECTURAL is NOT an escape hatch for "this finding is hard" — the fix agent must articulate a structural reason in CLAIMS. Difficulty alone routes through normal Fatal/Significant fixing. The verdict is rare; in practice, expect 0-2 per pipeline.
 
 ## Fix Mechanism
 
@@ -219,6 +308,22 @@ The orchestrator coordinates the loop but does NOT fix artifacts directly. Fixes
 The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round.
 
 The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
+
+### No-Op Fix Detection
+
+A no-op fix is structural signal that the loop has zero forward momentum. The orchestrator detects no-op fixes via either of two conditions:
+
+1. **Byte-identical artifact:** The fix agent's returned artifact is byte-for-byte identical to the input artifact. Detect by SHA-256 comparison.
+2. **All-Unresolved verifier:** The fix verifier returns no Resolved findings (every targeted finding remains Unresolved).
+
+When either condition is met:
+- Record `no-op-fix: true` in `round-N-score.md`
+- **Escalate immediately**, regardless of round number — this overrides pre-threshold suppression. Report: "No-op fix detected at round N: [byte-identical artifact | verifier marked all findings Unresolved]. The loop has zero forward momentum. Escalating."
+- Verdict: `ESCALATED` (a no-op is not architectural — the fix agent declined to engage, not declared structurally unfixable). When the `architectural-candidates` list is empty (so no promotion re-dispatch fires), write `Reason: no-op-fix`. When the list is non-empty, the promotion path below governs the Reason token.
+
+**Architectural-candidate promotion path.** If the no-op happened while the `architectural-candidates` list is non-empty (see Fix Verification), the orchestrator re-dispatches the fix agent ONE more time. The re-dispatch prompt enumerates ALL currently-set candidate finding-ids and instructs the fix agent to either (a) resolve any one of the contested Fatal findings, or (b) return `VERDICT: ARCHITECTURAL_BLOCK` with a CLAIMS citation describing the structural barrier — any one resolution path applies independently per candidate. This re-dispatch is executed as the **Pre-precedence resolution** step (see Exit Precedence) — it runs BEFORE precedence evaluation, ensuring the fix agent's second-chance declaration is never preempted by a higher-precedence co-firing exit. The re-dispatch round does NOT increment the gate's round counter (it is a remediation retry within the same no-op round). If the second dispatch produces a clean fix, the gate continues to the next red-team round normally. After the second fix dispatch (when it produced a clean fix, not another no-op or `ARCHITECTURAL_BLOCK`), the orchestrator runs the fix verifier on the second-fix artifact before the next red-team round. The verifier's output (including the `semantic-equivalence:` lines per Step 5) replaces the first-fix verification's output in `round-N-verification.md`. This ensures the architectural-candidates clearing rule has authoritative semantic-equivalence data even when a no-op was promoted to a clean fix mid-round. If the second dispatch returns `ARCHITECTURAL_BLOCK`, route to the ARCHITECTURAL exit (see Architectural Concerns Exit). If the second dispatch also produces a no-op, exit as `ESCALATED` with reason "no-op-with-architectural-candidate" and include both no-op receipts in the escalation output.
+
+This rule is necessary because no-op rounds preserve the weighted score, which under pre-threshold suppression would otherwise loop without escalation. No-op detection is orthogonal to score trajectory.
 
 ## Scope Anchoring for Fix Agents
 
@@ -240,11 +345,15 @@ The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch di
 
 ```
 ## Round N Fix
+- **suppressed-signal:** none | regression | sustained-regression | stagnation-would-fire | diminishing-returns | oscillation
+- **no-op-fix:** true | false
 - **Findings addressed:** [list of Fatal/Significant findings from round N, summarized]
 - **Approach taken:** [1-2 sentence description of fix strategy]
 - **Files changed:** [list of files modified]
 - **Reasoning:** [why this approach was chosen over alternatives]
 ```
+
+The `suppressed-signal` and `no-op-fix` fields are copied from `round-N-score.md` after the fix completes; they are not authored by the fix agent. Forge consumes these to detect early-thrash patterns.
 
 **On subsequent rounds, the fix agent receives the full fix journal.** This gives the fix agent critical context:
 - What approaches were already tried (avoid repeating failed strategies)
@@ -276,9 +385,11 @@ After each fix agent completes and before the next red-team round, dispatch a **
 **Reading the verdict:** The verifier returns a per-finding Resolved/Unresolved table and an overall PASS/FAIL.
 
 **Handling Unresolved findings:**
-- **Fatal-severity Unresolved:** Flagged as "prior unresolved Fatal — must address" in the next round's fix dispatch. This is binding with one-round grace: if the fix agent addresses it and the next red-team round does NOT re-raise the finding, the binding expires. If the verifier marks the same Fatal as Unresolved again (persistent disagreement), the verdict downgrades to informational. Sonnet should not permanently override Opus.
+- **Fatal-severity Unresolved:** Flagged as "prior unresolved Fatal — must address" in the next round's fix dispatch. This is binding with one-round grace: if the fix agent addresses it and the next red-team round does NOT re-raise the finding, the binding expires. If the verifier marks the same Fatal as Unresolved again (persistent disagreement), the verdict downgrades to informational AND the orchestrator appends that finding-id to the `architectural-candidates` list for the next round's fix dispatch (see below). Sonnet should not permanently override Opus, but persistent verifier-red-team agreement that a Fatal cannot be fixed is structural signal — route it to the architectural exit rather than letting it churn silently.
+- **Architectural-candidate flag (set on persistent-disagreement downgrade):** The next round's fix-agent prompt enumerates every finding-id currently in the `architectural-candidates` list, e.g.: "The prior two consecutive verifier rounds both marked Fatal `<id-1>`[, `<id-2>`, ...] Unresolved while the red-team has re-raised [it/them]. If you cannot resolve any of these within the change boundary on this round, return `VERDICT: ARCHITECTURAL_BLOCK` citing one or more of these findings (see Architectural Concerns Exit) instead of producing a no-op fix."
 - **Significant-severity Unresolved:** Appended to the fix journal as informational context. The next round's fix agent may address, disagree with, or deprioritize.
 - **All Resolved (PASS):** Proceed to next red-team round normally.
+- **All Unresolved (verifier-PASS=false, no Resolved findings):** This is structural signal that the fix round did no work. The orchestrator records `no-op-fix: true` in `round-N-score.md` and applies the No-Op Fix Detector rule (see Fix Mechanism > No-Op Fix Detection).
 
 **Fix journal integration:** The verifier's output is appended under a `### Verifier Assessment` heading in the fix journal, distinct from the `## Round N Fix` entry format. This keeps verifier assessments on the remediation path (fix agents see them) without contaminating the review path (red-team never sees them).
 
@@ -288,7 +399,13 @@ After each fix agent completes and before the next red-team round, dispatch a **
 
 ## Stagnation Detection
 
-Two-layer system: the orchestrator handles scoring; a dedicated judge agent handles semantic analysis.
+A single stagnation pipeline with three optional model tiers, all gated by `suppression_threshold`:
+
+1. **Orchestrator first-pass (always runs)** — local arithmetic check on weighted score and Fatal count. Cheapest; deterministic; runs every round but only escalates at round ≥ threshold (with sustained-regression and no-op-fix as the at-any-round exceptions).
+2. **Sonnet stagnation judge (runs at round ≥ threshold - 4, silent until threshold)** — semantic comparison of finding sets across rounds. Verdict: PROGRESS / STAGNATION / DIMINISHING_RETURNS. Silent dispatches seed comparison history (see Judge Dispatch).
+3. **Multi-model consensus (runs on Round 1 and every `max(1, suppression_threshold // 3)` rounds thereafter up to round 15, when consensus_query available)** — cross-model verdict on the same comparison inputs. Higher confidence; carries pre-threshold escalation power via the consensus carve-out (see Pre-Threshold Consensus Carve-Out).
+
+The three tiers share the same trigger (same-or-higher weighted score, no Fatal improvement) but produce distinct signals at different cost points. The orchestrator first-pass is the always-on rail; the judge adds semantic recurring/new classification; consensus adds cross-model unanimity weighting. Each tier's verdict is reflected in `round-N-score.md` and `round-N-comparison.md` regardless of whether it escalates.
 
 ### First-Pass Check (orchestrator — runs every round)
 
@@ -300,9 +417,25 @@ Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count 
 
 If either condition is met → progress, loop again. No judge needed.
 
-**Oscillation detection:** If the weighted score *increases* (not just stays the same), escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
+**Pre-threshold gating.** Before round `suppression_threshold`, the single-round regression and stagnation paths below do NOT escalate. Record the signal in `round-N-score.md` for audit purposes and continue looping. The single-round-regression check below applies only at round `suppression_threshold` and later. (See Skill Arguments for threshold defaults and overrides.)
 
-**Regression with checkpoint:** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
+**Sustained-regression hard exit (applies at every round, including pre-threshold).** If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` — two consecutive strict score increases — escalate immediately as a sustained regression. This rule overrides pre-threshold suppression and guarantees loop termination. Requires at least 3 rounds of history (skip on rounds 1 and 2). See How It Works step 10 for rationale.
+
+**Oscillation detection (round ≥ `suppression_threshold`):** If the weighted score *increases* (not just stays the same) for a single round, escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
+
+**Regression with checkpoint (any escalation path on code artifacts):** When the gate escalates with `Verdict: ESCALATED | STAGNATION | SUSTAINED_REGRESSION | ARCHITECTURAL`, glob for all `pre-qg-fix-round-*` checkpoints in the checkpoint skill's store. Surface the full list in escalation output:
+
+```
+Pre-fix checkpoints from this gate run (most-recent first):
+  - round 9: <hash> (score 4, before round-9 fix)
+  - round 8: <hash> (score 3, before round-8 fix)
+  - round 7: <hash> (score 5, before round-7 fix)
+  ...
+```
+
+The user can identify the inflection point (e.g., round-3 fix made things worse) by score trajectory and choose any checkpoint to restore. Options offered: (a) restore to a chosen checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to parent orchestrator.
+
+If no checkpoints exist (checkpoint skill unavailable), escalate without the restore option.
 
 ### Multi-Model Consensus (when available)
 
@@ -328,9 +461,33 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
    metadata: models queried, models responded, agreement level, and any
    dissenting verdicts.
 
-### Judge Dispatch (only when first-pass check would trigger stagnation)
+### Judge Dispatch (silent-seed at round ≥ `max(1, suppression_threshold - 3)` when `suppression_threshold ≥ 6`; normal escalation at round ≥ `suppression_threshold`)
 
-If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
+**Rounds `1` through `max(0, suppression_threshold - 4)`:** Skip judge dispatch entirely. Loop again regardless of score trajectory. The `max(0, ...)` clamp handles short thresholds: for `suppression_threshold ≤ 4` the upper bound clamps to 0 (no rounds are skipped — judge dispatches normally starting at the threshold). For threshold 10: rounds 1-6 skipped. For threshold 3: no rounds skipped; judge runs from round 3 onward.
+
+**Seed rounds (rounds `max(1, suppression_threshold - 3)` through `suppression_threshold - 1`, only when `suppression_threshold ≥ 6`):** When the first-pass check would trigger stagnation (same-or-higher score AND no Fatal count improvement), dispatch the judge in **silent mode**. For `suppression_threshold ≤ 5` there are no seed rounds. For threshold 10 this is rounds 7-9. Silent mode is identical to normal dispatch except:
+- The judge's verdict (PROGRESS/STAGNATION/DIMINISHING_RETURNS) is logged to `round-N-comparison.md` but does NOT route to the user
+- A `silent-mode: true` line is appended to the comparison file
+- The orchestrator loops again regardless of verdict
+- The judge's `suppressed-signal` reading is mirrored into `round-N-score.md` (e.g., `suppressed-signal: stagnation-would-fire`)
+
+Silent dispatch seeds the consecutive-round comparison history that the judge's prompt expects. Without seeding, the at-threshold judge runs with no prior comparison files and the consecutive-round semantics never engage until two rounds later — leaving few escalation-eligible rounds before the 15-round limit.
+
+**Dispatch boundaries by threshold:**
+
+| `suppression_threshold` | Skip range | Seed range (silent) | First normal dispatch |
+| --- | --- | --- | --- |
+| 3 | none (clamped to 0) | none | round 3 |
+| 4 | none (clamped to 0) | none | round 4 |
+| 5 | round 1 only | none | round 5 |
+| 6 | rounds 1-2 | rounds 3-5 | round 6 |
+| 10 | rounds 1-6 | rounds 7-9 | round 10 |
+
+For thresholds 3-5 the short window means no silent-seed pass is feasible; the judge dispatches at the threshold with whatever comparison state exists. For threshold ≥ 6 the full skip-then-seed-then-normal pattern applies.
+
+**Short-threshold behavior note (thresholds 4 and 5):** The silent-seed window only opens at `suppression_threshold ≥ 6`. For thresholds 4 and 5, the at-threshold judge dispatches without any prior `round-*-comparison.md` history. The judge's "recurring-Significant for 2 consecutive rounds" rule requires comparison history; with none, the judge's fail-open default classifies findings as PROGRESS or New rather than recurring, making STAGNATION effectively unreachable on the first at-threshold round. By round `threshold+1`, one comparison file exists and the judge can detect stuck patterns normally. This is an intentional trade-off: short-threshold artifacts (hypothesis/mockup/translation in particular) prioritize fast convergence over early stagnation detection.
+
+**At round `suppression_threshold` and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
 
@@ -360,7 +517,25 @@ Code artifacts vary in size. The orchestrator prepares the artifact based on sco
 
 - **Small implementations (<500 lines diff):** Pass the full diff + any new files in full.
 - **Medium implementations (500-2000 lines):** Pass full source of high-risk files (new files, files with complex logic changes) + summaries of routine changes (imports, wiring, boilerplate). Include a change manifest listing all files with 1-line descriptions.
-- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. Normal stagnation detection, progress notifications, and round 15 safety limit apply to **total rounds across all chunks**, not per chunk. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
+- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. See Chunked Gate Counter Semantics below for how round numbering, consensus cadence, and the suppression threshold apply across chunks. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
+
+### Chunked Gate Counter Semantics
+
+A chunked gate has two independent round counters: a **local** counter per chunk (resets to 1 at each chunk start) and a **global** counter (monotonic across all chunks). These counters drive different mechanisms; the spec made them collide before this section was added.
+
+| Mechanism | Counter | Rationale |
+|---|---|---|
+| `suppression_threshold` | **local** (per chunk) | Each chunk is conceptually its own artifact converging from scratch; the convergence economics that justify a 10-round trust window apply per chunk, not globally. |
+| Consensus cadence (every `max(1, suppression_threshold // 3)` rounds, starting at 1) | **local** (per chunk) | Each chunk's round 1 deserves multi-model review; otherwise chunks 2+ never get consensus coverage. |
+| Stagnation judge dispatch | **local** (per chunk) | The judge's "consecutive-round comparison" semantics are about within-chunk convergence, not cross-chunk drift. |
+| Silent-seed judge dispatches (rounds threshold-3 to threshold-1) | **local** (per chunk) | Same reason — comparison history is per-chunk. |
+| 15-round safety limit | **global** (across all chunks) | This is runaway-protection circuit-breaker. If a 3-chunk gate is on round 16 globally, something is wrong; force escalation. |
+| `Rounds` field in verdict marker | **global** | Downstream consumers need total cost signal. |
+| `ScoreTrajectory` field | **global, with chunk boundary markers** | Format: `6,4,3,|,5,3,1,0,|,4,2,1` (pipes mark chunk boundaries). Lets forge analyze per-chunk and cross-chunk trajectory. |
+
+**Cross-chunk round:** After all chunks complete, the final integration round increments the global counter but is conceptually its own "mini-chunk" with `suppression_threshold` = 5 (lower, because integration issues should escalate faster than within-chunk issues). Consensus is mandatory for the cross-chunk round (single-model review is too narrow for integration-surface bugs).
+
+**Recovery semantics:** On compaction mid-chunked-gate, read `chunk-manifest.md` to recover chunk status. The local counter for the in-progress chunk is recovered by reading the highest N in `chunk-K/round-N-score.md`. The global counter is reconstructed by summing rounds across all completed chunks plus the in-progress chunk's local rounds.
 
 The red-team subagent receives the **prepared artifact**, not raw diff. This mirrors audit's Tier 1/Tier 2 context management approach.
 
@@ -387,198 +562,90 @@ Minor issues do not trigger fix rounds and do not count toward stagnation. Howev
 
 ## Pre-Flight Dependency Audit
 
-Runs ecosystem-appropriate dependency audit commands before the red-team loop begins. Produces an independent supply-chain signal that is surfaced to the orchestrator and user — the red-team never sees audit data.
+**Extracted to `crucible:dependency-audit` (2026-05-16).** The dependency-vulnerability scanning logic formerly inlined here is now its own skill, invoked in parallel with quality-gate by the parent orchestrator (build, debugging, user session). It produces an independent supply-chain signal that is surfaced alongside quality-gate's verdict but does not feed into quality-gate's weighted score (preserves INV-2 — host red-team findings only).
 
-**Artifact-type scoping:** Runs **only when the artifact type is `code`**. Unconditionally skipped for `design`, `plan`, `hypothesis`, `mockup`, and `translation` artifacts. When skipped, no audit section appears in gate output and no scratch files are written.
+**Migration note:** The `skip_blocking` and `min_blocking_severity` arguments no longer live on quality-gate; they belong to `crucible:dependency-audit`. Build dispatches both skills with their own arguments. Direct user invocations of `/quality-gate` no longer trigger pre-flight; users wanting both should invoke `/dependency-audit` separately or use `/build`.
 
-**Timing:** Runs after the active-run marker is written (setup phase, before the numbered steps in How It Works) but before artifact preparation and red-team dispatch. The pre-flight completes fully before the first red-team round begins.
+**Anti-anchoring preserved:** As before, dependency-audit findings are NOT passed to red-team dispatch. The two skills share an artifact but produce independent signals.
 
-### Skill Arguments
+See `skills/dependency-audit/SKILL.md` for the full audit specification (manifest scanning, ecosystem detection, severity normalization, output schema, recovery semantics).
 
-**`skip_blocking`** (boolean, default: `false`) — Global override. When `true`, disables ALL blocking regardless of `min_blocking_severity`. Findings are still reported in `audit-results.md` but no blocking occurs and the result is FINDINGS (not BLOCKED). `skip_blocking` supersedes `min_blocking_severity` entirely — they do not interact as independent thresholds.
+## Security Surface Detection and Siege Dispatch
 
-**`min_blocking_severity`** (string, default: `"critical"`, case-insensitive) — The minimum normalized severity at which a finding triggers blocking. Accepted values: `"critical"`, `"high"`, `"moderate"`, `"low"`. Invalid values are rejected with an error before execution begins. This does not change what gets reported — all findings always appear in `audit-results.md`; it only affects whether the result is BLOCKED vs FINDINGS.
+Some artifacts touch security-relevant surface and deserve a dedicated security audit pass alongside (not in place of) the red-team loop. Quality-gate inspects each artifact at gate start; when security signal is detected, it dispatches `crucible:siege` in parallel with the first red-team round. Siege runs its own attacker-perspective loop independently. The gate awaits both before declaring PASS.
 
-### Manifest Scanning
+This mirrors the dependency-audit pattern: siege is a sibling parallel skill, not a quality-gate phase. Findings flow back as an independent signal that blocks PASS but does not feed the weighted score (preserves INV-2).
 
-Walk the directory tree from artifact root, collecting all manifest files matching the supported set:
+### Detection Heuristic
 
-| Manifest File | Ecosystem |
-|---|---|
-| `package.json` | Node.js |
-| `Cargo.toml` | Rust |
-| `requirements.txt` | Python |
-| `pyproject.toml` | Python |
+Set `security_surface: detected` if ANY of the following signals fires:
 
-**Excluded directories:** `node_modules/`, `.git/`, `target/`, `dist/`, `vendor/`, `third_party/`, `.venv/`, `venv/`. These contain vendored or installed dependencies, not the project's own manifests.
+**File path / project structure:**
+- Path components matching: `auth/`, `crypto/`, `secrets/`, `tokens/`, `permissions/`, `sanitiz`, `validat`, `escape`, `csrf`, `xss`, `sqli`
+- Test paths matching the same patterns (test files that exercise security code are themselves security-relevant)
 
-**Symlinks are not followed** — following them risks infinite recursion in repos with circular symlinks or deeply nested node_modules.
+**Code patterns (code artifacts):**
+- Regex compiled from user input
+- Shell exec with string interpolation (any of: `os.system`, `subprocess.*shell=True`, backticks, `eval`, `exec`)
+- Deserialization without schema (pickle.loads, yaml.load without SafeLoader, JSON.parse-then-trust)
+- SQL with string concatenation or f-string interpolation against user-controlled values
+- File path joins where a path component is user-controlled (`os.path.join(base, user_input)` without sanitization)
+- Password / token comparisons not using constant-time (`==` against secret material)
+- Cryptographic primitives invoked directly (use of `hashlib`, `cryptography`, `crypto` libraries)
 
-**npm workspace detection:** Before scheduling per-directory `npm audit` runs, inspect each discovered `package.json` for a top-level `"workspaces"` field. If a workspace root is detected, schedule a single `npm audit` from that root directory. Do not schedule separate runs for `package.json` files in subdirectories that are members of that workspace.
+**Design / plan / hypothesis keywords:**
+- Single-word match in artifact body: `authentication`, `authorization`, `cryptographic`, `cryptography`, `session token`, `API key`, `permission boundary`, `trust boundary`, `sandbox`, `privilege`, `RBAC`, `OAuth`, `SAML`, `JWT`, `CSRF`, `XSS`, `SQL injection`, `RCE`, `deserialization`, `path traversal`
+- Two-word phrases: `user-supplied input`, `untrusted input`, `external input`, `attack surface`, `threat model`
 
-**Python dual-manifest handling:** When a directory contains both `requirements.txt` and `pyproject.toml`, audit both. They may represent different dependency sets. Duplicate findings are deduplicated at result-write time in `audit-results.md` using the key **(package name + CVE ID)** — each unique (package, CVE) pair appears once with a note of which sources reported it. Version differences for the same (package, CVE) pair are noted but not double-counted.
+**Dependency-audit signal:** If dependency-audit (running in parallel) flags Critical/High vulnerabilities in security-critical packages (auth libraries, crypto libraries, web frameworks), promote to `security_surface: detected` even if no other signal fired.
 
-**Manifest list finalization:** The manifest list is written to `preflight-audit.md` before any audit tool is invoked. This list is the authoritative scope for the run. If compaction occurs after this point, the gate resumes from the recorded list — it does not re-scan.
+**Standalone invocation note:** Standalone `/quality-gate` does not run `crucible:dependency-audit` (extracted to the parent orchestrator). Therefore the dependency-audit-promotes-security-surface path does NOT fire in standalone mode. Users wanting this signal should either: (a) invoke `/dependency-audit` first and pass `force_siege: true` to `/quality-gate` if it reports findings, or (b) use `/build`, which dispatches both skills.
 
-**Zero manifests:** If zero manifests are found anywhere in the tree, pre-flight completes as a no-op and notes this in the output summary.
+**Confidence threshold:** Keyword matches in design/plan/hypothesis artifacts are noisy. Require either ≥2 distinct keyword categories OR 1 keyword + an explicit "## Security" section. A single mention of "authentication" in passing does not trigger detection.
 
-### Ecosystem Detection and Ordering
+### Decision and Dispatch
 
-Detected manifests are audited in fixed order for deterministic output: **Node.js -> Rust -> Python**.
+After detection runs:
+- If `force_siege: true` → dispatch siege unconditionally (skip detection, log as "force-dispatched")
+- Else if `skip_siege: true` → never dispatch (log as "skip-requested")
+- Else if `security_surface: detected` → dispatch siege
+- Else → no siege dispatch (log as "no-security-surface")
 
-| Manifest File | Audit Command | Notes |
-|---|---|---|
-| `package.json` | `npm audit --json` | Run from workspace root if applicable, otherwise cwd = manifest directory |
-| `Cargo.toml` | `cargo audit --json` | Run with cwd = manifest directory |
-| `requirements.txt` | `pip-audit --format json -r requirements.txt` | Explicit `-r` flag; does NOT require active venv |
-| `pyproject.toml` | `pip-audit --format json` | Requires active venv or lockfile (see below) |
+**Dispatch timing:** Immediately before the first red-team round, in parallel. Quality-gate's loop proceeds independently; siege runs on its own scratch directory and its own counters.
 
-All detected manifests are audited independently (after workspace consolidation). Each runs as an isolated subprocess. A failure in one audit does **not** abort or skip audits for other manifests. **All ecosystems run to completion before the overall result is computed** — a BLOCKED result from one ecosystem does not short-circuit audits for remaining ecosystems.
+**Awaiting siege (all exit paths):** Before writing any terminal verdict marker, the orchestrator verifies siege has completed. This applies to ALL exits — PASS, ARCHITECTURAL, SUSTAINED_REGRESSION, STAGNATION, ESCALATED. If siege is still running:
 
-### Audit Tool Availability
+- **For PASS / clean exit:** Wait for siege unconditionally. Siege's Critical/High findings demote PASS to `ESCALATED` with reason "siege-blocked" — fix the security issue and re-run. If siege itself escalates (its own ESCALATED/STAGNATION verdict), include those findings in the gate's escalation summary. **Ordering on clean red-team round** (cross-reference How It Works step 5): (1) await siege; (2) if `SiegeVerdict != PASS`, skip Minor Issue Handling and write `Verdict: ESCALATED, Reason: siege-blocked`; (3) if siege PASSes or was not dispatched, run Minor Issue Handling on the known-passed artifact (Minor Issue Handling does NOT re-trigger siege); (4) write `Verdict: PASS, Reason: clean-pass` and cleanup.
+- **For any escalation exit (ARCHITECTURAL, SUSTAINED_REGRESSION, STAGNATION, ESCALATED):** Wait for siege if it has been running ≤ 5 minutes; otherwise cancel siege via `crucible:siege`'s interrupt mechanism and write `SiegeVerdict: UNAVAILABLE` with `SiegeReason: cancelled-by-host-exit`. The 5-minute cap prevents an in-flight siege from blocking an already-decided escalation indefinitely.
 
-Before invoking any audit tool, the gate checks availability:
+Quality-gate's verdict is always determined by the local exit condition (see Escalation > Exit Precedence); siege results are integrated into the verdict marker after the local verdict is determined. Siege's Critical/High findings BLOCK quality-gate PASS the same way a Fatal red-team finding does, but they do NOT override a higher-precedence escalation verdict — they are recorded alongside it.
 
-| Case | Condition | Action |
-|---|---|---|
-| **Available** | Tool in PATH, environment ready | Run audit |
-| **Tool missing** | Tool not in PATH | Write warning to audit-results.md, surface to user |
-| **Tool broken** | Tool found but `--version` fails | Write warning, skip |
-| **Environment not ready** | Tool found but required environment absent | Write specific reason, skip with warning |
+### Result Integration
 
-**Per-manifest environment readiness checks:**
+Verdict marker fields (extend the existing set):
 
-- **`requirements.txt`:** `pip-audit -r requirements.txt` reads the file directly. No virtualenv required. Available if `pip-audit` is on PATH.
-- **`pyproject.toml`:** `pip-audit` without `-r` inspects the installed environment. Requires an active virtualenv or a lockfile (`poetry.lock`, `pdm.lock`, `uv.lock`). If neither is present, skip with: "pip-audit requires a virtual environment or lock file for pyproject.toml; results would be unreliable."
-- **`Cargo.toml`:** Requires `Cargo.lock` to be present. If absent: "skipped — Cargo.lock absent; run cargo generate-lockfile first."
-- **`package.json`:** Requires `package-lock.json` (or `npm-shrinkwrap.json`) in the same directory (or workspace root). If absent: "skipped — no lockfile found; run npm install to generate package-lock.json." `npm` must be on PATH.
-
-**Python manifest confidence:** When only `pyproject.toml` is present (no `requirements.txt` or lockfile in the same directory), include a notice in `audit-results.md`: "**Confidence: Reduced** — No requirements.txt or lock file found. pip-audit is resolving dependencies from pyproject.toml directly. Results may be incomplete."
-
-Tool availability results are written to **`audit-results.md`** (not `preflight-audit.md`), because they are discovered at execution time, not scan time.
-
-A run where all manifests are skipped (missing tools or environment-not-ready) is reported as **INCONCLUSIVE**, not passing.
-
-### Audit Tool Error Handling
-
-Audit tools exit non-zero for two distinct reasons:
-
-- **Vulnerabilities found** — treated as a successful audit with findings (status: FINDINGS).
-- **Audit request failed** (network error, registry timeout, corrupt lockfile) — treated as a failed run (status: FAILED). Warning written, gate continues to next manifest.
-
-**Exit code contracts per tool:**
-
-| Tool | Clean | Findings | Error |
-|---|---|---|---|
-| `npm audit` | exit 0 | exit 1 | exit 2+ |
-| `cargo audit` | exit 0 | exit 1 | exit 2+ |
-| `pip-audit` | exit 0 | exit 1 | exit 2+ (or non-zero with unparseable stdout) |
-
-Use exit codes to distinguish outcomes. Do **not** parse stderr substring content to classify results.
-
-### Severity Normalization
-
-Audit tools use different severity vocabularies. The gate normalizes to a common scale. CVSS boundaries are **inclusive on the lower bound, exclusive on the upper** (e.g., a CVSS score of exactly 9.0 is Critical, not High).
-
-| Level | npm audit | cargo audit | pip-audit |
-|---|---|---|---|
-| **Critical** | `critical` | CVSS >= 9.0 | CVSS >= 9.0 |
-| **High** | `high` | CVSS >= 7.0 and < 9.0 | CVSS >= 7.0 and < 9.0 |
-| **Moderate** | `moderate` | CVSS >= 4.0 and < 7.0 | CVSS >= 4.0 and < 7.0 |
-| **Low** | `low` | CVSS >= 0.1 and < 4.0 | CVSS >= 0.1 and < 4.0 |
-| **Informational** | — | CVSS = 0.0 | CVSS = 0.0 |
-
-**CVSS 0.0** findings are classified as **Informational** — reported in `audit-results.md` but never count toward blocking. They do not map to any blocking severity level.
-
-If a finding has no CVSS score (advisory-only, no CVE assigned), it is treated as **Moderate** and flagged with `[no-cvss]` in the output.
-
-### Output Model
-
-Pre-flight produces two files under `scratch/<run-id>/`:
-
-**`preflight-audit.md`** — Scan-time plan. Written before any audit tool runs. Contains **only scan-time information**:
-- Run ID and `generated-at` timestamp (ISO-8601)
-- Manifest list with path, ecosystem, and deduplication/workspace decisions
-
-This file is **not updated after execution begins**. It is the immutable record of what the scan discovered.
-
-**`audit-results.md`** — Execution-time output. Written incrementally as each ecosystem completes. Contains:
-- Tool availability results (discovered at execution time)
-- Per-manifest findings with normalized severity
-- Deduplication notes (same CVE from multiple sources)
-- Reduced-confidence notices
-- Overall result
-
-Each ecosystem section ends with a **`status: complete`** sentinel line. A section without this sentinel is considered incomplete and must be discarded and re-run on recovery.
-
-**Schema for `audit-results.md`:**
-
-```markdown
-# Dependency Audit
-generated-at: <ISO-8601>
-run-id: <run-id>
-
-> This section is independent of red-team findings. The red-team did not see this data.
-
-## Tool Availability
-- npm audit: available
-- cargo audit: available
-- pip-audit (requirements.txt): available
-- pip-audit (pyproject.toml): unavailable — no venv or lock file
-
-## Summary
-Result: CLEAN | FINDINGS | BLOCKED | INCONCLUSIVE | FAILED
-Critical: N  High: N  Moderate: N  Low: N  Informational: N
-
-## npm — packages/api/package.json — FINDINGS
-[findings list: package, severity, CVE, fix-available]
-status: complete
-
-## pip — src/requirements.txt — FINDINGS
-## pip — src/pyproject.toml — FINDINGS
-[deduplicated: CVE-2024-XXXXX reported by both src/requirements.txt and src/pyproject.toml — counted once]
-status: complete
-
-## Warnings
-[environment-not-ready, reduced-confidence, or deduplication notes]
+```
+SiegeDispatched: true | false
+SiegeReason: detected | force | skip-requested | no-security-surface
+SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (only when SiegeDispatched=true)
+SiegeFindings: <count of Critical+High findings, 0 if none or N/A>
 ```
 
-### Overall Result Computation
+**Verdict mapping:** If `SiegeDispatched: true AND SiegeVerdict != PASS`, quality-gate's verdict cannot be `PASS` — emit `Verdict: ESCALATED` with reason "siege-blocked".
 
-When results span multiple manifests with mixed outcomes, the overall `Result:` field uses this precedence (highest wins):
+**Independent of weighted score (INV-2):** Siege findings are not summed into Fatal/Significant counts. They appear in the gate output as a separate "Security Findings" section. The red-team never sees siege output (anti-anchoring preserved).
 
-| Priority | Result | Condition |
-|---|---|---|
-| 1 (highest) | **BLOCKED** | Findings at or above `min_blocking_severity` and `skip_blocking` is false |
-| 2 | **FINDINGS** | At least one manifest returned vulnerability findings (below blocking threshold or override active) |
-| 3 | **INCONCLUSIVE** | At least one manifest was skipped (tool missing, environment not ready); no findings |
-| 4 | **FAILED** | At least one manifest tool errored; no findings and no skips |
-| 5 (lowest) | **CLEAN** | All manifests completed without findings |
+### Standalone Siege Invocations
 
-**INCONCLUSIVE outranks FAILED** because unknown coverage (a manifest exists but was never audited) is more dangerous than a known, retryable tool error.
-
-### Blocking and Prompting Behavior
-
-When a finding at or above `min_blocking_severity` is present and `skip_blocking` is not `true`:
-
-- **Interactive session** (Claude Code can prompt the user): Present the finding summary grouped by fix availability — "Fixable (N)" and "No fix available (M)" — and ask whether to continue to red-team review or abort. This grouping gives the user immediate signal on remediation effort: all-fixable blockers are a quick `npm audit fix` / `cargo update` away; no-fix blockers may require dependency replacement or acceptance.
-- **Non-interactive context** (automated pipeline, piped input): Write `Result: BLOCKED` and return to the parent orchestrator without prompting.
-
-Whether a session is interactive is a **Claude Code runtime property**, not something the skill detects via TTY heuristics or environment inspection.
-
-**Parent-pipeline integration:** When the gate returns with `Result: BLOCKED`, the parent orchestrator (build, spec, or direct user invocation) treats this the same as any gate failure — escalate to the user with the blocking findings listed. The `red-team-rounds: 0` field indicates the red-team loop never ran.
-
-### Anti-Anchoring Preservation
-
-Neither `preflight-audit.md` nor `audit-results.md` is passed to red-team dispatch. The red-team receives only the artifact under review — unchanged from current behavior. Audit findings are surfaced to the user at gate completion as an independent signal alongside (not merged with) red-team findings.
-
-### Stale Audit Results
-
-The `generated-at` timestamp marks when results were produced. Results are valid for that point in time only. The gate does **not** re-run pre-flight after fix-agent remediation within the same gate run. This is an explicit design boundary: the gate run is a point-in-time evaluation.
+Siege can still be invoked directly by the user. Quality-gate's siege dispatch is additive — it ensures siege runs when surfaced needs are detected, not exclusive. A user running `/siege` directly followed by `/quality-gate` will see siege run twice unless they pass `skip_siege: true` to the gate.
 
 ## Anti-Anchoring Rules
 
-The iterative loop's value depends on each reviewer seeing the artifact with fresh eyes. To prevent information leaking between rounds:
+The iterative loop relies on **no contextual anchoring** between rounds — each reviewer receives the artifact and prompt as if reviewing for the first time. This is a structural property the orchestrator controls (what is passed to the reviewer), not a claim about reviewer independence. Two dispatches of the same LLM on the same artifact may produce correlated findings; that correlation is acceptable as long as the orchestrator does not amplify it by leaking prior-round context.
+
+The convergence argument is therefore: *fix-agent edits change what is on the page; the next reviewer reads what is on the page; correlated findings on the same page imply real issues, not anchoring*. No claim about reviewer-to-reviewer statistical independence is made. (See `evals/anti-anchoring/` if it exists for empirical measurement; otherwise this property is asserted as a design boundary, not measured.)
+
+To prevent context leaking between rounds:
 
 1. **Clean artifact only.** The artifact passed to each round's reviewer must be the current version with no revision marks, "Fixed:" annotations, or comments about prior reviews. If the fix agent left review-response comments in the artifact, strip them before the next round.
 2. **Standardized framing.** The orchestrator's dispatch prompt must use the **same framing** for every round. Do not mention that prior review rounds occurred, what was fixed, or how many rounds have run. The reviewer sees the artifact as if it is the first review.
@@ -597,22 +664,45 @@ Quality gate writes round state to disk for compaction recovery.
 **Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge sessions).
 
 **After each round, write:**
-- `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count
+- `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count, plus the following suppression-audit fields:
+  - `delta-vs-prior`: integer (weighted score - prior weighted score; positive = regression, negative = progress)
+  - `fatal-delta`: integer (Fatal count delta vs prior round)
+  - `suppressed-signal`: one of `none | regression | sustained-regression | stagnation-would-fire | diminishing-returns | oscillation` (records what would have escalated had suppression not been in effect; `none` if no escalation signal would have fired; `sustained-regression` is itself an exit and cannot appear as suppressed)
+  - `no-op-fix`: boolean (true if round N's fix agent returned a byte-identical artifact, or the verifier returned all findings Unresolved)
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
-- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts.
-- `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes)
+- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts. Silent-seed dispatches (rounds threshold-3 through threshold-1) include a `silent-mode: true` line.
+- `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes). MUST include an `architectural-candidates: [<finding-id-1>, ...] | []` field recording the list of Fatal findings flagged as architectural-candidate as of this round. This field is now informational-only and mirrors the authoritative state in `round-N-flags.md` (see below). A finding-id is added when a Fatal is marked Unresolved for the second consecutive round (per Fix Verification).
+- `round-N-flags.md`: derived flag state in key-value form, written at the END of each round (after the red-team round completes, regardless of whether a fix was dispatched). This file exists for EVERY round, including clean-PASS rounds with no fix dispatch, so every round has a defined writer for flag state. Contents:
+  ```
+  architectural-candidates: [<finding-id-1>, <finding-id-2>, ...] | []
+  ```
+  A list of currently-set architectural-candidate findings, in the order they were marked. Empty list `[]` means no candidates. A finding-id is added to the list when the fix verifier downgrades that Fatal to informational (per Fix Verification). Multiple candidates can coexist. This is the authoritative store for flag state; `round-N-verification.md`'s `architectural-candidate:` field mirrors it for human readability but is not consulted by recovery.
+
+  **Clear condition for `architectural-candidates`:** A finding-id `<X>` is removed from the list (set difference) on round N if BOTH conditions hold:
+  1. The round-N red-team findings do not include `<X>` by literal id, AND
+  2. The round-N fix verifier (if dispatched — i.e., round N had Fatal/Significant findings) does NOT classify any new round-N finding as semantically equivalent to `<X>` under the stagnation judge's Attempted-Exposed-Deeper rule (per `stagnation-judge-prompt.md`).
+
+  If round N is a clean PASS with no fix verifier dispatched, condition (2) is trivially satisfied — the architectural concern is genuinely gone. If round N has a verifier and the verifier flags an Attempted-Exposed-Deeper relationship to `<X>`, the candidate is NOT cleared; instead the new finding's id replaces `<X>` in the list (preserving the architectural-candidate state under the new identity).
+
+  The fix verifier MUST scan round-N red-team findings against any active architectural-candidate id from `round-(N-1)-flags.md` and report semantic-equivalence determinations in its verdict, so the orchestrator can apply this clear rule deterministically.
+- `round-N-complete.md`: per-round completion sentinel. Written LAST for the round, with one of two trigger conditions:
+  - **Non-terminal round:** Written after all other round-N files are flushed AND the next round's red-team dispatch has been queued. Contents: `complete: <ISO-8601 timestamp>` and `next-round-dispatched: true`.
+  - **Terminal round** (the round on which the gate exits — clean PASS, ARCHITECTURAL, ESCALATED, SUSTAINED_REGRESSION, STAGNATION): Written after all other round-N files are flushed, BEFORE the verdict marker. Contents: `complete: <ISO-8601 timestamp>` and `terminal: <verdict>`. No next-round dispatch is queued.
+
+  The sentinel's presence guarantees round N is fully recoverable; its absence means the round is incomplete and must be discarded on recovery. The `terminal:` field tells recovery the gate had exited and the verdict marker should be the source of truth, not a continuation.
 
 **Compaction recovery:**
 0. Read `## Compression State` from `pipeline-status.md` — recover Goal, Key Decisions (including parent skill decisions that affect the gate), Active Constraints, and Next Steps. If absent, skip to step 1. Note: quality-gate is invoked by a parent skill (build, debugging, spec), so the Compression State reflects the parent's context. The quality-gate orchestrator inherits this context.
 1. Glob for `active-run-*.md` markers to locate the scratch directory.
 1b. **Pre-flight recovery (code artifacts only):** Check for `preflight-audit.md` in the scratch directory. If absent, restart from manifest scan. If present, read it to recover the manifest list. Then check `audit-results.md` for completed ecosystem sections (those ending with `status: complete` sentinel). Sections without the sentinel are discarded as incomplete. Resume from the first manifest not yet present as a complete section. Recovery re-invokes the audit tool for incomplete manifests — no raw output is cached between compaction events. After all manifests complete, regenerate the Summary section of `audit-results.md`.
-2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
+2. Read scratch directory to determine current round. The current round is the highest N with a corresponding `round-N-complete.md` sentinel. If `round-(N+1)-score.md` exists but `round-(N+1)-complete.md` does not, round (N+1) was in progress when the crash occurred — discard `round-(N+1)-*.md` files (they may be partial) and resume from round N+1's fix dispatch. If `round-N-complete.md` includes `terminal: <verdict>`, the gate had completed — proceed to verify the verdict marker exists; if so, no recovery needed (treat as completed run). If the marker is missing or partial, replay only the verdict-marker write step.
+2a. **Suppression-boundary recovery rule:** If recovery resumes at a round where the local round count ≥ `suppression_threshold`, the suppression window is over — all subsequent rounds use normal escalation logic. Crash-induced delay does not extend the trust window.
 3. Read the latest `artifact-N.md` as the current artifact state.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
 5. Read all `round-N-comparison.md` files to reconstruct consecutive-round state for the stagnation judge. Absence of comparison files is expected on clean-progress rounds.
-6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch.
+6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch. Then read the latest `round-N-flags.md` (authoritative store for flag state — exists for every round, including clean-PASS rounds): if its `architectural-candidates:` list is non-empty, restore every finding-id in the list to the next fix dispatch's prompt. Without this restoration, a crash between flag-set and the next no-op round would silently drop the candidates, breaking the no-op→architectural promotion path.
 7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
 8. Emit a Compression State Block into the conversation with gate-specific state: current round, score progression, artifact type under review. Inherit Goal and Key Decisions from the parent skill's last Compression State if available.
 8b. Check whether `consensus_query` MCP tool is available (consensus
@@ -628,9 +718,29 @@ Emit a Compression State Block at:
 - **Gate completion:** When the gate passes or escalates (before returning to parent skill)
 - **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
-**Dead-end handoff (step 5, code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 1+ round entries, copy its contents to `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective. On stagnation/escalation exit paths, also write the handoff file before escalating — stagnated sessions produce the highest-value dead-end data.
+**Forge handoff (code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 2+ round entries (i.e., at least one round had fixes to journal), copy its contents to the quality-gate memory directory as `fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective.
+
+Write the handoff on ALL exit paths with ≥2 rounds:
+- **Clean PASS at round ≥2:** write handoff so forge can detect early-thrash patterns even on successful exits ("converged but tried strategy X three times first")
+- **Any escalation:** write handoff — stagnated sessions produce the highest-value dead-end data
+- **Clean PASS at round 1:** skip the handoff (single-round successes have no remediation history worth recording)
+
+**Suppressed-signal tagging:** Each `## Round N Fix` entry in the journal includes a `suppressed-signal:` line copied from `round-N-score.md`. Forge uses this to distinguish "thrashed early, recovered" (multiple non-`none` suppressed signals followed by clean pass) from "stagnated late" (clean rounds early, stagnation near threshold). Example:
+
+```
+## Round 4 Fix
+- suppressed-signal: regression
+- no-op-fix: false
+- Findings addressed: ...
+```
+
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation). Do NOT delete verdict marker files (`gate-verdict-<run-id>.md`) — the build orchestrator is responsible for their lifecycle.
+
+**Checkpoint cleanup (code artifacts only):** On terminal exit paths:
+- **Clean PASS:** Delete all `pre-qg-fix-round-*` checkpoints from this gate run via the checkpoint skill. They served their purpose; retaining them clutters the shadow git log.
+- **Any escalation (ESCALATED, STAGNATION, SUSTAINED_REGRESSION, ARCHITECTURAL):** Retain all `pre-qg-fix-round-*` checkpoints until the user resolves the escalation. The user may invoke "restore to checkpoint" on any of them. After the user accepts the escalation (continues, restores, or kills the gate), cleanup is the responsibility of the parent orchestrator or the next gate run's stale-cleanup pass (2-hour TTL).
+- **Crash / abandoned run:** The 2-hour stale-cleanup pass at gate start handles abandoned checkpoint sets via mtime check.
 
 ## Verdict Marker
 
@@ -643,20 +753,83 @@ After Minor Issue Handling completes and before cleanup begins, write a verdict 
 **Format:** Key-value pairs, one per line:
 
 ```
-Verdict: PASS | FAIL | STAGNATION | ESCALATED
+Verdict: PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION
+Reason: clean-pass | siege-blocked | consensus-stagnation-pre-threshold | sustained-regression | no-op-fix | no-op-with-architectural-candidate | user-skipped | 15-round-circuit-breaker | stagnation-judge | single-round-regression | diminishing-returns | architectural-block-from-fix-agent | caller-detected-failure
 Phase: <phase name from invoking orchestrator, omit if standalone>
 PipelineID: <pipeline-id from invoking orchestrator, omit if standalone>
 Rounds: <total round count>
 FinalScore: <weighted score from last round>
+MaxScore: <highest weighted score observed across all rounds>
+ScoreTrajectory: <comma-separated per-round weighted scores; on chunked gates, chunk boundaries are marked with `|` between two commas (e.g., `6,4,3,|,5,3,1,0,|,4,2,1`); parsers must split on `,` and treat `|` tokens as chunk separators rather than integers, e.g., 6,4,5,4,3,0>
+SuppressedRegressions: <count of pre-threshold rounds with suppressed-signal != none>
+NoOpFixes: <count of rounds with no-op-fix = true>
+CoFiredExits: <comma-separated list of suppressed co-firing exits, omit if none>
+SiegeDispatched: true | false
+SiegeReason: detected | force | skip-requested | no-security-surface
+SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (omit if SiegeDispatched=false)
+SiegeFindings: <count of Critical+High siege findings, omit if SiegeDispatched=false>
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
 ```
+
+**Verdict enum semantics:**
+- `PASS`: gate exited cleanly (0 Fatal, 0 Significant on a fresh red-team round)
+- `FAIL`: caller-detected gate failure outside the normal exit paths (reserved for build's gate ledger). Quality-gate itself never writes `Verdict: FAIL`. The FAIL value exists in the enum for callers (build's gate ledger) that need to record a downstream-detected failure of the gate's output; such callers write `Reason: caller-detected-failure` alongside it.
+- `STAGNATION`: stagnation judge declared STAGNATION at round ≥ `suppression_threshold`
+- `ESCALATED`: any other escalation routed to the user (15-round limit, diminishing returns, single-round regression at round ≥ `suppression_threshold`)
+- `ARCHITECTURAL`: fix-agent flagged architectural concern (any round); see Architectural Concerns Exit
+- `SUSTAINED_REGRESSION`: `score(N) > score(N-1) > score(N-2)` triggered the hard exit (any round)
+
+**Reason token mapping (which exit-path writes which token):**
+- `clean-pass` — Verdict: PASS. The only valid Reason for PASS.
+- `siege-blocked` — Verdict: ESCALATED, from the Siege verdict-mapping rule (`SiegeDispatched: true AND SiegeVerdict != PASS`).
+- `consensus-stagnation-pre-threshold` — Verdict: ESCALATED, from the Pre-Threshold Consensus Carve-Out.
+- `sustained-regression` — Verdict: SUSTAINED_REGRESSION, from the sustained-regression hard exit.
+- `no-op-fix` — Verdict `ESCALATED`. The fix agent returned a byte-identical artifact, OR the verifier marked every targeted finding Unresolved, AND no architectural-candidate flag was set from a prior round. Distinct from `no-op-with-architectural-candidate`, which applies when the architectural-candidates list is non-empty.
+- `no-op-with-architectural-candidate` — Verdict: ESCALATED, from the no-op→architectural promotion path when the re-dispatch also returns a no-op.
+- `user-skipped` — Verdict: ESCALATED, from the interactive check-in's escalate-now/skip response or an out-of-band user interrupt.
+- `15-round-circuit-breaker` — Verdict: ESCALATED, from the 15-round global safety limit.
+- `stagnation-judge` — Verdict: STAGNATION, from the stagnation judge declaring STAGNATION at round ≥ `suppression_threshold`.
+- `single-round-regression` — Verdict: ESCALATED, from a single-round score increase at round ≥ `suppression_threshold`.
+- `diminishing-returns` — Verdict: ESCALATED, from the judge's DIMINISHING_RETURNS verdict.
+- `architectural-block-from-fix-agent` — Verdict: ARCHITECTURAL, from the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` declaration.
+- `caller-detected-failure` — Verdict: FAIL. Valid ONLY when `Verdict: FAIL`; written by callers (e.g., build's gate ledger) recording a downstream-detected failure of the gate's output. Quality-gate itself never writes this combination.
+
+**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis/mockup/translation gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate.
 
 **Tool:** Write tool (not Bash) since the path is under `.claude/`.
 
 **Standalone invocations:** When quality-gate is invoked directly (not by build), the `Phase` and `PipelineID` fields are omitted. The marker is still written — it serves as a completion record even without pipeline context.
 
 **Stale cleanup exclusion:** Verdict markers are NOT subject to the 2-hour stale cleanup that applies to scratch directories. They are deleted by the build orchestrator after writing the corresponding gate ledger entry. Orphaned markers (from crashed runs) are cleaned up during the build skill's ledger initialization.
+
+## Convergence Telemetry
+
+The pre-threshold suppression rule rests on a quantitative claim: "most artifacts converge to 0 Fatal / 0 Significant within a few rounds." Without measurement, the choice of threshold (default 10 for code, 3 for hypothesis) cannot be tuned or falsified. This section defines a persistent per-run convergence record that survives scratch cleanup and enables threshold calibration over time.
+
+**Path:** `convergence-log.jsonl` under the quality-gate memory directory (sibling to `gate-verdict-*.md`, NOT under `scratch/<run-id>/` which is deleted on terminal exit).
+
+**When written:** Once per gate run, immediately after the verdict marker is written and before scratch cleanup.
+
+**Tool:** Write tool (not Bash, since the path is under `.claude/`). Append-only — read existing file, append one line, write back.
+
+**Format:** One JSON object per line:
+
+```json
+{"run_id":"2026-05-16T14-30-00","artifact_type":"code","threshold":10,"rounds":4,"verdict":"PASS","final_score":0,"max_score":6,"score_trajectory":[6,4,3,0],"suppressed_regressions":1,"no_op_fixes":0,"siege_dispatched":false,"timestamp":"2026-05-16T14:38:21Z"}
+```
+
+Fields mirror the verdict marker plus `threshold` (the active `suppression_threshold` for this run). One line per gate run, regardless of verdict.
+
+**Size management:** The log is append-only. Rotate via mtime check: if the file exceeds 10,000 lines, the next gate run renames it to `convergence-log-<YYYY-MM>.jsonl` (archive) and starts a fresh log. Archives are never deleted by quality-gate — the user manages retention.
+
+**Acceptance criterion for the suppression rule:** Across the most recent 100 entries with matching `artifact_type`, ≥80% should have `rounds < threshold` AND `verdict == PASS`. If the ratio drops below 70% for a given artifact type across 50+ entries, the threshold default for that type is mistuned and should be revisited.
+
+**Sunset trigger:** If a single rolling 30-day window shows the acceptance criterion failing for any artifact type, the next gate run emits a warning at start: "Convergence telemetry shows suppression threshold for `<artifact_type>` may be mistuned: <ratio>% of recent runs PASSed under threshold. Consider overriding `suppression_threshold` for this invocation, or raising the issue for threshold review."
+
+**Privacy:** The log contains no artifact contents, no findings, no file paths from the project being gated. Run IDs are timestamps. Safe to commit, share with collaborators, or aggregate across projects.
+
+**Why not in the scratch directory:** Scratch is deleted on terminal exit. A telemetry log that survives only until the gate ends is useless for tuning. The convergence-log lives in the persistent quality-gate memory directory.
 
 ## Invocation Convention
 
@@ -668,7 +841,7 @@ Quality gate is invoked by the **outermost orchestrator only** — not self-invo
 
 The user's session is the outermost orchestrator. When a user runs `/design` directly, the design skill produces the doc and documents it as gateable. The user's session (following the design skill's instructions) invokes quality-gate.
 
-### When Used as a Sub-Skill of Build
+### When Used as a Sub-Skill of Build, Debugging, or Spec
 
 Build is the outermost orchestrator and controls all quality gates:
 
@@ -676,9 +849,7 @@ Build is the outermost orchestrator and controls all quality gates:
 - **Phase 2 (after plan review):** Quality gate on plan (artifact type: plan)
 - **Phase 4 (after implementation):** Quality gate on full implementation (artifact type: code)
 
-**Context from invoking orchestrator:** When build invokes quality-gate, it includes a "Context from invoking orchestrator" block in the dispatch prompt containing:
-- `Phase: <phase name>` — "design", "plan", or "code"
-- `PipelineID: <pipeline-id>` — the build's PipelineID (format: `build-YYYYMMDD-HHMMSS`)
+**Context from invoking orchestrator:** When a parent orchestrator (build, debugging, or spec) invokes quality-gate, it MUST include a "Context from invoking orchestrator" block in the dispatch prompt containing `Phase` (the parent's logical phase name) and `PipelineID` (the parent's unique pipeline identifier). For build, `Phase` is one of `design | plan | code` and `PipelineID` is `build-YYYYMMDD-HHMMSS`. For debugging, `Phase` is `hypothesis` or `code` (Phase 3.5 vs Phase 5) and `PipelineID` is `debug-YYYYMMDD-HHMMSS`. For spec, `Phase` is `spec` and `PipelineID` is `spec-<ticket-id>`. Quality-gate uses these to set `interactive: false` and to populate the verdict marker.
 
 Quality-gate reads these values from its dispatch context and includes them in the verdict marker. These are dispatch context values, not tool arguments — quality-gate is a skill, not an API.
 
@@ -701,50 +872,75 @@ Each artifact-producing skill's SKILL.md documents:
 
 ## Escalation
 
-Three exit modes beyond clean approval:
+Exit modes beyond clean approval. **Single-round stagnation, single-round regression, and diminishing-returns exits are suppressed before round `suppression_threshold`** — see the pre-threshold suppression rule under How It Works step 10. The sustained-regression, no-op-fix, and architectural-concerns exits apply at every round.
 
-- **Stagnation** → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating."
-- **Diminishing returns** → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
-- **Regression** (score increased) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
-- Global safety limit reached (15 rounds) → escalate to user with full round history
-- Architectural concerns → escalate immediately (bypass loop)
-- User can interrupt at any time to skip the gate
+- **Sustained regression** (any round) → escalate immediately: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." Verdict: `SUSTAINED_REGRESSION`. Applies pre-threshold too — guarantees loop termination under suppression.
+- **No-op fix** (any round) → escalate immediately on byte-identical artifact OR all-Unresolved verifier (see Fix Mechanism > No-Op Fix Detection). Verdict: `ESCALATED`. Applies pre-threshold too.
+- **Stagnation** (round ≥ threshold) → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating." Verdict: `STAGNATION`.
+- **Diminishing returns** (round ≥ threshold) → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment." Verdict: `ESCALATED`.
+- **Single-round regression** (round ≥ `suppression_threshold`) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." Verdict: `ESCALATED`.
+- **Global safety limit reached (15 rounds)** → escalate to user with full round history. Applies regardless of `suppression_threshold`. Verdict: `ESCALATED`.
+- **Architectural concerns** → fix agent returns `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). Escalate immediately, terminal verdict `ARCHITECTURAL`. Applies at any round.
+- **User interrupt** — either between-rounds interactive check-in's "escalate now"/"skip" response (see Skill Arguments) or an out-of-band interrupt. Verdict: `ESCALATED`, reason "user-skipped".
+
+### Exit Precedence
+
+A single round can satisfy more than one exit condition (e.g., sustained-regression AND no-op AND consensus-stagnation can co-fire). The orchestrator MUST select the verdict deterministically using this precedence list. Evaluate top-to-bottom; the first match wins; remaining conditions are recorded in the verdict marker for telemetry but do not change the verdict.
+
+**Pre-precedence resolution.** Before evaluating precedence, the orchestrator MUST run the no-op→architectural promotion re-dispatch if both conditions are true: (a) no-op fix detected this round, (b) the `architectural-candidates` list from a prior round is non-empty. The re-dispatch's outcome (ARCHITECTURAL_BLOCK, clean fix, or persistent no-op) then participates in normal precedence evaluation. This ensures the fix agent always gets its second chance to declare ARCHITECTURAL, even when other exits (15-round limit, consensus-stagnation, etc.) would co-fire and otherwise win precedence. Exception: if the current round is at the 15-round circuit breaker (`current_round == 15`), the pre-precedence re-dispatch is skipped and the orchestrator proceeds directly to circuit-breaker escalation. The 15-round cap is absolute — runaway protection takes precedence over architectural second-chance.
+
+1. **Clean pass** (0 Fatal, 0 Significant on a fresh red-team round) — overrides every other entry in this list, but is subject to post-precedence siege demotion (see below). A fresh-eyes clean review means the artifact is done.
+2. **ARCHITECTURAL_BLOCK** — the fix agent declared `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). The only exit declared by the fix agent itself; honor it. Verdict: `ARCHITECTURAL`.
+3. **SUSTAINED_REGRESSION** — three rounds of strictly-increasing scores (see First-Pass Check). Structural signal of active worsening; bypass everything else. Verdict: `SUSTAINED_REGRESSION`.
+4. **No-op fix ESCALATED** — byte-identical artifact OR all-Unresolved verifier (see No-Op Fix Detection). Pre-precedence resolution has already attempted the architectural-promotion re-dispatch if the `architectural-candidates` list was non-empty; by this point in evaluation, the outcome is one of: (a) re-dispatch produced a clean fix → no-op condition no longer fires; (b) re-dispatch returned ARCHITECTURAL_BLOCK → already won at precedence #2; (c) re-dispatch produced another no-op AND the architectural-candidates list was non-empty → verdict `ESCALATED` with Reason `no-op-with-architectural-candidate`; OR no-op detected with empty list (no re-dispatch fired) → verdict `ESCALATED` with Reason `no-op-fix`.
+5. **Consensus-stagnation pre-threshold ESCALATED** — ONLY when `consensus_query` is available (see Pre-Threshold Consensus Carve-Out). Verdict: `ESCALATED`, reason "consensus-stagnation-pre-threshold".
+6. **15-round circuit-breaker ESCALATED** — global safety limit. Verdict: `ESCALATED`.
+7. **At round ≥ `suppression_threshold`:** stagnation / regression / diminishing-returns ESCALATED, per the Stagnation Detection and Escalation rules above. Verdict: `STAGNATION` or `ESCALATED` as documented per exit.
+8. **User interrupt ESCALATED** — interactive check-in or out-of-band interrupt. Verdict: `ESCALATED`, reason "user-skipped".
+
+**Post-precedence siege demotion.** After the precedence list selects a local verdict, the orchestrator applies one post-processing step: if `SiegeDispatched: true` AND `SiegeVerdict != PASS` AND the local verdict is `PASS` (precedence #1), demote to `Verdict: ESCALATED` with `Reason: siege-blocked` and record the original would-be-PASS in `CoFiredExits: clean-pass-demoted-by-siege`. Siege demotion does NOT override any non-PASS local verdict (ARCHITECTURAL, SUSTAINED_REGRESSION, STAGNATION, ESCALATED) — those stand, with siege findings recorded in the dedicated `SiegeVerdict` / `SiegeFindings` marker fields. This demotion is the ONLY post-precedence verdict modification.
+
+How It Works step 10's enumeration of pre-threshold exits and the bullet list above reference this precedence; co-firing conditions resolve here. If a co-firing condition is suppressed by precedence, record it under a `CoFiredExits:` line in the verdict marker (informational only).
 
 ## Red Flags
 
-- Orchestrator fixing artifacts directly instead of dispatching a fix agent
-- Rationalizing away red-team findings instead of addressing them
-- Skipping the gate without explicit user approval — including autonomous decisions based on task size, complexity, or scope assessment ("this is small", "this is trivial", "this is just a config change")
-- Rationalizing that a change doesn't need adversarial review based on perceived simplicity
-- Declaring the gate complete after fixing findings without a clean verification round — the iteration loop must run to completion (0 Fatal, 0 Significant on a fresh review)
-- Exceeding the 15-round safety limit without escalating
-- Using the same red-team agent across rounds (always dispatch fresh)
-- Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
-- Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY)
+**Inclusion rule:** A red flag belongs here only if it describes a runtime mistake the orchestrator could make at gate time. Failure modes that the Anti-Rationalization Table, Non-Skippability, or a structural invariant (Receipt Linter, Cairn, Tripwire Manifest) already prevents do NOT appear in this list — they are mechanically impossible, not vigilance items. Any new red flag added here must come with a one-line justification of why no upstream mechanism catches it.
+
+### Loop ownership
+
+- Using the same red-team agent across rounds (always dispatch fresh — `crucible:red-team` is single-pass when invoked by quality-gate)
+- Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round's fix dispatch)
+- Orchestrator performing semantic comparison inline instead of dispatching the stagnation judge at round ≥ threshold
+
+### Anti-anchoring
+
+- Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY; verifier output is for fix agents only)
 - Leaving review-response artifacts (comments, annotations) in the artifact between rounds
 - Dispatching a fix agent without the fix journal on round 2+ (fix agents need remediation history)
-- Orchestrator performing semantic comparison inline instead of dispatching the stagnation judge
-- Dispatching the judge when the score is strictly improving (waste — score alone is sufficient)
-- Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking)
-- Skipping the fix verifier dispatch after a fix agent completes (every fix round gets verified)
-- Passing verifier output to the red-team reviewer (verifier is on the remediation path only)
-- Allowing fix agents to drift outside the declared change boundary without flagging
-- Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round)
-- Skipping Compression State Block emission at checkpoint boundaries
-- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
-- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
-- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
-- Using consensus on every red-team round (periodic only: rounds 1, 4, 7, ...)
-- Treating single-model unique findings from consensus as less important than multi-model agreements
 - Passing consensus provenance metadata to the fix agent's red-team framing (provenance is for the fix journal and orchestrator, not for biasing the next reviewer)
+
+### Scoring & verdicts (INV-2 hygiene)
+
+- Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
 - Including external review findings in the weighted score calculation (INV-2: host red-team findings ONLY)
 - Using external findings as inputs to stagnation detection scoring
+- Passing `crucible:dependency-audit` output to red-team dispatch — dependency-audit is an independent parallel signal, not red-team input
+- Dispatching the judge when the score is strictly improving (waste — score alone is sufficient)
+
+### State & recovery
+
+- Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking and silent-seed history)
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions, or letting the Goal field drift across blocks
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
+
+### Multi-model & external
+
+- Using consensus on every red-team round (periodic only: Round 1 and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15)
+- Treating single-model unique findings from consensus as less important than multi-model agreements (the prompt explicitly elevates "potentially novel" findings)
 - Blocking the host red-team round on external review availability or timeout
-- Passing pre-flight audit findings (preflight-audit.md or audit-results.md) to red-team dispatch — audit is an independent parallel signal, not red-team input
-- Skipping pre-flight for code artifacts without explicit user approval
-- Re-running pre-flight after fix rounds within the same gate run (pre-flight is a point-in-time evaluation)
-- Treating INCONCLUSIVE audit results as CLEAN — unknown coverage is more dangerous than no findings
-- Running pre-flight for non-code artifact types (design, plan, hypothesis, mockup, translation)
+
+**Retired (covered structurally):** Self-fixing instead of dispatching a fix agent, rationalizing away findings, skipping the gate without approval, declaring "complete" without a clean round, exceeding 15-round limit, escalating pre-threshold for single-round signals, dispatching the judge pre-threshold, looping past sustained regression, allowing fix-agent scope drift, skipping the fix verifier — all of these are now caught by the Anti-Rationalization Table or by structural invariants (Non-Skippability, Receipt Linter mandatory-work, Architectural Concerns Exit). They do not need separate red-flag entries.
 
 ## Integration
 
