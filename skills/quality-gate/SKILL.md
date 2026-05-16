@@ -155,11 +155,40 @@ would create non-deterministic stagnation behavior.
 | "The red-team finding is wrong / overblown, I'll mark it resolved without a fix." | Rationalizing away findings defeats the point of adversarial review. If a finding is wrong, the fix agent explicitly justifies dismissal in the fix journal — the orchestrator does not dismiss findings unilaterally. | Every Fatal/Significant finding is either fixed or documented as dismissed by the fix agent with reasoning. |
 | "The score went up but I can tell it's close, skip the stagnation judge." | Stagnation detection uses weighted score, not orchestrator intuition. Score-based inline judgment is the exact failure the judge exists to catch. | Dispatch the stagnation judge whenever score is not strictly lower than the prior round. |
 | "Round 15 hit — I'll squeeze in one more round, surely the next will pass." | The 15-round limit is a circuit breaker, not a suggestion. Exceeding it silently is how runaway loops happen. | At round 15, escalate to the user with full round history — never silently continue. |
-| "Score went up at round 4 — that's a regression, I should escalate now." | Pre-round-10 suppression is deliberate: most artifacts converge within a few rounds and early escalation interrupts that. Record the regression in `round-N-score.md` and keep looping. Exception: if score increased at BOTH round 3→4 AND round 4→5, that's sustained regression — escalate. | Single-round regressions before round 10 are suppressed; sustained regressions (2 consecutive strict increases) escalate at any round. |
-| "Round 6 scored higher than round 5, and round 5 scored higher than round 4 — but pre-round-10 suppression should still apply, right?" | No. The sustained-regression hard exit overrides suppression. Two strict score increases running is a structural signal that further looping will not help. | At round 3+, check `score(N) > score(N-1) > score(N-2)` every round; if true, escalate immediately regardless of suppression. |
-| "We're at round 8 and stuck — the user would want to know." | The suppression rule exists precisely because intuition about "stuck" is often wrong before round 10. Trust the rule; the loop continues. | Pre-round-10 escalations require explicit user interrupt or fix-agent architectural flag — orchestrator judgment does not qualify. |
+| "Score went up at round 4 — that's a regression, I should escalate now." | Pre-threshold suppression is deliberate: most artifacts converge within a few rounds and early escalation interrupts that. Record the regression in `round-N-score.md` and keep looping. Exception: if score increased at BOTH round 3→4 AND round 4→5, that's sustained regression — escalate. | Single-round regressions before `suppression_threshold` are suppressed; sustained regressions (2 consecutive strict increases) escalate at any round. |
+| "Round 6 scored higher than round 5, and round 5 scored higher than round 4 — but suppression should still apply, right?" | No. The sustained-regression hard exit overrides suppression. Two strict score increases running is a structural signal that further looping will not help. | At round 3+, check `score(N) > score(N-1) > score(N-2)` every round; if true, escalate immediately regardless of suppression. |
+| "We're at round 8 and stuck — the user would want to know." | The suppression rule exists precisely because intuition about "stuck" is often wrong before the threshold. Trust the rule; the loop continues unless one of the structural exits (sustained-regression, no-op-fix, architectural-block) fires. | Pre-threshold escalations require a structural exit or explicit user interrupt — orchestrator judgment does not qualify. |
+| "This is a hypothesis artifact and we're at round 4 — but pre-round-10 suppression should apply." | No. Hypothesis artifacts default to `suppression_threshold: 3`. At round 4 the threshold has already been crossed; normal escalation applies. Always read the threshold from skill arguments, not from memory of the default for code. | Always read `suppression_threshold` from the current invocation's arguments, never assume 10. |
 | "Pre-flight dependency audit is noise for this artifact, skip it." | The audit only runs on `code` artifacts, and on code artifacts it's mandatory. Dependency drift is a documented source of shipped bugs. | Run the dependency audit on every `code` artifact; skip silently only for non-code types. |
 | "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
+
+## Skill Arguments
+
+| Argument | Type | Default | Effect |
+|---|---|---|---|
+| `suppression_threshold` | int | (artifact-type lookup, see below) | The round number at which suppressed escalations (single-round stagnation, single-round regression, diminishing returns) become live. Below this round, only sustained-regression, no-op-fix, architectural-block, and user-interrupt can exit pre-clean. Above it, all escalation logic applies. |
+| `interactive` | bool | `true` if invoked from a standalone session, `false` if invoked by a parent orchestrator (build, debugging, spec) | When true, the orchestrator emits a between-rounds check-in at round `ceil(suppression_threshold/2)` offering the user options: continue, escalate-now, or skip. Non-interactive contexts skip this prompt. |
+| `skip_blocking` | bool | `false` | (Inherited by `crucible:dependency-audit` when build invokes both in parallel; no longer a quality-gate argument once pre-flight extraction lands. See migration note in Pre-Flight Dependency Audit section.) |
+| `min_blocking_severity` | string | `"critical"` | (Same — inherited by `crucible:dependency-audit`.) |
+
+**Artifact-type-aware default for `suppression_threshold`:**
+
+| Artifact Type | Default Threshold | Rationale |
+|---|---|---|
+| `code` | 10 | Build-pipeline economics; large diffs benefit from sustained iteration |
+| `design` | 10 | Iterative refinement on complex documents |
+| `plan` | 10 | Same as design |
+| `hypothesis` | 3 | 1-2 sentence artifacts; 10 rounds is wildly disproportionate |
+| `mockup` | 3 | Visual artifact; convergence is fast |
+| `translation` | 3 | Mock-to-Unity translation; fast iteration loop |
+
+The threshold can be overridden per invocation. Build typically uses the defaults; debugging's Phase 3.5 hypothesis review uses the hypothesis default (3); a user running `/design` directly inherits the design default (10) unless they pass `--suppression-threshold N`.
+
+**Interactive check-in (when `interactive: true`):** After round `ceil(suppression_threshold/2)` (e.g., round 5 for threshold=10, round 2 for threshold=3) completes without clean pass, emit:
+
+> "Quality gate round N (suppression active until round T). Score progression: [list]. Continue, escalate now, or skip gate?"
+
+The user's response routes to: continue (loop with suppression intact), escalate now (treat the next round's stagnation/regression signal as live regardless of suppression), or skip (terminate with `Verdict: ESCALATED`, reason "user-skipped"). One check-in per gate run; not repeated.
 
 ## How It Works
 
@@ -180,11 +209,11 @@ would create non-deterministic stagnation behavior.
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
 8. Read the judge's verdict and act on it (see Stagnation Detection below)
 9. **Progress notification.** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause.
-10. **Pre-round-10 escalation suppression.** Before round 10, the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched before round 10. Regression detection is recorded in the round notes but does not escalate on a single round.
+10. **Pre-threshold escalation suppression.** Before round `suppression_threshold` (default 10 for code/design/plan; 3 for hypothesis/mockup/translation — see Skill Arguments), the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched on rounds 1 through `suppression_threshold - 4` (i.e., rounds 1-6 for threshold 10). On rounds `suppression_threshold - 3` through `suppression_threshold - 1` (rounds 7-9 for threshold 10), the judge runs in silent mode to seed comparison history (see Stagnation Detection > Judge Dispatch). Regression detection is recorded in the round notes but does not escalate on a single round.
 
     **Sustained-regression hard exit (convergence guarantee).** Pre-round-10 suppression does NOT extend to a regression that persists across two consecutive rounds. If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` (i.e., weighted score has strictly increased two rounds running), the gate escalates immediately regardless of round number. Report: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." This rule guarantees loop termination even under suppression — without it, an oscillating fix agent (score 4 ↔ 5 ↔ 4) could burn rounds 1-9 with zero progress. Two consecutive strict increases is a structural signal that no further looping will help; one increase remains suppressed because single-round noise is expected during convergence.
 
-    The only pre-round-10 exits are: clean pass (0 Fatal, 0 Significant); architectural concerns declared via the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` receipt (see Architectural Concerns Exit); sustained-regression hard exit (defined above); or explicit user interrupt. Beginning at round 10, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns).
+    The only pre-threshold exits are: clean pass (0 Fatal, 0 Significant); architectural concerns declared via the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` receipt (see Architectural Concerns Exit); sustained-regression hard exit (defined above); no-op fix detection (see Fix Mechanism > No-Op Fix Detection); or explicit user interrupt (including the interactive check-in's "escalate now" response, see Skill Arguments). Beginning at round `suppression_threshold`, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns).
 11. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history. This limit applies regardless of the round-10 suppression rule.
 
 ### Multi-Model Red-Team Review (when available)
@@ -353,7 +382,7 @@ Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count 
 
 If either condition is met → progress, loop again. No judge needed.
 
-**Pre-round-10 gating.** Before round 10, the single-round regression and stagnation paths below do NOT escalate. Record the signal in `round-N-score.md` for audit purposes and continue looping. The stagnation judge is NOT dispatched before round 10. The single-round-regression check below applies only at round 10 and later.
+**Pre-threshold gating.** Before round `suppression_threshold`, the single-round regression and stagnation paths below do NOT escalate. Record the signal in `round-N-score.md` for audit purposes and continue looping. The single-round-regression check below applies only at round `suppression_threshold` and later. (See Skill Arguments for threshold defaults and overrides.)
 
 **Sustained-regression hard exit (applies at every round, including pre-round-10).** If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` — two consecutive strict score increases — escalate immediately as a sustained regression. This rule overrides pre-round-10 suppression and guarantees loop termination. Requires at least 3 rounds of history (skip on rounds 1 and 2). See How It Works step 10 for rationale.
 
@@ -385,11 +414,11 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
    metadata: models queried, models responded, agreement level, and any
    dissenting verdicts.
 
-### Judge Dispatch (only when first-pass check would trigger stagnation, round 10+)
+### Judge Dispatch (only when first-pass check would trigger stagnation, round ≥ suppression_threshold)
 
-**Pre-round-10 (rounds 1-6):** Skip judge dispatch entirely. Loop again regardless of score trajectory.
+**Rounds 1 through `suppression_threshold - 4`:** Skip judge dispatch entirely. Loop again regardless of score trajectory. (For threshold 10: rounds 1-6. For threshold 3: judge runs from round 3 onward; no seed rounds because the 3-round window is too short to seed.)
 
-**Seed rounds (rounds 7, 8, 9):** When the first-pass check would trigger stagnation (same-or-higher score AND no Fatal count improvement), dispatch the judge in **silent mode**. Silent mode is identical to normal dispatch except:
+**Seed rounds (rounds `suppression_threshold - 3` through `suppression_threshold - 1`, only when `suppression_threshold ≥ 6`):** When the first-pass check would trigger stagnation (same-or-higher score AND no Fatal count improvement), dispatch the judge in **silent mode**. For threshold 10 this is rounds 7-9; for threshold 3 there are no seed rounds. Silent mode is identical to normal dispatch except:
 - The judge's verdict (PROGRESS/STAGNATION/DIMINISHING_RETURNS) is logged to `round-N-comparison.md` but does NOT route to the user
 - A `silent-mode: true` line is appended to the comparison file
 - The orchestrator loops again regardless of verdict
@@ -786,15 +815,16 @@ Each artifact-producing skill's SKILL.md documents:
 
 ## Escalation
 
-Exit modes beyond clean approval. **Single-round stagnation, single-round regression, and diminishing-returns exits are suppressed before round 10** — see the pre-round-10 suppression rule under How It Works step 10. The sustained-regression and architectural-concerns exits apply at every round.
+Exit modes beyond clean approval. **Single-round stagnation, single-round regression, and diminishing-returns exits are suppressed before round `suppression_threshold`** — see the pre-threshold suppression rule under How It Works step 10. The sustained-regression, no-op-fix, and architectural-concerns exits apply at every round.
 
-- **Sustained regression** (any round) → escalate immediately: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." Applies pre-round-10 too — guarantees loop termination under suppression.
-- **Stagnation** (round 10+) → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating."
-- **Diminishing returns** (round 10+) → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
-- **Single-round regression** (round 10+) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
-- Global safety limit reached (15 rounds) → escalate to user with full round history. Applies regardless of round-10 suppression.
-- Architectural concerns → fix agent returns `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). Escalate immediately, terminal verdict `ARCHITECTURAL`. Applies at any round, including pre-round-10.
-- User can interrupt at any time to skip the gate
+- **Sustained regression** (any round) → escalate immediately: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." Verdict: `SUSTAINED_REGRESSION`. Applies pre-threshold too — guarantees loop termination under suppression.
+- **No-op fix** (any round) → escalate immediately on byte-identical artifact OR all-Unresolved verifier (see Fix Mechanism > No-Op Fix Detection). Verdict: `ESCALATED`. Applies pre-threshold too.
+- **Stagnation** (round ≥ threshold) → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating." Verdict: `STAGNATION`.
+- **Diminishing returns** (round ≥ threshold) → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment." Verdict: `ESCALATED`.
+- **Single-round regression** (round ≥ threshold) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." Verdict: `ESCALATED`.
+- **Global safety limit reached (15 rounds)** → escalate to user with full round history. Applies regardless of `suppression_threshold`. Verdict: `ESCALATED`.
+- **Architectural concerns** → fix agent returns `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). Escalate immediately, terminal verdict `ARCHITECTURAL`. Applies at any round.
+- **User interrupt** — either between-rounds interactive check-in's "escalate now"/"skip" response (see Skill Arguments) or an out-of-band interrupt. Verdict: `ESCALATED`, reason "user-skipped".
 
 ## Red Flags
 
