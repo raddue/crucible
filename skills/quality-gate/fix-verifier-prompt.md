@@ -46,6 +46,9 @@ Read the fix journal entry to understand what the fix agent claims it did to add
 ### Step 4: Return Verdict
 For each finding, return Resolved or Unresolved with a brief explanation referencing the evidence (diff location, specific text added, or absence thereof).
 
+### Step 5: Architectural-Candidate Semantic Scan
+If the dispatch context includes any active architectural-candidate finding-ids from the prior round's flags, scan the current round-N red-team findings against each candidate id. For every candidate, report a `semantic-equivalence: <candidate-id> -> <round-N-finding-id> | none` line in your receipt, classifying any equivalence under the stagnation judge's Attempted-Exposed-Deeper rule. The orchestrator consumes these lines to decide whether to clear or rename each architectural-candidate entry.
+
 ## Detection Targets
 
 1. **Cosmetic fixes** — renames, comments, restructuring that change presentation but not behavior
