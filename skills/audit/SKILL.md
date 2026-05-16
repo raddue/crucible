@@ -281,7 +281,7 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 ### Non-Code Recovery (artifact_type: design | plan | concept)
 
 1. Read `artifact-type.md` to recover the artifact type
-2. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation
+2. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation. If `dispatch-context.md` is absent and the artifact type is `plan` or `concept`, re-run step 4.5 (operating-environment gathering) before proceeding to Phase 2.
 3. **Phase 2 recovery:** Look for `<lens-name-kebab>-findings.md` files matching the type's lens names (e.g., `technical-soundness-findings.md` for design). Dispatch any lenses that don't have findings files.
 4. **Phase 2.5 recovery:** If all 4 lens findings exist but `noncode-blindspots-findings.md` does not, build the lens summary and dispatch the non-code blind-spots agent. If `noncode-blindspots-findings.md` exists, Phase 2.5 is complete.
 5. **Phase 3/4 recovery:** Same as code path — re-read findings, re-run synthesis if needed, continue with reporting.
@@ -325,7 +325,18 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    - Issue references (`#NNN`)
    - Explicit "see also" references
    For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 2000 lines total.** If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 2000-line context cap reached]". If no references found: proceed with artifact-only context.
-5. **Present user gate:** "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Proceed?"
+4.5. **Gather operating-environment context (plan and concept artifacts only).** For `plan` and `concept` artifact types, the Feasibility and Risk & Dependencies lenses cannot meaningfully assess an artifact in the abstract — they need to know what the executor actually has. For `design` artifacts, this step is OPTIONAL and may be skipped if the design is environment-independent.
+
+   Inspect:
+   - The project's `CLAUDE.md` for toolchain / build / framework constraints
+   - Any cartographer module map (`memory/cartographer/conventions.md` or similar) for architectural constraints. If the module map is flagged stale (mtime > 30 days or explicit stale marker), include the staleness note rather than the stale claims.
+   - The skill(s) the artifact names as its execution vehicle (e.g., `/audit`, `/build`, `/debug`) — pull their hard caps, budgets, and red flags from the named skill's SKILL.md
+   - The tracker conventions from `preferences.md` if present
+
+   Bundle these into a `## Operating Environment` block. **Soft cap: 500 lines.** Write to `scratch/<run-id>/dispatch-context.md` so lens dispatches reference the same file rather than each prompt copy-pasting 500 lines × 5 dispatches. If the bundle is empty (no relevant constraints found), record `## Operating Environment\n(none detected)` and proceed — the lens prompts treat an empty block as a no-op.
+
+   Anti-rationalization: skipping this step for plan/concept artifacts because "the constraints are obvious" produces generic feasibility findings ("sampling is generally hard") instead of concrete ones grounded in the executor's actual caps. Always run.
+5. **Present user gate:** "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Operating environment: [one-line summary of bundled constraints, if any]. Proceed?"
 6. **Write gate marker:** Write `scratch/<run-id>/gate-approved.md` (same as code path).
 
 ## Phase 2: Analysis
@@ -335,7 +346,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
 Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel, using `audit-noncode-lens-prompt.md` with lens-specific instruction injection.
 
 For each of the 4 lenses matching the artifact type (see Artifact Types table):
-1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`
+1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`, `{{OPERATING_ENVIRONMENT}}`. The `{{OPERATING_ENVIRONMENT}}` slot is filled from `scratch/<run-id>/dispatch-context.md` (see Phase 1 step 4.5). For `design` artifacts where Phase 1 skipped step 4.5, pass an empty string — the prompt template handles the no-op case.
 2. Dispatch via disk-mediated dispatch
 3. Write findings to `scratch/<run-id>/<lens-name-kebab>-findings.md` (e.g., `technical-soundness-findings.md`)
 
@@ -568,7 +579,7 @@ Blind-spots template (`Task tool, general-purpose, model: opus`):
 
 ### Non-Code Audit Templates
 
-- `audit-noncode-lens-prompt.md` -- Parameterized lens dispatch for all non-code artifact types. Orchestrator fills `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`.
+- `audit-noncode-lens-prompt.md` -- Parameterized lens dispatch for all non-code artifact types. Orchestrator fills `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`, `{{OPERATING_ENVIRONMENT}}`.
 - `audit-noncode-blindspots-prompt.md` -- Non-code blind-spots dispatch (receives lens summary, not coverage map)
 
 Each analysis template includes:
