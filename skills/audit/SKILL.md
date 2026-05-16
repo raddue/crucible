@@ -324,7 +324,18 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    - File paths (`path/to/file.ext`)
    - Issue references (`#NNN`)
    - Explicit "see also" references
+   - **Project-memory references** — bare filenames or relative paths that match Crucible-style memory conventions (see Project-Memory Reference Resolution below)
+   - **Skill name references** — names of skills the artifact mentions (e.g., "the `riftlock-standards` skill", "`feedback_use_component_library`")
+
    For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 2000 lines total.** If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 2000-line context cap reached]". If no references found: proceed with artifact-only context.
+
+   **Project-Memory Reference Resolution.** A reference that does not resolve repo-relative is tried against the project-memory directory at `~/.claude/projects/<project-hash>/memory/`:
+   - If the reference is a path (e.g., `memory/cartographer/conventions.md`), try `<project-memory-root>/cartographer/conventions.md`.
+   - If the reference is a bare filename matching `<prefix>_<rest>.md` where prefix is one of `user`, `feedback`, `project`, `reference` (Crucible memory convention) OR matches a date-prefixed retrospective pattern `YYYY-MM-DD-*.md`, search for it under `<project-memory-root>/` (root), `<project-memory-root>/forge/retrospectives/`, and `<project-memory-root>/cartographer/`.
+   - If the reference is a skill name (matches an entry in the available-skills list), include the skill's one-line description as supporting context. Skill body is opt-in via explicit user instruction; do NOT auto-include skill SKILL.md (token cost).
+   - **Path-collision resolution:** prefer repo-relative match over project-memory match if both exist.
+   - **No project hash known:** when the orchestrator cannot determine the project hash (e.g., running outside Claude Code, or `~/.claude/projects/<hash>/` is not discoverable from cwd), skip the project-memory fallback silently. No regression vs prior behavior.
+   - **Stale-memory annotation:** when a resolved memory file has a "stale" marker in frontmatter (some Crucible setups inject one for memories older than 30 days, or based on mtime), the orchestrator includes the file content with a leading note: "**Note: this memory was marked stale (mtime: <date>); verify current relevance before relying on its claims.**" Do not silently include stale memories without annotation.
 4.5. **Gather operating-environment context (plan and concept artifacts only).** For `plan` and `concept` artifact types, the Feasibility and Risk & Dependencies lenses cannot meaningfully assess an artifact in the abstract — they need to know what the executor actually has. For `design` artifacts, this step is OPTIONAL and may be skipped if the design is environment-independent.
 
    Inspect:
