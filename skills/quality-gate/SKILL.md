@@ -155,6 +155,9 @@ would create non-deterministic stagnation behavior.
 | "The red-team finding is wrong / overblown, I'll mark it resolved without a fix." | Rationalizing away findings defeats the point of adversarial review. If a finding is wrong, the fix agent explicitly justifies dismissal in the fix journal — the orchestrator does not dismiss findings unilaterally. | Every Fatal/Significant finding is either fixed or documented as dismissed by the fix agent with reasoning. |
 | "The score went up but I can tell it's close, skip the stagnation judge." | Stagnation detection uses weighted score, not orchestrator intuition. Score-based inline judgment is the exact failure the judge exists to catch. | Dispatch the stagnation judge whenever score is not strictly lower than the prior round. |
 | "Round 15 hit — I'll squeeze in one more round, surely the next will pass." | The 15-round limit is a circuit breaker, not a suggestion. Exceeding it silently is how runaway loops happen. | At round 15, escalate to the user with full round history — never silently continue. |
+| "Score went up at round 4 — that's a regression, I should escalate now." | Pre-round-10 suppression is deliberate: most artifacts converge within a few rounds and early escalation interrupts that. Record the regression in `round-N-score.md` and keep looping. Exception: if score increased at BOTH round 3→4 AND round 4→5, that's sustained regression — escalate. | Single-round regressions before round 10 are suppressed; sustained regressions (2 consecutive strict increases) escalate at any round. |
+| "Round 6 scored higher than round 5, and round 5 scored higher than round 4 — but pre-round-10 suppression should still apply, right?" | No. The sustained-regression hard exit overrides suppression. Two strict score increases running is a structural signal that further looping will not help. | At round 3+, check `score(N) > score(N-1) > score(N-2)` every round; if true, escalate immediately regardless of suppression. |
+| "We're at round 8 and stuck — the user would want to know." | The suppression rule exists precisely because intuition about "stuck" is often wrong before round 10. Trust the rule; the loop continues. | Pre-round-10 escalations require explicit user interrupt or fix-agent architectural flag — orchestrator judgment does not qualify. |
 | "Pre-flight dependency audit is noise for this artifact, skip it." | The audit only runs on `code` artifacts, and on code artifacts it's mandatory. Dependency drift is a documented source of shipped bugs. | Run the dependency audit on every `code` artifact; skip silently only for non-code types. |
 | "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
 
@@ -177,7 +180,12 @@ would create non-deterministic stagnation behavior.
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
 8. Read the judge's verdict and act on it (see Stagnation Detection below)
 9. **Progress notification.** After round 5 and every 3 rounds thereafter (rounds 5, 8, 11, 14), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause.
-10. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history.
+10. **Pre-round-10 escalation suppression.** Before round 10, the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched before round 10. Regression detection is recorded in the round notes but does not escalate on a single round.
+
+    **Sustained-regression hard exit (convergence guarantee).** Pre-round-10 suppression does NOT extend to a regression that persists across two consecutive rounds. If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` (i.e., weighted score has strictly increased two rounds running), the gate escalates immediately regardless of round number. Report: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." This rule guarantees loop termination even under suppression — without it, an oscillating fix agent (score 4 ↔ 5 ↔ 4) could burn rounds 1-9 with zero progress. Two consecutive strict increases is a structural signal that no further looping will help; one increase remains suppressed because single-round noise is expected during convergence.
+
+    The only pre-round-10 exits are: clean pass (0 Fatal, 0 Significant), architectural concerns flagged by the fix agent, sustained-regression hard exit (defined above), or explicit user interrupt. Beginning at round 10, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns).
+11. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history. This limit applies regardless of the round-10 suppression rule.
 
 ### Multi-Model Red-Team Review (when available)
 
@@ -300,9 +308,13 @@ Stagnation uses **weighted scoring** (Fatal=3, Significant=1) AND **Fatal count 
 
 If either condition is met → progress, loop again. No judge needed.
 
-**Oscillation detection:** If the weighted score *increases* (not just stays the same), escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
+**Pre-round-10 gating.** Before round 10, the single-round regression and stagnation paths below do NOT escalate. Record the signal in `round-N-score.md` for audit purposes and continue looping. The stagnation judge is NOT dispatched before round 10. The single-round-regression check below applies only at round 10 and later.
 
-**Regression with checkpoint:** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
+**Sustained-regression hard exit (applies at every round, including pre-round-10).** If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` — two consecutive strict score increases — escalate immediately as a sustained regression. This rule overrides pre-round-10 suppression and guarantees loop termination. Requires at least 3 rounds of history (skip on rounds 1 and 2). See How It Works step 10 for rationale.
+
+**Oscillation detection (round 10+):** If the weighted score *increases* (not just stays the same) for a single round, escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
+
+**Regression with checkpoint (round 10+):** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
 
 ### Multi-Model Consensus (when available)
 
@@ -328,9 +340,11 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
    metadata: models queried, models responded, agreement level, and any
    dissenting verdicts.
 
-### Judge Dispatch (only when first-pass check would trigger stagnation)
+### Judge Dispatch (only when first-pass check would trigger stagnation, round 10+)
 
-If neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
+**Pre-round-10:** Skip judge dispatch entirely. Loop again regardless of score trajectory.
+
+At round 10 and later, if neither progress condition is met AND the score did not increase (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
 
@@ -701,13 +715,14 @@ Each artifact-producing skill's SKILL.md documents:
 
 ## Escalation
 
-Three exit modes beyond clean approval:
+Exit modes beyond clean approval. **Single-round stagnation, single-round regression, and diminishing-returns exits are suppressed before round 10** — see the pre-round-10 suppression rule under How It Works step 10. The sustained-regression and architectural-concerns exits apply at every round.
 
-- **Stagnation** → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating."
-- **Diminishing returns** → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
-- **Regression** (score increased) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
-- Global safety limit reached (15 rounds) → escalate to user with full round history
-- Architectural concerns → escalate immediately (bypass loop)
+- **Sustained regression** (any round) → escalate immediately: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." Applies pre-round-10 too — guarantees loop termination under suppression.
+- **Stagnation** (round 10+) → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating."
+- **Diminishing returns** (round 10+) → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
+- **Single-round regression** (round 10+) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
+- Global safety limit reached (15 rounds) → escalate to user with full round history. Applies regardless of round-10 suppression.
+- Architectural concerns → escalate immediately (bypass loop). Applies at any round, including pre-round-10.
 - User can interrupt at any time to skip the gate
 
 ## Red Flags
@@ -718,6 +733,9 @@ Three exit modes beyond clean approval:
 - Rationalizing that a change doesn't need adversarial review based on perceived simplicity
 - Declaring the gate complete after fixing findings without a clean verification round — the iteration loop must run to completion (0 Fatal, 0 Significant on a fresh review)
 - Exceeding the 15-round safety limit without escalating
+- Escalating on single-round stagnation, regression, or diminishing returns before round 10 (suppression rule — these signals are recorded and looping continues)
+- Dispatching the stagnation judge before round 10 (skip the dispatch entirely; the verdict would be ignored)
+- Continuing to loop after detecting sustained regression (`score(N) > score(N-1) > score(N-2)`) — the sustained-regression hard exit overrides suppression at every round
 - Using the same red-team agent across rounds (always dispatch fresh)
 - Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
 - Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY)
