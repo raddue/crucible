@@ -320,11 +320,15 @@ The quality gate maintains a **fix journal** (`fix-journal.md` in the scratch di
 
 ```
 ## Round N Fix
+- **suppressed-signal:** none | regression | sustained-regression | stagnation-would-fire | diminishing-returns | oscillation
+- **no-op-fix:** true | false
 - **Findings addressed:** [list of Fatal/Significant findings from round N, summarized]
 - **Approach taken:** [1-2 sentence description of fix strategy]
 - **Files changed:** [list of files modified]
 - **Reasoning:** [why this approach was chosen over alternatives]
 ```
+
+The `suppressed-signal` and `no-op-fix` fields are copied from `round-N-score.md` after the fix completes; they are not authored by the fix agent. Forge consumes these to detect early-thrash patterns.
 
 **On subsequent rounds, the fix agent receives the full fix journal.** This gives the fix agent critical context:
 - What approaches were already tried (avoid repeating failed strategies)
@@ -388,7 +392,19 @@ If either condition is met → progress, loop again. No judge needed.
 
 **Oscillation detection (round 10+):** If the weighted score *increases* (not just stays the same) for a single round, escalate immediately as a **regression**. Report: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." No judge needed.
 
-**Regression with checkpoint (round 10+):** If a pre-qg-fix-round checkpoint exists for the prior round, include in the escalation: "A checkpoint of the pre-fix state exists (`<hash>`). Options: (a) restore to pre-fix checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to user." If no checkpoint exists, escalate as currently specified.
+**Regression with checkpoint (any escalation path on code artifacts):** When the gate escalates with `Verdict: ESCALATED | STAGNATION | SUSTAINED_REGRESSION | ARCHITECTURAL`, glob for all `pre-qg-fix-round-*` checkpoints in the checkpoint skill's store. Surface the full list in escalation output:
+
+```
+Pre-fix checkpoints from this gate run (most-recent first):
+  - round 9: <hash> (score 4, before round-9 fix)
+  - round 8: <hash> (score 3, before round-8 fix)
+  - round 7: <hash> (score 5, before round-7 fix)
+  ...
+```
+
+The user can identify the inflection point (e.g., round-3 fix made things worse) by score trajectory and choose any checkpoint to restore. Options offered: (a) restore to a chosen checkpoint and retry with different fix strategy, (b) continue with current state, (c) escalate to parent orchestrator.
+
+If no checkpoints exist (checkpoint skill unavailable), escalate without the restore option.
 
 ### Multi-Model Consensus (when available)
 
@@ -728,9 +744,29 @@ Emit a Compression State Block at:
 - **Gate completion:** When the gate passes or escalates (before returning to parent skill)
 - **Health transitions:** On any GREEN->YELLOW or YELLOW->RED transition
 
-**Dead-end handoff (step 5, code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 1+ round entries, copy its contents to `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective. On stagnation/escalation exit paths, also write the handoff file before escalating — stagnated sessions produce the highest-value dead-end data.
+**Forge handoff (code artifacts only):** After Minor Issue Handling and before cleanup, if `fix-journal.md` exists in the scratch directory and contains 2+ round entries (i.e., at least one round had fixes to journal), copy its contents to the quality-gate memory directory as `fix-journal-<run-id>.md` (using the gate's run-id). This is a **transient handoff artifact** for the next forge retrospective.
+
+Write the handoff on ALL exit paths with ≥2 rounds:
+- **Clean PASS at round ≥2:** write handoff so forge can detect early-thrash patterns even on successful exits ("converged but tried strategy X three times first")
+- **Any escalation:** write handoff — stagnated sessions produce the highest-value dead-end data
+- **Clean PASS at round 1:** skip the handoff (single-round successes have no remediation history worth recording)
+
+**Suppressed-signal tagging:** Each `## Round N Fix` entry in the journal includes a `suppressed-signal:` line copied from `round-N-score.md`. Forge uses this to distinguish "thrashed early, recovered" (multiple non-`none` suppressed signals followed by clean pass) from "stagnated late" (clean rounds early, stagnation near threshold). Example:
+
+```
+## Round 4 Fix
+- suppressed-signal: regression
+- no-op-fix: false
+- Findings addressed: ...
+```
+
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation). Do NOT delete verdict marker files (`gate-verdict-<run-id>.md`) — the build orchestrator is responsible for their lifecycle.
+
+**Checkpoint cleanup (code artifacts only):** On terminal exit paths:
+- **Clean PASS:** Delete all `pre-qg-fix-round-*` checkpoints from this gate run via the checkpoint skill. They served their purpose; retaining them clutters the shadow git log.
+- **Any escalation (ESCALATED, STAGNATION, SUSTAINED_REGRESSION, ARCHITECTURAL):** Retain all `pre-qg-fix-round-*` checkpoints until the user resolves the escalation. The user may invoke "restore to checkpoint" on any of them. After the user accepts the escalation (continues, restores, or kills the gate), cleanup is the responsibility of the parent orchestrator or the next gate run's stale-cleanup pass (2-hour TTL).
+- **Crash / abandoned run:** The 2-hour stale-cleanup pass at gate start handles abandoned checkpoint sets via mtime check.
 
 ## Verdict Marker
 
