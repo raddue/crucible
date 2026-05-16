@@ -485,7 +485,25 @@ Code artifacts vary in size. The orchestrator prepares the artifact based on sco
 
 - **Small implementations (<500 lines diff):** Pass the full diff + any new files in full.
 - **Medium implementations (500-2000 lines):** Pass full source of high-risk files (new files, files with complex logic changes) + summaries of routine changes (imports, wiring, boilerplate). Include a change manifest listing all files with 1-line descriptions.
-- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. Normal stagnation detection, progress notifications, and round 15 safety limit apply to **total rounds across all chunks**, not per chunk. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
+- **Large implementations (>2000 lines):** Split into logical chunks (by subsystem, module, or feature boundary). Run a quality gate on each chunk, then a final cross-chunk round reviewing the integration points. Present the chunking plan to the user before proceeding. See Chunked Gate Counter Semantics below for how round numbering, consensus cadence, and the suppression threshold apply across chunks. **Chunked compaction recovery:** Use a parent run-id for the entire chunked gate. Write `chunk-manifest.md` (lists all chunks with gated/pending status) to the parent scratch directory. Per-chunk round files go in `chunk-N/` subdirectories. Only delete the parent scratch directory after the final cross-chunk round completes. The `active-run.md` marker references the parent run-id throughout.
+
+### Chunked Gate Counter Semantics
+
+A chunked gate has two independent round counters: a **local** counter per chunk (resets to 1 at each chunk start) and a **global** counter (monotonic across all chunks). These counters drive different mechanisms; the spec made them collide before this section was added.
+
+| Mechanism | Counter | Rationale |
+|---|---|---|
+| `suppression_threshold` | **local** (per chunk) | Each chunk is conceptually its own artifact converging from scratch; the convergence economics that justify a 10-round trust window apply per chunk, not globally. |
+| Consensus cadence (rounds 1, 4, 7, 10, 13) | **local** (per chunk) | Each chunk's round 1 deserves multi-model review; otherwise chunks 2+ never get consensus coverage. |
+| Stagnation judge dispatch | **local** (per chunk) | The judge's "consecutive-round comparison" semantics are about within-chunk convergence, not cross-chunk drift. |
+| Silent-seed judge dispatches (rounds threshold-3 to threshold-1) | **local** (per chunk) | Same reason — comparison history is per-chunk. |
+| 15-round safety limit | **global** (across all chunks) | This is runaway-protection circuit-breaker. If a 3-chunk gate is on round 16 globally, something is wrong; force escalation. |
+| `Rounds` field in verdict marker | **global** | Downstream consumers need total cost signal. |
+| `ScoreTrajectory` field | **global, with chunk boundary markers** | Format: `6,4,3,|,5,3,1,0,|,4,2,1` (pipes mark chunk boundaries). Lets forge analyze per-chunk and cross-chunk trajectory. |
+
+**Cross-chunk round:** After all chunks complete, the final integration round increments the global counter but is conceptually its own "mini-chunk" with `suppression_threshold` = 5 (lower, because integration issues should escalate faster than within-chunk issues). Consensus is mandatory for the cross-chunk round (single-model review is too narrow for integration-surface bugs).
+
+**Recovery semantics:** On compaction mid-chunked-gate, read `chunk-manifest.md` to recover chunk status. The local counter for the in-progress chunk is recovered by reading the highest N in `chunk-K/round-N-score.md`. The global counter is reconstructed by summing rounds across all completed chunks plus the in-progress chunk's local rounds.
 
 The red-team subagent receives the **prepared artifact**, not raw diff. This mirrors audit's Tier 1/Tier 2 context management approach.
 
@@ -523,7 +541,11 @@ See `skills/dependency-audit/SKILL.md` for the full audit specification (manifes
 
 ## Anti-Anchoring Rules
 
-The iterative loop's value depends on each reviewer seeing the artifact with fresh eyes. To prevent information leaking between rounds:
+The iterative loop relies on **no contextual anchoring** between rounds — each reviewer receives the artifact and prompt as if reviewing for the first time. This is a structural property the orchestrator controls (what is passed to the reviewer), not a claim about reviewer independence. Two dispatches of the same LLM on the same artifact may produce correlated findings; that correlation is acceptable as long as the orchestrator does not amplify it by leaking prior-round context.
+
+The convergence argument is therefore: *fix-agent edits change what is on the page; the next reviewer reads what is on the page; correlated findings on the same page imply real issues, not anchoring*. No claim about reviewer-to-reviewer statistical independence is made. (See `evals/anti-anchoring/` if it exists for empirical measurement; otherwise this property is asserted as a design boundary, not measured.)
+
+To prevent context leaking between rounds:
 
 1. **Clean artifact only.** The artifact passed to each round's reviewer must be the current version with no revision marks, "Fixed:" annotations, or comments about prior reviews. If the fix agent left review-response comments in the artifact, strip them before the next round.
 2. **Standardized framing.** The orchestrator's dispatch prompt must use the **same framing** for every round. Do not mention that prior review rounds occurred, what was fixed, or how many rounds have run. The reviewer sees the artifact as if it is the first review.
@@ -550,14 +572,16 @@ Quality gate writes round state to disk for compaction recovery.
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
-- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts.
+- `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts. Silent-seed dispatches (rounds threshold-3 through threshold-1) include a `silent-mode: true` line.
 - `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes)
+- `round-N-complete.md`: per-round completion sentinel. Written LAST, after all other round-N files are flushed AND the next round's red-team dispatch has been queued. Contents: a single line `complete: <ISO-8601 timestamp>`. The sentinel's presence guarantees round N is fully recoverable; its absence means the round is incomplete and must be discarded on recovery.
 
 **Compaction recovery:**
 0. Read `## Compression State` from `pipeline-status.md` — recover Goal, Key Decisions (including parent skill decisions that affect the gate), Active Constraints, and Next Steps. If absent, skip to step 1. Note: quality-gate is invoked by a parent skill (build, debugging, spec), so the Compression State reflects the parent's context. The quality-gate orchestrator inherits this context.
 1. Glob for `active-run-*.md` markers to locate the scratch directory.
 1b. **Pre-flight recovery (code artifacts only):** Check for `preflight-audit.md` in the scratch directory. If absent, restart from manifest scan. If present, read it to recover the manifest list. Then check `audit-results.md` for completed ecosystem sections (those ending with `status: complete` sentinel). Sections without the sentinel are discarded as incomplete. Resume from the first manifest not yet present as a complete section. Recovery re-invokes the audit tool for incomplete manifests — no raw output is cached between compaction events. After all manifests complete, regenerate the Summary section of `audit-results.md`.
-2. Read scratch directory to determine current round (highest N in `round-N-score.md` files).
+2. Read scratch directory to determine current round. The current round is the highest N with a corresponding `round-N-complete.md` sentinel. If `round-(N+1)-score.md` exists but `round-(N+1)-complete.md` does not, round (N+1) was in progress when the crash occurred — discard `round-(N+1)-*.md` files (they may be partial) and resume from round N+1's fix dispatch.
+2a. **Suppression-boundary recovery rule:** If recovery resumes at a round where the local round count ≥ `suppression_threshold`, the suppression window is over — all subsequent rounds use normal escalation logic. Crash-induced delay does not extend the trust window.
 3. Read the latest `artifact-N.md` as the current artifact state.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
 5. Read all `round-N-comparison.md` files to reconstruct consecutive-round state for the stagnation judge. Absence of comparison files is expected on clean-progress rounds.
