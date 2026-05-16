@@ -184,7 +184,7 @@ would create non-deterministic stagnation behavior.
 
     **Sustained-regression hard exit (convergence guarantee).** Pre-round-10 suppression does NOT extend to a regression that persists across two consecutive rounds. If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` (i.e., weighted score has strictly increased two rounds running), the gate escalates immediately regardless of round number. Report: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." This rule guarantees loop termination even under suppression — without it, an oscillating fix agent (score 4 ↔ 5 ↔ 4) could burn rounds 1-9 with zero progress. Two consecutive strict increases is a structural signal that no further looping will help; one increase remains suppressed because single-round noise is expected during convergence.
 
-    The only pre-round-10 exits are: clean pass (0 Fatal, 0 Significant), architectural concerns flagged by the fix agent, sustained-regression hard exit (defined above), or explicit user interrupt. Beginning at round 10, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns).
+    The only pre-round-10 exits are: clean pass (0 Fatal, 0 Significant); architectural concerns declared via the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` receipt (see Architectural Concerns Exit); sustained-regression hard exit (defined above); or explicit user interrupt. Beginning at round 10, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns).
 11. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history. This limit applies regardless of the round-10 suppression rule.
 
 ### Multi-Model Red-Team Review (when available)
@@ -208,6 +208,35 @@ On consensus-eligible rounds:
 **The gate is not "done" until it completes with a clean round** (0 Fatal, 0 Significant on a fresh review). Fixing findings and moving on without a verification round is a skip, not a pass. The iteration loop exists because fix agents introduce new issues or incompletely resolve old ones — fresh-eyes re-review catches what the fixer missed.
 
 **The only valid skip** is an unambiguous user instruction specifically referencing the gate (e.g., "skip the quality gate"). General feedback like "looks good" or "move on" is not skip approval. Once a gate has run and presented findings to the user, the user's decision to proceed is authoritative.
+
+## Architectural Concerns Exit
+
+A fix agent may encounter a finding that cannot be resolved by editing within the declared change boundary — the artifact's structure itself is the problem. This is the only non-clean exit that bypasses suppression at any round.
+
+**Declarant:** The fix agent only. Red-team and verifier agents may flag architectural concerns in their output, but those route through normal severity (Fatal/Significant) — only the fix agent can declare an architectural exit.
+
+**Signal format:** The fix agent's return receipt includes a `VERDICT: ARCHITECTURAL_BLOCK` line and a mandatory `CLAIMS:` citation describing the structural barrier. Format:
+
+```
+VERDICT: ARCHITECTURAL_BLOCK
+CLAIMS:
+  - <Fatal/Significant finding id from the round's red-team findings>
+  - <one-sentence explanation of why this cannot be fixed within the change boundary>
+WITNESS:
+  - kind: lint
+  - expect-fail: "fixable-within-change-boundary"
+NEXT: orchestrator-escalate-architectural
+```
+
+**Orchestrator action on ARCHITECTURAL_BLOCK:**
+1. Verify the receipt parses per Tier 1 lint (see Receipt Linter).
+2. Write `gate-verdict-<run-id>.md` with `Verdict: ARCHITECTURAL` and the standard fields.
+3. Surface to the user: "Architectural concern declared at round N by fix agent. Citation: [CLAIMS]. The artifact requires structural changes beyond the current change boundary. Options: (a) expand change boundary and re-run gate, (b) escalate to the parent skill (design or planning), (c) accept findings as-is."
+4. Do NOT loop further. ARCHITECTURAL is a terminal verdict.
+
+**Carve-out from Non-Skippability.** Non-Skippability says "the gate is not done until 0 Fatal / 0 Significant on a fresh review." The ARCHITECTURAL exit is the documented exception: it acknowledges that some findings cannot be resolved without leaving the current artifact's scope. The exit is non-clean by design and routes the user to a parent-skill remediation rather than continued looping.
+
+**Anti-rationalization.** ARCHITECTURAL is NOT an escape hatch for "this finding is hard" — the fix agent must articulate a structural reason in CLAIMS. Difficulty alone routes through normal Fatal/Significant fixing. The verdict is rare; in practice, expect 0-2 per pipeline.
 
 ## Fix Mechanism
 
@@ -611,7 +640,11 @@ Quality gate writes round state to disk for compaction recovery.
 **Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge sessions).
 
 **After each round, write:**
-- `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count
+- `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count, plus the following suppression-audit fields:
+  - `delta-vs-prior`: integer (weighted score - prior weighted score; positive = regression, negative = progress)
+  - `fatal-delta`: integer (Fatal count delta vs prior round)
+  - `suppressed-signal`: one of `none | regression | sustained-regression | stagnation-would-fire | diminishing-returns | oscillation` (records what would have escalated had suppression not been in effect; `none` if no escalation signal would have fired; `sustained-regression` is itself an exit and cannot appear as suppressed)
+  - `no-op-fix`: boolean (true if round N's fix agent returned a byte-identical artifact, or the verifier returned all findings Unresolved)
 - `round-N-findings.md`: the red-team findings for this round
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
@@ -657,14 +690,28 @@ After Minor Issue Handling completes and before cleanup begins, write a verdict 
 **Format:** Key-value pairs, one per line:
 
 ```
-Verdict: PASS | FAIL | STAGNATION | ESCALATED
+Verdict: PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION
 Phase: <phase name from invoking orchestrator, omit if standalone>
 PipelineID: <pipeline-id from invoking orchestrator, omit if standalone>
 Rounds: <total round count>
 FinalScore: <weighted score from last round>
+MaxScore: <highest weighted score observed across all rounds>
+ScoreTrajectory: <comma-separated per-round weighted scores, e.g., 6,4,5,4,3,0>
+SuppressedRegressions: <count of pre-round-10 rounds with suppressed-signal != none>
+NoOpFixes: <count of rounds with no-op-fix = true>
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
 ```
+
+**Verdict enum semantics:**
+- `PASS`: gate exited cleanly (0 Fatal, 0 Significant on a fresh red-team round)
+- `FAIL`: caller-detected gate failure outside the normal exit paths (reserved for build's gate ledger)
+- `STAGNATION`: stagnation judge declared STAGNATION at round 10+
+- `ESCALATED`: any other escalation routed to the user (15-round limit, diminishing returns, single-round regression at round 10+)
+- `ARCHITECTURAL`: fix-agent flagged architectural concern (any round); see Architectural Concerns Exit
+- `SUSTAINED_REGRESSION`: `score(N) > score(N-1) > score(N-2)` triggered the hard exit (any round)
+
+**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + 2 OR NoOpFixes > 0)`. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate.
 
 **Tool:** Write tool (not Bash) since the path is under `.claude/`.
 
@@ -722,7 +769,7 @@ Exit modes beyond clean approval. **Single-round stagnation, single-round regres
 - **Diminishing returns** (round 10+) → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
 - **Single-round regression** (round 10+) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating."
 - Global safety limit reached (15 rounds) → escalate to user with full round history. Applies regardless of round-10 suppression.
-- Architectural concerns → escalate immediately (bypass loop). Applies at any round, including pre-round-10.
+- Architectural concerns → fix agent returns `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). Escalate immediately, terminal verdict `ARCHITECTURAL`. Applies at any round, including pre-round-10.
 - User can interrupt at any time to skip the gate
 
 ## Red Flags
