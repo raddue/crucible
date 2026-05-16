@@ -725,39 +725,43 @@ Exit modes beyond clean approval. **Single-round stagnation, single-round regres
 
 ## Red Flags
 
-- Orchestrator fixing artifacts directly instead of dispatching a fix agent
-- Rationalizing away red-team findings instead of addressing them
-- Skipping the gate without explicit user approval — including autonomous decisions based on task size, complexity, or scope assessment ("this is small", "this is trivial", "this is just a config change")
-- Rationalizing that a change doesn't need adversarial review based on perceived simplicity
-- Declaring the gate complete after fixing findings without a clean verification round — the iteration loop must run to completion (0 Fatal, 0 Significant on a fresh review)
-- Exceeding the 15-round safety limit without escalating
-- Escalating on single-round stagnation, regression, or diminishing returns before round 10 (suppression rule — these signals are recorded and looping continues)
-- Dispatching the stagnation judge on rounds 1-6 (skip entirely)
-- Routing a silent-mode judge verdict (rounds 7-9) to the user — silent dispatches log only, never escalate
-- Continuing to loop after detecting sustained regression (`score(N) > score(N-1) > score(N-2)`) — the sustained-regression hard exit overrides suppression at every round
-- Using the same red-team agent across rounds (always dispatch fresh)
-- Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
-- Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY)
+**Inclusion rule:** A red flag belongs here only if it describes a runtime mistake the orchestrator could make at gate time. Failure modes that the Anti-Rationalization Table, Non-Skippability, or a structural invariant (Receipt Linter, Cairn, Tripwire Manifest) already prevents do NOT appear in this list — they are mechanically impossible, not vigilance items. Any new red flag added here must come with a one-line justification of why no upstream mechanism catches it.
+
+### Loop ownership
+
+- Using the same red-team agent across rounds (always dispatch fresh — `crucible:red-team` is single-pass when invoked by quality-gate)
+- Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round's fix dispatch)
+- Orchestrator performing semantic comparison inline instead of dispatching the stagnation judge at round ≥ threshold
+
+### Anti-anchoring
+
+- Passing revision context, prior findings, round history, or fix journal to the red-team reviewer (fix journal is for fix agents ONLY; verifier output is for fix agents only)
 - Leaving review-response artifacts (comments, annotations) in the artifact between rounds
 - Dispatching a fix agent without the fix journal on round 2+ (fix agents need remediation history)
-- Orchestrator performing semantic comparison inline instead of dispatching the stagnation judge
-- Dispatching the judge when the score is strictly improving (waste — score alone is sufficient)
-- Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking)
-- Skipping the fix verifier dispatch after a fix agent completes (every fix round gets verified)
-- Passing verifier output to the red-team reviewer (verifier is on the remediation path only)
-- Allowing fix agents to drift outside the declared change boundary without flagging
-- Re-dispatching the fix agent based on verifier results (no re-fix sub-loop — verifier checks once, output feeds into next round)
-- Skipping Compression State Block emission at checkpoint boundaries
-- Emitting a Compression State Block with stale or missing Key Decisions (decisions must be cumulative across all prior blocks)
-- Allowing the Goal field to drift across successive Compression State Blocks (must match original user request)
-- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
-- Using consensus on every red-team round (periodic only: rounds 1, 4, 7, ...)
-- Treating single-model unique findings from consensus as less important than multi-model agreements
 - Passing consensus provenance metadata to the fix agent's red-team framing (provenance is for the fix journal and orchestrator, not for biasing the next reviewer)
+
+### Scoring & verdicts (INV-2 hygiene)
+
+- Declaring stagnation on raw issue count without using weighted score (Fatal=3, Significant=1)
 - Including external review findings in the weighted score calculation (INV-2: host red-team findings ONLY)
 - Using external findings as inputs to stagnation detection scoring
+- Passing `crucible:dependency-audit` output to red-team dispatch — dependency-audit is an independent parallel signal, not red-team input
+- Dispatching the judge when the score is strictly improving (waste — score alone is sufficient)
+
+### State & recovery
+
+- Forgetting to save the judge's output as `round-N-comparison.md` (breaks consecutive-round tracking and silent-seed history)
+- Skipping Compression State Block emission at checkpoint boundaries
+- Emitting a Compression State Block with stale or missing Key Decisions, or letting the Goal field drift across blocks
+- Exceeding 10 entries in the Key Decisions list without overflow-compressing the oldest
+
+### Multi-model & external
+
+- Using consensus on every red-team round (periodic only: rounds 1, 4, 7, 10, 13)
+- Treating single-model unique findings from consensus as less important than multi-model agreements (the prompt explicitly elevates "potentially novel" findings)
 - Blocking the host red-team round on external review availability or timeout
-- Passing `crucible:dependency-audit` output (preflight-audit.md or audit-results.md) to red-team dispatch — dependency-audit is an independent parallel signal, not red-team input
+
+**Retired (covered structurally):** Self-fixing instead of dispatching a fix agent, rationalizing away findings, skipping the gate without approval, declaring "complete" without a clean round, exceeding 15-round limit, escalating pre-threshold for single-round signals, dispatching the judge pre-threshold, looping past sustained regression, allowing fix-agent scope drift, skipping the fix verifier — all of these are now caught by the Anti-Rationalization Table or by structural invariants (Non-Skippability, Receipt Linter mandatory-work, Architectural Concerns Exit). They do not need separate red-flag entries.
 
 ## Integration
 
