@@ -230,6 +230,18 @@ On consensus-eligible rounds:
 **Cost control:** The consensus dispatch replaces (not supplements) the single-model dispatch on eligible rounds.
 **Fallback:** If consensus is unavailable on an eligible round, dispatch standard single-model red-team review.
 
+### Pre-Threshold Consensus Carve-Out
+
+Consensus-eligible rounds 4 and 7 fall inside the suppression window for the default `suppression_threshold` of 10. The red-team consensus dispatch still runs on these rounds and produces findings — but normally the stagnation signal it implies (e.g., score didn't improve) is suppressed.
+
+**Carve-out:** When a consensus-mode red-team dispatch on a pre-threshold round returns findings whose Fatal+Significant count is identical to the prior round's AND the weighted score did not strictly decrease AND the consensus aggregator reports `agreement_level >= 0.75` (75% of responding models converged on the same finding set), the orchestrator escalates immediately with verdict `ESCALATED`, reason "consensus-stagnation-pre-threshold". Report:
+
+> "Multi-model consensus at round N shows persistent findings with high model agreement (75%+). Suppression overridden — unanimity is stronger signal than the threshold heuristic. Escalating."
+
+This preserves the value of the rounds-4/7 consensus investment without giving every consensus call escape-hatch power. Without the carve-out, those rounds pay full consensus cost for signal the loop is contractually deaf to.
+
+**Fallback:** If `agreement_level` is unavailable in the consensus response, treat as < 0.75 (do not escalate).
+
 ## Non-Skippability
 
 **This gate cannot be bypassed without explicit user approval.** Task size, complexity, or scope is never a valid reason to skip. The invoking skill is responsible for always dispatching the gate AND letting it run to completion.
@@ -374,7 +386,13 @@ After each fix agent completes and before the next red-team round, dispatch a **
 
 ## Stagnation Detection
 
-Two-layer system: the orchestrator handles scoring; a dedicated judge agent handles semantic analysis.
+A single stagnation pipeline with three optional model tiers, all gated by `suppression_threshold`:
+
+1. **Orchestrator first-pass (always runs)** — local arithmetic check on weighted score and Fatal count. Cheapest; deterministic; runs every round but only escalates at round ≥ threshold (with sustained-regression and no-op-fix as the at-any-round exceptions).
+2. **Sonnet stagnation judge (runs at round ≥ threshold - 4, silent until threshold)** — semantic comparison of finding sets across rounds. Verdict: PROGRESS / STAGNATION / DIMINISHING_RETURNS. Silent dispatches seed comparison history (see Judge Dispatch).
+3. **Multi-model consensus (runs on rounds 1, 4, 7, 10, 13 when consensus_query available)** — cross-model verdict on the same comparison inputs. Higher confidence; carries pre-threshold escalation power via the consensus carve-out (see Pre-Threshold Consensus Carve-Out).
+
+The three tiers share the same trigger (same-or-higher weighted score, no Fatal improvement) but produce distinct signals at different cost points. The orchestrator first-pass is the always-on rail; the judge adds semantic recurring/new classification; consensus adds cross-model unanimity weighting. Each tier's verdict is reflected in `round-N-score.md` and `round-N-comparison.md` regardless of whether it escalates.
 
 ### First-Pass Check (orchestrator — runs every round)
 
