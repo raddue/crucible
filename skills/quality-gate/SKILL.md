@@ -159,7 +159,6 @@ would create non-deterministic stagnation behavior.
 | "Round 6 scored higher than round 5, and round 5 scored higher than round 4 — but suppression should still apply, right?" | No. The sustained-regression hard exit overrides suppression. Two strict score increases running is a structural signal that further looping will not help. | At round 3+, check `score(N) > score(N-1) > score(N-2)` every round; if true, escalate immediately regardless of suppression. |
 | "We're at round 8 and stuck — the user would want to know." | The suppression rule exists precisely because intuition about "stuck" is often wrong before the threshold. Trust the rule; the loop continues unless one of the structural exits (sustained-regression, no-op-fix, architectural-block) fires. | Pre-threshold escalations require a structural exit or explicit user interrupt — orchestrator judgment does not qualify. |
 | "This is a hypothesis artifact and we're at round 4 — but pre-round-10 suppression should apply." | No. Hypothesis artifacts default to `suppression_threshold: 3`. At round 4 the threshold has already been crossed; normal escalation applies. Always read the threshold from skill arguments, not from memory of the default for code. | Always read `suppression_threshold` from the current invocation's arguments, never assume 10. |
-| "Pre-flight dependency audit is noise for this artifact, skip it." | The audit only runs on `code` artifacts, and on code artifacts it's mandatory. Dependency drift is a documented source of shipped bugs. | Run the dependency audit on every `code` artifact; skip silently only for non-code types. |
 | "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
 
 ## Skill Arguments
@@ -168,8 +167,6 @@ would create non-deterministic stagnation behavior.
 |---|---|---|---|
 | `suppression_threshold` | int | (artifact-type lookup, see below) | The round number at which suppressed escalations (single-round stagnation, single-round regression, diminishing returns) become live. Below this round, only sustained-regression, no-op-fix, architectural-block, and user-interrupt can exit pre-clean. Above it, all escalation logic applies. |
 | `interactive` | bool | `true` if invoked from a standalone session, `false` if invoked by a parent orchestrator (build, debugging, spec) | When true, the orchestrator emits a between-rounds check-in at round `ceil(suppression_threshold/2)` offering the user options: continue, escalate-now, or skip. Non-interactive contexts skip this prompt. |
-| `skip_blocking` | bool | `false` | (Inherited by `crucible:dependency-audit` when build invokes both in parallel; no longer a quality-gate argument once pre-flight extraction lands. See migration note in Pre-Flight Dependency Audit section.) |
-| `min_blocking_severity` | string | `"critical"` | (Same — inherited by `crucible:dependency-audit`.) |
 
 **Artifact-type-aware default for `suppression_threshold`:**
 
@@ -193,7 +190,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
 ## How It Works
 
 1. Receives: artifact content, artifact type, project context
-2. **Pre-flight dependency audit (code artifacts only).** If artifact type is `code`, run the pre-flight dependency audit (see Pre-Flight Dependency Audit below). If the result is BLOCKED and the user does not approve continuation, abort the gate. For all other artifact types, skip this step entirely — no scan, no output, no scratch files.
+2. **Pre-flight dependency audit (delegated).** As of 2026-05-16, dependency-vulnerability scanning is `crucible:dependency-audit`, invoked by the parent orchestrator in parallel with quality-gate. Quality-gate itself no longer runs this step. If invoked standalone on a code artifact and the user expects dependency scanning, point them to `/dependency-audit`.
 3. Prepares the artifact for review (see Artifact Preparation below)
 4. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
 5. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Write final artifact to scratch directory, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
@@ -517,194 +514,14 @@ Minor issues do not trigger fix rounds and do not count toward stagnation. Howev
 
 ## Pre-Flight Dependency Audit
 
-Runs ecosystem-appropriate dependency audit commands before the red-team loop begins. Produces an independent supply-chain signal that is surfaced to the orchestrator and user — the red-team never sees audit data.
+**Extracted to `crucible:dependency-audit` (2026-05-16).** The dependency-vulnerability scanning logic formerly inlined here is now its own skill, invoked in parallel with quality-gate by the parent orchestrator (build, debugging, user session). It produces an independent supply-chain signal that is surfaced alongside quality-gate's verdict but does not feed into quality-gate's weighted score (preserves INV-2 — host red-team findings only).
 
-**Artifact-type scoping:** Runs **only when the artifact type is `code`**. Unconditionally skipped for `design`, `plan`, `hypothesis`, `mockup`, and `translation` artifacts. When skipped, no audit section appears in gate output and no scratch files are written.
+**Migration note:** The `skip_blocking` and `min_blocking_severity` arguments no longer live on quality-gate; they belong to `crucible:dependency-audit`. Build dispatches both skills with their own arguments. Direct user invocations of `/quality-gate` no longer trigger pre-flight; users wanting both should invoke `/dependency-audit` separately or use `/build`.
 
-**Timing:** Runs after the active-run marker is written (setup phase, before the numbered steps in How It Works) but before artifact preparation and red-team dispatch. The pre-flight completes fully before the first red-team round begins.
+**Anti-anchoring preserved:** As before, dependency-audit findings are NOT passed to red-team dispatch. The two skills share an artifact but produce independent signals.
 
-### Skill Arguments
+See `skills/dependency-audit/SKILL.md` for the full audit specification (manifest scanning, ecosystem detection, severity normalization, output schema, recovery semantics).
 
-**`skip_blocking`** (boolean, default: `false`) — Global override. When `true`, disables ALL blocking regardless of `min_blocking_severity`. Findings are still reported in `audit-results.md` but no blocking occurs and the result is FINDINGS (not BLOCKED). `skip_blocking` supersedes `min_blocking_severity` entirely — they do not interact as independent thresholds.
-
-**`min_blocking_severity`** (string, default: `"critical"`, case-insensitive) — The minimum normalized severity at which a finding triggers blocking. Accepted values: `"critical"`, `"high"`, `"moderate"`, `"low"`. Invalid values are rejected with an error before execution begins. This does not change what gets reported — all findings always appear in `audit-results.md`; it only affects whether the result is BLOCKED vs FINDINGS.
-
-### Manifest Scanning
-
-Walk the directory tree from artifact root, collecting all manifest files matching the supported set:
-
-| Manifest File | Ecosystem |
-|---|---|
-| `package.json` | Node.js |
-| `Cargo.toml` | Rust |
-| `requirements.txt` | Python |
-| `pyproject.toml` | Python |
-
-**Excluded directories:** `node_modules/`, `.git/`, `target/`, `dist/`, `vendor/`, `third_party/`, `.venv/`, `venv/`. These contain vendored or installed dependencies, not the project's own manifests.
-
-**Symlinks are not followed** — following them risks infinite recursion in repos with circular symlinks or deeply nested node_modules.
-
-**npm workspace detection:** Before scheduling per-directory `npm audit` runs, inspect each discovered `package.json` for a top-level `"workspaces"` field. If a workspace root is detected, schedule a single `npm audit` from that root directory. Do not schedule separate runs for `package.json` files in subdirectories that are members of that workspace.
-
-**Python dual-manifest handling:** When a directory contains both `requirements.txt` and `pyproject.toml`, audit both. They may represent different dependency sets. Duplicate findings are deduplicated at result-write time in `audit-results.md` using the key **(package name + CVE ID)** — each unique (package, CVE) pair appears once with a note of which sources reported it. Version differences for the same (package, CVE) pair are noted but not double-counted.
-
-**Manifest list finalization:** The manifest list is written to `preflight-audit.md` before any audit tool is invoked. This list is the authoritative scope for the run. If compaction occurs after this point, the gate resumes from the recorded list — it does not re-scan.
-
-**Zero manifests:** If zero manifests are found anywhere in the tree, pre-flight completes as a no-op and notes this in the output summary.
-
-### Ecosystem Detection and Ordering
-
-Detected manifests are audited in fixed order for deterministic output: **Node.js -> Rust -> Python**.
-
-| Manifest File | Audit Command | Notes |
-|---|---|---|
-| `package.json` | `npm audit --json` | Run from workspace root if applicable, otherwise cwd = manifest directory |
-| `Cargo.toml` | `cargo audit --json` | Run with cwd = manifest directory |
-| `requirements.txt` | `pip-audit --format json -r requirements.txt` | Explicit `-r` flag; does NOT require active venv |
-| `pyproject.toml` | `pip-audit --format json` | Requires active venv or lockfile (see below) |
-
-All detected manifests are audited independently (after workspace consolidation). Each runs as an isolated subprocess. A failure in one audit does **not** abort or skip audits for other manifests. **All ecosystems run to completion before the overall result is computed** — a BLOCKED result from one ecosystem does not short-circuit audits for remaining ecosystems.
-
-### Audit Tool Availability
-
-Before invoking any audit tool, the gate checks availability:
-
-| Case | Condition | Action |
-|---|---|---|
-| **Available** | Tool in PATH, environment ready | Run audit |
-| **Tool missing** | Tool not in PATH | Write warning to audit-results.md, surface to user |
-| **Tool broken** | Tool found but `--version` fails | Write warning, skip |
-| **Environment not ready** | Tool found but required environment absent | Write specific reason, skip with warning |
-
-**Per-manifest environment readiness checks:**
-
-- **`requirements.txt`:** `pip-audit -r requirements.txt` reads the file directly. No virtualenv required. Available if `pip-audit` is on PATH.
-- **`pyproject.toml`:** `pip-audit` without `-r` inspects the installed environment. Requires an active virtualenv or a lockfile (`poetry.lock`, `pdm.lock`, `uv.lock`). If neither is present, skip with: "pip-audit requires a virtual environment or lock file for pyproject.toml; results would be unreliable."
-- **`Cargo.toml`:** Requires `Cargo.lock` to be present. If absent: "skipped — Cargo.lock absent; run cargo generate-lockfile first."
-- **`package.json`:** Requires `package-lock.json` (or `npm-shrinkwrap.json`) in the same directory (or workspace root). If absent: "skipped — no lockfile found; run npm install to generate package-lock.json." `npm` must be on PATH.
-
-**Python manifest confidence:** When only `pyproject.toml` is present (no `requirements.txt` or lockfile in the same directory), include a notice in `audit-results.md`: "**Confidence: Reduced** — No requirements.txt or lock file found. pip-audit is resolving dependencies from pyproject.toml directly. Results may be incomplete."
-
-Tool availability results are written to **`audit-results.md`** (not `preflight-audit.md`), because they are discovered at execution time, not scan time.
-
-A run where all manifests are skipped (missing tools or environment-not-ready) is reported as **INCONCLUSIVE**, not passing.
-
-### Audit Tool Error Handling
-
-Audit tools exit non-zero for two distinct reasons:
-
-- **Vulnerabilities found** — treated as a successful audit with findings (status: FINDINGS).
-- **Audit request failed** (network error, registry timeout, corrupt lockfile) — treated as a failed run (status: FAILED). Warning written, gate continues to next manifest.
-
-**Exit code contracts per tool:**
-
-| Tool | Clean | Findings | Error |
-|---|---|---|---|
-| `npm audit` | exit 0 | exit 1 | exit 2+ |
-| `cargo audit` | exit 0 | exit 1 | exit 2+ |
-| `pip-audit` | exit 0 | exit 1 | exit 2+ (or non-zero with unparseable stdout) |
-
-Use exit codes to distinguish outcomes. Do **not** parse stderr substring content to classify results.
-
-### Severity Normalization
-
-Audit tools use different severity vocabularies. The gate normalizes to a common scale. CVSS boundaries are **inclusive on the lower bound, exclusive on the upper** (e.g., a CVSS score of exactly 9.0 is Critical, not High).
-
-| Level | npm audit | cargo audit | pip-audit |
-|---|---|---|---|
-| **Critical** | `critical` | CVSS >= 9.0 | CVSS >= 9.0 |
-| **High** | `high` | CVSS >= 7.0 and < 9.0 | CVSS >= 7.0 and < 9.0 |
-| **Moderate** | `moderate` | CVSS >= 4.0 and < 7.0 | CVSS >= 4.0 and < 7.0 |
-| **Low** | `low` | CVSS >= 0.1 and < 4.0 | CVSS >= 0.1 and < 4.0 |
-| **Informational** | — | CVSS = 0.0 | CVSS = 0.0 |
-
-**CVSS 0.0** findings are classified as **Informational** — reported in `audit-results.md` but never count toward blocking. They do not map to any blocking severity level.
-
-If a finding has no CVSS score (advisory-only, no CVE assigned), it is treated as **Moderate** and flagged with `[no-cvss]` in the output.
-
-### Output Model
-
-Pre-flight produces two files under `scratch/<run-id>/`:
-
-**`preflight-audit.md`** — Scan-time plan. Written before any audit tool runs. Contains **only scan-time information**:
-- Run ID and `generated-at` timestamp (ISO-8601)
-- Manifest list with path, ecosystem, and deduplication/workspace decisions
-
-This file is **not updated after execution begins**. It is the immutable record of what the scan discovered.
-
-**`audit-results.md`** — Execution-time output. Written incrementally as each ecosystem completes. Contains:
-- Tool availability results (discovered at execution time)
-- Per-manifest findings with normalized severity
-- Deduplication notes (same CVE from multiple sources)
-- Reduced-confidence notices
-- Overall result
-
-Each ecosystem section ends with a **`status: complete`** sentinel line. A section without this sentinel is considered incomplete and must be discarded and re-run on recovery.
-
-**Schema for `audit-results.md`:**
-
-```markdown
-# Dependency Audit
-generated-at: <ISO-8601>
-run-id: <run-id>
-
-> This section is independent of red-team findings. The red-team did not see this data.
-
-## Tool Availability
-- npm audit: available
-- cargo audit: available
-- pip-audit (requirements.txt): available
-- pip-audit (pyproject.toml): unavailable — no venv or lock file
-
-## Summary
-Result: CLEAN | FINDINGS | BLOCKED | INCONCLUSIVE | FAILED
-Critical: N  High: N  Moderate: N  Low: N  Informational: N
-
-## npm — packages/api/package.json — FINDINGS
-[findings list: package, severity, CVE, fix-available]
-status: complete
-
-## pip — src/requirements.txt — FINDINGS
-## pip — src/pyproject.toml — FINDINGS
-[deduplicated: CVE-2024-XXXXX reported by both src/requirements.txt and src/pyproject.toml — counted once]
-status: complete
-
-## Warnings
-[environment-not-ready, reduced-confidence, or deduplication notes]
-```
-
-### Overall Result Computation
-
-When results span multiple manifests with mixed outcomes, the overall `Result:` field uses this precedence (highest wins):
-
-| Priority | Result | Condition |
-|---|---|---|
-| 1 (highest) | **BLOCKED** | Findings at or above `min_blocking_severity` and `skip_blocking` is false |
-| 2 | **FINDINGS** | At least one manifest returned vulnerability findings (below blocking threshold or override active) |
-| 3 | **INCONCLUSIVE** | At least one manifest was skipped (tool missing, environment not ready); no findings |
-| 4 | **FAILED** | At least one manifest tool errored; no findings and no skips |
-| 5 (lowest) | **CLEAN** | All manifests completed without findings |
-
-**INCONCLUSIVE outranks FAILED** because unknown coverage (a manifest exists but was never audited) is more dangerous than a known, retryable tool error.
-
-### Blocking and Prompting Behavior
-
-When a finding at or above `min_blocking_severity` is present and `skip_blocking` is not `true`:
-
-- **Interactive session** (Claude Code can prompt the user): Present the finding summary grouped by fix availability — "Fixable (N)" and "No fix available (M)" — and ask whether to continue to red-team review or abort. This grouping gives the user immediate signal on remediation effort: all-fixable blockers are a quick `npm audit fix` / `cargo update` away; no-fix blockers may require dependency replacement or acceptance.
-- **Non-interactive context** (automated pipeline, piped input): Write `Result: BLOCKED` and return to the parent orchestrator without prompting.
-
-Whether a session is interactive is a **Claude Code runtime property**, not something the skill detects via TTY heuristics or environment inspection.
-
-**Parent-pipeline integration:** When the gate returns with `Result: BLOCKED`, the parent orchestrator (build, spec, or direct user invocation) treats this the same as any gate failure — escalate to the user with the blocking findings listed. The `red-team-rounds: 0` field indicates the red-team loop never ran.
-
-### Anti-Anchoring Preservation
-
-Neither `preflight-audit.md` nor `audit-results.md` is passed to red-team dispatch. The red-team receives only the artifact under review — unchanged from current behavior. Audit findings are surfaced to the user at gate completion as an independent signal alongside (not merged with) red-team findings.
-
-### Stale Audit Results
-
-The `generated-at` timestamp marks when results were produced. Results are valid for that point in time only. The gate does **not** re-run pre-flight after fix-agent remediation within the same gate run. This is an explicit design boundary: the gate run is a point-in-time evaluation.
 
 ## Anti-Anchoring Rules
 
@@ -914,11 +731,7 @@ Exit modes beyond clean approval. **Single-round stagnation, single-round regres
 - Including external review findings in the weighted score calculation (INV-2: host red-team findings ONLY)
 - Using external findings as inputs to stagnation detection scoring
 - Blocking the host red-team round on external review availability or timeout
-- Passing pre-flight audit findings (preflight-audit.md or audit-results.md) to red-team dispatch — audit is an independent parallel signal, not red-team input
-- Skipping pre-flight for code artifacts without explicit user approval
-- Re-running pre-flight after fix rounds within the same gate run (pre-flight is a point-in-time evaluation)
-- Treating INCONCLUSIVE audit results as CLEAN — unknown coverage is more dangerous than no findings
-- Running pre-flight for non-code artifact types (design, plan, hypothesis, mockup, translation)
+- Passing `crucible:dependency-audit` output (preflight-audit.md or audit-results.md) to red-team dispatch — dependency-audit is an independent parallel signal, not red-team input
 
 ## Integration
 
