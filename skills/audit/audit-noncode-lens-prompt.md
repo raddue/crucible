@@ -37,6 +37,22 @@ Task tool (general-purpose, model: opus):
     If no supporting context is provided, evaluate the artifact on its
     own merits.
 
+    ## Operating Environment
+
+    {{OPERATING_ENVIRONMENT}}
+
+    The Operating Environment block describes the executor's actual
+    constraints — toolchain capacities, framework versions, hard caps of
+    skills the artifact names as its execution vehicle, tracker conventions,
+    and any stale-data caveats. For Feasibility and Risk & Dependencies
+    lenses on plan and concept artifacts, this is load-bearing: ground
+    your findings in these specific constraints rather than abstract
+    "this is generally hard" reasoning.
+
+    If the block is empty or absent (common for design artifacts), evaluate
+    the artifact without environment-specific grounding. Do not invent
+    constraints not listed here.
+
     ## Your Job
 
     1. **Read the artifact carefully.** Understand its structure, claims,
