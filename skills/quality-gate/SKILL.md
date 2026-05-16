@@ -643,6 +643,34 @@ RunID: <quality-gate run-id>
 
 **Stale cleanup exclusion:** Verdict markers are NOT subject to the 2-hour stale cleanup that applies to scratch directories. They are deleted by the build orchestrator after writing the corresponding gate ledger entry. Orphaned markers (from crashed runs) are cleaned up during the build skill's ledger initialization.
 
+## Convergence Telemetry
+
+The pre-threshold suppression rule rests on a quantitative claim: "most artifacts converge to 0 Fatal / 0 Significant within a few rounds." Without measurement, the choice of threshold (default 10 for code, 3 for hypothesis) cannot be tuned or falsified. This section defines a persistent per-run convergence record that survives scratch cleanup and enables threshold calibration over time.
+
+**Path:** `convergence-log.jsonl` under the quality-gate memory directory (sibling to `gate-verdict-*.md`, NOT under `scratch/<run-id>/` which is deleted on terminal exit).
+
+**When written:** Once per gate run, immediately after the verdict marker is written and before scratch cleanup.
+
+**Tool:** Write tool (not Bash, since the path is under `.claude/`). Append-only — read existing file, append one line, write back.
+
+**Format:** One JSON object per line:
+
+```json
+{"run_id":"2026-05-16T14-30-00","artifact_type":"code","threshold":10,"rounds":4,"verdict":"PASS","final_score":0,"max_score":6,"score_trajectory":[6,4,3,0],"suppressed_regressions":1,"no_op_fixes":0,"siege_dispatched":false,"timestamp":"2026-05-16T14:38:21Z"}
+```
+
+Fields mirror the verdict marker plus `threshold` (the active `suppression_threshold` for this run). One line per gate run, regardless of verdict.
+
+**Size management:** The log is append-only. Rotate via mtime check: if the file exceeds 10,000 lines, the next gate run renames it to `convergence-log-<YYYY-MM>.jsonl` (archive) and starts a fresh log. Archives are never deleted by quality-gate — the user manages retention.
+
+**Acceptance criterion for the suppression rule:** Across the most recent 100 entries with matching `artifact_type`, ≥80% should have `rounds < threshold` AND `verdict == PASS`. If the ratio drops below 70% for a given artifact type across 50+ entries, the threshold default for that type is mistuned and should be revisited.
+
+**Sunset trigger:** If a single rolling 30-day window shows the acceptance criterion failing for any artifact type, the next gate run emits a warning at start: "Convergence telemetry shows suppression threshold for `<artifact_type>` may be mistuned: <ratio>% of recent runs PASSed under threshold. Consider overriding `suppression_threshold` for this invocation, or raising the issue for threshold review."
+
+**Privacy:** The log contains no artifact contents, no findings, no file paths from the project being gated. Run IDs are timestamps. Safe to commit, share with collaborators, or aggregate across projects.
+
+**Why not in the scratch directory:** Scratch is deleted on terminal exit. A telemetry log that survives only until the gate ends is useless for tuning. The convergence-log lives in the persistent quality-gate memory directory.
+
 ## Invocation Convention
 
 Quality gate is invoked by the **outermost orchestrator only** — not self-invoked by child skills. This avoids double-gating.
