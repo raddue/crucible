@@ -157,6 +157,8 @@ would create non-deterministic stagnation behavior.
 | "Round 6 scored higher than round 5, and round 5 scored higher than round 4 — but suppression should still apply, right?" | No. The sustained-regression hard exit overrides suppression. Two strict score increases running is a structural signal that further looping will not help. | At round 3+, check `score(N) > score(N-1) > score(N-2)` every round; if true, escalate immediately regardless of suppression. |
 | "We're at round 8 and stuck — the user would want to know." | The suppression rule exists precisely because intuition about "stuck" is often wrong before the threshold. Trust the rule; the loop continues unless one of the structural exits (sustained-regression, no-op-fix, architectural-block) fires. | Pre-threshold escalations require a structural exit or explicit user interrupt — orchestrator judgment does not qualify. |
 | "This is a hypothesis artifact and we're at round 4 — but pre-round-10 suppression should apply." | No. Hypothesis artifacts default to `suppression_threshold: 3`. At round 4 the threshold has already been crossed; normal escalation applies. Always read the threshold from skill arguments, not from memory of the default for code. | Always read `suppression_threshold` from the current invocation's arguments, never assume 10. |
+| "This is a small auth fix, siege is overkill — skip it." | Detection exists because intuition about "small" security changes is unreliable. The cost of one siege dispatch is ~6 Opus agents; the cost of missing a regression in a security PR is unbounded. | Never skip siege when detection fires unless `skip_siege: true` is explicitly set with documented reason. |
+| "Detection fired on keywords in a design doc, but the doc isn't really about security." | The confidence threshold (≥2 categories OR keyword + dedicated `## Security` section) already filters single-word noise. If detection still fires, the doc has real security content. | Trust the confidence threshold. To override, set `skip_siege: true` with reason in the gate-verdict marker. |
 | "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
 
 ## Skill Arguments
@@ -165,6 +167,8 @@ would create non-deterministic stagnation behavior.
 |---|---|---|---|
 | `suppression_threshold` | int | (artifact-type lookup, see below) | The round number at which suppressed escalations (single-round stagnation, single-round regression, diminishing returns) become live. Below this round, only sustained-regression, no-op-fix, architectural-block, and user-interrupt can exit pre-clean. Above it, all escalation logic applies. |
 | `interactive` | bool | `true` if invoked from a standalone session, `false` if invoked by a parent orchestrator (build, debugging, spec) | When true, the orchestrator emits a between-rounds check-in at round `ceil(suppression_threshold/2)` offering the user options: continue, escalate-now, or skip. Non-interactive contexts skip this prompt. |
+| `force_siege` | bool | `false` | When true, always dispatch `crucible:siege` in parallel with the first red-team round regardless of security-surface detection. Use for: explicit security PRs, scheduled security audits, post-incident review. |
+| `skip_siege` | bool | `false` | When true, never dispatch siege even if security-surface detection fires. Use for: artifacts the user already siege-tested separately, or repeated re-runs after siege already passed. Mutually exclusive with `force_siege` — passing both is an error. |
 
 **Artifact-type-aware default for `suppression_threshold`:**
 
@@ -189,6 +193,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
 
 1. Receives: artifact content, artifact type, project context
 2. **Pre-flight dependency audit (delegated).** As of 2026-05-16, dependency-vulnerability scanning is `crucible:dependency-audit`, invoked by the parent orchestrator in parallel with quality-gate. Quality-gate itself no longer runs this step. If invoked standalone on a code artifact and the user expects dependency scanning, point them to `/dependency-audit`.
+2.5. **Security surface detection and siege dispatch.** Run the detection heuristic (see Security Surface Detection and Siege Dispatch). If `security_surface: detected` AND `skip_siege: false`, OR if `force_siege: true`, dispatch `crucible:siege` in parallel with the first red-team round. The two skills proceed independently. The orchestrator awaits both before terminal verdict.
 3. Prepares the artifact for review (see Artifact Preparation below)
 4. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
 5. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Write final artifact to scratch directory, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
@@ -538,6 +543,67 @@ Minor issues do not trigger fix rounds and do not count toward stagnation. Howev
 
 See `skills/dependency-audit/SKILL.md` for the full audit specification (manifest scanning, ecosystem detection, severity normalization, output schema, recovery semantics).
 
+## Security Surface Detection and Siege Dispatch
+
+Some artifacts touch security-relevant surface and deserve a dedicated security audit pass alongside (not in place of) the red-team loop. Quality-gate inspects each artifact at gate start; when security signal is detected, it dispatches `crucible:siege` in parallel with the first red-team round. Siege runs its own attacker-perspective loop independently. The gate awaits both before declaring PASS.
+
+This mirrors the dependency-audit pattern: siege is a sibling parallel skill, not a quality-gate phase. Findings flow back as an independent signal that blocks PASS but does not feed the weighted score (preserves INV-2).
+
+### Detection Heuristic
+
+Set `security_surface: detected` if ANY of the following signals fires:
+
+**File path / project structure:**
+- Path components matching: `auth/`, `crypto/`, `secrets/`, `tokens/`, `permissions/`, `sanitiz`, `validat`, `escape`, `csrf`, `xss`, `sqli`
+- Test paths matching the same patterns (test files that exercise security code are themselves security-relevant)
+
+**Code patterns (code artifacts):**
+- Regex compiled from user input
+- Shell exec with string interpolation (any of: `os.system`, `subprocess.*shell=True`, backticks, `eval`, `exec`)
+- Deserialization without schema (pickle.loads, yaml.load without SafeLoader, JSON.parse-then-trust)
+- SQL with string concatenation or f-string interpolation against user-controlled values
+- File path joins where a path component is user-controlled (`os.path.join(base, user_input)` without sanitization)
+- Password / token comparisons not using constant-time (`==` against secret material)
+- Cryptographic primitives invoked directly (use of `hashlib`, `cryptography`, `crypto` libraries)
+
+**Design / plan / hypothesis keywords:**
+- Single-word match in artifact body: `authentication`, `authorization`, `cryptographic`, `cryptography`, `session token`, `API key`, `permission boundary`, `trust boundary`, `sandbox`, `privilege`, `RBAC`, `OAuth`, `SAML`, `JWT`, `CSRF`, `XSS`, `SQL injection`, `RCE`, `deserialization`, `path traversal`
+- Two-word phrases: `user-supplied input`, `untrusted input`, `external input`, `attack surface`, `threat model`
+
+**Dependency-audit signal:** If dependency-audit (running in parallel) flags Critical/High vulnerabilities in security-critical packages (auth libraries, crypto libraries, web frameworks), promote to `security_surface: detected` even if no other signal fired.
+
+**Confidence threshold:** Keyword matches in design/plan/hypothesis artifacts are noisy. Require either ≥2 distinct keyword categories OR 1 keyword + an explicit "## Security" section. A single mention of "authentication" in passing does not trigger detection.
+
+### Decision and Dispatch
+
+After detection runs:
+- If `force_siege: true` → dispatch siege unconditionally (skip detection, log as "force-dispatched")
+- Else if `skip_siege: true` → never dispatch (log as "skip-requested")
+- Else if `security_surface: detected` → dispatch siege
+- Else → no siege dispatch (log as "no-security-surface")
+
+**Dispatch timing:** Immediately before the first red-team round, in parallel. Quality-gate's loop proceeds independently; siege runs on its own scratch directory and its own counters.
+
+**Awaiting siege:** Before declaring `Verdict: PASS`, the orchestrator must verify siege has completed. If siege is still running when quality-gate would otherwise PASS, wait. If siege escalates (its own ESCALATED/STAGNATION verdict), include those findings in the gate's escalation summary. Siege's Critical/High findings BLOCK quality-gate PASS the same way a Fatal red-team finding does — fix the security issue, re-run.
+
+### Result Integration
+
+Verdict marker fields (extend the existing set):
+
+```
+SiegeDispatched: true | false
+SiegeReason: detected | force | skip-requested | no-security-surface
+SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (only when SiegeDispatched=true)
+SiegeFindings: <count of Critical+High findings, 0 if none or N/A>
+```
+
+**Verdict mapping:** If `SiegeDispatched: true AND SiegeVerdict != PASS`, quality-gate's verdict cannot be `PASS` — emit `Verdict: ESCALATED` with reason "siege-blocked".
+
+**Independent of weighted score (INV-2):** Siege findings are not summed into Fatal/Significant counts. They appear in the gate output as a separate "Security Findings" section. The red-team never sees siege output (anti-anchoring preserved).
+
+### Standalone Siege Invocations
+
+Siege can still be invoked directly by the user. Quality-gate's siege dispatch is additive — it ensures siege runs when surfaced needs are detected, not exclusive. A user running `/siege` directly followed by `/quality-gate` will see siege run twice unless they pass `skip_siege: true` to the gate.
 
 ## Anti-Anchoring Rules
 
@@ -645,6 +711,10 @@ MaxScore: <highest weighted score observed across all rounds>
 ScoreTrajectory: <comma-separated per-round weighted scores, e.g., 6,4,5,4,3,0>
 SuppressedRegressions: <count of pre-round-10 rounds with suppressed-signal != none>
 NoOpFixes: <count of rounds with no-op-fix = true>
+SiegeDispatched: true | false
+SiegeReason: detected | force | skip-requested | no-security-surface
+SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (omit if SiegeDispatched=false)
+SiegeFindings: <count of Critical+High siege findings, omit if SiegeDispatched=false>
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
 ```
