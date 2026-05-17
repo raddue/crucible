@@ -48,8 +48,8 @@ Priority chain when `artifact_type` is not provided:
 
 1. Directory or subsystem name → `code` (existing behavior)
 2. File with code extension (`.py`, `.ts`, `.go`, etc.) → `code`
-3. YAML frontmatter contains `source: "design"` or `source: "spec"` → `design`
-4. YAML frontmatter contains `source: "plan"` or title contains "implementation plan" → `plan`
+3. YAML frontmatter `source` field is authoritative when present and matches a known value: `source: "design"` or `source: "spec"` → `design`; `source: "plan"` → `plan`. **Conflict check:** if `source` is set but title text disagrees (e.g., `source: "design"` with title "implementation plan"), warn the user: "Frontmatter says [type] but title suggests [other-type]. Treating as [source value] — pass `artifact_type:` explicitly to override." For unknown `source` values (e.g., `"retrospective"`), do not infer — fall through to rule 6.
+4. No frontmatter `source` field, but title contains "implementation plan" → `plan`
 5. No file path (freeform text input) → `concept`
 6. Ambiguous → ask user: "I detected a markdown document but can't determine its type. Is this a design doc, plan, or concept?"
 
@@ -121,7 +121,7 @@ Per-task quality gates (red-team, inquisitor) review artifacts produced during d
 
 ## Communication Requirement (Non-Negotiable)
 
-**Between every agent dispatch and every agent completion, output a status update to the user.** This is NOT optional -- the user cannot see agent activity without your narration.
+**Between every agent dispatch and every agent completion, output a status update to the user AND touch `scratch/<run-id>/heartbeat.md` (overwrite with the current timestamp).** This is NOT optional -- the user cannot see agent activity without your narration, and the heartbeat file is what protects an in-flight audit from being deleted by a concurrent invocation's stale-cleanup pass (see Scratch Directory).
 
 Every status update must include:
 1. **Current phase** -- Which phase you're in
@@ -129,7 +129,7 @@ Every status update must include:
 3. **What's being dispatched next** -- What you're about to do and why
 4. **Lens status** -- Which lenses have reported vs. still in flight, finding counts so far
 
-**After compaction:** Re-read the scratch directory and current state before continuing. See Compaction Recovery below.
+**After compaction:** Re-read the scratch directory and current state before continuing. See the Compaction Recovery section (orchestrator-level recovery) below.
 
 **Examples of GOOD narration:**
 > "Phase 2: Correctness and Robustness lenses complete (4 findings, 2 findings). Architecture still in flight. Consistency Agent A returned -- flagged 6 files, dispatching Agent B."
@@ -144,7 +144,7 @@ Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at 
 
 ### Write Triggers
 
-Write the status file at every point where the Communication Requirement mandates narration: before dispatch, after completion, phase transitions, health changes, escalations, and after compaction recovery.
+Write the status file at every point where the Communication Requirement mandates narration: before dispatch, after completion, phase transitions, health changes, escalations, and after compaction recovery. At each of these write points, also touch `scratch/<run-id>/heartbeat.md` (overwrite with current timestamp) so the stale-cleanup heuristic can distinguish in-flight audits from abandoned ones during long dispatch gaps.
 
 ### Status File Format
 
@@ -205,7 +205,7 @@ Output concise inline status alongside the status file write:
 - **Phase changes and escalations**: expanded block with `---` separators
 - **Health transitions**: always expanded with old -> new health
 
-### Compaction Recovery
+### Compaction Recovery (Pipeline Status)
 
 After compaction, before re-writing the status file:
 1. Read the existing `pipeline-status.md` to recover `Started` timestamp and `Recent Events` buffer
@@ -240,7 +240,11 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 
 All relative paths in this document (e.g., `scratch/<run-id>/manifest.md`) are relative to `~/.claude/projects/<project-hash>/memory/audit/`.
 
-**Stale cleanup:** At the start of each audit run, delete scratch directories whose timestamps are older than 1 hour. Do not delete recent directories (could belong to concurrent sessions).
+**Stale cleanup:** At the start of each audit run, delete scratch directories whose **`heartbeat.md` mtime** (or, if `heartbeat.md` is absent, the most-recent file mtime inside the directory) is older than 1 hour. The orchestrator writes `scratch/<run-id>/heartbeat.md` at every narration point (see Communication Requirement and Pipeline Status Write Triggers), so an active audit always has a fresh heartbeat even during the long Phase 2 dispatch → first lens completion gap when no other scratch files are being written. Do not delete directories whose heartbeat is within the 1-hour window (they belong to concurrent or long-running sessions).
+
+**User-gate exceptions to stale cleanup.** User gates can idle for hours between the orchestrator's last narration and the user's response, during which no heartbeat is refreshed. Two exceptions protect these directories:
+1. **Pending gate:** Never delete a scratch directory containing `gate-pending.md` unless its heartbeat is older than 24 hours (a catastrophic-abandonment cap distinct from the 1-hour active-work threshold).
+2. **Post-approval idle:** Never delete a scratch directory containing `gate-approved.md` UNLESS it also contains a terminal marker (`report.md`). A `gate-approved.md` without `report.md` indicates an in-flight run whose orchestrator may be paused between dispatches.
 
 ## Session Tracking
 
@@ -249,13 +253,13 @@ All relative paths in this document (e.g., `scratch/<run-id>/manifest.md`) are r
 
 The `<run-id>` is the same timestamp used for the scratch directory.
 
-## Compaction Recovery
+## Compaction Recovery (Orchestrator)
 
 After context compaction, the orchestrator must first determine whether this is a code or non-code audit:
 
 ### Step 1: Detect Audit Type
 
-Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-code recovery. If absent, follow code recovery (existing behavior).
+Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-code recovery. If absent, follow code recovery (existing behavior). **Marker-absent semantics:** because Phase 1 Non-Code Path writes this marker as its FIRST action (before validation, before any other work), absence is unambiguous — it means either a code audit OR a crash before type detection completed (which implies no Phase 1 work occurred). Both cases are safely handled by defaulting to code recovery.
 
 ### Code Recovery (artifact_type: code)
 
@@ -274,17 +278,18 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 **Phase-specific recovery (code):**
 - **Phase 1:** If `manifest.md` exists but `gate-approved.md` does not, re-present the manifest to the user for confirmation.
 - **Phase 2:** Check which lenses have findings files. Dispatch any remaining lenses.
-- **Phase 2.5:** If all four lens findings files exist but `blindspots-findings.md` does not, rebuild the coverage map from partition records and findings files (see Coverage Map Construction), then dispatch the blind-spots agent. If `blindspots-findings.md` exists, Phase 2.5 is complete.
+- **Phase 2.5:** If all four lens findings files exist but `blindspots-findings.md` does not, rebuild the coverage map from partition records and findings files (see Coverage Map Construction), then dispatch the blind-spots agent. If `blindspots-findings.md` exists but `blindspots-followup-findings.md` does not, re-read `blindspots-findings.md` for a "Files Needing Deeper Inspection" section. If present and the audit is under the ~20 agent cap, dispatch the follow-up (writing to `blindspots-followup-findings.md`); otherwise mark for the standard "Areas not fully covered" disclosure in the Phase 3 report. If both `blindspots-findings.md` and `blindspots-followup-findings.md` exist, or if `blindspots-findings.md` exists and has no "Files Needing Deeper Inspection" section, Phase 2.5 is complete.
 - **Phase 3:** If compaction occurs during synthesis, re-read all findings files (including blindspots) and re-run synthesis. This is safe — synthesis is idempotent.
 - **Phase 4:** If `report.md` exists, re-read it and continue with cross-referencing/filing.
 
 ### Non-Code Recovery (artifact_type: design | plan | concept)
 
-1. Read `artifact-type.md` to recover the artifact type
-2. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation. If `dispatch-context.md` is absent and the artifact type is `plan` or `concept`, re-run step 4.5 (operating-environment gathering) before proceeding to Phase 2.
-3. **Phase 2 recovery:** Look for `<lens-name-kebab>-findings.md` files matching the type's lens names (e.g., `technical-soundness-findings.md` for design). Dispatch any lenses that don't have findings files.
-4. **Phase 2.5 recovery:** If all 4 lens findings exist but `noncode-blindspots-findings.md` does not, build the lens summary and dispatch the non-code blind-spots agent. If `noncode-blindspots-findings.md` exists, Phase 2.5 is complete.
-5. **Phase 3/4 recovery:** Same as code path — re-read findings, re-run synthesis if needed, continue with reporting.
+(The artifact type was already recovered by Step 1 above via `artifact-type.md`.)
+
+1. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation. **Supporting-context recovery:** If `gate-approved.md` is absent and `supporting-context.md` is absent, re-run step 4 (supporting-context gathering). If `supporting-context.md` exists, reuse it as-is rather than re-running step 4 (avoids non-deterministic re-resolution). If `dispatch-context.md` is absent, re-run step 4.5 (operating-environment gathering) before proceeding to Phase 2 — this applies to all non-code types including `design`, because step 4.5 now always writes the file (a stub for skipped design artifacts), so absence unambiguously means lost-to-compaction.
+2. **Phase 2 recovery:** Look for `<lens-name-kebab>-findings.md` files matching the type's lens names (e.g., `technical-soundness-findings.md` for design). Dispatch any lenses that don't have findings files.
+3. **Phase 2.5 recovery:** If all 4 lens findings exist but `noncode-blindspots-findings.md` does not, build the lens summary and dispatch the non-code blind-spots agent. If `noncode-blindspots-findings.md` exists, Phase 2.5 is complete.
+4. **Phase 3/4 recovery:** Same as code path — re-read findings, re-run synthesis if needed, continue with reporting.
 
 ## Phase 1: Scoping
 
@@ -308,7 +313,7 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 4. If the subsystem cannot be cleanly scoped (files share no common dependency chain, naming convention, or functional cohesion), report the scoping difficulty to the user and ask for clarification or a file list.
 5. **Output:** A manifest of files belonging to the subsystem (paths + brief role descriptions). Write to `scratch/<run-id>/manifest.md`.
 
-**USER GATE:** Present the manifest to the user. Do not proceed to Phase 2 until the user confirms the scope is correct. User may add/remove files or refine the boundary. When the user approves, write `scratch/<run-id>/gate-approved.md` (contents: timestamp + user confirmation) as a compaction recovery marker.
+**USER GATE:** Before presenting the manifest, write `scratch/<run-id>/gate-pending.md` (contents: timestamp + "awaiting user scope approval") so stale-cleanup protects this directory across an idle gate (see Scratch Directory). Present the manifest to the user. Do not proceed to Phase 2 until the user confirms the scope is correct. User may add/remove files or refine the boundary. When the user approves, delete `gate-pending.md` and write `scratch/<run-id>/gate-approved.md` (contents: timestamp + user confirmation) as a compaction recovery marker.
 
 If the user removes all files or the manifest is empty: abort cleanly with "No files in scope -- audit cancelled."
 
@@ -316,9 +321,9 @@ If the user removes all files or the manifest is empty: abort cleanly with "No f
 
 No scoping agent needed — the artifact IS the scope. The orchestrator:
 
-1. **Validate artifact:** Read the file or accept freeform text input. If file does not exist, abort.
-2. **Detect or confirm type:** Apply auto-detection (see Auto-Detection above) or use explicit `artifact_type`.
-3. **Write type marker:** Write `scratch/<run-id>/artifact-type.md` containing the detected type. This file is the compaction recovery marker for non-code audits.
+1. **Detect or confirm type:** Apply auto-detection (see Auto-Detection above) or use explicit `artifact_type`.
+2. **Write type marker (FIRST action):** Immediately write `scratch/<run-id>/artifact-type.md` containing the detected type, *before* artifact validation or any other Phase 1 work. This file is the compaction recovery marker for non-code audits. Writing it first eliminates the ambiguity window where compaction between type detection and marker write would force recovery into the wrong branch. After this write, marker absence reliably indicates either (a) a code audit, or (b) a crash before type detection (which means no Phase 1 work happened) — both safely handled by the code-recovery default.
+3. **Validate artifact:** Read the file or accept freeform text input. If file does not exist, abort.
 4. **Gather supporting context:** Parse the artifact for references:
    - Markdown links (`[text](path)`)
    - File paths (`path/to/file.ext`)
@@ -327,16 +332,30 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    - **Project-memory references** — bare filenames or relative paths that match Crucible-style memory conventions (see Project-Memory Reference Resolution below)
    - **Skill name references** — names of skills the artifact mentions (e.g., "the `riftlock-standards` skill", "`feedback_use_component_library`")
 
-   For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 2000 lines total.** If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 2000-line context cap reached]". If no references found: proceed with artifact-only context.
+   For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 800 lines total.** This keeps non-code dispatches within the 1500-line hard cap when combined with artifact content (typically ~300-500 lines), operating environment (≤500 lines), and template overhead. If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 800-line context cap reached]". If no references found: proceed with artifact-only context.
 
    **Project-Memory Reference Resolution.** A reference that does not resolve repo-relative is tried against the project-memory directory at `~/.claude/projects/<project-hash>/memory/`:
    - If the reference is a path (e.g., `memory/cartographer/conventions.md`), try `<project-memory-root>/cartographer/conventions.md`.
-   - If the reference is a bare filename matching `<prefix>_<rest>.md` where prefix is one of `user`, `feedback`, `project`, `reference` (Crucible memory convention) OR matches a date-prefixed retrospective pattern `YYYY-MM-DD-*.md`, search for it under `<project-memory-root>/` (root), `<project-memory-root>/forge/retrospectives/`, and `<project-memory-root>/cartographer/`.
+   - If the reference is a bare filename matching `<prefix>_<rest>.md` where prefix is one of `user`, `feedback`, `project`, `reference` (Crucible memory convention) OR matches a date-prefixed retrospective pattern `YYYY-MM-DD-*.md`, search for it under `<project-memory-root>/` (root), `<project-memory-root>/cartographer/`, and `<project-memory-root>/forge/retrospectives/`. **Search order is fixed:** project-memory root → cartographer/ → forge/retrospectives/. **First match wins; only one file is resolved per bare reference** (no merging, no duplicate inclusion across locations). Stale-marker annotation (below) still applies to the winning file if applicable.
    - If the reference is a skill name (matches an entry in the available-skills list), include the skill's one-line description as supporting context. Skill body is opt-in via explicit user instruction; do NOT auto-include skill SKILL.md (token cost).
    - **Path-collision resolution:** prefer repo-relative match over project-memory match if both exist.
-   - **No project hash known:** when the orchestrator cannot determine the project hash (e.g., running outside Claude Code, or `~/.claude/projects/<hash>/` is not discoverable from cwd), skip the project-memory fallback silently. No regression vs prior behavior.
+   - **No project hash known:** when the orchestrator cannot determine the project hash (e.g., running outside Claude Code, or `~/.claude/projects/<hash>/` is not discoverable from cwd), skip the project-memory fallback AND surface a one-line note at the Phase 1 user gate: "Project-memory references not resolved — project hash undetermined; supporting context may be incomplete." This parallels the stale-memory annotation pattern and gives the user visibility into the degraded context so dev/CI/worktree variance is not silent.
    - **Stale-memory annotation:** when a resolved memory file has a "stale" marker in frontmatter (some Crucible setups inject one for memories older than 30 days, or based on mtime), the orchestrator includes the file content with a leading note: "**Note: this memory was marked stale (mtime: <date>); verify current relevance before relying on its claims.**" Do not silently include stale memories without annotation.
-4.5. **Gather operating-environment context (plan and concept artifacts only).** For `plan` and `concept` artifact types, the Feasibility and Risk & Dependencies lenses cannot meaningfully assess an artifact in the abstract — they need to know what the executor actually has. For `design` artifacts, this step is OPTIONAL and may be skipped if the design is environment-independent.
+
+   **4a. Persist resolved supporting context (mandatory continuation of step 4):** At the end of this step, write the bundled supporting context (resolved file list, fetched issue bodies, project-memory inclusions, truncation notes, stale-memory annotations) to `scratch/<run-id>/supporting-context.md`. This is the compaction recovery marker for step 4 — it captures the prioritization and resolution decisions so they don't silently re-run with different results.
+4.5. **Gather operating-environment context (plan and concept artifacts: mandatory; design artifacts: predicate-gated).** For `plan` and `concept` artifact types, the Feasibility and Risk & Dependencies lenses cannot meaningfully assess an artifact in the abstract — they need to know what the executor actually has. **For `design` artifacts, the skip decision is determined by a concrete predicate (not orchestrator judgment):**
+
+   **Design skip predicate.** Skip the gather (write stub) ONLY if **both** conditions hold:
+   1. The artifact has no `## Execution` section AND no `## Implementation` section (case-insensitive heading match), AND
+   2. The artifact names no skill in its body or frontmatter. Skill-detection clause (any match disqualifies the skip):
+      - `/skill-name` invocations (slash form), OR
+      - Backtick-quoted skill names matching the available-skills list, OR
+      - `skill:` frontmatter field, OR
+      - **Case-insensitive natural-language patterns** against the available-skills list: `"the <name> skill"`, `"via <name>"`, `"using <name> skill"`, `"<name> skill"` (bare name + " skill"). Example: a reference like "executed by the audit skill" fires the predicate (because `audit` is in the available-skills list and the pattern `"the audit skill"` matches), so the gather runs and operating-environment is collected.
+
+   Otherwise gather normally — the design has executor-touching content that needs grounded constraints.
+
+   When the predicate skips the gather, **the orchestrator must still write a stub `dispatch-context.md` containing `## Operating Environment\n(skipped — design artifact, predicate-determined no-op)`** so that absence of the file unambiguously means "lost to compaction" during recovery. The stub is a *determined* no-op (driven by the predicate), not an arbitrary skip.
 
    Inspect:
    - The project's `CLAUDE.md` for toolchain / build / framework constraints
@@ -346,9 +365,9 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
 
    Bundle these into a `## Operating Environment` block. **Soft cap: 500 lines.** Write to `scratch/<run-id>/dispatch-context.md` so lens dispatches reference the same file rather than each prompt copy-pasting 500 lines × 5 dispatches. If the bundle is empty (no relevant constraints found), record `## Operating Environment\n(none detected)` and proceed — the lens prompts treat an empty block as a no-op.
 
-   Anti-rationalization: skipping this step for plan/concept artifacts because "the constraints are obvious" produces generic feasibility findings ("sampling is generally hard") instead of concrete ones grounded in the executor's actual caps. Always run.
-5. **Present user gate:** "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Operating environment: [one-line summary of bundled constraints, if any]. Proceed?"
-6. **Write gate marker:** Write `scratch/<run-id>/gate-approved.md` (same as code path).
+   Anti-rationalization (plan/concept only): skipping this step because "the constraints are obvious" produces generic feasibility findings ("sampling is generally hard") instead of concrete ones grounded in the executor's actual caps. For plan/concept, always run. (For `design`, the skip path is governed by the predicate above, not orchestrator judgment.)
+5. **Present user gate:** Before presenting, write `scratch/<run-id>/gate-pending.md` (contents: timestamp + "awaiting user scope approval") so stale-cleanup protects this directory across an idle gate (see Scratch Directory). Then prompt: "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Operating environment: [one-line summary of bundled constraints, if any]. Proceed?"
+6. **Write gate marker:** On approval, delete `gate-pending.md` and write `scratch/<run-id>/gate-approved.md` (same as code path).
 
 ## Phase 2: Analysis
 
@@ -357,7 +376,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
 Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel, using `audit-noncode-lens-prompt.md` with lens-specific instruction injection.
 
 For each of the 4 lenses matching the artifact type (see Artifact Types table):
-1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`, `{{OPERATING_ENVIRONMENT}}`. The `{{OPERATING_ENVIRONMENT}}` slot is filled from `scratch/<run-id>/dispatch-context.md` (see Phase 1 step 4.5). For `design` artifacts where Phase 1 skipped step 4.5, pass an empty string — the prompt template handles the no-op case.
+1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`, `{{OPERATING_ENVIRONMENT}}`. The `{{OPERATING_ENVIRONMENT}}` slot is filled from `scratch/<run-id>/dispatch-context.md` (see Phase 1 step 4.5). For `design` artifacts where Phase 1 skipped the gathering, the stub file contains `## Operating Environment\n(skipped — design artifact)` — the prompt template handles this no-op case.
 2. Dispatch via disk-mediated dispatch
 3. Write findings to `scratch/<run-id>/<lens-name-kebab>-findings.md` (e.g., `technical-soundness-findings.md`)
 
@@ -391,7 +410,15 @@ If the subsystem is too large to summarize within the 800-line Tier 1 cap:
 
 - Split by dependency subgraph -- files that call each other stay together. Prefer natural boundaries (directories, modules, namespaces).
 - **Soft cap: 4 chunks maximum.** If more than 4 chunks would be needed, advise the user to narrow the subsystem scope instead.
-- Present the chunking plan at the Phase 1 user gate: "This subsystem is large. I'll audit it in N chunks (~6N+1 agents: 5 analysis + 1 blind-spots per chunk, plus 1 cross-chunk blind-spots). Chunk descriptions: [list]. Approve?"
+- Present the chunking plan at the Phase 1 user gate. Show the full agent-budget breakdown so the user approves the **worst-case** total, not a partial slice:
+  - **Scoping:** 1 agent (mandatory — recon or fallback scoping agent, run in Phase 1)
+  - **Per chunk:** 6 agents (mandatory — Correctness, Robustness, Consistency-A, Consistency-B, Architecture, Blind-spots)
+  - **Cross-chunk blind-spots:** 1 agent (mandatory if N>1, else 0)
+  - **Optional blind-spots follow-ups:** up to N agents (one per chunk, dispatched only when a chunk's blind-spots agent lists "Files Needing Deeper Inspection" AND budget allows)
+  - **Formula:** `1 (scoping) + N × 6 (per-chunk) + (1 if N>1 else 0) (cross-chunk) + up to N (optional follow-ups)`
+  - **Worst-case for N=4:** `1 + 24 + 1 + 4 = 30 agents` — over the 20-agent hard cap; re-gate per the agent-budget rule (narrow scope, reduce chunks, or raise the cap).
+  - Message: "This subsystem is large. I'll audit it in N chunks. Worst-case agent budget: [scoping 1] + [N×6 per-chunk] + [cross-chunk 1 if N>1] + [up to N optional follow-ups] = [worst-case total]. Mandatory floor (no follow-ups): [1 + N×6 + cross-chunk]. Chunk descriptions: [list]. Approve worst-case total?"
+- **20-agent budget is a HARD CAP, tracked across all phases.** The orchestrator maintains a running count of dispatched agents. Before any dispatch that would cross the cap (chunked analysis lenses, blind-spots, follow-ups, cross-chunk), if the projected total exceeds the user-approved number, re-gate: present the projected total and the remaining work, and ask the user whether to (a) raise the cap, (b) skip optional dispatches (follow-ups first, then cross-chunk blind-spots), or (c) abort.
 - Each chunk gets its own set of analysis agents.
 - Synthesis (Phase 3) merges findings across all chunks.
 - Cross-chunk concerns: the Tier 1 overview for each chunk includes a "cross-chunk interface" section describing how this chunk interacts with others. All lenses receive this section and should consider cross-chunk issues within their domain.
@@ -427,6 +454,7 @@ All lenses output structured findings with these common fields: `{severity, file
 
 - **Agent A:** Receives the Tier 1 overview (which includes the file manifest with role descriptions) + conventions.md from cartographer if available. The overview IS the summary -- do not add additional file-level summaries. Returns: list of files flagged for suspected inconsistencies with rationale. Subject to the 1500-line hard cap.
 - **Agent B:** Receives full source for Agent A's flagged files only. Subject to the same 1500-line hard cap. If Agent A flags more files than fit, the orchestrator applies the same overflow-summary mechanism (summarize overflow files, include full source for highest-priority flags, dispatch follow-up if needed). Returns: confirmed findings with evidence.
+- **Zero-flag case:** If Agent A flags zero files, the orchestrator skips Agent B dispatch and writes empty marker files: `consistency-b-findings.md` and `consistency-b-partition.md` each containing only `(no files flagged for deep review)`. Downstream consumers — compaction recovery, Phase 3 reading list, Coverage Map construction — treat these markers as "Phase 2 complete for Consistency" and proceed without error.
 - **Timing:** Agent A dispatches in parallel with the other three lenses. Agent B dispatches after Agent A completes. The orchestrator proceeds to Phase 3 once all lenses (including Consistency Agent B) have reported. The other three lenses may finish earlier -- this is expected and acceptable.
 
 #### Architecture
@@ -487,7 +515,7 @@ The blind-spots agent does NOT receive raw findings from the other lenses. Inste
 ### Coverage Map Construction (Orchestrator)
 
 To build the coverage map:
-1. Read all partition records from disk: `correctness-partition.md`, `robustness-partition.md`, `consistency-b-partition.md`, `architecture-partition.md`. These list the files each lens received as full source (written during Phase 2). Union of all partition files = the **examined set**.
+1. Read all partition records from disk: `correctness-partition.md`, `robustness-partition.md`, `consistency-b-partition.md`, `architecture-partition.md`. These list the files each lens received as full source (written during Phase 2). Union of all partition files = the **examined set**. **Zero-flag marker handling:** if a partition file contains only the marker `(no files flagged for deep review)` (written by the Consistency zero-flag case), treat it as contributing **zero files** to the examined set — do not include the marker string as a path. The Consistency lens then contributes only to coverage from Agent A's triage (which is not source-level examination); its Tier 2 examination contribution is zero, and files only flagged by no other lens correctly appear in the never-examined set.
 2. Read the Phase 1 manifest. Any manifest file NOT in the examined set = **never examined**.
 3. Read all findings files: correctness, robustness, consistency-b, architecture. Do NOT include consistency-a (triage only). Extract finding counts per lens per file.
 4. Overlay finding counts onto the examined set. Files in the examined set with no findings get "(0 findings)" for the lenses that examined them.
@@ -571,7 +599,7 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 4. **Record to cartographer (code audits only):** After completion, dispatch cartographer recorder (Mode 1) with the Phase 1 manifest only. The manifest was deliberately scoped during exploration and is reliable structural data. Do NOT feed incidental observations from Phase 2 bug-hunting agents to cartographer -- those are unverified structural inferences. **Skip for non-code audits** — no subsystem manifest to record.
 
-5. **Cleanup:** Delete the `scratch/<run-id>/` directory only after ALL Phase 4 actions are complete (issue filing, cartographer recording). Do not clean up prematurely -- the report on disk is needed for compaction recovery during Phase 4.
+5. **Cleanup:** Delete `scratch/<run-id>/` after all applicable Phase 4 steps have resolved (filing decision made; cartographer step run-or-skipped per artifact type). Do not clean up prematurely -- the report on disk is needed for compaction recovery during Phase 4.
 
 ## Prompt Templates
 
@@ -617,6 +645,7 @@ Each analysis template includes:
 - Feed Phase 2 structural inferences to cartographer (Phase 1 manifest only)
 - Skip narration between agent dispatches (Communication Requirement)
 - Dispatch more than ~20 agents without user awareness (chunking approval includes agent count)
+- Offer or dispatch remediation actions in Phase 4. Audit is find-and-report only. If the user requests fixes after reviewing the report, instruct them to invoke `/build` or `/debug` separately — do not propose "would you like me to fix this?" or dispatch fix agents from within the audit run.
 
 ## Red Flags
 
