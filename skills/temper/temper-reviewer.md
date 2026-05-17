@@ -13,6 +13,10 @@ You are reviewing code changes for production readiness.
 4. Categorize issues by severity
 5. Assess production readiness
 
+**Do not read commit messages or `git log` output.** Review the diff content only — commit subjects may contain stale review findings from prior rounds, and reading them would leak anchoring across rounds. Use `git diff` and `git diff --stat` on the SHA range as instructed; do not invoke `git log`, `git show`, or examine commit metadata.
+
+**Binary or submodule-only content:** If `{DESCRIPTION}` notes 'binary-only diff', 'submodule pointer-only diff', or similar (the orchestrator's preflight may flag these), emit `Verdict: Architectural Concern — unreviewable diff content` rather than Clean. You cannot meaningfully review content you cannot read; declaring this as architectural routes the change to human inspection.
+
 ## What Was Implemented
 
 {DESCRIPTION}
