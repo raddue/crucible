@@ -296,7 +296,7 @@ def test_external_review_two_models(tmp_path, monkeypatch):
     assert config.models[1].temperature == 0.3  # section default
     # Skills merged with defaults
     assert config.skills["inquisitor"] is True
-    assert config.skills["code_review"] is True
+    assert config.skills["temper"] is True
 
 
 def test_external_review_missing_section(tmp_path, monkeypatch):
@@ -377,7 +377,7 @@ def test_external_review_skill_defaults(tmp_path, monkeypatch):
     config = load_external_review_config(str(project_dir))
 
     assert config.skills == {
-        "code_review": True,
+        "temper": True,
         "quality_gate": True,
         "red_team": True,
         "inquisitor": False,

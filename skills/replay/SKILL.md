@@ -114,7 +114,7 @@ Partition the manifest into completed and incomplete phases:
 | Late Phase 2 | `pre-plan-gate` | After plan approval, before execution |
 | Pre-Phase 3 | `pre-wave-1` | After plan approval, before first execution wave |
 | Mid-Phase 3 (wave N) | `pre-wave-N` | After wave N-1 completion |
-| Pre-Phase 4 | `pre-code-review` | After all execution waves complete |
+| Pre-Phase 4 | `pre-temper` | After all execution waves complete |
 | Mid-Phase 4 | `pre-inquisitor` | After code review, before inquisitor |
 | Late Phase 4 | `pre-impl-gate` | After inquisitor, before quality gate |
 
@@ -154,7 +154,7 @@ Map the verified resume point to a shadow git checkpoint:
    - Late Phase 2 boundary -> checkpoint reason starts with `pre-plan-gate`
    - Phase 3 boundary -> checkpoint reason starts with `pre-wave-1`
    - Phase 3 wave N -> checkpoint reason starts with `pre-wave-N`
-   - Phase 4 boundary -> checkpoint reason starts with `pre-code-review`
+   - Phase 4 boundary -> checkpoint reason starts with `pre-temper`
    - Phase 4 mid -> checkpoint reason starts with `pre-inquisitor`
    - Phase 4 late -> checkpoint reason starts with `pre-impl-gate`
 3. **If multiple checkpoints match** (e.g., multiple `pre-wave-2` entries from retries): use the most recent by timestamp.

@@ -21,6 +21,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 - **Adversarial testing at every level** — `adversarial-tester` writes tests designed to break the implementation; `inquisitor` runs 5 parallel attack dimensions against the full feature diff; `siege` runs 6 attacker-perspective security agents until zero Critical/High.
 - **Token-efficient by design** — orchestrators use [disk-mediated dispatch](skills/shared/dispatch-convention.md): full subagent prompts go to `/tmp`, only ~100-token pointers enter orchestrator context. A full build saves 73-131K tokens of fossilized context.
 - **Crash-resilient and session-continuous** — `replay` resumes interrupted pipelines from the last phase boundary (10 minutes, not 90); `recall` queries a searchable session activity index that survives compaction.
+- **Forge-agnostic iterative code review** — `temper` runs fresh-eyes review loops on PRs from any platform (GitHub, GitLab, Bitbucket, self-hosted) or raw `<base>..<head>` ranges. Multi-round convergence with stagnation detection; optional external-model second opinion via MCP. Renamed from `/code-review` to avoid collision with Claude Code's built-in `/review`.
 
 See [docs/architecture.md](docs/architecture.md) for how the orchestrator skills compose, and [docs/skills.md](docs/skills.md) for the full catalog.
 

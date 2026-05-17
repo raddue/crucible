@@ -446,7 +446,7 @@ async def test_external_review_skill_disabled():
             ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
         ],
         timeout_seconds=180,
-        skills={"inquisitor": False, "code_review": True},
+        skills={"inquisitor": False, "temper": True},
     )
     server_mod._state = ServerState(
         external_config=ext_config,
@@ -473,7 +473,7 @@ async def test_external_review_skill_enabled(mock_dispatch):
             ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
         ],
         timeout_seconds=180,
-        skills={"code_review": True},
+        skills={"temper": True},
     )
     server_mod._state = ServerState(
         external_config=ext_config,
@@ -487,7 +487,7 @@ async def test_external_review_skill_enabled(mock_dispatch):
     result = await call_tool("external_review", {
         "prompt": "Review this",
         "context": "some code",
-        "skill": "code_review",
+        "skill": "temper",
     })
 
     parsed = json.loads(result[0].text)
@@ -504,7 +504,7 @@ async def test_external_review_unknown_skill_defaults_enabled(mock_dispatch):
             ModelConfig(provider="openai", model_id="gpt-4o", api_key_env="TEST_OPENAI_KEY"),
         ],
         timeout_seconds=180,
-        skills={"code_review": True},
+        skills={"temper": True},
     )
     server_mod._state = ServerState(
         external_config=ext_config,

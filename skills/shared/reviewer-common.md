@@ -5,7 +5,7 @@
 > `<!-- CANONICAL: shared/reviewer-common.md#section-name -->` comments.
 > When updating, change this file first, then propagate to templates.
 >
-> **Used by:** `skills/build/build-reviewer-prompt.md`, `skills/code-review/code-reviewer.md`
+> **Used by:** `skills/build/build-reviewer-prompt.md`, `skills/temper/temper-reviewer.md`
 
 ## Review Checklist
 

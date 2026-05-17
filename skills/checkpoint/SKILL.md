@@ -162,6 +162,6 @@ No active marker file is needed — the shadow repo's existence IS the marker. T
 ## Integration
 
 Consuming skills:
-- **crucible:build** — Pipeline boundary checkpoints (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-code-review, pre-inquisitor, pre-impl-gate)
+- **crucible:build** — Pipeline boundary checkpoints (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-temper, pre-inquisitor, pre-impl-gate)
 - **crucible:quality-gate** — Pre-fix-round checkpoints for code artifacts (pre-qg-fix-round-N)
 - **crucible:debugging** — Pre-implementation, pre-sibling, and pre-quality-gate checkpoints (pre-debug-fix-cycle-N, pre-where-else, pre-debug-gate)

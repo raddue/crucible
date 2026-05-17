@@ -276,7 +276,7 @@ Orchestrator: Verify fix -> Success? Phase 4.5. Failed? Cleanup, log, loop back.
 Phase 4.5: "Where Else?" scan — find and fix sibling locations
     |
     v
-Phase 5: Quality-gate the fix (crucible:quality-gate) + Code review (crucible:code-review)
+Phase 5: Quality-gate the fix (crucible:quality-gate) + Code review (crucible:temper)
     |
     v
 Test Gap Writer (if reviews flagged missing coverage)
@@ -713,7 +713,7 @@ After Phase 4.5 completes (or Phase 4 succeeds if no Phase 4.5 ran), the orchest
 
 Quality-gate handles iteration tracking, stagnation detection, compaction recovery, and user checkpoints. Do NOT invoke `crucible:red-team` directly — always go through quality-gate for iteration management.
 
-**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:code-review` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
+**Step 2: Code review** — After red-teaming passes clean, invoke `crucible:temper` against the full diff (from before debugging started to HEAD). The code reviewer checks implementation quality, test coverage, and adherence to project conventions.
 
 If code review finds Critical or Important issues, fix them and re-review per the standard code review loop.
 

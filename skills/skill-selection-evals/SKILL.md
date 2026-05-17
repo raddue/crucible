@@ -21,7 +21,7 @@ Crucible's 49 execution evals measure quality once a skill is invoked. Selection
 ## Boundaries Tested
 
 1. **test-methodology** — TDD vs test-coverage vs adversarial-tester
-2. **review-direction** — code-review vs review-feedback
+2. **review-direction** — temper vs review-feedback
 3. **adversarial-scope** — red-team vs inquisitor vs audit vs siege
 4. **completion-claims** — verify vs finish
 5. **bug-handling** — debugging vs verify vs audit
