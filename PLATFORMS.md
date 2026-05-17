@@ -28,7 +28,7 @@ These skills use subagent dispatch for parallelism or fresh-perspective reviews.
 | quality-gate | Subagent dispatch for fresh reviewers each round | Agent reviews iteratively in-context (anchoring risk) |
 | red-team | Subagent dispatch for Devil's Advocate reviewers | Agent plays Devil's Advocate in-context |
 | inquisitor | 5 parallel adversarial dimensions | Dimensions run sequentially |
-| code-review | Subagent dispatch for review | Agent reviews in-context |
+| temper | Subagent dispatch for review | Agent reviews in-context |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | adversarial-tester | Subagent dispatch for test writing | Agent writes tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |

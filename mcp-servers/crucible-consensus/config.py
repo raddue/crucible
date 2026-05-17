@@ -27,7 +27,7 @@ class ExternalReviewConfig:
     models: list[ModelConfig] = field(default_factory=list)
     timeout_seconds: int = 180
     skills: dict[str, bool] = field(default_factory=lambda: {
-        "code_review": True,
+        "temper": True,
         "quality_gate": True,
         "red_team": True,
         "inquisitor": False,
@@ -187,7 +187,7 @@ def load_external_review_config(project_dir: str) -> ExternalReviewConfig:
 
     # Parse skills with defaults
     default_skills = {
-        "code_review": True,
+        "temper": True,
         "quality_gate": True,
         "red_team": True,
         "inquisitor": False,

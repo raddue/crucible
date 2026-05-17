@@ -31,7 +31,7 @@ The **siege** skill performs security audits — 6 parallel attacker-perspective
 
 ## External model perspectives
 
-**External model review** adds independent non-Anthropic perspectives to code-review, quality-gate, red-team, and inquisitor. Unlike consensus (which requires multiple models and synthesizes), external review works with a single provider and returns raw per-model analysis. On consensus-eligible quality-gate rounds, external responses are bridged into consensus. Configure in [consensus-config-example.yaml](../skills/consensus/consensus-config-example.yaml) under `external_review:`.
+**External model review** adds independent non-Anthropic perspectives to temper, quality-gate, red-team, and inquisitor. Unlike consensus (which requires multiple models and synthesizes), external review works with a single provider and returns raw per-model analysis. On consensus-eligible quality-gate rounds, external responses are bridged into consensus. Configure in [consensus-config-example.yaml](../skills/consensus/consensus-config-example.yaml) under `external_review:`.
 
 ## Crash recovery and A/B experimentation
 

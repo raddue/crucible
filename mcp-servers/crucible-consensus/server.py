@@ -126,7 +126,7 @@ async def list_tools() -> list[Tool]:
                     "prompt": {"type": "string", "description": "Review prompt to send to external models"},
                     "context": {"type": "string", "description": "Code diff and supporting context"},
                     "metadata": {"type": "object", "description": "Traceability metadata"},
-                    "skill": {"type": "string", "description": "Calling skill name (e.g. 'code_review', 'quality_gate'). If provided, checked against per-skill toggles in config."},
+                    "skill": {"type": "string", "description": "Calling skill name (e.g. 'temper', 'quality_gate'). If provided, checked against per-skill toggles in config."},
                 },
                 "required": ["prompt", "context"],
             },

@@ -232,7 +232,7 @@ Output the aggregated INQUISITOR REPORT including fix outcomes. The report must 
 
 When used within the build pipeline (Phase 4):
 
-- **Runs after:** code-review on full implementation (obvious issues already fixed)
+- **Runs after:** temper on full implementation (obvious issues already fixed)
 - **Runs before:** quality-gate on full implementation (gate reviews final state including inquisitor fixes)
 - **Input:** `git diff <base-sha>..HEAD` where base-sha is the commit before Phase 3 execution began
 - **Orchestrator provides:** base SHA, project test conventions, cartographer module context
@@ -275,9 +275,9 @@ Append external perspectives per dimension alongside the host subagent's finding
 
 ## Integration
 
-- **Called by:** `crucible:build` (Phase 4, after code-review, before quality-gate)
+- **Called by:** `crucible:build` (Phase 4, after temper, before quality-gate)
 - **Dispatches:** 5 parallel subagents (one per dimension) using `./inquisitor-prompt.md`
-- **May dispatch:** Fixer subagents for FAIL results, lightweight code-review if fix touches 3+ files
+- **May dispatch:** Fixer subagents for FAIL results, lightweight temper if fix touches 3+ files
 - **Uses:** `crucible:cartographer` context (when available) for module-aware attack surface analysis
 - **Pairs with:** `crucible:adversarial-tester` (per-task, Phase 3) -- inquisitor is the full-feature complement
 - **Prompt template:** `inquisitor-prompt.md` (for dimension subagent dispatch)

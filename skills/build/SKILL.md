@@ -1183,15 +1183,15 @@ After all tasks complete:
    - If any fail: implementation is incomplete. Identify what's missing, dispatch implementer to fix, re-run.
    - If all pass: feature is verifiably done. Proceed.
 2. Run full test suite (unit + integration)
-3. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-code-review" before dispatching code review. If the iterative review fix cycle introduces regressions, this is the rollback target.
-3. **REQUIRED SUB-SKILL:** Use crucible:code-review on full implementation (iterative until clean)
+3. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-temper" before dispatching code review. If the iterative review fix cycle introduces regressions, this is the rollback target.
+3. **REQUIRED SUB-SKILL:** Use crucible:temper on full implementation (iterative until clean)
 4. **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-inquisitor" before dispatching inquisitor. If the inquisitor's fix cycle produces regressions, this is the rollback target.
 4. **REQUIRED SUB-SKILL:** Use crucible:inquisitor on full implementation (dispatches 5 parallel dimensions against full feature diff)
    - Input: `git diff <base-sha>..HEAD` where base-sha is the commit before Phase 3 execution began
    - Runs after code review (obvious issues already fixed) and before quality gate (gate reviews final state)
    - The inquisitor manages its own fix cycle internally — do not intervene unless it escalates
    - See `crucible:inquisitor` for full process
-5. **Conditional:** If the inquisitor's fix cycle produced any code changes, re-run crucible:code-review scoped to the inquisitor fix commits only (`git diff <pre-inquisitor-sha>..HEAD`)
+5. **Conditional:** If the inquisitor's fix cycle produced any code changes, re-run crucible:temper scoped to the inquisitor fix commits only (`git diff <pre-inquisitor-sha>..HEAD`)
    - This is NOT a full implementation re-review — scope it to only the fixer's changes
    - Iterative until clean, same as step 3
    - Skip if the inquisitor reported all PASS (no fixes were needed)
@@ -1217,7 +1217,7 @@ After all tasks complete:
    e. **Blocking behavior:** Siege iterates internally until zero Critical + zero High.
       - If siege completes clean: continue to step 6 (quality-gate)
       - If siege escalates (stagnation, user input needed): escalate to user with siege context
-      - If siege's fix cycle produced code changes: re-run crucible:code-review scoped to siege fix commits only (`git diff <pre-siege-sha>..HEAD`). Same pattern as post-inquisitor conditional review at step 5.
+      - If siege's fix cycle produced code changes: re-run crucible:temper scoped to siege fix commits only (`git diff <pre-siege-sha>..HEAD`). Same pattern as post-inquisitor conditional review at step 5.
    f. **Escape hatches:** User can override automatic siege behavior:
       - `--force-siege` — Dispatch siege regardless of signal count. Maps to siege's `--force` flag. Decision journal: `security-review | choice=force-dispatch | reason=user --force-siege flag`
       - `--skip-siege` — Suppress siege even when signals/contract require it. Maps to siege's `--skip` flag. Decision journal: `security-review | choice=force-skip | reason=user --skip-siege flag`
@@ -1355,7 +1355,7 @@ Build is the outermost orchestrator and controls all quality gates via `crucible
 | Phase 2, Step 3 (after plan review) | plan | Existing `crucible:red-team` on plan |
 | Phase 4, Step 6 (after inquisitor + conditional re-review) | code | Existing `crucible:red-team` on implementation |
 
-Code review (`crucible:code-review`) and inquisitor (`crucible:inquisitor`) remain separate from the quality gate — code-review does structured quality checks, inquisitor writes cross-component adversarial tests, and the quality gate does adversarial artifact review. All three serve distinct purposes.
+Code review (`crucible:temper`) and inquisitor (`crucible:inquisitor`) remain separate from the quality gate — temper does structured quality checks, inquisitor writes cross-component adversarial tests, and the quality gate does adversarial artifact review. All three serve distinct purposes.
 
 ### Contract-Aware Quality Gate
 
@@ -1399,12 +1399,12 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 - **crucible:quality-gate** — Iterative red-teaming at each quality gate point
 - **crucible:red-team** — Adversarial review engine (invoked by quality-gate)
 - **crucible:innovate** — Creative enhancement before quality gates
-- **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, after code-review, before quality-gate)
+- **crucible:inquisitor** — Full-feature cross-component adversarial testing (Phase 4, after temper, before quality-gate)
 
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
 - **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
-- **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-code-review, pre-inquisitor, pre-impl-gate)
+- **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-temper, pre-inquisitor, pre-impl-gate)
 
 **Recon/assay context:** Inherits recon/assay context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
 

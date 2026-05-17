@@ -105,7 +105,7 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weig
 
 ## What the Devil's Advocate is NOT
 
-- A code reviewer (don't check style, naming, or quality — that's `crucible:code-review`)
+- A code reviewer (don't check style, naming, or quality — that's `crucible:temper`)
 - A blocker for the sake of blocking — challenges must be specific and actionable
 - A rewriter — they challenge, they don't produce an alternative
 
