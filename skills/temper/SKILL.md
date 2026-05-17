@@ -62,11 +62,12 @@ Determine what to review based on the argument:
 
 Use the Task tool with `subagent_type="general-purpose"`. Fill in the template at `temper-reviewer.md` in this directory and pass it as the subagent prompt.
 
-**Placeholders:**
-- `{WHAT_WAS_IMPLEMENTED}` — derived from PR title if available, else `Changes in <base>..<head>`
-- `{PLAN_OR_REQUIREMENTS}` — PR body if available, else `(none provided — review against general production-readiness criteria)`
-- `{BASE_SHA}` / `{HEAD_SHA}` — resolved SHA range from Step 1
-- `{DESCRIPTION}` — one-line summary (PR title or "changes on branch X")
+**Placeholders** (four slots, all must be filled before dispatch — these match the section slots in `temper-reviewer.md` exactly):
+- `{DESCRIPTION}` — one-line summary of what was implemented. PR title if available, else `Changes in <base>..<head>` / `changes on branch X`.
+- `{PLAN_REFERENCE}` — PR body / plan / requirements if available, else `(none provided — review against general production-readiness criteria)`.
+- `{BASE_SHA}` / `{HEAD_SHA}` — resolved SHA range from Step 1.
+
+Earlier drafts listed `{WHAT_WAS_IMPLEMENTED}` and `{PLAN_OR_REQUIREMENTS}` as separate placeholders. Those names were redundant aliases for `{DESCRIPTION}` and `{PLAN_REFERENCE}` respectively — the template now uses the canonical names in both its prose and its section slots, so there is exactly one slot per concept.
 
 ### Step 3: Act on feedback and iterate
 
