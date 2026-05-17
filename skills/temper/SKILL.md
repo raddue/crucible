@@ -63,9 +63,11 @@ When in doubt: if the artifact is a code diff, use temper. If it is anything els
 /temper https://...              # PR URL on any forge
 /temper main..HEAD               # explicit SHA range
 /temper a1b2c3..d4e5f6           # explicit SHA range
+/temper 259 max_rounds=8         # override default 5-round circuit breaker
+/temper 259 max_rounds=8 external_review=skip  # skip redundant external_review on re-invocation
 ```
 
-**Argument shape:** `[PR-id-or-URL | <base>..<head>]`. No argument means auto-detect.
+**Argument shape:** `[PR-id-or-URL | <base>..<head>] [max_rounds=<N>] [external_review=skip]`. No argument means auto-detect.
 
 ## How to Request
 
@@ -73,9 +75,15 @@ When in doubt: if the artifact is a code diff, use temper. If it is anything els
 
 Determine what to review based on the argument:
 
-**Case 1 — PR number or URL.** Fetch metadata (title, body, base ref, head ref). Forge detection is **CLI-probe order, not hostname-literal** (covers GitHub Enterprise Server and any other GH-flavored host). When the argument is a URL, parse the forge from the URL host first; only use `git remote get-url origin` for forge inference when no URL is given (handles fork workflows where `origin` and `upstream` live on different forges).
+**Case 1 — PR number or URL.** Fetch metadata (title, body, base ref, head ref). Forge detection is **CLI-probe order, not hostname-literal** (covers GitHub Enterprise Server and any other GH-flavored host). When the argument is a URL, parse the forge from the URL host first and use **only** the matching CLI (handles fork workflows where `origin` and `upstream` live on different forges). When the argument is a bare PR number, probe CLIs in order against the current `origin`.
 
-Try in this order until one succeeds:
+**If the argument is a URL,** parse the forge from the URL host and try only the matching CLI:
+- `github.com` or any host `gh` authenticates against (GHE) → `gh pr view <id> --json title,body,baseRefName,headRefName,author --repo <owner/repo-from-URL>`
+- `gitlab.com` or any GitLab host → `glab mr view <id> --repo <project-from-URL>`
+- `bitbucket.org` or any Bitbucket host → `bb pr view <id> --repo <slug-from-URL>`
+- Unknown host → fall back to git plumbing (`git fetch <remote> <head-ref>`); ask the user to paste the description.
+
+**If the argument is a bare PR number,** try CLIs in order against the current `origin`:
 1. `gh pr view <id> --json title,body,baseRefName,headRefName,author` — covers GitHub and GitHub Enterprise (any host `gh` is authenticated against; verify with `gh auth status --hostname <host>` if needed).
 2. `glab mr view <id>` — covers GitLab and self-hosted GitLab.
 3. `bb pr view <id>` (or REST) — covers Bitbucket.
@@ -89,7 +97,7 @@ Map the fetched metadata to `<base>..<head>` SHA range using `git rev-parse <bas
 
 **Case 3 — No argument** (auto-detect). Precedence (first match wins):
 1. If HEAD is detached (`git symbolic-ref -q HEAD` returns non-zero), **require an explicit argument** — auto-detect is ambiguous in detached state. Abort with a one-line instruction telling the user to pass a SHA range.
-2. Try forge-CLI detection of the current branch's PR. If found, treat as Case 1.
+2. Try forge-CLI detection of the current branch's PR. If found, treat as Case 1. If the CLI is present but errors (auth-fail, 403, rate-limit, network), surface the error and pause per Case 1's distinguish-error-from-missing rule. Only the unambiguous "no PR for this branch" result advances to step 3.
 3. Resolve the upstream default branch via `git symbolic-ref refs/remotes/origin/HEAD` (handles `main`, `master`, `trunk`, or anything else the remote uses). Use `<that-ref>..HEAD` as the SHA range.
 4. If no `origin/HEAD` is set (rare; usually means the remote was never properly cloned), fall back to the merge base of HEAD against any of `origin/main`, `origin/master`, `origin/trunk` — whichever exists. If none exist, abort with "Cannot determine default branch — pass an explicit `<base>..<head>` range."
 
@@ -105,11 +113,13 @@ Run `git diff --numstat <base>..<head>` and inspect:
 - **Binary-only diff** (every entry has `-\t-\t<path>` indicating binary): note in `{DESCRIPTION}` that the diff is binary-only and the reviewer cannot inspect content. The reviewer should not produce a Clean verdict against unreviewable content; it should emit `Verdict: Architectural Concern — binary-only diff requires human review`.
 - **Submodule pointer-only diff** (changes are entirely in `.gitmodules` or submodule SHA pointers): note in `{DESCRIPTION}` and instruct the reviewer to flag a Suggestion to inspect the submodule contents separately. Do not produce a spurious Clean.
 - **Mixed text + binary**: include the text portion normally; note the binary files in `{DESCRIPTION}` so the reviewer doesn't pretend to have read them.
-- **Diff too large** (>5,000 added+deleted lines per `numstat`): warn the user and offer to split per-commit or per-file. If the user proceeds anyway, note the over-cap in `{DESCRIPTION}` and dispatch with a context-window degradation warning. This is a soft cap, not a hard block.
+- **Diff too large** (>5,000 added+deleted lines per `numstat`): warn the user and offer to split per-commit or per-file. If the user proceeds anyway, note the over-cap in `{DESCRIPTION}` and dispatch with a context-window degradation warning. This is a soft cap, not a hard block. **Non-interactive callers** (build / debugging / finish dispatching `/temper`): on >5,000-line diffs, proceed automatically with the over-cap note in `{DESCRIPTION}` and emit a `degraded-context` flag in the round metadata. Interactive (standalone) callers retain the offer-to-split flow above.
+
+**Empty-diff caller contract.** Pipeline callers (build / debugging / finish) MUST treat `Reason: empty-diff` as a soft-warn — surface to the user ("temper found no changes between BASE and HEAD; confirm this is intended") before proceeding past the gate. The most common cause is uncommitted work, a wrong base, or detached-HEAD post-rebase. Ad-hoc / standalone callers may proceed silently (the user invoked /temper knowing the state).
 
 ### Step 2: Dispatch the temper reviewer
 
-Use the Task tool with `subagent_type="general-purpose"`. Fill in the template at `temper-reviewer.md` in this directory and pass it as the subagent prompt.
+Write the filled template to a dispatch file at the path defined by `shared/dispatch-convention.md` (one file per dispatch-id; see Per-invocation dispatch-id below). Then dispatch a `general-purpose` Task subagent that reads that file as its prompt. Do not paste the filled template directly into the Task tool prompt — the disk-mediated dispatch is what gives the dispatch-id per-invocation uniqueness on disk.
 
 **Placeholders** (four slots, all must be filled before dispatch — these match the section slots in `temper-reviewer.md` exactly):
 - `{DESCRIPTION}` — one-line summary of what was implemented. PR title if available, else `Changes in <base>..<head>` / `changes on branch X`. Augment with preflight notes (binary, submodule, oversized) when applicable.
@@ -118,7 +128,7 @@ Use the Task tool with `subagent_type="general-purpose"`. Fill in the template a
 
 Earlier drafts listed `{WHAT_WAS_IMPLEMENTED}` and `{PLAN_OR_REQUIREMENTS}` as separate placeholders. Those names were redundant aliases for `{DESCRIPTION}` and `{PLAN_REFERENCE}` — the template now uses the canonical names in both prose and section slots, so there is exactly one slot per concept.
 
-**Per-invocation dispatch-id** (concurrency isolation). Every `/temper` invocation generates a unique dispatch-id at Step 1: `temper-YYYYMMDDTHHmmss-<6-char-nonce>`. The dispatch file path and the `metadata.dispatch_id` field both include this id, so concurrent invocations (e.g., user-initiated overlapping with build's Phase 4) cannot collide. Round numbering remains per-invocation; the dispatch-id disambiguates `(skill, round)` traceability tuples in the external_review MCP and in any session-log consumers.
+**Per-invocation dispatch-id** (concurrency isolation). Every `/temper` invocation generates a unique dispatch-id at Step 1: `temper-YYYYMMDDTHHmmss-<6-char-nonce>`. Generate via a cryptographic RNG (e.g., `python -c 'import secrets; print(secrets.token_hex(3))'` for 6 hex chars). If the dispatch file path already exists on disk, regenerate the nonce and retry — never overwrite. The dispatch file path and the `metadata.dispatch_id` field both include this id, so concurrent invocations (e.g., user-initiated overlapping with build's Phase 4) cannot collide. Round numbering remains per-invocation; the dispatch-id disambiguates `(skill, round)` traceability tuples in the external_review MCP and in any session-log consumers.
 
 #### Freshness Boundary
 
@@ -131,7 +141,7 @@ Temper's core principle ("fresh reviewer every round, no anchoring") is conventi
 The reviewer **must not** receive:
 - Prior-round findings (any round, any reviewer)
 - PR review comments (only PR title + body are pulled via the forge CLI; comments are out of scope)
-- Fixup-commit subject lines that quote prior temper output (if a fixup commit's subject contains a temper finding's wording, redact the subject in the diff context passed to the reviewer)
+- Fixup-commit subjects and other commit messages — the reviewer subagent is explicitly instructed (in `temper-reviewer.md`) to read diff content only, not `git log` / commit messages. This shifts the boundary from orchestrator-side redaction (unenforceable, since the reviewer runs its own `git` commands) to reviewer-side discipline.
 - Any out-of-band notes from the user "for the reviewer's awareness"
 
 This boundary is what makes round-N independent of round-N-1. Step 5's optional post-to-PR happens *after* a round completes; on subsequent rounds, the reviewer is dispatched against the *new* diff, and PR comments (which now contain prior findings) are excluded from the metadata fetch.
@@ -146,12 +156,14 @@ This boundary is what makes round-N independent of round-N-1. Step 5's optional 
 
 ### Step 4: Re-review after fixes (iterative loop)
 
-After fixing Critical/Important issues, dispatch a **NEW fresh temper reviewer subagent** (never the same one — fresh eyes, no anchoring). Compare issue count to prior round:
+After fixing Critical/Important issues, dispatch a **NEW fresh temper reviewer subagent** (never the same one — fresh eyes, no anchoring). Compare issue count to prior round.
 
-- **Strictly fewer Critical+Important issues:** Progress — fix and re-review again.
-- **Same or more Critical+Important issues:** Stagnation — escalate to user with findings from both rounds.
-- **No Critical/Important issues:** Clean — proceed.
+Evaluate in this order; first match wins:
 - **Architectural concerns:** Immediate escalation regardless of round.
+- **No Critical/Important issues:** Clean — proceed (terminate the loop).
+- **Round number reaches `max_rounds`:** Circuit-breaker — escalate to user with full round history regardless of trajectory (see Max-round circuit breaker subsection below for the message format).
+- **Strictly fewer Critical+Important issues than prior round:** Progress — fix and re-review again.
+- **Same or more Critical+Important issues than prior round, AND prior round was non-zero:** Stagnation — escalate to user with findings from both rounds.
 
 **Fresh reviewer every round.** Never pass prior findings to the next reviewer.
 
@@ -159,14 +171,14 @@ After fixing Critical/Important issues, dispatch a **NEW fresh temper reviewer s
 
 The loop is bounded by **5 rounds** by default. A reviewer that produces a strictly-decreasing-but-slow C+I count (e.g., 8 → 7 → 6 → …) would otherwise burn fresh dispatches indefinitely. At round 5 without convergence, escalate to the user with the full round history regardless of trajectory:
 
-> "Temper reached the 5-round max without a clean verdict. Trajectory: [N₁, N₂, …, N₅]. The fix cycle is making progress but slowly; review whether the artifact's remaining issues are real (continue with `--max-rounds=N`) or structural (escalate to design/plan)."
+> "Temper reached the {max_rounds}-round cap without a clean verdict. Trajectory: [N₁, N₂, …, N_{max_rounds}]. The fix cycle is making progress but slowly. To extend, re-invoke `/temper <scope> max_rounds=N` — this starts a **fresh review loop** with a higher cap (the prior trajectory is informational only; round counting restarts at 1, and the new reviewer has no anchoring from prior rounds). If the remaining issues appear structural rather than fixable in another loop, escalate to design / plan instead."
 
-Callers (build Phase 4) treat round-5 escalation as a soft block: the diff is not approved, the user decides whether to extend, refactor, or accept the remaining findings. The default cap is overridable via skill argument `max_rounds: <N>` for genuine multi-pass remediation; defaults to 5 to keep runaway protection on by default.
+Callers (build Phase 4) treat round-5 escalation as a soft block: the diff is not approved, the user decides whether to extend, refactor, or accept the remaining findings. The default cap is overridable via trailing skill argument `max_rounds=<N>` for genuine multi-pass remediation; defaults to 5 to keep runaway protection on by default.
 
 #### Done When
 
 - **Clean exit:** A fresh round returns 0 Critical, 0 Important. Verdict `Clean`. Caller may proceed.
-- **Stagnation exit:** Two consecutive rounds with non-decreasing Critical+Important count. Verdict `Stagnation`. Caller escalates to user.
+- **Stagnation exit:** A round's Critical+Important count is ≥ the prior round's count (no strict decrease) AND the prior round's count was non-zero. Verdict `Stagnation`. Caller escalates to user.
 - **Architectural exit:** Any round emits `Architectural Concern`. Verdict `Architectural Concern`. Caller escalates immediately regardless of round number.
 - **Circuit-breaker exit:** Round 5 reached without convergence. Verdict `Max-Rounds`. Caller escalates with full round history.
 
@@ -181,11 +193,13 @@ If the user explicitly asks ("post this to the PR", "leave a review comment"), p
 - Bitbucket → `bb pr comment <id> --file findings.md` (or REST)
 - Unavailable / unknown forge → output the formatted body for the user to paste
 
-**Confirm success explicitly.** Check the CLI's exit code. On non-zero exit, **fall through to paste-mode**: surface the error, output the formatted body, and tell the user "Posting failed with `<error>` — here is the body to paste manually." Do not silently skip on:
-- `gh auth status` failure (token expired)
-- PR closed / merged / deleted between dispatch and post
-- 403 rate-limit response
-- Network error
+**Confirm success explicitly.** Check the CLI's exit code. On non-zero exit, classify the failure mode and respond per the table below — do not silently skip:
+
+| Failure mode | Response |
+|---|---|
+| Auth-fail (`gh auth status` failure / token expired) / rate-limit (403) / network error | Paste-mode with retry guidance: "Posting failed with `<error>` — re-authenticate / wait and retry, or paste the body manually below." |
+| PR closed-without-merge | Paste-mode with conditional guidance: "PR is closed; if you intend to reopen, paste the body. Otherwise the findings remain in your session." |
+| PR merged or deleted | Do **not** offer paste-mode. Surface the findings locally: "The PR is no longer postable (merged / deleted). Findings remain in your session for reference." |
 
 Never post without an explicit user instruction. Findings live in the user's session by default.
 
@@ -223,6 +237,10 @@ After dispatching the host temper subagent, optionally call the `external_review
 **Preferred dispatch pattern:** dispatch the host reviewer as a background Agent first, call `external_review`, then collect host results — gives effective parallelism where background agents are available. If background agents are not available, run sequentially: host first (must complete; INV-1 below), then external. Do not call external_review first or in a fire-and-forget pattern that would block host result collection.
 
 **Invocation:**
+
+**Cadence:** external_review is called **once per `/temper` invocation, on Round 1** — to provide a second opinion on the initial finding set without multiplying external-API cost across the fix loop. Subsequent rounds rely on the fresh host reviewer alone.
+
+**Re-invocation skip rule:** Re-invoking `/temper` via `max_rounds=N` after a stagnated run normally triggers another Round-1 external_review call. To avoid redundant external API spend on essentially-the-same diff, pass `external_review=skip` as a trailing skill argument. (No automatic same-diff detection — the spec does not define a persistent dispatch-id log across invocations, so skip is explicit-only.)
 
 Call `external_review` with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
