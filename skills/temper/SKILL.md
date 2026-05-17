@@ -14,6 +14,25 @@ Like tempering steel after forging — iterative heat-and-quench cycles that set
 
 **Renamed from `/code-review` (2026-05-17)** to avoid collision with Claude Code's built-in `/review` command. Same iteration behavior; the argument shape and platform-agnostic PR support are new.
 
+## Non-Goals
+
+Temper reviews **code diffs only**. Use a different skill for:
+
+- **Design docs / plans / concepts** — use `/audit` or `/red-team`.
+- **Multi-lens parallel review** (4+ analytical lenses on one artifact) — use `/audit`.
+- **Executable cross-component bug-hunting** (adversarial tests against assembled features) — use `/inquisitor`.
+- **Security-specific review** with attacker-perspective coverage — use Claude Code's built-in `/security-review` or `/siege` for a deep multi-agent security audit.
+- **Iterative red-team of *any* artifact** (not just code diffs) — use `/quality-gate`.
+
+## Relationship to `/quality-gate`
+
+Temper and quality-gate share a loop shape (fresh reviewer each round, stagnation detection, escalate on architectural concerns). They differ in scope and caller:
+
+- **`/quality-gate`** is the generic iterative red-team loop over *any* artifact (design, plan, code, hypothesis, mockup). It is invoked **by artifact-producing skills** as their terminal gate.
+- **`/temper`** is the code-diff-specific instance — same loop shape, plus a code-review checklist, plus forge integration (PR metadata, optional post-back). It is **user-facing** for ad-hoc review and is called by build / debugging / finish on diffs.
+
+When in doubt: if the artifact is a code diff, use temper. If it is anything else (or you are inside an artifact-producing skill writing the gate), use quality-gate.
+
 ## When to Request Review
 
 **Mandatory:**
@@ -26,10 +45,20 @@ Like tempering steel after forging — iterative heat-and-quench cycles that set
 - Before refactoring (baseline check)
 - After fixing complex bug
 
+## Dependencies
+
+| Component | Required? | Purpose | Fallback if missing |
+|---|---|---|---|
+| `git` | Required | Diff resolution, SHA range, default-branch detection | None — abort with clear error |
+| Forge CLI (`gh` / `glab` / `bb`) | Optional | PR metadata fetch + optional Step 5 post-back | Probe in order; if all missing, fall through to git-plumbing and ask user for description |
+| `crucible-consensus` MCP server | Optional | External-model second opinion via `external_review` | Skip silently |
+| `crucible:test-coverage` | Optional | Test-alignment audit when behavioral changes are made | Skip; recommend manually |
+| `crucible:checkpoint` | Optional | Pre-fix rollback target (used by build's wrapping) | Skip silently |
+
 ## Invocation
 
 ```
-/temper                          # auto-detect: current branch's PR if one exists, else origin/main..HEAD
+/temper                          # auto-detect (see Step 1 case 3)
 /temper 259                      # PR identifier on the current forge
 /temper https://...              # PR URL on any forge
 /temper main..HEAD               # explicit SHA range
@@ -44,38 +73,76 @@ Like tempering steel after forging — iterative heat-and-quench cycles that set
 
 Determine what to review based on the argument:
 
-1. **PR number or URL** — fetch metadata (title, body, base ref, head ref) using whatever CLI is available for the detected forge. Detect forge from `git remote get-url origin`:
-   - `github.com` → try `gh pr view <id> --json title,body,baseRefName,headRefName,author`
-   - `gitlab.com` or self-hosted GitLab → try `glab mr view <id>` (or REST)
-   - `bitbucket.org` → try `bb pr view <id>` (or REST)
-   - Other / unavailable CLI → fetch the PR head via `git fetch <remote> <head-ref>` and proceed with the diff alone; ask the user to paste the description if they want it factored into the review brief
+**Case 1 — PR number or URL.** Fetch metadata (title, body, base ref, head ref). Forge detection is **CLI-probe order, not hostname-literal** (covers GitHub Enterprise Server and any other GH-flavored host). When the argument is a URL, parse the forge from the URL host first; only use `git remote get-url origin` for forge inference when no URL is given (handles fork workflows where `origin` and `upstream` live on different forges).
 
-   Map the fetched metadata to `<base>..<head>` SHA range using `git rev-parse <baseRef>` and `git rev-parse <headRef>`.
+Try in this order until one succeeds:
+1. `gh pr view <id> --json title,body,baseRefName,headRefName,author` — covers GitHub and GitHub Enterprise (any host `gh` is authenticated against; verify with `gh auth status --hostname <host>` if needed).
+2. `glab mr view <id>` — covers GitLab and self-hosted GitLab.
+3. `bb pr view <id>` (or REST) — covers Bitbucket.
+4. None of the above succeeded → fall back to git plumbing: `git fetch <remote> pull/<id>/head` (GitHub-style ref) or `git fetch <remote> merge-requests/<id>/head` (GitLab-style); ask the user to paste the description if they want it factored in.
 
-2. **SHA range** (argument contains `..`) — use as-is. Metadata is empty: no PR description, just the diff.
+**Distinguish CLI errors from missing CLIs.** A CLI that exits non-zero with "404 / PR not found / authentication required" is *not* a missing-CLI fallback path. Surface the error to the user (e.g., "gh found the PR but auth failed — re-authenticate or paste the diff manually") and pause for instruction. Falling through silently on a CLI error would dispatch a review against the wrong scope.
 
-3. **No argument** — try forge-CLI detection of the current branch's PR. If found, treat as case 1. Otherwise default to `origin/main..HEAD` (or the merge base of the current branch and main).
+Map the fetched metadata to `<base>..<head>` SHA range using `git rev-parse <baseRef>` and `git rev-parse <headRef>`.
 
-**Anti-rationalization:** don't hardcode `gh` calls. The skill is forge-agnostic — the CLI used is whichever the environment makes available. Skip metadata gracefully on missing CLIs rather than failing the review.
+**Case 2 — SHA range** (argument contains `..`). Use as-is. Metadata is empty: no PR description, just the diff.
+
+**Case 3 — No argument** (auto-detect). Precedence (first match wins):
+1. If HEAD is detached (`git symbolic-ref -q HEAD` returns non-zero), **require an explicit argument** — auto-detect is ambiguous in detached state. Abort with a one-line instruction telling the user to pass a SHA range.
+2. Try forge-CLI detection of the current branch's PR. If found, treat as Case 1.
+3. Resolve the upstream default branch via `git symbolic-ref refs/remotes/origin/HEAD` (handles `main`, `master`, `trunk`, or anything else the remote uses). Use `<that-ref>..HEAD` as the SHA range.
+4. If no `origin/HEAD` is set (rare; usually means the remote was never properly cloned), fall back to the merge base of HEAD against any of `origin/main`, `origin/master`, `origin/trunk` — whichever exists. If none exist, abort with "Cannot determine default branch — pass an explicit `<base>..<head>` range."
+
+**Anti-rationalization:** don't hardcode `gh` calls in the dispatch path. The skill is forge-agnostic — the CLI used is whichever the environment makes available. Skip metadata gracefully on missing CLIs; surface explicit errors on present-but-failing CLIs.
+
+### Step 1.5: Diff preflight (mandatory — runs before dispatch)
+
+Classify the resolved diff before spending a reviewer dispatch on it. Empty / binary / submodule-only diffs are recognized and handled explicitly so they cannot produce silent false-Clean verdicts.
+
+Run `git diff --numstat <base>..<head>` and inspect:
+
+- **Empty diff** (no entries): short-circuit. Return `Clean — no changes to review` immediately. Do not dispatch a reviewer. Callers (build, finish) see this as "Clean" but with `Reason: empty-diff` distinguishable from a substantive Clean.
+- **Binary-only diff** (every entry has `-\t-\t<path>` indicating binary): note in `{DESCRIPTION}` that the diff is binary-only and the reviewer cannot inspect content. The reviewer should not produce a Clean verdict against unreviewable content; it should emit `Verdict: Architectural Concern — binary-only diff requires human review`.
+- **Submodule pointer-only diff** (changes are entirely in `.gitmodules` or submodule SHA pointers): note in `{DESCRIPTION}` and instruct the reviewer to flag a Suggestion to inspect the submodule contents separately. Do not produce a spurious Clean.
+- **Mixed text + binary**: include the text portion normally; note the binary files in `{DESCRIPTION}` so the reviewer doesn't pretend to have read them.
+- **Diff too large** (>5,000 added+deleted lines per `numstat`): warn the user and offer to split per-commit or per-file. If the user proceeds anyway, note the over-cap in `{DESCRIPTION}` and dispatch with a context-window degradation warning. This is a soft cap, not a hard block.
 
 ### Step 2: Dispatch the temper reviewer
 
 Use the Task tool with `subagent_type="general-purpose"`. Fill in the template at `temper-reviewer.md` in this directory and pass it as the subagent prompt.
 
 **Placeholders** (four slots, all must be filled before dispatch — these match the section slots in `temper-reviewer.md` exactly):
-- `{DESCRIPTION}` — one-line summary of what was implemented. PR title if available, else `Changes in <base>..<head>` / `changes on branch X`.
+- `{DESCRIPTION}` — one-line summary of what was implemented. PR title if available, else `Changes in <base>..<head>` / `changes on branch X`. Augment with preflight notes (binary, submodule, oversized) when applicable.
 - `{PLAN_REFERENCE}` — PR body / plan / requirements if available, else `(none provided — review against general production-readiness criteria)`.
 - `{BASE_SHA}` / `{HEAD_SHA}` — resolved SHA range from Step 1.
 
-Earlier drafts listed `{WHAT_WAS_IMPLEMENTED}` and `{PLAN_OR_REQUIREMENTS}` as separate placeholders. Those names were redundant aliases for `{DESCRIPTION}` and `{PLAN_REFERENCE}` respectively — the template now uses the canonical names in both its prose and its section slots, so there is exactly one slot per concept.
+Earlier drafts listed `{WHAT_WAS_IMPLEMENTED}` and `{PLAN_OR_REQUIREMENTS}` as separate placeholders. Those names were redundant aliases for `{DESCRIPTION}` and `{PLAN_REFERENCE}` — the template now uses the canonical names in both prose and section slots, so there is exactly one slot per concept.
+
+**Per-invocation dispatch-id** (concurrency isolation). Every `/temper` invocation generates a unique dispatch-id at Step 1: `temper-YYYYMMDDTHHmmss-<6-char-nonce>`. The dispatch file path and the `metadata.dispatch_id` field both include this id, so concurrent invocations (e.g., user-initiated overlapping with build's Phase 4) cannot collide. Round numbering remains per-invocation; the dispatch-id disambiguates `(skill, round)` traceability tuples in the external_review MCP and in any session-log consumers.
+
+#### Freshness Boundary
+
+Temper's core principle ("fresh reviewer every round, no anchoring") is convention-plus-mechanism. The mechanism: the reviewer subagent receives **only these inputs** and nothing else:
+
+- The diff itself (`git diff <base>..<head>`)
+- The four placeholders above (`{DESCRIPTION}`, `{PLAN_REFERENCE}`, `{BASE_SHA}`, `{HEAD_SHA}`)
+- The reviewer template (`temper-reviewer.md`) and its canonical includes (`shared/reviewer-common.md`)
+
+The reviewer **must not** receive:
+- Prior-round findings (any round, any reviewer)
+- PR review comments (only PR title + body are pulled via the forge CLI; comments are out of scope)
+- Fixup-commit subject lines that quote prior temper output (if a fixup commit's subject contains a temper finding's wording, redact the subject in the diff context passed to the reviewer)
+- Any out-of-band notes from the user "for the reviewer's awareness"
+
+This boundary is what makes round-N independent of round-N-1. Step 5's optional post-to-PR happens *after* a round completes; on subsequent rounds, the reviewer is dispatched against the *new* diff, and PR comments (which now contain prior findings) are excluded from the metadata fetch.
 
 ### Step 3: Act on feedback and iterate
 
 - Fix Critical issues immediately
 - Fix Important issues before proceeding
-- Note Minor issues for later
+- Note Minor and Suggestion issues for later (see Severity / Verdict Vocabulary below for how these map)
 - Push back if the reviewer is wrong (with reasoning)
-- **Record the issue count** (Critical + Important only — Minor doesn't count)
+- **Record the issue count** (Critical + Important only — Minor and Suggestion do not count toward convergence)
 
 ### Step 4: Re-review after fixes (iterative loop)
 
@@ -88,7 +155,24 @@ After fixing Critical/Important issues, dispatch a **NEW fresh temper reviewer s
 
 **Fresh reviewer every round.** Never pass prior findings to the next reviewer.
 
+#### Max-round circuit breaker
+
+The loop is bounded by **5 rounds** by default. A reviewer that produces a strictly-decreasing-but-slow C+I count (e.g., 8 → 7 → 6 → …) would otherwise burn fresh dispatches indefinitely. At round 5 without convergence, escalate to the user with the full round history regardless of trajectory:
+
+> "Temper reached the 5-round max without a clean verdict. Trajectory: [N₁, N₂, …, N₅]. The fix cycle is making progress but slowly; review whether the artifact's remaining issues are real (continue with `--max-rounds=N`) or structural (escalate to design/plan)."
+
+Callers (build Phase 4) treat round-5 escalation as a soft block: the diff is not approved, the user decides whether to extend, refactor, or accept the remaining findings. The default cap is overridable via skill argument `max_rounds: <N>` for genuine multi-pass remediation; defaults to 5 to keep runaway protection on by default.
+
+#### Done When
+
+- **Clean exit:** A fresh round returns 0 Critical, 0 Important. Verdict `Clean`. Caller may proceed.
+- **Stagnation exit:** Two consecutive rounds with non-decreasing Critical+Important count. Verdict `Stagnation`. Caller escalates to user.
+- **Architectural exit:** Any round emits `Architectural Concern`. Verdict `Architectural Concern`. Caller escalates immediately regardless of round number.
+- **Circuit-breaker exit:** Round 5 reached without convergence. Verdict `Max-Rounds`. Caller escalates with full round history.
+
 ### Step 5 (optional) — Post findings to the PR
+
+This step is an **output convenience, not part of the review contract** — findings are complete after Step 4 regardless of whether they're posted. It exists for users who want the local review surfaced on the PR for asynchronous collaborators.
 
 If the user explicitly asks ("post this to the PR", "leave a review comment"), publish using whichever CLI fits the forge:
 
@@ -97,11 +181,46 @@ If the user explicitly asks ("post this to the PR", "leave a review comment"), p
 - Bitbucket → `bb pr comment <id> --file findings.md` (or REST)
 - Unavailable / unknown forge → output the formatted body for the user to paste
 
+**Confirm success explicitly.** Check the CLI's exit code. On non-zero exit, **fall through to paste-mode**: surface the error, output the formatted body, and tell the user "Posting failed with `<error>` — here is the body to paste manually." Do not silently skip on:
+- `gh auth status` failure (token expired)
+- PR closed / merged / deleted between dispatch and post
+- 403 rate-limit response
+- Network error
+
 Never post without an explicit user instruction. Findings live in the user's session by default.
+
+## Severity / Verdict Vocabulary
+
+The reviewer template (`shared/reviewer-common.md`) uses a 4-tier severity scale and a parallel verdict vocabulary. This section pins the canonical mapping the temper orchestrator uses to compute convergence.
+
+### Severity mapping
+
+| Reviewer emits | Temper counts as | Affects convergence? |
+|---|---|---|
+| **Critical** | Critical | Yes — must reach 0 to exit Clean |
+| **Important** | Important | Yes — must reach 0 to exit Clean |
+| **Minor** | Minor | No — informational, surfaced to user |
+| **Suggestion** | Minor | No — folded into Minor bucket for orchestrator purposes; preserved verbatim in the report |
+
+**Why fold Suggestion into Minor?** Reviewers sometimes soften real bugs to "Suggestion" as an LLM diplomacy pattern. Folding ensures these are surfaced to the user (not silently dropped) without contaminating the convergence math. If the user identifies a Suggestion that should have been Critical/Important, they can re-dispatch with an explicit prompt to re-grade.
+
+### Verdict mapping
+
+The reviewer template also emits an overall verdict. Two parallel vocabularies exist for historical reasons; temper recognizes both as synonyms:
+
+| Reviewer emits | Temper treats as |
+|---|---|
+| **Clean** ≡ **Approved** | Clean (exit) |
+| **Issues Found** ≡ **Needs Fixes** | Issues Found (continue loop) |
+| **Architectural Concern** ≡ **Escalate** | Architectural Concern (immediate escalation) |
+
+The canonical (preferred) names are the left column. The right-column synonyms remain accepted to avoid breaking older reviewer templates.
 
 ## External Model Review (Optional)
 
-After dispatching the host temper subagent, optionally call the `external_review` MCP tool for an independent second opinion from external models. The preferred pattern is: dispatch the host reviewer as a background Agent first, call `external_review`, then collect host results — this gives effective parallelism where background agents are available.
+After dispatching the host temper subagent, optionally call the `external_review` MCP tool for an independent second opinion from external models.
+
+**Preferred dispatch pattern:** dispatch the host reviewer as a background Agent first, call `external_review`, then collect host results — gives effective parallelism where background agents are available. If background agents are not available, run sequentially: host first (must complete; INV-1 below), then external. Do not call external_review first or in a fire-and-forget pattern that would block host result collection.
 
 **Invocation:**
 
@@ -109,9 +228,11 @@ Call `external_review` with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
 - `context`: the same diff and requirements context given to the host reviewer
 - `skill`: `"temper"` (top-level argument for per-skill toggle enforcement)
-- `metadata`: `{"skill": "temper", "round": N}` (traceability; N is the current review round)
+- `metadata`: `{"skill": "temper", "round": N, "dispatch_id": "<from Step 2>"}` (traceability)
 
-**Per-skill toggle:** The server checks the `skill` argument against `skills.temper` in the external review config. If `false`, the server returns `unavailable`.
+**Per-skill toggle:** The server checks the `skill` argument against `skills.temper` in the external review config. If `false`, the server returns `unavailable`. **Server hyphen-normalization:** `mcp-servers/crucible-consensus/server.py` normalizes hyphens to underscores in the skill name before lookup, so a hyphenated skill name (`red-team`) and its underscored form (`red_team`) resolve to the same toggle. Today temper has no hyphen — the contract works trivially — but the rule is documented here for future renames.
+
+**Config-rename note for opt-out users.** The toggle key was renamed from `code_review` to `temper` on 2026-05-17. If you previously set `skills.code_review: false` to opt out, **rename the key to `skills.temper: false`** to preserve your opt-out. Otherwise the toggle inherits the default `True`.
 
 **Graceful degradation:**
 - `external_review` tool not available (MCP server not running): skip silently.
@@ -128,11 +249,14 @@ Call `external_review` with:
 
 ## Cross-Reference to Deep Cloud Review
 
-For GitHub PRs only, Claude Code's built-in `/ultrareview <PR>` runs a deeper multi-agent review in a cloud sandbox. After a local `/temper` round, suggest `/ultrareview` to the user when:
-- The local round found significant issues across multiple categories, OR
-- The user wants a second opinion before merge on a high-stakes change
+For GitHub PRs only, Claude Code's built-in `/ultrareview <PR>` runs a deeper multi-agent review in a cloud sandbox. After a local `/temper` round, suggest `/ultrareview` to the user when **either** of these holds:
 
-`/ultrareview` is GitHub-specific; do not suggest it for GitLab/Bitbucket/other-forge PRs.
+- The local round emitted findings in ≥2 distinct categories from the reviewer-common checklist (Architecture, Correctness, Quality, Testing, TDD Process, Production Readiness — see `shared/reviewer-common.md`), **OR**
+- The user explicitly wants a second opinion before merge on a high-stakes change.
+
+"Categories" means the reviewer-common checklist sections, not severity tiers — the trigger is breadth of issue surface, not depth of any single issue.
+
+`/ultrareview` is GitHub-specific; **do not suggest** it for GitLab / Bitbucket / other-forge PRs.
 
 ## Example
 
@@ -141,56 +265,55 @@ For GitHub PRs only, Claude Code's built-in `/ultrareview <PR>` runs a deeper mu
 
 You: Let me request review before proceeding.
 
-[Resolve scope]
-- No PR yet; default to origin/main..HEAD
+[Step 1: Resolve scope]
+- No argument given; HEAD is on branch `feat/verify`
+- gh pr view (current branch) → no PR yet
+- origin/HEAD → main; resolved range: origin/main..HEAD
 - BASE_SHA=$(git rev-parse origin/main)
 - HEAD_SHA=$(git rev-parse HEAD)
 
-[Dispatch fresh temper reviewer — Round 1]
+[Step 1.5: Preflight]
+- numstat: 4 files changed, 87 added, 12 deleted — text diff, in-cap, proceed
+
+[Step 2: Dispatch fresh temper reviewer — Round 1, dispatch-id temper-20260517T150500-a7f3c2]
   Issues: 2 Important (missing progress indicators, no error handling for empty input)
   Minor: 1 (magic number)
 
 You: [Fix both Important issues]
 
-[Dispatch NEW fresh temper reviewer — Round 2]
+[Step 4: Dispatch NEW fresh temper reviewer — Round 2]
   Issues: 1 Important (error handling catches wrong exception type)
 
 Round 2 (1 issue) < Round 1 (2 issues) → progress, continue
 
 You: [Fix the exception type]
 
-[Dispatch NEW fresh temper reviewer — Round 3]
+[Step 4: Dispatch NEW fresh temper reviewer — Round 3]
   Issues: 0 Critical/Important
   Minor: 1 (could use named constant)
 
-Clean — proceed to Task 3.
+Verdict: Clean (0 Critical, 0 Important). Proceed to Task 3.
 ```
 
 ## Test Alignment
 
-When `/temper` is used standalone (not from build, debugging, or finish — those pipelines handle test-coverage automatically), the caller should consider dispatching `crucible:test-coverage` after temper completes if behavioral changes were made.
+When behavioral changes were made, consider dispatching `crucible:test-coverage` after temper completes. This catches stale tests, missing coverage, or assertion drift introduced by the fixes.
 
-This is especially valuable when:
-- The review identified behavioral changes that might affect existing tests
-- The diff modifies functions/methods that have dedicated test files
-- The review noted "tests should be updated" without specifying which ones
+**Caller context determines who runs it:**
+- **Pipelines (build / debugging / finish):** the pipeline orchestrator dispatches `crucible:test-coverage` automatically — temper does not.
+- **Standalone / ad-hoc:** the user (or whoever invoked `/temper` directly) is responsible for the hand-off. Recommend `crucible:test-coverage` when the review noted behavioral changes that might affect existing tests, when the diff modified functions with dedicated test files, or when the reviewer said "tests should be updated" without specifics.
+
+This is the single canonical statement of the rule; the workflow sections below cross-link rather than restate.
 
 ## Integration with Workflows
 
-**Build Pipeline:**
-- Temper after EACH task
-- Test-coverage audit after temper (handled by build pipeline)
-- Catch issues before they compound
-- Fix before moving to next task
+**Build pipeline (Phase 4):** Temper runs after each task. Build dispatches `crucible:test-coverage` automatically (see Test Alignment).
 
-**Standalone Plan Execution:**
-- Temper after each batch (3 tasks)
-- Get feedback, apply, continue
+**Standalone plan execution:** Temper after each batch (3 tasks). The user dispatches `crucible:test-coverage` afterward if behavioral changes were made.
 
-**Ad-Hoc Development:**
-- Temper before merge
-- Temper when stuck
-- Consider `crucible:test-coverage` after temper if behavioral changes were made
+**Ad-hoc development:** Temper before merge, when stuck, after a complex bug fix. The user dispatches `crucible:test-coverage` afterward if behavioral changes were made.
+
+**Migration note — pre-rename retrospectives.** `crucible:forge` retrospectives written before 2026-05-17 are tagged with `code_review`. Forge's consult-past-lessons step does not auto-alias; if you want the old lessons to surface for `temper`, query both keys. (Out of temper's scope to fix; flagged here so users know.)
 
 ## Red Flags
 
@@ -201,8 +324,12 @@ This is especially valuable when:
 - Argue with valid technical feedback
 - Skip re-review after fixes ("the fixes look fine")
 - Reuse the same reviewer subagent across rounds
-- Pass prior findings to the next reviewer
+- Pass prior findings to the next reviewer (see Freshness Boundary)
 - Hardcode `gh` (or any single forge's CLI) in the dispatch path — temper is forge-agnostic
+- Silently fall through on a CLI **error** (vs missing-CLI) — surface the failure to the user
+- Run past the 5-round circuit breaker without explicit user instruction
+- Post to a PR without explicit user instruction
+- Silently skip Step 5 on auth-fail / closed-PR / rate-limit — fall through to paste-mode
 
 **If the reviewer is wrong:**
 - Push back with technical reasoning
