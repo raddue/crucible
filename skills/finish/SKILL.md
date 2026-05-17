@@ -44,7 +44,7 @@ Stop. Don't proceed to Step 2.
 
 **Before presenting options, run a full code review.**
 
-**REQUIRED SUB-SKILL:** Use crucible:code-review
+**REQUIRED SUB-SKILL:** Use crucible:temper
 
 1. Get base and head SHAs:
 ```bash
@@ -57,7 +57,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)...HEAD
 ```
 
-3. Dispatch a code review subagent (general-purpose) using the `code-review/code-reviewer.md` template with:
+3. Dispatch a code review subagent (general-purpose) using the `temper/temper-reviewer.md` template with:
    - What was implemented (summary of branch work)
    - The plan or requirements it was built against
    - Base and head SHAs
@@ -346,7 +346,7 @@ git worktree remove <worktree-path>
 
 **Skipping code review**
 - **Problem:** Subtle bugs, architectural violations, and style drift make it into the branch
-- **Fix:** Always run crucible:code-review before presenting options. The orchestrator's lightweight review during execution is not sufficient.
+- **Fix:** Always run crucible:temper before presenting options. The orchestrator's lightweight review during execution is not sufficient.
 
 **Open-ended questions**
 - **Problem:** "What should I do next?" -> ambiguous

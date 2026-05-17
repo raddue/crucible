@@ -76,7 +76,7 @@ R48 (`name` as only required plugin manifest field) — applies to plugin packag
 
 R06 (code examples must be runnable, not pseudocode) — Crucible could be more rigorous about this in some skill bodies. Worth adding to `/skill-creator`'s checklist.
 
-R07 (scope note when related skills exist) — Crucible has overlap between `audit`, `red-team`, `code-review`, `siege`, and `quality-gate`. Cross-references exist but are inconsistent. Adopting R07 as a `/stocktake` audit dimension would surface dead pointers and missing pointers.
+R07 (scope note when related skills exist) — Crucible has overlap between `audit`, `red-team`, `temper`, `siege`, and `quality-gate`. Cross-references exist but are inconsistent. Adopting R07 as a `/stocktake` audit dimension would surface dead pointers and missing pointers.
 
 R08 (patterns over theory) — Crucible's larger orchestrator skills sometimes drift toward theory in their preamble sections. R08 as a quality-gate criterion for skill artifacts would catch this.
 

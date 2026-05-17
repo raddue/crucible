@@ -76,7 +76,7 @@
       "dimension": "direct",
       "boundary": "review-direction",
       "prompt": "I'm done with the feature branch. Can you review my changes before I create a PR?",
-      "expected_skill": "code-review",
+      "expected_skill": "temper",
       "common_mistakes": [
         "review-feedback",
         "quality-gate"
@@ -92,7 +92,7 @@
       "prompt": "I got 6 comments on my PR from the tech lead. Help me work through them.",
       "expected_skill": "review-feedback",
       "common_mistakes": [
-        "code-review"
+        "temper"
       ],
       "context": "User has received review feedback on a PR and needs to process and respond to the comments.",
       "reasoning": "Review-feedback handles inbound review comments \u2014 analyzing them for technical merit, identifying unclear or contradictory items, and determining the right response. Code-review would be requesting a new review, which is the wrong direction.",
@@ -105,7 +105,7 @@
       "prompt": "The senior dev left some comments on my PR saying 'looks good, just clean up the naming'. Help me with the review.",
       "expected_skill": "review-feedback",
       "common_mistakes": [
-        "code-review"
+        "temper"
       ],
       "context": "Despite using the word 'review', the user has RECEIVED feedback and needs to process it. The feedback is inbound.",
       "reasoning": "The word 'review' appears but the direction is inbound \u2014 the user received comments and needs to process them. Review-feedback handles this. Code-review would be wrong because the user is not requesting a fresh review of their code.",
@@ -116,13 +116,13 @@
       "dimension": "context-dependent",
       "boundary": "review-direction",
       "prompt": "Review this code.",
-      "expected_skill": "code-review",
+      "expected_skill": "temper",
       "common_mistakes": [
         "review-feedback",
         "audit"
       ],
       "context": "User is presenting their own code and asking for a review. No prior feedback exists \u2014 this is a request for review.",
-      "reasoning": "Same word 'review' but context determines direction. Here the user is requesting a review (outbound) \u2014 code-review. If the user had said 'I got a review on this code, help me address it', the direction would be inbound \u2014 review-feedback. Audit would be wrong because the user is asking for a targeted review, not a multi-lens adversarial subsystem audit.",
+      "reasoning": "Same word 'review' but context determines direction. Here the user is requesting a review (outbound) \u2014 temper. If the user had said 'I got a review on this code, help me address it', the direction would be inbound \u2014 review-feedback. Audit would be wrong because the user is asking for a targeted review, not a multi-lens adversarial subsystem audit.",
       "difficulty": "easy"
     },
     {
@@ -148,7 +148,7 @@
       "expected_skill": "audit",
       "common_mistakes": [
         "red-team",
-        "code-review",
+        "temper",
         "prospector"
       ],
       "context": "Existing codebase subsystem, multi-dimensional review requested. Not a single artifact \u2014 an entire subsystem with multiple files.",
@@ -192,7 +192,7 @@
       "expected_skill": "finish",
       "common_mistakes": [
         "verify",
-        "code-review"
+        "temper"
       ],
       "context": "User has provided fresh test evidence in the current message. Verification is satisfied. This is now an integration decision.",
       "reasoning": "Finish guides completion \u2014 presenting options for merge, PR, or cleanup. Verify gathers evidence, but the user just provided fresh evidence (test output in the current message). The remaining decision is how to integrate the work, which is finish's domain.",
