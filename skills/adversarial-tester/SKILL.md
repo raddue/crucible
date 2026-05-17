@@ -140,5 +140,5 @@ This skill produces **adversarial tests**. When used standalone, the tests thems
 
 - **Called by:** `crucible:build` (Phase 3, after test gap writer)
 - **Uses:** `crucible:test-driven-development` patterns for test writing
-- **Pairs with:** `crucible:code-review` (lightweight review if fix touches 3+ files)
+- **Pairs with:** `crucible:temper` (lightweight review if fix touches 3+ files)
 - **Prompt template:** `break-it-prompt.md` (for subagent dispatch)

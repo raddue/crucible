@@ -296,14 +296,14 @@ After any skill that completes a significant task reports success. The calling s
    | design | questions_investigated, auto_resolved |
    | planning | task_count, review_rounds |
    | audit | findings_count, lenses_dispatched |
-   | code-review | rounds, findings_by_severity |
+   | temper | rounds, findings_by_severity |
    | TDD | cycles, red_green_refactor_count |
    | *all skills* | efficiency (optional sub-object, present only when enriched manifest data exists) |
 
    **Signal scope rule:** Emit one signal per top-level skill invocation, not per
    sub-skill dispatch. When build calls quality-gate internally, quality-gate does
    NOT emit its own signal — its metrics are captured in build's metrics bag.
-   Standalone invocations of quality-gate, code-review, etc. DO emit signals.
+   Standalone invocations of quality-gate, temper, etc. DO emit signals.
 
    This is self-enforcing: forge retrospective only runs at the end of a top-level
    skill invocation, so Step 8.5 naturally fires once per top-level skill. Sub-skills
