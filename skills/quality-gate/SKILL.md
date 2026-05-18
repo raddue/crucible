@@ -246,10 +246,35 @@ The user's response routes to: continue (loop with suppression intact), escalate
     The only pre-threshold exits are: clean pass (0 Fatal, 0 Significant); architectural concerns declared via the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` receipt (see Architectural Concerns Exit); sustained-regression hard exit (defined above); no-op fix detection (see Fix Mechanism > No-Op Fix Detection); consensus-stagnation pre-threshold escalation (ONLY when `consensus_query` is available; see Pre-Threshold Consensus Carve-Out); or explicit user interrupt (including the interactive check-in's "escalate now" response, see Skill Arguments). Beginning at round `suppression_threshold`, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns). When two or more exits would fire on the same round, apply the precedence rules in Escalation > Exit Precedence (first match wins).
 11. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history. This limit applies regardless of the `suppression_threshold` rule.
 
+### Tail-Rubric Flag (Component 2 / #265)
+
+**Trigger.** The orchestrator computes `tail_rubric: true` for a red-team dispatch IFF:
+
+- `suppression_threshold ≥ 5`, AND
+- the current LOCAL round number ≥ `ceil(suppression_threshold * 0.6)`.
+
+For default thresholds in the enabled range:
+
+- `suppression_threshold = 10` (code/design/plan) → trigger at LOCAL round 6.
+- `suppression_threshold = 6` → trigger at LOCAL round 4.
+- `suppression_threshold = 5` (cross-chunk integration round) → trigger at LOCAL round 3 (`ceil(5*0.6) = 3`).
+- `suppression_threshold ∈ {3, 4}` → tail-rubric DISABLED. The flag is **never** set on these gates regardless of round number (INV-T3).
+
+**Counter selection.** The tail-rubric uses the LOCAL (per-chunk) round number, consistent with `suppression_threshold`, consensus cadence, look-harder, and silent-seed. Late chunks do NOT automatically have tail-rubric active from round 1 — each chunk's local counter governs.
+
+**Action.** When `tail_rubric: true`, the quality-gate orchestrator **concatenates `skills/quality-gate/tightened-rubric-addendum.md` to the `red-team-prompt.md` body BEFORE Task dispatch**. This is the SAME addendum file used by look-harder (Component 1); one source of truth, two trigger paths. `red-team-prompt.md` itself is **not modified** — the orchestrator is the sole appender (INV-A4). Standalone red-team invocation (i.e., red-team called outside of quality-gate) does NOT use the addendum.
+
+The dispatch file written by the orchestrator records `tail_rubric: true` so the candidate-clean-round look-harder skip condition (`tail-rubric-already-applied`) can read it from disk after the round completes.
+
+**Cross-chunk integration coverage.** The cross-chunk integration round runs with `suppression_threshold = 5` (see Chunked Gate Counter Semantics). The tail-rubric trigger at threshold 5 (LOCAL round 3+) ensures the integration surface — which carries cumulative residual risk from all chunks — benefits from late-round rubric tightening.
+
+**Interaction with the existing inflation check.** The `red-team-prompt.md` body already has an inflation check on its severity rubric. The tail-rubric addendum **tightens** that check round-conditionally; it does not replace it. Early rounds use the existing rubric unchanged; tail rounds layer the shared addendum on top.
+
 ### Multi-Model Red-Team Review (when available)
 
 **Applies to:** Round 1, and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15. For the default `suppression_threshold` of 10, this yields cadence 3 → rounds 1, 4, 7, 10, 13. For `suppression_threshold` of 3 (hypothesis/mockup/translation), this yields cadence 1 → rounds 1, 2, 3 (effectively every pre-threshold round — short-threshold artifacts have less room to converge, so multi-model coverage on every round is justified). The `max(1, ...)` floor handles thresholds 1-2 (rare) by collapsing to cadence 1.
 **Intermediate rounds:** Standard single-model red-team dispatch (no change).
+**Tail-rubric and consensus rounds:** When `tail_rubric: true` AND the round is consensus-eligible, the orchestrator concatenates the tightened-rubric addendum to the prompt body passed to `consensus_query(mode: "review")` the same way it does for single-model dispatch. Consensus participants see the tightened rubric uniformly; per-model variance applies to the tightening, not its presence.
 
 On consensus-eligible rounds:
 1. Instead of dispatching a single red-team subagent, call `consensus_query(mode: "review")` with the red-team prompt and artifact content
