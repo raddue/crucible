@@ -237,7 +237,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
 7. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
-8. Read the judge's verdict and act on it (see Stagnation Detection below)
+8. Read the judge's verdict and act on it (see Stagnation Detection below). See `## Stagnation Detection > Persistence Check` for the orchestrator step that runs BEFORE judge dispatch (Component 4 / #265), and `## Stagnation Detection > Verdict-Level Promotion` for the post-judge promotion step that may convert a `PROGRESS` verdict to `STAGNATION, Reason: persistent-finding-corroborated`.
 9. **Progress notification.** After round `ceil(suppression_threshold / 2)` and every `max(1, suppression_threshold // 3)` rounds thereafter (rounds 5, 8, 11, 14 for threshold 10; rounds 2, 3, 4, ... for threshold 3), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause. (Start round uses `ceil` — rounds up — so the first notification lands no earlier than the midpoint; cadence uses `max(1, // 3)` — floors with a 1-minimum — so worked examples match: threshold 10 yields cadence 3, threshold 3 yields cadence 1.)
 10. **Pre-threshold escalation suppression.** Before round `suppression_threshold` (default 10 for code/design/plan; 3 for hypothesis/mockup/translation — see Skill Arguments), the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched on rounds 1 through `suppression_threshold - 4` (i.e., rounds 1-6 for threshold 10). On rounds `max(1, suppression_threshold - 3)` through `suppression_threshold - 1` (rounds 7-9 for threshold 10), **and only when `suppression_threshold ≥ 6`**, the judge runs in silent mode to seed comparison history (see Stagnation Detection > Judge Dispatch). For thresholds < 6 (hypothesis, mockup, translation defaults), there are no silent-seed rounds — the judge dispatches only at round ≥ `suppression_threshold` in normal mode. Regression detection is recorded in the round notes but does not escalate on a single round.
 
@@ -509,6 +509,29 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
    metadata: models queried, models responded, agreement level, and any
    dissenting verdicts.
 
+### Persistence Check (Component 4 / #265)
+
+The orchestrator dispatches a **persistence checker** between a non-clean red-team round's receipt and the stagnation judge's dispatch, **conditional on cross-channel corroboration triggers**. The stagnation judge itself is UNCHANGED — its 4-input set and procedure are preserved verbatim. The persistence signal is applied as an orchestrator-layer verdict-level promotion AFTER the judge returns (see Verdict-Level Promotion below).
+
+**Trigger (INV-A10).** The persistence checker fires on every non-clean red-team round N+1 where ALL of:
+
+- Round N's fix-journal entry's `### Verifier Assessment` sub-section contains **≥1 finding with verdict `Unresolved`** (the verifier's per-finding vocabulary is exactly `Resolved` | `Unresolved` per `fix-verifier-prompt.md`). Partial-Unresolved (some Resolved, some Unresolved) fires it; full-Resolved SKIPS it (symmetric leverage — converging runs bypass the mechanism entirely); full-Unresolved fires it.
+- Both `round-N-findings.md` AND `round-(N+1)-findings.md` exist on disk.
+
+**Verifier-error rounds** (where the round-N fix-verifier dispatch failed or its `### Verifier Assessment` sub-section is malformed/absent) implicitly skip the persistence checker per fail-open semantics — the `≥1 Unresolved` gate is vacuous, so the trigger does not fire. The F1 promotion is also skipped (vacuous gating on condition (d) below).
+
+**Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Sonnet Task with `persistence-checker-prompt.md` as the prompt. Inputs supplied verbatim by the orchestrator:
+
+1. `round-N-findings.md` (prior round's findings)
+2. `round-(N+1)-findings.md` (current round's findings)
+3. The round-N fix-journal entry — **full entry**, including both the `## Round N Fix` agent-authored sub-section AND the `### Verifier Assessment` verifier-authored sub-section. Both sub-sections live in the remediation path and never leak to the red-team.
+
+The persistence checker performs a **structural diff** — not an adversarial review. It produces only correspondence judgments between round-(N+1) findings and the round-N `Unresolved` set. Output is a JSON object (see `persistence-checker-prompt.md` for schema) written to `round-(N+1)-persistence.md` BEFORE the stagnation judge dispatches on round N+1.
+
+**Failure modes (fail-open).** If the persistence checker fails (Task error, malformed output): record `status: error` in `round-(N+1)-persistence.md`, treat `persistent_finding_count: 0`, and proceed to standard stagnation judge dispatch. The orchestrator does NOT retry a failed persistence-checker dispatch within the same round. Error dispatches DO count toward `PersistentCheckCount` (the dispatch happened); only the resulting `persistent_finding_count` is treated as 0.
+
+**Data flow guarantees (anti-anchoring preservation, INV-A11).** Persistence-checker output flows ONLY to the orchestrator (read path between judge dispatch and verdict marker write). It NEVER flows back into the red-team prompt on subsequent rounds. It NEVER flows into the stagnation judge's input set. The persistence checker itself sees only the three inputs above; it never receives prior-round content beyond round N, the orchestrator's state machine, or the artifact bytes.
+
 ### Judge Dispatch (silent-seed at round ≥ `max(1, suppression_threshold - 3)` when `suppression_threshold ≥ 6`; normal escalation at round ≥ `suppression_threshold`)
 
 **Rounds `1` through `max(0, suppression_threshold - 4)`:** Skip judge dispatch entirely. Loop again regardless of score trajectory. The `max(0, ...)` clamp handles short thresholds: for `suppression_threshold ≤ 4` the upper bound clamps to 0 (no rounds are skipped — judge dispatches normally starting at the threshold). For threshold 10: rounds 1-6 skipped. For threshold 3: no rounds skipped; judge runs from round 3 onward.
@@ -552,6 +575,27 @@ For thresholds 3-5 the short window means no silent-seed pass is feasible; the j
 - **DIMINISHING_RETURNS** → escalate: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list from judge]. Presenting for user judgment."
 
 **The judge also writes:** a `round-N-comparison.md` file. The orchestrator saves the judge's full output as `round-N-comparison.md` in the scratch directory. This file is used by future judge dispatches for consecutive-round tracking.
+
+### Verdict-Level Promotion (Persistent Finding Corroboration, Component 4 / #265)
+
+After the stagnation judge returns its verdict (PROGRESS / STAGNATION / DIMINISHING_RETURNS), **and after the existing Pre-precedence resolution step** (no-op → architectural re-dispatch), the orchestrator applies one promotion step that consumes the persistence-checker output:
+
+**Promotion condition (F1 / INV-A10 / INV-T14).** If ALL of:
+
+a. `persistent_finding_count ≥ 1` (read from `round-(N+1)-persistence.md`); AND
+b. current round ≥ `suppression_threshold`; AND
+c. the judge's verdict is `PROGRESS`; AND
+d. round N's verifier had **≥1 `Resolved` finding** (NOT fully no-op — i.e., the fix attempted real work and still left a persistent finding);
+
+then promote to `Verdict: STAGNATION, Reason: persistent-finding-corroborated`. The promoted STAGNATION verdict is then consumed at **precedence slot #7** (the standard stagnation-judge consumption slot — see Exit Precedence).
+
+**Mutex with no-op exit (anti-double-counting).** Condition (d) prevents mechanical over-firing on no-op rounds. When round N's verifier marked ALL findings `Unresolved` (i.e., a no-op fix per Fix Mechanism → No-Op Fix Detection), the no-op exit (precedence slot #4) is the authoritative cause — F1 promotion would mechanically over-fire because the persistence checker is GUARANTEED to find correspondences when the fix didn't change anything. F1 fires only when the fix attempted real work and still left a persistent finding.
+
+**Precedence interaction.** Precedence slots #2-#6 (ARCHITECTURAL_BLOCK, SUSTAINED_REGRESSION, no-op fix, consensus-stagnation pre-threshold, 15-round circuit-breaker) continue to outrank a promoted STAGNATION when they co-fire on the same round — `persistent-finding-corroborated` is recorded under `CoFiredExits` in those cases. See Exit Precedence for the full ordering and `CoFiredExits` semantics.
+
+**Rationale.** Surface/Structural is a per-finding class that the judge tags only in its **All-new** branch. Persistent findings are by construction Recurring (they match prior-round findings whose verifier verdict was `Unresolved`), so the judge enters its All-recurring or Mixed branch — where Surface/Structural is never tagged — and a classification-level override would have nothing to apply. The persistence signal is therefore promoted at the orchestrator layer, not via classification override.
+
+The stagnation judge's own output is unchanged in both fire and no-fire cases (the judge still wrote `PROGRESS`); the promotion happens entirely in orchestrator post-processing.
 
 ## Artifact Preparation
 
