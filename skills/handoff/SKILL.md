@@ -94,7 +94,7 @@ Same omit-over-filler rule applies.
    - Check for an existing `docs/handoffs/`, `handoffs/`, or `.handoffs/` directory in the project root. If one exists, use it and match the filename style of the most recent file in that directory (`ls -t | head` it).
    - If none exists, default to `docs/handoffs/YYYY-MM-DD-<short-topic-slug>.md`. Create the directory if needed and note the new convention in the doc itself.
    - For backlog handoffs, the topic slug should signal the scope (e.g., `<milestone-or-epic>-backlog`).
-   - **If a same-day, same-topic file already exists**, do not clobber and do not append. Instead, create a new file with `-pt2` (or `-pt3`, etc.) appended to the slug, and reference the prior file's path in the new file's first paragraph. The `HANDOFF:` line then points unambiguously at the freshest content.
+   - **If a same-day, same-topic file already exists**, do not clobber and do not append. Instead, create a new file with `-pt2` (or `-pt3`, etc.) appended to the slug, and reference the prior file's path in the new file's first paragraph. The `Read this doc and continue:` line then points unambiguously at the freshest content.
 
 6. **Output the file path** — see Output Contract below.
 
@@ -103,9 +103,10 @@ Same omit-over-filler rule applies.
 The user explicitly asked for the file location in the response. Make it impossible to miss:
 
 - Print a brief 1–3 sentence summary of what's in the file (mode A or B, key topic).
-- Then end your response with **exactly one line**, on its own, with no surrounding code fence or trailing commentary. Do NOT wrap the line in backticks or a code fence — emit it as plain text. Format: `HANDOFF: <absolute path>`. Example: `HANDOFF: /home/user/project/docs/handoffs/2026-04-19-foo.md`
+- Then end your response with **exactly one line**, on its own, with no surrounding code fence or trailing commentary. Do NOT wrap the line in backticks or a code fence — emit it as plain text. Format: `Read this doc and continue: <absolute path>`. Example: `Read this doc and continue: /home/user/project/docs/handoffs/2026-04-19-foo.md`
+- Rationale: the user copies this line verbatim into the next session as the opening message. The "Read this doc and continue:" prefix turns the line into a complete, self-contained next-action instruction — the next session needs no additional prompt.
 - "Absolute path" means either (a) the path your file-write tool returned, OR (b) `<repo-root>/<relative-path>` where repo-root comes from `git rev-parse --show-toplevel`. Native path separators are fine (Windows backslashes are acceptable). In the non-git fallback mode (see Step 0), use whatever absolute path the user directed you to write to.
-- If you skipped writing a file (per Step 0), end with: `HANDOFF: (none — nothing to hand off)` — same no-fence rule applies.
+- If you skipped writing a file (per Step 0), end with: `Read this doc and continue: (none — nothing to hand off)` — same no-fence rule applies.
 
 ## Quality bar
 
