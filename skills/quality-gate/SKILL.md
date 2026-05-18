@@ -216,7 +216,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
 
       If look-harder is NOT skipped, dispatch as a fresh Task (same disk-mediated dispatch convention as every red-team round). Output is persisted to `round-N-look-harder.md`. Phase 2 of the write-ordering protocol (see below) updates `round-N-flags.md` with `look-harder-fired-on-round: <LOCAL N>` AFTER look-harder resolves.
 
-      - If look-harder returns **0F/0S**: confirms the candidate-clean round. Proceed to sub-step 5 (Minor Issue Handling). `LookHarderFiredCount` is incremented; `LookHarderRounds` is NOT appended (only non-clean fires are listed).
+      - If look-harder returns **0F/0S**: confirms the candidate-clean round. Execute Phase 2 of the write-ordering protocol (re-open `round-N-flags.md` and set `look-harder-fired-on-round: <LOCAL N>`, full-file replacement). Then proceed to sub-step 5 (Minor Issue Handling). `LookHarderFiredCount` is incremented; `LookHarderRounds` is NOT appended (only non-clean fires are listed).
       - If look-harder returns **Fatal/Significant**: the candidate-clean round is DEMOTED. The orchestrator MUST execute the following three writes **in strict order, with no other dispatches interleaved** (this ordering is load-bearing for recovery — see the Demotion crash-window rule below):
         1. Persist `round-N-look-harder.md` with the demoting findings.
         2. Overwrite `round-N-findings.md` with the look-harder findings (INV-A17) — the original 0F/0S findings file is replaced.
