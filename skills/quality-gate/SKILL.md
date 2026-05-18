@@ -840,10 +840,25 @@ The pre-threshold suppression rule rests on a quantitative claim: "most artifact
 **Format:** One JSON object per line:
 
 ```json
-{"run_id":"2026-05-16T14-30-00","artifact_type":"code","threshold":10,"rounds":4,"verdict":"PASS","final_score":0,"max_score":6,"score_trajectory":[6,4,3,0],"suppressed_regressions":1,"no_op_fixes":0,"siege_dispatched":false,"timestamp":"2026-05-16T14:38:21Z"}
+{"marker_version":2,"artifact_hash":"<sha256-hex>","chunk_hash":"<sha256-hex>","run_id":"2026-05-16T14-30-00","artifact_type":"code","threshold":10,"rounds":4,"verdict":"PASS","final_score":0,"max_score":6,"score_trajectory":[6,4,3,0],"suppressed_regressions":1,"no_op_fixes":0,"consensus_available":false,"consensus_rounds_run":0,"look_harder_rounds":[],"look_harder_fired_count":0,"look_harder_skipped_reason":null,"persistent_finding_rounds":[],"persistent_check_count":0,"siege_dispatched":false,"timestamp":"2026-05-16T14:38:21Z"}
 ```
 
 Fields mirror the verdict marker plus `threshold` (the active `suppression_threshold` for this run). One line per gate run, regardless of verdict.
+
+**Field semantics for the new entries:**
+
+- `marker_version`: integer matching the verdict marker's `MarkerVersion`. New entries written by this version carry `2`.
+- `artifact_hash`: sha256 hex of the FULL pre-chunking artifact's bytes (mirrors `ArtifactHash` in the verdict marker).
+- `chunk_hash`: sha256 hex of the specific chunk's bytes. Present on chunked-gate per-chunk entries only; OMITTED (key absent) on non-chunked entries and on the cross-chunk integration entry.
+- `consensus_available`: `true` iff `consensus_query` returned `status in {complete, partial}` on ≥1 consensus-eligible round across the run.
+- `consensus_rounds_run`: integer count of rounds where `consensus_query` returned `status in {complete, partial}`.
+- `look_harder_rounds`: JSON list. **Non-chunked gates:** bare integers (e.g., `[3, 6]`). **Chunked gates:** objects `{"chunk": "chunk-<N>" | "cross-chunk", "local_round": <int>}` (e.g., `[{"chunk":"chunk-1","local_round":3},{"chunk":"chunk-2","local_round":5}]`). Empty list `[]` when no non-clean look-harder rounds occurred (JSON has no omit-vs-empty ambiguity, so empty list is canonical rather than absent key).
+- `look_harder_fired_count`: integer count of look-harder dispatches in the gate run (clean + non-clean, NOT skipped). Defaults to 0. Invariant: `len(look_harder_rounds) ≤ look_harder_fired_count`.
+- `look_harder_skipped_reason`: enum value `"circuit-breaker"` | `"tail-rubric-already-applied"` recorded on a per-run basis. First reason recorded if multiple skips occur. `null` when no skip occurred.
+- `persistent_finding_rounds`: JSON list, same element grammar as `look_harder_rounds`. Empty list `[]` when no rounds produced `persistent_finding_count ≥ 1`.
+- `persistent_check_count`: integer count of persistence-checker dispatches (error dispatches DO count). Defaults to 0. Invariant: `len(persistent_finding_rounds) ≤ persistent_check_count`.
+
+**Version-aware backward compatibility (canonical):** Existing convergence-log entries written before this version was deployed lack `marker_version`, `artifact_hash`, and the new telemetry fields. Consumers MUST treat any missing field on a legacy entry as `null` (unknown), NOT as `false` / `0` / `[]`. **Legacy entries are explicitly excluded from any rate-denominator computation** — clean-confirmation rates, non-clean rates, persistence-checker correlation rates, and the recurrence-rate measurements in Open Questions are computed only over entries with `marker_version: 2`. Forge consumers analyzing pre-design entries treat all new fields as `null` and skip those entries when computing rates.
 
 **Size management:** The log is append-only. Rotate via mtime check: if the file exceeds 10,000 lines, the next gate run renames it to `convergence-log-<YYYY-MM>.jsonl` (archive) and starts a fresh log. Archives are never deleted by quality-gate — the user manages retention.
 
