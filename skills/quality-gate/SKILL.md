@@ -189,6 +189,8 @@ would create non-deterministic stagnation behavior.
 
 The threshold can be overridden per invocation. Build typically uses the defaults; debugging's Phase 3.5 hypothesis review uses the hypothesis default (3); a user running `/design` directly inherits the design default (10) unless they pass `--suppression-threshold N`.
 
+**No new public arguments for #265 mechanisms.** Look-harder verification, tail-rubric, and the persistence checker are mechanically derived from existing `suppression_threshold` + artifact type + LOCAL round number. There is no `--look-harder` / `--tail-rubric` / `--persistence-check` argument — callers do not opt in or out. The mechanisms fire on their structural triggers; the only externally observable change is new fields in the verdict marker and convergence-log.
+
 **Interactive check-in (when `interactive: true`):** After round `ceil(suppression_threshold/2)` (e.g., round 5 for threshold=10, round 2 for threshold=3) completes without clean pass, emit:
 
 > "Quality gate round N (suppression active until round T). Score progression: [list]. Continue, escalate now, or skip gate?"
@@ -1105,6 +1107,12 @@ How It Works step 10's enumeration of pre-threshold exits and the bullet list ab
 - Using consensus on every red-team round (periodic only: Round 1 and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15)
 - Treating single-model unique findings from consensus as less important than multi-model agreements (the prompt explicitly elevates "potentially novel" findings)
 - Blocking the host red-team round on external review availability or timeout
+
+### Look-harder, tail-rubric, and persistence (#265)
+
+- Self-overwriting `round-N-findings.md` on the same candidate-clean round where look-harder ran AND returned 0F/0S. The overwrite happens ONLY on look-harder demotion (look-harder returned Fatal/Significant). Confirming a clean round does NOT overwrite the findings file.
+- Forwarding persistence-checker output to the red-team prompt or the stagnation judge's input set. The output flows ONLY to the orchestrator (read path between judge dispatch and verdict marker write). Leaking it to either consumer breaks anti-anchoring (red-team) or the judge's input-set invariant.
+- Computing `tail_rubric: true` against the GLOBAL round number on chunked gates. The trigger is LOCAL (per-chunk) — chunk 2 of a chunked gate does NOT inherit tail-rubric from chunk 1's late rounds. Each chunk's local counter governs.
 
 **Retired (covered structurally):** Self-fixing instead of dispatching a fix agent, rationalizing away findings, skipping the gate without approval, declaring "complete" without a clean round, exceeding 15-round limit, escalating pre-threshold for single-round signals, dispatching the judge pre-threshold, looping past sustained regression, allowing fix-agent scope drift, skipping the fix verifier — all of these are now caught by the Anti-Rationalization Table or by structural invariants (Non-Skippability, Receipt Linter mandatory-work, Architectural Concerns Exit). They do not need separate red-flag entries.
 
