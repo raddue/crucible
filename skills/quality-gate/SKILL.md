@@ -163,6 +163,9 @@ would create non-deterministic stagnation behavior.
 | "This is a small auth fix, siege is overkill — skip it." | Detection exists because intuition about "small" security changes is unreliable. The cost of one siege dispatch is ~6 Opus agents; the cost of missing a regression in a security PR is unbounded. | Never skip siege when detection fires unless `skip_siege: true` is explicitly set with documented reason. |
 | "Detection fired on keywords in a design doc, but the doc isn't really about security." | The confidence threshold (≥2 categories OR keyword + dedicated `## Security` section) already filters single-word noise. If detection still fires, the doc has real security content. | Trust the confidence threshold. To override, set `skip_siege: true` with reason in the gate-verdict marker. |
 | "The user said 'move on', that's approval to skip the gate." | General feedback is never skip approval. Skip requires an unambiguous instruction specifically referencing the gate. | Only an explicit, gate-referencing instruction counts as skip approval. |
+| "Skip look-harder on this clean round — it converged fast and the artifact is obviously fine." | Speed of convergence is not signal of correctness; the entire premise of look-harder is that a single-pass clean round can hide Significants under standard rubric. The skip conditions are MECHANICAL (`circuit-breaker` at round 15, `tail-rubric-already-applied` when the round ran with the addendum already in-band), not judgment-based. | Look-harder fires on every first-clean round of a chunk; only the documented skip conditions short-circuit it. No "this one feels safe" exceptions. |
+| "Skip the persistence checker — round N's fix verifier already confirmed which findings were unresolved, so running the checker on round N+1 is redundant." | The verifier checks whether *this specific fix attempt* resolved the targeted findings (single-channel, fix-side). The persistence checker checks whether round-(N+1)'s red-team independently raises the same complaint (single-channel, review-side). Two single channels do not equal two-channel corroboration. | Run the persistence checker whenever the trigger fires (round N+1 non-clean AND ≥1 round-N Unresolved verdict). The verifier and persistence checker are independent corroboration channels by design. |
+| "Tail-rubric is too aggressive on round 6 of this threshold-10 gate — the standard rubric is fine, let the round stand without the addendum." | The tail-rubric trigger is mechanical (`suppression_threshold ≥ 5` AND LOCAL round ≥ `ceil(suppression_threshold * 0.6)`), NOT a judgment call. Late-round inflation is the failure mode the addendum exists to suppress; declining to apply it at the trigger round is exactly when it's most needed. | Apply `tail_rubric: true` mechanically. The addendum's anti-undergrade clause preserves real Fatals; the demotion is targeted at speculative Significants only. |
 
 ## Skill Arguments
 
@@ -186,6 +189,8 @@ would create non-deterministic stagnation behavior.
 
 The threshold can be overridden per invocation. Build typically uses the defaults; debugging's Phase 3.5 hypothesis review uses the hypothesis default (3); a user running `/design` directly inherits the design default (10) unless they pass `--suppression-threshold N`.
 
+**No new public arguments for #265 mechanisms.** Look-harder verification, tail-rubric, and the persistence checker are mechanically derived from existing `suppression_threshold` + artifact type + LOCAL round number. There is no `--look-harder` / `--tail-rubric` / `--persistence-check` argument — callers do not opt in or out. The mechanisms fire on their structural triggers; the only externally observable change is new fields in the verdict marker and convergence-log.
+
 **Interactive check-in (when `interactive: true`):** After round `ceil(suppression_threshold/2)` (e.g., round 5 for threshold=10, round 2 for threshold=3) completes without clean pass, emit:
 
 > "Quality gate round N (suppression active until round T). Score progression: [list]. Continue, escalate now, or skip gate?"
@@ -199,11 +204,41 @@ The user's response routes to: continue (loop with suppression intact), escalate
 2.5. **Security surface detection and siege dispatch.** Run the detection heuristic (see Security Surface Detection and Siege Dispatch). If `security_surface: detected` AND `skip_siege: false`, OR if `force_siege: true`, dispatch `crucible:siege` in parallel with the first red-team round. The two skills proceed independently. The orchestrator awaits both before terminal verdict.
 3. Prepares the artifact for review (see Artifact Preparation below)
 4. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
-5. If red-team finds **zero Fatal and zero Significant issues:** artifact approved. Order of operations on a clean red-team round (0 Fatal, 0 Significant) — see Awaiting siege for cross-reference:
-   1. Await siege completion (if dispatched and still running) — see Awaiting siege.
-   2. If `SiegeVerdict != PASS`: skip Minor Issue Handling, write verdict marker with `Verdict: ESCALATED, Reason: siege-blocked`, surface siege findings, and exit.
-   3. If `SiegeVerdict: PASS` or `SiegeDispatched: false`: proceed to Minor Issue Handling (quick-fix pass on consolidated minors). Minor Issue Handling does not re-trigger siege — it operates on a known-passed artifact.
-   4. After Minor Issue Handling: write final artifact to scratch directory, write verdict marker with `Verdict: PASS, Reason: clean-pass`, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
+5. If red-team finds **zero Fatal and zero Significant issues:** artifact is a *candidate* PASS — the round is candidate-clean, but the terminal verdict is deferred until look-harder verification completes. Order of operations on a candidate-clean round (0 Fatal, 0 Significant) — see `## Security Surface Detection and Siege Dispatch > Decision and Dispatch > Awaiting siege` for cross-reference:
+   1. Await siege completion (if dispatched and still running) — see `## Security Surface Detection and Siege Dispatch > Decision and Dispatch > Awaiting siege`.
+   2. If `SiegeVerdict != PASS`: skip look-harder + Minor Issue Handling, write verdict marker with `Verdict: ESCALATED, Reason: siege-blocked`, surface siege findings, and exit. Look-harder is SKIPPED entirely — the round was never going to be PASS.
+   3. **Look-harder precedence gate.** Before invoking look-harder, evaluate Exit Precedence slots #3 (sustained-regression) and #4 (no-op-fix) per existing logic. (**This is a distinct mechanism from Exit Precedence's "Pre-precedence resolution" step at `## Escalation > Exit Precedence`** — that step is specifically the no-op → architectural re-dispatch path, run before precedence evaluation on rounds with active architectural candidates. The "Look-harder precedence gate" here is a much narrower check: it inspects whether a non-Clean-Pass slot would have won precedence on this candidate-clean round, and short-circuits look-harder if so.) A 0F/0S round cannot logically co-fire with sustained-regression (the weighted score on 0F/0S is 0, so `score(N) > score(N-1) > score(N-2)` cannot hold), but no-op-fix CAN co-fire (the fix agent may have returned a byte-identical artifact that the red-team also finds clean). If either slot fires, look-harder is SKIPPED ENTIRELY — the round was never going to be PASS. Look-harder is reached only when Clean Pass (slot #1) would otherwise win precedence.
+   4. **Look-harder verification (Component 1 / #265).** Same-model re-dispatch of red-team with the shared tightened-rubric addendum (`skills/quality-gate/tightened-rubric-addendum.md`) concatenated to `red-team-prompt.md` body by the orchestrator. The re-dispatch is the same model, same artifact, fresh dispatch — only the rubric is tightened; no prior-round context leaks (anti-anchoring preserved). Look-harder is SKIPPED on the following conditions; the orchestrator records `LookHarderSkippedReason` in the verdict marker and proceeds to sub-step 5:
+      - **`circuit-breaker`** — global round 15 (runaway protection takes precedence; this matches the pre-precedence architectural re-dispatch behavior of the 15-round limit).
+      - **`tail-rubric-already-applied`** — the candidate-clean round's red-team dispatch already carried `tail_rubric: true` (i.e., LOCAL round ≥ `ceil(suppression_threshold * 0.6)` on a `suppression_threshold ≥ 5` gate). The same-model re-dispatch with the identical addendum adds no signal beyond sampling variance.
+      - **Already fired this chunk** — `look-harder-fired-on-round` is non-null in any prior `round-N-flags.md` of the in-progress chunk per the all-files recovery scan (see Compaction Recovery). Skip silently; no `LookHarderSkippedReason` recorded (the field is for circuit-breaker / tail-rubric-already-applied only).
+      - **Co-fire precedence:** when BOTH `circuit-breaker` AND `tail-rubric-already-applied` apply simultaneously, `circuit-breaker` wins and is the recorded reason. (Note: co-fire is reachable on threshold-5 / threshold-6 gates where LOCAL round 15 is also a tail-rubric round; the precedence rule disambiguates regardless of frequency.)
+
+      If look-harder is NOT skipped, dispatch as a fresh Task (same disk-mediated dispatch convention as every red-team round). Output is persisted to `round-N-look-harder.md`. Phase 2 of the write-ordering protocol (see below) updates `round-N-flags.md` with `look-harder-fired-on-round: <LOCAL N>` AFTER look-harder resolves.
+
+      - If look-harder returns **0F/0S**: confirms the candidate-clean round. Execute Phase 2 of the write-ordering protocol (re-open `round-N-flags.md` and set `look-harder-fired-on-round: <LOCAL N>`, full-file replacement). Then proceed to sub-step 5 (Minor Issue Handling). `LookHarderFiredCount` is incremented; `LookHarderRounds` is NOT appended (only non-clean fires are listed).
+      - If look-harder returns **Fatal/Significant**: the candidate-clean round is DEMOTED. The orchestrator MUST execute the following three writes **in strict order, with no other dispatches interleaved** (this ordering is load-bearing for recovery — see the Demotion crash-window rule below):
+        1. Persist `round-N-look-harder.md` with the demoting findings.
+        2. Overwrite `round-N-findings.md` with the look-harder findings (INV-A17) — the original 0F/0S findings file is replaced.
+        3. Execute Phase 2 of the write-ordering protocol: re-open `round-N-flags.md` and set `look-harder-fired-on-round: <LOCAL N>` (full-file replacement).
+
+        After step 3, the round becomes a normal non-clean round and proceeds to the fix loop (step 6 below). Do NOT re-dispatch siege — siege's prior verdict carries forward; the existing siege-await ordering applies on the next candidate-clean round without a fresh siege dispatch. The terminal sentinel `round-N-complete.md` is NOT written (round became non-terminal). `LookHarderFiredCount` is incremented and the round's LOCAL number is appended to `LookHarderRounds`. `round-N-look-harder.md` is retained as a separate telemetry artifact.
+
+      Look-harder does NOT increment the gate's round counter (INV-A2). It is a verification step within slot #1; if it confirms, slot #1 stands; if it demotes, slot #1 is invalidated.
+
+   5. Proceed to **Minor Issue Handling** (quick-fix pass on consolidated minors). Minor Issue Handling does not re-trigger siege — it operates on a known-passed artifact.
+   6. After Minor Issue Handling: write final artifact to scratch directory, write verdict marker with `Verdict: PASS, Reason: clean-pass`, output consolidated Minor observations from all rounds (see Minor Issue Handling), surface pre-flight audit results (if any) alongside gate results, clean up, and return.
+
+   **Write-ordering protocol (two-phase) for `round-N-flags.md` on candidate-clean rounds where look-harder fires:**
+
+   1. **Phase 1 (end of red-team round, before look-harder dispatch).** Existing semantics. Write `architectural-candidates: [...]` per the Compaction Recovery section. Add the new key `look-harder-fired-on-round: null` to the same file in the same write.
+   2. **Phase 2 (after look-harder dispatch resolves, immediately after `round-N-look-harder.md` is persisted).** Re-open `round-N-flags.md` via the Write tool, set `look-harder-fired-on-round: <LOCAL N>` (the LOCAL round number within the current chunk), and write back as a **full-file replacement** (same pattern as the convergence-log update — not append).
+
+   On **non-candidate-clean rounds** (the round had Fatal/Significant), look-harder is not dispatched and Phase 2 is skipped; the key remains `null`. On **skipped look-harder** (circuit-breaker / tail-rubric-already-applied), Phase 2 is also skipped and the key remains `null`. Recovery interprets `null` as "look-harder not yet fired in this chunk, eligible to fire" and a populated value as "look-harder already fired in this chunk, skip per INV-T8."
+
+   **Crash-window analysis.** If the orchestrator crashes between Phase 1 and Phase 2 (look-harder dispatch in flight), recovery scans all `round-N-flags.md` files in the in-progress chunk's directory and sees `null` for the in-flight round. Recovery re-dispatches look-harder. Look-harder is protocol-safe to re-run (same model, same artifact, fresh framing) because no fix dispatch has yet consumed the first dispatch's findings — the second dispatch's findings are authoritative. `round-N-look-harder.md` is overwritten by the re-dispatch; this is the documented exception to the "no overwrites" convention for round-N artifacts.
+
+   **Demotion crash-window rule.** The strict write order (1: persist look-harder findings, 2: overwrite findings, 3: Phase 2 flags) collapses the demotion crash window onto Phase 2: if Phase 2 ran to completion, the findings overwrite is guaranteed to have happened before it. Recovery therefore treats `look-harder-fired-on-round: <N>` (Phase 2 populated) as authoritative evidence that the demotion's findings-overwrite (INV-A17) also completed; no separate consistency check is required. If recovery instead observes `round-N-look-harder.md` present AND Phase 2 still `null`, the crash landed between step 1 and step 3, and recovery step 6b's "re-dispatch look-harder" path applies — which transparently re-runs steps 1-3 in order. **Out-of-order writes are forbidden**: an orchestrator MUST NOT, for example, write Phase 2 before overwriting findings, or skip step 2 entirely. The recovery semantics depend on step ordering being honored.
 6. If red-team finds Fatal or Significant issues:
    a. Dispatch a **separate fix agent** (see Fix Mechanism below) — receive revised artifact, append to fix journal
    b. Dispatch **Fix Verifier** (see Fix Verification below) — one Sonnet check per fix round
@@ -214,7 +249,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
 7. Track weighted score between rounds (Fatal=3, Significant=1):
    - **Strictly lower score** → progress, loop again
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
-8. Read the judge's verdict and act on it (see Stagnation Detection below)
+8. Read the judge's verdict and act on it (see Stagnation Detection below). See `## Stagnation Detection > Persistence Check` for the orchestrator step that runs BEFORE judge dispatch (Component 4 / #265), and `## Stagnation Detection > Verdict-Level Promotion` for the post-judge promotion step that may convert a `PROGRESS` verdict to `STAGNATION, Reason: persistent-finding-corroborated`.
 9. **Progress notification.** After round `ceil(suppression_threshold / 2)` and every `max(1, suppression_threshold // 3)` rounds thereafter (rounds 5, 8, 11, 14 for threshold 10; rounds 2, 3, 4, ... for threshold 3), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause. (Start round uses `ceil` — rounds up — so the first notification lands no earlier than the midpoint; cadence uses `max(1, // 3)` — floors with a 1-minimum — so worked examples match: threshold 10 yields cadence 3, threshold 3 yields cadence 1.)
 10. **Pre-threshold escalation suppression.** Before round `suppression_threshold` (default 10 for code/design/plan; 3 for hypothesis/mockup/translation — see Skill Arguments), the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched on rounds 1 through `suppression_threshold - 4` (i.e., rounds 1-6 for threshold 10). On rounds `max(1, suppression_threshold - 3)` through `suppression_threshold - 1` (rounds 7-9 for threshold 10), **and only when `suppression_threshold ≥ 6`**, the judge runs in silent mode to seed comparison history (see Stagnation Detection > Judge Dispatch). For thresholds < 6 (hypothesis, mockup, translation defaults), there are no silent-seed rounds — the judge dispatches only at round ≥ `suppression_threshold` in normal mode. Regression detection is recorded in the round notes but does not escalate on a single round.
 
@@ -223,10 +258,35 @@ The user's response routes to: continue (loop with suppression intact), escalate
     The only pre-threshold exits are: clean pass (0 Fatal, 0 Significant); architectural concerns declared via the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` receipt (see Architectural Concerns Exit); sustained-regression hard exit (defined above); no-op fix detection (see Fix Mechanism > No-Op Fix Detection); consensus-stagnation pre-threshold escalation (ONLY when `consensus_query` is available; see Pre-Threshold Consensus Carve-Out); or explicit user interrupt (including the interactive check-in's "escalate now" response, see Skill Arguments). Beginning at round `suppression_threshold`, normal escalation logic applies (stagnation judge, single-round regression escalation, diminishing returns). When two or more exits would fire on the same round, apply the precedence rules in Escalation > Exit Precedence (first match wins).
 11. **Global safety limit: 15 rounds.** This is a runaway protection circuit-breaker. If you hit 15, escalate to user with full round history. This limit applies regardless of the `suppression_threshold` rule.
 
+### Tail-Rubric Flag (Component 2 / #265)
+
+**Trigger.** The orchestrator computes `tail_rubric: true` for a red-team dispatch IFF:
+
+- `suppression_threshold ≥ 5`, AND
+- the current LOCAL round number ≥ `ceil(suppression_threshold * 0.6)`.
+
+For default thresholds in the enabled range:
+
+- `suppression_threshold = 10` (code/design/plan) → trigger at LOCAL round 6.
+- `suppression_threshold = 6` → trigger at LOCAL round 4.
+- `suppression_threshold = 5` (cross-chunk integration round) → trigger at LOCAL round 3 (`ceil(5*0.6) = 3`).
+- `suppression_threshold ∈ {3, 4}` → tail-rubric DISABLED. The flag is **never** set on these gates regardless of round number (INV-T3).
+
+**Counter selection.** The tail-rubric uses the LOCAL (per-chunk) round number, consistent with `suppression_threshold`, consensus cadence, look-harder, and silent-seed. Late chunks do NOT automatically have tail-rubric active from round 1 — each chunk's local counter governs.
+
+**Action.** When `tail_rubric: true`, the quality-gate orchestrator **concatenates `skills/quality-gate/tightened-rubric-addendum.md` to the `red-team-prompt.md` body BEFORE Task dispatch**. This is the SAME addendum file used by look-harder (Component 1); one source of truth, two trigger paths. `red-team-prompt.md` itself is **not modified** — the orchestrator is the sole appender (INV-A4). Standalone red-team invocation (i.e., red-team called outside of quality-gate) does NOT use the addendum.
+
+The dispatch file written by the orchestrator records `tail_rubric: true` so the candidate-clean-round look-harder skip condition (`tail-rubric-already-applied`) can read it from disk after the round completes.
+
+**Cross-chunk integration coverage.** The cross-chunk integration round runs with `suppression_threshold = 5` (see Chunked Gate Counter Semantics). The tail-rubric trigger at threshold 5 (LOCAL round 3+) ensures the integration surface — which carries cumulative residual risk from all chunks — benefits from late-round rubric tightening.
+
+**Interaction with the existing inflation check.** The `red-team-prompt.md` body already has an inflation check on its severity rubric. The tail-rubric addendum **tightens** that check round-conditionally; it does not replace it. Early rounds use the existing rubric unchanged; tail rounds layer the shared addendum on top.
+
 ### Multi-Model Red-Team Review (when available)
 
 **Applies to:** Round 1, and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15. For the default `suppression_threshold` of 10, this yields cadence 3 → rounds 1, 4, 7, 10, 13. For `suppression_threshold` of 3 (hypothesis/mockup/translation), this yields cadence 1 → rounds 1, 2, 3 (effectively every pre-threshold round — short-threshold artifacts have less room to converge, so multi-model coverage on every round is justified). The `max(1, ...)` floor handles thresholds 1-2 (rare) by collapsing to cadence 1.
 **Intermediate rounds:** Standard single-model red-team dispatch (no change).
+**Tail-rubric and consensus rounds:** When `tail_rubric: true` AND the round is consensus-eligible, the orchestrator concatenates the tightened-rubric addendum to the prompt body passed to `consensus_query(mode: "review")` the same way it does for single-model dispatch. Consensus participants see the tightened rubric uniformly; per-model variance applies to the tightening, not its presence.
 
 On consensus-eligible rounds:
 1. Instead of dispatching a single red-team subagent, call `consensus_query(mode: "review")` with the red-team prompt and artifact content
@@ -461,6 +521,31 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
    metadata: models queried, models responded, agreement level, and any
    dissenting verdicts.
 
+### Persistence Check (Component 4 / #265)
+
+The orchestrator dispatches a **persistence checker** between a non-clean red-team round's receipt and the stagnation judge's dispatch, **conditional on cross-channel corroboration triggers**. The stagnation judge itself is UNCHANGED — its 4-data-input set (plus the prompt itself) and procedure are preserved verbatim. The persistence signal is applied as an orchestrator-layer verdict-level promotion AFTER the judge returns (see Verdict-Level Promotion below).
+
+**Counter selection.** For chunked gates, "round N" and "round N+1" in this section refer to LOCAL round numbers within the in-progress chunk (consistent with `suppression_threshold`, look-harder, tail-rubric, consensus cadence, and the stagnation judge). Cross-chunk persistence checking is NOT performed — each chunk's persistence-checker fires only against the prior LOCAL round of the same chunk. The marker / convergence-log encoding for persistence rounds uses the canonical `<chunk_id>:<local_round>` grammar per INV-A15.
+
+**Trigger (INV-A10).** The persistence checker fires on every non-clean red-team round N+1 where ALL of:
+
+- Round N's fix-journal entry's `### Verifier Assessment` sub-section contains **≥1 finding with verdict `Unresolved`** (the verifier's per-finding vocabulary is exactly `Resolved` | `Unresolved` per `fix-verifier-prompt.md`). Partial-Unresolved (some Resolved, some Unresolved) fires it; full-Resolved SKIPS it (symmetric leverage — converging runs bypass the mechanism entirely); full-Unresolved fires it.
+- Both `round-N-findings.md` AND `round-(N+1)-findings.md` exist on disk.
+
+**Verifier-error rounds** (where the round-N fix-verifier dispatch failed or its `### Verifier Assessment` sub-section is malformed/absent) implicitly skip the persistence checker per fail-open semantics — the `≥1 Unresolved` gate is vacuous, so the trigger does not fire. The F1 promotion is also skipped (vacuous gating on condition (d) below).
+
+**Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Sonnet Task with `persistence-checker-prompt.md` as the prompt. Inputs supplied verbatim by the orchestrator:
+
+1. `round-N-findings.md` (prior round's findings)
+2. `round-(N+1)-findings.md` (current round's findings)
+3. The round-N fix-journal entry — **full entry**, including both the `## Round N Fix` agent-authored sub-section AND the `### Verifier Assessment` verifier-authored sub-section. Both sub-sections live in the remediation path and never leak to the red-team.
+
+The persistence checker performs a **structural diff** — not an adversarial review. It produces only correspondence judgments between round-(N+1) findings and the round-N `Unresolved` set. Output is a JSON object (see `persistence-checker-prompt.md` for schema) written to `round-(N+1)-persistence.md` BEFORE the stagnation judge dispatches on round N+1.
+
+**Failure modes (fail-open).** If the persistence checker fails (Task error, malformed output): record `status: error` in `round-(N+1)-persistence.md`, treat `persistent_finding_count: 0`, and proceed to standard stagnation judge dispatch. The orchestrator does NOT retry a failed persistence-checker dispatch within the same round. Error dispatches DO count toward `PersistentCheckCount` (the dispatch happened); only the resulting `persistent_finding_count` is treated as 0.
+
+**Data flow guarantees (anti-anchoring preservation, INV-A11).** Persistence-checker output flows ONLY to the orchestrator (read path between judge dispatch and verdict marker write). It NEVER flows back into the red-team prompt on subsequent rounds. It NEVER flows into the stagnation judge's input set. The persistence checker itself sees only the three inputs above; it never receives prior-round content beyond round N, the orchestrator's state machine, or the artifact bytes.
+
 ### Judge Dispatch (silent-seed at round ≥ `max(1, suppression_threshold - 3)` when `suppression_threshold ≥ 6`; normal escalation at round ≥ `suppression_threshold`)
 
 **Rounds `1` through `max(0, suppression_threshold - 4)`:** Skip judge dispatch entirely. Loop again regardless of score trajectory. The `max(0, ...)` clamp handles short thresholds: for `suppression_threshold ≤ 4` the upper bound clamps to 0 (no rounds are skipped — judge dispatches normally starting at the threshold). For threshold 10: rounds 1-6 skipped. For threshold 3: no rounds skipped; judge runs from round 3 onward.
@@ -505,6 +590,29 @@ For thresholds 3-5 the short window means no silent-seed pass is feasible; the j
 
 **The judge also writes:** a `round-N-comparison.md` file. The orchestrator saves the judge's full output as `round-N-comparison.md` in the scratch directory. This file is used by future judge dispatches for consecutive-round tracking.
 
+### Verdict-Level Promotion (Persistent Finding Corroboration, Component 4 / #265)
+
+After the stagnation judge returns its verdict (PROGRESS / STAGNATION / DIMINISHING_RETURNS), **and after the existing Pre-precedence resolution step** (no-op → architectural re-dispatch), the orchestrator applies one promotion step that consumes the persistence-checker output:
+
+**Promotion condition (F1 / INV-A10 / INV-T14).** If ALL of:
+
+a. `persistent_finding_count ≥ 1` (read from `round-(N+1)-persistence.md`); AND
+b. current round ≥ `suppression_threshold`; AND
+c. the judge's verdict is `PROGRESS`; AND
+d. round N's verifier had **≥1 `Resolved` finding** (NOT fully no-op — i.e., the fix attempted real work and still left a persistent finding);
+
+then promote to `Verdict: STAGNATION, Reason: persistent-finding-corroborated`. The promoted STAGNATION verdict is then consumed at **precedence slot #7** (the standard stagnation-judge consumption slot — see Exit Precedence).
+
+**Threshold rationale (persistent_finding_count ≥ 1).** The single-match threshold is deliberate but rests on the checker's documented conservativeness, not on the orchestrator side alone. The asymmetry is: a false-positive `high` correspondence promotes PROGRESS to STAGNATION, costing the user a real escalation; a false-negative `high` correspondence simply means the promotion fires on a later round when the same root cause persists. The checker's prompt mandates "when in doubt between `high` and `medium`, choose `medium`" and `medium` does NOT count toward `persistent_finding_count`, so a single `high` is by construction a high-confidence structural match against a verifier-`Unresolved` round-N finding. The orchestrator does NOT add a second independent verification of the correspondence — the prompt's conservativeness is the upstream guard. If empirical data (after ≥30 marker_version=2 entries; see Open Questions) shows false-positive `high` correspondences driving incorrect F1 promotions, the threshold should be raised to `≥ 2` or a second-channel corroboration check added; this is the canonical revisit trigger.
+
+**Mutex with no-op exit (anti-double-counting).** Condition (d) prevents mechanical over-firing on no-op rounds. When round N's verifier marked ALL findings `Unresolved` (i.e., a no-op fix per Fix Mechanism → No-Op Fix Detection), the no-op exit (precedence slot #4) is the authoritative cause — F1 promotion would mechanically over-fire because the persistence checker is GUARANTEED to find correspondences when the fix didn't change anything. F1 fires only when the fix attempted real work and still left a persistent finding.
+
+**Precedence interaction.** Precedence slots #2-#6 (ARCHITECTURAL_BLOCK, SUSTAINED_REGRESSION, no-op fix, consensus-stagnation pre-threshold, 15-round circuit-breaker) continue to outrank a promoted STAGNATION when they co-fire on the same round — `persistent-finding-corroborated` is recorded under `CoFiredExits` in those cases. See Exit Precedence for the full ordering and `CoFiredExits` semantics.
+
+**Rationale.** Surface/Structural is a per-finding class that the judge tags only in its **All-new** branch. Persistent findings are by construction Recurring (they match prior-round findings whose verifier verdict was `Unresolved`), so the judge enters its All-recurring or Mixed branch — where Surface/Structural is never tagged — and a classification-level override would have nothing to apply. The persistence signal is therefore promoted at the orchestrator layer, not via classification override.
+
+The stagnation judge's own output is unchanged in both fire and no-fire cases (the judge still wrote `PROGRESS`); the promotion happens entirely in orchestrator post-processing.
+
 ## Artifact Preparation
 
 ### Small artifacts (design docs, plans, hypotheses, mockups, translations)
@@ -535,7 +643,25 @@ A chunked gate has two independent round counters: a **local** counter per chunk
 
 **Cross-chunk round:** After all chunks complete, the final integration round increments the global counter but is conceptually its own "mini-chunk" with `suppression_threshold` = 5 (lower, because integration issues should escalate faster than within-chunk issues). Consensus is mandatory for the cross-chunk round (single-model review is too narrow for integration-surface bugs).
 
-**Recovery semantics:** On compaction mid-chunked-gate, read `chunk-manifest.md` to recover chunk status. The local counter for the in-progress chunk is recovered by reading the highest N in `chunk-K/round-N-score.md`. The global counter is reconstructed by summing rounds across all completed chunks plus the in-progress chunk's local rounds.
+**Canonical `chunk_id` grammar (INV-A15 / #265).** Chunk identifiers used in marker fields (`LookHarderRounds`, `PersistentFindingRounds`), convergence-log entries (`look_harder_rounds`, `persistent_finding_rounds`), and scratch directory names are restricted to TWO forms:
+
+- `chunk-<N>` where `<N>` is a positive integer matching the chunk's directory name (`chunk-1`, `chunk-2`, ...). Used for author-defined chunks.
+- `cross-chunk` — reserved string for the synthetic cross-chunk integration round.
+
+**Gate-start validation.** At chunked-gate start, the orchestrator MUST refuse to begin if any author-chunk directory name does not match the regex `^chunk-[1-9][0-9]*$`. The reserved `cross-chunk` token explicitly avoids collision with user-chosen subsystem names (e.g., `integration` would be a valid directory name in some authors' systems but would collide with the integration round's semantic).
+
+**Chunked-gate list-element encoding for new telemetry fields (INV-A15 / S6).** `LookHarderRounds` and `PersistentFindingRounds` are run-level lists in marker output; their elements differ between chunked and non-chunked gates:
+
+- **Non-chunked gates:** bare integers — e.g., `LookHarderRounds: 3, 6`. The convergence-log uses bare integers in the JSON list.
+- **Chunked gates:** `<chunk_id>:<local_round>` pairs (colon-separated) in the marker — e.g., `LookHarderRounds: chunk-1:3, chunk-2:5, cross-chunk:2`. The convergence-log encodes elements as JSON objects: `[{"chunk":"chunk-1","local_round":3},{"chunk":"chunk-2","local_round":5},{"chunk":"cross-chunk","local_round":2}]`.
+
+Two chunks could each contribute a "round 3"; without chunk-coordinate qualification a flat integer list would be ambiguous. The same encoding applies to `PersistentFindingRounds` / `persistent_finding_rounds`.
+
+**ArtifactHash and ChunkHash semantics on chunked gates.** `ArtifactHash` is the sha256 hex of the FULL pre-chunking artifact's bytes, computed once at gate start. Every per-chunk verdict marker AND the cross-chunk integration round's marker carry the **same** `ArtifactHash` — it identifies the artifact bytes across all chunks of a single gate run AND across multiple gate runs on the same content (regardless of chunking strategy). Forge consumers group markers by `ArtifactHash` for cross-run comparison, including the `tail-rubric-already-applied` revisit trigger.
+
+`ChunkHash` is the sha256 hex of the specific chunk's bytes. It is present **only** on per-chunk markers in chunked gates; it is **omitted** from non-chunked-gate markers and from the cross-chunk integration round's marker. `ChunkHash` is internal-only for per-chunk recovery scenarios; `ArtifactHash` is the canonical cross-run identifier.
+
+**Recovery semantics:** On compaction mid-chunked-gate, read `chunk-manifest.md` to recover chunk status. The local counter for the in-progress chunk is recovered by reading the highest N in `chunk-K/round-N-score.md`. The global counter is reconstructed by summing rounds across all completed chunks plus the in-progress chunk's local rounds. The look-harder all-files scan (see Compaction Recovery step 6a) operates strictly within the in-progress chunk's directory — never globs across chunks.
 
 The red-team subagent receives the **prepared artifact**, not raw diff. This mirrors audit's Tier 1/Tier 2 context management approach.
 
@@ -674,11 +800,23 @@ Quality gate writes round state to disk for compaction recovery.
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above)
 - `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts. Silent-seed dispatches (rounds threshold-3 through threshold-1) include a `silent-mode: true` line.
 - `round-N-verification.md`: fix verifier verdict summary (written after every fix round — unlike comparison files, these exist for every round that had fixes). MUST include an `architectural-candidates: [<finding-id-1>, ...] | []` field recording the list of Fatal findings flagged as architectural-candidate as of this round. This field is now informational-only and mirrors the authoritative state in `round-N-flags.md` (see below). A finding-id is added when a Fatal is marked Unresolved for the second consecutive round (per Fix Verification).
-- `round-N-flags.md`: derived flag state in key-value form, written at the END of each round (after the red-team round completes, regardless of whether a fix was dispatched). This file exists for EVERY round, including clean-PASS rounds with no fix dispatch, so every round has a defined writer for flag state. Contents:
+- `round-N-flags.md`: derived flag state in key-value form, written at the END of each round (after the red-team round completes, regardless of whether a fix was dispatched). This file exists for EVERY round, including clean-PASS rounds with no fix dispatch AND candidate-clean rounds that exit early (siege-blocked or no-op-fix co-fire), so every round has a defined writer for flag state. **Phase 2 behavior on candidate-clean rounds:**
+  - **Look-harder confirms clean** → Phase 2 RUNS, setting `look-harder-fired-on-round: <LOCAL N>`. (This populates the at-most-once-per-chunk flag and, more importantly, prevents recovery step 6b from spuriously re-dispatching look-harder after a crash that landed post-confirmation.)
+  - **Look-harder demotes the round** → Phase 2 RUNS (per the three-step Demotion crash-window rule in How It Works step 5), setting `look-harder-fired-on-round: <LOCAL N>`.
+  - **Look-harder skipped (circuit-breaker, tail-rubric-already-applied, or already-fired-this-chunk)** → Phase 2 is SKIPPED; the key remains `null`. The chunk-scoped at-most-once invariant is enforced by either the chunk having ended (the skip occurred on a terminal PASS round) or by a prior round's flag carrying the populated value (the already-fired skip).
+  - **Siege-blocked exit** → Phase 2 is SKIPPED; the key remains `null`. The round is terminal (`Verdict: ESCALATED, Reason: siege-blocked`); the chunk does not continue, so no subsequent round will mis-interpret the `null`.
+
+  Contents:
   ```
   architectural-candidates: [<finding-id-1>, <finding-id-2>, ...] | []
+  look-harder-fired-on-round: <LOCAL round number> | null
   ```
   A list of currently-set architectural-candidate findings, in the order they were marked. Empty list `[]` means no candidates. A finding-id is added to the list when the fix verifier downgrades that Fatal to informational (per Fix Verification). Multiple candidates can coexist. This is the authoritative store for flag state; `round-N-verification.md`'s `architectural-candidate:` field mirrors it for human readability but is not consulted by recovery.
+
+  The `look-harder-fired-on-round` key records the LOCAL round number (per-chunk) on which look-harder fired in the current chunk, or `null` if look-harder has not fired in this chunk as of round N. The key is set to `null` on every round's Phase 1 write; the firing round's Phase 2 re-write updates it to the LOCAL round number. **Recovery uses the all-files scan rule below — NOT the latest-file value alone — because later non-clean rounds write `null` (Phase 1 only) and the latest-file's `null` does NOT mean look-harder has never fired in the chunk.**
+
+- `round-N-look-harder.md`: per-round artifact persisting the look-harder dispatch's findings (Component 1 / #265). Written ONLY on rounds where look-harder fired (clean confirmation or non-clean demotion). Absence is the canonical "look-harder did not fire this round" signal. Format mirrors `round-N-findings.md` — the red-team output of the look-harder dispatch.
+- `round-N-persistence.md`: per-round artifact persisting the persistence-checker output (Component 4 / #265). Written ONLY on rounds where the persistence checker fired (i.e., round N+1's check against round N's `Unresolved` set; the file is named for round N+1, the current round). Format is the JSON object emitted by `persistence-checker-prompt.md` — either a populated correspondence list or a `status: error` fail-open entry.
 
   **Clear condition for `architectural-candidates`:** A finding-id `<X>` is removed from the list (set difference) on round N if BOTH conditions hold:
   1. The round-N red-team findings do not include `<X>` by literal id, AND
@@ -703,6 +841,15 @@ Quality gate writes round state to disk for compaction recovery.
 4. Read all `round-N-score.md` files to reconstruct the score progression.
 5. Read all `round-N-comparison.md` files to reconstruct consecutive-round state for the stagnation judge. Absence of comparison files is expected on clean-progress rounds.
 6. Read all `round-N-verification.md` files to recover fix verifier state. If any Fatal-severity Unresolved verdicts exist in the latest verification file, carry them forward as binding context for the next fix dispatch. Then read the latest `round-N-flags.md` (authoritative store for flag state — exists for every round, including clean-PASS rounds): if its `architectural-candidates:` list is non-empty, restore every finding-id in the list to the next fix dispatch's prompt. Without this restoration, a crash between flag-set and the next no-op round would silently drop the candidates, breaking the no-op→architectural promotion path.
+
+6a. **Look-harder fired-flag recovery (all-files scan, not latest-file).** Read ALL `round-N-flags.md` files in the in-progress chunk's directory (per the chunk-scoped grammar — non-chunked gates scan the flat scratch dir; chunked gates scan only `chunk-K/round-N-flags.md` for the in-progress chunk K — **no cross-chunk globbing**, completed chunks' flag files are never consulted). Treat look-harder as already fired in this chunk iff ANY file has a non-null `look-harder-fired-on-round` value. The chunk's effective fired-round is the maximum LOCAL round number across all non-null entries. Subsequent candidate-clean rounds in this chunk SKIP look-harder silently per INV-A1. This rule is load-bearing: later non-clean rounds wrote `look-harder-fired-on-round: null` (Phase 1 only; Phase 2 skipped on non-clean), so reading the latest flag file alone would lose the earlier "fired" state and re-fire look-harder on the next candidate-clean round.
+
+6b. **`round-N-look-harder.md` recovery.** If `round-N-look-harder.md` exists but the corresponding `round-N-flags.md`'s `look-harder-fired-on-round` is `null`, the orchestrator crashed in the Phase-1 / Phase-2 window. Re-dispatch look-harder for round N; the re-dispatch overwrites `round-N-look-harder.md` and writes Phase 2 of `round-N-flags.md` per the write-ordering protocol. This is protocol-safe per the crash-window analysis (no fix dispatch has consumed the prior findings; sampling-variance differences are acceptable).
+
+6c. **`round-N-persistence.md` recovery.** Three sub-cases:
+   - **File ABSENT and trigger conditions met** (round N+1 was non-clean AND round N's `### Verifier Assessment` contains ≥1 `Unresolved` AND both findings files exist): the orchestrator crashed BEFORE the persistence checker dispatched. Dispatch the persistence checker now, before the judge, per the normal flow. This case is NOT fail-open — the gate must run the checker if the trigger fires, and an absent file means "never dispatched", not "errored". (Without this clause, an F1 verdict-level promotion would silently fail to fire on recovery and a real persistence pattern would be missed.)
+   - **File EXISTS with `status: error`**: the state stands — do NOT re-dispatch the persistence checker. `persistent_finding_count: 0` (fail-open) carries forward, and the verdict-level promotion does not fire on this round even after recovery.
+   - **File EXISTS with a populated correspondence list**: the state stands as-is; the orchestrator reads it after judge dispatch as if the gate had never crashed.
 7. Output status to user: "Quality gate recovered after compaction. Round N complete, score progression: [list]. Continuing."
 8. Emit a Compression State Block into the conversation with gate-specific state: current round, score progression, artifact type under review. Inherit Goal and Key Decisions from the parent skill's last Compression State if available.
 8b. Check whether `consensus_query` MCP tool is available (consensus
@@ -750,11 +897,14 @@ After Minor Issue Handling completes and before cleanup begins, write a verdict 
 
 **Path:** `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-<run-id>.md`
 
-**Format:** Key-value pairs, one per line:
+**Format:** Key-value pairs, one per line. `MarkerVersion: 2` MUST be the FIRST line, `ArtifactHash` the SECOND. Field ordering below is canonical for writers:
 
 ```
+MarkerVersion: 2
+ArtifactHash: <sha256-hex of FULL pre-chunking artifact bytes, computed once at gate start>
+ChunkHash: <sha256-hex of this chunk's bytes>   # chunked gates only, per-chunk markers only; omit on non-chunked markers and on the cross-chunk integration marker
 Verdict: PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION
-Reason: clean-pass | siege-blocked | consensus-stagnation-pre-threshold | sustained-regression | no-op-fix | no-op-with-architectural-candidate | user-skipped | 15-round-circuit-breaker | stagnation-judge | single-round-regression | diminishing-returns | architectural-block-from-fix-agent | caller-detected-failure
+Reason: clean-pass | siege-blocked | consensus-stagnation-pre-threshold | sustained-regression | no-op-fix | no-op-with-architectural-candidate | user-skipped | 15-round-circuit-breaker | stagnation-judge | single-round-regression | diminishing-returns | architectural-block-from-fix-agent | persistent-finding-corroborated | caller-detected-failure
 Phase: <phase name from invoking orchestrator, omit if standalone>
 PipelineID: <pipeline-id from invoking orchestrator, omit if standalone>
 Rounds: <total round count>
@@ -764,6 +914,13 @@ ScoreTrajectory: <comma-separated per-round weighted scores; on chunked gates, c
 SuppressedRegressions: <count of pre-threshold rounds with suppressed-signal != none>
 NoOpFixes: <count of rounds with no-op-fix = true>
 CoFiredExits: <comma-separated list of suppressed co-firing exits, omit if none>
+ConsensusAvailable: true | false
+ConsensusRoundsRun: <int — count of rounds where consensus_query returned status in {complete, partial}>
+LookHarderRounds: <comma-separated list of LOCAL round numbers where look-harder fired NON-CLEAN; on chunked gates, elements are `<chunk_id>:<local_round>` per the canonical grammar — see Chunked Gate section; OMIT this field entirely when empty (omit-when-empty, parallel to CoFiredExits)>
+LookHarderFiredCount: <int — count of look-harder dispatches (clean + non-clean, NOT skipped); always present, defaults to 0; invariant: len(LookHarderRounds) ≤ LookHarderFiredCount>
+LookHarderSkippedReason: circuit-breaker | tail-rubric-already-applied   # OMIT unless look-harder was skipped on a candidate-clean round; per-run, first reason recorded if multiple skips occur; circuit-breaker wins over tail-rubric-already-applied on co-fire
+PersistentFindingRounds: <comma-separated list of LOCAL round numbers where persistent_finding_count ≥ 1; on chunked gates, elements are `<chunk_id>:<local_round>`; OMIT this field entirely when empty (parallel to LookHarderRounds)>
+PersistentCheckCount: <int — count of persistence-checker dispatches (error dispatches DO count); always present, defaults to 0; invariant: len(PersistentFindingRounds) ≤ PersistentCheckCount>
 SiegeDispatched: true | false
 SiegeReason: detected | force | skip-requested | no-security-surface
 SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (omit if SiegeDispatched=false)
@@ -771,6 +928,17 @@ SiegeFindings: <count of Critical+High siege findings, omit if SiegeDispatched=f
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
 ```
+
+**MarkerVersion semantics:** Every verdict marker written by this version of the gate or later carries `MarkerVersion: 2` as its first line. Consumers gate version-aware parsing on this stamp:
+
+- `MarkerVersion: 1` or absent ⇒ legacy marker. Consumers MUST treat any missing field as `null` (unknown), NOT as `false`/`0`/`[]`.
+- `MarkerVersion: 2` ⇒ this version's marker. Missing fields are semantically empty per the **omit-when-empty** convention enumerated above (e.g., absent `LookHarderRounds` means "no non-clean look-harder rounds"; absent `LookHarderSkippedReason` means "look-harder was not skipped").
+
+The convergence-log mirrors this stamp via `marker_version` (see Convergence Telemetry).
+
+**ArtifactHash semantics:** `ArtifactHash` is the sha256 hex of the FULL pre-chunking artifact's bytes, computed once at gate start. For non-chunked gates this is the single artifact's hash. For chunked gates, every per-chunk verdict marker AND the cross-chunk integration round's marker carry the **same** `ArtifactHash` — it identifies the artifact across all chunks of a single gate run AND across multiple gate runs on the same byte content (regardless of chunking strategy). Forge consumers use `ArtifactHash` for same-artifact cross-run comparison, including the revisit trigger for the `tail-rubric-already-applied` skip.
+
+`ChunkHash` (chunked gates only): sha256 hex of the specific chunk's bytes. Present on per-chunk markers in chunked gates only. **Omitted from non-chunked-gate markers and from the cross-chunk integration round's marker.** `ArtifactHash` is the canonical cross-run identifier; `ChunkHash` is internal-only for per-chunk recovery scenarios.
 
 **Verdict enum semantics:**
 - `PASS`: gate exited cleanly (0 Fatal, 0 Significant on a fresh red-team round)
@@ -793,9 +961,12 @@ RunID: <quality-gate run-id>
 - `single-round-regression` — Verdict: ESCALATED, from a single-round score increase at round ≥ `suppression_threshold`.
 - `diminishing-returns` — Verdict: ESCALATED, from the judge's DIMINISHING_RETURNS verdict.
 - `architectural-block-from-fix-agent` — Verdict: ARCHITECTURAL, from the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` declaration.
+- `persistent-finding-corroborated` — Verdict: STAGNATION, from the orchestrator's post-judge verdict-level promotion rule (Component 4). Recorded when the stagnation judge returned PROGRESS but `persistent_finding_count ≥ 1` AND round ≥ `suppression_threshold` AND round N's verifier had ≥1 `Resolved` finding (NOT fully no-op). See `## Stagnation Detection > Persistence Check` for the promotion logic.
 - `caller-detected-failure` — Verdict: FAIL. Valid ONLY when `Verdict: FAIL`; written by callers (e.g., build's gate ledger) recording a downstream-detected failure of the gate's output. Quality-gate itself never writes this combination.
 
-**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis/mockup/translation gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate.
+**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0 OR ConsensusAvailable: false)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis/mockup/translation gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate.
+
+**Fragile-pass disjunct partitioning (advisory).** Consumers SHOULD partition `ConsensusAvailable: false` from the other disjuncts (SuppressedRegressions, MaxScore drift, NoOpFixes) when reporting fragility rates. The consensus disjunct reflects a **cross-model coverage gap** — the gate ran against a single model family and correlated blind spots are possible. The other disjuncts reflect **within-loop convergence instability**. Each consumer may choose to display them as separate metrics rather than a single fragility boolean; collapsing the two onto one axis obscures the underlying cause of the fragility flag.
 
 **Tool:** Write tool (not Bash) since the path is under `.claude/`.
 
@@ -816,10 +987,25 @@ The pre-threshold suppression rule rests on a quantitative claim: "most artifact
 **Format:** One JSON object per line:
 
 ```json
-{"run_id":"2026-05-16T14-30-00","artifact_type":"code","threshold":10,"rounds":4,"verdict":"PASS","final_score":0,"max_score":6,"score_trajectory":[6,4,3,0],"suppressed_regressions":1,"no_op_fixes":0,"siege_dispatched":false,"timestamp":"2026-05-16T14:38:21Z"}
+{"marker_version":2,"artifact_hash":"<sha256-hex>","chunk_hash":"<sha256-hex>","run_id":"2026-05-16T14-30-00","artifact_type":"code","threshold":10,"rounds":4,"verdict":"PASS","final_score":0,"max_score":6,"score_trajectory":[6,4,3,0],"suppressed_regressions":1,"no_op_fixes":0,"consensus_available":false,"consensus_rounds_run":0,"look_harder_rounds":[],"look_harder_fired_count":0,"look_harder_skipped_reason":null,"persistent_finding_rounds":[],"persistent_check_count":0,"siege_dispatched":false,"timestamp":"2026-05-16T14:38:21Z"}
 ```
 
 Fields mirror the verdict marker plus `threshold` (the active `suppression_threshold` for this run). One line per gate run, regardless of verdict.
+
+**Field semantics for the new entries:**
+
+- `marker_version`: integer matching the verdict marker's `MarkerVersion`. New entries written by this version carry `2`.
+- `artifact_hash`: sha256 hex of the FULL pre-chunking artifact's bytes (mirrors `ArtifactHash` in the verdict marker).
+- `chunk_hash`: sha256 hex of the specific chunk's bytes. Present on chunked-gate per-chunk entries only; OMITTED (key absent) on non-chunked entries and on the cross-chunk integration entry.
+- `consensus_available`: `true` iff `consensus_query` returned `status in {complete, partial}` on ≥1 consensus-eligible round across the run.
+- `consensus_rounds_run`: integer count of rounds where `consensus_query` returned `status in {complete, partial}`.
+- `look_harder_rounds`: JSON list. **Non-chunked gates:** bare integers (e.g., `[3, 6]`). **Chunked gates:** objects `{"chunk": "chunk-<N>" | "cross-chunk", "local_round": <int>}` (e.g., `[{"chunk":"chunk-1","local_round":3},{"chunk":"chunk-2","local_round":5}]`). Empty list `[]` when no non-clean look-harder rounds occurred (JSON has no omit-vs-empty ambiguity, so empty list is canonical rather than absent key).
+- `look_harder_fired_count`: integer count of look-harder dispatches in the gate run (clean + non-clean, NOT skipped). Defaults to 0. Invariant: `len(look_harder_rounds) ≤ look_harder_fired_count`.
+- `look_harder_skipped_reason`: enum value `"circuit-breaker"` | `"tail-rubric-already-applied"` recorded on a per-run basis. First reason recorded if multiple skips occur. `null` when no skip occurred.
+- `persistent_finding_rounds`: JSON list, same element grammar as `look_harder_rounds`. Empty list `[]` when no rounds produced `persistent_finding_count ≥ 1`.
+- `persistent_check_count`: integer count of persistence-checker dispatches (error dispatches DO count). Defaults to 0. Invariant: `len(persistent_finding_rounds) ≤ persistent_check_count`.
+
+**Version-aware backward compatibility (canonical):** Existing convergence-log entries written before this version was deployed lack `marker_version`, `artifact_hash`, and the new telemetry fields. Consumers MUST treat any missing field on a legacy entry as `null` (unknown), NOT as `false` / `0` / `[]`. **Legacy entries are explicitly excluded from any rate-denominator computation** — clean-confirmation rates, non-clean rates, persistence-checker correlation rates, and the recurrence-rate measurements in Open Questions are computed only over entries with `marker_version: 2`. Forge consumers analyzing pre-design entries treat all new fields as `null` and skip those entries when computing rates.
 
 **Size management:** The log is append-only. Rotate via mtime check: if the file exceeds 10,000 lines, the next gate run renames it to `convergence-log-<YYYY-MM>.jsonl` (archive) and starts a fresh log. Archives are never deleted by quality-gate — the user manages retention.
 
@@ -889,6 +1075,8 @@ A single round can satisfy more than one exit condition (e.g., sustained-regress
 
 **Pre-precedence resolution.** Before evaluating precedence, the orchestrator MUST run the no-op→architectural promotion re-dispatch if both conditions are true: (a) no-op fix detected this round, (b) the `architectural-candidates` list from a prior round is non-empty. The re-dispatch's outcome (ARCHITECTURAL_BLOCK, clean fix, or persistent no-op) then participates in normal precedence evaluation. This ensures the fix agent always gets its second chance to declare ARCHITECTURAL, even when other exits (15-round limit, consensus-stagnation, etc.) would co-fire and otherwise win precedence. Exception: if the current round is at the 15-round circuit breaker (`current_round == 15`), the pre-precedence re-dispatch is skipped and the orchestrator proceeds directly to circuit-breaker escalation. The 15-round cap is absolute — runaway protection takes precedence over architectural second-chance.
 
+**Persistent-finding verdict promotion (Component 4 / #265).** AFTER the Pre-precedence resolution step above AND AFTER the stagnation judge returns its verdict (per `## Stagnation Detection > Verdict-Level Promotion`), the orchestrator applies the persistent-finding promotion: if `persistent_finding_count ≥ 1` AND round ≥ `suppression_threshold` AND judge verdict is `PROGRESS` AND round N's verifier had ≥1 `Resolved` finding (NOT fully no-op), the verdict is promoted to `STAGNATION, Reason: persistent-finding-corroborated`. The promoted STAGNATION is consumed at **slot #7** (the standard stagnation-judge consumption slot below). Precedence slots #2-#6 outrank a promoted STAGNATION when they co-fire on the same round; in those cases `persistent-finding-corroborated` is recorded under `CoFiredExits` and does NOT alter the higher-precedence verdict.
+
 1. **Clean pass** (0 Fatal, 0 Significant on a fresh red-team round) — overrides every other entry in this list, but is subject to post-precedence siege demotion (see below). A fresh-eyes clean review means the artifact is done.
 2. **ARCHITECTURAL_BLOCK** — the fix agent declared `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). The only exit declared by the fix agent itself; honor it. Verdict: `ARCHITECTURAL`.
 3. **SUSTAINED_REGRESSION** — three rounds of strictly-increasing scores (see First-Pass Check). Structural signal of active worsening; bypass everything else. Verdict: `SUSTAINED_REGRESSION`.
@@ -940,7 +1128,63 @@ How It Works step 10's enumeration of pre-threshold exits and the bullet list ab
 - Treating single-model unique findings from consensus as less important than multi-model agreements (the prompt explicitly elevates "potentially novel" findings)
 - Blocking the host red-team round on external review availability or timeout
 
+### Look-harder, tail-rubric, and persistence (#265)
+
+- Self-overwriting `round-N-findings.md` on the same candidate-clean round where look-harder ran AND returned 0F/0S. The overwrite happens ONLY on look-harder demotion (look-harder returned Fatal/Significant). Confirming a clean round does NOT overwrite the findings file.
+- Forwarding persistence-checker output to the red-team prompt or the stagnation judge's input set. The output flows ONLY to the orchestrator (read path between judge dispatch and verdict marker write). Leaking it to either consumer breaks anti-anchoring (red-team) or the judge's input-set invariant.
+- Computing `tail_rubric: true` against the GLOBAL round number on chunked gates. The trigger is LOCAL (per-chunk) — chunk 2 of a chunked gate does NOT inherit tail-rubric from chunk 1's late rounds. Each chunk's local counter governs.
+
 **Retired (covered structurally):** Self-fixing instead of dispatching a fix agent, rationalizing away findings, skipping the gate without approval, declaring "complete" without a clean round, exceeding 15-round limit, escalating pre-threshold for single-round signals, dispatching the judge pre-threshold, looping past sustained regression, allowing fix-agent scope drift, skipping the fix verifier — all of these are now caught by the Anti-Rationalization Table or by structural invariants (Non-Skippability, Receipt Linter mandatory-work, Architectural Concerns Exit). They do not need separate red-flag entries.
+
+## Implementation Invariants
+
+The invariants below govern the look-harder verification (Component 1), the tail-rubric (Component 2), the telemetry-expansion fields (Component 3), and the persistence-checker / verdict-level promotion (Component 4) introduced by #265. These are spec-inspection invariants: in a spec-only repo, the verification mechanism is targeted grep against the orchestrator state-machine in this SKILL.md plus the two new prompt files (`tightened-rubric-addendum.md`, `persistence-checker-prompt.md`). The canonical statements live in the design doc (`docs/plans/2026-05-17-qg-tail-hardening-design.md`, local-only) and the machine-readable contract (`docs/plans/2026-05-17-qg-tail-hardening-contract.yaml`). This table is the navigational index.
+
+### Checkable (INV-A1 — INV-A17)
+
+| ID | Summary |
+|---|---|
+| INV-A1 | Look-harder fires at-most-once per chunk per gate run, on the first non-skip-condition clean round (LOCAL counter) |
+| INV-A2 | Look-harder does NOT increment the gate's round counter |
+| INV-A3 | `tail_rubric: true` iff `suppression_threshold ≥ 5` AND LOCAL round ≥ `ceil(suppression_threshold * 0.6)` |
+| INV-A4 | Shared addendum is concatenated to `red-team-prompt.md` body by the orchestrator iff look-harder is firing OR `tail_rubric: true`; orchestrator is sole appender |
+| INV-A5 | `ConsensusAvailable` present on every marker; canonical run-total semantics (any chunk OR cross-chunk integration); legacy markers treat absence as `null` |
+| INV-A6 | `ConsensusRoundsRun` is run-total count of consensus-eligible rounds with `status in {complete, partial}` |
+| INV-A7 | `look-harder-fired-on-round` persists per-chunk; recovery scans ALL flags files in the chunk dir; effective fired-round = max non-null |
+| INV-A8 | Two-phase write protocol for `round-N-flags.md` (Phase 1: null at end of round; Phase 2: LOCAL round after look-harder resolves) |
+| INV-A9 | `LookHarderFiredCount` always present; counts clean confirmations + non-clean demotions, NOT skipped |
+| INV-A10 | Persistence checker fires iff round N+1 non-clean AND round N's `### Verifier Assessment` has ≥1 `Unresolved`; F1 promotion requires `persistent_finding_count ≥ 1` AND round ≥ threshold AND judge `PROGRESS` AND ≥1 `Resolved` |
+| INV-A11 | Persistence checker inputs limited to round-N/N+1 findings + round-N fix-journal; output flows only to orchestrator (not red-team, not judge); promotion runs post-judge, post-pre-precedence; consumed at slot #7 |
+| INV-A12 | `PersistentCheckCount` always present; error dispatches count; invariant `len(PersistentFindingRounds) ≤ PersistentCheckCount` |
+| INV-A13 | `MarkerVersion: 2` is FIRST line of every marker by this design |
+| INV-A14 | `ArtifactHash` is SECOND line; per-run identifier covering all per-chunk and cross-chunk markers in a chunked gate |
+| INV-A15 | `chunk_id` grammar restricted to `chunk-<N>` (positive integer) | `cross-chunk`; gate refuses to start on non-conforming chunk dirs |
+| INV-A16 | `ChunkHash` on per-chunk markers only; omitted on non-chunked markers and on cross-chunk integration marker |
+| INV-A17 | On a look-harder-demoted round, `round-N-findings.md` is overwritten with look-harder findings before fix dispatch; `round-N-look-harder.md` is retained |
+
+### Testable (INV-T1 — INV-T16, with T2b/T2c/T5b suffix variants)
+
+| ID | Summary |
+|---|---|
+| INV-T1 | Round-counter integrity — 4-standard-round gate emits `Rounds: 4`, not 5 |
+| INV-T2 | Tail-rubric trigger (threshold 10) — LOCAL rounds 1-5 lack `tail_rubric: true`; LOCAL 6+ have it |
+| INV-T2b | Tail-rubric trigger (threshold 6) — LOCAL rounds 1-3 lack it; LOCAL 4+ have it |
+| INV-T2c | Tail-rubric trigger (threshold 5) — LOCAL rounds 1-2 lack it; LOCAL 3+ have it (cross-chunk integration round) |
+| INV-T3 | Tail-rubric DISABLED for threshold 3 / 4 — flag never set at any LOCAL round number |
+| INV-T4 | Look-harder no-second-fire per-chunk — across a clean→fix→non-clean→fix→clean chunk, look-harder fires only on the first clean LOCAL round |
+| INV-T5 | Consensus-unavailable run emits `ConsensusAvailable: false, ConsensusRoundsRun: 0` |
+| INV-T5b | Partial-consensus (one `partial`, one `unavailable`) emits `ConsensusAvailable: true, ConsensusRoundsRun: 1` |
+| INV-T6 | Convergence-log version-aware backward compat — consumers treat legacy missing fields as `null`, not `false`/`0`/`[]` |
+| INV-T7 | Fragile-pass disjunct extension — `PASS, ConsensusAvailable: false` is flagged fragile |
+| INV-T8 | Look-harder crash safety — chunk with fired round 1 + null round 2 recovers as "fired" via all-files scan |
+| INV-T9 | Chunked-gate look-harder isolation — chunk-1's firing does NOT prevent chunk-2's first firing |
+| INV-T10 | Two-phase write ordering — recovery between phases sees null and re-dispatches (protocol-safe) |
+| INV-T11 | `LookHarderFiredCount` accounting — counts dispatches (clean + non-clean), NOT skipped |
+| INV-T12 | `tail-rubric-already-applied` skip — first-clean at LOCAL 6 on threshold-10 emits skip reason; first-clean at LOCAL 5 fires look-harder normally |
+| INV-T13 | Persistence-trigger gating uses round-N verifier status (Resolved=skip, partial-Unresolved=fire, all-Unresolved=fire); LOCAL counter for chunked gates |
+| INV-T14 | F1 promotion fires on PROGRESS+`persistent_finding_count≥1`+round≥threshold+≥1 Resolved; SKIPS on fully no-op (slot #4 authoritative) |
+| INV-T15 | Persistence checker error → `status: error` + `persistent_finding_count = 0` (fail-open); no re-dispatch |
+| INV-T16 | Fix-input contract — `round-N-findings.md` overwritten with 2 Significants on look-harder demotion; `round-N-look-harder.md` retained as separate artifact; fix agent for round N+1 reads `round-N-findings.md` per existing convention |
 
 ## Integration
 
