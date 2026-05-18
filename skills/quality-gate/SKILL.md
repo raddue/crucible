@@ -750,11 +750,14 @@ After Minor Issue Handling completes and before cleanup begins, write a verdict 
 
 **Path:** `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-<run-id>.md`
 
-**Format:** Key-value pairs, one per line:
+**Format:** Key-value pairs, one per line. `MarkerVersion: 2` MUST be the FIRST line, `ArtifactHash` the SECOND. Field ordering below is canonical for writers:
 
 ```
+MarkerVersion: 2
+ArtifactHash: <sha256-hex of FULL pre-chunking artifact bytes, computed once at gate start>
+ChunkHash: <sha256-hex of this chunk's bytes>   # chunked gates only, per-chunk markers only; omit on non-chunked markers and on the cross-chunk integration marker
 Verdict: PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION
-Reason: clean-pass | siege-blocked | consensus-stagnation-pre-threshold | sustained-regression | no-op-fix | no-op-with-architectural-candidate | user-skipped | 15-round-circuit-breaker | stagnation-judge | single-round-regression | diminishing-returns | architectural-block-from-fix-agent | caller-detected-failure
+Reason: clean-pass | siege-blocked | consensus-stagnation-pre-threshold | sustained-regression | no-op-fix | no-op-with-architectural-candidate | user-skipped | 15-round-circuit-breaker | stagnation-judge | single-round-regression | diminishing-returns | architectural-block-from-fix-agent | persistent-finding-corroborated | caller-detected-failure
 Phase: <phase name from invoking orchestrator, omit if standalone>
 PipelineID: <pipeline-id from invoking orchestrator, omit if standalone>
 Rounds: <total round count>
@@ -764,6 +767,13 @@ ScoreTrajectory: <comma-separated per-round weighted scores; on chunked gates, c
 SuppressedRegressions: <count of pre-threshold rounds with suppressed-signal != none>
 NoOpFixes: <count of rounds with no-op-fix = true>
 CoFiredExits: <comma-separated list of suppressed co-firing exits, omit if none>
+ConsensusAvailable: true | false
+ConsensusRoundsRun: <int — count of rounds where consensus_query returned status in {complete, partial}>
+LookHarderRounds: <comma-separated list of LOCAL round numbers where look-harder fired NON-CLEAN; on chunked gates, elements are `<chunk_id>:<local_round>` per the canonical grammar — see Chunked Gate section; OMIT this field entirely when empty (omit-when-empty, parallel to CoFiredExits)>
+LookHarderFiredCount: <int — count of look-harder dispatches (clean + non-clean, NOT skipped); always present, defaults to 0; invariant: len(LookHarderRounds) ≤ LookHarderFiredCount>
+LookHarderSkippedReason: circuit-breaker | tail-rubric-already-applied   # OMIT unless look-harder was skipped on a candidate-clean round; per-run, first reason recorded if multiple skips occur; circuit-breaker wins over tail-rubric-already-applied on co-fire
+PersistentFindingRounds: <comma-separated list of LOCAL round numbers where persistent_finding_count ≥ 1; on chunked gates, elements are `<chunk_id>:<local_round>`; OMIT this field entirely when empty (parallel to LookHarderRounds)>
+PersistentCheckCount: <int — count of persistence-checker dispatches (error dispatches DO count); always present, defaults to 0; invariant: len(PersistentFindingRounds) ≤ PersistentCheckCount>
 SiegeDispatched: true | false
 SiegeReason: detected | force | skip-requested | no-security-surface
 SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (omit if SiegeDispatched=false)
@@ -771,6 +781,17 @@ SiegeFindings: <count of Critical+High siege findings, omit if SiegeDispatched=f
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
 ```
+
+**MarkerVersion semantics:** Every verdict marker written by this version of the gate or later carries `MarkerVersion: 2` as its first line. Consumers gate version-aware parsing on this stamp:
+
+- `MarkerVersion: 1` or absent ⇒ legacy marker. Consumers MUST treat any missing field as `null` (unknown), NOT as `false`/`0`/`[]`.
+- `MarkerVersion: 2` ⇒ this version's marker. Missing fields are semantically empty per the **omit-when-empty** convention enumerated above (e.g., absent `LookHarderRounds` means "no non-clean look-harder rounds"; absent `LookHarderSkippedReason` means "look-harder was not skipped").
+
+The convergence-log mirrors this stamp via `marker_version` (see Convergence Telemetry).
+
+**ArtifactHash semantics:** `ArtifactHash` is the sha256 hex of the FULL pre-chunking artifact's bytes, computed once at gate start. For non-chunked gates this is the single artifact's hash. For chunked gates, every per-chunk verdict marker AND the cross-chunk integration round's marker carry the **same** `ArtifactHash` — it identifies the artifact across all chunks of a single gate run AND across multiple gate runs on the same byte content (regardless of chunking strategy). Forge consumers use `ArtifactHash` for same-artifact cross-run comparison, including the revisit trigger for the `tail-rubric-already-applied` skip.
+
+`ChunkHash` (chunked gates only): sha256 hex of the specific chunk's bytes. Present on per-chunk markers in chunked gates only. **Omitted from non-chunked-gate markers and from the cross-chunk integration round's marker.** `ArtifactHash` is the canonical cross-run identifier; `ChunkHash` is internal-only for per-chunk recovery scenarios.
 
 **Verdict enum semantics:**
 - `PASS`: gate exited cleanly (0 Fatal, 0 Significant on a fresh red-team round)
@@ -793,9 +814,12 @@ RunID: <quality-gate run-id>
 - `single-round-regression` — Verdict: ESCALATED, from a single-round score increase at round ≥ `suppression_threshold`.
 - `diminishing-returns` — Verdict: ESCALATED, from the judge's DIMINISHING_RETURNS verdict.
 - `architectural-block-from-fix-agent` — Verdict: ARCHITECTURAL, from the fix agent's `VERDICT: ARCHITECTURAL_BLOCK` declaration.
+- `persistent-finding-corroborated` — Verdict: STAGNATION, from the orchestrator's post-judge verdict-level promotion rule (Component 4). Recorded when the stagnation judge returned PROGRESS but `persistent_finding_count ≥ 1` AND round ≥ `suppression_threshold` AND round N's verifier had ≥1 `Resolved` finding (NOT fully no-op). See `## Stagnation Detection > Persistence Check` for the promotion logic.
 - `caller-detected-failure` — Verdict: FAIL. Valid ONLY when `Verdict: FAIL`; written by callers (e.g., build's gate ledger) recording a downstream-detected failure of the gate's output. Quality-gate itself never writes this combination.
 
-**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis/mockup/translation gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate.
+**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0 OR ConsensusAvailable: false)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis/mockup/translation gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate.
+
+**Fragile-pass disjunct partitioning (advisory).** Consumers SHOULD partition `ConsensusAvailable: false` from the other disjuncts (SuppressedRegressions, MaxScore drift, NoOpFixes) when reporting fragility rates. The consensus disjunct reflects a **cross-model coverage gap** — the gate ran against a single model family and correlated blind spots are possible. The other disjuncts reflect **within-loop convergence instability**. Each consumer may choose to display them as separate metrics rather than a single fragility boolean; collapsing the two onto one axis obscures the underlying cause of the fragility flag.
 
 **Tool:** Write tool (not Bash) since the path is under `.claude/`.
 
