@@ -1105,6 +1105,56 @@ How It Works step 10's enumeration of pre-threshold exits and the bullet list ab
 
 **Retired (covered structurally):** Self-fixing instead of dispatching a fix agent, rationalizing away findings, skipping the gate without approval, declaring "complete" without a clean round, exceeding 15-round limit, escalating pre-threshold for single-round signals, dispatching the judge pre-threshold, looping past sustained regression, allowing fix-agent scope drift, skipping the fix verifier — all of these are now caught by the Anti-Rationalization Table or by structural invariants (Non-Skippability, Receipt Linter mandatory-work, Architectural Concerns Exit). They do not need separate red-flag entries.
 
+## Implementation Invariants
+
+The invariants below govern the look-harder verification (Component 1), the tail-rubric (Component 2), the telemetry-expansion fields (Component 3), and the persistence-checker / verdict-level promotion (Component 4) introduced by #265. These are spec-inspection invariants: in a spec-only repo, the verification mechanism is targeted grep against the orchestrator state-machine in this SKILL.md plus the two new prompt files (`tightened-rubric-addendum.md`, `persistence-checker-prompt.md`). The canonical statements live in the design doc (`docs/plans/2026-05-17-qg-tail-hardening-design.md`, local-only) and the machine-readable contract (`docs/plans/2026-05-17-qg-tail-hardening-contract.yaml`). This table is the navigational index.
+
+### Checkable (INV-A1 — INV-A17)
+
+| ID | Summary |
+|---|---|
+| INV-A1 | Look-harder fires at-most-once per chunk per gate run, on the first non-skip-condition clean round (LOCAL counter) |
+| INV-A2 | Look-harder does NOT increment the gate's round counter |
+| INV-A3 | `tail_rubric: true` iff `suppression_threshold ≥ 5` AND LOCAL round ≥ `ceil(suppression_threshold * 0.6)` |
+| INV-A4 | Shared addendum is concatenated to `red-team-prompt.md` body by the orchestrator iff look-harder is firing OR `tail_rubric: true`; orchestrator is sole appender |
+| INV-A5 | `ConsensusAvailable` present on every marker; canonical run-total semantics (any chunk OR cross-chunk integration); legacy markers treat absence as `null` |
+| INV-A6 | `ConsensusRoundsRun` is run-total count of consensus-eligible rounds with `status in {complete, partial}` |
+| INV-A7 | `look-harder-fired-on-round` persists per-chunk; recovery scans ALL flags files in the chunk dir; effective fired-round = max non-null |
+| INV-A8 | Two-phase write protocol for `round-N-flags.md` (Phase 1: null at end of round; Phase 2: LOCAL round after look-harder resolves) |
+| INV-A9 | `LookHarderFiredCount` always present; counts clean confirmations + non-clean demotions, NOT skipped |
+| INV-A10 | Persistence checker fires iff round N+1 non-clean AND round N's `### Verifier Assessment` has ≥1 `Unresolved`; F1 promotion requires `persistent_finding_count ≥ 1` AND round ≥ threshold AND judge `PROGRESS` AND ≥1 `Resolved` |
+| INV-A11 | Persistence checker inputs limited to round-N/N+1 findings + round-N fix-journal; output flows only to orchestrator (not red-team, not judge); promotion runs post-judge, post-pre-precedence; consumed at slot #7 |
+| INV-A12 | `PersistentCheckCount` always present; error dispatches count; invariant `len(PersistentFindingRounds) ≤ PersistentCheckCount` |
+| INV-A13 | `MarkerVersion: 2` is FIRST line of every marker by this design |
+| INV-A14 | `ArtifactHash` is SECOND line; per-run identifier covering all per-chunk and cross-chunk markers in a chunked gate |
+| INV-A15 | `chunk_id` grammar restricted to `chunk-<N>` (positive integer) | `cross-chunk`; gate refuses to start on non-conforming chunk dirs |
+| INV-A16 | `ChunkHash` on per-chunk markers only; omitted on non-chunked markers and on cross-chunk integration marker |
+| INV-A17 | On a look-harder-demoted round, `round-N-findings.md` is overwritten with look-harder findings before fix dispatch; `round-N-look-harder.md` is retained |
+
+### Testable (INV-T1 — INV-T16, with T2b/T2c/T5b suffix variants)
+
+| ID | Summary |
+|---|---|
+| INV-T1 | Round-counter integrity — 4-standard-round gate emits `Rounds: 4`, not 5 |
+| INV-T2 | Tail-rubric trigger (threshold 10) — LOCAL rounds 1-5 lack `tail_rubric: true`; LOCAL 6+ have it |
+| INV-T2b | Tail-rubric trigger (threshold 6) — LOCAL rounds 1-3 lack it; LOCAL 4+ have it |
+| INV-T2c | Tail-rubric trigger (threshold 5) — LOCAL rounds 1-2 lack it; LOCAL 3+ have it (cross-chunk integration round) |
+| INV-T3 | Tail-rubric DISABLED for threshold 3 / 4 — flag never set at any LOCAL round number |
+| INV-T4 | Look-harder no-second-fire per-chunk — across a clean→fix→non-clean→fix→clean chunk, look-harder fires only on the first clean LOCAL round |
+| INV-T5 | Consensus-unavailable run emits `ConsensusAvailable: false, ConsensusRoundsRun: 0` |
+| INV-T5b | Partial-consensus (one `partial`, one `unavailable`) emits `ConsensusAvailable: true, ConsensusRoundsRun: 1` |
+| INV-T6 | Convergence-log version-aware backward compat — consumers treat legacy missing fields as `null`, not `false`/`0`/`[]` |
+| INV-T7 | Fragile-pass disjunct extension — `PASS, ConsensusAvailable: false` is flagged fragile |
+| INV-T8 | Look-harder crash safety — chunk with fired round 1 + null round 2 recovers as "fired" via all-files scan |
+| INV-T9 | Chunked-gate look-harder isolation — chunk-1's firing does NOT prevent chunk-2's first firing |
+| INV-T10 | Two-phase write ordering — recovery between phases sees null and re-dispatches (protocol-safe) |
+| INV-T11 | `LookHarderFiredCount` accounting — counts dispatches (clean + non-clean), NOT skipped |
+| INV-T12 | `tail-rubric-already-applied` skip — first-clean at LOCAL 6 on threshold-10 emits skip reason; first-clean at LOCAL 5 fires look-harder normally |
+| INV-T13 | Persistence-trigger gating uses round-N verifier status (Resolved=skip, partial-Unresolved=fire, all-Unresolved=fire); LOCAL counter for chunked gates |
+| INV-T14 | F1 promotion fires on PROGRESS+`persistent_finding_count≥1`+round≥threshold+≥1 Resolved; SKIPS on fully no-op (slot #4 authoritative) |
+| INV-T15 | Persistence checker error → `status: error` + `persistent_finding_count = 0` (fail-open); no re-dispatch |
+| INV-T16 | Fix-input contract — `round-N-findings.md` overwritten with 2 Significants on look-harder demotion; `round-N-look-harder.md` retained as separate artifact; fix agent for round N+1 reads `round-N-findings.md` per existing convention |
+
 ## Integration
 
 - **crucible:red-team** — The engine that performs each review round. **Loop ownership:** Quality-gate uses red-team as a single-pass reviewer only (one dispatch = one review round, findings returned). Quality-gate owns the iteration loop, stagnation detection, and round tracking. Red-team does NOT run its own stagnation loop when invoked by quality-gate. Red-team's stagnation rules apply only when red-team is invoked directly (e.g., by `crucible:finish`).
