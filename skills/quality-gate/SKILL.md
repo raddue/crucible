@@ -627,7 +627,25 @@ A chunked gate has two independent round counters: a **local** counter per chunk
 
 **Cross-chunk round:** After all chunks complete, the final integration round increments the global counter but is conceptually its own "mini-chunk" with `suppression_threshold` = 5 (lower, because integration issues should escalate faster than within-chunk issues). Consensus is mandatory for the cross-chunk round (single-model review is too narrow for integration-surface bugs).
 
-**Recovery semantics:** On compaction mid-chunked-gate, read `chunk-manifest.md` to recover chunk status. The local counter for the in-progress chunk is recovered by reading the highest N in `chunk-K/round-N-score.md`. The global counter is reconstructed by summing rounds across all completed chunks plus the in-progress chunk's local rounds.
+**Canonical `chunk_id` grammar (INV-A15 / #265).** Chunk identifiers used in marker fields (`LookHarderRounds`, `PersistentFindingRounds`), convergence-log entries (`look_harder_rounds`, `persistent_finding_rounds`), and scratch directory names are restricted to TWO forms:
+
+- `chunk-<N>` where `<N>` is a positive integer matching the chunk's directory name (`chunk-1`, `chunk-2`, ...). Used for author-defined chunks.
+- `cross-chunk` — reserved string for the synthetic cross-chunk integration round.
+
+**Gate-start validation.** At chunked-gate start, the orchestrator MUST refuse to begin if any author-chunk directory name does not match the regex `^chunk-[1-9][0-9]*$`. The reserved `cross-chunk` token explicitly avoids collision with user-chosen subsystem names (e.g., `integration` would be a valid directory name in some authors' systems but would collide with the integration round's semantic).
+
+**Chunked-gate list-element encoding for new telemetry fields (INV-A15 / S6).** `LookHarderRounds` and `PersistentFindingRounds` are run-level lists in marker output; their elements differ between chunked and non-chunked gates:
+
+- **Non-chunked gates:** bare integers — e.g., `LookHarderRounds: 3, 6`. The convergence-log uses bare integers in the JSON list.
+- **Chunked gates:** `<chunk_id>:<local_round>` pairs (colon-separated) in the marker — e.g., `LookHarderRounds: chunk-1:3, chunk-2:5, cross-chunk:2`. The convergence-log encodes elements as JSON objects: `[{"chunk":"chunk-1","local_round":3},{"chunk":"chunk-2","local_round":5},{"chunk":"cross-chunk","local_round":2}]`.
+
+Two chunks could each contribute a "round 3"; without chunk-coordinate qualification a flat integer list would be ambiguous. The same encoding applies to `PersistentFindingRounds` / `persistent_finding_rounds`.
+
+**ArtifactHash and ChunkHash semantics on chunked gates.** `ArtifactHash` is the sha256 hex of the FULL pre-chunking artifact's bytes, computed once at gate start. Every per-chunk verdict marker AND the cross-chunk integration round's marker carry the **same** `ArtifactHash` — it identifies the artifact bytes across all chunks of a single gate run AND across multiple gate runs on the same content (regardless of chunking strategy). Forge consumers group markers by `ArtifactHash` for cross-run comparison, including the `tail-rubric-already-applied` revisit trigger.
+
+`ChunkHash` is the sha256 hex of the specific chunk's bytes. It is present **only** on per-chunk markers in chunked gates; it is **omitted** from non-chunked-gate markers and from the cross-chunk integration round's marker. `ChunkHash` is internal-only for per-chunk recovery scenarios; `ArtifactHash` is the canonical cross-run identifier.
+
+**Recovery semantics:** On compaction mid-chunked-gate, read `chunk-manifest.md` to recover chunk status. The local counter for the in-progress chunk is recovered by reading the highest N in `chunk-K/round-N-score.md`. The global counter is reconstructed by summing rounds across all completed chunks plus the in-progress chunk's local rounds. The look-harder all-files scan (see Compaction Recovery step 6a) operates strictly within the in-progress chunk's directory — never globs across chunks.
 
 The red-team subagent receives the **prepared artifact**, not raw diff. This mirrors audit's Tier 1/Tier 2 context management approach.
 
