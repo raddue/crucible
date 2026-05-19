@@ -1,4 +1,5 @@
 node_modules/
+.worktrees/
 docs/plans/
 docs/prds/
 skills/*-workspace/
@@ -9,3 +10,6 @@ tests/
 package.json
 package-lock.json
 tsconfig.json
+.crucible/ledger/brier-rolling.json
+eval/**/__pycache__/
+scripts/__pycache__/

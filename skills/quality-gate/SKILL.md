@@ -927,7 +927,14 @@ SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (omit if SiegeDispatch
 SiegeFindings: <count of Critical+High siege findings, omit if SiegeDispatched=false>
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
+Severity-Histogram: <json — e.g., {"fatal":0,"significant":0,"minor":0,"nit":0}>
+Gated-Files: <json-list — e.g., ["src/foo.py","src/bar.py"]>
+Highest-Finding: "<one-line quote of the most severe finding, or empty string if none>"
 ```
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+**Ledger append at verdict-emit.** When emitting your terminal verdict, also append one JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md`. Honor `CRUCIBLE_CALIBRATION_DISABLED=1` by returning before any lock acquisition. Dedup by `(run_id, skill)` via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` BEFORE invoking `append()` — the append helper does NOT scan existing entries; honoring L-2 is the caller's responsibility.
 
 **MarkerVersion semantics:** Every verdict marker written by this version of the gate or later carries `MarkerVersion: 2` as its first line. Consumers gate version-aware parsing on this stamp:
 
