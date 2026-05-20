@@ -275,7 +275,7 @@ Before any dispatch work, check for a crashed prior spec session:
 
 ### Step-by-Step Detail
 
-**[1] Consult cartographer + forge:** Use `crucible:cartographer` (consult mode) to review the codebase map and `crucible:forge` (feed-forward mode) to consult past lessons. Run once at the start of the run.
+**[1] Consult cartographer + forge:** Use `crucible:cartographer-skill` (consult mode) to review the codebase map and `crucible:forge` (feed-forward mode) to consult past lessons. Run once at the start of the run.
 
 **[2] Fetch epic, extract child tickets:** Use the extraction fallback chain (sub-issues, task list checkboxes, body references, manual identification). See Epic Extraction section.
 
@@ -608,7 +608,7 @@ Machine-readable contracts make inter-ticket interfaces structural and verifiabl
 ## Integration
 
 **Sub-skills used:**
-- **crucible:cartographer** -- consult mode, once at start of run
+- **crucible:cartographer-skill** -- consult mode, once at start of run
 - **crucible:forge** -- feed-forward mode, once at start of run
 - **crucible:design** -- investigation prompts (parallel agents) reused for autonomous investigation. Templates in `design/investigation-prompts.md`.
 - **crucible:recon** -- dispatched per-ticket at investigation start with `modules: ["impact-analysis"]` and epic-level `session_id` for Structure Scout cache reuse across tickets. Replaces Codebase Scout. Fallback: investigate from scratch.

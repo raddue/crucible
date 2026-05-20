@@ -395,8 +395,8 @@ Skills that benefit from project-init output:
 
 | Skill | How It Uses project-init Data |
 |-------|-------------------------------|
-| `crucible:cartographer` (consult) | Reads `map.md` — structural content provides baseline even before any task exploration |
-| `crucible:cartographer` (load) | Loads `modules/*.md` into subagent prompts — structural context prevents wrong assumptions |
+| `crucible:cartographer-skill` (consult) | Reads `map.md` — structural content provides baseline even before any task exploration |
+| `crucible:cartographer-skill` (load) | Loads `modules/*.md` into subagent prompts — structural context prevents wrong assumptions |
 | `crucible:build` | Gets structural awareness from cartographer consult at task start |
 | `crucible:design` | Knows module boundaries and dependencies before proposing architecture |
 | `crucible:debugging` | Loads module context and landmines for investigators |
@@ -410,7 +410,7 @@ Skills that benefit from project-init output:
 
 ### Related Skills
 
-- `crucible:cartographer` — ongoing codebase mapping (project-init bootstraps, cartographer maintains)
+- `crucible:cartographer-skill` — ongoing codebase mapping (project-init bootstraps, cartographer maintains)
 - `crucible:build` — implementation workflow (consumes cartographer data)
 - `crucible:design` — architecture planning (consumes map and topology)
 - `crucible:debugging` — investigation workflow (consumes modules and landmines)

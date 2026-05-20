@@ -464,7 +464,7 @@ After all consumer waves complete:
 Cleanup is a distinct phase because premature shim removal is the most common migration failure mode. Keeping it separate ensures the user explicitly approves shim removal.
 
 **Post-cleanup:**
-- Dispatch `crucible:cartographer` (record mode) -- record migration discoveries
+- Dispatch `crucible:cartographer-skill` (record mode) -- record migration discoveries
 - Dispatch `crucible:forge` (retrospective) -- capture migration outcome and lessons
 - Delete `.pipeline-active` marker from the scratch directory
 
@@ -498,8 +498,8 @@ Escalate to the user when:
 |-------|----------|------|
 | `crucible:recon` | Consumer-registry module | Phase 0 (structural context + direct consumer discovery). Fallback: Blast Radius Mapper discovers consumers from scratch. |
 | `crucible:assay` | Strategy evaluation | User Gate (structured evaluation of migration approach with kill criteria). Fallback: present plan without assay scoring. |
-| `crucible:cartographer` | Consult mode | Phase 0 (module boundaries for blast radius) |
-| `crucible:cartographer` | Record mode | Phase 8 (record migration discoveries) |
+| `crucible:cartographer-skill` | Consult mode | Phase 0 (module boundaries for blast radius) |
+| `crucible:cartographer-skill` | Record mode | Phase 8 (record migration discoveries) |
 | `crucible:forge` | Feed-forward | Phase 0 (past migration lessons) |
 | `crucible:forge` | Retrospective | Phase 8 (capture migration outcome) |
 | `crucible:build` | Refactor mode | Phase 7 (per-phase execution for restructuring phases) |

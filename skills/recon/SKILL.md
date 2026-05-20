@@ -626,7 +626,7 @@ not dispatch the recorder twice.
    Task tool (general-purpose, model: sonnet):
      description: "Cartographer recording for recon findings"
    ```
-   Use the existing `crucible:cartographer` skill's `recorder-prompt.md` template (at `skills/cartographer-skill/recorder-prompt.md`). Note: this is `Task tool`, not `Agent tool (Explore)` — the recorder needs write access to the memory directory. Pass scout findings as input following the recorder's expected format.
+   Use the existing `crucible:cartographer-skill` skill's `recorder-prompt.md` template (at `skills/cartographer-skill/recorder-prompt.md`). Note: this is `Task tool`, not `Agent tool (Explore)` — the recorder needs write access to the memory directory. Pass scout findings as input following the recorder's expected format.
    - Include auto-update resolutions from cartographer conflict adjudication
    - New module files, conventions, or landmines flow into cartographer storage
    - **Narrate auto-updates:** "Auto-updating cartographer: [description]. Review with `/cartographer consult`." Auto-updates must be visible — silent persistent changes affect all future sessions.
@@ -924,9 +924,9 @@ falsification-grep and doc-mining.
 - `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer (Opus)
 - `readiness-checker-prompt.md` — Readiness Checker (Sonnet)
 
-**Consults:** `crucible:cartographer` (consult mode — direct file read of `map.md`)
+**Consults:** `crucible:cartographer-skill` (consult mode — direct file read of `map.md`)
 
-**Records to:** `crucible:cartographer` (recorder dispatch after investigation, using `skills/cartographer-skill/recorder-prompt.md`)
+**Records to:** `crucible:cartographer-skill` (recorder dispatch after investigation, using `skills/cartographer-skill/recorder-prompt.md`)
 
 **Called by:** `/design` (Phase 2 context + impact-analysis), `/spec` (per-ticket investigation + impact-analysis), `/migrate` (Phase 0 + consumer-registry), `/audit` (Phase 1 code scoping + subsystem-manifest)
 

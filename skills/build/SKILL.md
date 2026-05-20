@@ -604,7 +604,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
 - **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
-- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (consult mode) — review codebase map for structural awareness
+- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (consult mode) — review codebase map for structural awareness
 - **REQUIRED SUB-SKILL:** Use crucible:design
 - Follow design skill for design refinement, section-by-section validation, and saving the design doc
 - **OVERRIDE:** When design completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
@@ -806,7 +806,7 @@ Write a handoff manifest:
 
 ### Step 0: Load Module Context for Subagents
 
-- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (load mode) — when dispatching implementers and reviewers, include relevant module files, conventions.md, and landmines.md in their dispatch files
+- **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (load mode) — when dispatching implementers and reviewers, include relevant module files, conventions.md, and landmines.md in their dispatch files
 
 - **Defect signature loading (for implementers only):**
   1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory
@@ -1253,7 +1253,7 @@ After all tasks complete:
      `metrics={mode, tasks count, tasks_passed count from task list, stagnation=false}`
    - Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
    - If forge retrospective DID run, skip this step (forge Step 8.5 already emitted the signal)
-8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during build
+8. **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (record mode) — persist any new codebase knowledge discovered during build
 9. Compile summary: what was built, acceptance tests passing, review findings addressed, inquisitor findings, concerns
 10. Report to user
 10.5. **Session index event:** Emit a `skill_end` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_end","summary":"/build complete: <outcome summary>","detail":{"skill":"build","outcome":"success|failure|escalated"}}`.
@@ -1423,7 +1423,7 @@ When a contract YAML exists for the current ticket, the quality gate adds contra
 
 **Recommended sub-skills:**
 - **crucible:forge** — Feed-forward at Phase 1 start, retrospective at Phase 4 completion
-- **crucible:cartographer** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
+- **crucible:cartographer-skill** — Consult at Phase 1 start, load at Phase 3 dispatches, record at Phase 4
 - **crucible:checkpoint** — Shadow git checkpoints at pipeline boundaries (pre-design-gate, pre-plan-gate, pre-wave-N, pre-cleanup-task-N, pre-temper, pre-inquisitor, pre-impl-gate)
 
 **Recon/assay context:** Inherits recon/assay context through /design (Phase 1). No direct dispatch. When design integrates recon, build benefits automatically. See #147 for rationale.
