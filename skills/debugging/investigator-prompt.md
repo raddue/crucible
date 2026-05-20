@@ -51,7 +51,7 @@ Agent tool (subagent_type: "general-purpose", model: opus):
 
     ## Codebase Context (from Cartographer)
 
-    [PASTE module context from crucible:cartographer here. Include:
+    [PASTE module context from crucible:cartographer-skill here. Include:
     - Module map files for relevant subsystems
     - Key file paths, class hierarchies, dependency chains
     - Known conventions and landmines

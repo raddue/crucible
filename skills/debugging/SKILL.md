@@ -241,7 +241,7 @@ Bug reported / test failure / unexpected behavior
 Orchestrator: Parse initial context (error message, failing test, user description)
     |
     v
-Phase 0: Load codebase context (crucible:cartographer)
+Phase 0: Load codebase context (crucible:cartographer-skill)
     |
     v
 Phase 1: Dispatch 3-6 parallel investigation subagents
@@ -302,7 +302,7 @@ Before any dispatch work, check for a crashed prior debugging session:
 
 ### Phase 0: Load Codebase Context
 
-**Before any investigation dispatch,** use `crucible:cartographer` (load mode) to pull module context for the area being investigated. If module files exist, include them in every investigator's dispatch file so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
+**Before any investigation dispatch,** use `crucible:cartographer-skill` (load mode) to pull module context for the area being investigated. If module files exist, include them in every investigator's dispatch file so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
 **Defect signature loading (for investigators):**
 1. Glob `defect-signatures/*.md` (excluding `*.non-matches.md`) from the cartographer storage directory
@@ -661,7 +661,7 @@ When count of existing signatures would exceed 20 after writing:
 4. Write-before-delete ordering: dispatch the recorder first, then delete pruned files after the recorder succeeds
 
 **Step 3: Dispatch recorder (orchestrator)**
-Dispatch a Sonnet cartographer recorder agent using `crucible:cartographer` recorder-prompt.md with the "Record defect signature" directive. Provide:
+Dispatch a Sonnet cartographer recorder agent using `crucible:cartographer-skill` recorder-prompt.md with the "Record defect signature" directive. Provide:
 - Phase 4.5 scan report (generalized pattern, confirmed siblings, reverted siblings, skipped siblings)
 - Original fix metadata (file path, commit SHA, commit message summary, issue number)
 - Cartographer module names from Phase 0 (or directory prefix fallbacks)
@@ -807,7 +807,7 @@ After the Implementation agent reports back, the orchestrator evaluates four pos
     `metrics={hypotheses count, root_cause_category from fix, where_else_hits count}`
   - Append as a single JSON line to `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
   - If forge retrospective WILL run, skip this step (forge Step 8.5 handles it)
-- **RECOMMENDED:** Use crucible:cartographer (record mode) — persist any new codebase knowledge discovered during investigation
+- **RECOMMENDED:** Use crucible:cartographer-skill (record mode) — persist any new codebase knowledge discovered during investigation
 
 **Test passes immediately (no fix applied)** -- The implementer's reproduction test passed before any fix was written. Two possibilities:
 1. **Bug was already resolved** (by investigation side effects, environment change, or prior cycle). Verify by running the original reproduction steps. If the original bug is gone: proceed to Phase 5 but **skip Step 1 (quality-gate on code)** since there is no code change. Go directly to Step 2 (code review) scoped to the reproduction test file only.
@@ -1017,7 +1017,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 **Does not dispatch /recon or /assay** -- uses specialized investigation agents (Error Analysis, Change Analysis, Evidence Gathering, Reproduction) that are categorically different from structural investigation. Hypothesis evaluation uses quality-gate, not assay. See #147 for rationale.
 
 **Required skills:**
-- **`crucible:cartographer`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
+- **`crucible:cartographer-skill`** -- Phase 0: load module context for investigators and defect signatures. Phase 4 completion: record discoveries. Phase 4.5 completion: persist defect signature via recorder dispatch.
 
 **Recommended skills:**
 - **`crucible:forge`** -- Retrospective after fix verified (captures debugging lessons)

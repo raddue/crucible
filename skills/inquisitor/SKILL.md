@@ -278,7 +278,7 @@ Append external perspectives per dimension alongside the host subagent's finding
 - **Called by:** `crucible:build` (Phase 4, after temper, before quality-gate)
 - **Dispatches:** 5 parallel subagents (one per dimension) using `./inquisitor-prompt.md`
 - **May dispatch:** Fixer subagents for FAIL results, lightweight temper if fix touches 3+ files
-- **Uses:** `crucible:cartographer` context (when available) for module-aware attack surface analysis
+- **Uses:** `crucible:cartographer-skill` context (when available) for module-aware attack surface analysis
 - **Pairs with:** `crucible:adversarial-tester` (per-task, Phase 3) -- inquisitor is the full-feature complement
 - **Prompt template:** `inquisitor-prompt.md` (for dimension subagent dispatch)
 

@@ -660,8 +660,8 @@ Each analysis template includes:
 | Skill | How Used | When |
 |-------|----------|------|
 | `crucible:recon` | Subsystem-manifest module | Phase 1 Code Path (subsystem scoping via structured manifest). Fallback: dispatch scoping agent via `audit-scoping-prompt.md`. |
-| `crucible:cartographer` | Consult mode | Phase 1 (subsystem scoping and conventions) |
-| `crucible:cartographer` | Record mode | Phase 4 (Phase 1 manifest only) |
+| `crucible:cartographer-skill` | Consult mode | Phase 1 (subsystem scoping and conventions) |
+| `crucible:cartographer-skill` | Record mode | Phase 4 (Phase 1 manifest only) |
 
 - **Dispatches:** Code audit templates (correctness, robustness, consistency [2 agents], architecture, blind-spots) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback).
 - **Pairs with:** `crucible:forge` -- audit findings could inform retrospective if they reveal systemic patterns

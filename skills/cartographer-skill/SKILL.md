@@ -1,5 +1,5 @@
 ---
-name: cartographer
+name: cartographer-skill
 description: Use when exploring unfamiliar code and want to persist what you learn, when starting a task and want to consult known codebase structure, or when collaborators need module-specific context for implementation or review
 ---
 

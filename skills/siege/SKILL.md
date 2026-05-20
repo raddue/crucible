@@ -911,7 +911,7 @@ Prompt templates are created during skill implementation. Each template follows 
 
 - **Invoked by:** User directly (`/siege`), or recommended by `crucible:audit` when security surfaces are detected
 - **Invokes:** None (Siege is self-contained; it dispatches its own agents)
-- **Consults:** `crucible:cartographer` (Mode 2: consult map) for subsystem boundaries and dependency graphs
+- **Consults:** `crucible:cartographer-skill` (Mode 2: consult map) for subsystem boundaries and dependency graphs
 - **Consults:** `consensus_query` MCP tool for Chain Analyst dispatch (when available)
 - **Persistence:** `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` (read at start, written at end)
 - **Pairs with:** `crucible:build` -- Siege can run after build Phase 4 (implementation) when the activation heuristic triggers

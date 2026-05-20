@@ -32,7 +32,7 @@ Every significant design question is backed by parallel investigation agents tha
 ### Phase 1: Context Gathering
 
 - **RECOMMENDED:** Use crucible:forge (feed-forward mode) — consult past lessons
-- **RECOMMENDED:** Use crucible:cartographer (consult mode) — review codebase map
+- **RECOMMENDED:** Use crucible:cartographer-skill (consult mode) — review codebase map
 - Check current project state (files, docs, recent commits)
 - Understand the user's initial idea through open conversation
 
@@ -276,7 +276,7 @@ This skill produces **design docs**. When used standalone, invoke `crucible:qual
 
 ## Integration
 
-**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context), crucible:assay (Phase 2 decision evaluation)
+**Related skills:** crucible:build, crucible:planning, crucible:worktree, crucible:forge, crucible:cartographer-skill, crucible:quality-gate, crucible:spec, crucible:recon (Phase 2 context), crucible:assay (Phase 2 decision evaluation)
 
 **Recon/Assay dispatch:** Recon is dispatched once at Phase 2 start (Step 0) with `modules: ["impact-analysis"]` and a session-level `session_id`. Assay is dispatched per Deep Dive dimension during synthesis (Step 5) with `decision_type: "architecture"`. Both include fallback to existing behavior on failure.
 
