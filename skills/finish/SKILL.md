@@ -193,6 +193,28 @@ git merge <feature-branch>
 git branch -d <feature-branch>
 ```
 
+<!-- CANONICAL: shared/compass-protocol.md -->
+**Compass emit (after local merge + tests pass):**
+
+Run `compass update` (atomic multi-field) to emit `last_meaningful_commit` plus arc-closure. Capture the merge commit SHA and subject first. The `next_move` value comes from the caller's `--value` argument if provided, otherwise preserve the existing `next_move` (omit `--set next_move` entirely), or pass an empty string if no prior value exists.
+
+```bash
+MERGE_SHA=$(git rev-parse HEAD)
+MERGE_SUBJECT=$(git log -1 --pretty=%s)
+
+# If caller provided a next_move value:
+python scripts/compass.py update \
+  --set last_meaningful_commit --value "${MERGE_SHA}:${MERGE_SUBJECT}" \
+  --set current_arc --value '' \
+  --set next_move --value '<caller-provided-or-empty>'
+
+# If no next_move value was provided by caller, omit --set next_move
+# so the existing value is preserved:
+python scripts/compass.py update \
+  --set last_meaningful_commit --value "${MERGE_SHA}:${MERGE_SUBJECT}" \
+  --set current_arc --value ''
+```
+
 Then: If using a worktree, clean it up (Step 7)
 
 #### Option 2: Push and Create PR
@@ -282,9 +304,28 @@ If the exit is non-zero (either via `--watch` or the explicit assertion): diagno
 
 If the block exits with the "No CI checks configured" message, record that in the final report so the user knows local validation was the only gate, and recommend they add CI.
 
+<!-- CANONICAL: shared/compass-protocol.md -->
+**Compass emit (after `gh pr checks --watch` returns green):**
+
+Run `compass update` (provisional arc-closure only). Do NOT emit `last_meaningful_commit` — CI green does not mean merged; the subsequent `/merge-pr` invocation writes the SHA. The `next_move` value comes from the caller's `--value` argument if provided, otherwise preserve the existing `next_move` (omit `--set next_move` entirely), or pass an empty string if neither.
+
+```bash
+# If caller provided a next_move value:
+python scripts/compass.py update \
+  --set current_arc --value '' \
+  --set next_move --value '<caller-provided-or-empty>'
+
+# If no next_move value was provided by caller, omit --set next_move
+# so the existing value is preserved:
+python scripts/compass.py update \
+  --set current_arc --value ''
+```
+
 Then: If using a worktree, clean it up (Step 7)
 
 #### Option 3: Keep As-Is
+
+<!-- Options 3 and 4 intentionally emit no compass update — work is neither merged nor CI-green. -->
 
 Report: "Keeping branch <name>."
 

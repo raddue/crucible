@@ -205,7 +205,32 @@ This needs immediate attention. The target branch is broken.
 
 Do NOT proceed to cleanup until the user acknowledges the failure and decides next steps.
 
-**If post-merge CI passes:** Continue to Step 7.
+**If post-merge CI passes:** Emit compass update, then continue to Step 7.
+
+<!-- Compass emit — orchestrator only (D14). CANONICAL: shared/compass-protocol.md -->
+```bash
+# Capture merge commit SHA with 3-retry null guard (DEC-5 / R15-M1)
+PR="<pr-number>"
+SHA=""
+for ATTEMPT in 1 2 3; do
+  SHA=$(gh pr view "$PR" --json mergeCommit --jq '.mergeCommit.oid')
+  [ -n "$SHA" ] && [ "$SHA" != "null" ] && break
+  SLEEP_S=$((ATTEMPT * 2))   # 2s, 4s, 6s
+  sleep "$SLEEP_S"
+done
+SUBJ=$(gh pr view "$PR" --json title --jq '.title')
+if [ -n "$SHA" ] && [ "$SHA" != "null" ]; then
+  # compass update --field last_meaningful_commit --value "<sha>:<subject>"
+  python scripts/compass.py update --field last_meaningful_commit --value "${SHA}:${SUBJ}" \
+    2>&1 || echo '[compass] emit failed; continuing' >&2
+else
+  # gh cache lag after 3 retries — write pending-merge marker
+  # compass update --field last_meaningful_commit --value "<pending-merge:#NNN>"
+  python scripts/compass.py update --field last_meaningful_commit --value "<pending-merge:#${PR}>" \
+    2>&1 || echo '[compass] emit failed; continuing' >&2
+fi
+```
+<!-- END compass emit -->
 
 ## MANDATORY CHECKPOINT - DO NOT SKIP
 
