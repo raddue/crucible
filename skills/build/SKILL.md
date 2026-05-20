@@ -555,6 +555,26 @@ Before any design or dispatch work, check for a crashed prior pipeline:
 
 **Gate Ledger Initialization:** After the pipeline-active marker is written (or recovered) and mode detection is complete, run the Gate Ledger Protocol's Ledger Initialization and Orphan Cleanup steps. The ledger must exist before Phase 1 transitions to IN_PROGRESS.
 
+**Compass Arc Emit (build orchestrator only — D14):**
+<!-- CANONICAL: shared/compass-protocol.md -->
+
+After Gate Ledger Initialization completes AND the resume decision at Step -1 has resolved, emit the current arc to `docs/compass.md` — but ONLY on a fresh-start or fresh-restart path. Skip this emit if the user accepted the resume path (Step -1e: replay took over), because the prior arc's `current_arc` is already correct. Do NOT place this emit inside crash-recovery branches (Step -1, items 3 or 4e), as those fire mid-resume-detection and can clobber `current_arc` before replay restores the prior arc.
+
+`RESUME_DECISION` is set by Step -1 to one of `fresh` / `resume` / `fresh-restart`. Default `fresh` if unset.
+
+```bash
+if [ "${RESUME_DECISION:-fresh}" != "resume" ]; then
+  python scripts/compass.py update --field current_arc --value "#<ticket>: <user-goal-one-liner>" \
+    || echo '[compass] emit failed at arc start; continuing build' >&2
+fi
+```
+
+Replace `<ticket>` with the GitHub issue number (e.g. `273`) and `<user-goal-one-liner>` with a short, precise description of the task at hand (e.g. `Compass arc-state skill`). The leading `#` is required — `compass update` raises `ValueError` on values missing the `#NNN:` prefix.
+
+**Error policy (best-effort):** Compass is an optimization, not a correctness layer. A failed emit MUST NOT fail the build pipeline — log to stderr and continue. Never tighten this error handling.
+
+**D14 invariant:** Sub-agents spawned inside build do NOT emit compass updates. This emit fires from the build orchestrator only, exactly once per fresh pipeline start.
+
 ### Step 0: Pre-Existing Doc Detection
 
 Before running interactive design, check whether `/spec` (or a prior `/build` run) already produced design artifacts for this ticket.
