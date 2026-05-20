@@ -840,6 +840,18 @@ Track a stagnation metric across cycles — the hypothesis specificity score:
 
 **Stagnation rule:** If Cycle N+1 surfaces no new information compared to Cycle N (same root causes, same evidence, same gaps), the orchestrator STOPS and escalates immediately. Do not dispatch Cycle N+2 — the investigation is stuck, not progressing.
 
+**Confirm before auto-escalating on judgment-call stagnation.** The "no new information" test is unambiguous when both sides are identical (zero new evidence, zero new files touched, identical hypothesis list) — auto-escalate in that case. But when Cycle N+1 surfaced *some* new content that the orchestrator judges immaterial ("technically a new file but same module", "another instance of the same null check"), surface the side-by-side comparison to the user before escalating:
+
+```
+[debugging] Stagnation candidate — Cycle N vs N+1:
+  - Cycle N hypotheses: <list>
+  - Cycle N+1 hypotheses: <list>
+  - New evidence in N+1: <delta or "none material in my judgment">
+Escalate to user, or dispatch Cycle N+2 with a different angle?
+```
+
+The user has context the model lacks about which "new" findings are actually load-bearing for their mental model. Default-on-away: escalate (matches the conservative-on-stuck instinct). The zero-delta auto-escalate path stays silent.
+
 #### Escalation Tiers
 
 | Cycle | Action |
