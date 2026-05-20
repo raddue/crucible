@@ -45,6 +45,32 @@ If you're in mode A but want to mention upcoming-pickup candidates, add a brief 
 
 When in doubt between (A) and (B), pick (A) — losing context is more costly than losing pickup recommendations.
 
+## Compass-only short-circuit (mode A only)
+
+<!-- CANONICAL: shared/compass-protocol.md -->
+
+Before writing a full continuation doc, ask: would `compass` alone suffice? Compass holds `current_arc`, `next_move`, `open_loops`, `dont_forget`, and `last_meaningful_commit` in `docs/compass.md` — the next session's `getting-started` surfaces it automatically via `compass read --compact`.
+
+Compass-only is enough when **all** of these hold:
+
+- Next action fits in one paragraph (≤5 lines) — `next_move` cap.
+- No mid-pipeline state to preserve (no active Phase N Task M, no in-flight dispatch manifests, no QG round-trajectory worth keeping).
+- No situational carry-forwards (no R15-style pins, no DEC- decisions future work must respect).
+- The arc itself is describable in one line — no architectural context required.
+- Open questions, if any, fit in ≤5 short bullets — `open_loops` cap.
+
+If all five hold, just run:
+```
+python scripts/compass.py update \
+  --set current_arc --value '#NNN: <subject>' \
+  --set next_move --value '<one paragraph>'
+```
+(plus `--set open_loops --value ...` etc. if needed — note the `current_arc` + `open_loops` mutex; if both move, use two separate calls). Skip the file. Output `Read this doc and continue: (none — compass updated)` per Output Contract below.
+
+If **any** of the five fails, write the full doc — compass's 40-line cap can't hold structured pipeline state, dispatch manifests, or carry-forward chains. Examples that need full docs: mid-Phase-3 pause with task list + R15 pins; multi-round QG handoff with shed-receipt trajectory; cross-repo coordination state. Examples that fit compass: "shipped #273 to PR #284, next is APFS validation when on macOS" or "investigating ledger-write race, repro at scripts/repro.sh, next is to instrument _acquire_lock."
+
+When unsure, default to a full doc — losing context is the more costly failure mode.
+
 ## What goes in a Continuation handoff
 
 Lead with **what to do next** — a fresh agent should be able to start the very next concrete action within 60 seconds of reading. Then layer in the context they need to act sensibly.
@@ -107,6 +133,7 @@ The user explicitly asked for the file location in the response. Make it impossi
 - Rationale: the user copies this line verbatim into the next session as the opening message. The "Read this doc and continue:" prefix turns the line into a complete, self-contained next-action instruction — the next session needs no additional prompt.
 - "Absolute path" means either (a) the path your file-write tool returned, OR (b) `<repo-root>/<relative-path>` where repo-root comes from `git rev-parse --show-toplevel`. Native path separators are fine (Windows backslashes are acceptable). In the non-git fallback mode (see Step 0), use whatever absolute path the user directed you to write to.
 - If you skipped writing a file (per Step 0), end with: `Read this doc and continue: (none — nothing to hand off)` — same no-fence rule applies.
+- If you took the compass-only short-circuit, end with: `Read this doc and continue: (none — compass updated)` — same no-fence rule.
 
 ## Quality bar
 
