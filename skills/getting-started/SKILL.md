@@ -5,6 +5,18 @@ description: Use when starting any conversation - establishes how to find and us
 
 # Using Crucible Skills
 
+## Session Context (Compass)
+
+<!-- CANONICAL: shared/compass-protocol.md -->
+
+Read current arc state before the dispatch table. Silent no-op on non-Crucible repos or missing compass file (the script's `read()` fast-returns empty on `FileNotFoundError`).
+
+```bash
+test -f scripts/compass.py && python scripts/compass.py read --compact 2>/dev/null || true
+```
+
+If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this skill — getting-started reads only.
+
 ## The Rule
 
 **Invoke relevant skills BEFORE taking action or responding.** Skills encode hard-won process discipline — skipping them loses that value.
