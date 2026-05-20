@@ -43,7 +43,7 @@ If you're in mode A but want to mention upcoming-pickup candidates, add a brief 
 - The user just said "we're done with X" or similar
 - We hit a natural decision point (e.g., "pivot to a different track")
 
-When in doubt between (A) and (B), pick (A) — losing context is more costly than losing pickup recommendations.
+**Ambiguity check — ask, don't guess.** If the session has clear signals for one mode (mid-feature with concrete next steps → A; user just said "we shipped, what's next?" → B), pick silently and state the choice + one-line reason at the top of the doc. But if the session genuinely could go either way — e.g., one arc just shipped AND a separate half-done thread exists, or the user paused with no clear "done" signal but also no obvious next action — surface the choice to the user with one-line summaries of what each mode would produce, and let them pick. The user has context the model doesn't (what they're about to do next, whether the half-done thread matters). When the user is away or asks for default behavior, fall back to (A) — losing context is more costly than losing pickup recommendations.
 
 ## What goes in a Continuation handoff
 
