@@ -117,12 +117,20 @@ On confirmation, display a numbered list of entries and ask which to convert. Fo
 
 ### Step 4: Determine Base Branch
 
+Resolve via `git symbolic-ref refs/remotes/origin/HEAD` first — that's the upstream default and works for any name (main/master/trunk). If unset, check which of `main` / `master` actually exist locally:
+
 ```bash
-# Try common base branches
-git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+  || { for ref in main master; do git rev-parse --verify "$ref" >/dev/null 2>&1 && echo "$ref"; done; }
 ```
 
-Or ask: "This branch split from main - is that correct?"
+If exactly one main-like ref exists, use it and narrate the choice (`"[finish] base branch: main (only main-like ref found)"`). If multiple exist (legacy repos with both `main` and `master`, or unusual naming), **ask** before picking — these are usually load-bearing differences (one is real default, the other is leftover) and the model has no signal which one this branch was cut from. Format:
+
+```
+Multiple base-branch candidates found: main, master. Which did this branch split from?
+```
+
+Do not silently pick the first match.
 
 ### Step 5: Present Options
 
