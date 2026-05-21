@@ -108,6 +108,46 @@
         {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "OCP", "include_reattributed": true}},
         {"type": "mechanical", "check": "all-findings-have-file-line"}
       ]
+    },
+    {
+      "id": "6-tenancy-forged-callback",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds a webhook callback handler that reads a multi-tenant `orders` table.\n\n```diff\n--- a/src/webhooks.py\n+++ b/src/webhooks.py\n@@ -1,12 +1,30 @@\n from .db import db\n from .auth import verify_signature\n \n \n+def on_order_paid(payload, signature):\n+    \"\"\"Webhook callback fired when an order is paid in the payment provider.\n+\n+    `payload['order_id']` identifies the order. Signature is verified\n+    against the per-tenant webhook secret resolved from the auth context.\n+    \"\"\"\n+    if not verify_signature(payload, signature):\n+        return {\"status\": \"unauthorized\"}, 401\n+\n+    order_id = payload[\"order_id\"]\n+    # orders is a multi-tenant table; rows have tenant_id, order_id columns.\n+    row = db.execute(\n+        \"UPDATE orders SET status = 'paid', paid_at = NOW() \"\n+        \"WHERE order_id = :order_id RETURNING *\",\n+        {\"order_id\": order_id},\n+    ).fetchone()\n+    return {\"status\": \"ok\", \"order\": row.order_id, \"tenant\": row.tenant_id}, 200\n+\n+\n def on_order_refunded(payload, signature):\n     # ... pre-existing handler, unchanged ...\n     pass\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Tenancy or Rollback findings with `Category:` lines per the canonical Report Format.",
+      "expected_output": "Tenancy finding fires Important: the UPDATE filters by order_id only, not tenant_id. A forged callback with a valid signature for tenant-A whose payload references an order_id belonging to tenant-B writes to tenant-B's row.",
+      "files": ["src/webhooks.py"],
+      "allowed_files": ["src/webhooks.py"],
+      "lens_under_test": "tenancy",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "category-finding-fires", "params": {"category": "Tenancy", "severity_at_least": "Important"}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "7-rollback-orphan-fk",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds an Alembic migration introducing a `regions` parent table and a `region_id` FK column on the existing `customers` table.\n\n```diff\n--- /dev/null\n+++ b/migrations/20260521_add_regions.py\n@@ -0,0 +1,38 @@\n+\"\"\"add regions table and customers.region_id FK\n+\n+Revision ID: a3f9c1b\n+Revises: 9c81e2d\n+\"\"\"\n+from alembic import op\n+import sqlalchemy as sa\n+\n+\n+def upgrade():\n+    op.create_table(\n+        \"regions\",\n+        sa.Column(\"id\", sa.Integer(), primary_key=True),\n+        sa.Column(\"name\", sa.String(), nullable=False),\n+    )\n+    op.add_column(\n+        \"customers\",\n+        sa.Column(\"region_id\", sa.Integer(), nullable=True),\n+    )\n+    op.create_foreign_key(\n+        \"fk_customers_region\",\n+        \"customers\",\n+        \"regions\",\n+        [\"region_id\"],\n+        [\"id\"],\n+    )\n+\n+\n+def downgrade():\n+    # Drop the parent table; FK is dropped via CASCADE.\n+    op.execute(\"DROP TABLE regions CASCADE\")\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Tenancy or Rollback findings with `Category:` lines per the canonical Report Format.",
+      "expected_output": "Rollback finding fires Important: `downgrade()` drops `regions` CASCADE but leaves the `customers.region_id` column orphaned. Re-running `upgrade()` after a `downgrade()` will fail when `add_column` collides with the still-present column.",
+      "files": ["migrations/20260521_add_regions.py"],
+      "allowed_files": ["migrations/20260521_add_regions.py"],
+      "lens_under_test": "rollback",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "category-finding-fires", "params": {"category": "Rollback", "severity_at_least": "Important"}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "8-defense-in-depth-not-slop",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds a second authorization check on a tenancy-aware read path that already enforces tenancy at the query layer via RLS. The diff also fixes an unrelated typo in a docstring.\n\n```diff\n--- a/src/orders.py\n+++ b/src/orders.py\n@@ -1,18 +1,24 @@\n from .auth import current_user, assert_can_read_tenant\n from .db import db\n \n \n def get_order(order_id):\n-    \"\"\"Fetch a single order by id. Tenancy enforced via RLS on the connection.\"\"\"\n+    \"\"\"Fetch a single order by id. Tenancy enforced via RLS on the connection.\"\"\"\n     row = db.execute(\n         \"SELECT * FROM orders WHERE order_id = :order_id\",\n         {\"order_id\": order_id},\n     ).fetchone()\n     if row is None:\n         return None\n+    # Belt-and-suspenders: in addition to RLS at the connection layer,\n+    # explicitly verify the row's tenant matches the current request's tenant.\n+    # Both layers should agree; if they ever diverge, fail closed.\n+    assert_can_read_tenant(current_user(), row.tenant_id)\n     return row\n \n \n-def get_orderr(order_id):  # legacy alias, was misspelled in 0.1\n+def get_order_legacy(order_id):  # legacy alias, was misspelled in 0.1\n     return get_order(order_id)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Tenancy or Rollback findings with `Category:` lines per the canonical Report Format.",
+      "expected_output": "No AI-Slop 'over-defensive' finding; no Category: Tenancy finding (defense-in-depth is intentional and correct). The reviewer may flag the typo-fix rename as a Minor Surgical scope-bleed observation — that's fine and demonstrates engagement.",
+      "files": ["src/orders.py"],
+      "allowed_files": ["src/orders.py"],
+      "lens_under_test": "defense-in-depth-counter-rule",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "finding-body-does-not-contain", "params": {"patterns": ["over-defensive", "over defensive", "unnecessary error handling", "redundant check"], "case_insensitive": true}},
+        {"type": "mechanical", "check": "category-finding-does-not-fire", "params": {"category": "Tenancy"}},
+        {"type": "mechanical", "check": "findings-count-at-least", "params": {"n": 1}}
+      ]
     }
   ]
 }

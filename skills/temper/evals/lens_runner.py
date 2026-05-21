@@ -26,6 +26,7 @@ maintainers reading the regexes see them immediately):
 from __future__ import annotations
 
 import re
+import sys
 from typing import Literal
 
 Verdict = Literal["PASS", "FAIL", "N/A"]
@@ -42,11 +43,14 @@ _FINDING_HEADER_RE = re.compile(r"^\s*(?:-\s+)?(?:\*\*)?(\d+)\.\s+")
 _FILE_RE = re.compile(r"^\s*[-*]?\s*File:\s+(\S+?):(\d+)(?:-(\d+))?\s*$")
 _SEVERITY_RE = re.compile(r"^\s*[-*]?\s*Severity:\s+(\w+)\s*$")
 _LENS_RE = re.compile(r"^\s*[-*]?\s*Lens:\s+(\S+)\s*(\(re-attributed\))?\s*$")
+_CATEGORY_RE = re.compile(r"^\s*[-*]?\s*Category:\s+(\S+)\s*$")
 
 
 def _parse_findings(output: str) -> list[dict]:
     """Return list of findings with keys file, line_range, severity, lens,
-    lens_reattributed, section. Pathless findings include file=None."""
+    lens_reattributed, category, body, section. Pathless findings include
+    file=None. A WARNING is emitted to stderr when a finding carries both
+    Lens: and Category: lines (mutex tripwire — does not fail the parse)."""
     lines = output.splitlines()
 
     # Pre-pass: identify boundary line indices (finding headers + ### headings).
@@ -72,11 +76,13 @@ def _parse_findings(output: str) -> list[dict]:
         end = next(b for b in boundaries if b > idx)
 
         block = lines[idx + 1 : end]
+        header_line = line
         file_path: str | None = None
         line_range: tuple[int, int] | None = None
         severity: str | None = None
         lens: str | None = None
         reattributed = False
+        category: str | None = None
 
         for child in block:
             m = _FILE_RE.match(child)
@@ -95,6 +101,24 @@ def _parse_findings(output: str) -> list[dict]:
                 lens = m.group(1)
                 reattributed = m.group(2) is not None
                 continue
+            m = _CATEGORY_RE.match(child)
+            if m:
+                category = m.group(1)
+                continue
+
+        # Mutex tripwire: WARN only, don't fail the parse. A 3rd category
+        # arrival triggers a hard mutex check upgrade (filed as follow-up).
+        if lens is not None and category is not None:
+            print(
+                f"WARNING: finding has both Lens: {lens} and Category: {category} "
+                f"(mutex violation, see #267); header: {header_line.strip()!r}",
+                file=sys.stderr,
+            )
+
+        # Capture finding body (header + block lines, joined) for
+        # finding-body-does-not-contain pattern scans. Keep raw casing here;
+        # the matcher handles case-insensitive matching downstream.
+        body = "\n".join([header_line, *block])
 
         findings.append(
             {
@@ -103,6 +127,8 @@ def _parse_findings(output: str) -> list[dict]:
                 "severity": severity,
                 "lens": lens,
                 "lens_reattributed": reattributed,
+                "category": category,
+                "body": body,
                 "section": current_section,
             }
         )
@@ -149,6 +175,18 @@ def lens_findings_in_allowed_files(
     return ("PASS", f"all {len(lens_findings)} lens finding(s) in allowed_files")
 
 
+_SEVERITY_ORDER = {"Critical": 4, "Important": 3, "Minor": 2, "Suggestion": 1}
+
+
+def _severity_at_least(actual: str | None, floor: str) -> bool:
+    """True if `actual` severity is >= `floor`. Unknown actual severity = False."""
+    if actual is None:
+        return False
+    a = _SEVERITY_ORDER.get(actual, 0)
+    f = _SEVERITY_ORDER.get(floor, 0)
+    return a >= f
+
+
 def lens_finding_fires(
     output: str,
     lens: str,
@@ -164,6 +202,87 @@ def lens_finding_fires(
         if f["severity"] == severity:
             return ("PASS", f"Lens: {lens} at {severity} fires")
     return ("FAIL", f"no Lens: {lens} finding at Severity: {severity}")
+
+
+def category_finding_fires(
+    output: str,
+    category: str,
+    severity: str | None = None,
+    severity_at_least: str | None = None,
+) -> Result:
+    """Mirror of lens_finding_fires for Category-tagged findings.
+
+    `severity` (exact match) and `severity_at_least` (≥ floor) are mutually
+    optional. If both are specified, both must match. If neither is
+    specified, any matching Category fires.
+    """
+    findings = _parse_findings(output)
+    for f in findings:
+        if f["category"] != category:
+            continue
+        if severity is not None and f["severity"] != severity:
+            continue
+        if severity_at_least is not None and not _severity_at_least(
+            f["severity"], severity_at_least
+        ):
+            continue
+        return ("PASS", f"Category: {category} at {f['severity']} fires")
+    descr = (
+        f"Severity: {severity}"
+        if severity
+        else f"Severity ≥ {severity_at_least}"
+        if severity_at_least
+        else "any severity"
+    )
+    return ("FAIL", f"no Category: {category} finding at {descr}")
+
+
+def category_finding_does_not_fire(output: str, category: str) -> Result:
+    findings = _parse_findings(output)
+    for f in findings:
+        if f["category"] == category:
+            return (
+                "FAIL",
+                f"unexpected Category: {category} finding at {f['file']} "
+                f"(severity {f['severity']})",
+            )
+    return ("PASS", f"no Category: {category} findings")
+
+
+def finding_body_does_not_contain(
+    output: str,
+    patterns: list[str],
+    case_insensitive: bool = True,
+) -> Result:
+    """FAIL if any finding's body text contains any pattern (substring match).
+    Used to verify counter-rule effectiveness — e.g., assert no finding's
+    prose contains AI-Slop "over-defensive" trigger phrases."""
+    findings = _parse_findings(output)
+    if not findings:
+        return ("N/A", "no findings parsed")
+    hits: list[str] = []
+    for f in findings:
+        body = f["body"]
+        haystack = body.lower() if case_insensitive else body
+        for p in patterns:
+            needle = p.lower() if case_insensitive else p
+            if needle in haystack:
+                hits.append(f"{p!r} in finding at {f['file']}")
+                break
+    if hits:
+        return ("FAIL", "; ".join(hits))
+    return ("PASS", f"no listed patterns appear in any of {len(findings)} finding(s)")
+
+
+def findings_count_at_least(output: str, n: int) -> Result:
+    """PASS if the parsed findings count is >= n. Used as a positive
+    co-assertion alongside negative checks (distinguishes 'reviewer engaged'
+    from 'reviewer silent')."""
+    findings = _parse_findings(output)
+    actual = len(findings)
+    if actual >= n:
+        return ("PASS", f"{actual} finding(s) ≥ {n} required")
+    return ("FAIL", f"only {actual} finding(s), need ≥ {n}")
 
 
 def lens_finding_does_not_fire(
@@ -255,6 +374,10 @@ _CHECK_REGISTRY = {
     "reattributed-finding-fires": reattributed_finding_fires,
     "lens-finding-cites-file": lens_finding_cites_file,
     "no-lens-findings-overlap-region": no_lens_findings_overlap_region,
+    "category-finding-fires": category_finding_fires,
+    "category-finding-does-not-fire": category_finding_does_not_fire,
+    "finding-body-does-not-contain": finding_body_does_not_contain,
+    "findings-count-at-least": findings_count_at_least,
 }
 
 # Checks that take (output, fixture, ocp_carveout) — fixture-aware.
