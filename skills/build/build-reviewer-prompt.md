@@ -70,7 +70,7 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - Clean separation of concerns? Single responsibility per component?
     - Clear naming that matches what things DO, not how they work?
     - Proportional error handling? (validate at boundaries, trust internal contracts — see AI Slop Signals for specific diff-level patterns)
-    - DRY principle followed?
+    - DRY violations? (See Targeted Lenses → DRY for the formal trigger threshold and co-fire rules.)
     - No overengineering or YAGNI violations?
 
     <!-- CANONICAL: shared/reviewer-common.md — Review Checklist (AI Slop Signals) -->
@@ -84,6 +84,45 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - Unused imports: imports for modules, types, or symbols not referenced in the file.
     Judge by whether additions serve the task or merely inflate the diff.
     In the build pipeline, check the de-sloppify cleanup log before flagging these patterns independently.
+
+    <!-- CANONICAL: shared/reviewer-common.md — Targeted Lenses (Pass 1 — paraphrased) -->
+    **Targeted Lenses:** Four named lenses focus on disciplines reviewers drift on. Tag findings with `Lens: <name>`. Every lens finding MUST include a `File:` line in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (e.g., `src/foo.py:42`) — function/class names are NOT acceptable line locators (OCP may also cite a registry file with the same numeric format); prose-only suggestions are not findings.
+
+    #### Surgical Changes
+    > Every changed line should trace to what the user asked for. Drive-by edits muddy diffs and inflate review burden.
+    - **Flag:** drive-by reformatting of adjacent code; deletion of pre-existing dead code not orphaned BY this change (mention, don't delete); style "corrections" where existing style is internally consistent; edits to files sharing no symbols with the request.
+    - **Do not flag:** cleanup of code orphaned BY this change; refactors the request called for; mechanically-required adjacent edits (e.g., updating a single caller for a signature change).
+    - **Severity:** Critical/Important when scope-bleed materially obscures the requested change or introduces regression risk. Minor/Suggestion when bleed is cosmetic.
+    - **Precedence:** wins over DRY/SRP/OCP on the same lines; the other lens may surface a separate Minor/Suggestion finding but MUST NOT recommend the fix at higher severity.
+
+    #### DRY
+    - **Flag:** new code duplicating an existing helper; two near-identical blocks in this diff; **syntactic trigger:** 2+ sequences of 5+ contiguous code tokens identical modulo identifier renames, where a maintainer would predictably fix the same bug in both places.
+    - **Do not flag:** 2-3 similar lines / under-5-token repetition; coincidental similarity for semantically distinct ops; framework-API shape repetition (e.g., route registrations).
+    - **Severity ceiling:** Minor (or Suggestion). DRY findings from this lens MUST NOT exceed Minor. If duplication would silently diverge in production, DROP the direct DRY finding entirely (no parallel Minor emit) and re-emit ONE finding under Correctness/Architecture at the appropriate severity, tagged `Lens: DRY (re-attributed)` on its own line. Direct and re-attributed are mutually exclusive.
+
+    #### SRP
+    - **Flag:** new function/class doing two clearly separable jobs (parse+emit, validate+persist, routing+business rules). Module-level mixing surfaces as **architectural observation only** and NEVER displaces DRY on co-fire.
+    - **Do not flag:** existing units (lens applies to NEW or substantially-rewritten units); deliberately-coupled convenience helpers (e.g., `parse_and_validate`).
+    - **Severity ceiling:** Minor (or Suggestion). Function- and class-level SRP findings are primary; module-level is architectural observation only.
+
+    #### OCP
+    - **Flag (ALL must hold):** a NEW `elif`/`case`/`match` arm added to a chain dispatching on a discriminator (string tag, enum, type name) when a registry/strategy table for the same discriminator exists elsewhere AND the OCP finding's `File:` lines explicitly include the registry file path (use a second `File:` line if needed). If the cited registry can't be located, DROP the finding.
+    - **Carve-out:** OCP is the ONLY lens permitted to cite a file outside the diff (the registry).
+    - **Do not flag:** chains with no existing registry; chains dispatching on non-discriminator values (e.g., `if x > threshold`). L/I/D are out of scope.
+    - **Severity ceiling:** Minor (or Suggestion).
+
+    **Co-fire precedence table:**
+
+    | Co-fire condition | Attribute to |
+    |---|---|
+    | Surgical Changes triggers + any other lens (same lines) | Surgical Changes |
+    | Function-SRP fully contains DRY block | SRP |
+    | Class-SRP fully contains DRY block | SRP |
+    | Module-SRP overlaps DRY (any extent) | DRY (module-SRP surfaced separately as architectural observation) |
+    | SRP and DRY apply, SRP unit does NOT contain DRY block | DRY |
+    | OCP and any other lens | Both fire independently (OCP carve-out is structural, not overlapping) |
+
+    Finding format addendum: add `Lens: Surgical | DRY | SRP | OCP` — required when finding originates from a Targeted Lens; omit otherwise. Re-attributed findings use `Lens: <name> (re-attributed)` on its own line immediately after Severity:.
 
     **Wiring:**
     - Is new code actually connected to the rest of the system?
@@ -155,10 +194,11 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     ## Report Format
 
     **For each issue found:**
-    - File:line reference (be specific, not vague)
+    - File:line reference, in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (numeric line refs from diff hunks — function/class names are NOT acceptable substitutes)
     - What's wrong
     - Why it matters
     - Severity classification
+    - Lens: Surgical | DRY | SRP | OCP — required when finding originates from a Targeted Lens; omit otherwise. Re-attributed findings use 'Lens: <name> (re-attributed)' on its own line immediately after Severity:.
     - How to fix (if not obvious)
 
     ### Pass 1: Code Review
