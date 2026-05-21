@@ -73,12 +73,17 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - DRY violations? (See Targeted Lenses → DRY for the formal trigger threshold and co-fire rules.)
     - No overengineering or YAGNI violations?
 
+    <!-- CANONICAL: shared/reviewer-common.md — Tenancy & Isolation, Production Readiness (paraphrased) -->
+    **Tenancy & Isolation:** When diff touches tenant-scoped tables, RLS policies, cross-tenant queries, or auth/authz callback handlers (in code, not prose), ask: where is the tenancy filter enforced (query, RLS, both); is single-layer documented or implicit; can a valid token for tenant-X reach a row owned by tenant-Y via any path. Emit `Category: Tenancy` on its own line after Severity:. Bands (floors, not ceilings): exploitable cross-tenant reach = Critical; defensible-but-undocumented single-layer = Important; BYPASSRLS test handles on tenancy-acceptance tests = Important. Skips when no tenancy surface (or only prose mentions tenancy).
+
+    **Production Readiness (Rollback Walk):** When diff includes a migration file (Alembic, Knex, sqlx, Rails, raw SQL), walk `down()`: orphan FK columns; CASCADE side-effects beyond stated scope; will `up()` succeed if re-run. Emit `Category: Rollback` after Severity:. Bands (floors): re-up failure on already-deployed migration or CASCADE causing data loss = Critical; orphan FK or broken re-up in non-prod = Important; CASCADE beyond stated scope (non-data-loss) = Important; forward-only without documented intent = Minor. Skips when no migration file present.
+
     <!-- CANONICAL: shared/reviewer-common.md — Review Checklist (AI Slop Signals) -->
     **AI Slop Signals:**
     AI agents produce characteristic padding that inflates diffs and obscures real changes. Typically Minor severity; Important only when padding obscures real changes. Common patterns:
     - Comment inflation: comments restating obvious code. Comments explain *why*, not *what*.
     - Docstring/annotation padding retrofitted onto code not otherwise changed in this diff. (Type annotations required by type-checking config are not padding.)
-    - Over-defensive error handling for conditions that cannot occur given call site and framework guarantees.
+    - Over-defensive error handling for conditions that cannot occur given call site and framework guarantees. **Counter-rule for tenancy/auth surfaces:** "trust internal code, validate at boundaries only" does NOT apply on tenancy/auth/authz paths — these warrant defense-in-depth, not single-layer trust. A single-layer guard on a tenancy/auth path is `Category: Tenancy`, NOT AI-Slop. A second layer mirroring an existing first on a tenancy/auth path is intentional defense-in-depth — DO NOT flag.
     - Premature abstraction: helpers, wrappers, or type definitions used exactly once without adding meaningful naming.
     - Backwards-compatibility ghosts: renamed-but-unused vars, re-exported dead types, `// removed` comments.
     - Unused imports: imports for modules, types, or symbols not referenced in the file.
@@ -199,6 +204,7 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - Why it matters
     - Severity classification
     - Lens: Surgical | DRY | SRP | OCP — required when finding originates from a Targeted Lens; omit otherwise. Re-attributed findings use 'Lens: <name> (re-attributed)' on its own line immediately after Severity:.
+    - Category: Tenancy | Rollback — required when finding originates from a Tenancy or Rollback discipline section; omit otherwise. Mutually exclusive with `Lens:` (do not emit both on the same finding).
     - How to fix (if not obvious)
 
     ### Pass 1: Code Review

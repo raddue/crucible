@@ -161,12 +161,39 @@ git diff {BASE_SHA}..{HEAD_SHA}
 > - *New function does parsing + emitting and has a duplicated regex.* A new function `process_record()` parses a row and emits a serialized result, and contains the same regex pattern in two branches. Attribute to **SRP** (function-level, fully contains the DRY block). DRY does not fire as a separate finding.
 > - *New module does parsing + emitting; parsing duplicates an existing util.* A new module mixes parsing and emitting; its parsing function duplicates an existing util elsewhere. Attribute to **DRY** for the duplication (module-SRP never displaces DRY). Surface module-SRP as a separate architectural observation Minor finding.
 
+### Tenancy & Isolation
+
+> When the diff touches tenant-scoped tables, RLS policies, cross-tenant queries, or auth/authz callback handlers, ask:
+>
+> - Where is the tenancy filter enforced — query layer, RLS/policy layer, both?
+> - If single-layer: is that the documented design intent, or implicit?
+> - Can a valid auth token for tenant-X reach a row owned by tenant-Y via any code path (forged callback, side-channel, admin bypass)?
+>
+> **Severity:** exploitable cross-tenant reach = Critical. Defensible-but-undocumented single-layer enforcement = Important. Admin/BYPASSRLS handles in tenancy-acceptance tests = Important (the test is plumbing-only, not policy coverage). Bands are floors, not ceilings — promote per actual impact.
+>
+> **Finding format:** emit `Category: Tenancy` on its own line immediately after the `Severity:` line.
+>
+> **Applies when:** the diff touches a tenancy surface as defined above **in code, not in documentation or prose**. If the diff only edits markdown / docstrings / prompt templates that mention tenancy concepts as text (without changing code that enforces tenancy), this discipline emits nothing. If no tenancy surface is present at all, this discipline emits nothing.
+
+### Production Readiness (Rollback Walk)
+
+> When the diff includes a migration file (Alembic, Knex, sqlx, Rails, raw SQL, etc.), ask:
+>
+> - If `down()` is provided: walk what it leaves behind. Orphan FK columns? CASCADE side-effects beyond the migration's stated scope? Will `up()` succeed if re-run after `down()` (FK re-add integrity)?
+> - If `down()` is not provided: is forward-only the documented intent, or an omission?
+>
+> **Severity:** re-`up()` failure on a migration already deployed to a production / non-rollback-able environment = Critical. CASCADE causing data loss beyond the migration's stated scope = Critical. Orphan FK columns or broken re-up in non-production paths = Important. CASCADE side-effects beyond stated scope (non-data-loss) = Important. Forward-only without documented intent = Minor. Bands are floors, not ceilings — promote per actual impact.
+>
+> **Finding format:** emit `Category: Rollback` on its own line immediately after the `Severity:` line.
+>
+> **Applies when:** the diff includes migration files. Otherwise emits nothing.
+
 ### AI Slop Signals
 AI agents produce characteristic padding patterns that aren't bugs but inflate diffs, obscure real changes, and accumulate as maintenance burden. These are typically Minor or Suggestion severity; escalate to Important only when padding materially obscures real changes in the diff. Common patterns include:
 
 - **Comment inflation:** Inline comments restating obvious code (`// increment counter` above `counter++`). Comments should explain *why*, not *what*.
 - **Docstring/annotation padding:** Docstrings or annotations retrofitted onto code not otherwise changed in this diff. New public APIs deserve docs; retrofitting docs onto untouched private helpers is noise. (Type annotations required by the project's type-checking configuration are not padding.)
-- **Over-defensive error handling:** Try/catch, null checks, or validation for conditions that cannot occur given the call site and framework guarantees. Trust internal code; validate at system boundaries only.
+- **Over-defensive error handling:** Try/catch, null checks, or validation for conditions that cannot occur given the call site and framework guarantees. Trust internal code; validate at system boundaries only. **Counter-rule for tenancy/auth surfaces.** "Trust internal code; validate at boundaries only" does NOT apply on tenancy, auth, or authorization paths — these surfaces warrant defense-in-depth, not single-layer trust. A single-layer guard on a tenancy/auth path is a `Category: Tenancy` finding (see Tenancy & Isolation), not an AI-Slop "over-defensive" finding. If the diff adds a second layer that mirrors an existing first layer on a tenancy/auth path, that is intentional defense-in-depth — DO NOT flag as redundant.
 - **Premature abstraction:** Helpers, utilities, wrapper functions, or type definitions used exactly once and not providing a meaningful name for a complex operation. Three similar lines are better than a one-call abstraction that just moves code.
 - **Backwards-compatibility ghosts:** Renamed-but-unused `_old_var`, re-exported types no consumer imports, `// removed` comments for deleted code. If it's unused, delete it completely.
 - **Unused imports:** Import statements for modules, types, or symbols not referenced in the file. Especially common when an agent adds imports speculatively during implementation and doesn't clean up.
@@ -218,6 +245,7 @@ AI agents produce characteristic padding patterns that aren't bugs but inflate d
 - Why it matters
 - Severity classification
 - Lens: Surgical | DRY | SRP | OCP — required when finding originates from a Targeted Lens; omit otherwise. Re-attributed findings use 'Lens: <name> (re-attributed)' on its own line immediately after Severity:.
+- Category: Tenancy | Rollback — required when finding originates from a Tenancy or Rollback discipline section; omit otherwise. Mutually exclusive with `Lens:` (do not emit both on the same finding).
 - How to fix (if not obvious)
 
 **Report structure:**
