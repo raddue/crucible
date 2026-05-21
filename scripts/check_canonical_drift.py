@@ -22,6 +22,7 @@ import pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CANON = ROOT / "skills/shared/reviewer-common.md"
 BUILD = ROOT / "skills/build/build-reviewer-prompt.md"
+TEMPER = ROOT / "skills/temper/temper-reviewer.md"
 
 LENS_HEADINGS = ["#### Surgical Changes", "#### DRY", "#### SRP", "#### OCP"]
 COFIRE_ROWS = [
@@ -92,6 +93,7 @@ def check_disciplines(name: str, text: str) -> list[str]:
 def main() -> int:
     canon_text = CANON.read_text(encoding="utf-8")
     build_text = BUILD.read_text(encoding="utf-8")
+    temper_text = TEMPER.read_text(encoding="utf-8")
     canon_block = extract_canon(canon_text)
     build_block = extract_build(build_text)
     errs = (
@@ -99,13 +101,14 @@ def main() -> int:
         + check("build-paraphrase", build_block)
         + check_disciplines("canonical", canon_text)
         + check_disciplines("build-paraphrase", build_text)
+        + check_disciplines("temper-reviewer", temper_text)
     )
     if errs:
         print("DRIFT DETECTED:")
         for e in errs:
             print(f"  - {e}")
         return 1
-    print("OK — canonical and build paraphrase are aligned (lenses + disciplines).")
+    print("OK — canonical, build paraphrase, and temper reviewer are aligned (lenses + disciplines).")
     return 0
 
 if __name__ == "__main__":
