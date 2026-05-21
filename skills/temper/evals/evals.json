@@ -1,0 +1,113 @@
+{
+  "skill_name": "temper",
+  "evals": [
+    {
+      "id": "1a",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1,28 +1,46 @@\n-import json\n+import json\n+import logging\n+\n+log = logging.getLogger(__name__)\n \n \n def load_config(path):\n-    with open(path) as f:\n-        return json.load(f)\n+    with open(path) as f:\n+        return json.load(f)\n+\n+\n+def get_timeout_seconds(config):\n+    \"\"\"Return the configured request timeout in seconds.\n+\n+    Reads `config['timeout_ms']` (preferred) and falls back to a\n+    30s default if absent. Logs the chosen value once at DEBUG.\n+    \"\"\"\n+    ms = config.get(\"timeout_ms\")\n+    if ms is None:\n+        log.debug(\"timeout_ms missing; defaulting to 30000\")\n+        return 30.0\n+    return float(ms) / 1000.0\n \n \n-def render_banner(title,subtitle=None):\n-    if subtitle:\n-      return title+' - '+subtitle\n-    return title\n+def render_banner(title, subtitle=None):\n+    if subtitle:\n+        return f\"{title} - {subtitle}\"\n+    return title\n \n \n def save_state(path, state):\n     with open(path, \"w\") as f:\n         json.dump(state, f, indent=2)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "Surgical lens fires at Important on the reformatted render_banner block; no DRY/SRP/OCP findings.",
+      "files": ["src/foo.py"],
+      "allowed_files": ["src/foo.py"],
+      "lens_under_test": "surgical",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "Surgical", "severity": "Important"}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "SRP", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "OCP", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "1b",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1,40 +1,72 @@\n-import json\n+import json\n+import logging\n+\n+log = logging.getLogger(__name__)\n \n \n def load_config(path):\n-    with open(path) as f:\n-        return json.load(f)\n+    with open(path) as f:\n+        return json.load(f)\n+\n+\n+def get_timeout_seconds(config):\n+    \"\"\"Return the configured request timeout in seconds.\"\"\"\n+    ms = config.get(\"timeout_ms\")\n+    if ms is None:\n+        log.debug(\"timeout_ms missing; defaulting to 30000\")\n+        return 30.0\n+    return float(ms) / 1000.0\n \n \n-def render_banner(title,subtitle=None):\n-    if subtitle:\n-      s = title.strip()\n-      t = subtitle.strip()\n-      return s+' - '+t\n-    return title.strip()\n+def render_banner(title, subtitle=None):\n+    if subtitle:\n+        s = title.strip()\n+        t = subtitle.strip()\n+        return f\"{s} - {t}\"\n+    return title.strip()\n \n \n-def render_footer(left,right=None):\n-    if right:\n-      s = left.strip()\n-      t = right.strip()\n-      return s+' - '+t\n-    return left.strip()\n+def render_footer(left, right=None):\n+    if right:\n+        s = left.strip()\n+        t = right.strip()\n+        return f\"{s} - {t}\"\n+    return left.strip()\n \n \n def save_state(path, state):\n     with open(path, \"w\") as f:\n         json.dump(state, f, indent=2)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "Surgical lens fires at Important on the reformatted banner+footer region; DRY does NOT fire on the same lines (Surgical precedence).",
+      "files": ["src/foo.py"],
+      "allowed_files": ["src/foo.py"],
+      "lens_under_test": "surgical-precedence",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "Surgical", "severity": "Important"}},
+        {"type": "mechanical", "check": "no-lens-findings-overlap-region", "params": {"primary_lens": "Surgical", "secondary_lens": "DRY"}, "prerequisite": {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "Surgical", "severity": "Important"}}},
+        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "2",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/util.py\n+++ b/src/util.py\n@@ -1,18 +1,18 @@\n import re\n \n _WS_RE = re.compile(r\"\\s+\")\n \n \n def normalize_input(s):\n     \"\"\"Strip surrounding whitespace, collapse internal runs, and lowercase.\"\"\"\n     if s is None:\n         return \"\"\n     s = s.strip()\n     s = _WS_RE.sub(\" \", s)\n     return s.lower()\n \n \n def is_blank(s):\n     return not s or not s.strip()\n--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1,12 +1,30 @@\n import re\n \n+_PARSER_WS_RE = re.compile(r\"\\s+\")\n+\n+\n+def _clean_token(s):\n+    \"\"\"Strip surrounding whitespace, collapse internal runs, lowercase.\"\"\"\n+    if s is None:\n+        return \"\"\n+    s = s.strip()\n+    s = _PARSER_WS_RE.sub(\" \", s)\n+    return s.lower()\n+\n \n def parse_header(line):\n     name, _, value = line.partition(\":\")\n-    return name.strip().lower(), value.strip()\n+    return _clean_token(name), _clean_token(value)\n \n \n def parse_record(text):\n     parts = text.split(\"|\")\n-    return [p.strip().lower() for p in parts]\n+    return [_clean_token(p) for p in parts]\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "DRY lens fires at Minor; finding cites src/util.py as the existing duplicate source.",
+      "files": ["src/parser.py", "src/util.py"],
+      "allowed_files": ["src/parser.py", "src/util.py"],
+      "lens_under_test": "dry",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "DRY", "severity": "Minor"}},
+        {"type": "mechanical", "check": "lens-finding-cites-file", "params": {"lens": "DRY", "file": "src/util.py"}},
+        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "2-reattrib",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/util.py\n+++ b/src/util.py\n@@ -1,20 +1,20 @@\n import re\n \n _WS_RE = re.compile(r\"\\s+\")\n MAX_LEN = 1024\n \n \n def normalize_input(s):\n     \"\"\"Strip, collapse, lowercase. Truncates to MAX_LEN to protect downstream buffers.\"\"\"\n     if s is None:\n         return \"\"\n     s = s.strip()\n     s = _WS_RE.sub(\" \", s)\n     s = s.lower()\n     if len(s) > MAX_LEN:\n         s = s[:MAX_LEN]\n     return s\n--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1,12 +1,28 @@\n import re\n \n+_PARSER_WS_RE = re.compile(r\"\\s+\")\n+\n+\n+def _clean_token(s):\n+    \"\"\"Strip, collapse, lowercase. NOTE: does NOT enforce MAX_LEN.\"\"\"\n+    if s is None:\n+        return \"\"\n+    s = s.strip()\n+    s = _PARSER_WS_RE.sub(\" \", s)\n+    return s.lower()\n+\n \n def parse_header(line):\n     name, _, value = line.partition(\":\")\n-    return name.strip().lower(), value.strip()\n+    return _clean_token(name), _clean_token(value)\n \n \n def parse_record(text):\n     parts = text.split(\"|\")\n-    return [p.strip().lower() for p in parts]\n+    # Untrusted user input flows through here from the HTTP layer.\n+    return [_clean_token(p) for p in parts]\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "No direct DRY finding; the duplication is re-attributed to a Correctness/Security finding (DRY (re-attributed)) at Important because parser silently skips MAX_LEN bound that util enforces.",
+      "files": ["src/parser.py", "src/util.py"],
+      "allowed_files": ["src/parser.py", "src/util.py"],
+      "lens_under_test": "dry-reattribution",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": false}},
+        {"type": "mechanical", "check": "reattributed-finding-fires", "params": {"lens": "DRY", "severity": "Important"}},
+        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "3",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/processor.py\n+++ b/src/processor.py\n@@ -1,8 +1,42 @@\n import json\n+import sys\n \n \n def load_records(path):\n     with open(path) as f:\n         return json.load(f)\n+\n+\n+def process_record(raw, out=sys.stdout):\n+    \"\"\"Parse a raw record string and emit a formatted line.\n+\n+    Does two things:\n+      (1) Parse: split on '|', strip each field, coerce the second\n+          field to int, validate that the third field is a known\n+          status code, and assemble a dict.\n+      (2) Emit: format the dict as 'id=<id> qty=<qty> status=<status>'\n+          and write it to `out` with a trailing newline.\n+    \"\"\"\n+    # --- parsing ---\n+    parts = [p.strip() for p in raw.split(\"|\")]\n+    if len(parts) != 3:\n+        raise ValueError(f\"expected 3 fields, got {len(parts)}\")\n+    rec_id = parts[0]\n+    try:\n+        qty = int(parts[1])\n+    except ValueError as e:\n+        raise ValueError(f\"qty must be int: {parts[1]!r}\") from e\n+    status = parts[2]\n+    if status not in {\"OK\", \"WARN\", \"ERR\"}:\n+        raise ValueError(f\"unknown status {status!r}\")\n+    record = {\"id\": rec_id, \"qty\": qty, \"status\": status}\n+\n+    # --- emitting ---\n+    line = f\"id={record['id']} qty={record['qty']} status={record['status']}\\n\"\n+    out.write(line)\n+    return record\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "SRP lens fires at Minor on process_record (parsing and emitting are clearly separable concerns).",
+      "files": ["src/processor.py"],
+      "allowed_files": ["src/processor.py"],
+      "lens_under_test": "srp",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "SRP", "severity": "Minor"}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "4",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff includes one unchanged file (src/registry.py) shown as context so you can see the existing dispatch infrastructure.\n\n```diff\ndiff --git a/src/registry.py b/src/registry.py\n--- a/src/registry.py\n+++ b/src/registry.py\n@@ -1,18 +1,18 @@\n # Existing handler registry — unchanged in this diff, shown for context.\n \n from .handlers import handle_create, handle_update, handle_delete, handle_archive\n \n HANDLERS = {\n     \"create\": handle_create,\n     \"update\": handle_update,\n     \"delete\": handle_delete,\n     \"archive\": handle_archive,\n }\n \n \n def dispatch(op, payload):\n     fn = HANDLERS.get(op)\n     if fn is None:\n         raise KeyError(f\"no handler for {op!r}\")\n     return fn(payload)\n--- a/src/handler.py\n+++ b/src/handler.py\n@@ -1,20 +1,32 @@\n from .handlers import (\n     handle_create,\n     handle_update,\n     handle_delete,\n     handle_archive,\n+    handle_restore,\n )\n \n \n def handle_op(op, payload):\n     if op == \"create\":\n         return handle_create(payload)\n     elif op == \"update\":\n         return handle_update(payload)\n     elif op == \"delete\":\n         return handle_delete(payload)\n     elif op == \"archive\":\n         return handle_archive(payload)\n+    elif op == \"restore\":\n+        return handle_restore(payload)\n     else:\n         raise KeyError(f\"no handler for {op!r}\")\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "OCP lens fires at Minor on handler.py recommending the new arm be added to the existing registry in src/registry.py; finding cites src/registry.py (allowed via ocp carve-out).",
+      "files": ["src/handler.py", "src/registry.py"],
+      "allowed_files": ["src/handler.py"],
+      "lens_under_test": "ocp",
+      "replicate_rule": {"trials": 5, "threshold": 3},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "OCP", "severity": "Minor"}},
+        {"type": "mechanical", "check": "lens-finding-cites-file", "params": {"lens": "OCP", "file": "src/registry.py"}},
+        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": true}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    },
+    {
+      "id": "5",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/clean.py\n+++ b/src/clean.py\n@@ -12,9 +12,15 @@ def slugify(text):\n     text = text.strip().lower()\n     text = _SLUG_NON_ALNUM_RE.sub(\"-\", text)\n     text = _SLUG_DASH_COLLAPSE_RE.sub(\"-\", text)\n     return text.strip(\"-\")\n \n \n+def slugify_with_max_length(text, max_length):\n+    \"\"\"Slugify `text` and truncate at the last full word fitting under max_length.\"\"\"\n+    slug = slugify(text)\n+    if len(slug) <= max_length:\n+        return slug\n+    truncated = slug[:max_length].rsplit(\"-\", 1)[0]\n+    return truncated or slug[:max_length]\n+\n+\n def is_valid_slug(s):\n     return bool(s) and _SLUG_VALID_RE.match(s) is not None\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "No lens findings — clean, surgical, single-responsibility addition that reuses existing slugify().",
+      "files": ["src/clean.py"],
+      "allowed_files": ["src/clean.py"],
+      "lens_under_test": "negative",
+      "replicate_rule": {"trials": 1, "threshold": 1},
+      "expectations": [
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "Surgical", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "SRP", "include_reattributed": true}},
+        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "OCP", "include_reattributed": true}},
+        {"type": "mechanical", "check": "all-findings-have-file-line"}
+      ]
+    }
+  ]
+}
