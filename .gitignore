@@ -5,6 +5,7 @@ docs/prds/
 skills/*-workspace/
 skills/skill-creator/
 skills/stocktake/results.json
+skills/temper/evals/last_run.json
 src/
 tests/
 package.json

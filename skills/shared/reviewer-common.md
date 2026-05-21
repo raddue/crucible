@@ -23,11 +23,111 @@
 - No scope creep -- implementation matches what was requested?
 
 ### Quality
-- Clean separation of concerns? Single responsibility per component?
+- Clean separation of concerns? Single responsibility per component? (See Targeted Lenses → SRP for the new-function/new-class trigger and OCP carve-out.)
 - Clear naming that matches what things DO, not how they work?
 - Proportional error handling? (validate at boundaries, trust internal contracts — see AI Slop Signals for specific diff-level patterns)
-- DRY principle followed?
+- DRY violations? (See Targeted Lenses → DRY for the formal trigger threshold and co-fire rules.)
 - No overengineering or YAGNI violations?
+
+### Targeted Lenses
+
+> Four named lenses focus the review on disciplines code-review agents reliably drift on. Each lens emits findings tagged with the lens name (`Lens: <name>`) in addition to the standard finding fields. **Every finding emitted from any lens MUST include a `File:` line in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (e.g., `File: src/foo.py:42` or `File: src/foo.py:42-58`). Function names, class names, or parenthetical locators (e.g., `src/foo.py (render_banner)` or `src/foo.py:get_timeout_seconds`) are INVALID — use the actual line number from the diff's `@@` hunks. Findings without a numeric `File:` line are invalid and MUST be dropped before emit.** Prose-only suggestions ("consider being more DRY") are not findings.
+
+#### Surgical Changes (precedence: highest)
+
+> Every changed line should trace to what the user asked for. Drive-by reformatting and adjacent-code "improvements" muddy diffs and increase review burden disproportionately.
+>
+> **Flag:**
+> - Reformatting / rewriting of code adjacent to the task but not part of the request.
+> - Deletion of pre-existing dead code that was not orphaned BY this change (mention it instead — do not delete).
+> - Style "corrections" to match the reviewer's taste when existing style is internally consistent.
+> - Modifications to files that share no edited symbols with the rest of the diff and were not named in the request.
+>
+> **Do not flag:**
+> - Removal of imports, variables, or functions orphaned BY this change (in-scope cleanup).
+> - Renames or refactors that the request explicitly called for.
+> - Adjacent-line changes mechanically required by the new code (e.g., adjusting a function signature also updates its one caller).
+>
+> **Severity:** Critical/Important when scope-bleed materially obscures the requested change or introduces regression risk. Minor/Suggestion when bleed is cosmetic.
+>
+> **Degraded mode (no scope context in this prompt):** When the prompt above does NOT contain a clear statement of what was requested (no PR body, no task spec, no plan reference — only the diff and a placeholder), reserve Important/Critical for surgical findings about structural breakage. Scope-bleed findings drop to Suggestion-severity in degraded mode — without a stated request, "in scope" is unknowable for borderline cases.
+>
+> **Precedence:** When this lens conflicts with DRY/SRP/OCP on the same lines, this lens wins. The other lens may surface the underlying concern as a Minor/Suggestion comment but MUST NOT recommend the fix at higher severity.
+
+#### DRY
+
+> Flag duplication introduced by this diff and new code that bypasses an existing helper.
+>
+> **Flag:**
+> - New code that duplicates an existing helper or utility instead of calling it.
+> - Two near-identical blocks introduced in the same diff (same file or across files).
+> - **Syntactic trigger:** two or more sequences of 5+ contiguous code tokens (excluding whitespace, punctuation, and comments) that are identical or differ only in identifier names. The bar above the trigger: a maintainer would predictably fix the same bug in both places.
+>
+> **Do not flag (over-DRY):**
+> - Two or three similar lines. Inlined repetition under 5 tokens is fine.
+> - Coincidental syntactic similarity where the two blocks express semantically distinct operations and would not co-evolve under a bug fix.
+> - A copy-of-a-pattern that *names* a thing (e.g., two route registrations look similar but the similarity is the framework's API, not the user's code).
+>
+> **Severity ceiling:** Minor (or Suggestion). DRY findings from this lens MUST NOT exceed Minor. If duplication rises to Important (e.g., the two diverging copies will silently behave differently in production), **DROP the Targeted-Lens DRY finding entirely** (do NOT emit it at Minor in parallel — avoids double-counting) and re-emit ONE finding under the appropriate non-lens checklist section (Correctness for behavioral divergence, Architecture and Patterns for structural mixing) at the appropriate severity, tagged on its own line `Lens: DRY (re-attributed)` immediately after the Severity: line. The escape hatch is mutually exclusive with the direct lens finding: emit EITHER a Minor `Lens: DRY` finding OR an Important+ `Lens: DRY (re-attributed)` finding, never both.
+
+#### SRP
+
+> Flag new declarative units (functions, classes, modules) that do two clearly separable jobs.
+>
+> **Flag:**
+> - A new function with two distinct responsibilities (e.g., parses input AND emits output; validates AND persists).
+> - A new class that aggregates two unrelated concerns (e.g., HTTP routing AND business-rule evaluation).
+> - **Module-level SRP** (a new module mixes concerns): surface as an **architectural observation**, not as a refactor recommendation. Module-level SRP NEVER displaces DRY on co-fire.
+>
+> **Do not flag:**
+> - Existing units (this lens applies to NEW or substantially-rewritten declarative units only).
+> - Helpers that compose two operations as a deliberate convenience (e.g., `parse_and_validate(s)` where parsing and validating are tightly coupled by domain).
+>
+> **Severity ceiling:** Minor (or Suggestion). Function- and class-level SRP findings are primary; module-level is architectural observation only.
+
+#### OCP
+
+> Flag a new `elif`, `case`, or `match` arm added to a chain dispatching on a discriminator IFF a registry / strategy table for that discriminator exists elsewhere in the codebase.
+>
+> **Flag conditions (ALL must hold):**
+> - The arm is NEW in this diff (not a modification of an existing arm).
+> - The chain dispatches on a discriminator (string tag, enum, type name).
+> - A registry / strategy dispatch table for the same discriminator exists in the diff's context — and **the finding cites the registry file path in a `File:` line**. The OCP finding's `File:` lines MUST include both the new arm's location AND the registry file path (use two `File:` lines if needed: one for the elif site, one for the registry). Without the registry path explicitly in a `File:` line, the OCP finding is incomplete.
+>
+> **If the cited registry file cannot be located** (the reviewer does not have access to it, or it does not exist), DROP the finding. No false positives.
+>
+> **Out-of-scope-reference carve-out:** OCP findings are the ONLY lens findings permitted to cite a file path that is not directly part of the diff under review. This carve-out is the OCP lens's defining shape (an OCP finding requires pointing at the registry as an alternative). For all other lenses (Surgical, DRY, SRP), every cited file path must be a file appearing in the diff.
+>
+> **Do not flag:**
+> - Conditional chains where no registry exists — extending the only dispatch site is fine.
+> - Chains dispatching on a value that is not a discriminator (e.g., `if x > threshold`).
+>
+> **Severity ceiling:** Minor (or Suggestion).
+>
+> **L / I / D out of scope:** Liskov, Interface-Segregation, and Dependency-Inversion are explicitly NOT part of this lens.
+
+### Lens precedence and co-fire resolution
+
+> When a single set of lines triggers multiple lenses, resolve attribution as follows:
+>
+> 1. **Surgical Changes wins** over DRY/SRP/OCP on the same lines. The other lens may surface the concern as a separate Minor/Suggestion finding on different lines, but MUST NOT recommend the fix at higher severity.
+> 2. **Function- or class-level SRP that fully contains a DRY block wins over DRY** when the unit mixes two clearly separable concerns AND the duplicated block is entirely inside it. Module-level SRP NEVER displaces DRY.
+> 3. **All other co-fires: DRY wins** (including SRP-vs-DRY where SRP is module-level or where SRP unit does not contain the DRY block).
+>
+> | Co-fire condition | Attribute to |
+> |---|---|
+> | Surgical Changes triggers + any other lens (same lines) | Surgical Changes |
+> | Function-SRP fully contains DRY block | SRP |
+> | Class-SRP fully contains DRY block | SRP |
+> | Module-SRP overlaps DRY (any extent) | DRY (module-SRP surfaced separately as architectural observation) |
+> | SRP and DRY apply, SRP unit does NOT contain DRY block | DRY |
+> | OCP and any other lens | Both fire independently (OCP carve-out is structural, not overlapping) |
+>
+> **Worked examples:**
+>
+> - *Drive-by reformat that also collapses duplication.* A diff adds a feature, and also reformats a neighboring function whose old body happened to be duplicated. Attribute to **Surgical Changes** (the reformat is the violation; the duplication-collapse is a side effect). DRY does not fire on these lines.
+> - *New function does parsing + emitting and has a duplicated regex.* A new function `process_record()` parses a row and emits a serialized result, and contains the same regex pattern in two branches. Attribute to **SRP** (function-level, fully contains the DRY block). DRY does not fire as a separate finding.
+> - *New module does parsing + emitting; parsing duplicates an existing util.* A new module mixes parsing and emitting; its parsing function duplicates an existing util elsewhere. Attribute to **DRY** for the duplication (module-SRP never displaces DRY). Surface module-SRP as a separate architectural observation Minor finding.
 
 ### AI Slop Signals
 AI agents produce characteristic padding patterns that aren't bugs but inflate diffs, obscure real changes, and accumulate as maintenance burden. These are typically Minor or Suggestion severity; escalate to Important only when padding materially obscures real changes in the diff. Common patterns include:
@@ -73,10 +173,11 @@ AI agents produce characteristic padding patterns that aren't bugs but inflate d
 ## Report Format
 
 **For each issue found:**
-- File:line reference (be specific, not vague)
+- File:line reference, in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (numeric line refs from the diff's `@@` hunks — function/class names are NOT acceptable substitutes)
 - What's wrong
 - Why it matters
 - Severity classification
+- Lens: Surgical | DRY | SRP | OCP — required when finding originates from a Targeted Lens; omit otherwise. Re-attributed findings use 'Lens: <name> (re-attributed)' on its own line immediately after Severity:.
 - How to fix (if not obvious)
 
 **Report structure:**
