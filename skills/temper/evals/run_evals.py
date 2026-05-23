@@ -38,6 +38,11 @@ _LAST_RUN = (
     if os.environ.get("TEMPER_LAST_RUN_OVERRIDE")
     else _EVALS_DIR / "last_run.json"
 )
+# SP-R7-C: declared in Task 6 (not Task 8) so test_run_evals_score.py's
+# `_seed_dispatch_dir` helper can `monkeypatch.setattr(run_evals, "_BASELINE_PATH", ...)`
+# without raising AttributeError. The `_write_baseline` / `_compare_baseline` helper
+# functions that USE this constant are still added in Task 8 (stubs added below in Task 6).
+_BASELINE_PATH = _EVALS_DIR / "baseline.json"
 
 _FIXTURE_CONTENT_HEADER = (
     "## Fixture content (synthetic — review this in lieu of running git commands):\n\n"
@@ -309,8 +314,28 @@ def _run_fixture(
         )
         reviewer_outputs.append(out)
 
+    return _aggregate_from_outputs(
+        fixture, reviewer_outputs, n_trials=n_trials, threshold=threshold
+    )
+
+
+def _aggregate_from_outputs(
+    fix: dict,
+    reviewer_outputs: list[str | None],
+    *,
+    # S2 R8/R9: closure deps identified in Step 0 (/tmp/_aggregate_closure_deps.txt).
+    # Explicit kwargs eliminate the implicit-lexical-capture footgun that would
+    # surface as NameError at first call rather than a clean assertion failure.
+    n_trials: int,
+    threshold: int,
+) -> dict:
+    """Behavioral equivalent of _run_fixture's post-resolution aggregation.
+
+    Takes already-resolved per-trial reviewer outputs (None for missing/ERROR).
+    Returns the per-fixture result dict.
+    """
     expectation_results: list[dict] = []
-    for expectation in fixture.get("expectations", []):
+    for expectation in fix.get("expectations", []):
         per_trial_verdicts: list[str] = []
         per_trial_rationales: list[str] = []
         for out in reviewer_outputs:
@@ -318,7 +343,7 @@ def _run_fixture(
                 per_trial_verdicts.append("N/A")
                 per_trial_rationales.append("dispatch failure: no reviewer output")
                 continue
-            verdict, rationale = lens_runner.evaluate_expectation(expectation, out, fixture)
+            verdict, rationale = lens_runner.evaluate_expectation(expectation, out, fix)
             per_trial_verdicts.append(verdict)
             per_trial_rationales.append(rationale)
         aggregated = lens_runner.aggregate_replicates(per_trial_verdicts, threshold)  # type: ignore[arg-type]
@@ -334,7 +359,6 @@ def _run_fixture(
             }
         )
 
-    # Fixture verdict: FAIL if any expectation FAIL; else PASS if ≥1 PASS; else N/A.
     verdicts = [r["aggregated_verdict"] for r in expectation_results]
     if any(v == "FAIL" for v in verdicts):
         fixture_verdict = "FAIL"
@@ -344,13 +368,202 @@ def _run_fixture(
         fixture_verdict = "N/A"
 
     return {
-        "id": fixture["id"],
+        "id": fix["id"],
         "verdict": fixture_verdict,
         "trials": n_trials,
         "threshold": threshold,
         "expectations": expectation_results,
         "reviewer_outputs": reviewer_outputs,
     }
+
+
+# ---------------------------------------------------------------------------
+# score() — Task 6 of #297
+# ---------------------------------------------------------------------------
+
+
+def _parse_result_file(path: Path) -> str | None:
+    """Read a per-trial result file and return reviewer output (or None on sentinel).
+
+    Task 6: minimal impl — Task 7 lands the structural parser with whitespace
+    handling, collision detection, etc. For now: any body starting with
+    `DISPATCH_STATUS:` (e.g. ERROR/EMPTY) is treated as a failed trial.
+    """
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not body.strip():
+        return None
+    if body.lstrip().startswith("DISPATCH_STATUS:"):
+        return None
+    return body
+
+
+# S-R4-1: stubs replaced in Task 8 with real impl. Between Task 6 and Task 8
+# commits, --write-baseline / --compare-baseline raise loudly rather than
+# NameError-ing deep in score().
+def _write_baseline(payload: dict, current_template_sha: str) -> None:
+    raise NotImplementedError("Baseline writing implemented in Task 8")
+
+
+def _compare_baseline(payload: dict, current_template_sha: str, *, incomplete: bool) -> int:
+    raise NotImplementedError("Baseline comparison implemented in Task 8")
+
+
+def score(
+    run_id: str,
+    *,
+    write_baseline: bool = False,
+    compare_baseline: bool = False,
+    force_rescore: bool = False,
+    allow_incomplete: bool = False,
+    per_iter: bool = False,
+) -> int:
+    """Read stage-manifest.json + result files; aggregate; write last_run.json.
+
+    Returns: 0=PASS, 1=any FAIL, 2=fatal
+    """
+    validate_run_id(run_id)
+    dispatch_dir = resolve_dispatch_dir(run_id)
+    manifest_path = dispatch_dir / "stage-manifest.json"
+    if not manifest_path.exists():
+        print(f"[fatal] no stage-manifest.json at {manifest_path}", file=sys.stderr)
+        return 2
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # I-8 + I-11 precedence (S-2)
+    status_path = dispatch_dir / ".collect-status"
+    incomplete = False
+    incomplete_cause: str | None = None
+    # 2P-2 R5: use `return 2` consistently (NOT sys.exit).
+    if not status_path.exists():
+        if not allow_incomplete:
+            print(
+                "[fatal] dispatch run incomplete: `.collect-status` absent. "
+                "Pass --allow-incomplete to override.",
+                file=sys.stderr,
+            )
+            return 2
+        incomplete = True  # cause undetermined per S-2
+    else:
+        first = status_path.read_text(encoding="utf-8").splitlines()
+        if not first or first[0].strip() != "complete":
+            if not allow_incomplete:
+                print("[fatal] .collect-status does not contain 'complete'", file=sys.stderr)
+                return 2
+            incomplete = True
+        # Parse "errors: N/total" line if present (I-11)
+        if len(first) >= 2 and first[1].startswith("errors:"):
+            n_str, total_str = first[1].removeprefix("errors:").strip().split("/")
+            n_err, total = int(n_str), int(total_str)
+            if total > 0 and n_err == total:
+                if not allow_incomplete:
+                    print(
+                        f"[fatal] all {total} dispatches errored (incomplete-cause: all-error). "
+                        f"Pass --allow-incomplete to score anyway.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                incomplete = True
+                incomplete_cause = "all-error"
+            # M-FE-2 R3: ceil-half threshold so exactly half also triggers.
+            elif total > 0 and 2 * n_err >= total:
+                print(
+                    f"[warn] {n_err}/{total} dispatches errored (>= half)",
+                    file=sys.stderr,
+                )
+
+    # Recompute per-trial fixture_sha; refuse mismatches unless --force-rescore
+    evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+    fixtures_by_id = {f["id"]: f for f in evals_data.get("evals", [])}
+
+    # Template_sha drift advisory (S-1)
+    current_template_sha = template_sha(_REVIEWER_PROMPT)
+    if current_template_sha != manifest.get("template_sha"):
+        if not force_rescore:
+            print(
+                f"[warn] template_sha drift detected (manifest: {manifest['template_sha'][:12]}…, "
+                f"current: {current_template_sha[:12]}…). ADVISORY ONLY — current run's prompts are "
+                f"frozen at stage-time and unaffected. Pass --force-rescore to suppress.",
+                file=sys.stderr,
+            )
+
+    # Reassemble per-fixture trials
+    by_fixture: dict[str, list[tuple[int, dict, str | None]]] = {}
+    for entry in manifest["trials"]:
+        seq = entry["seq"]
+        fid = entry["fixture_id"]
+        fix = fixtures_by_id.get(fid)
+        if fix is None:
+            print(f"[fatal] unknown fixture id {fid!r} in manifest", file=sys.stderr)
+            return 2
+
+        # Per-trial fixture_sha refusal (I-3)
+        current_fsha = fixture_sha(fix)
+        if current_fsha != entry["fixture_sha"] and not force_rescore:
+            print(
+                f"[warn] fixture {fid!r} sha mismatch on seq {seq}: REFUSED. "
+                f"Pass --force-rescore to override.",
+                file=sys.stderr,
+            )
+            by_fixture.setdefault(fid, []).append((entry["trial"], entry, None))
+            continue
+
+        result_path = dispatch_dir / entry["result_file"]
+        out = _parse_result_file(result_path) if result_path.exists() else None
+        by_fixture.setdefault(fid, []).append((entry["trial"], entry, out))
+
+    # Run lens_runner per fixture
+    fixture_results: list[dict] = []
+    for fid, trials_list in by_fixture.items():
+        fix = fixtures_by_id[fid]
+        trials_list.sort(key=lambda t: t[0])
+        reviewer_outputs = [out for _, _, out in trials_list]
+        rule = fix.get("replicate_rule", {"trials": 1, "threshold": 1})
+        n_trials = rule.get("trials", 1)
+        threshold = rule.get("threshold", 1)
+        result = _aggregate_from_outputs(
+            fix, reviewer_outputs, n_trials=n_trials, threshold=threshold
+        )
+        fixture_results.append(result)
+
+    # Write last_run.json
+    payload: dict[str, Any] = {
+        "run_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "run_id": run_id,
+        "fixtures": fixture_results,
+    }
+    if incomplete:
+        payload["incomplete"] = True
+        if incomplete_cause:
+            payload["incomplete-cause"] = incomplete_cause
+    if force_rescore:
+        payload["force_rescore"] = True
+
+    # F1 / S-FE-5 R3: per-iter outputs under .calibrate-state/ (blanket-gitignored)
+    if per_iter:
+        per_iter_dir = _EVALS_DIR / ".calibrate-state"
+        per_iter_dir.mkdir(parents=True, exist_ok=True)
+        out_path = per_iter_dir / f"last_run-{run_id}.json"
+        print(
+            f"[info] writing per-iter output to {out_path} (gitignored via .calibrate-state/)",
+            file=sys.stderr,
+        )
+    else:
+        out_path = _LAST_RUN
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    # --write-baseline + --compare-baseline — see Task 8 (stubs raise NotImplementedError)
+    if write_baseline:
+        _write_baseline(payload, current_template_sha)
+    if compare_baseline:
+        return _compare_baseline(payload, current_template_sha, incomplete=incomplete)
+
+    if any(fr["verdict"] == "FAIL" for fr in fixture_results):
+        return 1
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -451,9 +664,17 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     if args.cmd == "score":
-        # Task 6 implements `score()`; until then, surface a clear error.
-        print("[fatal] `score` subcommand not yet implemented (Task 6)", file=sys.stderr)
-        return 2
+        try:
+            return score(
+                args.run_id,
+                write_baseline=args.write_baseline,
+                compare_baseline=args.compare_baseline,
+                force_rescore=args.force_rescore,
+                allow_incomplete=args.allow_incomplete,
+            )
+        except ValueError as e:
+            print(f"[fatal] {e}", file=sys.stderr)
+            return 2
 
     # Legacy mock/replay path — preserved unchanged
     return _legacy_main(args)
