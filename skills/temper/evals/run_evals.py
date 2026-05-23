@@ -679,11 +679,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sp_score.add_argument("--compare-baseline", action="store_true")
     sp_score.add_argument("--force-rescore", action="store_true")
     sp_score.add_argument("--allow-incomplete", action="store_true")
-    # F-R4-1: `--per-iter` argparse declaration is intentionally NOT added here.
-    # Both the argparse declaration AND the main() wiring land atomically in Task 13
-    # (S-1 R5: per-iter wiring lands BEFORE the calibrate skill) to eliminate a
-    # silent-drop window where the flag would be parseable but unwired (silently
-    # clobbering shared last_run.json).
+    sp_score.add_argument("--per-iter", action="store_true",
+        help="Write last_run-<run_id>.json under .calibrate-state/ instead of shared last_run.json. Set by /temper-eval-calibrate.")
 
     # Legacy mock/replay paths (back-compat, no subcommand)
     # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.
@@ -724,6 +721,7 @@ def main(argv: list[str] | None = None) -> int:
                 compare_baseline=args.compare_baseline,
                 force_rescore=args.force_rescore,
                 allow_incomplete=args.allow_incomplete,
+                per_iter=args.per_iter,
             )
         except ValueError as e:
             print(f"[fatal] {e}", file=sys.stderr)
