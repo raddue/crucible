@@ -19,12 +19,15 @@ import argparse
 import datetime as _dt
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from . import lens_runner
+from ._dispatch_paths import fixture_sha, resolve_dispatch_dir, template_sha
+from ._runid import validate_run_id
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _EVALS_DIR = Path(__file__).resolve().parent
@@ -92,6 +95,135 @@ def _dispatch_live(prompt: str, fixture_id: str, trial: int, timeout: int) -> st
         )
         return None
     return result.stdout
+
+
+# ---------------------------------------------------------------------------
+# stage(): render dispatch files + manifest (Task 3 of #297)
+# ---------------------------------------------------------------------------
+
+
+_DISPATCH_HEADER_TEMPLATE = """\
+# Dispatch: temper-reviewer
+**Pipeline:** temper-eval | **Phase:** collect | **Task:** {seq}
+**Timestamp:** {ts}
+**Dispatch-Dir:** {dispatch_dir}
+
+---
+
+"""
+
+
+def _validate_rendered_prompt(rendered: str) -> None:
+    """I-T9 stub — proper impl in Task 5."""
+    pass
+
+
+def stage(
+    run_id: str,
+    *,
+    force: bool = False,
+    source: str = "all",
+    fixture: str | None = None,
+    trials_override: int | None = None,
+    timeout: int = 300,
+) -> Path:
+    """Render fixtures × trials to dispatch files; write stage-manifest.json.
+
+    Returns: dispatch directory path.
+    Raises:
+        ValueError: invalid run_id (I-9) or source+fixture intersection (M-1)
+        FileExistsError: dispatch dir exists and force=False
+    """
+    validate_run_id(run_id)
+
+    # Load fixtures
+    evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+    fixtures = evals_data.get("evals", [])
+
+    # --source filter
+    if source != "all":
+        fixtures = [f for f in fixtures if f.get("source", "synthetic") == source]
+
+    # --fixture filter + M-1 intersection check
+    if fixture is not None:
+        matching = [f for f in fixtures if f["id"] == fixture]
+        if not matching:
+            raise ValueError(
+                f"--fixture {fixture!r} not found in --source {source!r} "
+                f"(M-1: intersection produces zero trials)"
+            )
+        fixtures = matching
+
+    # Resolve + prepare dispatch dir
+    dispatch_dir = resolve_dispatch_dir(run_id)
+    if dispatch_dir.exists():
+        if not force:
+            raise FileExistsError(
+                f"dispatch dir {dispatch_dir} already exists; pass force=True to overwrite"
+            )
+        shutil.rmtree(dispatch_dir)
+    dispatch_dir.mkdir(parents=True)
+
+    # Read template once
+    template = _REVIEWER_PROMPT.read_text(encoding="utf-8")
+    tpl_sha = template_sha(_REVIEWER_PROMPT)
+    ts = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+    # Render trials
+    trials: list[dict] = []
+    seq = 0
+    for fix in fixtures:
+        rule = fix.get("replicate_rule", {"trials": 1, "threshold": 1})
+        n_trials = trials_override if trials_override is not None else rule.get("trials", 1)
+        for trial_idx in range(1, n_trials + 1):
+            seq += 1
+            dispatch_file = f"{seq:03d}-reviewer.md"
+            result_file = f"{seq:03d}-result.md"
+            body = _render_prompt(template, fix)
+            header = _DISPATCH_HEADER_TEMPLATE.format(
+                seq=seq, ts=ts, dispatch_dir=dispatch_dir
+            )
+            rendered = header + body
+            _validate_rendered_prompt(rendered)  # I-T9 — see Task 5
+            (dispatch_dir / dispatch_file).write_text(rendered, encoding="utf-8")
+            trials.append({
+                "seq": seq,
+                "fixture_id": fix["id"],
+                "trial": trial_idx,
+                "dispatch_file": dispatch_file,
+                "result_file": result_file,
+                "fixture_sha": fixture_sha(fix),
+            })
+
+    # Write stage-manifest.json
+    # stage(): non-atomic writes accepted — see plan M-FE-1 R3
+    manifest = {
+        "run_id": run_id,
+        "stage_timestamp": ts,
+        "dispatch_timeout": timeout,
+        "reviewer_model": "opus",
+        "template_sha": tpl_sha,
+        "trials": trials,
+    }
+    (dispatch_dir / "stage-manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
+
+    # Initial manifest.jsonl entries (stage-side).
+    # S-R4-3: `manifest.jsonl` is informational/audit only — score does NOT consume it.
+    # S-4 R5: `"w"` mode is safe ONLY because rmtree+mkdir above guarantees an
+    # empty dispatch dir at this point. Do NOT relocate this open() call above
+    # the rmtree without re-evaluating the truncation hazard.
+    # stage(): non-atomic writes accepted — see plan M-FE-1 R3
+    with (dispatch_dir / "manifest.jsonl").open("w", encoding="utf-8") as f:
+        for t in trials:
+            f.write(json.dumps({
+                "seq": t["seq"], "file": t["dispatch_file"],
+                "role": "temper-reviewer", "phase": "stage", "task": None,
+                "status": "dispatched", "duration_s": None, "summary": None,
+            }) + "\n")
+
+    return dispatch_dir
 
 
 # ---------------------------------------------------------------------------
