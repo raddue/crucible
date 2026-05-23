@@ -1,0 +1,21 @@
+### Code Review
+
+Verdict: changes-requested
+
+The new `_clean_token` helper in `src/parser.py` duplicates the
+already-public `normalize_input` from `src/util.py` (strip → collapse
+whitespace → lowercase). The DRY lens fires at Minor — the right fix is
+to import `util.normalize_input` instead of re-rolling it.
+
+### Issues
+
+1. _clean_token re-implements util.normalize_input
+   - File: src/util.py:6-12
+   - Severity: Minor
+   - Lens: DRY
+   The body of `_clean_token` is the same algorithm as
+   `normalize_input` already exposed from `src/util.py` (strip,
+   regex-collapse runs of whitespace, lowercase). Import and reuse
+   the existing helper rather than copying it — the duplicate regex
+   `_PARSER_WS_RE` is also redundant. Drop `_clean_token` and call
+   `normalize_input` directly from `parse_header` and `parse_record`.

@@ -119,8 +119,13 @@ def test_legacy_main_runs_without_attribute_error(tmp_path, monkeypatch):
     env = {**os.environ, "TEMPER_LAST_RUN_OVERRIDE": str(last_run_out)}
     repo_tracked = repo_root / "skills" / "temper" / "evals" / "last_run.json"
     repo_tracked_mtime_pre = repo_tracked.stat().st_mtime if repo_tracked.exists() else None
+    import sys
     result = subprocess.run(
-        ["python", "-m", "skills.temper.evals.run_evals",
+        # Task 8.5 deviation: use sys.executable so the test runs under
+        # environments where `python` is not on PATH (e.g. Debian/Ubuntu
+        # without `python-is-python3`). Necessary now that mock-fixtures
+        # exists and this test un-skips.
+        [sys.executable, "-m", "skills.temper.evals.run_evals",
          "--mock-reviewer", str(dst_fixtures)],
         capture_output=True, text=True, timeout=120,
         cwd=str(repo_root), env=env,

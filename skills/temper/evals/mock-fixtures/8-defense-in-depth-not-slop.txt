@@ -1,0 +1,22 @@
+### Code Review
+
+Verdict: approve-with-nits
+
+The added `assert_can_read_tenant` call is a deliberate belt-and-
+suspenders layer alongside the RLS enforcement at the connection
+level — that is correct defense in depth, not duplicated work, and
+should not be flagged. The unrelated rename of `get_orderr` →
+`get_order_legacy` is a scope bleed worth noting.
+
+### Issues
+
+1. Typo-fix rename mixed into a security-layer change
+   - File: src/orders.py:21-22
+   - Severity: Minor
+   - Lens: Surgical
+   The rename from `get_orderr` to `get_order_legacy` is a
+   reasonable cleanup but it lands in the same commit as the
+   tenancy belt-and-suspenders addition. Either change alone is
+   fine; combining them makes the diff harder to bisect if the
+   security-layer change ever needs to be reverted. Split the
+   rename into its own commit.
