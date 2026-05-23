@@ -15,6 +15,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _SNAPSHOT = _REPO_ROOT / "skills" / "temper" / "evals" / "mock_snapshot.json"
 _MOCK_DIR = _REPO_ROOT / "skills" / "temper" / "evals" / "mock-fixtures"
+_EVALS_JSON = _REPO_ROOT / "skills" / "temper" / "evals" / "evals.json"
 
 def _run_mock(tmp_path: Path) -> dict:
     """Run --mock-reviewer and return per-fixture verdicts.
@@ -67,9 +68,11 @@ def test_legacy_mock_reviewer_matches_snapshot(tmp_path):
     # truncated/empty snapshot (e.g. subprocess error swallowed), the equality
     # assertion below would pass trivially — so explicitly floor the shape first.
     # `expected` is a flat {fixture_id: verdict} dict; assert both cardinality and
-    # verdict-presence.
-    assert len(expected) >= 7, (
-        f"snapshot has <7 fixtures (expected N=7); re-bootstrap via "
+    # verdict-presence. Floor is derived from evals.json so it stays current as
+    # fixtures are added.
+    expected_n = len(json.loads(_EVALS_JSON.read_text())["evals"])
+    assert len(expected) >= expected_n, (
+        f"snapshot has <{expected_n} fixtures (expected N={expected_n}); re-bootstrap via "
         f"`python -m skills.temper.evals.bootstrap_snapshot`"
     )
     assert all(isinstance(v, str) and v for v in expected.values()), (

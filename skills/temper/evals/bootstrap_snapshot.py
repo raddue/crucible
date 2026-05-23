@@ -29,6 +29,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _SNAPSHOT = _REPO_ROOT / "skills" / "temper" / "evals" / "mock_snapshot.json"
 _MOCK_DIR = _REPO_ROOT / "skills" / "temper" / "evals" / "mock-fixtures"
+_EVALS_JSON = _REPO_ROOT / "skills" / "temper" / "evals" / "evals.json"
 
 def main() -> int:
     # S1 R8: default behavior = VERIFY mode (idempotent re-run, compares against
@@ -46,6 +47,8 @@ def main() -> int:
         )
         data = json.loads(out.read_text())
         verdicts = {f["id"]: f["verdict"] for f in data["fixtures"]}
+
+    expected_n = len(json.loads(_EVALS_JSON.read_text())["evals"])
 
     # S1 R8: VERIFY mode — snapshot exists and no --force. Re-execute mock-reviewer,
     # compare against the committed snapshot; exit nonzero with diff on mismatch.
@@ -72,10 +75,10 @@ def main() -> int:
         "verdicts": verdicts,
     }
     # S-R4-2: refuse to write a hollow snapshot. If the subprocess silently
-    # produced <7 fixtures or missing verdicts, the test would later pass
+    # produced fewer fixtures than evals.json declares, the test would later pass
     # trivially — catch it at bootstrap time instead.
-    if len(verdicts) < 7:
-        print(f"[bootstrap][fatal] only {len(verdicts)} fixtures captured; expected >=7. "
+    if len(verdicts) < expected_n:
+        print(f"[bootstrap][fatal] only {len(verdicts)} fixtures captured; expected >={expected_n}. "
               f"Refusing to write a hollow snapshot.", file=sys.stderr)
         return 2
     if not all(isinstance(v, str) and v for v in verdicts.values()):
@@ -86,7 +89,7 @@ def main() -> int:
     # Re-read and re-assert post-write (defense in depth against partial-write/IO truncation)
     reread = json.loads(_SNAPSHOT.read_text())
     reread_verdicts = reread.get("verdicts", {})
-    assert len(reread_verdicts) >= 7 and all(reread_verdicts.values()), \
+    assert len(reread_verdicts) >= expected_n and all(reread_verdicts.values()), \
         "post-write snapshot validation failed; refuse to declare success"
     assert reread.get("bootstrap_python"), "missing bootstrap_python pin in snapshot"
     print(f"[bootstrap] wrote {_SNAPSHOT}", file=sys.stderr)

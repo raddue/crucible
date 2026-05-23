@@ -1,6 +1,7 @@
 """Tests for stage() subcommand (Task 3 of #297)."""
 
 import json
+import sys
 
 import pytest
 
@@ -119,7 +120,6 @@ def test_legacy_main_runs_without_attribute_error(tmp_path, monkeypatch):
     env = {**os.environ, "TEMPER_LAST_RUN_OVERRIDE": str(last_run_out)}
     repo_tracked = repo_root / "skills" / "temper" / "evals" / "last_run.json"
     repo_tracked_mtime_pre = repo_tracked.stat().st_mtime if repo_tracked.exists() else None
-    import sys
     result = subprocess.run(
         # Task 8.5 deviation: use sys.executable so the test runs under
         # environments where `python` is not on PATH (e.g. Debian/Ubuntu
