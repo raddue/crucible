@@ -37,6 +37,26 @@ _LAST_RUN = (
     if os.environ.get("TEMPER_LAST_RUN_OVERRIDE")
     else _EVALS_DIR / "last_run.json"
 )
+
+
+def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
+    """S4 R6: resolves output path at call time using CURRENT _EVALS_DIR.
+
+    Replaces direct `_LAST_RUN` / `_EVALS_DIR / ".calibrate-state" / ...` references
+    in score(). Eliminates the import-time vs runtime asymmetry that previously
+    required tests to monkeypatch _LAST_RUN AND _EVALS_DIR separately.
+
+    Note: `TEMPER_LAST_RUN_OVERRIDE` (Task 4 Step 3.5 addendum) still wins for the
+    SHARED path when set — preserved here for legacy test-isolation parity. The
+    per-iter path is unaffected by the override (no test currently needs it).
+    """
+    if per_iter:
+        return _EVALS_DIR / ".calibrate-state" / f"last_run-{run_id}.json"
+    # Legacy override hook preserved (Task 4 Step 3.5 addendum)
+    env_override = os.environ.get("TEMPER_LAST_RUN_OVERRIDE")
+    if env_override:
+        return Path(env_override)
+    return _EVALS_DIR / "last_run.json"
 # SP-R7-C: declared in Task 6 (not Task 8) so test_run_evals_score.py's
 # `_seed_dispatch_dir` helper can `monkeypatch.setattr(run_evals, "_BASELINE_PATH", ...)`
 # without raising AttributeError. The `_write_baseline` / `_compare_baseline` helper
@@ -596,16 +616,13 @@ def score(
         payload["force_rescore"] = True
 
     # F1 / S-FE-5 R3: per-iter outputs under .calibrate-state/ (blanket-gitignored)
+    out_path = _resolve_output_path(run_id, per_iter=per_iter)
     if per_iter:
-        per_iter_dir = _EVALS_DIR / ".calibrate-state"
-        per_iter_dir.mkdir(parents=True, exist_ok=True)
-        out_path = per_iter_dir / f"last_run-{run_id}.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         print(
             f"[info] writing per-iter output to {out_path} (gitignored via .calibrate-state/)",
             file=sys.stderr,
         )
-    else:
-        out_path = _LAST_RUN
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     # --write-baseline + --compare-baseline — see Task 8 (stubs raise NotImplementedError)

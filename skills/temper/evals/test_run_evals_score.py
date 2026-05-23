@@ -1,12 +1,15 @@
 """Tests for score() subcommand (Task 6 of #297).
 
-SP3 / F-1: All tests in this file MUST use module-attribute access
-(`run_evals._LAST_RUN`, `run_evals._BASELINE_PATH`) — never hardcode
-`skills/temper/evals/...` paths. The shared `_seed_dispatch_dir` helper
-monkeypatches _LAST_RUN, _BASELINE_PATH, and _EVALS_DIR to tmp_path,
-so any test that wants to read or assert against these files must do so
-through the module attribute (which the helper has redirected) — not via
-`Path("skills/temper/evals/baseline.json")` which would bypass the redirect.
+SP3 / F-1: All tests in this file MUST redirect output paths via monkeypatch —
+never hardcode `skills/temper/evals/...` paths. The shared `_seed_dispatch_dir`
+helper monkeypatches _LAST_RUN, _BASELINE_PATH, and _EVALS_DIR to tmp_path.
+
+Post-Task-13.5: `_resolve_output_path()` reads `_EVALS_DIR` at call time, so
+monkeypatching `_EVALS_DIR` alone is sufficient for both the shared and per-iter
+output paths. `_LAST_RUN` is still monkeypatched by `_seed_dispatch_dir` only to
+exercise the legacy `TEMPER_LAST_RUN_OVERRIDE` env-var path. Tests that read the
+shared output file should use `tmp_path / "last_run.json"` directly — not
+`run_evals._LAST_RUN` — since that attribute is not the routing source post-13.5.
 """
 from __future__ import annotations
 
@@ -276,35 +279,25 @@ def test_ac3_smoke_coverage_delegated_to_legacy_modes():
 def test_score_per_iter_flag_writes_separate_file(monkeypatch, tmp_path):
     """F1: --per-iter routes output to last_run-<run_id>.json; shared file untouched.
 
-    M-4: this test depends on both _LAST_RUN (import-time constant) AND _EVALS_DIR
-    (used at runtime inside score()) being monkeypatched. The brittle coupling is
-    documented above the test block. Do not refactor one without the other.
+    Post-Task-13.5: `_resolve_output_path()` reads `_EVALS_DIR` at call time, so
+    monkeypatching `_EVALS_DIR` alone is sufficient for BOTH the shared and per-iter
+    output paths. The `_LAST_RUN` monkeypatch in `_seed_dispatch_dir` is preserved
+    only to exercise the legacy `TEMPER_LAST_RUN_OVERRIDE` env-var path.
 
-    SP3 R8 bisect-window note: Task 13.5 (next commit) refactors the per-iter path
-    resolution into `_resolve_output_path()`, after which monkeypatching `_EVALS_DIR`
-    alone is sufficient. THIS docstring's brittle-coupling note is correct for THIS
-    commit's state and will be updated in Task 13.5. If you are reading this after
-    Task 13.5 has landed and the docstring still says "Do not refactor one without
-    the other," that is a stale-docstring bug — fix it.
-
-    M-R4-1: note the asymmetry — `_EVALS_DIR` and `_EVALS_JSON` are both bound
-    at import time, but only `_EVALS_DIR` appears in a runtime path expression
-    inside `score()` (the per-iter path), so monkeypatching `_EVALS_DIR` redirects
-    that expression. `_EVALS_JSON` is bound at import time AND used by name at
-    runtime — monkeypatching `_EVALS_DIR` does NOT retroactively redirect
-    `_EVALS_JSON`. If a future test needs to redirect fixture data, it must
-    monkeypatch `_EVALS_JSON` separately.
+    M-R4-1: `_EVALS_JSON` is bound at import time AND used by name at runtime —
+    monkeypatching `_EVALS_DIR` does NOT retroactively redirect `_EVALS_JSON`. If a
+    future test needs to redirect fixture data, it must monkeypatch `_EVALS_JSON`
+    separately.
 
     M-5 R5: `_seed_dispatch_dir` already monkeypatches `_EVALS_DIR` to `tmp_path`,
-    so the redundant `monkeypatch.setattr(run_evals, "_EVALS_DIR", tmp_path)`
-    that previously appeared here has been removed.
+    so no additional `_EVALS_DIR` monkeypatch is needed here.
     """
     import time
     d = _seed_dispatch_dir(monkeypatch, tmp_path, "Rcalprefix-1")
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
 
     # Pre-populate the shared last_run.json with sentinel content, capture mtime
-    shared = run_evals._LAST_RUN  # SP3: monkeypatched to tmp_path
+    shared = tmp_path / "last_run.json"  # _seed_dispatch_dir sets _EVALS_DIR → tmp_path
     shared.write_text('{"sentinel": "untouched"}')
     mtime_before = shared.stat().st_mtime
     time.sleep(0.01)  # ensure any write would change mtime
@@ -325,12 +318,15 @@ def test_score_without_per_iter_writes_shared(monkeypatch, tmp_path):
     `--per-iter` flag is the routing trigger, NOT run-id shape. Under the
     pre-F1 regex heuristic (`-\\d+$`), this run-id would have been MIS-ROUTED
     to a per-iter path; under the F1 explicit flag, it correctly writes shared.
+
+    Post-Task-13.5: `_resolve_output_path()` reads `_EVALS_DIR` at call time, so
+    monkeypatching `_EVALS_DIR` alone is sufficient. The redundant `_EVALS_DIR` and
+    `_LAST_RUN` monkeypatches that previously appeared here have been removed —
+    `_seed_dispatch_dir` already sets `_EVALS_DIR` to `tmp_path`.
     """
     d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-2026-04-15")  # run-id ends in -<digits>!
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
-    monkeypatch.setattr(run_evals, "_EVALS_DIR", tmp_path)
     shared = tmp_path / "last_run.json"
-    monkeypatch.setattr(run_evals, "_LAST_RUN", shared)
 
     score("R-2026-04-15", per_iter=False, allow_incomplete=False)
 
@@ -352,7 +348,7 @@ def test_per_iter_flag_not_silently_dropped(monkeypatch, tmp_path):
     from skills.temper.evals.run_evals import main
     d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-flag-drop")
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
-    shared = run_evals._LAST_RUN  # monkeypatched to tmp_path by _seed_dispatch_dir
+    shared = tmp_path / "last_run.json"  # _seed_dispatch_dir sets _EVALS_DIR → tmp_path
     shared.write_text('{"sentinel": "untouched"}')
     mtime_before = shared.stat().st_mtime
     time.sleep(0.01)
@@ -381,3 +377,22 @@ def test_score_help_lists_per_iter():
     )
     out = result.stdout + result.stderr
     assert "--per-iter" in out, "Task 13 must add --per-iter to score subparser"
+
+
+# ---------------------------------------------------------------------------
+# Task 13.5: _resolve_output_path() helper (S4 R6)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_output_path_uses_current_evals_dir(monkeypatch, tmp_path):
+    """S4 R6: _resolve_output_path reads _EVALS_DIR at CALL TIME, not import time.
+
+    Eliminates the asymmetry where tests previously had to monkeypatch _LAST_RUN
+    AND _EVALS_DIR separately. After this refactor, monkeypatching _EVALS_DIR
+    alone is sufficient for BOTH the shared and per-iter output paths.
+    """
+    monkeypatch.setattr(run_evals, "_EVALS_DIR", tmp_path)
+    p_shared = run_evals._resolve_output_path("R-x", per_iter=False)
+    p_iter = run_evals._resolve_output_path("R-x", per_iter=True)
+    assert p_shared == tmp_path / "last_run.json"
+    assert p_iter == tmp_path / ".calibrate-state" / "last_run-R-x.json"
