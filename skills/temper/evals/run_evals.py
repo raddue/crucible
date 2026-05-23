@@ -383,19 +383,45 @@ def _aggregate_from_outputs(
 
 
 def _parse_result_file(path: Path) -> str | None:
-    """Read a per-trial result file and return reviewer output (or None on sentinel).
+    """Parse <NNN>-result.md. Returns reviewer markdown body or None on ERROR.
 
-    Task 6: minimal impl — Task 7 lands the structural parser with whitespace
-    handling, collision detection, etc. For now: any body starting with
-    `DISPATCH_STATUS:` (e.g. ERROR/EMPTY) is treated as a failed trial.
+    Task 7 (S-1, I-T6): structural first-line prefix match. The body may
+    contain literal `DISPATCH_STATUS:` substrings without collision because
+    only line 0 is inspected for the sentinel.
+
+    Layout assumed:
+        DISPATCH_STATUS: <STATE>[: detail]
+        <blank line>
+        <reviewer markdown body...>
+
+    Return value:
+      - None when the sentinel is ERROR (or malformed / missing).
+      - None when the sentinel is OK but the body is empty / whitespace-only
+        (collect skill SHOULD have promoted this to ERROR upstream — defense
+        in depth).
+      - The body string when the sentinel is OK and the body is non-empty.
     """
     try:
-        body = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return None
-    if not body.strip():
+    lines = text.split("\n", 2)  # split at most twice: first, blank, rest
+    if not lines:
         return None
-    if body.lstrip().startswith("DISPATCH_STATUS:"):
+    first = lines[0]
+    if first.startswith("DISPATCH_STATUS: ERROR"):
+        return None
+    if not first.startswith("DISPATCH_STATUS: OK"):
+        # Malformed sentinel — treat as None (no claim about content)
+        return None
+    # Body starts after the blank line (lines[2] if present).
+    # S1: empty body is treated as None (not empty string) — collect skill
+    # should have promoted empty-body to DISPATCH_STATUS: ERROR: empty-body
+    # before this point.
+    if len(lines) < 3:
+        return None
+    body = lines[2]
+    if body.strip() == "":
         return None
     return body
 

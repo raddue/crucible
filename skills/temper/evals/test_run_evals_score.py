@@ -158,3 +158,59 @@ def test_aggregate_from_outputs_has_no_implicit_closure_leak():
         f"S2 R9: closure-dep mismatch: signature has {kwargs}, expected {expected}. "
         f"Update _aggregate_from_outputs signature OR re-run Step 0 inspection."
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 7: structural DISPATCH_STATUS sentinel parser (S-1, I-T6)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_result_file_ok(tmp_path):
+    """M-2: use tmp_path, not hardcoded /tmp/, to avoid parallel-test collisions."""
+    from skills.temper.evals.run_evals import _parse_result_file
+    p = tmp_path / "test-result-ok.md"
+    p.write_text("DISPATCH_STATUS: OK\n\n### Code Review\nVerdict: Clean\n")
+    out = _parse_result_file(p)
+    assert out is not None
+    assert "Code Review" in out
+    assert "DISPATCH_STATUS" not in out  # stripped from body
+
+
+def test_parse_result_file_error_returns_none(tmp_path):
+    from skills.temper.evals.run_evals import _parse_result_file
+    p = tmp_path / "test-result-err.md"
+    p.write_text("DISPATCH_STATUS: ERROR: timeout\n\n")
+    out = _parse_result_file(p)
+    assert out is None
+
+
+def test_parse_result_file_collision_safety(tmp_path):
+    """I-T6: reviewer body containing literal 'DISPATCH_STATUS:' must not flip parse."""
+    from skills.temper.evals.run_evals import _parse_result_file
+    p = tmp_path / "test-result-collision.md"
+    p.write_text(
+        "DISPATCH_STATUS: OK\n\n"
+        "### Code Review\nThe code mentions DISPATCH_STATUS: ERROR but that's a quote.\n"
+    )
+    out = _parse_result_file(p)
+    assert out is not None
+    assert "DISPATCH_STATUS: ERROR" in out  # body preserved
+
+
+def test_parse_result_file_empty_body_returns_none(tmp_path):
+    """S1: `OK\\n\\n` with empty body returns None, not empty string."""
+    from skills.temper.evals.run_evals import _parse_result_file
+    p = tmp_path / "test-result-empty.md"
+    p.write_text("DISPATCH_STATUS: OK\n\n")
+    out = _parse_result_file(p)
+    assert out is None
+
+
+def test_parse_result_file_whitespace_only_body_returns_none(tmp_path):
+    """S1 R10: `OK` with whitespace-only body returns None — strip-check
+    semantics align with SKILL.md Step 7's empty-body promotion gate."""
+    from skills.temper.evals.run_evals import _parse_result_file
+    p = tmp_path / "test-result-ws.md"
+    p.write_text("DISPATCH_STATUS: OK\n\n   \n\t\n")
+    out = _parse_result_file(p)
+    assert out is None
