@@ -426,15 +426,59 @@ def _parse_result_file(path: Path) -> str | None:
     return body
 
 
-# S-R4-1: stubs replaced in Task 8 with real impl. Between Task 6 and Task 8
-# commits, --write-baseline / --compare-baseline raise loudly rather than
-# NameError-ing deep in score().
+# Task 8: real impls. SP-1 baseline header carries template_sha so
+# --compare-baseline can detect dispatch-template drift since baseline.
 def _write_baseline(payload: dict, current_template_sha: str) -> None:
-    raise NotImplementedError("Baseline writing implemented in Task 8")
+    """SP-1: baseline header carries template_sha."""
+    baseline = dict(payload)
+    baseline["template_sha"] = current_template_sha
+    _BASELINE_PATH.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
 
 
 def _compare_baseline(payload: dict, current_template_sha: str, *, incomplete: bool) -> int:
-    raise NotImplementedError("Baseline comparison implemented in Task 8")
+    """Return 1 on regression, 2 if refused (incomplete / missing baseline), 0 if clean.
+
+    M3 R6 caveat — fixture-set drift: this function compares verdicts by fixture id.
+    If a fixture is DELETED from evals.json post-baseline, that fixture appears in
+    `base_verdicts` but is absent from `current_verdicts.get(fid)` → resolves to
+    `None`, which does not match the `("FAIL", "N/A")` regression set, so the
+    deletion is currently SILENT. Conversely, fixtures ADDED post-baseline are
+    not compared at all (no baseline entry). Operators changing the fixture set
+    must re-baseline explicitly (`--write-baseline`) — otherwise comparisons
+    drift apples-to-oranges without warning. Future work: emit an explicit
+    `[warn] fixture-set drift` line when `set(base_verdicts) != set(current_verdicts)`.
+    """
+    if incomplete:
+        print(
+            "[fatal] --compare-baseline refuses to compare an incomplete run "
+            "(last_run.json header has incomplete: true). Exit 2.",
+            file=sys.stderr,
+        )
+        return 2
+    if not _BASELINE_PATH.exists():
+        print(f"[fatal] no baseline at {_BASELINE_PATH}", file=sys.stderr)
+        return 2
+    baseline = json.loads(_BASELINE_PATH.read_text(encoding="utf-8"))
+    if baseline.get("template_sha") != current_template_sha:
+        print(
+            f"[warn] template_sha drift since baseline (baseline: "
+            f"{baseline.get('template_sha', '?')[:12]}…, current: "
+            f"{current_template_sha[:12]}…); verdict comparison may be apples-to-oranges",
+            file=sys.stderr,
+        )
+    # Per-fixture verdict comparison
+    current_verdicts = {f["id"]: f["verdict"] for f in payload["fixtures"]}
+    base_verdicts = {f["id"]: f["verdict"] for f in baseline.get("fixtures", [])}
+    regressions = []
+    for fid, base_v in base_verdicts.items():
+        cur_v = current_verdicts.get(fid)
+        if base_v == "PASS" and cur_v in ("FAIL", "N/A"):
+            regressions.append((fid, base_v, cur_v))
+    if regressions:
+        for fid, b, c in regressions:
+            print(f"[regression] {fid}: baseline {b} → current {c}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def score(

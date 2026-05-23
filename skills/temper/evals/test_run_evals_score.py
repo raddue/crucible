@@ -13,8 +13,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from skills.temper.evals import run_evals
 from skills.temper.evals.run_evals import score, stage
 
@@ -85,15 +83,71 @@ def test_score_no_stage_manifest_returns_fatal(monkeypatch, tmp_path):
     assert rc == 2
 
 
-def test_score_baseline_stubs_raise_not_implemented(monkeypatch, tmp_path):
-    """S-R4-1: --write-baseline / --compare-baseline raise NotImplementedError
-    cleanly between Task 6 and Task 8 commits."""
-    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-stub")
+def test_write_baseline_produces_matching_baseline_json(monkeypatch, tmp_path):
+    """Task 8 AC-10b: --write-baseline emits baseline.json mirroring last_run
+    verdicts + a template_sha header (SP-1)."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-base")
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
-    with pytest.raises(NotImplementedError, match="Task 8"):
-        score("R-stub", write_baseline=True)
-    with pytest.raises(NotImplementedError, match="Task 8"):
-        score("R-stub", compare_baseline=True)
+    score("R-base", write_baseline=True)
+    # F-1: read via module attributes (monkeypatched to tmp_path) — NOT via
+    # hardcoded skills/temper/evals/ paths.
+    baseline = json.loads(run_evals._BASELINE_PATH.read_text())
+    last_run = json.loads(run_evals._LAST_RUN.read_text())
+    # Header carries template_sha (SP-1)
+    assert "template_sha" in baseline
+    # Verdicts match
+    assert [f["verdict"] for f in baseline["fixtures"]] == [
+        f["verdict"] for f in last_run["fixtures"]
+    ]
+
+
+def test_compare_baseline_exits_nonzero_on_regression(monkeypatch, tmp_path):
+    """Task 8 AC-10c: --compare-baseline returns non-zero when current verdicts
+    regress relative to baseline."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-cmp")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-cmp", write_baseline=True)
+    # F-1: mutate via module-attribute path (monkeypatched to tmp_path)
+    baseline = json.loads(run_evals._BASELINE_PATH.read_text())
+    if baseline["fixtures"]:
+        baseline["fixtures"][0]["verdict"] = "PASS"  # claim baseline was PASS
+    run_evals._BASELINE_PATH.write_text(json.dumps(baseline))
+    # New run with all-N/A (no results) — compare should detect regression
+    rc = score("R-cmp", compare_baseline=True)
+    # rc==1 iff regression; rc==2 if incomplete-blocked; either signals nonzero
+    assert rc != 0
+
+
+def test_compare_baseline_refuses_incomplete(monkeypatch, tmp_path):
+    """AC-13 + Override Flags: --compare-baseline refuses to compare incomplete."""
+    _seed_dispatch_dir(monkeypatch, tmp_path, "R-incomplete")
+    # Skip .collect-status
+    score("R-incomplete", allow_incomplete=True)  # writes incomplete: true
+    rc = score("R-incomplete", compare_baseline=True, allow_incomplete=True)
+    assert rc == 2  # explicit refusal exit
+
+
+def test_compare_baseline_warns_on_template_drift(monkeypatch, tmp_path, capsys):
+    """SP2 R8: when current template_sha differs from baseline.template_sha,
+    --compare-baseline emits a `[warn]` line to stderr (apples-to-oranges narration).
+
+    Asserts the warn-not-refuse asymmetry documented in Task 8's M6 R6 note:
+    template_sha drift is informational; the comparison still proceeds.
+    """
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-drift")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-drift", write_baseline=True)
+    # Mutate baseline.template_sha to a different value to simulate drift
+    baseline = json.loads(run_evals._BASELINE_PATH.read_text())
+    baseline["template_sha"] = "0" * 64  # bogus sha, certain to differ from current
+    run_evals._BASELINE_PATH.write_text(json.dumps(baseline))
+    capsys.readouterr()  # clear prior output
+    score("R-drift", compare_baseline=True)
+    captured = capsys.readouterr()
+    assert "[warn]" in captured.err
+    assert "template_sha drift" in captured.err, (
+        "SP2 R8: --compare-baseline must emit a template_sha drift warning"
+    )
 
 
 def test_aggregate_from_outputs_matches_run_fixture_legacy(monkeypatch):
