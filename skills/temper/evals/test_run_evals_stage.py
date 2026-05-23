@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from skills.temper.evals.run_evals import stage
+from skills.temper.evals.run_evals import _validate_rendered_prompt, stage
 
 
 def test_stage_produces_dispatch_files(monkeypatch, tmp_path):
@@ -142,3 +142,37 @@ def test_legacy_main_runs_without_attribute_error(tmp_path, monkeypatch):
     assert "AttributeError" not in result.stderr, (
         f"_legacy_main attribute rename incomplete: {result.stderr}"
     )
+
+
+def test_rendered_prompt_validator_rejects_small():
+    with pytest.raises(ValueError, match="length"):
+        _validate_rendered_prompt("tiny")
+
+
+def test_rendered_prompt_validator_rejects_unsubstituted_placeholder():
+    # >200 bytes so length-floor passes, but contains a placeholder marker
+    body = "x" * 300 + " {DESCRIPTION} " + "y" * 100
+    with pytest.raises(ValueError, match="placeholder"):
+        _validate_rendered_prompt(body)
+
+
+def test_rendered_prompt_validator_accepts_clean():
+    clean = "a" * 500
+    assert "{" not in clean
+    _validate_rendered_prompt(clean)  # should not raise
+
+
+def test_stage_rejects_template_with_unsubstituted_placeholder(monkeypatch, tmp_path):
+    """I-T9 integration: stage() must fail-fast if the template after substitution
+    still contains `{` — even though fixture body legitimately contains `{`.
+    Validates that validation scope is template-only (not full rendered prompt)."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("USER", "tester")
+    bad_template_path = tmp_path / "bad-template.md"
+    bad_template_path.write_text(
+        "# Reviewer\n" + "x" * 250 + " {UNSUBSTITUTED_VAR} more text\n"
+    )
+    from skills.temper.evals import run_evals
+    monkeypatch.setattr(run_evals, "_REVIEWER_PROMPT", bad_template_path)
+    with pytest.raises(ValueError, match="placeholder"):
+        run_evals.stage("R-bad")

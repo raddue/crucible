@@ -66,13 +66,20 @@ def _synth_plan_reference(fixture: dict) -> str:
 
 
 def _render_prompt(template: str, fixture: dict) -> str:
-    """Substitute placeholders and append fixture content."""
+    """Substitute placeholders, validate (template portion only), then append
+    fixture content.
+
+    I-T9 (M-4): validation applies to the substituted template — NOT the
+    appended fixture body. Fixture diffs legitimately contain `{` (f-strings,
+    dict literals); validating after concat would false-positive.
+    """
     rendered = (
         template.replace("{DESCRIPTION}", f"Synthetic lens eval fixture: {fixture['id']}")
         .replace("{PLAN_REFERENCE}", _synth_plan_reference(fixture))
         .replace("{BASE_SHA}", "FIXTURE_BASE")
         .replace("{HEAD_SHA}", "FIXTURE_HEAD")
     )
+    _validate_rendered_prompt(rendered)  # I-T9: validate BEFORE appending fixture body
     return rendered + "\n\n" + _FIXTURE_CONTENT_HEADER + fixture["prompt"]
 
 
@@ -118,8 +125,23 @@ _DISPATCH_HEADER_TEMPLATE = """\
 
 
 def _validate_rendered_prompt(rendered: str) -> None:
-    """I-T9 stub — proper impl in Task 5."""
-    pass
+    """I-T9 (M-4): length-floor + placeholder-residual check.
+
+    Template-evolution-tolerant. Catches catastrophically-empty renders
+    and unsubstituted placeholders without binding to specific placeholder names.
+    """
+    if len(rendered) <= 200:
+        raise ValueError(
+            f"rendered prompt has length {len(rendered)} ≤ 200 bytes "
+            f"(I-T9 length-floor): suspect catastrophic-empty render"
+        )
+    if "{" in rendered:
+        idx = rendered.index("{")
+        context = rendered[max(0, idx - 20):idx + 40]
+        raise ValueError(
+            f"rendered prompt contains unsubstituted `{{` placeholder marker "
+            f"at offset {idx} (I-T9 placeholder-residual): {context!r}"
+        )
 
 
 def stage(
@@ -188,7 +210,7 @@ def stage(
                 seq=seq, ts=ts, dispatch_dir=dispatch_dir
             )
             rendered = header + body
-            _validate_rendered_prompt(rendered)  # I-T9 — see Task 5
+            # I-T9 validation runs inside _render_prompt on the template-only portion
             (dispatch_dir / dispatch_file).write_text(rendered, encoding="utf-8")
             trials.append({
                 "seq": seq,
