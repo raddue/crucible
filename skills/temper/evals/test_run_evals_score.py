@@ -244,3 +244,25 @@ def test_parse_result_file_whitespace_only_body_returns_none(tmp_path):
     p.write_text("DISPATCH_STATUS: OK\n\n   \n\t\n")
     out = _parse_result_file(p)
     assert out is None
+
+
+def test_ac3_smoke_coverage_delegated_to_legacy_modes():
+    """AC-3: `--mock-reviewer` end-to-end smoke.
+
+    Per #297 plan Task 10, the AC-3 smoke is delegated to
+    `test_legacy_modes.py::test_legacy_mock_reviewer_matches_snapshot`,
+    which is strictly stronger than the original tautological "claude not in
+    stderr" smoke: it asserts per-fixture verdict equality against the
+    committed pre-#297 snapshot. This marker test enforces that the
+    delegation target still exists.
+    """
+    from pathlib import Path
+    legacy_modes = Path(__file__).parent / "test_legacy_modes.py"
+    assert legacy_modes.exists(), (
+        "AC-3 delegation target missing: test_legacy_modes.py was deleted "
+        "or renamed. Either restore it or update AC-3 coverage here."
+    )
+    contents = legacy_modes.read_text()
+    assert "def test_legacy_mock_reviewer_matches_snapshot" in contents, (
+        "AC-3 delegation target test function was renamed; update marker test."
+    )
