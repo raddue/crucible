@@ -33,7 +33,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _EVALS_DIR = Path(__file__).resolve().parent
 _EVALS_JSON = _EVALS_DIR / "evals.json"
 _REVIEWER_PROMPT = _REPO_ROOT / "skills" / "temper" / "temper-reviewer.md"
-_LAST_RUN = _EVALS_DIR / "last_run.json"
+_LAST_RUN = (
+    Path(os.environ["TEMPER_LAST_RUN_OVERRIDE"])
+    if os.environ.get("TEMPER_LAST_RUN_OVERRIDE")
+    else _EVALS_DIR / "last_run.json"
+)
 
 _FIXTURE_CONTENT_HEADER = (
     "## Fixture content (synthetic — review this in lieu of running git commands):\n\n"
@@ -369,17 +373,71 @@ def _render_summary(fixture_results: list[dict]) -> str:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run temper lens evals.")
-    p.add_argument("--fixture", help="run only one fixture by id")
+    sub = p.add_subparsers(dest="cmd")
+
+    # stage
+    sp_stage = sub.add_parser("stage", help="Render fixtures × trials to dispatch files")
+    sp_stage.add_argument("run_id")
+    sp_stage.add_argument("--force", action="store_true")
+    sp_stage.add_argument("--source", choices=["synthetic", "real-pr", "all"], default="all")
+    sp_stage.add_argument("--fixture", default=None)
+    sp_stage.add_argument("--trials-override", type=int, default=None)
+    sp_stage.add_argument("--timeout", type=int, default=300)
+
+    # score — Task 6
+    sp_score = sub.add_parser("score", help="Aggregate results + write last_run.json")
+    sp_score.add_argument("run_id")
+    sp_score.add_argument("--write-baseline", action="store_true")
+    sp_score.add_argument("--compare-baseline", action="store_true")
+    sp_score.add_argument("--force-rescore", action="store_true")
+    sp_score.add_argument("--allow-incomplete", action="store_true")
+    # F-R4-1: `--per-iter` argparse declaration is intentionally NOT added here.
+    # Both the argparse declaration AND the main() wiring land atomically in Task 13
+    # (S-1 R5: per-iter wiring lands BEFORE the calibrate skill) to eliminate a
+    # silent-drop window where the flag would be parseable but unwired (silently
+    # clobbering shared last_run.json).
+
+    # Legacy mock/replay paths (back-compat, no subcommand)
+    # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.
+    p.add_argument("--legacy-fixture", dest="legacy_fixture", help="(legacy) run one fixture by id (with mock/replay)")
     p.add_argument("--mock-reviewer", help="dir containing <fixture-id>.txt canned outputs")
     p.add_argument("--replay", help="path to last_run.json to re-evaluate")
-    p.add_argument("--trials-override", type=int, help="override replicate_rule.trials")
-    p.add_argument("--timeout", type=int, default=120, help="per-dispatch timeout in seconds")
+    # S-3 R5: dest matches the flag's full name (`legacy_trials_override`) to
+    # eliminate the prior `legacy_trials` vs `args.trials_override` naming confusion.
+    p.add_argument("--legacy-trials-override", dest="legacy_trials_override", type=int, help="(legacy)")
+    p.add_argument("--legacy-timeout", dest="legacy_timeout", type=int, default=120, help="(legacy)")
+
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
 
+    if args.cmd == "stage":
+        try:
+            stage(
+                args.run_id,
+                force=args.force,
+                source=args.source,
+                fixture=args.fixture,
+                trials_override=args.trials_override,
+                timeout=args.timeout,
+            )
+            return 0
+        except (FileExistsError, ValueError) as e:
+            print(f"[fatal] {e}", file=sys.stderr)
+            return 2
+
+    if args.cmd == "score":
+        # Task 6 implements `score()`; until then, surface a clear error.
+        print("[fatal] `score` subcommand not yet implemented (Task 6)", file=sys.stderr)
+        return 2
+
+    # Legacy mock/replay path — preserved unchanged
+    return _legacy_main(args)
+
+
+def _legacy_main(args: argparse.Namespace) -> int:
     # Load fixtures
     try:
         evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
@@ -388,10 +446,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     fixtures = evals_data.get("evals", [])
-    if args.fixture:
-        fixtures = [f for f in fixtures if f["id"] == args.fixture]
+    if args.legacy_fixture:
+        fixtures = [f for f in fixtures if f["id"] == args.legacy_fixture]
         if not fixtures:
-            print(f"[fatal] no fixture with id {args.fixture!r}", file=sys.stderr)
+            print(f"[fatal] no fixture with id {args.legacy_fixture!r}", file=sys.stderr)
             return 2
 
     # Resolve mode
@@ -428,8 +486,8 @@ def main(argv: list[str] | None = None) -> int:
             template=template,
             mock_dir=mock_dir,
             replay_outputs=replay_outputs,
-            trials_override=args.trials_override,
-            timeout=args.timeout,
+            trials_override=args.legacy_trials_override,
+            timeout=args.legacy_timeout,
         )
         fixture_results.append(result)
 
