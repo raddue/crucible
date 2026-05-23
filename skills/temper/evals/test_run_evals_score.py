@@ -150,42 +150,18 @@ def test_compare_baseline_warns_on_template_drift(monkeypatch, tmp_path, capsys)
     )
 
 
-def test_aggregate_from_outputs_matches_run_fixture_legacy(monkeypatch):
-    """SP2 / F-2: _aggregate_from_outputs(fix, outs) == _run_fixture(fix, replay_outputs=outs).
+def test_dispatch_live_symbol_remains_deleted():
+    """S-FE-2 R3: post-#297, `_dispatch_live` must not exist as a module attribute.
 
-    F-2: To guard against silent regression where some future refactor causes
-    replay_outputs=[None,...] to trigger live dispatch, we monkeypatch
-    subprocess.run to RAISE — any subprocess call during this test fails loud.
+    Guards against accidental re-introduction (e.g. a future revert that doesn't
+    cleanly remove the function, or a copy-paste from git history that re-adds it).
+    If you genuinely need a subprocess-based dispatcher again, file a new issue
+    and re-design the legacy boundary — do NOT silently re-add `_dispatch_live`.
     """
-    import subprocess
-
-    from skills.temper.evals.run_evals import _aggregate_from_outputs, _run_fixture
-
-    def _no_subprocess(*a, **kw):
-        raise AssertionError(
-            "F-2 violation: _run_fixture(replay_outputs=[None]*n) attempted a subprocess call; "
-            "the replay branch must not invoke live dispatch."
-        )
-    monkeypatch.setattr(subprocess, "run", _no_subprocess)
-
-    evals = json.loads(Path("skills/temper/evals/evals.json").read_text())
-    fix = evals["evals"][0]
-    rule = fix.get("replicate_rule", {"trials": 1, "threshold": 1})
-    n_trials = rule.get("trials", 1)
-    threshold = rule.get("threshold", 1)
-    outs = [None] * n_trials
-    legacy_result = _run_fixture(
-        fix,
-        template=None,
-        mock_dir=None,
-        replay_outputs=outs,
-        trials_override=None,
-        timeout=0,
-    )
-    extracted_result = _aggregate_from_outputs(
-        fix, outs, n_trials=n_trials, threshold=threshold
-    )
-    assert legacy_result == extracted_result
+    import pytest
+    from skills.temper.evals import run_evals
+    with pytest.raises(AttributeError):
+        run_evals._dispatch_live  # noqa: B018  (intentional attribute probe)
 
 
 def test_aggregate_from_outputs_has_no_implicit_closure_leak():

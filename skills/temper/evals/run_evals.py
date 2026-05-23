@@ -4,8 +4,8 @@ Dispatches the temper-reviewer prompt against each fixture in
 `evals.json`, collects reviewer outputs across N replicate trials, and
 evaluates the fixture's structured expectations via `lens_runner`.
 
-Supports three execution modes:
-  - live: subprocess `claude -p <prompt>` per trial (default)
+Supports two execution modes (live dispatch removed in #297 —
+use `stage` + `/temper-eval-collect` + `score` subcommands instead):
   - mock: read canned outputs from `--mock-reviewer <dir>/<id>.txt`
   - replay: re-evaluate cached outputs from a prior `last_run.json`
 
@@ -20,7 +20,6 @@ import datetime as _dt
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -86,31 +85,6 @@ def _render_prompt(template: str, fixture: dict) -> str:
     )
     _validate_rendered_prompt(rendered)  # I-T9: validate BEFORE appending fixture body
     return rendered + "\n\n" + _FIXTURE_CONTENT_HEADER + fixture["prompt"]
-
-
-def _dispatch_live(prompt: str, fixture_id: str, trial: int, timeout: int) -> str | None:
-    """Live-dispatch via `claude -p`. Returns stdout, or None on failure."""
-    try:
-        result = subprocess.run(
-            ["claude", "-p", prompt],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        print(f"  [dispatch] timeout on {fixture_id} trial {trial}", file=sys.stderr)
-        return None
-    except FileNotFoundError:
-        print("  [dispatch] `claude` CLI not found on PATH", file=sys.stderr)
-        return None
-    if result.returncode != 0:
-        print(
-            f"  [dispatch] non-zero exit {result.returncode} on {fixture_id} trial {trial}: "
-            f"{result.stderr[:200]}",
-            file=sys.stderr,
-        )
-        return None
-    return result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -266,11 +240,22 @@ def _resolve_output(
     fixture: dict,
     trial: int,
     *,
-    template: str | None,
+    template: str | None,  # noqa: ARG001 — kept for legacy callers post-#297
     mock_dir: Path | None,
     replay_outputs: list[str] | None,
-    timeout: int,
+    timeout: int,  # noqa: ARG001 — kept for legacy callers post-#297
 ) -> str | None:
+    """Resolve a per-trial reviewer output from mock-dir or replay cache.
+
+    Post-#297: subprocess-based live dispatch is removed. Live runs now go
+    through the `stage` subcommand + `/temper-eval-collect` skill + `score`
+    subcommand. When neither `replay_outputs` nor `mock_dir` applies this
+    returns `None`; legacy callers should error out before calling.
+
+    `template` and `timeout` are kept in the signature as vestigial kwargs
+    so legacy `_run_fixture` callers don't need a parallel-edit; they are
+    intentionally ignored.
+    """
     if replay_outputs is not None:
         if trial - 1 < len(replay_outputs):
             return replay_outputs[trial - 1]
@@ -282,9 +267,7 @@ def _resolve_output(
         except OSError as e:
             print(f"  [mock] cannot read {path}: {e}", file=sys.stderr)
             return None
-    assert template is not None
-    prompt = _render_prompt(template, fixture)
-    return _dispatch_live(prompt, fixture["id"], trial, timeout)
+    return None
 
 
 def _run_fixture(
@@ -784,11 +767,16 @@ def _legacy_main(args: argparse.Namespace) -> int:
             print(f"[fatal] mock-reviewer dir not found: {mock_dir}", file=sys.stderr)
             return 2
     else:
-        try:
-            template = _REVIEWER_PROMPT.read_text(encoding="utf-8")
-        except OSError as e:
-            print(f"[fatal] cannot read reviewer template: {e}", file=sys.stderr)
-            return 2
+        # Post-#297: subprocess-based live dispatch is removed. The legacy
+        # entry point only supports `--mock-reviewer` or `--replay`. Live
+        # runs go through `stage` + `/temper-eval-collect` + `score`.
+        print(
+            "[fatal] legacy entry point requires --mock-reviewer or --replay; "
+            "live dispatch was removed in #297 — use the `stage` subcommand "
+            "+ /temper-eval-collect + `score` for live runs.",
+            file=sys.stderr,
+        )
+        return 2
 
     # Run each fixture
     fixture_results: list[dict] = []
