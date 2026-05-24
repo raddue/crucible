@@ -97,7 +97,13 @@ On successful score, write `skills/temper/evals/.calibrate-state/<prefix>-<i>-co
 
 ### Step 4: Final consolidation (M-3)
 
-After ALL k iterations succeed (every iteration's `.calibrate-state/<prefix>-<i>-complete` sentinel is present), ALWAYS copy `skills/temper/evals/.calibrate-state/last_run-<prefix>-<k>.json` to `skills/temper/evals/last_run.json` (the shared output the `--compare-baseline` workflow expects). This is unconditional on success — not optional.
+After ALL k iterations succeed (every iteration's `.calibrate-state/<prefix>-<i>-complete` sentinel is present), copy `skills/temper/evals/.calibrate-state/last_run-<prefix>-<k>.json` to `skills/temper/evals/last_run.json` (the shared output the `--compare-baseline` workflow expects). This is unconditional on success — not optional.
+
+**Pre-copy verification (mirrors the sentinel-pair discipline in Step 3b):**
+1. Verify `last_run-<prefix>-<k>.json` exists. If absent, refuse to clobber `last_run.json` and exit with the fatal error `"iteration k completion sentinel present but per-iter file missing at <path>; refusing to consolidate."`
+2. Parse the file as JSON. If parsing fails, refuse with `"per-iter file at <path> is malformed JSON; refusing to consolidate."`
+3. Confirm the `run_id` field equals `<prefix>-<k>`. If it does not, refuse with `"per-iter file at <path> carries run_id=<actual>, expected <prefix>-<k>; refusing to consolidate."`
+4. Only after all three checks pass, perform the copy.
 
 If ANY iteration failed (sentinel missing, score returned 2, or stage refused), do NOTHING in this step: leave `last_run.json` untouched so the operator can inspect the per-iter files manually without a clobbered shared state.
 

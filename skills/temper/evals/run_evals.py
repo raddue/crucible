@@ -260,21 +260,16 @@ def _resolve_output(
     fixture: dict,
     trial: int,
     *,
-    template: str | None,  # noqa: ARG001 — kept for legacy callers post-#297
     mock_dir: Path | None,
     replay_outputs: list[str] | None,
-    timeout: int,  # noqa: ARG001 — kept for legacy callers post-#297
 ) -> str | None:
     """Resolve a per-trial reviewer output from mock-dir or replay cache.
 
     Post-#297: subprocess-based live dispatch is removed. Live runs now go
     through the `stage` subcommand + `/temper-eval-collect` skill + `score`
     subcommand. When neither `replay_outputs` nor `mock_dir` applies this
-    returns `None`; legacy callers should error out before calling.
-
-    `template` and `timeout` are kept in the signature as vestigial kwargs
-    so legacy `_run_fixture` callers don't need a parallel-edit; they are
-    intentionally ignored.
+    returns `None`; legacy callers error out in `_legacy_main` before reaching
+    here.
     """
     if replay_outputs is not None:
         if trial - 1 < len(replay_outputs):
@@ -293,11 +288,9 @@ def _resolve_output(
 def _run_fixture(
     fixture: dict,
     *,
-    template: str | None,
     mock_dir: Path | None,
     replay_outputs: list[str] | None,
     trials_override: int | None,
-    timeout: int,
 ) -> dict:
     rule = fixture.get("replicate_rule", {"trials": 1, "threshold": 1})
     n_trials = trials_override if trials_override is not None else rule.get("trials", 1)
@@ -310,10 +303,8 @@ def _run_fixture(
         out = _resolve_output(
             fixture,
             trial,
-            template=template,
             mock_dir=mock_dir,
             replay_outputs=replay_outputs,
-            timeout=timeout,
         )
         reviewer_outputs.append(out)
 
@@ -764,7 +755,6 @@ def _legacy_main(args: argparse.Namespace) -> int:
             return 2
 
     # Resolve mode
-    template: str | None = None
     mock_dir: Path | None = None
     replay_by_fixture: dict[str, list[str]] = {}
 
@@ -799,11 +789,9 @@ def _legacy_main(args: argparse.Namespace) -> int:
         replay_outputs = replay_by_fixture.get(fixture["id"]) if args.replay else None
         result = _run_fixture(
             fixture,
-            template=template,
             mock_dir=mock_dir,
             replay_outputs=replay_outputs,
             trials_override=args.legacy_trials_override,
-            timeout=args.legacy_timeout,
         )
         fixture_results.append(result)
 

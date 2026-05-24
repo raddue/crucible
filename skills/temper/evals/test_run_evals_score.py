@@ -168,20 +168,22 @@ def test_dispatch_live_symbol_remains_deleted():
 
 
 def test_aggregate_from_outputs_has_no_implicit_closure_leak():
-    """S2 R8/R9: closure-dep enumeration is read from /tmp/_aggregate_closure_deps.txt
-    (populated by Task 6 Step 0's inspection). The helper's kwarg signature
-    must match exactly — catches operator forgetting to mirror Step 0 findings.
+    """S2 R8/R9: enumerate the kwargs `_aggregate_from_outputs` must carry
+    explicitly so that closure-leak regressions surface as a signature mismatch
+    rather than a NameError at first call.
+
+    The canonical closure-dep set was captured by Task 6 Step 0 inspection and is
+    inlined here so the test is reproducible on any fresh clone (the prior
+    /tmp/_aggregate_closure_deps.txt artifact did not survive `/tmp` cleanup
+    or CI).
     """
     import inspect
 
     from skills.temper.evals.run_evals import _aggregate_from_outputs
 
-    closure_deps_file = Path("/tmp/_aggregate_closure_deps.txt")
-    assert closure_deps_file.exists(), (
-        "S2 R9: closure-deps file missing — run Task 6 Step 0 inspection first "
-        "and write findings to /tmp/_aggregate_closure_deps.txt."
-    )
-    expected = set(closure_deps_file.read_text().split())
+    # Canonical closure-dep set (Task 6 Step 0 inspection output, inlined for
+    # reproducibility — see _aggregate_from_outputs docstring).
+    expected = {"n_trials", "threshold"}
     sig = inspect.signature(_aggregate_from_outputs)
     params = set(sig.parameters)
     assert "fix" in params
@@ -189,7 +191,7 @@ def test_aggregate_from_outputs_has_no_implicit_closure_leak():
     kwargs = params - {"fix", "reviewer_outputs"}
     assert kwargs == expected, (
         f"S2 R9: closure-dep mismatch: signature has {kwargs}, expected {expected}. "
-        f"Update _aggregate_from_outputs signature OR re-run Step 0 inspection."
+        f"Update _aggregate_from_outputs signature OR update the expected set here."
     )
 
 
