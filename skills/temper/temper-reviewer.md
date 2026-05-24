@@ -171,7 +171,7 @@ git diff {BASE_SHA}..{HEAD_SHA}
 >
 > **Severity:** exploitable cross-tenant reach = Critical. Defensible-but-undocumented single-layer enforcement = Important. Admin/BYPASSRLS handles in tenancy-acceptance tests = Important (the test is plumbing-only, not policy coverage). Bands are floors, not ceilings — promote per actual impact.
 >
-> **Finding format:** emit `Category: Tenancy` on its own line immediately after the `Severity:` line.
+> **Finding format:** emit `Category: Tenancy` on its own line immediately after the `Severity:` line. **Every Tenancy finding MUST also include a `File:` line in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (numeric line refs from the diff's `@@` hunks — function/class names, table names, or symbolic locators are INVALID). Findings without a numeric `File:` line are invalid and MUST be dropped before emit.** This mirrors the Lens File:line discipline (see Targeted Lenses preamble) and applies identically to Category findings.
 >
 > **Applies when:** the diff touches a tenancy surface as defined above **in code, not in documentation or prose**. If the diff only edits markdown / docstrings / prompt templates that mention tenancy concepts as text (without changing code that enforces tenancy), this discipline emits nothing. If no tenancy surface is present at all, this discipline emits nothing.
 
@@ -184,7 +184,7 @@ git diff {BASE_SHA}..{HEAD_SHA}
 >
 > **Severity:** re-`up()` failure on a migration already deployed to a production / non-rollback-able environment = Critical. CASCADE causing data loss beyond the migration's stated scope = Critical. Orphan FK columns or broken re-up in non-production paths = Important. CASCADE side-effects beyond stated scope (non-data-loss) = Important. Forward-only without documented intent = Minor. Bands are floors, not ceilings — promote per actual impact.
 >
-> **Finding format:** emit `Category: Rollback` on its own line immediately after the `Severity:` line.
+> **Finding format:** emit `Category: Rollback` on its own line immediately after the `Severity:` line. **Every Rollback finding MUST also include a `File:` line in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (numeric line refs from the diff's `@@` hunks — migration filenames without a line number, function names, or symbolic locators are INVALID). Findings without a numeric `File:` line are invalid and MUST be dropped before emit.** This mirrors the Lens File:line discipline (see Targeted Lenses preamble) and applies identically to Category findings.
 >
 > **Applies when:** the diff includes migration files. Otherwise emits nothing.
 
