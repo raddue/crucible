@@ -1,0 +1,24 @@
+### Code Review
+
+Verdict: changes-requested
+
+The new `on_order_paid` webhook handler verifies the per-tenant
+signature correctly, but the SQL UPDATE only filters by `order_id`.
+A forged callback with a valid signature for tenant-A whose payload
+references an order_id owned by tenant-B will silently mutate
+tenant-B's row. Tenancy fires at Important.
+
+### Issues
+
+1. on_order_paid UPDATE missing tenant_id filter — cross-tenant write
+   - File: src/webhooks.py:12-22
+   - Severity: Important
+   - Category: Tenancy
+   The UPDATE statement filters only on `order_id`, but `orders` is a
+   multi-tenant table (rows carry both `tenant_id` and `order_id`).
+   Signature verification establishes WHICH tenant the caller speaks
+   for, but does not bind the affected row to that tenant. Resolve
+   the tenant from the verified auth context and add
+   `AND tenant_id = :tenant_id` to the WHERE clause; otherwise a
+   correctly-signed callback from tenant-A can mutate any order whose
+   id is known/guessable across the whole table.

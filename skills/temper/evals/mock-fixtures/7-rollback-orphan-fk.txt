@@ -1,0 +1,25 @@
+### Code Review
+
+Verdict: changes-requested
+
+The `downgrade()` step drops `regions` with CASCADE (which drops the
+foreign-key constraint) but does NOT drop the `customers.region_id`
+column. After a downgrade, re-running `upgrade()` will fail at
+`op.add_column("customers", ...)` because the column still exists.
+Rollback fires at Important.
+
+### Issues
+
+1. downgrade() leaves customers.region_id orphaned — re-upgrade fails
+   - File: migrations/20260521_add_regions.py:28-31
+   - Severity: Important
+   - Category: Rollback
+   `op.execute("DROP TABLE regions CASCADE")` removes the parent
+   table and the FK constraint, but the child column
+   `customers.region_id` survives. A subsequent `upgrade()` then
+   collides on `add_column` with "column already exists". The
+   downgrade must also `op.drop_constraint("fk_customers_region",
+   "customers", type_="foreignkey")` and
+   `op.drop_column("customers", "region_id")` before dropping
+   `regions`. Reversibility of migrations is a hard requirement —
+   without it, prod rollback ladders break.

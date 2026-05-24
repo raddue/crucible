@@ -1,0 +1,15 @@
+{
+  "bootstrap_python": "3.12",
+  "verdicts": {
+    "1a": "PASS",
+    "1b": "PASS",
+    "2": "PASS",
+    "2-reattrib": "PASS",
+    "3": "PASS",
+    "4": "PASS",
+    "5": "PASS",
+    "6-tenancy-forged-callback": "PASS",
+    "7-rollback-orphan-fk": "PASS",
+    "8-defense-in-depth-not-slop": "PASS"
+  }
+}

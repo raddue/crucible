@@ -1,0 +1,20 @@
+### Correctness
+
+The duplication between `_clean_token` and `normalize_input` is real but
+re-attributed: this is a Correctness/Security issue, not a stylistic DRY
+nit. `util.normalize_input` enforces a `MAX_LEN` truncation on untrusted
+input; the new parser-side helper silently drops that bound.
+
+### Issues
+
+1. parser._clean_token bypasses util.MAX_LEN bound on untrusted input
+   - File: src/parser.py:15-22
+   - Severity: Important
+   - Lens: DRY (re-attributed)
+   `parse_record` now feeds untrusted HTTP-layer input through
+   `_clean_token`, which deliberately drops the `MAX_LEN` truncation
+   that `util.normalize_input` applies. Two near-identical helpers
+   exist (DRY), but the dangerous half of the divergence is that one
+   silently relaxes a bound the other enforces. Re-attributing this
+   from DRY → Correctness: either call `normalize_input` from
+   `parser.py` or apply the same `MAX_LEN` cap inline.
