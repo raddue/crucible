@@ -454,11 +454,16 @@ def test_score_write_is_atomic(monkeypatch, tmp_path):
 
 
 def test_compare_baseline_warns_on_added_fixture(monkeypatch, tmp_path, capsys):
-    """QG R2 Fix 3: fixtures added since baseline emit a [warn] but don't block."""
+    """QG R2 Fix 3 / QG R3 Fix 1: fixtures added to evals.json since baseline emit
+    a [warn] but don't block. Drift is now measured against the live evals.json keyset,
+    not the manifest payload — so a fixture present in evals.json but not in baseline
+    correctly appears as "added"."""
     d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-added")
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
     score("R-added", write_baseline=True)
-    # Mutate baseline: drop all-but-first fixture so the rest appear "added"
+    # Mutate baseline: drop all-but-first fixture so the remaining evals.json fixtures
+    # appear "added to evals.json since baseline". The manifest scope is unchanged —
+    # only the baseline is trimmed, so the drift is detected via the evals.json comparison.
     baseline = json.loads(run_evals._BASELINE_PATH.read_text())
     assert len(baseline["fixtures"]) >= 2, "need >=2 fixtures to simulate addition"
     baseline["fixtures"] = baseline["fixtures"][:1]
@@ -468,18 +473,21 @@ def test_compare_baseline_warns_on_added_fixture(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     # additions don't block: rc must not be the "removed fixtures" refusal (rc=2)
     assert rc != 2, f"additions should not block compare; got rc={rc}, stderr={captured.err!r}"
-    assert "added since baseline" in captured.err
+    assert "added to evals.json since baseline" in captured.err
 
 
 def test_compare_baseline_refuses_removed_fixture(monkeypatch, tmp_path, capsys):
-    """QG R2 Fix 3: fixtures removed from evals.json post-baseline block compare
-    with rc=2 unless --allow-fixture-drift is passed (prevents silent
-    regression-laundering by fixture deletion)."""
+    """QG R2 Fix 3 / QG R3 Fix 1: fixtures removed from evals.json post-baseline block
+    compare with rc=2 unless --allow-fixture-drift is passed (prevents silent
+    regression-laundering by fixture deletion). Drift is now measured against the live
+    evals.json keyset — adding a ghost to baseline simulates a fixture deleted from
+    evals.json."""
     d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-removed")
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
     score("R-removed", write_baseline=True)
-    # Mutate baseline to ADD a fake fixture id that doesn't exist in current run
-    # → simulates fixture being removed from evals.json since baseline was taken
+    # Mutate baseline to ADD a fake fixture id that doesn't exist in evals.json
+    # → simulates fixture being removed from evals.json since baseline was taken.
+    # The live evals.json does not contain "ghost-fixture-id", so drift is detected.
     baseline = json.loads(run_evals._BASELINE_PATH.read_text())
     baseline["fixtures"].append({"id": "ghost-fixture-id", "verdict": "PASS"})
     run_evals._BASELINE_PATH.write_text(json.dumps(baseline))
@@ -488,7 +496,7 @@ def test_compare_baseline_refuses_removed_fixture(monkeypatch, tmp_path, capsys)
     rc = score("R-removed", compare_baseline=True, allow_incomplete=False)
     captured = capsys.readouterr()
     assert rc == 2, f"removed fixtures should refuse without flag; got rc={rc}"
-    assert "removed from baseline" in captured.err
+    assert "removed from evals.json" in captured.err
     # With flag: proceeds (rc=0 since remaining fixtures show no regression)
     rc2 = score(
         "R-removed",
@@ -497,6 +505,43 @@ def test_compare_baseline_refuses_removed_fixture(monkeypatch, tmp_path, capsys)
         allow_fixture_drift=True,
     )
     assert rc2 == 0, f"--allow-fixture-drift should allow comparison; got rc={rc2}"
+
+
+def test_compare_baseline_allows_scoped_stage(monkeypatch, tmp_path, capsys):
+    """QG R3 regression: stage --fixture <subset> + score --compare-baseline must NOT
+    falsely report fixture drift; the manifest scope < evals.json scope is legitimate.
+
+    Setup: write baseline against a full run, then score a subset manifest.
+    The subset manifest has fewer fixtures than evals.json but that is NOT a deletion —
+    evals.json still contains all fixtures. Assert: no fixture-drift warning, no rc=2,
+    normal comparison on the subset.
+    """
+    # Seed a full dispatch dir and write baseline
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-scoped-full")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-scoped-full", write_baseline=True)
+
+    # Now stage a SCOPED run (only the first fixture id from the real evals.json)
+    evals_data = json.loads(run_evals._EVALS_JSON.read_text())
+    all_fixture_ids = [f["id"] for f in evals_data.get("evals", [])]
+    assert len(all_fixture_ids) >= 2, "need >=2 fixtures to test scoping"
+    subset_id = all_fixture_ids[0]
+
+    d2 = stage("R-scoped-sub", fixture=subset_id)
+    (d2 / ".collect-status").write_text("complete\nerrors: 0/0\n")
+
+    capsys.readouterr()
+    rc = score("R-scoped-sub", compare_baseline=True, allow_incomplete=False)
+    captured = capsys.readouterr()
+
+    # The subset manifest has fewer fixtures than evals.json, but evals.json still
+    # has all fixtures → no fixture-drift warning, no rc=2
+    assert "removed from evals.json" not in captured.err, (
+        f"R3 regression: false fixture-drift for scoped stage. stderr={captured.err!r}"
+    )
+    assert rc != 2, (
+        f"R3 regression: scoped stage score rc=2 (should be 0 or 1). stderr={captured.err!r}"
+    )
 
 
 def test_resolve_output_path_uses_current_evals_dir(monkeypatch, tmp_path):

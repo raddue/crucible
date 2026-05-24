@@ -92,8 +92,11 @@ def test_baseline_write_compare_uses_symmetric_template_sha_key(monkeypatch, tmp
     written = json.loads((tmp_path / "baseline.json").read_text())
     assert "template_sha" in written, "_write_baseline does not write template_sha"
     assert written["template_sha"] == "deadbeef" * 8
-    # Compare with the SAME sha should not trigger the drift warning
-    rc = _compare_baseline(payload, "deadbeef" * 8, incomplete=False)
+    # Compare with the SAME sha should not trigger the drift warning.
+    # evals_fixture_ids covers the fixture in payload so no drift is reported.
+    rc = _compare_baseline(
+        payload, "deadbeef" * 8, incomplete=False, evals_fixture_ids={"x"}
+    )
     assert rc == 0  # no regression, sha matches
 
 

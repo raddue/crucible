@@ -470,19 +470,16 @@ def _compare_baseline(
     current_template_sha: str,
     *,
     incomplete: bool,
+    evals_fixture_ids: set[str],
     allow_fixture_drift: bool = False,
 ) -> int:
     """Return 1 on regression, 2 if refused (incomplete / missing baseline), 0 if clean.
 
-    M3 R6 caveat — fixture-set drift: this function compares verdicts by fixture id.
-    If a fixture is DELETED from evals.json post-baseline, that fixture appears in
-    `base_verdicts` but is absent from `current_verdicts.get(fid)` → resolves to
-    `None`, which does not match the `("FAIL", "N/A")` regression set, so the
-    deletion is currently SILENT. Conversely, fixtures ADDED post-baseline are
-    not compared at all (no baseline entry). Operators changing the fixture set
-    must re-baseline explicitly (`--write-baseline`) — otherwise comparisons
-    drift apples-to-oranges without warning. Future work: emit an explicit
-    `[warn] fixture-set drift` line when `set(base_verdicts) != set(current_verdicts)`.
+    QG R3 Fix 1: fixture-set drift is now checked by the caller (score()) against
+    the live evals.json keyset (evals_fixture_ids), not against the possibly-filtered
+    manifest payload. This function receives the already-validated evals_fixture_ids
+    and operates on the intersection of baseline keys + current manifest scope, which
+    is the correct behavior — the drift gate has already passed at the outer scope.
     """
     if incomplete:
         print(
@@ -511,34 +508,10 @@ def _compare_baseline(
             f"{current_template_sha[:12]}…); verdict comparison may be apples-to-oranges",
             file=sys.stderr,
         )
-    # Per-fixture verdict comparison
+    # Per-fixture verdict comparison against the current manifest scope.
+    # Drift against evals.json has already been checked in score() before this call.
     current_verdicts = {f["id"]: f["verdict"] for f in payload["fixtures"]}
     base_verdicts = {f["id"]: f["verdict"] for f in baseline.get("fixtures", [])}
-
-    # QG R2 Fix 3: fixture-set drift detection. Closes the silent-deletion gap
-    # documented in the prior M3 R6 caveat — an operator can no longer "fix" a
-    # regression by deleting the fixture from evals.json without explicit opt-in.
-    base_ids = set(base_verdicts.keys())
-    current_ids = set(current_verdicts.keys())
-    removed = base_ids - current_ids
-    added = current_ids - base_ids
-    if removed:
-        print(
-            f"[warn] fixture-set drift: removed from baseline: {sorted(removed)}",
-            file=sys.stderr,
-        )
-    if added:
-        print(
-            f"[warn] fixture-set drift: added since baseline: {sorted(added)}",
-            file=sys.stderr,
-        )
-    if removed and not allow_fixture_drift:
-        print(
-            "[fatal] baseline regression-check refuses removed fixtures "
-            "without --allow-fixture-drift",
-            file=sys.stderr,
-        )
-        return 2
 
     regressions = []
     for fid, base_v in base_verdicts.items():
@@ -719,10 +692,45 @@ def score(
     if write_baseline:
         _write_baseline(payload, current_template_sha)
     if compare_baseline:
+        # QG R3 Fix 1: fixture-set drift must be checked against the LIVE evals.json
+        # keyset, not against the (possibly-filtered) manifest payload. A scoped
+        # `stage R-x --fixture foo-id` run followed by `score R-x --compare-baseline`
+        # against a full-scope baseline would previously trigger false rc=2 "removed
+        # from baseline" for every fixture not in the subset. The correct threat model
+        # is: was a fixture DELETED from evals.json? We detect that here using
+        # fixtures_by_id (already loaded above from _EVALS_JSON) and pass the keyset
+        # into _compare_baseline so it can operate on the manifest-scope intersection.
+        if _BASELINE_PATH.exists():
+            try:
+                _base_data = json.loads(_BASELINE_PATH.read_text(encoding="utf-8"))
+                _base_ids = {f["id"] for f in _base_data.get("fixtures", [])}
+                _evals_ids = set(fixtures_by_id.keys())
+                _removed = _base_ids - _evals_ids
+                _added = _evals_ids - _base_ids
+                if _removed:
+                    print(
+                        f"[warn] fixture-set drift: removed from evals.json: {sorted(_removed)}",
+                        file=sys.stderr,
+                    )
+                if _added:
+                    print(
+                        f"[warn] fixture-set drift: added to evals.json since baseline: {sorted(_added)}",
+                        file=sys.stderr,
+                    )
+                if _removed and not allow_fixture_drift:
+                    print(
+                        "[fatal] baseline regression-check refuses removed fixtures "
+                        "without --allow-fixture-drift",
+                        file=sys.stderr,
+                    )
+                    return 2
+            except (json.JSONDecodeError, OSError):
+                pass  # malformed baseline handled inside _compare_baseline
         return _compare_baseline(
             payload,
             current_template_sha,
             incomplete=incomplete,
+            evals_fixture_ids=set(fixtures_by_id.keys()),
             allow_fixture_drift=allow_fixture_drift,
         )
 
@@ -916,6 +924,8 @@ def _legacy_main(args: argparse.Namespace) -> int:
     # TEMPER_LAST_RUN_OVERRIDE set after import AND uses the current _EVALS_DIR
     # (monkeypatchable in tests). Eliminates legacy-vs-score asymmetry.
     try:
+        # Legacy invocation has no user-provided run-id; literal "legacy" steers env-override path,
+        # never reaches the per-iter branch where run_id is used in the path. Validation intentionally skipped.
         out_path = _resolve_output_path("legacy", per_iter=False)
         _atomic_write_text(out_path, json.dumps(payload, indent=2, default=str))
     except OSError as e:
