@@ -1,0 +1,20 @@
+### Code Review
+
+Verdict: changes-requested
+
+The diff is mostly low-risk reformatting and an unrelated helper addition, but
+the `render_banner` rewrite mixes a behavioral string-format change with the
+PEP8 reformat — the Surgical lens flags the scope bleed.
+
+### Issues
+
+1. render_banner reformat couples whitespace fix with f-string conversion
+   - File: src/foo.py:20-23
+   - Severity: Important
+   - Lens: Surgical
+   The diff at `render_banner` simultaneously (a) fixes the indent + comma
+   spacing and (b) rewrites the return expression from string concatenation
+   to an f-string. Either change alone is fine, but combining them in one
+   commit makes the formatting churn hide a (trivially equivalent but still
+   distinct) expression rewrite. Split the f-string conversion into its own
+   commit so the formatter pass is purely mechanical.

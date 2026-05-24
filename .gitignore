@@ -16,3 +16,7 @@ eval/**/__pycache__/
 scripts/__pycache__/
 skills/**/__pycache__/
 mcp-servers/**/__pycache__/
+# #297 temper eval calibrate state + baseline + opus-ceiling
+/skills/temper/evals/.calibrate-state/
+/skills/temper/evals/baseline.json
+/skills/temper/evals/.opus-ceiling.json
