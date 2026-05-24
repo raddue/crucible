@@ -440,6 +440,65 @@ def test_compare_baseline_handles_corrupt_baseline_json(monkeypatch, tmp_path, c
     assert "baseline.json" in captured.err
 
 
+def test_score_write_is_atomic(monkeypatch, tmp_path):
+    """QG R2 Fix 1: atomic write — no `.tmp` artifact survives, no truncated file."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-atomic")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc = score("R-atomic", allow_incomplete=False)
+    assert rc in (0, 1)
+    # No tmp residue
+    assert not any(p.name.endswith(".tmp") for p in tmp_path.rglob("*"))
+    # File is valid JSON (not truncated)
+    out = tmp_path / "last_run.json"
+    json.loads(out.read_text())  # raises if malformed
+
+
+def test_compare_baseline_warns_on_added_fixture(monkeypatch, tmp_path, capsys):
+    """QG R2 Fix 3: fixtures added since baseline emit a [warn] but don't block."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-added")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-added", write_baseline=True)
+    # Mutate baseline: drop all-but-first fixture so the rest appear "added"
+    baseline = json.loads(run_evals._BASELINE_PATH.read_text())
+    assert len(baseline["fixtures"]) >= 2, "need >=2 fixtures to simulate addition"
+    baseline["fixtures"] = baseline["fixtures"][:1]
+    run_evals._BASELINE_PATH.write_text(json.dumps(baseline))
+    capsys.readouterr()
+    rc = score("R-added", compare_baseline=True, allow_incomplete=False)
+    captured = capsys.readouterr()
+    # additions don't block: rc must not be the "removed fixtures" refusal (rc=2)
+    assert rc != 2, f"additions should not block compare; got rc={rc}, stderr={captured.err!r}"
+    assert "added since baseline" in captured.err
+
+
+def test_compare_baseline_refuses_removed_fixture(monkeypatch, tmp_path, capsys):
+    """QG R2 Fix 3: fixtures removed from evals.json post-baseline block compare
+    with rc=2 unless --allow-fixture-drift is passed (prevents silent
+    regression-laundering by fixture deletion)."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-removed")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-removed", write_baseline=True)
+    # Mutate baseline to ADD a fake fixture id that doesn't exist in current run
+    # → simulates fixture being removed from evals.json since baseline was taken
+    baseline = json.loads(run_evals._BASELINE_PATH.read_text())
+    baseline["fixtures"].append({"id": "ghost-fixture-id", "verdict": "PASS"})
+    run_evals._BASELINE_PATH.write_text(json.dumps(baseline))
+    # Without flag: refused
+    capsys.readouterr()
+    rc = score("R-removed", compare_baseline=True, allow_incomplete=False)
+    captured = capsys.readouterr()
+    assert rc == 2, f"removed fixtures should refuse without flag; got rc={rc}"
+    assert "removed from baseline" in captured.err
+    # With flag: proceeds (rc=0 since remaining fixtures show no regression)
+    rc2 = score(
+        "R-removed",
+        compare_baseline=True,
+        allow_incomplete=False,
+        allow_fixture_drift=True,
+    )
+    assert rc2 == 0, f"--allow-fixture-drift should allow comparison; got rc={rc2}"
+
+
 def test_resolve_output_path_uses_current_evals_dir(monkeypatch, tmp_path):
     """S4 R6: _resolve_output_path reads _EVALS_DIR at CALL TIME, not import time.
 

@@ -40,6 +40,23 @@ _LAST_RUN = (
 )
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Atomic write via tmp + os.replace. POSIX-atomic on same filesystem.
+
+    QG R2 Fix 1: SIGINT/OOM/disk-full mid-write previously left truncated JSON,
+    which the next `--compare-baseline` would crash on (R1 try/except converted
+    crash to rc=2, but lost the baseline-correctness signal). This helper
+    ensures readers never observe a partial file.
+
+    Used for: score() out_path (last_run/per-iter), _write_baseline,
+    _legacy_main's last_run write. NOT used for stage-manifest.json or
+    reviewer dispatch files (different lifecycle — write-once-never-reread).
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
     """S4 R6: resolves output path at call time using CURRENT _EVALS_DIR.
 
@@ -444,10 +461,17 @@ def _write_baseline(payload: dict, current_template_sha: str) -> None:
     """SP-1: baseline header carries template_sha."""
     baseline = dict(payload)
     baseline["template_sha"] = current_template_sha
-    _BASELINE_PATH.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
+    # QG R2 Fix 1: atomic write — prevents truncated baseline.json mid-write
+    _atomic_write_text(_BASELINE_PATH, json.dumps(baseline, indent=2))
 
 
-def _compare_baseline(payload: dict, current_template_sha: str, *, incomplete: bool) -> int:
+def _compare_baseline(
+    payload: dict,
+    current_template_sha: str,
+    *,
+    incomplete: bool,
+    allow_fixture_drift: bool = False,
+) -> int:
     """Return 1 on regression, 2 if refused (incomplete / missing baseline), 0 if clean.
 
     M3 R6 caveat — fixture-set drift: this function compares verdicts by fixture id.
@@ -490,6 +514,32 @@ def _compare_baseline(payload: dict, current_template_sha: str, *, incomplete: b
     # Per-fixture verdict comparison
     current_verdicts = {f["id"]: f["verdict"] for f in payload["fixtures"]}
     base_verdicts = {f["id"]: f["verdict"] for f in baseline.get("fixtures", [])}
+
+    # QG R2 Fix 3: fixture-set drift detection. Closes the silent-deletion gap
+    # documented in the prior M3 R6 caveat — an operator can no longer "fix" a
+    # regression by deleting the fixture from evals.json without explicit opt-in.
+    base_ids = set(base_verdicts.keys())
+    current_ids = set(current_verdicts.keys())
+    removed = base_ids - current_ids
+    added = current_ids - base_ids
+    if removed:
+        print(
+            f"[warn] fixture-set drift: removed from baseline: {sorted(removed)}",
+            file=sys.stderr,
+        )
+    if added:
+        print(
+            f"[warn] fixture-set drift: added since baseline: {sorted(added)}",
+            file=sys.stderr,
+        )
+    if removed and not allow_fixture_drift:
+        print(
+            "[fatal] baseline regression-check refuses removed fixtures "
+            "without --allow-fixture-drift",
+            file=sys.stderr,
+        )
+        return 2
+
     regressions = []
     for fid, base_v in base_verdicts.items():
         cur_v = current_verdicts.get(fid)
@@ -510,6 +560,7 @@ def score(
     force_rescore: bool = False,
     allow_incomplete: bool = False,
     per_iter: bool = False,
+    allow_fixture_drift: bool = False,
 ) -> int:
     """Read stage-manifest.json + result files; aggregate; write last_run.json.
 
@@ -661,13 +712,19 @@ def score(
             f"[info] writing per-iter output to {out_path} (gitignored via .calibrate-state/)",
             file=sys.stderr,
         )
-    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    # QG R2 Fix 1: atomic write — prevents truncated last_run/per-iter on SIGINT/OOM/disk-full
+    _atomic_write_text(out_path, json.dumps(payload, indent=2))
 
     # --write-baseline + --compare-baseline — see Task 8 (stubs raise NotImplementedError)
     if write_baseline:
         _write_baseline(payload, current_template_sha)
     if compare_baseline:
-        return _compare_baseline(payload, current_template_sha, incomplete=incomplete)
+        return _compare_baseline(
+            payload,
+            current_template_sha,
+            incomplete=incomplete,
+            allow_fixture_drift=allow_fixture_drift,
+        )
 
     if any(fr["verdict"] == "FAIL" for fr in fixture_results):
         return 1
@@ -734,6 +791,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sp_score.add_argument("--compare-baseline", action="store_true")
     sp_score.add_argument("--force-rescore", action="store_true")
     sp_score.add_argument("--allow-incomplete", action="store_true")
+    sp_score.add_argument("--allow-fixture-drift", action="store_true",
+        help="Permit --compare-baseline when fixtures have been removed from evals.json. "
+             "Without this flag, removed fixtures cause rc=2 (prevents silent regression-laundering).")
     sp_score.add_argument("--per-iter", action="store_true",
         help="Write last_run-<run_id>.json under .calibrate-state/ instead of shared last_run.json. Set by /temper-eval-calibrate.")
 
@@ -777,6 +837,7 @@ def main(argv: list[str] | None = None) -> int:
                 force_rescore=args.force_rescore,
                 allow_incomplete=args.allow_incomplete,
                 per_iter=args.per_iter,
+                allow_fixture_drift=args.allow_fixture_drift,
             )
         except ValueError as e:
             print(f"[fatal] {e}", file=sys.stderr)
@@ -851,8 +912,12 @@ def _legacy_main(args: argparse.Namespace) -> int:
         "args": vars(args),
         "fixtures": fixture_results,
     }
+    # QG R2 Fix 2: route via _resolve_output_path() to mirror score() — honors
+    # TEMPER_LAST_RUN_OVERRIDE set after import AND uses the current _EVALS_DIR
+    # (monkeypatchable in tests). Eliminates legacy-vs-score asymmetry.
     try:
-        _LAST_RUN.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        out_path = _resolve_output_path("legacy", per_iter=False)
+        _atomic_write_text(out_path, json.dumps(payload, indent=2, default=str))
     except OSError as e:
         print(f"[warn] cannot write last_run.json: {e}", file=sys.stderr)
 
