@@ -386,6 +386,60 @@ def test_score_help_lists_per_iter():
 # ---------------------------------------------------------------------------
 
 
+def test_score_handles_malformed_errors_line(monkeypatch, tmp_path, capsys):
+    """QG R1 Fix 1: malformed `.collect-status` errors-line surfaces fatal+rc=2,
+    not raw ValueError/IndexError traceback."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-malformed")
+    (d / ".collect-status").write_text("complete\nerrors: garbage\n")
+    rc = score("R-malformed", allow_incomplete=False)
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "malformed" in captured.err
+    assert ".collect-status" in captured.err
+
+
+def test_score_honors_manifest_trials_override(monkeypatch, tmp_path):
+    """QG R1 Fix 2: when stage runs with --trials-override 5, score must report
+    `5` as the denominator (not the evals.json replicate_rule trials count)."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("USER", "tester")
+    monkeypatch.setattr(run_evals, "_LAST_RUN", tmp_path / "last_run.json")
+    monkeypatch.setattr(run_evals, "_BASELINE_PATH", tmp_path / "baseline.json")
+    monkeypatch.setattr(run_evals, "_EVALS_DIR", tmp_path)
+    d = stage("R-toverride", trials_override=5)
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-toverride", allow_incomplete=False)
+    out = json.loads((tmp_path / "last_run.json").read_text())
+    # Every fixture must report n_trials=5 (denominator) and matching rationale
+    assert out["fixtures"], "no fixtures in output"
+    for fr in out["fixtures"]:
+        assert fr["trials"] == 5, (
+            f"fixture {fr['id']!r} reports trials={fr['trials']}, expected 5 "
+            f"(manifest trials_override should be canonical)"
+        )
+        for er in fr["expectations"]:
+            assert "/5 trials" in er["aggregated_rationale"], (
+                f"expectation rationale {er['aggregated_rationale']!r} "
+                f"does not honor manifest trials_override=5"
+            )
+
+
+def test_compare_baseline_handles_corrupt_baseline_json(monkeypatch, tmp_path, capsys):
+    """QG R1 Fix 3: corrupt/truncated baseline.json surfaces fatal+rc=2,
+    not raw JSONDecodeError traceback."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-corrupt")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    # Write a valid run first
+    score("R-corrupt", allow_incomplete=False)
+    # Now write a truncated baseline (simulates interrupted --write-baseline)
+    run_evals._BASELINE_PATH.write_text('{"fixtures": [{"id":')
+    rc = score("R-corrupt", compare_baseline=True, allow_incomplete=False)
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "malformed" in captured.err
+    assert "baseline.json" in captured.err
+
+
 def test_resolve_output_path_uses_current_evals_dir(monkeypatch, tmp_path):
     """S4 R6: _resolve_output_path reads _EVALS_DIR at CALL TIME, not import time.
 

@@ -19,6 +19,7 @@ import argparse
 import datetime as _dt
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -123,23 +124,29 @@ _DISPATCH_HEADER_TEMPLATE = """\
 """
 
 
+_PLACEHOLDER_RE = re.compile(r"\{[A-Z_][A-Z0-9_]*\}")
+
+
 def _validate_rendered_prompt(rendered: str) -> None:
     """I-T9 (M-4): length-floor + placeholder-residual check.
 
     Template-evolution-tolerant. Catches catastrophically-empty renders
     and unsubstituted placeholders without binding to specific placeholder names.
+
+    QG R1 Fix 6: narrowed to `{UPPER_SNAKE_CASE}` placeholder shape only —
+    bare `{` characters (JSON examples, prose, `${VAR}` syntax) no longer
+    false-positive.
     """
     if len(rendered) <= 200:
         raise ValueError(
             f"rendered prompt has length {len(rendered)} ≤ 200 bytes "
             f"(I-T9 length-floor): suspect catastrophic-empty render"
         )
-    if "{" in rendered:
-        idx = rendered.index("{")
-        context = rendered[max(0, idx - 20):idx + 40]
+    leftover = _PLACEHOLDER_RE.findall(rendered)
+    if leftover:
         raise ValueError(
-            f"rendered prompt contains unsubstituted `{{` placeholder marker "
-            f"at offset {idx} (I-T9 placeholder-residual): {context!r}"
+            f"rendered prompt contains unsubstituted placeholders "
+            f"(I-T9 placeholder-residual): {leftover}"
         )
 
 
@@ -158,8 +165,16 @@ def stage(
     Raises:
         ValueError: invalid run_id (I-9) or source+fixture intersection (M-1)
         FileExistsError: dispatch dir exists and force=False
+        ValueError: trials_override < 1 or timeout < 1 (QG R1 Fix 4)
     """
     validate_run_id(run_id)
+    # QG R1 Fix 4: reject zero/negative trials_override + timeout (false-green guard)
+    if trials_override is not None and trials_override < 1:
+        raise ValueError(
+            f"--trials-override must be >= 1 (got {trials_override})"
+        )
+    if timeout < 1:
+        raise ValueError(f"--timeout must be >= 1 (got {timeout})")
 
     # Load fixtures
     evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
@@ -228,6 +243,9 @@ def stage(
         "dispatch_timeout": timeout,
         "reviewer_model": "opus",
         "template_sha": tpl_sha,
+        # QG R1 Fix 2: record trials_override so score() can honor manifest's
+        # actual trial count, not recompute from evals.json replicate_rule.
+        "trials_override": trials_override,
         "trials": trials,
     }
     (dispatch_dir / "stage-manifest.json").write_text(
@@ -452,7 +470,16 @@ def _compare_baseline(payload: dict, current_template_sha: str, *, incomplete: b
     if not _BASELINE_PATH.exists():
         print(f"[fatal] no baseline at {_BASELINE_PATH}", file=sys.stderr)
         return 2
-    baseline = json.loads(_BASELINE_PATH.read_text(encoding="utf-8"))
+    # QG R1 Fix 3: guard malformed/truncated baseline.json (e.g. interrupted
+    # prior `--write-baseline`). Surface fatal-with-context not raw traceback.
+    try:
+        baseline = json.loads(_BASELINE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(
+            f"[fatal] baseline.json malformed or unreadable: {e}",
+            file=sys.stderr,
+        )
+        return 2
     if baseline.get("template_sha") != current_template_sha:
         print(
             f"[warn] template_sha drift since baseline (baseline: "
@@ -520,8 +547,17 @@ def score(
             incomplete = True
         # Parse "errors: N/total" line if present (I-11)
         if len(first) >= 2 and first[1].startswith("errors:"):
-            n_str, total_str = first[1].removeprefix("errors:").strip().split("/")
-            n_err, total = int(n_str), int(total_str)
+            # QG R1 Fix 1: guard malformed payload (e.g. `errors:`, `errors: abc/5`,
+            # `errors: 1`). Surface fatal-with-context instead of raw traceback.
+            try:
+                n_str, total_str = first[1].removeprefix("errors:").strip().split("/")
+                n_err, total = int(n_str), int(total_str)
+            except (ValueError, IndexError):
+                print(
+                    f"[fatal] malformed .collect-status second line: {first[1]!r}",
+                    file=sys.stderr,
+                )
+                return 2
             if total > 0 and n_err == total:
                 if not allow_incomplete:
                     print(
@@ -580,14 +616,25 @@ def score(
         by_fixture.setdefault(fid, []).append((entry["trial"], entry, out))
 
     # Run lens_runner per fixture
+    # QG R1 Fix 2: honor manifest's trials_override header (if set) as the
+    # canonical n_trials per fixture, not the evals.json replicate_rule. Falls
+    # back to per-fixture manifest-trial count when no override was recorded
+    # (e.g. legacy manifests). Threshold is clamped against the actual N.
+    manifest_trials_override = manifest.get("trials_override")
     fixture_results: list[dict] = []
     for fid, trials_list in by_fixture.items():
         fix = fixtures_by_id[fid]
         trials_list.sort(key=lambda t: t[0])
         reviewer_outputs = [out for _, _, out in trials_list]
         rule = fix.get("replicate_rule", {"trials": 1, "threshold": 1})
-        n_trials = rule.get("trials", 1)
+        if manifest_trials_override is not None:
+            n_trials = manifest_trials_override
+        else:
+            # Count actual trial entries the manifest staged for this fixture
+            n_trials = len(trials_list) or rule.get("trials", 1)
         threshold = rule.get("threshold", 1)
+        if threshold > n_trials:
+            threshold = n_trials  # clamp
         result = _aggregate_from_outputs(
             fix, reviewer_outputs, n_trials=n_trials, threshold=threshold
         )

@@ -89,9 +89,14 @@ def main() -> int:
     # Re-read and re-assert post-write (defense in depth against partial-write/IO truncation)
     reread = json.loads(_SNAPSHOT.read_text())
     reread_verdicts = reread.get("verdicts", {})
-    assert len(reread_verdicts) >= expected_n and all(reread_verdicts.values()), \
-        "post-write snapshot validation failed; refuse to declare success"
-    assert reread.get("bootstrap_python"), "missing bootstrap_python pin in snapshot"
+    # QG R1 Fix 5: `assert` is stripped under `python -O`, defeating the
+    # defense-in-depth check the comment promises. Use explicit raise.
+    if not (len(reread_verdicts) >= expected_n and all(reread_verdicts.values())):
+        raise RuntimeError(
+            "post-write snapshot validation failed; refuse to declare success"
+        )
+    if not reread.get("bootstrap_python"):
+        raise RuntimeError("missing bootstrap_python pin in snapshot")
     print(f"[bootstrap] wrote {_SNAPSHOT}", file=sys.stderr)
     print(f"[bootstrap] REVIEW THE DIFF then `git add` and commit.", file=sys.stderr)
     return 0

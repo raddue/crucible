@@ -167,6 +167,25 @@ def test_rendered_prompt_validator_accepts_clean():
     _validate_rendered_prompt(clean)  # should not raise
 
 
+def test_stage_rejects_zero_trials_override(monkeypatch, tmp_path):
+    """QG R1 Fix 4: --trials-override 0 must rc=2, not silent-empty-manifest
+    (which would PASS vacuously)."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("USER", "tester")
+    from skills.temper.evals.run_evals import main
+    rc = main(["stage", "R-zero-t", "--trials-override", "0"])
+    assert rc == 2
+
+
+def test_stage_rejects_zero_timeout(monkeypatch, tmp_path):
+    """QG R1 Fix 4: --timeout 0 must rc=2 (defense against unusable manifest)."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("USER", "tester")
+    from skills.temper.evals.run_evals import main
+    rc = main(["stage", "R-zero-to", "--timeout", "0"])
+    assert rc == 2
+
+
 def test_stage_rejects_template_with_unsubstituted_placeholder(monkeypatch, tmp_path):
     """I-T9 integration: stage() must fail-fast if the template after substitution
     still contains `{` — even though fixture body legitimately contains `{`.
