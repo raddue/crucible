@@ -86,6 +86,13 @@ _FIXTURE_CONTENT_HEADER = (
 )
 
 
+# Task 10 (#290): shared --source filter values.
+# Single source of truth for the `--source` argparse choices on both
+# `stage` (post-#297) and `score` subcommands. Also imported by
+# `lens_runner.py` separately (per #290 plan Task 10).
+_SOURCE_VALUES = ("synthetic", "real-pr", "all")
+
+
 # ---------------------------------------------------------------------------
 # Task 4 (F2): pr_description leakage check (warning-only + fatal ^Lens:)
 # Task 5 (S2): lens_column enum + forward-compat allowlist
@@ -807,6 +814,7 @@ def score(
     allow_incomplete: bool = False,
     per_iter: bool = False,
     allow_fixture_drift: bool = False,
+    source: str = "all",
 ) -> int:
     """Read stage-manifest.json + result files; aggregate; write last_run.json.
 
@@ -876,6 +884,17 @@ def score(
     evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
     fixtures_by_id = {f["id"]: f for f in evals_data.get("evals", [])}
 
+    # Task 10 (#290): score-time --source filter. Restrict fixtures_by_id to
+    # those matching the requested source. Trials referencing filtered-out
+    # fixtures are skipped (not errored) so the same staged dispatch dir can
+    # be re-scored against different source subsets without re-staging.
+    if source != "all":
+        fixtures_by_id = {
+            fid: f
+            for fid, f in fixtures_by_id.items()
+            if f.get("source", "synthetic") == source
+        }
+
     # Template_sha drift advisory (S-1)
     current_template_sha = template_sha(_REVIEWER_PROMPT)
     if current_template_sha != manifest.get("template_sha"):
@@ -889,11 +908,19 @@ def score(
 
     # Reassemble per-fixture trials
     by_fixture: dict[str, list[tuple[int, dict, str | None]]] = {}
+    # Track fixture ids in the live evals.json (pre-filter) for distinguishing
+    # "filtered-out" (skip silently) from "deleted-from-evals" (fatal).
+    _all_evals_ids = {f["id"] for f in evals_data.get("evals", [])}
     for entry in manifest["trials"]:
         seq = entry["seq"]
         fid = entry["fixture_id"]
         fix = fixtures_by_id.get(fid)
         if fix is None:
+            # Task 10: if the fixture exists in evals.json but was filtered out
+            # via --source, skip silently. Only fail-loud if the fixture is
+            # missing entirely (deleted between stage and score).
+            if source != "all" and fid in _all_evals_ids:
+                continue
             print(f"[fatal] unknown fixture id {fid!r} in manifest", file=sys.stderr)
             return 2
 
@@ -1060,7 +1087,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sp_stage = sub.add_parser("stage", help="Render fixtures × trials to dispatch files")
     sp_stage.add_argument("run_id")
     sp_stage.add_argument("--force", action="store_true")
-    sp_stage.add_argument("--source", choices=["synthetic", "real-pr", "all"], default="all")
+    sp_stage.add_argument("--source", choices=list(_SOURCE_VALUES), default="all")
     sp_stage.add_argument("--fixture", default=None)
     sp_stage.add_argument("--trials-override", type=int, default=None)
     sp_stage.add_argument("--timeout", type=int, default=300)
@@ -1077,6 +1104,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
              "Without this flag, removed fixtures cause rc=2 (prevents silent regression-laundering).")
     sp_score.add_argument("--per-iter", action="store_true",
         help="Write last_run-<run_id>.json under .calibrate-state/ instead of shared last_run.json. Set by /temper-eval-calibrate.")
+    # Task 10 (#290): score-time --source filter. Limits scoring to fixtures
+    # matching the given source (synthetic | real-pr | all). Default "all"
+    # preserves prior behavior. Score-time filter is orthogonal to stage-time
+    # --source; staged trials for filtered-out fixtures are simply skipped.
+    sp_score.add_argument("--source", choices=list(_SOURCE_VALUES), default="all",
+        help="Limit scoring to fixtures with this source (synthetic | real-pr | all). Default: all.")
 
     # Legacy mock/replay paths (back-compat, no subcommand)
     # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.
@@ -1119,6 +1152,7 @@ def main(argv: list[str] | None = None) -> int:
                 allow_incomplete=args.allow_incomplete,
                 per_iter=args.per_iter,
                 allow_fixture_drift=args.allow_fixture_drift,
+                source=args.source,
             )
         except ValueError as e:
             print(f"[fatal] {e}", file=sys.stderr)

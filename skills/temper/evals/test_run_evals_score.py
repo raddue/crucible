@@ -556,3 +556,82 @@ def test_resolve_output_path_uses_current_evals_dir(monkeypatch, tmp_path):
     p_iter = run_evals._resolve_output_path("R-x", per_iter=True)
     assert p_shared == tmp_path / "last_run.json"
     assert p_iter == tmp_path / ".calibrate-state" / "last_run-R-x.json"
+
+
+# ---------------------------------------------------------------------------
+# Task 10 (#290): --source CLI filter on score subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_source_values_constant_exported():
+    """Shared constant _SOURCE_VALUES exists and lists the three expected values."""
+    from skills.temper.evals.run_evals import _SOURCE_VALUES
+    assert set(_SOURCE_VALUES) == {"synthetic", "real-pr", "all"}
+
+
+def test_score_source_filter_synthetic_scores_all_synthetic_fixtures(
+    monkeypatch, tmp_path
+):
+    """--source synthetic: synthetic fixtures still scored (current evals.json
+    is synthetic-only, so payload['fixtures'] is non-empty)."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-syn")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc = score("R-syn", source="synthetic")
+    assert rc in (0, 1)
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    assert len(payload["fixtures"]) > 0
+
+
+def test_score_source_filter_real_pr_skips_synthetic_fixtures(
+    monkeypatch, tmp_path
+):
+    """--source real-pr: synthetic-staged trials are filtered out → empty fixture set.
+
+    Until real-PR fixtures exist (Task 7), this leaves no fixtures to score —
+    payload is written with an empty fixtures list rather than erroring out
+    on 'unknown fixture id'.
+    """
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-real")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc = score("R-real", source="real-pr")
+    # rc 0 = no FAILs (vacuously true with empty fixture set)
+    assert rc == 0
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    assert payload["fixtures"] == []
+
+
+def test_score_source_filter_invalid_rejected():
+    """argparse rejects --source frob with SystemExit(2)."""
+    from skills.temper.evals.run_evals import main
+    import pytest as _pytest
+    with _pytest.raises(SystemExit) as excinfo:
+        main(["score", "R-x", "--source", "frob"])
+    assert excinfo.value.code == 2
+
+
+def test_score_source_filter_all_is_default(monkeypatch, tmp_path):
+    """--source all (and default) scores every staged fixture."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-all")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc_explicit = score("R-all", source="all")
+    payload_explicit = json.loads(run_evals._LAST_RUN.read_text())
+
+    d2 = _seed_dispatch_dir(monkeypatch, tmp_path, "R-all2")
+    (d2 / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc_default = score("R-all2")
+    payload_default = json.loads(run_evals._LAST_RUN.read_text())
+
+    # Same fixture set in both
+    assert [f["id"] for f in payload_explicit["fixtures"]] == [
+        f["id"] for f in payload_default["fixtures"]
+    ]
+    assert rc_explicit == rc_default
+
+
+def test_score_source_filter_cli_passthrough(monkeypatch, tmp_path):
+    """`score R-x --source synthetic` via CLI wires through to score()."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-cli")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    from skills.temper.evals.run_evals import main
+    rc = main(["score", "R-cli", "--source", "synthetic"])
+    assert rc in (0, 1)
