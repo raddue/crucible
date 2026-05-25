@@ -1146,6 +1146,167 @@ def _compare_baseline(
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Task 11 (#290 S3): grouped summary + by_source + drift_delta + per_trial_rates
+# ---------------------------------------------------------------------------
+
+
+def _classify_trial_outcome(
+    reviewer_output: str | None, per_trial_verdicts_at_idx: list[str]
+) -> str:
+    """Three-state classifier for a single trial (R1 M4 / R3 SP1).
+
+    Returns one of 'PASS' | 'FAIL' | 'ERROR'.
+
+    - ERROR: reviewer dispatch failed (`reviewer_output is None`). Excluded
+      from the per-trial-rate denominator.
+    - PASS:  reviewer output present, every expectation verdict at this trial
+      index is 'PASS'.
+    - FAIL:  reviewer output present, at least one expectation verdict is
+      non-'PASS' (FAIL or N/A from lens_runner inconclusive aggregation).
+
+    Per R3 S-1, lens_runner-inconclusive 'N/A' verdicts (reviewer output
+    present, aggregation ambiguous) map to FAIL — NOT ERROR.
+    """
+    if reviewer_output is None:
+        return "ERROR"
+    if all(v == "PASS" for v in per_trial_verdicts_at_idx):
+        return "PASS"
+    return "FAIL"
+
+
+def _as_lens_list(lens_column: Any) -> list[str]:
+    """Normalize a fixture's lens_column to a list of lens-column strings.
+
+    String 'none' → []  (zero-contribution per R1 S6).
+    String lens → [lens].
+    List → list (already normalized).
+    """
+    if isinstance(lens_column, str):
+        if lens_column == "none":
+            return []
+        return [lens_column]
+    if isinstance(lens_column, list):
+        return [v for v in lens_column if isinstance(v, str) and v != "none"]
+    return []
+
+
+def _compute_grouped_summary(
+    fixture_results: list[dict],
+    fixtures_by_id: dict[str, dict],
+) -> dict[str, Any]:
+    """Compute the Task-11 emission block: by_source + drift_delta + per_trial_rates.
+
+    R1 S6: lens_column=='none' fixtures appear in `by_source` but contribute
+    ZERO to any lens column's drift_delta / per_trial_rates.
+    R1 M4 / R3 SP1: ERROR trials (reviewer_output is None) are excluded from
+    the denominator. Rates = PASS / (PASS + FAIL).
+    R1 Q6: per-fixture trial sum — denominators are summed over each fixture's
+    actual trial count, not scalar trials × fixture-count.
+
+    Args:
+        fixture_results: list of per-fixture aggregate dicts from
+            `_aggregate_from_outputs`. Each entry must carry `id`,
+            `reviewer_outputs`, and `expectations[*].per_trial_verdicts`.
+        fixtures_by_id: live evals.json fixture map, used for `source` +
+            `lens_column` lookup (the result dict does NOT carry these).
+
+    Returns:
+        dict with keys:
+          - `by_source`: {synthetic: [{id, verdict}], real-pr: [{id, verdict}]}
+          - `drift_delta`: {lens: float | None}  (synthetic_rate - real_rate)
+          - `per_trial_rates`: {lens: {synthetic: float|None, real-pr: float|None}}
+    """
+    by_source: dict[str, list[dict[str, str]]] = {"synthetic": [], "real-pr": []}
+    # Lens columns considered in drift_delta. Derived from _LENS_COLUMN_VALUES
+    # minus 'none' per M-R6-5 — no hardcoded ('Surgical','DRY','SRP','OCP') tuple.
+    lens_cols = tuple(v for v in _LENS_COLUMN_VALUES if v != "none")
+
+    # Per-lens / per-source PASS + FAIL trial counts (ERROR excluded).
+    counts: dict[str, dict[str, dict[str, int]]] = {
+        lens: {
+            "synthetic": {"PASS": 0, "FAIL": 0, "ERROR": 0},
+            "real-pr": {"PASS": 0, "FAIL": 0, "ERROR": 0},
+        }
+        for lens in lens_cols
+    }
+
+    for fr in fixture_results:
+        fid = fr.get("id")
+        fix = fixtures_by_id.get(fid, {})
+        source = fix.get("source", "synthetic")
+        if source not in by_source:
+            # Defense in depth — unknown source shouldn't appear post-validation
+            by_source[source] = []
+        by_source[source].append({"id": fid, "verdict": fr.get("verdict", "N/A")})
+
+        lens_list = _as_lens_list(fix.get("lens_column"))
+        if not lens_list:
+            # R1 S6: lens_column=='none' (or unknown) → zero contribution to
+            # any lens column. Still recorded in by_source above.
+            continue
+
+        reviewer_outputs = fr.get("reviewer_outputs", [])
+        expectations = fr.get("expectations", [])
+        # Align per-trial verdicts across all expectations (R1 Q6: per-fixture
+        # trial sum). n_trials = len(reviewer_outputs).
+        n_trials = len(reviewer_outputs)
+        for t in range(n_trials):
+            # Collect this trial's per-expectation verdicts.
+            verdicts_at_t = [
+                er.get("per_trial_verdicts", [])[t]
+                for er in expectations
+                if t < len(er.get("per_trial_verdicts", []))
+            ]
+            outcome = _classify_trial_outcome(reviewer_outputs[t], verdicts_at_t)
+            # Mixed fixtures contribute to EACH lens column in their list.
+            for lens in lens_list:
+                if lens not in counts:
+                    continue  # forward-compat / future lens columns
+                counts[lens][source][outcome] += 1
+
+    # Compute rates + drift_delta. Divide-by-zero guards per R2 Q5.
+    per_trial_rates: dict[str, dict[str, float | None]] = {}
+    drift_delta: dict[str, float | None] = {}
+    for lens in lens_cols:
+        syn_pass = counts[lens]["synthetic"]["PASS"]
+        syn_fail = counts[lens]["synthetic"]["FAIL"]
+        real_pass = counts[lens]["real-pr"]["PASS"]
+        real_fail = counts[lens]["real-pr"]["FAIL"]
+        syn_denom = syn_pass + syn_fail  # ERROR excluded (R1 M4)
+        real_denom = real_pass + real_fail
+        syn_rate = (syn_pass / syn_denom) if syn_denom else None
+        real_rate = (real_pass / real_denom) if real_denom else None
+        per_trial_rates[lens] = {"synthetic": syn_rate, "real-pr": real_rate}
+        if syn_rate is None or real_rate is None:
+            drift_delta[lens] = None
+        else:
+            drift_delta[lens] = syn_rate - real_rate
+
+    return {
+        "by_source": by_source,
+        "drift_delta": drift_delta,
+        "per_trial_rates": per_trial_rates,
+    }
+
+
+def _render_grouped_summary(by_source: dict[str, list[dict[str, str]]]) -> str:
+    """Render the Task-11 grouped stdout summary.
+
+    Format:
+        Synthetic: P/N PASS
+        Real-PR:   P/N PASS
+
+    Where P = count of PASS verdicts, N = total fixtures in that group.
+    """
+    lines: list[str] = []
+    for label, key in (("Synthetic", "synthetic"), ("Real-PR", "real-pr")):
+        entries = by_source.get(key, [])
+        n_pass = sum(1 for e in entries if e.get("verdict") == "PASS")
+        lines.append(f"{label}: {n_pass}/{len(entries)} PASS")
+    return "\n".join(lines)
+
+
 def _per_fixture_pass_rates(fixtures: list[dict]) -> dict[str, float]:
     """Compute per-fixture PASS rate (PASS trials / total trials).
 
@@ -1350,6 +1511,18 @@ def score(
             payload["incomplete-cause"] = incomplete_cause
     if force_rescore:
         payload["force_rescore"] = True
+
+    # Task 11 (#290 S3): grouped emission block.
+    # by_source + drift_delta + per_trial_rates derived from fixture_results
+    # using the three-state PASS/FAIL/ERROR classifier (R1 M4 / R3 SP1).
+    # lens_column=='none' fixtures contribute zero to any lens column (R1 S6).
+    grouped = _compute_grouped_summary(fixture_results, fixtures_by_id)
+    payload["by_source"] = grouped["by_source"]
+    payload["drift_delta"] = grouped["drift_delta"]
+    payload["per_trial_rates"] = grouped["per_trial_rates"]
+
+    # Stdout grouped summary (Task 11 Step 1).
+    print(_render_grouped_summary(grouped["by_source"]))
 
     # F1 / S-FE-5 R3: per-iter outputs under .calibrate-state/ (blanket-gitignored)
     out_path = _resolve_output_path(run_id, per_iter=per_iter)
