@@ -582,22 +582,35 @@ def test_score_source_filter_synthetic_scores_all_synthetic_fixtures(
     assert len(payload["fixtures"]) > 0
 
 
-def test_score_source_filter_real_pr_skips_synthetic_fixtures(
+def test_score_source_filter_real_pr_scores_only_real_pr_fixtures(
     monkeypatch, tmp_path
 ):
-    """--source real-pr: synthetic-staged trials are filtered out → empty fixture set.
+    """--source real-pr: synthetic-staged trials are filtered out → only real-PR
+    fixtures appear in payload.
 
-    Until real-PR fixtures exist (Task 7), this leaves no fixtures to score —
-    payload is written with an empty fixtures list rather than erroring out
-    on 'unknown fixture id'.
+    Post-Task-7 the 5 real-PR fixtures exist (surgical-real, dry-real, srp-real,
+    ocp-real, mixed-real). The dispatch dir seeded by `_seed_dispatch_dir` stages
+    synthetic-side trials only; with `--source real-pr` filter, real-PR fixtures
+    are scored with no staged trials → N/A aggregated verdicts.
     """
     d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-real")
     (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
     rc = score("R-real", source="real-pr")
-    # rc 0 = no FAILs (vacuously true with empty fixture set)
+    # rc 0 = no FAILs (N/A verdicts don't count as failures)
     assert rc == 0
     payload = json.loads(run_evals._LAST_RUN.read_text())
-    assert payload["fixtures"] == []
+    fixture_ids = {f["id"] for f in payload["fixtures"]}
+    assert fixture_ids == {
+        "surgical-real",
+        "dry-real",
+        "srp-real",
+        "ocp-real",
+        "mixed-real",
+    }
+    # No real-PR trials staged → all verdicts are N/A (not PASS/FAIL).
+    for fx in payload["fixtures"]:
+        for exp in fx["expectations"]:
+            assert exp["aggregated_verdict"] == "N/A"
 
 
 def test_score_source_filter_invalid_rejected():
