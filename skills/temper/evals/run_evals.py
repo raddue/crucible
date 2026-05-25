@@ -265,6 +265,231 @@ def _validate_lens_column(value: Any, fixture_id: str = "<unknown>") -> None:
 
 
 # ---------------------------------------------------------------------------
+# Task 8 (#290 F2/S3): _validate_fixtures + BaselineQualityError
+# Gates (a)-(m) per Design Harness §2.
+# ---------------------------------------------------------------------------
+
+
+class BaselineQualityError(FixtureValidationError):
+    """Gate (l)/(m): baseline-quality refusal.
+
+    Subclass of FixtureValidationError so existing rc=2 handlers
+    (`except FixtureValidationError`) catch this without modification.
+    Raised exclusively from the `score --write-baseline` path — never
+    by `_validate_fixtures` directly.
+    """
+
+
+# Gate (b) SHA-format regex: `#NNN @ <7-40 lowercase hex>` (Design Harness §2(b)).
+_SOURCE_PR_RE = re.compile(r"^#\d+ @ [0-9a-f]{7,40}$")
+
+
+def _validate_fixtures(
+    evals_data: dict,
+    *,
+    strict_source_pr: bool = False,
+) -> None:
+    """Apply Design Harness §2 gates (a)-(m) (Task 8 / #290 F2).
+
+    Gates implemented here (raise `FixtureValidationError`):
+      (a) `source` field present and in {"synthetic", "real-pr"}
+      (b) `real-pr` w/ malformed `source_pr` (regex `^#\\d+ @ [0-9a-f]{7,40}$`);
+          also asserts top-level `evals` key (R1 M12).
+      (c) `synthetic_pair` resolves AND its `lens_column` matches.
+      (d) empty `pr_description`.
+      (e) bad `lens_column` enum (delegated to `_validate_lens_column`).
+      (f) lens-vocab `^Lens:` line in `pr_description` (delegated to
+          `_check_pr_description_leakage` — substring + word-boundary +
+          semantic-prime hits are warnings only; only `^Lens:` is fatal).
+      (g) `^Lens:` substring in `prompt` (warning).
+      (i) trials-uniformity: every non-`none` lens_column fixture MUST
+          declare `replicate_rule.trials in {5, 10}`.
+      (j) `--strict-source-pr` SHA-existence (opt-in; requires git env).
+      (k) mixed-fixture cap: at most ONE real-PR fixture with list `lens_column`.
+
+    Gates (l) and (m) live in `_write_baseline` / `score --write-baseline`
+    paths (BaselineQualityError, not validation-time).
+
+    Args:
+        evals_data: parsed evals.json (must have top-level "evals" key).
+        strict_source_pr: when True, runs gate (j) — `git cat-file -e` per SHA.
+    """
+    if not isinstance(evals_data, dict) or "evals" not in evals_data:
+        raise FixtureValidationError(
+            "evals.json missing top-level 'evals' array (R1 M12 / Design Harness §1)"
+        )
+    fixtures = evals_data["evals"]
+    if not isinstance(fixtures, list):
+        raise FixtureValidationError(
+            "evals.json 'evals' field must be a list of fixture objects"
+        )
+
+    # Pre-compute id->fixture for gate (c) twin lookup
+    by_id = {f.get("id"): f for f in fixtures if isinstance(f, dict)}
+
+    # Gate (j) pre-condition: if strict, verify git env once up front.
+    if strict_source_pr:
+        import subprocess
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                capture_output=True, text=True, check=False,
+            )
+            if r.returncode != 0:
+                raise FixtureValidationError(
+                    f"git-environment-unavailable: {r.stderr.strip()}"
+                )
+        except (FileNotFoundError, OSError) as e:
+            raise FixtureValidationError(
+                f"git-environment-unavailable: {e}"
+            ) from e
+
+    list_lens_column_offenders: list[str] = []
+
+    for fix in fixtures:
+        if not isinstance(fix, dict):
+            raise FixtureValidationError(
+                f"fixture entry is not an object: {fix!r}"
+            )
+        fid = fix.get("id", "<unknown>")
+
+        # gap_documented carve-out (Step 3d): waives non-empty prompt + body
+        # requirements but still validates schema fields.
+        gap_documented = bool(fix.get("gap_documented", False))
+
+        # (a) source presence + value
+        source = fix.get("source")
+        if source not in ("synthetic", "real-pr"):
+            raise FixtureValidationError(
+                f"fixture {fid!r} missing/invalid 'source' (got {source!r}; "
+                f"expected 'synthetic' or 'real-pr')"
+            )
+
+        # (b) real-pr source_pr format
+        if source == "real-pr":
+            spr = fix.get("source_pr", "")
+            if not isinstance(spr, str) or not _SOURCE_PR_RE.match(spr):
+                raise FixtureValidationError(
+                    f"fixture {fid!r} (source='real-pr') has malformed "
+                    f"'source_pr' {spr!r}; expected '#NNN @ <7-40 hex sha>'"
+                )
+
+        # (d) empty pr_description (waived for gap_documented)
+        pr_desc = fix.get("pr_description", "")
+        if not gap_documented:
+            if not isinstance(pr_desc, str) or not pr_desc.strip():
+                raise FixtureValidationError(
+                    f"fixture {fid!r} has empty/missing 'pr_description'"
+                )
+
+        # (e) lens_column enum
+        lens_col = fix.get("lens_column")
+        if lens_col is None:
+            raise FixtureValidationError(
+                f"fixture {fid!r} missing 'lens_column' field"
+            )
+        _validate_lens_column(lens_col, fid)  # raises on typo/reserved
+
+        # (f) pr_description leak check — fatal carve-out on ^Lens: line only
+        if isinstance(pr_desc, str) and pr_desc:
+            _check_pr_description_leakage(pr_desc, fid)  # may raise
+
+        # (g) ^Lens: substring in prompt → warning, not fatal
+        prompt = fix.get("prompt", "")
+        if isinstance(prompt, str) and prompt and not gap_documented:
+            if _LEAK_FATAL_LENS_LINE_RE.search(prompt):
+                print(
+                    f"WARNING: fixture {fid!r} prompt contains '^Lens:' line; "
+                    f"may collide with downstream parsing",
+                    file=sys.stderr,
+                )
+            # gap_documented fixtures bypass the non-empty prompt requirement
+        elif not gap_documented and not prompt:
+            raise FixtureValidationError(
+                f"fixture {fid!r} has empty/missing 'prompt' "
+                f"(set gap_documented=true to waive)"
+            )
+
+        # (i) trials-uniformity: non-'none' lens columns must have trials in {5, 10}
+        is_none_col = lens_col == "none"
+        if not is_none_col:
+            rule = fix.get("replicate_rule", {})
+            trials = rule.get("trials") if isinstance(rule, dict) else None
+            if trials not in (5, 10):
+                raise FixtureValidationError(
+                    f"fixture {fid!r} lens_column={lens_col!r} must declare "
+                    f"replicate_rule.trials in {{5, 10}} (R1 M9 / gate (i)); "
+                    f"got {trials!r}"
+                )
+
+        # (c) synthetic_pair resolution + lens_column match
+        pair_id = fix.get("synthetic_pair")
+        if pair_id is not None:
+            # pair_id can be a string OR list (for mixed-real)
+            pair_ids = pair_id if isinstance(pair_id, list) else [pair_id]
+            for pid in pair_ids:
+                twin = by_id.get(pid)
+                if twin is None:
+                    raise FixtureValidationError(
+                        f"fixture {fid!r} synthetic_pair {pid!r} does not "
+                        f"resolve to a known fixture id"
+                    )
+                twin_lc = twin.get("lens_column")
+                if isinstance(lens_col, str):
+                    if twin_lc != lens_col:
+                        raise FixtureValidationError(
+                            f"fixture {fid!r} synthetic_pair twin {pid!r} "
+                            f"lens_column {twin_lc!r} does not match "
+                            f"{lens_col!r}"
+                        )
+                elif isinstance(lens_col, list):
+                    # Mixed: twin's lens_column must appear in the mixed list
+                    if isinstance(twin_lc, str):
+                        if twin_lc not in lens_col:
+                            raise FixtureValidationError(
+                                f"fixture {fid!r} (mixed) synthetic_pair twin "
+                                f"{pid!r} lens_column {twin_lc!r} not in mixed "
+                                f"set {lens_col!r}"
+                            )
+                    elif isinstance(twin_lc, list):
+                        if not set(twin_lc) <= set(lens_col):
+                            raise FixtureValidationError(
+                                f"fixture {fid!r} (mixed) synthetic_pair twin "
+                                f"{pid!r} lens_column {twin_lc!r} not subset of "
+                                f"{lens_col!r}"
+                            )
+
+        # (j) strict source_pr existence check (opt-in)
+        if strict_source_pr and source == "real-pr":
+            import subprocess
+            spr = fix.get("source_pr", "")
+            # Parse "#NNN @ <sha>"
+            m = re.match(r"^#\d+ @ ([0-9a-f]{7,40})$", spr)
+            if m:
+                sha = m.group(1)
+                r = subprocess.run(
+                    ["git", "cat-file", "-e", sha],
+                    capture_output=True, text=True, check=False,
+                )
+                if r.returncode != 0:
+                    raise FixtureValidationError(
+                        f"fixture {fid!r} source_pr sha {sha!r} not present "
+                        f"in current git repository (gate (j))"
+                    )
+
+        # (k) mixed-fixture cap: at most one real-pr fixture with list lens_column
+        if source == "real-pr" and isinstance(lens_col, list):
+            list_lens_column_offenders.append(fid)
+
+    # Gate (k) check after loop
+    if len(list_lens_column_offenders) > 1:
+        raise FixtureValidationError(
+            f"gate (k): at most one real-PR fixture may carry list-valued "
+            f"lens_column; found: {list_lens_column_offenders}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Task 9 (#290 S3): per-lens-column PASS for mixed fixtures
 # ---------------------------------------------------------------------------
 
@@ -461,6 +686,7 @@ def stage(
     fixture: str | None = None,
     trials_override: int | None = None,
     timeout: int = 300,
+    strict_source_pr: bool = False,
 ) -> Path:
     """Render fixtures × trials to dispatch files; write stage-manifest.json.
 
@@ -481,6 +707,9 @@ def stage(
 
     # Load fixtures
     evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+    # Task 8 (#290 F2): schema gate at stage-time. Raises FixtureValidationError
+    # for any (a)-(k) failure; rc=2 propagates via the main() handler.
+    _validate_fixtures(evals_data, strict_source_pr=strict_source_pr)
     fixtures = evals_data.get("evals", [])
 
     # --source filter
@@ -1236,6 +1465,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sp_stage.add_argument("--fixture", default=None)
     sp_stage.add_argument("--trials-override", type=int, default=None)
     sp_stage.add_argument("--timeout", type=int, default=300)
+    # Task 8 (#290 F2 / gate (j)): opt-in `git cat-file -e` per source_pr sha.
+    # Off by default — gate (j) does not invoke any `git rev-parse` /
+    # `git cat-file` subprocess unless this flag is present.
+    sp_stage.add_argument("--strict-source-pr", action="store_true",
+        help="(#290 gate j) require every real-PR fixture's source_pr SHA to "
+             "exist in the current git repo. Default OFF.")
 
     # score — Task 6
     sp_score = sub.add_parser("score", help="Aggregate results + write last_run.json")
@@ -1290,9 +1525,10 @@ def main(argv: list[str] | None = None) -> int:
                 fixture=args.fixture,
                 trials_override=args.trials_override,
                 timeout=args.timeout,
+                strict_source_pr=args.strict_source_pr,
             )
             return 0
-        except (FileExistsError, ValueError) as e:
+        except (FileExistsError, ValueError, FixtureValidationError) as e:
             print(f"[fatal] {e}", file=sys.stderr)
             return 2
 

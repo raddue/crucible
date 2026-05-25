@@ -1130,5 +1130,279 @@ def test_drift_tolerance_loader_handles_malformed_calibration(
     assert run_evals._drift_tolerance() == 0.447
 
 
+# ---------------------------------------------------------------------------
+# Task 8 (#290 F2/S3): _validate_fixtures + FixtureValidationError gates (a)-(m)
+# ---------------------------------------------------------------------------
+
+
+def _minimal_fixture(**overrides) -> dict:
+    """Build a minimal fixture passing all gates (a)-(k) for selective override."""
+    base = {
+        "id": "fx",
+        "source": "synthetic",
+        "lens_column": "Surgical",
+        "pr_description": "Add a helper that wraps an existing utility.",
+        "prompt": "Review the diff.\n\n```diff\n+x = 1\n```",
+        "expected_output": "Some expected output rationale.",
+        "files": ["src/x.py"],
+        "allowed_files": ["src/x.py"],
+        "lens_under_test": "surgical",
+        "replicate_rule": {"trials": 5, "threshold": 3},
+        "expectations": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_validate_fixtures_evals_key_required():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    with pytest.raises(FixtureValidationError, match="evals"):
+        _validate_fixtures({"fixtures": []})
+    with pytest.raises(FixtureValidationError, match="evals"):
+        _validate_fixtures({})
+
+
+def test_validate_fixtures_gate_a_missing_source():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture()
+    fx.pop("source")
+    with pytest.raises(FixtureValidationError, match="source"):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_b_real_pr_malformed_source_pr():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(source="real-pr", source_pr="not-a-pr-ref")
+    with pytest.raises(FixtureValidationError, match="source_pr"):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_b_real_pr_valid_sha():
+    """`#123 @ deadbee` (7 hex) is accepted."""
+    from skills.temper.evals.run_evals import _validate_fixtures
+    fx = _minimal_fixture(
+        id="real",
+        source="real-pr",
+        source_pr="#123 @ deadbee",
+        synthetic_pair=None,
+    )
+    # No raise expected
+    _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_c_synthetic_pair_unresolved():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(
+        id="real",
+        source="real-pr",
+        source_pr="#1 @ abcdef0",
+        synthetic_pair="ghost-id",
+    )
+    with pytest.raises(FixtureValidationError, match="synthetic_pair"):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_c_pair_lens_column_mismatch():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    twin = _minimal_fixture(id="twin", lens_column="DRY")
+    fx = _minimal_fixture(
+        id="real",
+        source="real-pr",
+        source_pr="#1 @ abcdef0",
+        synthetic_pair="twin",
+        lens_column="Surgical",  # mismatch with twin's DRY
+    )
+    with pytest.raises(FixtureValidationError, match="lens_column"):
+        _validate_fixtures({"evals": [twin, fx]})
+
+
+def test_validate_fixtures_gate_d_empty_pr_description():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(pr_description="")
+    with pytest.raises(FixtureValidationError, match="pr_description"):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_e_bad_lens_column():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(lens_column="Surigcal")
+    with pytest.raises(FixtureValidationError):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_f_lens_line_pr_description_fatal():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(pr_description="Some text\nLens: Surgical\nmore")
+    with pytest.raises(FixtureValidationError, match="Lens"):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_g_lens_line_in_prompt_warns_not_fatal(capsys):
+    from skills.temper.evals.run_evals import _validate_fixtures
+    # `^\s*Lens:` regex requires line-start (or whitespace) before `Lens:`.
+    fx = _minimal_fixture(
+        prompt="Review diff.\nLens: SRP\nLong enough." + "x" * 200,
+    )
+    _validate_fixtures({"evals": [fx]})  # warning only — no raise
+    err = capsys.readouterr().err
+    assert "Lens" in err or "lens" in err
+
+
+def test_validate_fixtures_gate_i_trials_uniformity():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(replicate_rule={"trials": 3, "threshold": 2})
+    with pytest.raises(FixtureValidationError, match="trials"):
+        _validate_fixtures({"evals": [fx]})
+
+
+def test_validate_fixtures_gate_i_none_lens_column_waived():
+    """`lens_column='none'` bypasses gate (i)'s trials-uniformity check."""
+    from skills.temper.evals.run_evals import _validate_fixtures
+    fx = _minimal_fixture(
+        lens_column="none",
+        replicate_rule={"trials": 3, "threshold": 2},
+    )
+    _validate_fixtures({"evals": [fx]})  # no raise
+
+
+def test_validate_fixtures_gate_j_strict_flag_off_does_not_call_git():
+    """When --strict-source-pr is OFF, validator does not probe git."""
+    from unittest.mock import patch
+    from skills.temper.evals.run_evals import _validate_fixtures
+    fx = _minimal_fixture(
+        id="real",
+        source="real-pr",
+        source_pr="#1 @ deadbee",
+    )
+    with patch("subprocess.run") as mrun:
+        _validate_fixtures({"evals": [fx]}, strict_source_pr=False)
+        for call in mrun.call_args_list:
+            args0 = call.args[0] if call.args else []
+            if isinstance(args0, list) and args0 and args0[0] == "git":
+                assert args0[1] not in ("rev-parse", "cat-file")
+
+
+def test_validate_fixtures_gate_j_strict_flag_on_missing_sha_fails(monkeypatch):
+    from unittest.mock import MagicMock
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    fx = _minimal_fixture(
+        id="real",
+        source="real-pr",
+        source_pr="#1 @ deadbee",
+    )
+
+    call_log = []
+
+    def fake_run(args, **kwargs):
+        call_log.append(args)
+        m = MagicMock()
+        if "rev-parse" in args:
+            m.returncode = 0
+            m.stderr = ""
+        else:
+            # cat-file: simulate missing SHA
+            m.returncode = 1
+            m.stderr = "fatal: not a tree object"
+        return m
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    with pytest.raises(FixtureValidationError, match="sha"):
+        _validate_fixtures({"evals": [fx]}, strict_source_pr=True)
+
+
+def test_validate_fixtures_gate_k_mixed_fixture_cap():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_fixtures,
+    )
+    a = _minimal_fixture(
+        id="a",
+        source="real-pr",
+        source_pr="#1 @ abcdef0",
+        lens_column=["Surgical", "DRY"],
+    )
+    b = _minimal_fixture(
+        id="b",
+        source="real-pr",
+        source_pr="#2 @ abcdef0",
+        lens_column=["SRP", "OCP"],
+    )
+    with pytest.raises(FixtureValidationError, match="lens_column"):
+        _validate_fixtures({"evals": [a, b]})
+
+
+def test_validate_fixtures_gap_documented_waives_prompt():
+    """gap_documented=True bypasses empty-prompt + empty-pr_description gates."""
+    from skills.temper.evals.run_evals import _validate_fixtures
+    fx = _minimal_fixture(
+        prompt="",
+        pr_description="",
+        gap_documented=True,
+    )
+    _validate_fixtures({"evals": [fx]})  # no raise
+
+
+def test_baseline_quality_error_is_subclass_of_fixture_validation_error():
+    """BaselineQualityError preserves rc=2 propagation via FixtureValidationError."""
+    from skills.temper.evals.run_evals import (
+        BaselineQualityError,
+        FixtureValidationError,
+    )
+    assert issubclass(BaselineQualityError, FixtureValidationError)
+
+
+def test_strict_source_pr_flag_wired_on_stage_argparser():
+    """`stage --strict-source-pr` is accepted by argparse."""
+    from skills.temper.evals.run_evals import _parse_args
+    ns = _parse_args(["stage", "R-x", "--strict-source-pr"])
+    assert ns.cmd == "stage"
+    assert ns.strict_source_pr is True
+
+
+def test_trials_override_flag_wired_on_stage_argparser():
+    """`stage --trials-override 10` is accepted by argparse."""
+    from skills.temper.evals.run_evals import _parse_args
+    ns = _parse_args(["stage", "R-x", "--trials-override", "10"])
+    assert ns.cmd == "stage"
+    assert ns.trials_override == 10
+
+
+def test_validate_fixtures_live_evals_json_passes():
+    """The committed evals.json passes the validator without warnings."""
+    from skills.temper.evals.run_evals import _validate_fixtures, _EVALS_JSON
+    data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+    _validate_fixtures(data)  # no raise
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
