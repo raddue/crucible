@@ -81,6 +81,12 @@ def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
 # functions that USE this constant are still added in Task 8 (stubs added below in Task 6).
 _BASELINE_PATH = _EVALS_DIR / "baseline.json"
 
+# Task 2 (#290 S1): empirical-tolerance calibration artifact path. The header
+# schema is enforced by `test_calibration_json_schema`. Mutations land via
+# `scripts/calibrate_tolerance.py` after k=3 baseline runs through the post-#297
+# 3-step protocol (NOT via `claude -p` — see feedback_no_claude_p).
+_CALIBRATION_PATH = _EVALS_DIR / "calibration.json"
+
 _FIXTURE_CONTENT_HEADER = (
     "## Fixture content (synthetic — review this in lieu of running git commands):\n\n"
 )
@@ -735,6 +741,90 @@ def _parse_result_file(path: Path) -> str | None:
     return body
 
 
+# Task 2/3 (#290 S1): calibration loader. Returns the calibrated tolerance
+# value for the drift-delta gate. Falls back to the analytic floor (0.447)
+# if calibration.json is absent — never silently uses the legacy 0.7 literal.
+_DEFAULT_TOLERANCE_FLOOR = 0.447
+
+
+def _load_calibration() -> dict:
+    """Load calibration.json. Returns {} if absent or malformed.
+
+    The drift-delta gate uses `_load_calibration().get('tolerance', 0.447)`
+    so a missing artifact degrades gracefully to the analytic floor rather
+    than crashing the score path.
+    """
+    if not _CALIBRATION_PATH.exists():
+        return {}
+    try:
+        return json.loads(_CALIBRATION_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _drift_tolerance() -> float:
+    """Return the drift-delta tolerance from calibration.json.
+
+    Falls back to `_DEFAULT_TOLERANCE_FLOOR` (0.447) when calibration.json
+    is absent or malformed. Task 3 wires this into the gate.
+    """
+    cal = _load_calibration()
+    val = cal.get("tolerance")
+    if isinstance(val, (int, float)) and val > 0:
+        return float(val)
+    return _DEFAULT_TOLERANCE_FLOOR
+
+
+_CALIBRATION_PLACEHOLDER = {
+    "calibrated_at": "PLACEHOLDER",
+    "baseline_runs": 3,
+    "per_lens_sigma_empirical": {
+        "Surgical": 0.0,
+        "DRY": 0.0,
+        "SRP": 0.0,
+        "OCP": 0.0,
+    },
+    "sigma_worst": 0.0,
+    "t_emp": 0.0,
+    "analytic_floor": _DEFAULT_TOLERANCE_FLOOR,
+    "floor_binding": True,
+    "tolerance": 0.45,
+    "design_ceiling": 0.7,
+    "ceiling_binding": False,
+    "method": (
+        "min(max(2x empirical sigma over k=3 synth-only baseline runs, "
+        "0.447 analytic floor), 0.7 design ceiling)"
+    ),
+    "note": (
+        "Placeholder header written by `score --write-calibration`. "
+        "Run scripts/calibrate_tolerance.py after k=3 baseline runs for "
+        "the real empirical artifact."
+    ),
+}
+
+
+def _write_calibration_placeholder() -> bool:
+    """(#290 Task 2) Write a placeholder calibration.json if absent.
+
+    Returns True if a file was written, False if one already exists.
+
+    Computing real empirical sigmas requires the 3-step protocol
+    (stage / /temper-eval-collect / score, k=3) — see
+    scripts/calibrate_tolerance.py for the full flow. This helper exists
+    so the `--write-calibration` CLI flag has a coherent no-op when the
+    artifact is missing in CI / clean checkouts.
+    """
+    if _CALIBRATION_PATH.exists():
+        return False
+    import datetime as _dt2
+    payload = dict(_CALIBRATION_PLACEHOLDER)
+    payload["calibrated_at"] = _dt2.datetime.now(_dt2.timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    _atomic_write_text(_CALIBRATION_PATH, json.dumps(payload, indent=2) + "\n")
+    return True
+
+
 # Task 8: real impls. SP-1 baseline header carries template_sha so
 # --compare-baseline can detect dispatch-template drift since baseline.
 def _write_baseline(payload: dict, current_template_sha: str) -> None:
@@ -1110,6 +1200,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     # --source; staged trials for filtered-out fixtures are simply skipped.
     sp_score.add_argument("--source", choices=list(_SOURCE_VALUES), default="all",
         help="Limit scoring to fixtures with this source (synthetic | real-pr | all). Default: all.")
+    # Task 2 (#290 S1): writes a placeholder calibration.json header in-place
+    # if missing. Actually computing empirical sigmas requires the 3-step
+    # protocol (stage / /temper-eval-collect / score, k=3) followed by running
+    # `scripts/calibrate_tolerance.py` against the k last_run.json artifacts.
+    # See scripts/calibrate_tolerance.py for the full reproducible flow.
+    sp_score.add_argument("--write-calibration", action="store_true",
+        help="(#290 S1) emit a placeholder calibration.json header if absent. "
+             "Full calibration is computed by scripts/calibrate_tolerance.py "
+             "after k=3 baseline runs via the 3-step protocol.")
 
     # Legacy mock/replay paths (back-compat, no subcommand)
     # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.
@@ -1144,7 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "score":
         try:
-            return score(
+            rc = score(
                 args.run_id,
                 write_baseline=args.write_baseline,
                 compare_baseline=args.compare_baseline,
@@ -1157,6 +1256,23 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as e:
             print(f"[fatal] {e}", file=sys.stderr)
             return 2
+        # Task 2 (#290 S1): --write-calibration emits a placeholder header if
+        # calibration.json is absent. Runs after score() so a fatal score does
+        # not silently bypass calibration writeout.
+        if getattr(args, "write_calibration", False):
+            wrote = _write_calibration_placeholder()
+            if wrote:
+                print(
+                    f"[info] wrote placeholder calibration at {_CALIBRATION_PATH}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[info] calibration.json already present at {_CALIBRATION_PATH}; "
+                    f"not overwriting",
+                    file=sys.stderr,
+                )
+        return rc
 
     # Legacy mock/replay path — preserved unchanged
     return _legacy_main(args)

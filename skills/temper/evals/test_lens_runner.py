@@ -8,6 +8,8 @@ suffix being matched by a bare-lens `Lens: <name>` regex.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from skills.temper.evals.lens_runner import (
@@ -933,6 +935,103 @@ def test_compute_per_lens_pass_accepts_dict_outcomes():
     }
     # dict keyed by expectation index
     assert _compute_per_lens_pass(fixture, {0: True, 1: True}) == {"SRP": True}
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (#290 S1): empirical tolerance calibration baseline
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_json_schema():
+    """The committed calibration.json carries the required header keys."""
+    import json
+    from pathlib import Path
+
+    cal_path = (
+        Path(__file__).resolve().parent / "calibration.json"
+    )
+    cal = json.loads(cal_path.read_text(encoding="utf-8"))
+    assert "per_lens_sigma_empirical" in cal
+    assert "tolerance" in cal
+    assert "baseline_runs" in cal and cal["baseline_runs"] >= 3
+    assert set(cal["per_lens_sigma_empirical"].keys()) >= {
+        "Surgical",
+        "DRY",
+        "SRP",
+        "OCP",
+    }
+    # Clamping invariants
+    assert 0.447 <= cal["tolerance"] <= 0.7
+    assert cal["analytic_floor"] == 0.447
+    assert cal["design_ceiling"] == 0.7
+
+
+def test_write_calibration_placeholder_creates_when_missing(tmp_path, monkeypatch):
+    """`_write_calibration_placeholder()` writes a placeholder when absent."""
+    from skills.temper.evals import run_evals
+
+    target = tmp_path / "calibration.json"
+    monkeypatch.setattr(run_evals, "_CALIBRATION_PATH", target)
+    assert not target.exists()
+    wrote = run_evals._write_calibration_placeholder()
+    assert wrote is True
+    assert target.exists()
+    payload = json.loads(target.read_text())
+    assert payload["tolerance"] >= 0.447
+    assert "Surgical" in payload["per_lens_sigma_empirical"]
+
+
+def test_write_calibration_placeholder_noop_when_present(tmp_path, monkeypatch):
+    """`_write_calibration_placeholder()` returns False if file already present."""
+    from skills.temper.evals import run_evals
+
+    target = tmp_path / "calibration.json"
+    target.write_text('{"tolerance": 0.5}', encoding="utf-8")
+    monkeypatch.setattr(run_evals, "_CALIBRATION_PATH", target)
+    wrote = run_evals._write_calibration_placeholder()
+    assert wrote is False
+    # Pre-existing content untouched
+    assert json.loads(target.read_text()) == {"tolerance": 0.5}
+
+
+def test_calibrate_tolerance_script_clamps_to_floor(tmp_path):
+    """`scripts/calibrate_tolerance.py` clamps t_emp < floor up to 0.447."""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / "scripts"))
+    try:
+        import calibrate_tolerance  # type: ignore[import-not-found]
+    finally:
+        _sys.path.pop(0)
+
+    # Fabricate 3 minimal baseline last_run.json files with identical PASS rates
+    # so sigma=0 across runs => t_emp=0 => floor binds at 0.447.
+    fake_evals = tmp_path / "evals.json"
+    fake_evals.write_text(json.dumps({
+        "evals": [
+            {"id": "x", "lens_column": "Surgical"},
+        ]
+    }), encoding="utf-8")
+    inputs = []
+    for i in range(3):
+        p = tmp_path / f"run-{i}.json"
+        p.write_text(json.dumps({
+            "fixtures": [{
+                "id": "x",
+                "expectations": [
+                    {"per_trial_verdicts": ["PASS", "PASS", "PASS"]},
+                ],
+            }],
+        }), encoding="utf-8")
+        inputs.append(p)
+    artifact = calibrate_tolerance.calibrate(inputs, fake_evals)
+    assert artifact["tolerance"] == 0.45  # round(0.447, 2) == 0.45
+    assert artifact["floor_binding"] is True
+    assert artifact["ceiling_binding"] is False
+    assert set(artifact["per_lens_sigma_empirical"].keys()) == {
+        "Surgical", "DRY", "SRP", "OCP",
+    }
 
 
 if __name__ == "__main__":
