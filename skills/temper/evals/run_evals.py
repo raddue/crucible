@@ -888,11 +888,66 @@ def _compare_baseline(
         cur_v = current_verdicts.get(fid)
         if base_v == "PASS" and cur_v in ("FAIL", "N/A"):
             regressions.append((fid, base_v, cur_v))
-    if regressions:
+
+    # Task 3 (#290 S1): per-fixture PASS-rate drift-delta gate. Reads tolerance
+    # from calibration.json (analytic floor 0.447 when absent — never the
+    # legacy 0.7 literal). |cur_rate - base_rate| > tolerance flags as drift.
+    tolerance = _drift_tolerance()
+    cur_rates = _per_fixture_pass_rates(payload.get("fixtures", []))
+    base_rates = _per_fixture_pass_rates(baseline.get("fixtures", []))
+    drift_flags = []
+    for fid, base_rate in base_rates.items():
+        if fid not in cur_rates:
+            continue
+        delta = abs(cur_rates[fid] - base_rate)
+        if delta > tolerance:
+            drift_flags.append((fid, base_rate, cur_rates[fid], delta))
+    if drift_flags:
+        for fid, br, cr, dl in drift_flags:
+            print(
+                f"[drift] {fid}: baseline pass_rate={br:.2f} -> current={cr:.2f} "
+                f"(delta={dl:.2f} > tolerance={tolerance:.2f})",
+                file=sys.stderr,
+            )
+
+    if regressions or drift_flags:
         for fid, b, c in regressions:
-            print(f"[regression] {fid}: baseline {b} → current {c}", file=sys.stderr)
+            print(f"[regression] {fid}: baseline {b} -> current {c}", file=sys.stderr)
         return 1
     return 0
+
+
+def _per_fixture_pass_rates(fixtures: list[dict]) -> dict[str, float]:
+    """Compute per-fixture PASS rate (PASS trials / total trials).
+
+    Task 3 (#290 S1) drift-delta gate input. Returns 0.0 for fixtures with
+    no expectations or no trials so the gate degrades gracefully on malformed
+    baselines (and on synthetic schema variants used by tests).
+    """
+    rates: dict[str, float] = {}
+    for fr in fixtures:
+        fid = fr.get("id")
+        if not fid:
+            continue
+        expectations = fr.get("expectations", [])
+        if not expectations:
+            rates[fid] = 0.0
+            continue
+        per_trial_lists = [er.get("per_trial_verdicts", []) for er in expectations]
+        n_trials = max((len(lst) for lst in per_trial_lists), default=0)
+        if n_trials == 0:
+            rates[fid] = 0.0
+            continue
+        passes = 0
+        for t in range(n_trials):
+            if all(
+                t < len(per_trial_lists[i])
+                and per_trial_lists[i][t] == "PASS"
+                for i in range(len(per_trial_lists))
+            ):
+                passes += 1
+        rates[fid] = passes / n_trials
+    return rates
 
 
 def score(

@@ -1034,5 +1034,101 @@ def test_calibrate_tolerance_script_clamps_to_floor(tmp_path):
     }
 
 
+# ---------------------------------------------------------------------------
+# Task 3 (#290 S1): drift-delta gate reads calibrated tolerance
+# ---------------------------------------------------------------------------
+
+
+def _drift_payload(fid: str, n_pass: int, n_total: int, verdict: str = "PASS") -> dict:
+    """Build a fixture payload with controllable per-trial pass rate.
+
+    `verdict` is the aggregated verdict (independent of per-trial counts so
+    the swing-tolerance gate can be tested without tripping the
+    PASS->FAIL/N/A regression branch).
+    """
+    verdicts = ["PASS"] * n_pass + ["FAIL"] * (n_total - n_pass)
+    return {
+        "id": fid,
+        "verdict": verdict,
+        "expectations": [{"per_trial_verdicts": verdicts}],
+    }
+
+
+def test_drift_gate_reads_calibration_tolerance(tmp_path, monkeypatch):
+    """When delta > calibrated tolerance, _compare_baseline flags drift (rc=1)."""
+    from skills.temper.evals import run_evals
+
+    cal = tmp_path / "calibration.json"
+    cal.write_text(json.dumps({"tolerance": 0.3}), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline = {
+        "template_sha": "abc",
+        "fixtures": [_drift_payload("x", 5, 5)],  # base rate 1.0
+    }
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    monkeypatch.setattr(run_evals, "_CALIBRATION_PATH", cal)
+    monkeypatch.setattr(run_evals, "_BASELINE_PATH", baseline_path)
+
+    # keep verdict=PASS so regression branch does not preempt drift gate
+    payload = {"fixtures": [_drift_payload("x", 2, 5, verdict="PASS")]}  # delta=0.6
+    rc = run_evals._compare_baseline(
+        payload,
+        "abc",
+        incomplete=False,
+        evals_fixture_ids={"x"},
+    )
+    assert rc == 1
+
+
+def test_drift_gate_within_tolerance_no_flag(tmp_path, monkeypatch):
+    """When delta <= calibrated tolerance, no drift flag fires."""
+    from skills.temper.evals import run_evals
+
+    cal = tmp_path / "calibration.json"
+    cal.write_text(json.dumps({"tolerance": 0.5}), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline = {
+        "template_sha": "abc",
+        "fixtures": [_drift_payload("x", 5, 5)],
+    }
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    monkeypatch.setattr(run_evals, "_CALIBRATION_PATH", cal)
+    monkeypatch.setattr(run_evals, "_BASELINE_PATH", baseline_path)
+
+    payload = {"fixtures": [_drift_payload("x", 4, 5, verdict="PASS")]}  # delta=0.2
+    rc = run_evals._compare_baseline(
+        payload,
+        "abc",
+        incomplete=False,
+        evals_fixture_ids={"x"},
+    )
+    assert rc == 0
+
+
+def test_drift_gate_falls_back_to_analytic_floor_when_calibration_absent(
+    tmp_path, monkeypatch
+):
+    """When calibration.json is absent, tolerance defaults to 0.447 floor."""
+    from skills.temper.evals import run_evals
+
+    missing_cal = tmp_path / "calibration.json"  # does not exist
+    monkeypatch.setattr(run_evals, "_CALIBRATION_PATH", missing_cal)
+    assert run_evals._drift_tolerance() == 0.447
+
+
+def test_drift_tolerance_loader_handles_malformed_calibration(
+    tmp_path, monkeypatch
+):
+    """Malformed calibration.json => analytic floor fallback (not crash)."""
+    from skills.temper.evals import run_evals
+
+    cal = tmp_path / "calibration.json"
+    cal.write_text("not json{", encoding="utf-8")
+    monkeypatch.setattr(run_evals, "_CALIBRATION_PATH", cal)
+    assert run_evals._drift_tolerance() == 0.447
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
