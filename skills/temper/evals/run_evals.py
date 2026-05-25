@@ -87,6 +87,105 @@ _FIXTURE_CONTENT_HEADER = (
 
 
 # ---------------------------------------------------------------------------
+# Task 4 (#290 F2): pr_description leakage check (warning-only + fatal ^Lens:)
+# ---------------------------------------------------------------------------
+
+
+class FixtureValidationError(Exception):
+    """Raised when a fixture violates a load-time validation gate.
+
+    Task 8 will wire this into _validate_fixtures; Tasks 4 and 5 raise it
+    for fatal sub-gates (^Lens: line in pr_description; reserved-future
+    lens_column values) so the exception class is the single source of
+    truth for fixture-schema failures.
+    """
+
+
+# Substring patterns (case-insensitive) — Design Harness §2(f).
+# WARNING-only per R1 demotion. Substring (not word-boundary) for these so
+# `srp-related`, `over-defensive`, etc. trip the warning per design intent.
+_LEAK_SUBSTR_PATTERNS = (
+    "lens",
+    "dry",
+    "surgical",
+    "srp",
+    "ocp",
+    "re-attribut",
+    "scope bleed",
+    "scope-bleed",
+    "defense-in-depth",
+    "defense in depth",
+    "over-defensive",
+)
+
+# Word-boundary patterns (case-insensitive) — narrow set per R3 S3.
+# Only `tenancy` / `rollback` themselves trip; `tenant_id`, `rollback_handler`
+# (function name), `safe-undo flow` etc. pass cleanly.
+_LEAK_WORDBOUNDARY_PATTERNS = (r"\btenancy\b", r"\brollback\b")
+
+# Semantic-prime word-boundary patterns — Design Harness §2(f).
+_LEAK_SEMANTIC_PRIMES = (
+    r"\bduplicate\b",
+    r"\bextract\b",
+    r"\breformat\b",
+    r"\bresponsibility\b",
+    r"\bregistry\b",
+    r"\belif\b",
+    r"\bdispatch\b",
+    r"\bunrelated\b",
+    r"\bdrive-by\b",
+)
+
+# Fatal pattern: `^Lens:` line (case-insensitive, multiline) — direct
+# collision with _LENS_RE parsing in lens_runner.
+_LEAK_FATAL_LENS_LINE_RE = re.compile(r"^\s*Lens:", re.IGNORECASE | re.MULTILINE)
+
+
+def _check_pr_description_leakage(
+    pr_description: str, fixture_id: str = "<unknown>"
+) -> list[str]:
+    """Scan pr_description for lens-vocab leak.
+
+    Returns: list of WARNING strings (substring + word-boundary + semantic-prime
+    hits). Emits each warning to stderr as a side effect.
+
+    Raises: FixtureValidationError if a `^Lens:` line is present — that
+    pattern directly collides with `_LENS_RE` parsing downstream and is
+    not survivable.
+
+    Task 8 will call this from `_validate_fixtures` once per fixture.
+    """
+    if not isinstance(pr_description, str):
+        return []
+
+    # Fatal carve-out: ^Lens: line match — re-raise as FixtureValidationError.
+    if _LEAK_FATAL_LENS_LINE_RE.search(pr_description):
+        raise FixtureValidationError(
+            f"pr_description for fixture {fixture_id!r} contains a literal "
+            f"'Lens:' line, which collides with downstream `_LENS_RE` parsing"
+        )
+
+    warnings: list[str] = []
+    lower = pr_description.lower()
+    for pat in _LEAK_SUBSTR_PATTERNS:
+        if pat in lower:
+            warnings.append(pat)
+    for regex_pat in _LEAK_WORDBOUNDARY_PATTERNS + _LEAK_SEMANTIC_PRIMES:
+        if re.search(regex_pat, pr_description, re.IGNORECASE):
+            # Strip regex anchors for display
+            display = regex_pat.replace(r"\b", "")
+            warnings.append(display)
+
+    for w in warnings:
+        print(
+            f"WARNING: pr_description for fixture {fixture_id!r} contains "
+            f"potentially-priming substring '{w}'",
+            file=sys.stderr,
+        )
+    return warnings
+
+
+# ---------------------------------------------------------------------------
 # Prompt assembly + dispatch
 # ---------------------------------------------------------------------------
 

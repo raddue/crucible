@@ -641,5 +641,94 @@ def test_aggregate_replicates_na_excluded_from_denominator():
     assert aggregate_replicates(["PASS", "PASS", "N/A", "FAIL"], 2) == "PASS"
 
 
+# ---------------------------------------------------------------------------
+# Task 4 (#290 F2): _check_pr_description_leakage tests
+# ---------------------------------------------------------------------------
+
+
+def test_pr_desc_leak_substring_match_srp_related():
+    # Design wants `srp-related` flagged via substring (NOT word-boundary).
+    # Verifies the substring-mode (vs word-boundary) for lens-vocab patterns.
+    from skills.temper.evals.run_evals import _check_pr_description_leakage
+    warnings = _check_pr_description_leakage(
+        "Some srp-related cleanup", fixture_id="t1"
+    )
+    assert "srp" in warnings
+
+
+def test_pr_desc_leak_word_boundary_protects_tenancy_rollback(capsys):
+    from skills.temper.evals.run_evals import _check_pr_description_leakage
+    # tenant_id and rollback_handler are NOT bare-word matches
+    warnings = _check_pr_description_leakage(
+        "Add tenant_id filter to rollback_handler function",
+        fixture_id="t2",
+    )
+    assert "tenancy" not in warnings
+    assert "rollback" not in warnings
+
+
+def test_pr_desc_leak_word_boundary_catches_bare_words():
+    from skills.temper.evals.run_evals import _check_pr_description_leakage
+    warnings = _check_pr_description_leakage(
+        "This change touches tenancy semantics and triggers a rollback.",
+        fixture_id="t2b",
+    )
+    assert "tenancy" in warnings
+    assert "rollback" in warnings
+
+
+def test_pr_desc_leak_blacklist_warns_not_fails(capsys):
+    from skills.temper.evals.run_evals import _check_pr_description_leakage
+    # "this is surgical" → warning to stderr, NOT FixtureValidationError
+    warnings = _check_pr_description_leakage(
+        "this is surgical work on the parser", fixture_id="t3"
+    )
+    assert "surgical" in warnings
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "surgical" in err
+    assert "t3" in err
+
+
+def test_pr_desc_leak_semantic_primes_warn():
+    from skills.temper.evals.run_evals import _check_pr_description_leakage
+    warnings = _check_pr_description_leakage(
+        "Extract the duplicate code into a helper.", fixture_id="t4"
+    )
+    assert "extract" in warnings
+    assert "duplicate" in warnings
+
+
+def test_pr_desc_leak_lens_line_match_is_fatal():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _check_pr_description_leakage,
+    )
+    with pytest.raises(FixtureValidationError, match="Lens:"):
+        _check_pr_description_leakage(
+            "Some scope.\nLens: Surgical\nMore prose.", fixture_id="t5"
+        )
+
+
+def test_pr_desc_leak_lens_line_match_case_insensitive():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _check_pr_description_leakage,
+    )
+    with pytest.raises(FixtureValidationError):
+        _check_pr_description_leakage(
+            "scope\nlens: dry\nrest", fixture_id="t6"
+        )
+
+
+def test_pr_desc_leak_clean_text_returns_empty():
+    from skills.temper.evals.run_evals import _check_pr_description_leakage
+    warnings = _check_pr_description_leakage(
+        "Add a slugify helper to support max-length truncation.",
+        fixture_id="t7",
+    )
+    assert warnings == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
