@@ -813,5 +813,127 @@ def test_lens_column_rejects_empty_list():
         _validate_lens_column([], fixture_id="bad-empty")
 
 
+# ---------------------------------------------------------------------------
+# Task 9 (#290 S3): per-lens-column PASS for mixed fixtures
+# ---------------------------------------------------------------------------
+
+
+def test_non_mixed_fixture_per_lens_pass_all_true():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "ex-1",
+        "lens_column": "Surgical",
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "Surgical"}},
+            {"check": "all-findings-have-file-line"},
+        ],
+    }
+    assert _compute_per_lens_pass(fixture, [True, True]) == {"Surgical": True}
+
+
+def test_non_mixed_fixture_per_lens_pass_one_false():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "ex-2",
+        "lens_column": "DRY",
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "DRY"}},
+            {"check": "all-findings-have-file-line"},
+        ],
+    }
+    assert _compute_per_lens_pass(fixture, [True, False]) == {"DRY": False}
+
+
+def test_mixed_fixture_per_lens_pass_partitioned():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "mixed-real",
+        "lens_column": ["Surgical", "OCP"],
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "Surgical"}},
+            {"check": "lens-finding-fires", "params": {"lens": "OCP"}},
+            {"check": "all-findings-have-file-line"},  # global
+        ],
+    }
+    # surgical PASS, ocp FAIL, global PASS → {Surgical: True, OCP: False}
+    result = _compute_per_lens_pass(fixture, [True, False, True])
+    assert result == {"Surgical": True, "OCP": False}
+
+
+def test_mixed_fixture_global_fail_taints_all_columns():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "mixed-2",
+        "lens_column": ["Surgical", "OCP"],
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "Surgical"}},
+            {"check": "lens-finding-fires", "params": {"lens": "OCP"}},
+            {"check": "all-findings-have-file-line"},  # global
+        ],
+    }
+    # global fails → both columns fail regardless of lens-specific verdict
+    result = _compute_per_lens_pass(fixture, [True, True, False])
+    assert result == {"Surgical": False, "OCP": False}
+
+
+def test_mixed_fixture_drift_delta_decoupled():
+    # 5 trials simulated: per-trial per-lens map collected externally;
+    # this test verifies a single mixed trial returns DECOUPLED per-lens bools.
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "mixed-3",
+        "lens_column": ["Surgical", "OCP"],
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "Surgical"}},
+            {"check": "lens-finding-fires", "params": {"lens": "OCP"}},
+        ],
+    }
+    # All-Surgical-pass / all-OCP-fail across 5 trials → Surgical rate 1.0, OCP 0.0
+    per_trial_maps = [_compute_per_lens_pass(fixture, [True, False]) for _ in range(5)]
+    surg_rate = sum(1 for m in per_trial_maps if m["Surgical"]) / 5
+    ocp_rate = sum(1 for m in per_trial_maps if m["OCP"]) / 5
+    assert surg_rate == 1.0
+    assert ocp_rate == 0.0
+
+
+def test_mixed_fixture_cross_leakage_raises():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "bad-leak",
+        "lens_column": ["Surgical", "OCP"],
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "Surgical"}},
+            {"check": "lens-finding-fires", "params": {"lens": "DRY"}},  # leak!
+        ],
+    }
+    with pytest.raises(ValueError, match="cross-leakage"):
+        _compute_per_lens_pass(fixture, [True, True])
+
+
+def test_compute_per_lens_pass_length_mismatch_raises():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "ex-len",
+        "lens_column": "Surgical",
+        "expectations": [{"check": "x", "params": {"lens": "Surgical"}}],
+    }
+    with pytest.raises(ValueError, match="length"):
+        _compute_per_lens_pass(fixture, [True, True])
+
+
+def test_compute_per_lens_pass_accepts_dict_outcomes():
+    from skills.temper.evals.run_evals import _compute_per_lens_pass
+    fixture = {
+        "id": "ex-d",
+        "lens_column": "SRP",
+        "expectations": [
+            {"check": "lens-finding-fires", "params": {"lens": "SRP"}},
+            {"check": "all-findings-have-file-line"},
+        ],
+    }
+    # dict keyed by expectation index
+    assert _compute_per_lens_pass(fixture, {0: True, 1: True}) == {"SRP": True}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -252,6 +252,114 @@ def _validate_lens_column(value: Any, fixture_id: str = "<unknown>") -> None:
 
 
 # ---------------------------------------------------------------------------
+# Task 9 (#290 S3): per-lens-column PASS for mixed fixtures
+# ---------------------------------------------------------------------------
+
+
+def _expectation_lens_tag(expectation: dict) -> str | None:
+    """Extract the lens-column tag from an expectation's `params`.
+
+    Returns the lens-column string (e.g. "Surgical", "DRY", "SRP", "OCP")
+    if the expectation is tagged with one; returns `None` for "global"
+    expectations (e.g. `lens-findings-in-allowed-files`, `all-findings-have-file-line`)
+    that apply across all lens columns.
+
+    Tag-source precedence (per Design Q5 resolution):
+      1. `params.lens` (most common — `lens-finding-*` checks)
+      2. `params.primary_lens` (`no-lens-findings-overlap-region`)
+      3. `params.category` (Tenancy/Rollback category checks)
+    """
+    params = expectation.get("params") or expectation.get("args") or {}
+    if not isinstance(params, dict):
+        return None
+    for key in ("lens", "primary_lens", "category"):
+        val = params.get(key)
+        if isinstance(val, str):
+            return val
+    return None
+
+
+def _compute_per_lens_pass(
+    fixture: dict,
+    trial_outcomes: list[bool] | dict[int, bool],
+) -> dict[str, bool]:
+    """Compute per-lens-column PASS map for a fixture across one trial.
+
+    Non-mixed (`lens_column` is a string): returns
+        `{lens_column: all(trial_outcomes)}`
+
+    Mixed (`lens_column` is a list): partitions expectations by their existing
+    per-expectation lens tag (`_expectation_lens_tag`). For each lens in the
+    fixture's `lens_column` list:
+        `{lens: all(outcomes for expectations tagged with that lens OR untagged)}`
+
+    Untagged (global) expectations contribute to ALL columns — they must pass
+    for every column to PASS that column.
+
+    Raises:
+        ValueError: if any expectation's lens tag is non-None but does not
+          appear in the fixture's `lens_column` list (cross-leakage guard).
+    """
+    expectations = fixture.get("expectations", [])
+
+    # Normalize trial_outcomes to a list aligned with expectations
+    if isinstance(trial_outcomes, dict):
+        outcomes = [bool(trial_outcomes.get(i, False)) for i in range(len(expectations))]
+    else:
+        outcomes = [bool(v) for v in trial_outcomes]
+    if len(outcomes) != len(expectations):
+        raise ValueError(
+            f"_compute_per_lens_pass: trial_outcomes length {len(outcomes)} "
+            f"does not match expectations length {len(expectations)} "
+            f"for fixture {fixture.get('id', '<?>')!r}"
+        )
+
+    lens_column = fixture.get("lens_column")
+
+    # Non-mixed path (string)
+    if isinstance(lens_column, str):
+        return {lens_column: all(outcomes)}
+
+    # Mixed path (list)
+    if isinstance(lens_column, list):
+        lens_set = set(lens_column)
+        # Cross-leakage guard
+        for idx, exp in enumerate(expectations):
+            tag = _expectation_lens_tag(exp)
+            if tag is not None and tag not in lens_set:
+                # Only fail-loud on lens tags that are KNOWN lens-column values;
+                # category tags (Tenancy/Rollback) for category-finding checks
+                # are allowed when fixture is non-mixed-future. For mixed
+                # fixtures (lens_column is list of Surgical/DRY/SRP/OCP only),
+                # any tag outside that set is cross-leakage.
+                if tag in _LENS_COLUMN_VALUES or tag in _LENS_COLUMN_FUTURE:
+                    raise ValueError(
+                        f"_compute_per_lens_pass: expectation #{idx} of "
+                        f"fixture {fixture.get('id', '<?>')!r} has lens tag "
+                        f"{tag!r} not in lens_column {lens_column!r} "
+                        f"(cross-leakage)"
+                    )
+
+        result: dict[str, bool] = {}
+        for lens in lens_column:
+            passed = True
+            for idx, exp in enumerate(expectations):
+                tag = _expectation_lens_tag(exp)
+                # Untagged (global) expectations apply to every column.
+                # Tagged expectations apply only to their matching column.
+                if tag is None or tag == lens:
+                    if not outcomes[idx]:
+                        passed = False
+                        break
+            result[lens] = passed
+        return result
+
+    # No lens_column → return empty (or treat as "none"). Schema validation
+    # at Task 8 will reject missing lens_column; this is defense-in-depth.
+    return {}
+
+
+# ---------------------------------------------------------------------------
 # Prompt assembly + dispatch
 # ---------------------------------------------------------------------------
 
