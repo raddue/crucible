@@ -730,5 +730,88 @@ def test_pr_desc_leak_clean_text_returns_empty():
     assert warnings == []
 
 
+# ---------------------------------------------------------------------------
+# Task 5 (#290 S2): lens_column enum + forward-compat allowlist tests
+# ---------------------------------------------------------------------------
+
+
+def test_lens_column_enum_accepts_known_values():
+    from skills.temper.evals.run_evals import _validate_lens_column
+    for v in ("Surgical", "DRY", "SRP", "OCP", "none"):
+        _validate_lens_column(v, fixture_id="ok")  # must not raise
+
+
+def test_lens_column_enum_rejects_typo():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_lens_column,
+    )
+    with pytest.raises(FixtureValidationError, match="Surigcal"):
+        _validate_lens_column("Surigcal", fixture_id="x")
+
+
+def test_lens_column_future_compat_constant_documented():
+    # Module-level constant _LENS_COLUMN_FUTURE must list "Tenancy", "Rollback"
+    # so future widening fails loud not silent.
+    from skills.temper.evals.run_evals import _LENS_COLUMN_FUTURE
+    assert {"Tenancy", "Rollback"} <= set(_LENS_COLUMN_FUTURE)
+
+
+def test_lens_column_mixed_accepts_list():
+    from skills.temper.evals.run_evals import _validate_lens_column
+    _validate_lens_column(["Surgical", "OCP"], fixture_id="mixed-1")  # ok
+
+
+def test_lens_column_mixed_rejects_none_in_list():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_lens_column,
+    )
+    with pytest.raises(FixtureValidationError):
+        _validate_lens_column(["Surgical", "none"], fixture_id="m2")
+
+
+def test_lens_column_tenancy_fail_loud():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_lens_column,
+    )
+    with pytest.raises(
+        FixtureValidationError,
+        match=r"lens_column 'Tenancy' is reserved for future use; not yet wired\.",
+    ):
+        _validate_lens_column("Tenancy", fixture_id="future-t")
+
+
+def test_lens_column_rollback_fail_loud():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_lens_column,
+    )
+    with pytest.raises(
+        FixtureValidationError,
+        match=r"lens_column 'Rollback' is reserved for future use; not yet wired\.",
+    ):
+        _validate_lens_column("Rollback", fixture_id="future-r")
+
+
+def test_lens_column_rejects_non_string_non_list():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_lens_column,
+    )
+    with pytest.raises(FixtureValidationError, match="must be str or list"):
+        _validate_lens_column(42, fixture_id="bad")
+
+
+def test_lens_column_rejects_empty_list():
+    from skills.temper.evals.run_evals import (
+        FixtureValidationError,
+        _validate_lens_column,
+    )
+    with pytest.raises(FixtureValidationError, match="empty list"):
+        _validate_lens_column([], fixture_id="bad-empty")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -87,7 +87,8 @@ _FIXTURE_CONTENT_HEADER = (
 
 
 # ---------------------------------------------------------------------------
-# Task 4 (#290 F2): pr_description leakage check (warning-only + fatal ^Lens:)
+# Task 4 (F2): pr_description leakage check (warning-only + fatal ^Lens:)
+# Task 5 (S2): lens_column enum + forward-compat allowlist
 # ---------------------------------------------------------------------------
 
 
@@ -183,6 +184,71 @@ def _check_pr_description_leakage(
             file=sys.stderr,
         )
     return warnings
+
+
+# Task 5: lens_column enum + forward-compat
+# Currently-wired lens columns (Design DEC-4 — Surgical/DRY/SRP/OCP +
+# `none` sentinel for negative/defense-in-depth fixtures).
+_LENS_COLUMN_VALUES = ("Surgical", "DRY", "SRP", "OCP", "none")
+
+# Reserved for future lens-column widening. Fixtures carrying these values
+# fail-loud today so the early-arriving Tenancy/Rollback fixture surfaces
+# with an actionable error pointing at #267 follow-ups (#294/#295/#296)
+# rather than being silently accepted under typo. Wire-in lands when
+# Tenancy/Rollback real-PR fixtures arrive (see DEC-4 in #290 design).
+_LENS_COLUMN_FUTURE = ("Tenancy", "Rollback")
+
+
+def _validate_lens_column(value: Any, fixture_id: str = "<unknown>") -> None:
+    """Validate a fixture's `lens_column` field.
+
+    Accepts:
+      - string in `_LENS_COLUMN_VALUES`
+      - list of strings drawn from `_LENS_COLUMN_VALUES \\ {"none"}`
+        (mixed fixtures; singleton "none" is non-mixed by definition)
+
+    Raises:
+      - FixtureValidationError on typo / unknown value
+      - FixtureValidationError with a distinct reserved-future message
+        when value matches `_LENS_COLUMN_FUTURE`
+    """
+    if isinstance(value, str):
+        if value in _LENS_COLUMN_FUTURE:
+            raise FixtureValidationError(
+                f"lens_column {value!r} is reserved for future use; not yet wired."
+            )
+        if value not in _LENS_COLUMN_VALUES:
+            raise FixtureValidationError(
+                f"lens_column {value!r} for fixture {fixture_id!r} not in "
+                f"{_LENS_COLUMN_VALUES}"
+            )
+        return
+    if isinstance(value, list):
+        if not value:
+            raise FixtureValidationError(
+                f"lens_column for fixture {fixture_id!r} is an empty list"
+            )
+        allowed_list = tuple(v for v in _LENS_COLUMN_VALUES if v != "none")
+        for item in value:
+            if not isinstance(item, str):
+                raise FixtureValidationError(
+                    f"lens_column list for fixture {fixture_id!r} contains "
+                    f"non-string entry {item!r}"
+                )
+            if item in _LENS_COLUMN_FUTURE:
+                raise FixtureValidationError(
+                    f"lens_column {item!r} is reserved for future use; not yet wired."
+                )
+            if item not in allowed_list:
+                raise FixtureValidationError(
+                    f"lens_column entry {item!r} for fixture {fixture_id!r} "
+                    f"not in {allowed_list} (singleton 'none' is non-mixed)"
+                )
+        return
+    raise FixtureValidationError(
+        f"lens_column for fixture {fixture_id!r} must be str or list, "
+        f"got {type(value).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
