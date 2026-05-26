@@ -447,6 +447,28 @@ git worktree remove <worktree-path>
 - Get typed confirmation for Option 4
 - Clean up worktree (if applicable) for Options 1, 2 & 4 only
 
+## Defer-Ledger Corpus Seeding (#303)
+
+After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate scratch directory (`~/.claude/projects/<project-hash>/memory/quality-gate/scratch/<run-id>/`) for `round-N-ledger.md` files emitted by the gate (see `skills/quality-gate/SKILL.md > ## Cost-Cap and Diminishing-Return Signals` for ledger format).
+
+For each ledger file found, **create-or-append** the `## Accepted` section to `docs/retrospectives/defer-ledger/<issue-number>.md` (where `<issue-number>` is the GitHub issue number associated with this run; derive from branch name `<prefix>/<NNN>-...` or from the PR's linked issue). If the target file does not exist, create it with a top-level `# Defer ledger — issue #<N>` header.
+
+Each appended entry preserves the finding summary verbatim and adds empty `Lik:`, `Cost:`, and `Outcome:` fields for v1.0 hand-fill or auto-fill:
+
+```markdown
+## <gate-run-timestamp> — <artifact-type> (<rounds> rounds)
+
+### Accepted
+- [<severity>] <finding-id>: <one-line summary>
+  Lik:
+  Cost:
+  Outcome:
+```
+
+**Graceful skip:** If the scratch directory is missing (gate did not run, crashed before round 1, or scratch already cleaned), or no ledger files are present, skip silently. Corpus seeding is best-effort — failures here MUST NOT block finish-skill completion.
+
+**Why this exists:** v0.1 ships visibility-only (no binding deferral). v1.0 will activate binding triage gated on a calibration corpus. This step seeds the corpus from v0.1 ledger emissions so v1.0 has data to learn from. See issue #305 for v1.0 follow-up work.
+
 ## Integration
 
 **Called by:**
