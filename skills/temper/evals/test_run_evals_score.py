@@ -556,3 +556,381 @@ def test_resolve_output_path_uses_current_evals_dir(monkeypatch, tmp_path):
     p_iter = run_evals._resolve_output_path("R-x", per_iter=True)
     assert p_shared == tmp_path / "last_run.json"
     assert p_iter == tmp_path / ".calibrate-state" / "last_run-R-x.json"
+
+
+# ---------------------------------------------------------------------------
+# Task 10 (#290): --source CLI filter on score subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_source_values_constant_exported():
+    """Shared constant _SOURCE_VALUES exists and lists the three expected values."""
+    from skills.temper.evals.run_evals import _SOURCE_VALUES
+    assert set(_SOURCE_VALUES) == {"synthetic", "real-pr", "all"}
+
+
+def test_score_source_filter_synthetic_scores_all_synthetic_fixtures(
+    monkeypatch, tmp_path
+):
+    """--source synthetic: synthetic fixtures still scored (current evals.json
+    is synthetic-only, so payload['fixtures'] is non-empty)."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-syn")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc = score("R-syn", source="synthetic")
+    assert rc in (0, 1)
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    assert len(payload["fixtures"]) > 0
+
+
+def test_score_source_filter_real_pr_scores_only_real_pr_fixtures(
+    monkeypatch, tmp_path
+):
+    """--source real-pr: synthetic-staged trials are filtered out → only real-PR
+    fixtures appear in payload.
+
+    Post-Task-7 the 5 real-PR fixtures exist (surgical-real, dry-real, srp-real,
+    ocp-real, mixed-real). The dispatch dir seeded by `_seed_dispatch_dir` stages
+    synthetic-side trials only; with `--source real-pr` filter, real-PR fixtures
+    are scored with no staged trials → N/A aggregated verdicts.
+    """
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-real")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc = score("R-real", source="real-pr")
+    # rc 0 = no FAILs (N/A verdicts don't count as failures)
+    assert rc == 0
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    fixture_ids = {f["id"] for f in payload["fixtures"]}
+    assert fixture_ids == {
+        "surgical-real",
+        "dry-real",
+        "srp-real",
+        "ocp-real",
+        "mixed-real",
+    }
+    # No real-PR trials staged → all verdicts are N/A (not PASS/FAIL).
+    for fx in payload["fixtures"]:
+        for exp in fx["expectations"]:
+            assert exp["aggregated_verdict"] == "N/A"
+
+
+def test_score_source_filter_invalid_rejected():
+    """argparse rejects --source frob with SystemExit(2)."""
+    from skills.temper.evals.run_evals import main
+    import pytest as _pytest
+    with _pytest.raises(SystemExit) as excinfo:
+        main(["score", "R-x", "--source", "frob"])
+    assert excinfo.value.code == 2
+
+
+def test_score_source_filter_all_is_default(monkeypatch, tmp_path):
+    """--source all (and default) scores every staged fixture."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-all")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc_explicit = score("R-all", source="all")
+    payload_explicit = json.loads(run_evals._LAST_RUN.read_text())
+
+    d2 = _seed_dispatch_dir(monkeypatch, tmp_path, "R-all2")
+    (d2 / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    rc_default = score("R-all2")
+    payload_default = json.loads(run_evals._LAST_RUN.read_text())
+
+    # Same fixture set in both
+    assert [f["id"] for f in payload_explicit["fixtures"]] == [
+        f["id"] for f in payload_default["fixtures"]
+    ]
+    assert rc_explicit == rc_default
+
+
+def test_score_source_filter_cli_passthrough(monkeypatch, tmp_path):
+    """`score R-x --source synthetic` via CLI wires through to score()."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-cli")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    from skills.temper.evals.run_evals import main
+    rc = main(["score", "R-cli", "--source", "synthetic"])
+    assert rc in (0, 1)
+
+
+# ---------------------------------------------------------------------------
+# Task 11 (#290 S3): grouped summary + by_source + drift_delta + per_trial_rates
+# ---------------------------------------------------------------------------
+
+
+def _seed_with_results(monkeypatch, tmp_path, run_id, outcomes_by_fixture):
+    """Seed a dispatch dir AND write reviewer-output result files per fixture.
+
+    outcomes_by_fixture: dict[fixture_id, list[str|None]] — one entry per trial.
+        Use None to simulate ERROR (dispatch failure); a non-empty string emits
+        a reviewer-shaped body. The body content drives lens_runner's verdict.
+    """
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, run_id)
+    manifest = json.loads((d / "stage-manifest.json").read_text())
+    # Group trial seqs by fixture_id (sorted by trial #)
+    for entry in manifest["trials"]:
+        fid = entry["fixture_id"]
+        trial = entry["trial"]
+        outputs = outcomes_by_fixture.get(fid)
+        if outputs is None:
+            continue
+        if trial - 1 >= len(outputs):
+            continue
+        body = outputs[trial - 1]
+        result_path = d / entry["result_file"]
+        if body is None:
+            # Simulate dispatch ERROR
+            result_path.write_text("DISPATCH_STATUS: ERROR: simulated\n\n", encoding="utf-8")
+        else:
+            result_path.write_text(
+                f"DISPATCH_STATUS: OK\n\n{body}", encoding="utf-8"
+            )
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    return d
+
+
+def test_last_run_has_by_source_block(monkeypatch, tmp_path):
+    """Task 11: last_run.json contains a `by_source` block keyed by source."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-bysrc")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-bysrc", source="all")
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    assert "by_source" in payload
+    assert "synthetic" in payload["by_source"]
+    assert "real-pr" in payload["by_source"]
+    # Synthetic fixtures (from evals.json) are present in by_source.synthetic.
+    syn_ids = {e["id"] for e in payload["by_source"]["synthetic"]}
+    assert "1a" in syn_ids  # known synthetic fixture
+    # Each entry carries id + verdict
+    for entry in payload["by_source"]["synthetic"]:
+        assert "id" in entry and "verdict" in entry
+
+
+def test_last_run_has_drift_delta_block(monkeypatch, tmp_path):
+    """Task 11: last_run.json contains `drift_delta` with the four lens columns."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-drift")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-drift", source="all")
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    assert "drift_delta" in payload
+    for lens in ("Surgical", "DRY", "SRP", "OCP"):
+        assert lens in payload["drift_delta"]
+
+
+def test_last_run_has_per_trial_rates_block(monkeypatch, tmp_path):
+    """Task 11: last_run.json contains `per_trial_rates` per lens column."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-rates")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-rates", source="all")
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    assert "per_trial_rates" in payload
+    for lens in ("Surgical", "DRY", "SRP", "OCP"):
+        assert lens in payload["per_trial_rates"]
+        block = payload["per_trial_rates"][lens]
+        assert "synthetic" in block
+        assert "real-pr" in block
+
+
+def test_drift_delta_none_column_zero_contribution(monkeypatch, tmp_path):
+    """R1 S6: fixtures with lens_column=='none' must NOT contribute to any lens column.
+
+    The default evals.json has 4 synthetic fixtures with lens_column='none'
+    (id=5, 6-tenancy..., 7-rollback..., 8-defense...). They should appear in
+    by_source.synthetic but not affect drift_delta or per_trial_rates for any
+    of {Surgical, DRY, SRP, OCP}.
+    """
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-none")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-none", source="all")
+    payload = json.loads(run_evals._LAST_RUN.read_text())
+    # All four none-column fixtures appear in by_source.synthetic
+    syn_ids = {e["id"] for e in payload["by_source"]["synthetic"]}
+    none_ids = {"5", "6-tenancy-forged-callback", "7-rollback-orphan-fk",
+                "8-defense-in-depth-not-slop"}
+    assert none_ids <= syn_ids, (
+        f"None-column fixtures missing from by_source.synthetic: "
+        f"{none_ids - syn_ids}"
+    )
+    # And explicitly: lens_column='none' fixtures' fixture_ids are NOT listed
+    # as contributors in any drift_delta column's contributing set (if surfaced).
+    # We can't easily inspect contributors without exposing them, so we instead
+    # construct an isolated synthetic test below.
+
+
+def test_drift_delta_none_column_isolated_assertion(monkeypatch, tmp_path):
+    """R1 S6 / S3: directly invoke _compute_grouped_summary with a manifest
+    containing a none-column fixture and assert zero contribution to lens cols.
+    """
+    from skills.temper.evals.run_evals import _compute_grouped_summary
+    fixtures_by_id = {
+        "fx-syn-surg": {
+            "id": "fx-syn-surg",
+            "source": "synthetic",
+            "lens_column": "Surgical",
+        },
+        "fx-syn-none": {
+            "id": "fx-syn-none",
+            "source": "synthetic",
+            "lens_column": "none",
+        },
+    }
+    fixture_results = [
+        {
+            "id": "fx-syn-surg",
+            "verdict": "PASS",
+            "trials": 2,
+            "threshold": 1,
+            "expectations": [
+                {"per_trial_verdicts": ["PASS", "PASS"]},
+            ],
+            "reviewer_outputs": ["body", "body"],
+        },
+        {
+            "id": "fx-syn-none",
+            "verdict": "PASS",
+            "trials": 2,
+            "threshold": 1,
+            "expectations": [
+                {"per_trial_verdicts": ["PASS", "PASS"]},
+            ],
+            "reviewer_outputs": ["body", "body"],
+        },
+    ]
+    summary = _compute_grouped_summary(fixture_results, fixtures_by_id)
+    # by_source carries both
+    syn_ids = {e["id"] for e in summary["by_source"]["synthetic"]}
+    assert syn_ids == {"fx-syn-surg", "fx-syn-none"}
+    # per_trial_rates["Surgical"]["synthetic"] is derived from fx-syn-surg ONLY
+    # (2/2 PASS) — the none-column fixture contributes zero.
+    assert summary["per_trial_rates"]["Surgical"]["synthetic"] == 1.0
+    # DRY/SRP/OCP have no synthetic contributors (only the none fixture exists
+    # otherwise) → None.
+    for lens in ("DRY", "SRP", "OCP"):
+        assert summary["per_trial_rates"][lens]["synthetic"] is None, (
+            f"R1 S6: lens={lens} synthetic rate should be None when only "
+            f"contributor is lens_column=='none'; got "
+            f"{summary['per_trial_rates'][lens]['synthetic']!r}"
+        )
+
+
+def test_drift_delta_error_excluded_from_denominator():
+    """R1 M4: ERROR trials are excluded from the per-trial-rate denominator.
+
+    Construct a synthetic + real-pr pair where the real-pr side has 1 PASS
+    trial + 1 ERROR (None reviewer_output). Denominator must be 1, not 2,
+    so the real rate = 1/1 = 1.0 (NOT 1/2 = 0.5).
+    """
+    from skills.temper.evals.run_evals import _compute_grouped_summary
+    fixtures_by_id = {
+        "fx-syn": {"id": "fx-syn", "source": "synthetic", "lens_column": "Surgical"},
+        "fx-real": {"id": "fx-real", "source": "real-pr", "lens_column": "Surgical"},
+    }
+    fixture_results = [
+        {
+            "id": "fx-syn",
+            "verdict": "PASS",
+            "trials": 2,
+            "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["PASS", "PASS"]}],
+            "reviewer_outputs": ["body", "body"],
+        },
+        {
+            "id": "fx-real",
+            "verdict": "PASS",
+            "trials": 2,
+            "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["PASS", "N/A"]}],
+            # 2nd trial: None reviewer_output → ERROR (excluded from denom)
+            "reviewer_outputs": ["body", None],
+        },
+    ]
+    summary = _compute_grouped_summary(fixture_results, fixtures_by_id)
+    # Real-PR Surgical: 1 PASS, 0 FAIL, 1 ERROR → rate = 1/1 = 1.0
+    assert summary["per_trial_rates"]["Surgical"]["real-pr"] == 1.0
+    # drift_delta = synthetic_rate - real_rate = 1.0 - 1.0 = 0.0
+    assert summary["drift_delta"]["Surgical"] == 0.0
+
+
+def test_drift_delta_column_grouping_mixed():
+    """R3 SP1: mixed-fixture (real-pr with list lens_column) contributes to
+    BOTH its lens columns' real-pr side, not the synthetic side."""
+    from skills.temper.evals.run_evals import _compute_grouped_summary
+    fixtures_by_id = {
+        "fx-syn-surg": {"id": "fx-syn-surg", "source": "synthetic", "lens_column": "Surgical"},
+        "fx-syn-ocp": {"id": "fx-syn-ocp", "source": "synthetic", "lens_column": "OCP"},
+        "fx-real-mixed": {
+            "id": "fx-real-mixed",
+            "source": "real-pr",
+            "lens_column": ["Surgical", "OCP"],
+        },
+    }
+    fixture_results = [
+        {
+            "id": "fx-syn-surg",
+            "verdict": "PASS", "trials": 1, "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["PASS"]}],
+            "reviewer_outputs": ["body"],
+        },
+        {
+            "id": "fx-syn-ocp",
+            "verdict": "PASS", "trials": 1, "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["PASS"]}],
+            "reviewer_outputs": ["body"],
+        },
+        {
+            "id": "fx-real-mixed",
+            "verdict": "FAIL", "trials": 1, "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["FAIL"]}],
+            "reviewer_outputs": ["body"],
+        },
+    ]
+    summary = _compute_grouped_summary(fixture_results, fixtures_by_id)
+    # Mixed real-pr fixture contributes to BOTH Surgical and OCP real-pr sides.
+    assert summary["per_trial_rates"]["Surgical"]["real-pr"] == 0.0
+    assert summary["per_trial_rates"]["OCP"]["real-pr"] == 0.0
+    # It does NOT contribute to the synthetic side.
+    assert summary["per_trial_rates"]["Surgical"]["synthetic"] == 1.0
+    assert summary["per_trial_rates"]["OCP"]["synthetic"] == 1.0
+
+
+def test_per_trial_rates_error_only_from_none_output():
+    """R3 SP1 / _classify_trial_outcome: ERROR maps ONLY from None reviewer_output.
+
+    Lens_runner-inconclusive trials (N/A from aggregation) are FAIL, not ERROR.
+    Only dispatch-failure (None) produces ERROR-classified trials.
+    """
+    from skills.temper.evals.run_evals import _compute_grouped_summary
+    fixtures_by_id = {
+        "fx-syn": {"id": "fx-syn", "source": "synthetic", "lens_column": "Surgical"},
+        "fx-real": {"id": "fx-real", "source": "real-pr", "lens_column": "Surgical"},
+    }
+    # Real-pr: 2 trials, BOTH have reviewer output (not None) but produce N/A
+    # verdicts at lens_runner level (e.g. inconclusive aggregation). These
+    # should be classified as FAIL — not ERROR — and counted in the denom.
+    fixture_results = [
+        {
+            "id": "fx-syn",
+            "verdict": "PASS", "trials": 2, "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["PASS", "PASS"]}],
+            "reviewer_outputs": ["body", "body"],
+        },
+        {
+            "id": "fx-real",
+            "verdict": "N/A", "trials": 2, "threshold": 1,
+            "expectations": [{"per_trial_verdicts": ["N/A", "N/A"]}],
+            # Both reviewer_outputs are non-None → N/A maps to FAIL, not ERROR.
+            "reviewer_outputs": ["body", "body"],
+        },
+    ]
+    summary = _compute_grouped_summary(fixture_results, fixtures_by_id)
+    # 0 PASS, 2 FAIL, 0 ERROR → rate = 0/2 = 0.0
+    assert summary["per_trial_rates"]["Surgical"]["real-pr"] == 0.0
+
+
+def test_summary_grouped_print(monkeypatch, tmp_path, capsys):
+    """Task 11 Step 1: stdout summary shows grouped 'Synthetic: N/N' and 'Real-PR: N/N' lines."""
+    d = _seed_dispatch_dir(monkeypatch, tmp_path, "R-grp")
+    (d / ".collect-status").write_text("complete\nerrors: 0/0\n")
+    score("R-grp", source="all")
+    # The grouped summary is emitted from score()'s stdout writes (added in T11).
+    captured = capsys.readouterr()
+    # Both groups should be present (synthetic + real-pr fixtures exist in evals.json)
+    assert "Synthetic:" in captured.out
+    assert "Real-PR:" in captured.out
