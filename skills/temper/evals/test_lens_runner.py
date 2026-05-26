@@ -1404,5 +1404,20 @@ def test_validate_fixtures_live_evals_json_passes():
     _validate_fixtures(data)  # no raise
 
 
+def test_synth_plan_reference_reads_pr_description():
+    """Post-#290 Task 13: _synth_plan_reference returns the fixture's
+    `pr_description` field verbatim in the body, NOT `expected_output`."""
+    from skills.temper.evals.run_evals import _synth_plan_reference
+    fixture = {
+        "id": "t13-unit",
+        "pr_description": "scope-only description here",
+        "expected_output": "rationale + expectation prose that must NOT leak",
+        "allowed_files": ["src/foo.py"],
+    }
+    out = _synth_plan_reference(fixture)
+    assert "scope-only description here" in out
+    assert "rationale + expectation prose that must NOT leak" not in out
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
