@@ -81,9 +81,520 @@ def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
 # functions that USE this constant are still added in Task 8 (stubs added below in Task 6).
 _BASELINE_PATH = _EVALS_DIR / "baseline.json"
 
+# Task 2 (#290 S1): empirical-tolerance calibration artifact path. The header
+# schema is enforced by `test_calibration_json_schema`. Mutations land via
+# `scripts/calibrate_tolerance.py` after k=3 baseline runs through the post-#297
+# 3-step protocol (NOT via `claude -p` — see feedback_no_claude_p).
+_CALIBRATION_PATH = _EVALS_DIR / "calibration.json"
+
 _FIXTURE_CONTENT_HEADER = (
     "## Fixture content (synthetic — review this in lieu of running git commands):\n\n"
 )
+
+
+# Task 10 (#290): shared --source filter values.
+# Single source of truth for the `--source` argparse choices on both
+# `stage` (post-#297) and `score` subcommands. Also imported by
+# `lens_runner.py` separately (per #290 plan Task 10).
+_SOURCE_VALUES = ("synthetic", "real-pr", "all")
+
+
+# ---------------------------------------------------------------------------
+# Task 4 (F2): pr_description leakage check (warning-only + fatal ^Lens:)
+# Task 5 (S2): lens_column enum + forward-compat allowlist
+# ---------------------------------------------------------------------------
+
+
+class FixtureValidationError(Exception):
+    """Raised when a fixture violates a load-time validation gate.
+
+    Task 8 will wire this into _validate_fixtures; Tasks 4 and 5 raise it
+    for fatal sub-gates (^Lens: line in pr_description; reserved-future
+    lens_column values) so the exception class is the single source of
+    truth for fixture-schema failures.
+    """
+
+
+# Substring patterns (case-insensitive) — Design Harness §2(f).
+# WARNING-only per R1 demotion. Substring (not word-boundary) for these so
+# `srp-related`, `over-defensive`, etc. trip the warning per design intent.
+_LEAK_SUBSTR_PATTERNS = (
+    "lens",
+    "dry",
+    "surgical",
+    "srp",
+    "ocp",
+    "re-attribut",
+    "scope bleed",
+    "scope-bleed",
+    "defense-in-depth",
+    "defense in depth",
+    "over-defensive",
+)
+
+# Word-boundary patterns (case-insensitive) — narrow set per R3 S3.
+# Only `tenancy` / `rollback` themselves trip; `tenant_id`, `rollback_handler`
+# (function name), `safe-undo flow` etc. pass cleanly.
+_LEAK_WORDBOUNDARY_PATTERNS = (r"\btenancy\b", r"\brollback\b")
+
+# Semantic-prime word-boundary patterns — Design Harness §2(f).
+_LEAK_SEMANTIC_PRIMES = (
+    r"\bduplicate\b",
+    r"\bextract\b",
+    r"\breformat\b",
+    r"\bresponsibility\b",
+    r"\bregistry\b",
+    r"\belif\b",
+    r"\bdispatch\b",
+    r"\bunrelated\b",
+    r"\bdrive-by\b",
+)
+
+# Fatal pattern: `^Lens:` line (case-insensitive, multiline) — direct
+# collision with _LENS_RE parsing in lens_runner.
+_LEAK_FATAL_LENS_LINE_RE = re.compile(r"^\s*Lens:", re.IGNORECASE | re.MULTILINE)
+
+
+def _check_pr_description_leakage(
+    pr_description: str, fixture_id: str = "<unknown>"
+) -> list[str]:
+    """Scan pr_description for lens-vocab leak.
+
+    Returns: list of WARNING strings (substring + word-boundary + semantic-prime
+    hits). Emits each warning to stderr as a side effect.
+
+    Raises: FixtureValidationError if a `^Lens:` line is present — that
+    pattern directly collides with `_LENS_RE` parsing downstream and is
+    not survivable.
+
+    Task 8 will call this from `_validate_fixtures` once per fixture.
+    """
+    if not isinstance(pr_description, str):
+        return []
+
+    # Fatal carve-out: ^Lens: line match — re-raise as FixtureValidationError.
+    if _LEAK_FATAL_LENS_LINE_RE.search(pr_description):
+        raise FixtureValidationError(
+            f"pr_description for fixture {fixture_id!r} contains a literal "
+            f"'Lens:' line, which collides with downstream `_LENS_RE` parsing"
+        )
+
+    warnings: list[str] = []
+    lower = pr_description.lower()
+    for pat in _LEAK_SUBSTR_PATTERNS:
+        if pat in lower:
+            warnings.append(pat)
+    for regex_pat in _LEAK_WORDBOUNDARY_PATTERNS + _LEAK_SEMANTIC_PRIMES:
+        if re.search(regex_pat, pr_description, re.IGNORECASE):
+            # Strip regex anchors for display
+            display = regex_pat.replace(r"\b", "")
+            warnings.append(display)
+
+    for w in warnings:
+        print(
+            f"WARNING: pr_description for fixture {fixture_id!r} contains "
+            f"potentially-priming substring '{w}'",
+            file=sys.stderr,
+        )
+    return warnings
+
+
+# Task 5: lens_column enum + forward-compat
+# Currently-wired lens columns (Design DEC-4 — Surgical/DRY/SRP/OCP +
+# `none` sentinel for negative/defense-in-depth fixtures).
+_LENS_COLUMN_VALUES = ("Surgical", "DRY", "SRP", "OCP", "none")
+
+# Reserved for future lens-column widening. Fixtures carrying these values
+# fail-loud today so the early-arriving Tenancy/Rollback fixture surfaces
+# with an actionable error pointing at #267 follow-ups (#294/#295/#296)
+# rather than being silently accepted under typo. Wire-in lands when
+# Tenancy/Rollback real-PR fixtures arrive (see DEC-4 in #290 design).
+_LENS_COLUMN_FUTURE = ("Tenancy", "Rollback")
+
+
+def _validate_lens_column(value: Any, fixture_id: str = "<unknown>") -> None:
+    """Validate a fixture's `lens_column` field.
+
+    Accepts:
+      - string in `_LENS_COLUMN_VALUES`
+      - list of strings drawn from `_LENS_COLUMN_VALUES \\ {"none"}`
+        (mixed fixtures; singleton "none" is non-mixed by definition)
+
+    Raises:
+      - FixtureValidationError on typo / unknown value
+      - FixtureValidationError with a distinct reserved-future message
+        when value matches `_LENS_COLUMN_FUTURE`
+    """
+    if isinstance(value, str):
+        if value in _LENS_COLUMN_FUTURE:
+            raise FixtureValidationError(
+                f"lens_column {value!r} is reserved for future use; not yet wired."
+            )
+        if value not in _LENS_COLUMN_VALUES:
+            raise FixtureValidationError(
+                f"lens_column {value!r} for fixture {fixture_id!r} not in "
+                f"{_LENS_COLUMN_VALUES}"
+            )
+        return
+    if isinstance(value, list):
+        if not value:
+            raise FixtureValidationError(
+                f"lens_column for fixture {fixture_id!r} is an empty list"
+            )
+        allowed_list = tuple(v for v in _LENS_COLUMN_VALUES if v != "none")
+        for item in value:
+            if not isinstance(item, str):
+                raise FixtureValidationError(
+                    f"lens_column list for fixture {fixture_id!r} contains "
+                    f"non-string entry {item!r}"
+                )
+            if item in _LENS_COLUMN_FUTURE:
+                raise FixtureValidationError(
+                    f"lens_column {item!r} is reserved for future use; not yet wired."
+                )
+            if item not in allowed_list:
+                raise FixtureValidationError(
+                    f"lens_column entry {item!r} for fixture {fixture_id!r} "
+                    f"not in {allowed_list} (singleton 'none' is non-mixed)"
+                )
+        return
+    raise FixtureValidationError(
+        f"lens_column for fixture {fixture_id!r} must be str or list, "
+        f"got {type(value).__name__}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 8 (#290 F2/S3): _validate_fixtures + BaselineQualityError
+# Gates (a)-(m) per Design Harness §2.
+# ---------------------------------------------------------------------------
+
+
+class BaselineQualityError(FixtureValidationError):
+    """Gate (l)/(m): baseline-quality refusal.
+
+    Subclass of FixtureValidationError so existing rc=2 handlers
+    (`except FixtureValidationError`) catch this without modification.
+    Raised exclusively from the `score --write-baseline` path — never
+    by `_validate_fixtures` directly.
+    """
+
+
+# Gate (b) SHA-format regex: `#NNN @ <7-40 lowercase hex>` (Design Harness §2(b)).
+_SOURCE_PR_RE = re.compile(r"^#\d+ @ [0-9a-f]{7,40}$")
+
+
+def _validate_fixtures(
+    evals_data: dict,
+    *,
+    strict_source_pr: bool = False,
+) -> None:
+    """Apply Design Harness §2 gates (a)-(m) (Task 8 / #290 F2).
+
+    Gates implemented here (raise `FixtureValidationError`):
+      (a) `source` field present and in {"synthetic", "real-pr"}
+      (b) `real-pr` w/ malformed `source_pr` (regex `^#\\d+ @ [0-9a-f]{7,40}$`);
+          also asserts top-level `evals` key (R1 M12).
+      (c) `synthetic_pair` resolves AND its `lens_column` matches.
+      (d) empty `pr_description`.
+      (e) bad `lens_column` enum (delegated to `_validate_lens_column`).
+      (f) lens-vocab `^Lens:` line in `pr_description` (delegated to
+          `_check_pr_description_leakage` — substring + word-boundary +
+          semantic-prime hits are warnings only; only `^Lens:` is fatal).
+      (g) `^Lens:` substring in `prompt` (warning).
+      (i) trials-uniformity: every non-`none` lens_column fixture MUST
+          declare `replicate_rule.trials in {5, 10}`.
+      (j) `--strict-source-pr` SHA-existence (opt-in; requires git env).
+      (k) mixed-fixture cap: at most ONE real-PR fixture with list `lens_column`.
+
+    Gates (l) and (m) live in `_write_baseline` / `score --write-baseline`
+    paths (BaselineQualityError, not validation-time).
+
+    Args:
+        evals_data: parsed evals.json (must have top-level "evals" key).
+        strict_source_pr: when True, runs gate (j) — `git cat-file -e` per SHA.
+    """
+    if not isinstance(evals_data, dict) or "evals" not in evals_data:
+        raise FixtureValidationError(
+            "evals.json missing top-level 'evals' array (R1 M12 / Design Harness §1)"
+        )
+    fixtures = evals_data["evals"]
+    if not isinstance(fixtures, list):
+        raise FixtureValidationError(
+            "evals.json 'evals' field must be a list of fixture objects"
+        )
+
+    # Pre-compute id->fixture for gate (c) twin lookup
+    by_id = {f.get("id"): f for f in fixtures if isinstance(f, dict)}
+
+    # Gate (j) pre-condition: if strict, verify git env once up front.
+    if strict_source_pr:
+        import subprocess
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                capture_output=True, text=True, check=False,
+            )
+            if r.returncode != 0:
+                raise FixtureValidationError(
+                    f"git-environment-unavailable: {r.stderr.strip()}"
+                )
+        except (FileNotFoundError, OSError) as e:
+            raise FixtureValidationError(
+                f"git-environment-unavailable: {e}"
+            ) from e
+
+    list_lens_column_offenders: list[str] = []
+
+    for fix in fixtures:
+        if not isinstance(fix, dict):
+            raise FixtureValidationError(
+                f"fixture entry is not an object: {fix!r}"
+            )
+        fid = fix.get("id", "<unknown>")
+
+        # gap_documented carve-out (Step 3d): waives non-empty prompt + body
+        # requirements but still validates schema fields.
+        gap_documented = bool(fix.get("gap_documented", False))
+
+        # (a) source presence + value
+        source = fix.get("source")
+        if source not in ("synthetic", "real-pr"):
+            raise FixtureValidationError(
+                f"fixture {fid!r} missing/invalid 'source' (got {source!r}; "
+                f"expected 'synthetic' or 'real-pr')"
+            )
+
+        # (b) real-pr source_pr format
+        if source == "real-pr":
+            spr = fix.get("source_pr", "")
+            if not isinstance(spr, str) or not _SOURCE_PR_RE.match(spr):
+                raise FixtureValidationError(
+                    f"fixture {fid!r} (source='real-pr') has malformed "
+                    f"'source_pr' {spr!r}; expected '#NNN @ <7-40 hex sha>'"
+                )
+
+        # (d) empty pr_description (waived for gap_documented)
+        pr_desc = fix.get("pr_description", "")
+        if not gap_documented:
+            if not isinstance(pr_desc, str) or not pr_desc.strip():
+                raise FixtureValidationError(
+                    f"fixture {fid!r} has empty/missing 'pr_description'"
+                )
+
+        # (e) lens_column enum
+        lens_col = fix.get("lens_column")
+        if lens_col is None:
+            raise FixtureValidationError(
+                f"fixture {fid!r} missing 'lens_column' field"
+            )
+        _validate_lens_column(lens_col, fid)  # raises on typo/reserved
+
+        # (f) pr_description leak check — fatal carve-out on ^Lens: line only
+        if isinstance(pr_desc, str) and pr_desc:
+            _check_pr_description_leakage(pr_desc, fid)  # may raise
+
+        # (g) ^Lens: substring in prompt → warning, not fatal
+        prompt = fix.get("prompt", "")
+        if isinstance(prompt, str) and prompt and not gap_documented:
+            if _LEAK_FATAL_LENS_LINE_RE.search(prompt):
+                print(
+                    f"WARNING: fixture {fid!r} prompt contains '^Lens:' line; "
+                    f"may collide with downstream parsing",
+                    file=sys.stderr,
+                )
+            # gap_documented fixtures bypass the non-empty prompt requirement
+        elif not gap_documented and not prompt:
+            raise FixtureValidationError(
+                f"fixture {fid!r} has empty/missing 'prompt' "
+                f"(set gap_documented=true to waive)"
+            )
+
+        # (i) trials-uniformity: non-'none' lens columns must have trials in {5, 10}
+        is_none_col = lens_col == "none"
+        if not is_none_col:
+            rule = fix.get("replicate_rule", {})
+            trials = rule.get("trials") if isinstance(rule, dict) else None
+            if trials not in (5, 10):
+                raise FixtureValidationError(
+                    f"fixture {fid!r} lens_column={lens_col!r} must declare "
+                    f"replicate_rule.trials in {{5, 10}} (R1 M9 / gate (i)); "
+                    f"got {trials!r}"
+                )
+
+        # (c) synthetic_pair resolution + lens_column match
+        pair_id = fix.get("synthetic_pair")
+        if pair_id is not None:
+            # pair_id can be a string OR list (for mixed-real)
+            pair_ids = pair_id if isinstance(pair_id, list) else [pair_id]
+            for pid in pair_ids:
+                twin = by_id.get(pid)
+                if twin is None:
+                    raise FixtureValidationError(
+                        f"fixture {fid!r} synthetic_pair {pid!r} does not "
+                        f"resolve to a known fixture id"
+                    )
+                twin_lc = twin.get("lens_column")
+                if isinstance(lens_col, str):
+                    if twin_lc != lens_col:
+                        raise FixtureValidationError(
+                            f"fixture {fid!r} synthetic_pair twin {pid!r} "
+                            f"lens_column {twin_lc!r} does not match "
+                            f"{lens_col!r}"
+                        )
+                elif isinstance(lens_col, list):
+                    # Mixed: twin's lens_column must appear in the mixed list
+                    if isinstance(twin_lc, str):
+                        if twin_lc not in lens_col:
+                            raise FixtureValidationError(
+                                f"fixture {fid!r} (mixed) synthetic_pair twin "
+                                f"{pid!r} lens_column {twin_lc!r} not in mixed "
+                                f"set {lens_col!r}"
+                            )
+                    elif isinstance(twin_lc, list):
+                        if not set(twin_lc) <= set(lens_col):
+                            raise FixtureValidationError(
+                                f"fixture {fid!r} (mixed) synthetic_pair twin "
+                                f"{pid!r} lens_column {twin_lc!r} not subset of "
+                                f"{lens_col!r}"
+                            )
+
+        # (j) strict source_pr existence check (opt-in)
+        if strict_source_pr and source == "real-pr":
+            import subprocess
+            spr = fix.get("source_pr", "")
+            # Parse "#NNN @ <sha>"
+            m = re.match(r"^#\d+ @ ([0-9a-f]{7,40})$", spr)
+            if m:
+                sha = m.group(1)
+                r = subprocess.run(
+                    ["git", "cat-file", "-e", sha],
+                    capture_output=True, text=True, check=False,
+                )
+                if r.returncode != 0:
+                    raise FixtureValidationError(
+                        f"fixture {fid!r} source_pr sha {sha!r} not present "
+                        f"in current git repository (gate (j))"
+                    )
+
+        # (k) mixed-fixture cap: at most one real-pr fixture with list lens_column
+        if source == "real-pr" and isinstance(lens_col, list):
+            list_lens_column_offenders.append(fid)
+
+    # Gate (k) check after loop
+    if len(list_lens_column_offenders) > 1:
+        raise FixtureValidationError(
+            f"gate (k): at most one real-PR fixture may carry list-valued "
+            f"lens_column; found: {list_lens_column_offenders}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Task 9 (#290 S3): per-lens-column PASS for mixed fixtures
+# ---------------------------------------------------------------------------
+
+
+def _expectation_lens_tag(expectation: dict) -> str | None:
+    """Extract the lens-column tag from an expectation's `params`.
+
+    Returns the lens-column string (e.g. "Surgical", "DRY", "SRP", "OCP")
+    if the expectation is tagged with one; returns `None` for "global"
+    expectations (e.g. `lens-findings-in-allowed-files`, `all-findings-have-file-line`)
+    that apply across all lens columns.
+
+    Tag-source precedence (per Design Q5 resolution):
+      1. `params.lens` (most common — `lens-finding-*` checks)
+      2. `params.primary_lens` (`no-lens-findings-overlap-region`)
+      3. `params.category` (Tenancy/Rollback category checks)
+    """
+    params = expectation.get("params") or expectation.get("args") or {}
+    if not isinstance(params, dict):
+        return None
+    for key in ("lens", "primary_lens", "category"):
+        val = params.get(key)
+        if isinstance(val, str):
+            return val
+    return None
+
+
+def _compute_per_lens_pass(
+    fixture: dict,
+    trial_outcomes: list[bool] | dict[int, bool],
+) -> dict[str, bool]:
+    """Compute per-lens-column PASS map for a fixture across one trial.
+
+    Non-mixed (`lens_column` is a string): returns
+        `{lens_column: all(trial_outcomes)}`
+
+    Mixed (`lens_column` is a list): partitions expectations by their existing
+    per-expectation lens tag (`_expectation_lens_tag`). For each lens in the
+    fixture's `lens_column` list:
+        `{lens: all(outcomes for expectations tagged with that lens OR untagged)}`
+
+    Untagged (global) expectations contribute to ALL columns — they must pass
+    for every column to PASS that column.
+
+    Raises:
+        ValueError: if any expectation's lens tag is non-None but does not
+          appear in the fixture's `lens_column` list (cross-leakage guard).
+    """
+    expectations = fixture.get("expectations", [])
+
+    # Normalize trial_outcomes to a list aligned with expectations
+    if isinstance(trial_outcomes, dict):
+        outcomes = [bool(trial_outcomes.get(i, False)) for i in range(len(expectations))]
+    else:
+        outcomes = [bool(v) for v in trial_outcomes]
+    if len(outcomes) != len(expectations):
+        raise ValueError(
+            f"_compute_per_lens_pass: trial_outcomes length {len(outcomes)} "
+            f"does not match expectations length {len(expectations)} "
+            f"for fixture {fixture.get('id', '<?>')!r}"
+        )
+
+    lens_column = fixture.get("lens_column")
+
+    # Non-mixed path (string)
+    if isinstance(lens_column, str):
+        return {lens_column: all(outcomes)}
+
+    # Mixed path (list)
+    if isinstance(lens_column, list):
+        lens_set = set(lens_column)
+        # Cross-leakage guard
+        for idx, exp in enumerate(expectations):
+            tag = _expectation_lens_tag(exp)
+            if tag is not None and tag not in lens_set:
+                # Only fail-loud on lens tags that are KNOWN lens-column values;
+                # category tags (Tenancy/Rollback) for category-finding checks
+                # are allowed when fixture is non-mixed-future. For mixed
+                # fixtures (lens_column is list of Surgical/DRY/SRP/OCP only),
+                # any tag outside that set is cross-leakage.
+                if tag in _LENS_COLUMN_VALUES or tag in _LENS_COLUMN_FUTURE:
+                    raise ValueError(
+                        f"_compute_per_lens_pass: expectation #{idx} of "
+                        f"fixture {fixture.get('id', '<?>')!r} has lens tag "
+                        f"{tag!r} not in lens_column {lens_column!r} "
+                        f"(cross-leakage)"
+                    )
+
+        result: dict[str, bool] = {}
+        for lens in lens_column:
+            passed = True
+            for idx, exp in enumerate(expectations):
+                tag = _expectation_lens_tag(exp)
+                # Untagged (global) expectations apply to every column.
+                # Tagged expectations apply only to their matching column.
+                if tag is None or tag == lens:
+                    if not outcomes[idx]:
+                        passed = False
+                        break
+            result[lens] = passed
+        return result
+
+    # No lens_column → return empty (or treat as "none"). Schema validation
+    # at Task 8 will reject missing lens_column; this is defense-in-depth.
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +686,7 @@ def stage(
     fixture: str | None = None,
     trials_override: int | None = None,
     timeout: int = 300,
+    strict_source_pr: bool = False,
 ) -> Path:
     """Render fixtures × trials to dispatch files; write stage-manifest.json.
 
@@ -195,6 +707,9 @@ def stage(
 
     # Load fixtures
     evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+    # Task 8 (#290 F2): schema gate at stage-time. Raises FixtureValidationError
+    # for any (a)-(k) failure; rc=2 propagates via the main() handler.
+    _validate_fixtures(evals_data, strict_source_pr=strict_source_pr)
     fixtures = evals_data.get("evals", [])
 
     # --source filter
@@ -455,6 +970,90 @@ def _parse_result_file(path: Path) -> str | None:
     return body
 
 
+# Task 2/3 (#290 S1): calibration loader. Returns the calibrated tolerance
+# value for the drift-delta gate. Falls back to the analytic floor (0.447)
+# if calibration.json is absent — never silently uses the legacy 0.7 literal.
+_DEFAULT_TOLERANCE_FLOOR = 0.447
+
+
+def _load_calibration() -> dict:
+    """Load calibration.json. Returns {} if absent or malformed.
+
+    The drift-delta gate uses `_load_calibration().get('tolerance', 0.447)`
+    so a missing artifact degrades gracefully to the analytic floor rather
+    than crashing the score path.
+    """
+    if not _CALIBRATION_PATH.exists():
+        return {}
+    try:
+        return json.loads(_CALIBRATION_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _drift_tolerance() -> float:
+    """Return the drift-delta tolerance from calibration.json.
+
+    Falls back to `_DEFAULT_TOLERANCE_FLOOR` (0.447) when calibration.json
+    is absent or malformed. Task 3 wires this into the gate.
+    """
+    cal = _load_calibration()
+    val = cal.get("tolerance")
+    if isinstance(val, (int, float)) and val > 0:
+        return float(val)
+    return _DEFAULT_TOLERANCE_FLOOR
+
+
+_CALIBRATION_PLACEHOLDER = {
+    "calibrated_at": "PLACEHOLDER",
+    "baseline_runs": 3,
+    "per_lens_sigma_empirical": {
+        "Surgical": 0.0,
+        "DRY": 0.0,
+        "SRP": 0.0,
+        "OCP": 0.0,
+    },
+    "sigma_worst": 0.0,
+    "t_emp": 0.0,
+    "analytic_floor": _DEFAULT_TOLERANCE_FLOOR,
+    "floor_binding": True,
+    "tolerance": 0.45,
+    "design_ceiling": 0.7,
+    "ceiling_binding": False,
+    "method": (
+        "min(max(2x empirical sigma over k=3 synth-only baseline runs, "
+        "0.447 analytic floor), 0.7 design ceiling)"
+    ),
+    "note": (
+        "Placeholder header written by `score --write-calibration`. "
+        "Run scripts/calibrate_tolerance.py after k=3 baseline runs for "
+        "the real empirical artifact."
+    ),
+}
+
+
+def _write_calibration_placeholder() -> bool:
+    """(#290 Task 2) Write a placeholder calibration.json if absent.
+
+    Returns True if a file was written, False if one already exists.
+
+    Computing real empirical sigmas requires the 3-step protocol
+    (stage / /temper-eval-collect / score, k=3) — see
+    scripts/calibrate_tolerance.py for the full flow. This helper exists
+    so the `--write-calibration` CLI flag has a coherent no-op when the
+    artifact is missing in CI / clean checkouts.
+    """
+    if _CALIBRATION_PATH.exists():
+        return False
+    import datetime as _dt2
+    payload = dict(_CALIBRATION_PLACEHOLDER)
+    payload["calibrated_at"] = _dt2.datetime.now(_dt2.timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    _atomic_write_text(_CALIBRATION_PATH, json.dumps(payload, indent=2) + "\n")
+    return True
+
+
 # Task 8: real impls. SP-1 baseline header carries template_sha so
 # --compare-baseline can detect dispatch-template drift since baseline.
 def _write_baseline(payload: dict, current_template_sha: str) -> None:
@@ -518,11 +1117,227 @@ def _compare_baseline(
         cur_v = current_verdicts.get(fid)
         if base_v == "PASS" and cur_v in ("FAIL", "N/A"):
             regressions.append((fid, base_v, cur_v))
-    if regressions:
+
+    # Task 3 (#290 S1): per-fixture PASS-rate drift-delta gate. Reads tolerance
+    # from calibration.json (analytic floor 0.447 when absent — never the
+    # legacy 0.7 literal). |cur_rate - base_rate| > tolerance flags as drift.
+    tolerance = _drift_tolerance()
+    cur_rates = _per_fixture_pass_rates(payload.get("fixtures", []))
+    base_rates = _per_fixture_pass_rates(baseline.get("fixtures", []))
+    drift_flags = []
+    for fid, base_rate in base_rates.items():
+        if fid not in cur_rates:
+            continue
+        delta = abs(cur_rates[fid] - base_rate)
+        if delta > tolerance:
+            drift_flags.append((fid, base_rate, cur_rates[fid], delta))
+    if drift_flags:
+        for fid, br, cr, dl in drift_flags:
+            print(
+                f"[drift] {fid}: baseline pass_rate={br:.2f} -> current={cr:.2f} "
+                f"(delta={dl:.2f} > tolerance={tolerance:.2f})",
+                file=sys.stderr,
+            )
+
+    if regressions or drift_flags:
         for fid, b, c in regressions:
-            print(f"[regression] {fid}: baseline {b} → current {c}", file=sys.stderr)
+            print(f"[regression] {fid}: baseline {b} -> current {c}", file=sys.stderr)
         return 1
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Task 11 (#290 S3): grouped summary + by_source + drift_delta + per_trial_rates
+# ---------------------------------------------------------------------------
+
+
+def _classify_trial_outcome(
+    reviewer_output: str | None, per_trial_verdicts_at_idx: list[str]
+) -> str:
+    """Three-state classifier for a single trial (R1 M4 / R3 SP1).
+
+    Returns one of 'PASS' | 'FAIL' | 'ERROR'.
+
+    - ERROR: reviewer dispatch failed (`reviewer_output is None`). Excluded
+      from the per-trial-rate denominator.
+    - PASS:  reviewer output present, every expectation verdict at this trial
+      index is 'PASS'.
+    - FAIL:  reviewer output present, at least one expectation verdict is
+      non-'PASS' (FAIL or N/A from lens_runner inconclusive aggregation).
+
+    Per R3 S-1, lens_runner-inconclusive 'N/A' verdicts (reviewer output
+    present, aggregation ambiguous) map to FAIL — NOT ERROR.
+    """
+    if reviewer_output is None:
+        return "ERROR"
+    if all(v == "PASS" for v in per_trial_verdicts_at_idx):
+        return "PASS"
+    return "FAIL"
+
+
+def _as_lens_list(lens_column: Any) -> list[str]:
+    """Normalize a fixture's lens_column to a list of lens-column strings.
+
+    String 'none' → []  (zero-contribution per R1 S6).
+    String lens → [lens].
+    List → list (already normalized).
+    """
+    if isinstance(lens_column, str):
+        if lens_column == "none":
+            return []
+        return [lens_column]
+    if isinstance(lens_column, list):
+        return [v for v in lens_column if isinstance(v, str) and v != "none"]
+    return []
+
+
+def _compute_grouped_summary(
+    fixture_results: list[dict],
+    fixtures_by_id: dict[str, dict],
+) -> dict[str, Any]:
+    """Compute the Task-11 emission block: by_source + drift_delta + per_trial_rates.
+
+    R1 S6: lens_column=='none' fixtures appear in `by_source` but contribute
+    ZERO to any lens column's drift_delta / per_trial_rates.
+    R1 M4 / R3 SP1: ERROR trials (reviewer_output is None) are excluded from
+    the denominator. Rates = PASS / (PASS + FAIL).
+    R1 Q6: per-fixture trial sum — denominators are summed over each fixture's
+    actual trial count, not scalar trials × fixture-count.
+
+    Args:
+        fixture_results: list of per-fixture aggregate dicts from
+            `_aggregate_from_outputs`. Each entry must carry `id`,
+            `reviewer_outputs`, and `expectations[*].per_trial_verdicts`.
+        fixtures_by_id: live evals.json fixture map, used for `source` +
+            `lens_column` lookup (the result dict does NOT carry these).
+
+    Returns:
+        dict with keys:
+          - `by_source`: {synthetic: [{id, verdict}], real-pr: [{id, verdict}]}
+          - `drift_delta`: {lens: float | None}  (synthetic_rate - real_rate)
+          - `per_trial_rates`: {lens: {synthetic: float|None, real-pr: float|None}}
+    """
+    by_source: dict[str, list[dict[str, str]]] = {"synthetic": [], "real-pr": []}
+    # Lens columns considered in drift_delta. Derived from _LENS_COLUMN_VALUES
+    # minus 'none' per M-R6-5 — no hardcoded ('Surgical','DRY','SRP','OCP') tuple.
+    lens_cols = tuple(v for v in _LENS_COLUMN_VALUES if v != "none")
+
+    # Per-lens / per-source PASS + FAIL trial counts (ERROR excluded).
+    counts: dict[str, dict[str, dict[str, int]]] = {
+        lens: {
+            "synthetic": {"PASS": 0, "FAIL": 0, "ERROR": 0},
+            "real-pr": {"PASS": 0, "FAIL": 0, "ERROR": 0},
+        }
+        for lens in lens_cols
+    }
+
+    for fr in fixture_results:
+        fid = fr.get("id")
+        fix = fixtures_by_id.get(fid, {})
+        source = fix.get("source", "synthetic")
+        if source not in by_source:
+            # Defense in depth — unknown source shouldn't appear post-validation
+            by_source[source] = []
+        by_source[source].append({"id": fid, "verdict": fr.get("verdict", "N/A")})
+
+        lens_list = _as_lens_list(fix.get("lens_column"))
+        if not lens_list:
+            # R1 S6: lens_column=='none' (or unknown) → zero contribution to
+            # any lens column. Still recorded in by_source above.
+            continue
+
+        reviewer_outputs = fr.get("reviewer_outputs", [])
+        expectations = fr.get("expectations", [])
+        # Align per-trial verdicts across all expectations (R1 Q6: per-fixture
+        # trial sum). n_trials = len(reviewer_outputs).
+        n_trials = len(reviewer_outputs)
+        for t in range(n_trials):
+            # Collect this trial's per-expectation verdicts.
+            verdicts_at_t = [
+                er.get("per_trial_verdicts", [])[t]
+                for er in expectations
+                if t < len(er.get("per_trial_verdicts", []))
+            ]
+            outcome = _classify_trial_outcome(reviewer_outputs[t], verdicts_at_t)
+            # Mixed fixtures contribute to EACH lens column in their list.
+            for lens in lens_list:
+                if lens not in counts:
+                    continue  # forward-compat / future lens columns
+                counts[lens][source][outcome] += 1
+
+    # Compute rates + drift_delta. Divide-by-zero guards per R2 Q5.
+    per_trial_rates: dict[str, dict[str, float | None]] = {}
+    drift_delta: dict[str, float | None] = {}
+    for lens in lens_cols:
+        syn_pass = counts[lens]["synthetic"]["PASS"]
+        syn_fail = counts[lens]["synthetic"]["FAIL"]
+        real_pass = counts[lens]["real-pr"]["PASS"]
+        real_fail = counts[lens]["real-pr"]["FAIL"]
+        syn_denom = syn_pass + syn_fail  # ERROR excluded (R1 M4)
+        real_denom = real_pass + real_fail
+        syn_rate = (syn_pass / syn_denom) if syn_denom else None
+        real_rate = (real_pass / real_denom) if real_denom else None
+        per_trial_rates[lens] = {"synthetic": syn_rate, "real-pr": real_rate}
+        if syn_rate is None or real_rate is None:
+            drift_delta[lens] = None
+        else:
+            drift_delta[lens] = syn_rate - real_rate
+
+    return {
+        "by_source": by_source,
+        "drift_delta": drift_delta,
+        "per_trial_rates": per_trial_rates,
+    }
+
+
+def _render_grouped_summary(by_source: dict[str, list[dict[str, str]]]) -> str:
+    """Render the Task-11 grouped stdout summary.
+
+    Format:
+        Synthetic: P/N PASS
+        Real-PR:   P/N PASS
+
+    Where P = count of PASS verdicts, N = total fixtures in that group.
+    """
+    lines: list[str] = []
+    for label, key in (("Synthetic", "synthetic"), ("Real-PR", "real-pr")):
+        entries = by_source.get(key, [])
+        n_pass = sum(1 for e in entries if e.get("verdict") == "PASS")
+        lines.append(f"{label}: {n_pass}/{len(entries)} PASS")
+    return "\n".join(lines)
+
+
+def _per_fixture_pass_rates(fixtures: list[dict]) -> dict[str, float]:
+    """Compute per-fixture PASS rate (PASS trials / total trials).
+
+    Task 3 (#290 S1) drift-delta gate input. Returns 0.0 for fixtures with
+    no expectations or no trials so the gate degrades gracefully on malformed
+    baselines (and on synthetic schema variants used by tests).
+    """
+    rates: dict[str, float] = {}
+    for fr in fixtures:
+        fid = fr.get("id")
+        if not fid:
+            continue
+        expectations = fr.get("expectations", [])
+        if not expectations:
+            rates[fid] = 0.0
+            continue
+        per_trial_lists = [er.get("per_trial_verdicts", []) for er in expectations]
+        n_trials = max((len(lst) for lst in per_trial_lists), default=0)
+        if n_trials == 0:
+            rates[fid] = 0.0
+            continue
+        passes = 0
+        for t in range(n_trials):
+            if all(
+                t < len(per_trial_lists[i])
+                and per_trial_lists[i][t] == "PASS"
+                for i in range(len(per_trial_lists))
+            ):
+                passes += 1
+        rates[fid] = passes / n_trials
+    return rates
 
 
 def score(
@@ -534,6 +1349,7 @@ def score(
     allow_incomplete: bool = False,
     per_iter: bool = False,
     allow_fixture_drift: bool = False,
+    source: str = "all",
 ) -> int:
     """Read stage-manifest.json + result files; aggregate; write last_run.json.
 
@@ -603,6 +1419,17 @@ def score(
     evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
     fixtures_by_id = {f["id"]: f for f in evals_data.get("evals", [])}
 
+    # Task 10 (#290): score-time --source filter. Restrict fixtures_by_id to
+    # those matching the requested source. Trials referencing filtered-out
+    # fixtures are skipped (not errored) so the same staged dispatch dir can
+    # be re-scored against different source subsets without re-staging.
+    if source != "all":
+        fixtures_by_id = {
+            fid: f
+            for fid, f in fixtures_by_id.items()
+            if f.get("source", "synthetic") == source
+        }
+
     # Template_sha drift advisory (S-1)
     current_template_sha = template_sha(_REVIEWER_PROMPT)
     if current_template_sha != manifest.get("template_sha"):
@@ -616,11 +1443,19 @@ def score(
 
     # Reassemble per-fixture trials
     by_fixture: dict[str, list[tuple[int, dict, str | None]]] = {}
+    # Track fixture ids in the live evals.json (pre-filter) for distinguishing
+    # "filtered-out" (skip silently) from "deleted-from-evals" (fatal).
+    _all_evals_ids = {f["id"] for f in evals_data.get("evals", [])}
     for entry in manifest["trials"]:
         seq = entry["seq"]
         fid = entry["fixture_id"]
         fix = fixtures_by_id.get(fid)
         if fix is None:
+            # Task 10: if the fixture exists in evals.json but was filtered out
+            # via --source, skip silently. Only fail-loud if the fixture is
+            # missing entirely (deleted between stage and score).
+            if source != "all" and fid in _all_evals_ids:
+                continue
             print(f"[fatal] unknown fixture id {fid!r} in manifest", file=sys.stderr)
             return 2
 
@@ -676,6 +1511,18 @@ def score(
             payload["incomplete-cause"] = incomplete_cause
     if force_rescore:
         payload["force_rescore"] = True
+
+    # Task 11 (#290 S3): grouped emission block.
+    # by_source + drift_delta + per_trial_rates derived from fixture_results
+    # using the three-state PASS/FAIL/ERROR classifier (R1 M4 / R3 SP1).
+    # lens_column=='none' fixtures contribute zero to any lens column (R1 S6).
+    grouped = _compute_grouped_summary(fixture_results, fixtures_by_id)
+    payload["by_source"] = grouped["by_source"]
+    payload["drift_delta"] = grouped["drift_delta"]
+    payload["per_trial_rates"] = grouped["per_trial_rates"]
+
+    # Stdout grouped summary (Task 11 Step 1).
+    print(_render_grouped_summary(grouped["by_source"]))
 
     # F1 / S-FE-5 R3: per-iter outputs under .calibrate-state/ (blanket-gitignored)
     out_path = _resolve_output_path(run_id, per_iter=per_iter)
@@ -787,10 +1634,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sp_stage = sub.add_parser("stage", help="Render fixtures × trials to dispatch files")
     sp_stage.add_argument("run_id")
     sp_stage.add_argument("--force", action="store_true")
-    sp_stage.add_argument("--source", choices=["synthetic", "real-pr", "all"], default="all")
+    sp_stage.add_argument("--source", choices=list(_SOURCE_VALUES), default="all")
     sp_stage.add_argument("--fixture", default=None)
     sp_stage.add_argument("--trials-override", type=int, default=None)
     sp_stage.add_argument("--timeout", type=int, default=300)
+    # Task 8 (#290 F2 / gate (j)): opt-in `git cat-file -e` per source_pr sha.
+    # Off by default — gate (j) does not invoke any `git rev-parse` /
+    # `git cat-file` subprocess unless this flag is present.
+    sp_stage.add_argument("--strict-source-pr", action="store_true",
+        help="(#290 gate j) require every real-PR fixture's source_pr SHA to "
+             "exist in the current git repo. Default OFF.")
 
     # score — Task 6
     sp_score = sub.add_parser("score", help="Aggregate results + write last_run.json")
@@ -804,6 +1657,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
              "Without this flag, removed fixtures cause rc=2 (prevents silent regression-laundering).")
     sp_score.add_argument("--per-iter", action="store_true",
         help="Write last_run-<run_id>.json under .calibrate-state/ instead of shared last_run.json. Set by /temper-eval-calibrate.")
+    # Task 10 (#290): score-time --source filter. Limits scoring to fixtures
+    # matching the given source (synthetic | real-pr | all). Default "all"
+    # preserves prior behavior. Score-time filter is orthogonal to stage-time
+    # --source; staged trials for filtered-out fixtures are simply skipped.
+    sp_score.add_argument("--source", choices=list(_SOURCE_VALUES), default="all",
+        help="Limit scoring to fixtures with this source (synthetic | real-pr | all). Default: all.")
+    # Task 2 (#290 S1): writes a placeholder calibration.json header in-place
+    # if missing. Actually computing empirical sigmas requires the 3-step
+    # protocol (stage / /temper-eval-collect / score, k=3) followed by running
+    # `scripts/calibrate_tolerance.py` against the k last_run.json artifacts.
+    # See scripts/calibrate_tolerance.py for the full reproducible flow.
+    sp_score.add_argument("--write-calibration", action="store_true",
+        help="(#290 S1) emit a placeholder calibration.json header if absent. "
+             "Full calibration is computed by scripts/calibrate_tolerance.py "
+             "after k=3 baseline runs via the 3-step protocol.")
 
     # Legacy mock/replay paths (back-compat, no subcommand)
     # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.
@@ -830,15 +1698,16 @@ def main(argv: list[str] | None = None) -> int:
                 fixture=args.fixture,
                 trials_override=args.trials_override,
                 timeout=args.timeout,
+                strict_source_pr=args.strict_source_pr,
             )
             return 0
-        except (FileExistsError, ValueError) as e:
+        except (FileExistsError, ValueError, FixtureValidationError) as e:
             print(f"[fatal] {e}", file=sys.stderr)
             return 2
 
     if args.cmd == "score":
         try:
-            return score(
+            rc = score(
                 args.run_id,
                 write_baseline=args.write_baseline,
                 compare_baseline=args.compare_baseline,
@@ -846,10 +1715,28 @@ def main(argv: list[str] | None = None) -> int:
                 allow_incomplete=args.allow_incomplete,
                 per_iter=args.per_iter,
                 allow_fixture_drift=args.allow_fixture_drift,
+                source=args.source,
             )
         except ValueError as e:
             print(f"[fatal] {e}", file=sys.stderr)
             return 2
+        # Task 2 (#290 S1): --write-calibration emits a placeholder header if
+        # calibration.json is absent. Runs after score() so a fatal score does
+        # not silently bypass calibration writeout.
+        if getattr(args, "write_calibration", False):
+            wrote = _write_calibration_placeholder()
+            if wrote:
+                print(
+                    f"[info] wrote placeholder calibration at {_CALIBRATION_PATH}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[info] calibration.json already present at {_CALIBRATION_PATH}; "
+                    f"not overwriting",
+                    file=sys.stderr,
+                )
+        return rc
 
     # Legacy mock/replay path — preserved unchanged
     return _legacy_main(args)

@@ -3,150 +3,825 @@
   "evals": [
     {
       "id": "1a",
+      "source": "synthetic",
+      "lens_column": "Surgical",
+      "pr_description": "Add a `get_timeout_seconds(config)` helper that reads `config['timeout_ms']` and falls back to a 30s default. Wires up a module-level logger to record the fallback at DEBUG.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1,28 +1,46 @@\n-import json\n+import json\n+import logging\n+\n+log = logging.getLogger(__name__)\n \n \n def load_config(path):\n-    with open(path) as f:\n-        return json.load(f)\n+    with open(path) as f:\n+        return json.load(f)\n+\n+\n+def get_timeout_seconds(config):\n+    \"\"\"Return the configured request timeout in seconds.\n+\n+    Reads `config['timeout_ms']` (preferred) and falls back to a\n+    30s default if absent. Logs the chosen value once at DEBUG.\n+    \"\"\"\n+    ms = config.get(\"timeout_ms\")\n+    if ms is None:\n+        log.debug(\"timeout_ms missing; defaulting to 30000\")\n+        return 30.0\n+    return float(ms) / 1000.0\n \n \n-def render_banner(title,subtitle=None):\n-    if subtitle:\n-      return title+' - '+subtitle\n-    return title\n+def render_banner(title, subtitle=None):\n+    if subtitle:\n+        return f\"{title} - {subtitle}\"\n+    return title\n \n \n def save_state(path, state):\n     with open(path, \"w\") as f:\n         json.dump(state, f, indent=2)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "Surgical lens fires at Important on the reformatted render_banner block; no DRY/SRP/OCP findings.",
-      "files": ["src/foo.py"],
-      "allowed_files": ["src/foo.py"],
+      "files": [
+        "src/foo.py"
+      ],
+      "allowed_files": [
+        "src/foo.py"
+      ],
       "lens_under_test": "surgical",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "Surgical", "severity": "Important"}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "SRP", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "OCP", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "Surgical",
+            "severity": "Important"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "OCP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-findings-in-allowed-files",
+          "params": {
+            "ocp_carveout": false
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "1b",
+      "source": "synthetic",
+      "lens_column": "Surgical",
+      "pr_description": "Add a `get_timeout_seconds(config)` helper that reads `config['timeout_ms']` and falls back to a 30s default. Wires up a module-level logger to record the fallback at DEBUG.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1,40 +1,72 @@\n-import json\n+import json\n+import logging\n+\n+log = logging.getLogger(__name__)\n \n \n def load_config(path):\n-    with open(path) as f:\n-        return json.load(f)\n+    with open(path) as f:\n+        return json.load(f)\n+\n+\n+def get_timeout_seconds(config):\n+    \"\"\"Return the configured request timeout in seconds.\"\"\"\n+    ms = config.get(\"timeout_ms\")\n+    if ms is None:\n+        log.debug(\"timeout_ms missing; defaulting to 30000\")\n+        return 30.0\n+    return float(ms) / 1000.0\n \n \n-def render_banner(title,subtitle=None):\n-    if subtitle:\n-      s = title.strip()\n-      t = subtitle.strip()\n-      return s+' - '+t\n-    return title.strip()\n+def render_banner(title, subtitle=None):\n+    if subtitle:\n+        s = title.strip()\n+        t = subtitle.strip()\n+        return f\"{s} - {t}\"\n+    return title.strip()\n \n \n-def render_footer(left,right=None):\n-    if right:\n-      s = left.strip()\n-      t = right.strip()\n-      return s+' - '+t\n-    return left.strip()\n+def render_footer(left, right=None):\n+    if right:\n+        s = left.strip()\n+        t = right.strip()\n+        return f\"{s} - {t}\"\n+    return left.strip()\n \n \n def save_state(path, state):\n     with open(path, \"w\") as f:\n         json.dump(state, f, indent=2)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "Surgical lens fires at Important on the reformatted banner+footer region; DRY does NOT fire on the same lines (Surgical precedence).",
-      "files": ["src/foo.py"],
-      "allowed_files": ["src/foo.py"],
+      "files": [
+        "src/foo.py"
+      ],
+      "allowed_files": [
+        "src/foo.py"
+      ],
       "lens_under_test": "surgical-precedence",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "Surgical", "severity": "Important"}},
-        {"type": "mechanical", "check": "no-lens-findings-overlap-region", "params": {"primary_lens": "Surgical", "secondary_lens": "DRY"}, "prerequisite": {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "Surgical", "severity": "Important"}}},
-        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "Surgical",
+            "severity": "Important"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "no-lens-findings-overlap-region",
+          "params": {
+            "primary_lens": "Surgical",
+            "secondary_lens": "DRY"
+          },
+          "prerequisite": {
+            "type": "mechanical",
+            "check": "lens-finding-fires",
+            "params": {
+              "lens": "Surgical",
+              "severity": "Important"
+            }
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-findings-in-allowed-files",
+          "params": {
+            "ocp_carveout": false
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "2",
+      "source": "synthetic",
+      "lens_column": "DRY",
+      "pr_description": "Introduce a private `_clean_token` helper in `parser.py` and reuse it from `parse_header` and `parse_record` so both functions normalize fields (strip / collapse whitespace / lowercase) the same way. No behavior change intended.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/util.py\n+++ b/src/util.py\n@@ -1,18 +1,18 @@\n import re\n \n _WS_RE = re.compile(r\"\\s+\")\n \n \n def normalize_input(s):\n     \"\"\"Strip surrounding whitespace, collapse internal runs, and lowercase.\"\"\"\n     if s is None:\n         return \"\"\n     s = s.strip()\n     s = _WS_RE.sub(\" \", s)\n     return s.lower()\n \n \n def is_blank(s):\n     return not s or not s.strip()\n--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1,12 +1,30 @@\n import re\n \n+_PARSER_WS_RE = re.compile(r\"\\s+\")\n+\n+\n+def _clean_token(s):\n+    \"\"\"Strip surrounding whitespace, collapse internal runs, lowercase.\"\"\"\n+    if s is None:\n+        return \"\"\n+    s = s.strip()\n+    s = _PARSER_WS_RE.sub(\" \", s)\n+    return s.lower()\n+\n \n def parse_header(line):\n     name, _, value = line.partition(\":\")\n-    return name.strip().lower(), value.strip()\n+    return _clean_token(name), _clean_token(value)\n \n \n def parse_record(text):\n     parts = text.split(\"|\")\n-    return [p.strip().lower() for p in parts]\n+    return [_clean_token(p) for p in parts]\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "DRY lens fires at Minor; finding cites src/util.py as the existing duplicate source.",
-      "files": ["src/parser.py", "src/util.py"],
-      "allowed_files": ["src/parser.py", "src/util.py"],
+      "files": [
+        "src/parser.py",
+        "src/util.py"
+      ],
+      "allowed_files": [
+        "src/parser.py",
+        "src/util.py"
+      ],
       "lens_under_test": "dry",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "DRY", "severity": "Minor"}},
-        {"type": "mechanical", "check": "lens-finding-cites-file", "params": {"lens": "DRY", "file": "src/util.py"}},
-        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "DRY",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-cites-file",
+          "params": {
+            "lens": "DRY",
+            "file": "src/util.py"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-findings-in-allowed-files",
+          "params": {
+            "ocp_carveout": false
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "2-reattrib",
+      "source": "synthetic",
+      "lens_column": "DRY",
+      "pr_description": "Introduce a private `_clean_token` helper in `parser.py` and reuse it from `parse_header` and `parse_record` so both functions normalize fields (strip / collapse whitespace / lowercase) the same way. Note in `parse_record` that untrusted user input flows through this path from the HTTP layer.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/util.py\n+++ b/src/util.py\n@@ -1,20 +1,20 @@\n import re\n \n _WS_RE = re.compile(r\"\\s+\")\n MAX_LEN = 1024\n \n \n def normalize_input(s):\n     \"\"\"Strip, collapse, lowercase. Truncates to MAX_LEN to protect downstream buffers.\"\"\"\n     if s is None:\n         return \"\"\n     s = s.strip()\n     s = _WS_RE.sub(\" \", s)\n     s = s.lower()\n     if len(s) > MAX_LEN:\n         s = s[:MAX_LEN]\n     return s\n--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1,12 +1,28 @@\n import re\n \n+_PARSER_WS_RE = re.compile(r\"\\s+\")\n+\n+\n+def _clean_token(s):\n+    \"\"\"Strip, collapse, lowercase. NOTE: does NOT enforce MAX_LEN.\"\"\"\n+    if s is None:\n+        return \"\"\n+    s = s.strip()\n+    s = _PARSER_WS_RE.sub(\" \", s)\n+    return s.lower()\n+\n \n def parse_header(line):\n     name, _, value = line.partition(\":\")\n-    return name.strip().lower(), value.strip()\n+    return _clean_token(name), _clean_token(value)\n \n \n def parse_record(text):\n     parts = text.split(\"|\")\n-    return [p.strip().lower() for p in parts]\n+    # Untrusted user input flows through here from the HTTP layer.\n+    return [_clean_token(p) for p in parts]\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "No direct DRY finding; the duplication is re-attributed to a Correctness/Security finding (DRY (re-attributed)) at Important because parser silently skips MAX_LEN bound that util enforces.",
-      "files": ["src/parser.py", "src/util.py"],
-      "allowed_files": ["src/parser.py", "src/util.py"],
+      "files": [
+        "src/parser.py",
+        "src/util.py"
+      ],
+      "allowed_files": [
+        "src/parser.py",
+        "src/util.py"
+      ],
       "lens_under_test": "dry-reattribution",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": false}},
-        {"type": "mechanical", "check": "reattributed-finding-fires", "params": {"lens": "DRY", "severity": "Important"}},
-        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": false
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "reattributed-finding-fires",
+          "params": {
+            "lens": "DRY",
+            "severity": "Important"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-findings-in-allowed-files",
+          "params": {
+            "ocp_carveout": false
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "3",
+      "source": "synthetic",
+      "lens_column": "SRP",
+      "pr_description": "Add `process_record(raw, out=sys.stdout)` to `processor.py`. Parses a pipe-delimited record (id, qty, status), validates the fields, writes a formatted line to `out`, and returns the parsed dict.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/processor.py\n+++ b/src/processor.py\n@@ -1,8 +1,42 @@\n import json\n+import sys\n \n \n def load_records(path):\n     with open(path) as f:\n         return json.load(f)\n+\n+\n+def process_record(raw, out=sys.stdout):\n+    \"\"\"Parse a raw record string and emit a formatted line.\n+\n+    Does two things:\n+      (1) Parse: split on '|', strip each field, coerce the second\n+          field to int, validate that the third field is a known\n+          status code, and assemble a dict.\n+      (2) Emit: format the dict as 'id=<id> qty=<qty> status=<status>'\n+          and write it to `out` with a trailing newline.\n+    \"\"\"\n+    # --- parsing ---\n+    parts = [p.strip() for p in raw.split(\"|\")]\n+    if len(parts) != 3:\n+        raise ValueError(f\"expected 3 fields, got {len(parts)}\")\n+    rec_id = parts[0]\n+    try:\n+        qty = int(parts[1])\n+    except ValueError as e:\n+        raise ValueError(f\"qty must be int: {parts[1]!r}\") from e\n+    status = parts[2]\n+    if status not in {\"OK\", \"WARN\", \"ERR\"}:\n+        raise ValueError(f\"unknown status {status!r}\")\n+    record = {\"id\": rec_id, \"qty\": qty, \"status\": status}\n+\n+    # --- emitting ---\n+    line = f\"id={record['id']} qty={record['qty']} status={record['status']}\\n\"\n+    out.write(line)\n+    return record\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "SRP lens fires at Minor on process_record (parsing and emitting are clearly separable concerns).",
-      "files": ["src/processor.py"],
-      "allowed_files": ["src/processor.py"],
+      "files": [
+        "src/processor.py"
+      ],
+      "allowed_files": [
+        "src/processor.py"
+      ],
       "lens_under_test": "srp",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "SRP", "severity": "Minor"}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": false}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "SRP",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-findings-in-allowed-files",
+          "params": {
+            "ocp_carveout": false
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "4",
+      "source": "synthetic",
+      "lens_column": "OCP",
+      "pr_description": "Add a new `restore` operation to `handle_op` in `src/handler.py`, wiring in the `handle_restore` callable from `.handlers`. A second file is shown unchanged for context.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff includes one unchanged file (src/registry.py) shown as context so you can see the existing dispatch infrastructure.\n\n```diff\ndiff --git a/src/registry.py b/src/registry.py\n--- a/src/registry.py\n+++ b/src/registry.py\n@@ -1,18 +1,18 @@\n # Existing handler registry — unchanged in this diff, shown for context.\n \n from .handlers import handle_create, handle_update, handle_delete, handle_archive\n \n HANDLERS = {\n     \"create\": handle_create,\n     \"update\": handle_update,\n     \"delete\": handle_delete,\n     \"archive\": handle_archive,\n }\n \n \n def dispatch(op, payload):\n     fn = HANDLERS.get(op)\n     if fn is None:\n         raise KeyError(f\"no handler for {op!r}\")\n     return fn(payload)\n--- a/src/handler.py\n+++ b/src/handler.py\n@@ -1,20 +1,32 @@\n from .handlers import (\n     handle_create,\n     handle_update,\n     handle_delete,\n     handle_archive,\n+    handle_restore,\n )\n \n \n def handle_op(op, payload):\n     if op == \"create\":\n         return handle_create(payload)\n     elif op == \"update\":\n         return handle_update(payload)\n     elif op == \"delete\":\n         return handle_delete(payload)\n     elif op == \"archive\":\n         return handle_archive(payload)\n+    elif op == \"restore\":\n+        return handle_restore(payload)\n     else:\n         raise KeyError(f\"no handler for {op!r}\")\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "OCP lens fires at Minor on handler.py recommending the new arm be added to the existing registry in src/registry.py; finding cites src/registry.py (allowed via ocp carve-out).",
-      "files": ["src/handler.py", "src/registry.py"],
-      "allowed_files": ["src/handler.py"],
+      "files": [
+        "src/handler.py",
+        "src/registry.py"
+      ],
+      "allowed_files": [
+        "src/handler.py"
+      ],
       "lens_under_test": "ocp",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-fires", "params": {"lens": "OCP", "severity": "Minor"}},
-        {"type": "mechanical", "check": "lens-finding-cites-file", "params": {"lens": "OCP", "file": "src/registry.py"}},
-        {"type": "mechanical", "check": "lens-findings-in-allowed-files", "params": {"ocp_carveout": true}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "OCP",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-cites-file",
+          "params": {
+            "lens": "OCP",
+            "file": "src/registry.py"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-findings-in-allowed-files",
+          "params": {
+            "ocp_carveout": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "5",
+      "source": "synthetic",
+      "lens_column": "none",
+      "pr_description": "Add `slugify_with_max_length(text, max_length)` to `src/clean.py` that wraps the existing `slugify` helper and truncates the result at the last full word fitting under `max_length`.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\n--- a/src/clean.py\n+++ b/src/clean.py\n@@ -12,9 +12,15 @@ def slugify(text):\n     text = text.strip().lower()\n     text = _SLUG_NON_ALNUM_RE.sub(\"-\", text)\n     text = _SLUG_DASH_COLLAPSE_RE.sub(\"-\", text)\n     return text.strip(\"-\")\n \n \n+def slugify_with_max_length(text, max_length):\n+    \"\"\"Slugify `text` and truncate at the last full word fitting under max_length.\"\"\"\n+    slug = slugify(text)\n+    if len(slug) <= max_length:\n+        return slug\n+    truncated = slug[:max_length].rsplit(\"-\", 1)[0]\n+    return truncated or slug[:max_length]\n+\n+\n def is_valid_slug(s):\n     return bool(s) and _SLUG_VALID_RE.match(s) is not None\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
       "expected_output": "No lens findings — clean, surgical, single-responsibility addition that reuses existing slugify().",
-      "files": ["src/clean.py"],
-      "allowed_files": ["src/clean.py"],
+      "files": [
+        "src/clean.py"
+      ],
+      "allowed_files": [
+        "src/clean.py"
+      ],
       "lens_under_test": "negative",
-      "replicate_rule": {"trials": 1, "threshold": 1},
+      "replicate_rule": {
+        "trials": 1,
+        "threshold": 1
+      },
       "expectations": [
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "Surgical", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "DRY", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "SRP", "include_reattributed": true}},
-        {"type": "mechanical", "check": "lens-finding-does-not-fire", "params": {"lens": "OCP", "include_reattributed": true}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "Surgical",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "OCP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "6-tenancy-forged-callback",
+      "source": "synthetic",
+      "lens_column": "none",
+      "pr_description": "Add an `on_order_paid` webhook handler in `src/webhooks.py`. The handler verifies the request signature against the per-customer webhook secret, then marks the matching row in the `orders` table as paid and stamps `paid_at`.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds a webhook callback handler that reads a multi-tenant `orders` table.\n\n```diff\n--- a/src/webhooks.py\n+++ b/src/webhooks.py\n@@ -1,12 +1,30 @@\n from .db import db\n from .auth import verify_signature\n \n \n+def on_order_paid(payload, signature):\n+    \"\"\"Webhook callback fired when an order is paid in the payment provider.\n+\n+    `payload['order_id']` identifies the order. Signature is verified\n+    against the per-tenant webhook secret resolved from the auth context.\n+    \"\"\"\n+    if not verify_signature(payload, signature):\n+        return {\"status\": \"unauthorized\"}, 401\n+\n+    order_id = payload[\"order_id\"]\n+    # orders is a multi-tenant table; rows have tenant_id, order_id columns.\n+    row = db.execute(\n+        \"UPDATE orders SET status = 'paid', paid_at = NOW() \"\n+        \"WHERE order_id = :order_id RETURNING *\",\n+        {\"order_id\": order_id},\n+    ).fetchone()\n+    return {\"status\": \"ok\", \"order\": row.order_id, \"tenant\": row.tenant_id}, 200\n+\n+\n def on_order_refunded(payload, signature):\n     # ... pre-existing handler, unchanged ...\n     pass\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Tenancy or Rollback findings with `Category:` lines per the canonical Report Format.",
       "expected_output": "Tenancy finding fires Important: the UPDATE filters by order_id only, not tenant_id. A forged callback with a valid signature for tenant-A whose payload references an order_id belonging to tenant-B writes to tenant-B's row.",
-      "files": ["src/webhooks.py"],
-      "allowed_files": ["src/webhooks.py"],
+      "files": [
+        "src/webhooks.py"
+      ],
+      "allowed_files": [
+        "src/webhooks.py"
+      ],
       "lens_under_test": "tenancy",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "category-finding-fires", "params": {"category": "Tenancy", "severity_at_least": "Important"}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "category-finding-fires",
+          "params": {
+            "category": "Tenancy",
+            "severity_at_least": "Important"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "7-rollback-orphan-fk",
+      "source": "synthetic",
+      "lens_column": "none",
+      "pr_description": "Add an Alembic migration that introduces a new `regions` parent table and adds a `region_id` foreign-key column to the existing `customers` table. The `downgrade()` path drops the parent table with `CASCADE` to undo the change.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds an Alembic migration introducing a `regions` parent table and a `region_id` FK column on the existing `customers` table.\n\n```diff\n--- /dev/null\n+++ b/migrations/20260521_add_regions.py\n@@ -0,0 +1,38 @@\n+\"\"\"add regions table and customers.region_id FK\n+\n+Revision ID: a3f9c1b\n+Revises: 9c81e2d\n+\"\"\"\n+from alembic import op\n+import sqlalchemy as sa\n+\n+\n+def upgrade():\n+    op.create_table(\n+        \"regions\",\n+        sa.Column(\"id\", sa.Integer(), primary_key=True),\n+        sa.Column(\"name\", sa.String(), nullable=False),\n+    )\n+    op.add_column(\n+        \"customers\",\n+        sa.Column(\"region_id\", sa.Integer(), nullable=True),\n+    )\n+    op.create_foreign_key(\n+        \"fk_customers_region\",\n+        \"customers\",\n+        \"regions\",\n+        [\"region_id\"],\n+        [\"id\"],\n+    )\n+\n+\n+def downgrade():\n+    # Drop the parent table; FK is dropped via CASCADE.\n+    op.execute(\"DROP TABLE regions CASCADE\")\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Tenancy or Rollback findings with `Category:` lines per the canonical Report Format.",
       "expected_output": "Rollback finding fires Important: `downgrade()` drops `regions` CASCADE but leaves the `customers.region_id` column orphaned. Re-running `upgrade()` after a `downgrade()` will fail when `add_column` collides with the still-present column.",
-      "files": ["migrations/20260521_add_regions.py"],
-      "allowed_files": ["migrations/20260521_add_regions.py"],
+      "files": [
+        "migrations/20260521_add_regions.py"
+      ],
+      "allowed_files": [
+        "migrations/20260521_add_regions.py"
+      ],
       "lens_under_test": "rollback",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "category-finding-fires", "params": {"category": "Rollback", "severity_at_least": "Important"}},
-        {"type": "mechanical", "check": "all-findings-have-file-line"}
+        {
+          "type": "mechanical",
+          "check": "category-finding-fires",
+          "params": {
+            "category": "Rollback",
+            "severity_at_least": "Important"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     },
     {
       "id": "8-defense-in-depth-not-slop",
+      "source": "synthetic",
+      "lens_column": "none",
+      "pr_description": "Add a belt-and-suspenders authorization assertion on the row returned by `get_order` so the per-request scope check runs at the application layer in addition to the existing row-level security at the connection layer. Also fix a typo in the legacy alias function name in the same file.",
       "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds a second authorization check on a tenancy-aware read path that already enforces tenancy at the query layer via RLS. The diff also fixes an unrelated typo in a docstring.\n\n```diff\n--- a/src/orders.py\n+++ b/src/orders.py\n@@ -1,18 +1,24 @@\n from .auth import current_user, assert_can_read_tenant\n from .db import db\n \n \n def get_order(order_id):\n-    \"\"\"Fetch a single order by id. Tenancy enforced via RLS on the connection.\"\"\"\n+    \"\"\"Fetch a single order by id. Tenancy enforced via RLS on the connection.\"\"\"\n     row = db.execute(\n         \"SELECT * FROM orders WHERE order_id = :order_id\",\n         {\"order_id\": order_id},\n     ).fetchone()\n     if row is None:\n         return None\n+    # Belt-and-suspenders: in addition to RLS at the connection layer,\n+    # explicitly verify the row's tenant matches the current request's tenant.\n+    # Both layers should agree; if they ever diverge, fail closed.\n+    assert_can_read_tenant(current_user(), row.tenant_id)\n     return row\n \n \n-def get_orderr(order_id):  # legacy alias, was misspelled in 0.1\n+def get_order_legacy(order_id):  # legacy alias, was misspelled in 0.1\n     return get_order(order_id)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Tenancy or Rollback findings with `Category:` lines per the canonical Report Format.",
       "expected_output": "No AI-Slop 'over-defensive' finding; no Category: Tenancy finding (defense-in-depth is intentional and correct). The reviewer may flag the typo-fix rename as a Minor Surgical scope-bleed observation — that's fine and demonstrates engagement.",
-      "files": ["src/orders.py"],
-      "allowed_files": ["src/orders.py"],
+      "files": [
+        "src/orders.py"
+      ],
+      "allowed_files": [
+        "src/orders.py"
+      ],
       "lens_under_test": "defense-in-depth-counter-rule",
-      "replicate_rule": {"trials": 5, "threshold": 3},
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
       "expectations": [
-        {"type": "mechanical", "check": "finding-body-does-not-contain", "params": {"patterns": ["over-defensive", "over defensive", "unnecessary error handling", "redundant check"], "case_insensitive": true}},
-        {"type": "mechanical", "check": "category-finding-does-not-fire", "params": {"category": "Tenancy"}},
-        {"type": "mechanical", "check": "findings-count-at-least", "params": {"n": 1}}
+        {
+          "type": "mechanical",
+          "check": "finding-body-does-not-contain",
+          "params": {
+            "patterns": [
+              "over-defensive",
+              "over defensive",
+              "unnecessary error handling",
+              "redundant check"
+            ],
+            "case_insensitive": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "category-finding-does-not-fire",
+          "params": {
+            "category": "Tenancy"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "findings-count-at-least",
+          "params": {
+            "n": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "surgical-real",
+      "source": "real-pr",
+      "source_pr": "#281 @ dc05109",
+      "synthetic_pair": "1a",
+      "lens_column": "Surgical",
+      "pr_description": "Add a private `_truncate_payload(entry, max_gated_files, max_highest_finding_chars)` helper used by the ledger-append path.\n\nThe helper produces a shallow copy of the input entry, applies the L-8 size cap to the gated_files list (returning the trimmed-off remainder as an overflow list for the caller to write to a sidecar file), and caps the highest_finding string at the configured character budget.\n\nCaller is responsible for sidecar I/O; the function is pure-ish (returns the truncated entry plus optional overflow list) so that the per-line bytes check upstream can reject oversize entries before any sidecar is written.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\ndiff --git a/scripts/ledger_append.py b/scripts/ledger_append.py\n--- a/scripts/ledger_append.py\n+++ b/scripts/ledger_append.py\n@@ -42,0 +42,26 @@\n+\n+\n+def _truncate_payload(entry: dict, max_gated_files: int,\n+                       max_highest_finding_chars: int) -> tuple[dict, Optional[list]]:\n+    \"\"\"Apply L-8 truncation in-place on a shallow copy.\n+\n+    Returns (truncated_entry, overflow_list_or_None). Sidecar I/O is the caller's\n+    responsibility — deferred to AFTER the line-bytes size check passes to avoid\n+    orphan-sidecar leaks on oversize rejection (review finding S-3).\n+    \"\"\"\n+    out = dict(entry)\n+    overflow: Optional[list] = None\n+    gated = out.get(\"gated_files\")\n+    if isinstance(gated, list) and len(gated) > max_gated_files:\n+        overflow = list(gated)\n+        out[\"gated_files\"] = overflow[:max_gated_files]\n+        out[\"gated_files_truncated\"] = len(overflow) - max_gated_files\n+    else:\n+        out.setdefault(\"gated_files_truncated\", 0)\n+\n+    hf = out.get(\"highest_finding\")\n+    if isinstance(hf, str) and len(hf) > max_highest_finding_chars:\n+        out[\"highest_finding\"] = hf[:max_highest_finding_chars]\n+    return out, overflow\n+\n+\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "Surgical lens should NOT fire; slice is a focused, single-purpose helper with no reformat / scope-bleed pattern. No DRY/SRP/OCP findings expected.\n\n## Diff Origin Verification\n\n- Source command: `git show dc05109 -- scripts/ledger_append.py` (slice L42-L67)\n- Injected violation profile: Surgical (none expected — slice is a tightly scoped helper from a real merged refactor)\n- Manual reviewer attestation required (verify_diff_origin.py automation deferred to Task 17b).",
+      "files": [
+        "scripts/ledger_append.py"
+      ],
+      "allowed_files": [
+        "scripts/ledger_append.py"
+      ],
+      "lens_under_test": "surgical",
+      "provenance": {
+        "pr": "#281",
+        "sha": "dc05109",
+        "file": "scripts/ledger_append.py",
+        "line_range": "L42-L67"
+      },
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "Surgical",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "OCP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
+      ]
+    },
+    {
+      "id": "dry-real",
+      "source": "real-pr",
+      "source_pr": "#284 @ 8c3c269",
+      "synthetic_pair": "2",
+      "lens_column": "DRY",
+      "pr_description": "Introduce two parser functions `_parse_single(argv, path)` and `_parse_multi(argv, path)` for the compass argv tokenizer.\n\n`_parse_single` implements the legacy single-field form: --field NAME --value V [--value V2 ...] [--append]. It validates that --field appears once, that at least one --value is given, and applies the scalar/list field-type table to choose the final shape (scalar vs list vs append-one).\n\n`_parse_multi` implements the new multi-field form: --set FIELD --value V [--set FIELD2 --value V2 ...], flushing each --set block into a patch tuple via the `_finalize_multi_patch` helper before moving to the next --set.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\ndiff --git a/scripts/compass.py b/scripts/compass.py\n--- a/scripts/compass.py\n+++ b/scripts/compass.py\n@@ -911,0 +911,100 @@\n+def _parse_single(argv, path):\n+    \"\"\"Legacy single-field mode: --field X --value Y [--value Y2 ...] [--append]\"\"\"\n+    field = None\n+    values = []\n+    append = False\n+    i = 0\n+    while i < len(argv):\n+        tok = argv[i]\n+        if tok == \"--field\":\n+            if field is not None:\n+                raise ValueError(\"--field specified more than once\")\n+            if i + 1 >= len(argv):\n+                raise ValueError(\"--field requires a value\")\n+            field = argv[i + 1]\n+            i += 2\n+        elif tok == \"--value\":\n+            if i + 1 >= len(argv):\n+                raise ValueError(\"--value requires a value\")\n+            # Inside-value state machine: unconditionally consume next token\n+            values.append(argv[i + 1])\n+            i += 2\n+        elif tok == \"--append\":\n+            append = True\n+            i += 1\n+        else:\n+            raise ValueError(f\"unexpected argument: {tok!r}\")\n+\n+    if field is None:\n+        raise ValueError(\"--field required\")\n+    if not values:\n+        raise ValueError(\"--value required\")\n+\n+    ftype = FIELD_TYPES.get(field)\n+    if ftype == \"scalar\" and len(values) > 1:\n+        raise ValueError(f\"scalar field {field!r} accepts at most one --value\")\n+\n+    if ftype == \"list\" and not append:\n+        value = values\n+    elif ftype == \"list\" and append:\n+        if len(values) > 1:\n+            raise ValueError(\"--append with --value: pass exactly one value\")\n+        value = values[0]\n+    else:\n+        value = values[0]\n+\n+    return \"single\", [(field, value, append)], path\n+\n+\n+def _parse_multi(argv, path):\n+    \"\"\"Multi-field --set mode: --set field --value V [--set field2 --value V2 ...]\"\"\"\n+    patches = []\n+    current_field = None\n+    current_values = []\n+    i = 0\n+    while i < len(argv):\n+        tok = argv[i]\n+        if tok == \"--set\":\n+            # Flush prior\n+            if current_field is not None:\n+                patches.append(_finalize_multi_patch(current_field, current_values))\n+                current_field = None\n+                current_values = []\n+            if i + 1 >= len(argv):\n+                raise ValueError(\"--set requires a field name\")\n+            current_field = argv[i + 1]\n+            i += 2\n+        elif tok == \"--value\":\n+            if i + 1 >= len(argv):\n+                raise ValueError(\"--value requires a value\")\n+            current_values.append(argv[i + 1])\n+            i += 2\n+        elif tok == \"--field\":\n+            raise ValueError(\"--field cannot be combined with --set\")\n+        else:\n+            raise ValueError(f\"unexpected argument: {tok!r}\")\n+\n+    if current_field is not None:\n+        patches.append(_finalize_multi_patch(current_field, current_values))\n+\n+    if not patches:\n+        raise ValueError(\"at least one --set required\")\n+\n+    return \"multi\", patches, path\n+\n+\n+def _finalize_multi_patch(field, values):\n+    if not values:\n+        raise ValueError(f\"--set {field}: no --value provided\")\n+    ftype = FIELD_TYPES.get(field)\n+    if ftype == \"scalar\":\n+        if len(values) > 1:\n+            raise ValueError(f\"scalar field {field!r} accepts at most one --value\")\n+        return (field, values[0], False)\n+    elif ftype == \"list\":\n+        return (field, list(values), False)\n+    else:\n+        # unknown field — let _apply_patch raise\n+        return (field, values[0] if len(values) == 1 else list(values), False)\n+\n+\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "DRY lens fires at Minor on `scripts/compass.py`; finding cites the parallel `_parse_single` / `_parse_multi` argv-loop skeletons as the shared opportunity.\n\n## Diff Origin Verification\n\n- Source command: `git show 8c3c269 -- scripts/compass.py` (slice L911-L1010)\n- Injected violation profile: DRY — `_parse_single` and `_parse_multi` share a near-identical while-loop tokenizer skeleton\n- Manual reviewer attestation required (verify_diff_origin.py automation deferred to Task 17b).",
+      "files": [
+        "scripts/compass.py"
+      ],
+      "allowed_files": [
+        "scripts/compass.py"
+      ],
+      "lens_under_test": "dry",
+      "provenance": {
+        "pr": "#284",
+        "sha": "8c3c269",
+        "file": "scripts/compass.py",
+        "line_range": "L911-L1010"
+      },
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "DRY",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "Surgical",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "OCP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
+      ]
+    },
+    {
+      "id": "srp-real",
+      "source": "real-pr",
+      "source_pr": "#162 @ a99728f",
+      "synthetic_pair": "3",
+      "lens_column": "SRP",
+      "pr_description": "Promote the five module-level globals (`_config`, `_providers`, `_project_dir`, `_external_config`, `_external_providers`) into a `ServerState` dataclass owned by the MCP server module.\n\n`initialize()` now constructs a fresh `ServerState(project_dir=...)`, populates the consensus `config` and `providers` fields inside its existing try/except blocks, then loads the external-review `external_config` and `external_providers` fields the same way, and finally stores the populated dataclass into the module-level `_state`. A new `_get_state()` accessor returns the current state (or None when uninitialized) for tool handlers to read from.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\ndiff --git a/mcp-servers/crucible-consensus/server.py b/mcp-servers/crucible-consensus/server.py\n--- a/mcp-servers/crucible-consensus/server.py\n+++ b/mcp-servers/crucible-consensus/server.py\n@@ -23,0 +23,68 @@\n+\n+@dataclass\n+class ServerState:\n+    \"\"\"Encapsulates all mutable server state.\"\"\"\n+    config: ConsensusConfig | None = None\n+    providers: list[BaseProvider] = field(default_factory=list)\n+    project_dir: str = \"\"\n+    external_config: ExternalReviewConfig | None = None\n+    external_providers: list[BaseProvider] = field(default_factory=list)\n+\n+\n+_state: ServerState | None = None\n+\n+\n+def _get_state() -> ServerState | None:\n+    \"\"\"Return current server state, or None if uninitialized.\"\"\"\n+    return _state\n+\n+\n+def initialize():\n+    \"\"\"Load config and create providers on startup.\"\"\"\n+    global _state\n+    project_dir = os.environ.get(\"PROJECT_DIR\", os.getcwd())\n+\n+    state = ServerState(project_dir=project_dir)\n+\n+    # Load consensus config (optional — don't crash if missing)\n+    try:\n+        state.config = load_config(project_dir)\n+    except ConfigError as e:\n+        state.config = None\n+        logger.warning(f\"Consensus config not loaded: {e}\")\n+\n+    if state.config is not None and not state.config.enabled:\n+        logger.info(\"Consensus is disabled in config\")\n+\n+    if state.config is not None and state.config.enabled:\n+        for model_config in state.config.models:\n+            try:\n+                provider = create_provider(model_config)\n+                state.providers.append(provider)\n+                logger.info(f\"Initialized {model_config.provider}/{model_config.model_id}\")\n+            except Exception as e:\n+                logger.warning(f\"Failed to initialize {model_config.provider}/{model_config.model_id}: {e}\")\n+\n+        logger.info(f\"Consensus server ready: {len(state.providers)} providers, min_models={state.config.min_models}\")\n+\n+    # Load external review config (may raise ConfigError on malformed config)\n+    try:\n+        state.external_config = load_external_review_config(project_dir)\n+    except ConfigError as e:\n+        state.external_config = ExternalReviewConfig()\n+        logger.warning(f\"External review config not loaded: {e}\")\n+    if state.external_config.enabled and state.external_config.models:\n+        for model_config in state.external_config.models:\n+            try:\n+                provider = create_provider(model_config)\n+                state.external_providers.append(provider)\n+                logger.info(f\"External review: initialized {model_config.provider}/{model_config.model_id}\")\n+            except Exception as e:\n+                logger.warning(f\"External review: failed to initialize {model_config.provider}/{model_config.model_id}: {e}\")\n+        logger.info(f\"External review ready: {len(state.external_providers)} providers\")\n+\n+    _state = state\n+\n+\n+@server.list_tools()\n+async def list_tools() -> list[Tool]:\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "SRP lens should NOT fire on the post-merge slice; the change collapses five module-level globals into a single dataclass with one clear concern.\n\n## Diff Origin Verification\n\n- Source command: `git show a99728f -- mcp-servers/crucible-consensus/server.py` (slice L23-L90)\n- Injected violation profile: SRP (none expected — slice IS the SRP-win refactor merged in #162, consolidating five globals into one cohesive owner)\n- Manual reviewer attestation required (verify_diff_origin.py automation deferred to Task 17b).",
+      "files": [
+        "mcp-servers/crucible-consensus/server.py"
+      ],
+      "allowed_files": [
+        "mcp-servers/crucible-consensus/server.py"
+      ],
+      "lens_under_test": "srp",
+      "provenance": {
+        "pr": "#162",
+        "sha": "a99728f",
+        "file": "mcp-servers/crucible-consensus/server.py",
+        "line_range": "L23-L90"
+      },
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "Surgical",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "OCP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
+      ]
+    },
+    {
+      "id": "ocp-real",
+      "source": "real-pr",
+      "source_pr": "#298 @ 8cc4821",
+      "synthetic_pair": "4",
+      "lens_column": "OCP",
+      "pr_description": "Add two new argparse subparsers to `_parse_args` for the eval CLI: `stage` (renders fixtures x trials into per-trial worker-input files on disk) and `score` (aggregates per-trial results into a run summary).\n\nBoth arms hang off the existing top-level subparser. `stage` takes a positional run id plus flags for --force / --source / --fixture / --trials-override / --timeout. `score` takes a positional run id plus flags for --write-baseline / --compare-baseline / --force-rescore / --allow-incomplete / --allow-fixture-drift / --per-iter.\n\n`main()` selects on `args.cmd`: when set to one of the two new values it invokes the corresponding worker function and returns; otherwise the existing legacy mock/replay entry point continues to run unchanged.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\ndiff --git a/skills/temper/evals/run_evals.py b/skills/temper/evals/run_evals.py\n--- a/skills/temper/evals/run_evals.py\n+++ b/skills/temper/evals/run_evals.py\n@@ -782,0 +782,74 @@\n+def _parse_args(argv: list[str]) -> argparse.Namespace:\n+    p = argparse.ArgumentParser(description=\"Run temper lens evals.\")\n+    sub = p.add_subparsers(dest=\"cmd\")\n+\n+    # stage\n+    sp_stage = sub.add_parser(\"stage\", help=\"Render fixtures × trials to dispatch files\")\n+    sp_stage.add_argument(\"run_id\")\n+    sp_stage.add_argument(\"--force\", action=\"store_true\")\n+    sp_stage.add_argument(\"--source\", choices=[\"synthetic\", \"real-pr\", \"all\"], default=\"all\")\n+    sp_stage.add_argument(\"--fixture\", default=None)\n+    sp_stage.add_argument(\"--trials-override\", type=int, default=None)\n+    sp_stage.add_argument(\"--timeout\", type=int, default=300)\n+\n+    # score — Task 6\n+    sp_score = sub.add_parser(\"score\", help=\"Aggregate results + write last_run.json\")\n+    sp_score.add_argument(\"run_id\")\n+    sp_score.add_argument(\"--write-baseline\", action=\"store_true\")\n+    sp_score.add_argument(\"--compare-baseline\", action=\"store_true\")\n+    sp_score.add_argument(\"--force-rescore\", action=\"store_true\")\n+    sp_score.add_argument(\"--allow-incomplete\", action=\"store_true\")\n+    sp_score.add_argument(\"--allow-fixture-drift\", action=\"store_true\",\n+        help=\"Permit --compare-baseline when fixtures have been removed from evals.json. \"\n+             \"Without this flag, removed fixtures cause rc=2 (prevents silent regression-laundering).\")\n+    sp_score.add_argument(\"--per-iter\", action=\"store_true\",\n+        help=\"Write last_run-<run_id>.json under .calibrate-state/ instead of shared last_run.json. Set by /temper-eval-calibrate.\")\n+\n+    # Legacy mock/replay paths (back-compat, no subcommand)\n+    # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.\n+    p.add_argument(\"--legacy-fixture\", dest=\"legacy_fixture\", help=\"(legacy) run one fixture by id (with mock/replay)\")\n+    p.add_argument(\"--mock-reviewer\", help=\"dir containing <fixture-id>.txt canned outputs\")\n+    p.add_argument(\"--replay\", help=\"path to last_run.json to re-evaluate\")\n+    # S-3 R5: dest matches the flag's full name (`legacy_trials_override`) to\n+    # eliminate the prior `legacy_trials` vs `args.trials_override` naming confusion.\n+    p.add_argument(\"--legacy-trials-override\", dest=\"legacy_trials_override\", type=int, help=\"(legacy)\")\n+    p.add_argument(\"--legacy-timeout\", dest=\"legacy_timeout\", type=int, default=120, help=\"(legacy)\")\n+\n+    return p.parse_args(argv)\n+\n+\n+def main(argv: list[str] | None = None) -> int:\n+    args = _parse_args(argv if argv is not None else sys.argv[1:])\n+\n+    if args.cmd == \"stage\":\n+        try:\n+            stage(\n+                args.run_id,\n+                force=args.force,\n+                source=args.source,\n+                fixture=args.fixture,\n+                trials_override=args.trials_override,\n+                timeout=args.timeout,\n+            )\n+            return 0\n+        except (FileExistsError, ValueError) as e:\n+            print(f\"[fatal] {e}\", file=sys.stderr)\n+            return 2\n+\n+    if args.cmd == \"score\":\n+        try:\n+            return score(\n+                args.run_id,\n+                write_baseline=args.write_baseline,\n+                compare_baseline=args.compare_baseline,\n+                force_rescore=args.force_rescore,\n+                allow_incomplete=args.allow_incomplete,\n+                per_iter=args.per_iter,\n+                allow_fixture_drift=args.allow_fixture_drift,\n+            )\n+        except ValueError as e:\n+            print(f\"[fatal] {e}\", file=sys.stderr)\n+            return 2\n+\n+    # Legacy mock/replay path — preserved unchanged\n+    return _legacy_main(args)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "OCP lens fires at Minor on the new-arm registration pattern (subparser arms added to an existing argparser plus parallel branch in main()).\n\n## Diff Origin Verification\n\n- Source command: `git show 8cc4821 -- skills/temper/evals/run_evals.py` (slice L782-L855)\n- Injected violation profile: OCP — two new argparse subparser arms (`stage`, `score`) registered alongside legacy mock/replay arms; new-arm widening pattern\n- Manual reviewer attestation required (verify_diff_origin.py automation deferred to Task 17b).",
+      "files": [
+        "skills/temper/evals/run_evals.py"
+      ],
+      "allowed_files": [
+        "skills/temper/evals/run_evals.py"
+      ],
+      "lens_under_test": "ocp",
+      "provenance": {
+        "pr": "#298",
+        "sha": "8cc4821",
+        "file": "skills/temper/evals/run_evals.py",
+        "line_range": "L782-L855",
+        "ocp_fallback": false
+      },
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "OCP",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "Surgical",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "DRY",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
+      ]
+    },
+    {
+      "id": "mixed-real",
+      "source": "real-pr",
+      "source_pr": "#293 @ cd5cbf7",
+      "synthetic_pair": [
+        "2",
+        "4"
+      ],
+      "lens_column": [
+        "DRY",
+        "OCP"
+      ],
+      "pr_description": "Add a new `category_finding_fires(output, category, severity=None, severity_at_least=None)` checker plus a `category_finding_does_not_fire(output, category)` companion to the runner result helpers, alongside a shared `_severity_at_least(actual, floor)` comparator that consults the four-tier severity table.\n\nThe new checkers operate on findings tagged with a `category` field (a parallel axis to the existing tag axis). `severity` and `severity_at_least` are mutually optional: an exact value, a floor value, both (must match both), or neither (any severity matches). On miss, the FAIL message reports which mode was requested.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`.\n\n```diff\ndiff --git a/skills/temper/evals/lens_runner.py b/skills/temper/evals/lens_runner.py\n--- a/skills/temper/evals/lens_runner.py\n+++ b/skills/temper/evals/lens_runner.py\n@@ -178,0 +178,83 @@\n+_SEVERITY_ORDER = {\"Critical\": 4, \"Important\": 3, \"Minor\": 2, \"Suggestion\": 1}\n+\n+\n+def _severity_at_least(actual: str | None, floor: str) -> bool:\n+    \"\"\"True if `actual` severity is >= `floor`. Unknown actual severity = False.\"\"\"\n+    if actual is None:\n+        return False\n+    a = _SEVERITY_ORDER.get(actual, 0)\n+    f = _SEVERITY_ORDER.get(floor, 0)\n+    return a >= f\n+\n+\n+def lens_finding_fires(\n+    output: str,\n+    lens: str,\n+    severity: str,\n+    include_reattributed: bool = False,\n+) -> Result:\n+    findings = _parse_findings(output)\n+    for f in findings:\n+        if f[\"lens\"] != lens:\n+            continue\n+        if f[\"lens_reattributed\"] and not include_reattributed:\n+            continue\n+        if f[\"severity\"] == severity:\n+            return (\"PASS\", f\"Lens: {lens} at {severity} fires\")\n+    return (\"FAIL\", f\"no Lens: {lens} finding at Severity: {severity}\")\n+\n+\n+def category_finding_fires(\n+    output: str,\n+    category: str,\n+    severity: str | None = None,\n+    severity_at_least: str | None = None,\n+) -> Result:\n+    \"\"\"Mirror of lens_finding_fires for Category-tagged findings.\n+\n+    `severity` (exact match) and `severity_at_least` (≥ floor) are mutually\n+    optional. If both are specified, both must match. If neither is\n+    specified, any matching Category fires.\n+    \"\"\"\n+    findings = _parse_findings(output)\n+    for f in findings:\n+        if f[\"category\"] != category:\n+            continue\n+        if severity is not None and f[\"severity\"] != severity:\n+            continue\n+        if severity_at_least is not None and not _severity_at_least(\n+            f[\"severity\"], severity_at_least\n+        ):\n+            continue\n+        return (\"PASS\", f\"Category: {category} at {f['severity']} fires\")\n+    descr = (\n+        f\"Severity: {severity}\"\n+        if severity\n+        else f\"Severity ≥ {severity_at_least}\"\n+        if severity_at_least\n+        else \"any severity\"\n+    )\n+    return (\"FAIL\", f\"no Category: {category} finding at {descr}\")\n+\n+\n+def category_finding_does_not_fire(output: str, category: str) -> Result:\n+    findings = _parse_findings(output)\n+    for f in findings:\n+        if f[\"category\"] == category:\n+            return (\n+                \"FAIL\",\n+                f\"unexpected Category: {category} finding at {f['file']} \"\n+                f\"(severity {f['severity']})\",\n+            )\n+    return (\"PASS\", f\"no Category: {category} findings\")\n+\n+\n+def finding_body_does_not_contain(\n+    output: str,\n+    patterns: list[str],\n+    case_insensitive: bool = True,\n+) -> Result:\n+    \"\"\"FAIL if any finding's body text contains any pattern (substring match).\n+    Used to verify counter-rule effectiveness — e.g., assert no finding's\n+    prose contains AI-Slop \"over-defensive\" trigger phrases.\"\"\"\n+    findings = _parse_findings(output)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "DRY lens fires at Minor on `lens_runner.py` (parallel finding-checker pair); OCP lens fires at Minor on the new-axis widening. SRP / Surgical do not fire.\n\n## Diff Origin Verification\n\n- Source command: `git show cd5cbf7 -- skills/temper/evals/lens_runner.py` (slice L178-L260)\n- Injected violation profile: Mixed (DRY + OCP) — `category_finding_fires` mirrors `lens_finding_fires` line-for-line (DRY), and adds a new Category axis parallel to the existing tag axis (OCP)\n- Manual reviewer attestation required (verify_diff_origin.py automation deferred to Task 17b).",
+      "files": [
+        "skills/temper/evals/lens_runner.py"
+      ],
+      "allowed_files": [
+        "skills/temper/evals/lens_runner.py"
+      ],
+      "lens_under_test": [
+        "dry",
+        "ocp"
+      ],
+      "provenance": {
+        "pr": "#293",
+        "sha": "cd5cbf7",
+        "file": "skills/temper/evals/lens_runner.py",
+        "line_range": "L178-L260"
+      },
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "DRY",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-fires",
+          "params": {
+            "lens": "OCP",
+            "severity": "Minor"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "Surgical",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "lens-finding-does-not-fire",
+          "params": {
+            "lens": "SRP",
+            "include_reattributed": true
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "all-findings-have-file-line"
+        }
       ]
     }
   ]
