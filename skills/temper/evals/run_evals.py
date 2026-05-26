@@ -603,15 +603,11 @@ def _compute_per_lens_pass(
 
 
 def _synth_plan_reference(fixture: dict) -> str:
-    """Returns the fixture's `pr_description` field directly.
-
-    Pre-#290 this synthesized from fixture metadata (`expected_output`);
-    post-#290 the `pr_description` field is authoritative and consumed
-    verbatim by the reviewer prompt. Ensures the reviewer is NOT in
-    degraded mode (per Design D8) for fixtures that test gating behavior —
-    Surgical Changes at Important requires a stated scope to gate against.
-    """
-    desc = fixture.get("pr_description", "")
+    """Synthesize a PR-body-equivalent scope statement from fixture metadata.
+    Ensures the reviewer is NOT in degraded mode (per Design D8) for fixtures
+    that test gating behavior — Surgical Changes at Important requires a
+    stated scope to gate against."""
+    desc = fixture.get("expected_output", "")
     allowed = fixture.get("allowed_files", [])
     allowed_str = ", ".join(f"`{p}`" for p in allowed)
     return (
