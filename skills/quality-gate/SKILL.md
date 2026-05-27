@@ -317,7 +317,7 @@ This preserves the value of the pre-threshold consensus investment without givin
 
 ## Cost-Cap and Diminishing-Return Signals (#303)
 
-Two advisory signals layered over existing escalation paths. Neither introduces a new termination path; both are advisory-only in v0.1. See `docs/plans/2026-05-26-303-qg-cost-cap-design.md` for full design rationale.
+Two advisory signals layered over existing escalation paths. Neither introduces a new termination path; both are advisory-only in v0.1 — they surface cost/diminishing-return information to the user but never change the gate's verdict or loop behavior.
 
 ### Per-Round Ledger
 
