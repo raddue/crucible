@@ -449,7 +449,7 @@ git worktree remove <worktree-path>
 
 ## Defer-Ledger Corpus Seeding (#303)
 
-After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate scratch directory (`~/.claude/projects/<project-hash>/memory/quality-gate/scratch/<run-id>/`) for `round-N-ledger.md` files emitted by the gate (see `skills/quality-gate/SKILL.md > ## Cost-Cap and Diminishing-Return Signals` for ledger format).
+After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate **defer-ledger handoff directories** the gate preserved before deleting its scratch directory: glob `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-*/` and read every `round-N-ledger.md` within (chunked gates flatten their per-chunk ledgers as `chunk-<K>-round-<N>-ledger.md` — match those too). The gate writes these handoff dirs on all exit paths because its own scratch dir is deleted at cleanup and would not survive to finish-time (see `skills/quality-gate/SKILL.md > Defer-ledger handoff` for the producer side and `> ## Cost-Cap and Diminishing-Return Signals` for ledger format). Use Write/Read/Glob, NOT Bash — safety hooks block Bash commands referencing `.claude/` paths.
 
 For each ledger file found, **create-or-append** the `## Accepted` section to `docs/retrospectives/defer-ledger/<issue-number>.md` (where `<issue-number>` is the GitHub issue number associated with this run; derive from branch name `<prefix>/<NNN>-...` or from the PR's linked issue). If the target file does not exist, create it with a top-level `# Defer ledger — issue #<N>` header.
 
@@ -465,7 +465,9 @@ Each appended entry preserves the finding summary verbatim and adds empty `Lik:`
   Outcome:
 ```
 
-**Graceful skip:** If the scratch directory is missing (gate did not run, crashed before round 1, or scratch already cleaned), or no ledger files are present, skip silently. Corpus seeding is best-effort — failures here MUST NOT block finish-skill completion.
+**Consume-once:** After seeding the corpus from a `defer-ledger-<run-id>/` directory, delete that directory so a later finish run does not re-seed the same ledgers. (A build pipeline may leave several handoff dirs — one per gate: design, plan, per-task code gates — all keyed to the same issue; processing and consuming all of them is correct, since they share the one `defer-ledger/<issue-number>.md` corpus file.)
+
+**Graceful skip:** If no `defer-ledger-*/` handoff directories exist (gate did not run, crashed before round 1, or the handoff was reclaimed by the 24h stale-cleanup pass before finish ran), or no ledger files are present within them, skip silently. Corpus seeding is best-effort — failures here MUST NOT block finish-skill completion.
 
 **Why this exists:** v0.1 ships visibility-only (no binding deferral). v1.0 will activate binding triage gated on a calibration corpus. This step seeds the corpus from v0.1 ledger emissions so v1.0 has data to learn from. See issue #305 for v1.0 follow-up work.
 

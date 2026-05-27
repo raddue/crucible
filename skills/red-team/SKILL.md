@@ -25,6 +25,11 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 
 These args apply ONLY in standalone-mode iterative-loop invocations. When red-team is invoked single-pass by `crucible:quality-gate`, QG owns the loop and these args are ignored — QG emits its own ledger.
 
+**Term definitions (standalone red-team).** Both defaults above reference two values red-team resolves at invocation:
+
+- `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/SKILL.md`): **10** for code artifacts, **3** for hypothesis / mockup / translation artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
+- `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/red-team`; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
+
 ## When to Use
 
 - After a design doc is finalized (before planning)

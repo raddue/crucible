@@ -861,7 +861,7 @@ Quality gate writes round state to disk for compaction recovery.
 
 **Active run marker:** At the start of the gate, write `~/.claude/projects/<project-hash>/memory/quality-gate/active-run-<run-id>.md` containing the run-id and scratch directory path. Delete only your own marker when the gate completes. After compaction, glob for `active-run-*.md` files to locate active runs — recover the one whose run-id matches context, or the most recent if context is lost.
 
-**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge sessions).
+**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files and `defer-ledger-*/` handoff directories in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge/finish sessions).
 
 **After each round, write:**
 - `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count, plus the following suppression-audit fields:
@@ -958,6 +958,8 @@ Write the handoff on ALL exit paths with ≥2 rounds:
 - Findings addressed: ...
 ```
 
+
+**Defer-ledger handoff (#303):** After Minor Issue Handling and before cleanup, preserve the per-round ledgers so `crucible:finish` can seed the v1.0 calibration corpus *after* this scratch directory is deleted. Copy every `round-N-ledger.md` from the scratch directory — including those in `chunk-*/` subdirectories for chunked gates — into a durable per-run directory `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-<run-id>/`. Flatten chunked ledgers with a chunk prefix (`chunk-<K>-round-<N>-ledger.md`) so names cannot collide with the non-chunked `round-<N>-ledger.md` form. Written on ALL exit paths (PASS, ESCALATED, STAGNATION, ARCHITECTURAL) because a ledger exists for every round per INV-303-1. Use Write/Read/Glob, NOT Bash (the `.claude/` Bash constraint above applies). This mirrors the `fix-journal-<run-id>.md` handoff: a transient artifact consumed by a later skill, not part of the gate's verdict. The consuming skill (`crucible:finish`) deletes the directory after seeding; the stale-cleanup pass (above, 24h) reclaims any handoff that is never consumed.
 
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation). Do NOT delete verdict marker files (`gate-verdict-<run-id>.md`) — the build orchestrator is responsible for their lifecycle.
 
@@ -1282,6 +1284,7 @@ The invariants below govern the look-harder verification (Component 1), the tail
 | INV-303-5 | For artifacts with `suppression_threshold ≤ 3`, both `cost_cap_threshold` and `dr_signal_findings` default to `null` |
 | INV-303-6 | v0.1 ledger Deferred section is empty for every round (Accept-all) |
 | INV-303-7 | Every verdict marker has `CostCapSignals` field, regardless of interactive mode |
+| INV-303-8 | Every round's ledger is copied to a durable `defer-ledger-<run-id>/` handoff dir before scratch cleanup, on all exit paths, so corpus seeding survives scratch deletion |
 
 ## Integration
 
