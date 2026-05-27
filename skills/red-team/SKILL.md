@@ -16,6 +16,20 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 
 **Announce at start:** "I'm using the red-team skill to adversarially review this artifact."
 
+## Skill Arguments (added by #303)
+
+| Argument | Type | Default | Effect |
+|---|---|---|---|
+| `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis/mockup/translation defaults) | Standalone-mode only: LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. |
+| `dr_signal_findings` | int \| null | `2` if `suppression_threshold > 3` else `null` | Standalone-mode only: count of NEW (delta-vs-prior-round) Fatal+Significant findings at or below which the DR signal fires (interactive only). |
+
+These args apply ONLY in standalone-mode iterative-loop invocations. When red-team is invoked single-pass by `crucible:quality-gate`, QG owns the loop and these args are ignored — QG emits its own ledger.
+
+**Term definitions (standalone red-team).** Both defaults above reference two values red-team resolves at invocation:
+
+- `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/SKILL.md`): **10** for code artifacts, **3** for hypothesis / mockup / translation artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
+- `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/red-team`; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
+
 ## When to Use
 
 - After a design doc is finalized (before planning)
@@ -69,6 +83,37 @@ The Devil's Advocate MUST classify every challenge:
 - **Fatal:** Artifact will fail or produce broken output. Must be addressed.
 - **Significant:** Artifact will work but has a meaningful risk or missed opportunity. Should be addressed.
 - **Minor:** Nitpick or preference. Log it but don't block.
+
+### Per-Round Ledger and Cost-Cap Signals (standalone mode only, #303)
+
+**Per-round ledger (standalone mode only, #303):** After each round's findings are produced and before the fix dispatch (if non-clean) or the round's terminal write (if clean), emit `round-N-ledger.md` to the run's scratch directory in this format:
+
+```
+# Round N Ledger
+
+Artifact-type: <code | hypothesis | mockup | translation>
+Total findings: N (F: x, S: y, M: z)
+New since round N-1: K   (on round 1, K = total findings — no prior round)
+Accepted: P (all findings — v0.1)
+Deferred: 0 (v0.1 — see issue #305 for v1.0)
+DR signal: <fired | not fired>
+Cost-cap signal: <fired | not fired>
+
+## Accepted
+- [Fatal] <finding-id>: <one-line summary>
+- [Significant] <finding-id>: <one-line summary>
+
+## Deferred (v1.0 — empty in v0.1)
+(none)
+```
+
+The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signal_findings` values (those args control prompts, not emission).
+
+**Diminishing-return signal (standalone-mode, interactive only, #303):** When `dr_signal_findings != null` AND LOCAL round ≥ 2 AND the count of NEW (delta-vs-prior-round) Fatal+Significant findings ≤ `dr_signal_findings`, emit prompt: "Red-team round N surfaced only K NEW Fatal+Significant findings. Diminishing returns reached. Continue or escalate?" Non-interactive: log `DR signal: fired` in the round ledger; no prompt; loop continues.
+
+**Cost-cap prompt (standalone-mode, interactive only, #303):** When `cost_cap_threshold != null` AND LOCAL round ≥ `cost_cap_threshold`, emit prompt: "Red-team round N (cost-cap threshold = T). Score progression: [list]. Continue or escalate?" Non-interactive: log `Cost-cap signal: fired` in the round ledger; no prompt; loop continues.
+
+**Combined-prompt rule:** When both signals fire in the same round in interactive mode, emit ONE combined prompt: "Red-team round N: cost-cap exceeded (threshold T) AND diminishing returns (K NEW findings ≤ S). Continue or escalate?"
 
 ## How to Use
 
@@ -165,6 +210,8 @@ Code review checks quality — is the code correct, clean, well-structured? Red-
 Red-team operates in two modes depending on the caller:
 
 **When invoked by `crucible:quality-gate`:** Run **single-pass only**. Return findings for this round. Do NOT iterate, do NOT apply stagnation detection, do NOT dispatch fix agents. Quality-gate owns the loop, stagnation detection, and fix dispatch. You are a reviewer, not a coordinator.
+
+**Cost-cap surfaces (#303):** When invoked by quality-gate, red-team does NOT emit `round-N-ledger.md`, NOT process `cost_cap_threshold` / `dr_signal_findings` args, and NOT emit DR/cost-cap prompts. Quality-gate owns the ledger emission and prompt surfaces in that path. This preserves the existing dual-mode contract and prevents double-emission.
 
 **When invoked directly** (e.g., by `crucible:finish` or standalone): Run the **full iterative loop** with stagnation detection, fix dispatch, and escalation as described above.
 

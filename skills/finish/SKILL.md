@@ -447,6 +447,30 @@ git worktree remove <worktree-path>
 - Get typed confirmation for Option 4
 - Clean up worktree (if applicable) for Options 1, 2 & 4 only
 
+## Defer-Ledger Corpus Seeding (#303)
+
+After the gate run terminates (any verdict — PASS, ESCALATED, ARCHITECTURAL, etc.), scan the quality-gate **defer-ledger handoff directories** the gate preserved before deleting its scratch directory: glob `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-*/` and read every `round-N-ledger.md` within (chunked gates flatten their per-chunk ledgers as `chunk-<K>-round-<N>-ledger.md` — match those too). The gate writes these handoff dirs on all exit paths because its own scratch dir is deleted at cleanup and would not survive to finish-time (see the **Defer-ledger handoff (#303)** paragraph in `skills/quality-gate/SKILL.md` for the producer side and its `## Cost-Cap and Diminishing-Return Signals` section for ledger format). Use Write/Read/Glob, NOT Bash — safety hooks block Bash commands referencing `.claude/` paths.
+
+For each ledger file found, **create-or-append** the `## Accepted` section to `docs/retrospectives/defer-ledger/<issue-number>.md` (where `<issue-number>` is the GitHub issue number associated with this run; derive from branch name `<prefix>/<NNN>-...` or from the PR's linked issue). If the target file does not exist, create it (creating the `docs/retrospectives/defer-ledger/` directory first if absent) with a top-level `# Defer ledger — issue #<N>` header.
+
+Each appended entry preserves the finding summary verbatim and adds empty `Lik:`, `Cost:`, and `Outcome:` fields for v1.0 hand-fill or auto-fill. Source the per-entry header fields as follows (one entry per `defer-ledger-<run-id>/` dir): `<gate-run-timestamp>` is the `<run-id>` parsed from the handoff directory name (the run-id is a start-of-gate timestamp); `<artifact-type>` is the `Artifact-type:` field from any of the dir's `round-N-ledger.md` files (constant across rounds of one run); `<rounds>` is the count of `round-N-ledger.md` files in the dir. The per-finding `## Accepted` lines are concatenated from every ledger's `## Accepted` section, deduplicated by `<finding-id>` (a finding accepted across multiple rounds appears once).
+
+```markdown
+## <gate-run-timestamp> — <artifact-type> (<rounds> rounds)
+
+### Accepted
+- [<severity>] <finding-id>: <one-line summary>
+  Lik:
+  Cost:
+  Outcome:
+```
+
+**Consume-once:** After seeding the corpus from a `defer-ledger-<run-id>/` directory, delete that directory so a later finish run does not re-seed the same ledgers. (A build pipeline may leave several handoff dirs — one per gate: design, plan, per-task code gates — all keyed to the same issue; processing and consuming all of them is correct, since they share the one `defer-ledger/<issue-number>.md` corpus file.)
+
+**Graceful skip:** If no `defer-ledger-*/` handoff directories exist (gate did not run, crashed before round 1, or the handoff was reclaimed by the 24h stale-cleanup pass before finish ran), or no ledger files are present within them, skip silently. Corpus seeding is best-effort — failures here MUST NOT block finish-skill completion.
+
+**Why this exists:** v0.1 ships visibility-only (no binding deferral). v1.0 will activate binding triage gated on a calibration corpus. This step seeds the corpus from v0.1 ledger emissions so v1.0 has data to learn from. See issue #305 for v1.0 follow-up work.
+
 ## Integration
 
 **Called by:**
