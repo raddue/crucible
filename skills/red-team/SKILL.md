@@ -91,8 +91,9 @@ The Devil's Advocate MUST classify every challenge:
 ```
 # Round N Ledger
 
+Artifact-type: <code | hypothesis | mockup | translation>
 Total findings: N (F: x, S: y, M: z)
-New since round N-1: K
+New since round N-1: K   (on round 1, K = total findings — no prior round)
 Accepted: P (all findings — v0.1)
 Deferred: 0 (v0.1 — see issue #305 for v1.0)
 DR signal: <fired | not fired>

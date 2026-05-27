@@ -330,8 +330,9 @@ Emission is unconditional and independent of `cost_cap_threshold` / `dr_signal_f
 ```markdown
 # Round N Ledger
 
+Artifact-type: <code | hypothesis | mockup | translation>
 Total findings: N (F: x, S: y, M: z)
-New since round N-1: K
+New since round N-1: K   (on round 1, K = total findings — no prior round)
 Accepted: P (all findings — v0.1)
 Deferred: 0 (v0.1 — see issue #305 for v1.0)
 DR signal: <fired | not fired>
@@ -347,7 +348,7 @@ Cost-cap signal: <fired | not fired>
 
 ### Diminishing-Return Signal
 
-Fires when the count of **NEW** (delta-vs-prior-round) Fatal+Significant findings is ≤ `dr_signal_findings` AND LOCAL round ≥ 2.
+Fires when `dr_signal_findings != null` AND the count of **NEW** (delta-vs-prior-round) Fatal+Significant findings is ≤ `dr_signal_findings` AND LOCAL round ≥ 2. (`null` disables the signal entirely per INV-303-4.)
 
 **Interactive** (`interactive: true`): emit prompt:
 
