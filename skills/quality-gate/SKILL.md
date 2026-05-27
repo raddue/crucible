@@ -175,6 +175,8 @@ would create non-deterministic stagnation behavior.
 | `interactive` | bool | `true` if invoked from a standalone session, `false` if invoked by a parent orchestrator (build, debugging, spec). **Detection:** The orchestrator infers `interactive` from the presence of the `Context from invoking orchestrator` block in its dispatch context: BOTH `Phase` AND `PipelineID` present → treated as sub-skill invocation (`interactive: false`). Either field alone or both absent → standalone (`interactive: true`). Sub-skill parents (debugging, spec) MUST follow the build pattern; any parent that fails to pass Phase+PipelineID will cause QG to default to `interactive: true` and emit between-rounds check-ins, which will hang non-interactive pipelines. Parent skills can also explicitly pass `interactive: false` to override detection if they do not have a natural Phase/PipelineID to provide. Explicit `interactive:` argument overrides detection in either direction. | When true, the orchestrator emits a between-rounds check-in at round `ceil(suppression_threshold/2)` offering the user options: continue, escalate-now, or skip. Non-interactive contexts skip this prompt. |
 | `force_siege` | bool | `false` | When true, always dispatch `crucible:siege` in parallel with the first red-team round regardless of security-surface detection. Use for: explicit security PRs, scheduled security audits, post-incident review. |
 | `skip_siege` | bool | `false` | When true, never dispatch siege even if security-surface detection fires. Use for: artifacts the user already siege-tested separately, or repeated re-runs after siege already passed. Mutually exclusive with `force_siege` — passing both is an error. |
+| `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis/mockup/translation) | LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. Auto-null when `suppression_threshold ≤ 3` to avoid collision with the existing `DIMINISHING_RETURNS` judge verdict at the same round. See `## Cost-Cap and Diminishing-Return Signals` for behavior. (Added by #303.) |
+| `dr_signal_findings` | int \| null | `2` if `suppression_threshold > 3` else `null` | Count of NEW (delta-vs-prior-round) Fatal+Significant findings at or below which the DR signal fires (interactive only). Same auto-null rule as `cost_cap_threshold`. (Added by #303.) |
 
 **Artifact-type-aware default for `suppression_threshold`:**
 
@@ -312,6 +314,79 @@ This preserves the value of the pre-threshold consensus investment without givin
 **Fallback:** If `agreement_level` is unavailable in the consensus response, treat as < 0.75 (do not escalate).
 
 **Round-1 exclusion.** The carve-out requires at least one prior round of findings for the "identical to the prior round's" comparison. It does NOT fire on Round 1, regardless of `suppression_threshold`. For `suppression_threshold ≤ 3`, this means the earliest carve-out is Round 2 (consensus rounds 1, 2, 3; pre-threshold rounds 1 and 2; round 1 excluded by this rule); for `suppression_threshold = 10`, the earliest carve-out is Round 4 (consensus rounds 1, 4, 7, 10; round 1 excluded). In all cases Round 1 is structurally ineligible because no prior-round comparison exists.
+
+## Cost-Cap and Diminishing-Return Signals (#303)
+
+Two advisory signals layered over existing escalation paths. Neither introduces a new termination path; both are advisory-only in v0.1 — they surface cost/diminishing-return information to the user but never change the gate's verdict or loop behavior.
+
+### Per-Round Ledger
+
+After each red-team round returns findings, the orchestrator writes `round-N-ledger.md` to the gate scratch directory. v0.1 enumerates every Fatal/Significant finding under `## Accepted`. The `## Deferred` section is present but always empty in v0.1 (no triage; deferral activates in v1.0 once corpus matures — see issue #305).
+
+Emission is unconditional and independent of `cost_cap_threshold` / `dr_signal_findings`. Threshold-3 artifacts get the ledger but no prompts.
+
+**Ledger format:**
+
+```markdown
+# Round N Ledger
+
+Artifact-type: <code | hypothesis | mockup | translation>
+Total findings: N (F: x, S: y, M: z)
+New since round N-1: K   (on round 1, K = total findings — no prior round)
+Accepted: P (all findings — v0.1)
+Deferred: 0 (v0.1 — see issue #305 for v1.0)
+DR signal: <fired | not fired>
+Cost-cap signal: <fired | not fired>
+
+## Accepted
+- [Fatal] <finding-id>: <one-line summary>
+- [Significant] <finding-id>: <one-line summary>
+
+## Deferred (v1.0 — empty in v0.1)
+(none)
+```
+
+### Diminishing-Return Signal
+
+Fires when `dr_signal_findings != null` AND the count of **NEW** (delta-vs-prior-round) Fatal+Significant findings is ≤ `dr_signal_findings` AND LOCAL round ≥ 2. (`null` disables the signal entirely per INV-303-4.)
+
+**Interactive** (`interactive: true`): emit prompt:
+
+> "Quality gate round N surfaced only K NEW Fatal+Significant findings (≤ `dr_signal_findings` threshold). Diminishing returns reached. Continue or escalate?"
+
+Choices: Continue / Escalate. No PASS exit from this prompt.
+
+**Non-interactive** (`interactive: false`): log `DR signal: fired` in the round-N-ledger.md. No prompt. No behavior change. Loop continues per existing logic.
+
+### Cost-Cap Prompt
+
+Fires when LOCAL round ≥ `cost_cap_threshold` (default 3). Interactive only.
+
+**Interactive:**
+
+> "Quality gate round N (cost-cap threshold = T, cap exceeded). Score progression: [weighted scores list]. Continue or escalate?"
+
+Choices: Continue / Escalate. No PASS-with-deferred exit in v0.1.
+
+**Counter semantics (chunked-gate):** cost-cap uses the LOCAL (per-chunk) round counter. On a chunked gate, the cap fires once per chunk that reaches LOCAL round ≥ `cost_cap_threshold`. The cross-chunk integration round (where `suppression_threshold = 5`) fires cost-cap at its own LOCAL round ≥ 3. For builds with ≥3 chunks, consider passing `cost_cap_threshold: 5` or `null` to reduce prompt frequency.
+
+**Non-interactive:** log `Cost-cap signal: fired` in the round-N-ledger.md. No prompt. No behavior change.
+
+### Combined-Prompt Rule
+
+When cost-cap and DR signals fire in the same round in interactive mode, emit a single combined prompt — not two sequential prompts:
+
+> "Round N: cost-cap exceeded (threshold T) AND diminishing returns (K NEW findings ≤ S). Continue or escalate?"
+
+### Non-Interactive End-of-Gate Summary
+
+On gate termination (any verdict), the orchestrator emits a single summary line in the dispatch return to the parent skill:
+
+```
+CostCapSignals: <DR-fire-count>+<cost-cap-fire-count>/<rounds>
+```
+
+Example: `CostCapSignals: 0+2/4` (zero DR fires, two cost-cap fires, four rounds). This gives the parent skill (build, spec, debugging) a structured signal without changing termination behavior. The same value appears as a verdict-marker field (see Verdict Marker spec below).
 
 ## Non-Skippability
 
@@ -787,7 +862,7 @@ Quality gate writes round state to disk for compaction recovery.
 
 **Active run marker:** At the start of the gate, write `~/.claude/projects/<project-hash>/memory/quality-gate/active-run-<run-id>.md` containing the run-id and scratch directory path. Delete only your own marker when the gate completes. After compaction, glob for `active-run-*.md` files to locate active runs — recover the one whose run-id matches context, or the most recent if context is lost.
 
-**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge sessions).
+**Stale cleanup:** At the start of each gate, delete scratch directories whose timestamps are older than 2 hours AND that are NOT referenced by any `active-run-*.md` marker. Also delete any `fix-journal-*.md` handoff files and `defer-ledger-*/` handoff directories in the `memory/quality-gate/` directory whose mtime is older than 24 hours (the longer window accommodates overnight breaks between QG and forge/finish sessions).
 
 **After each round, write:**
 - `round-N-score.md`: weighted score, Fatal count, Significant count, Minor count, plus the following suppression-audit fields:
@@ -810,7 +885,10 @@ Quality gate writes round state to disk for compaction recovery.
   ```
   architectural-candidates: [<finding-id-1>, <finding-id-2>, ...] | []
   look-harder-fired-on-round: <LOCAL round number> | null
+  ledger-emitted: <true | false>
   ```
+
+  `ledger-emitted` defaults to `true` (set every round); `false` only if the ledger write failed.
   A list of currently-set architectural-candidate findings, in the order they were marked. Empty list `[]` means no candidates. A finding-id is added to the list when the fix verifier downgrades that Fatal to informational (per Fix Verification). Multiple candidates can coexist. This is the authoritative store for flag state; `round-N-verification.md`'s `architectural-candidate:` field mirrors it for human readability but is not consulted by recovery.
 
   The `look-harder-fired-on-round` key records the LOCAL round number (per-chunk) on which look-harder fired in the current chunk, or `null` if look-harder has not fired in this chunk as of round N. The key is set to `null` on every round's Phase 1 write; the firing round's Phase 2 re-write updates it to the LOCAL round number. **Recovery uses the all-files scan rule below — NOT the latest-file value alone — because later non-clean rounds write `null` (Phase 1 only) and the latest-file's `null` does NOT mean look-harder has never fired in the chunk.**
@@ -882,6 +960,8 @@ Write the handoff on ALL exit paths with ≥2 rounds:
 ```
 
 
+**Defer-ledger handoff (#303):** After Minor Issue Handling and before cleanup, preserve the per-round ledgers so `crucible:finish` can seed the v1.0 calibration corpus *after* this scratch directory is deleted. Copy every `round-N-ledger.md` from the scratch directory — including those in `chunk-*/` subdirectories for chunked gates — into a durable per-run directory `~/.claude/projects/<project-hash>/memory/quality-gate/defer-ledger-<run-id>/`. Flatten chunked ledgers with a chunk prefix (`chunk-<K>-round-<N>-ledger.md`) so names cannot collide with the non-chunked `round-<N>-ledger.md` form. Written on ALL exit paths (PASS, ESCALATED, STAGNATION, ARCHITECTURAL) because a ledger exists for every round per INV-303-1. Use Write/Read/Glob, NOT Bash (the `.claude/` Bash constraint above applies). This mirrors the `fix-journal-<run-id>.md` handoff: a transient artifact consumed by a later skill, not part of the gate's verdict. The consuming skill (`crucible:finish`) deletes the directory after seeding; the stale-cleanup pass (above, 24h) reclaims any handoff that is never consumed.
+
 **Cleanup:** Delete scratch directory and your `active-run-<run-id>.md` marker after the gate completes (pass or stagnation). Do NOT delete verdict marker files (`gate-verdict-<run-id>.md`) — the build orchestrator is responsible for their lifecycle.
 
 **Checkpoint cleanup (code artifacts only):** On terminal exit paths:
@@ -925,6 +1005,7 @@ SiegeDispatched: true | false
 SiegeReason: detected | force | skip-requested | no-security-surface
 SiegeVerdict: PASS | ESCALATED | STAGNATION | UNAVAILABLE (omit if SiegeDispatched=false)
 SiegeFindings: <count of Critical+High siege findings, omit if SiegeDispatched=false>
+CostCapSignals: <DR-fire-count>+<cost-cap-fire-count>/<rounds>
 Timestamp: <ISO-8601>
 RunID: <quality-gate run-id>
 Severity-Histogram: <json — e.g., {"fatal":0,"significant":0,"minor":0,"nit":0}>
@@ -1192,6 +1273,19 @@ The invariants below govern the look-harder verification (Component 1), the tail
 | INV-T14 | F1 promotion fires on PROGRESS+`persistent_finding_count≥1`+round≥threshold+≥1 Resolved; SKIPS on fully no-op (slot #4 authoritative) |
 | INV-T15 | Persistence checker error → `status: error` + `persistent_finding_count = 0` (fail-open); no re-dispatch |
 | INV-T16 | Fix-input contract — `round-N-findings.md` overwritten with 2 Significants on look-harder demotion; `round-N-look-harder.md` retained as separate artifact; fix agent for round N+1 reads `round-N-findings.md` per existing convention |
+
+### #303 Cost-Cap (INV-303-1 — INV-303-7)
+
+| ID | Summary |
+|---|---|
+| INV-303-1 | Every QG round produces exactly one `round-N-ledger.md` file in the scratch dir |
+| INV-303-2 | Existing scoring/stagnation/escalation algorithms receive the same inputs as before. The ledger is a NEW output channel only. v0.1 introduces no new termination paths. |
+| INV-303-3 | `interactive: false` invocations never block on cost-cap or DR prompts |
+| INV-303-4 | `cost_cap_threshold: null` and `dr_signal_findings: null` disable their respective prompts entirely |
+| INV-303-5 | For artifacts with `suppression_threshold ≤ 3`, both `cost_cap_threshold` and `dr_signal_findings` default to `null` |
+| INV-303-6 | v0.1 ledger Deferred section is empty for every round (Accept-all) |
+| INV-303-7 | Every verdict marker has `CostCapSignals` field, regardless of interactive mode |
+| INV-303-8 | Every round's ledger is copied to a durable `defer-ledger-<run-id>/` handoff dir before scratch cleanup, on all exit paths, so corpus seeding survives scratch deletion |
 
 ## Integration
 
