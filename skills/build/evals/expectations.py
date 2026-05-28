@@ -169,8 +169,27 @@ def _working_tree_unchanged_from(exp: dict, ctx: CheckContext) -> CheckResult:
     if ctx.git_repo is None:
         return CheckResult(False, "no git_repo set on context")
     try:
-        rc = subprocess.run(
+        # Tracked content vs the baseline SHA. --quiet exits 0 when identical.
+        diff = subprocess.run(
             ["git", "diff", "--quiet", sha, "--"],
+            cwd=ctx.git_repo,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # Untracked files are invisible to `git diff` — list them separately.
+        # b4's halt signal is "no source modifications", and an over-eager build
+        # leaking a brand-new file is the most likely failure shape, so an
+        # untracked file must count as "changed". Eval-harness scaffolding that
+        # legitimately lives inside the workdir (the isolated HOME and the
+        # baseline-SHA marker stage() writes post-commit) is excluded so it does
+        # not masquerade as a build-leaked file.
+        untracked = subprocess.run(
+            [
+                "git", "ls-files", "--others", "--exclude-standard", "--",
+                ":(exclude).home", ":(exclude).home/**",
+                ":(exclude).eval-baseline-sha",
+            ],
             cwd=ctx.git_repo,
             capture_output=True,
             text=True,
@@ -180,7 +199,14 @@ def _working_tree_unchanged_from(exp: dict, ctx: CheckContext) -> CheckResult:
         return CheckResult(False, "git binary not found")
     except subprocess.TimeoutExpired:
         return CheckResult(False, "git diff timed out")
-    return CheckResult(rc.returncode == 0, f"git diff vs {sha[:12]} exit={rc.returncode}")
+    untracked_files = [ln for ln in untracked.stdout.splitlines() if ln.strip()]
+    tracked_unchanged = diff.returncode == 0
+    unchanged = tracked_unchanged and not untracked_files
+    if untracked_files:
+        detail = f"untracked files present: {', '.join(untracked_files[:5])}"
+    else:
+        detail = f"git diff vs {sha[:12]} exit={diff.returncode}"
+    return CheckResult(unchanged, detail)
 
 
 _CHECKERS = {

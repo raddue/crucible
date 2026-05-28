@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .expectations import CheckContext, check
-from .fixture_loader import Fixture, load_fixture
+from .fixture_loader import load_fixture
 
 
 FIXTURES_ROOT = Path(__file__).resolve().parent / "fixtures"
@@ -160,9 +160,10 @@ def _find_first(root: Path, rel_candidates: list[str]) -> Path | None:
         p = root / rel
         if p.exists():
             return p
-    # also try a recursive find for manifest.jsonl which build writes under a dispatch dir
+    # also try a recursive find for manifest.jsonl which build writes under a dispatch dir.
+    # Sort for deterministic selection when a multi-phase pipeline leaves several.
     if rel_candidates and rel_candidates[0] == "manifest.jsonl":
-        hits = list(root.rglob("manifest.jsonl"))
+        hits = sorted(root.rglob("manifest.jsonl"))
         if hits:
             return hits[0]
     return None

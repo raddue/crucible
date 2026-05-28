@@ -161,6 +161,10 @@ def test_working_tree_unchanged_pass(tmp_path: Path) -> None:
     _git("commit", "-q", "-m", "seed", cwd=tmp_path)
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True).stdout.strip()
     (tmp_path / ".eval-baseline-sha").write_text(sha)
+    # Eval-harness scaffolding inside the workdir must not read as a build leak.
+    home = tmp_path / ".home" / ".claude"
+    home.mkdir(parents=True)
+    (home / "pipeline-status.md").write_text("build process artifact")
     ctx = _ctx(tmp_path, baseline_file=tmp_path / ".eval-baseline-sha")
     assert check({"type": "working_tree_unchanged_from", "baseline_sha": "BASELINE"}, ctx).passed
 
@@ -177,6 +181,23 @@ def test_working_tree_unchanged_detects_diff(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("MODIFIED")
     ctx = _ctx(tmp_path, baseline_file=tmp_path / ".eval-baseline-sha")
     assert not check({"type": "working_tree_unchanged_from", "baseline_sha": "BASELINE"}, ctx).passed
+
+
+def test_working_tree_unchanged_detects_untracked_file(tmp_path: Path) -> None:
+    # An untracked new file is the most likely b4-halt failure shape (build leaks
+    # a file it created). `git diff` is blind to it, so the check must catch it.
+    _git("init", "-q", "-b", "main", cwd=tmp_path)
+    _git("config", "user.email", "t@x", cwd=tmp_path)
+    _git("config", "user.name", "t", cwd=tmp_path)
+    (tmp_path / "a.txt").write_text("hi")
+    _git("add", "-A", cwd=tmp_path)
+    _git("commit", "-q", "-m", "seed", cwd=tmp_path)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True).stdout.strip()
+    (tmp_path / ".eval-baseline-sha").write_text(sha)
+    (tmp_path / "leaked.py").write_text("# build should not have created this")
+    ctx = _ctx(tmp_path, baseline_file=tmp_path / ".eval-baseline-sha")
+    r = check({"type": "working_tree_unchanged_from", "baseline_sha": "BASELINE"}, ctx)
+    assert not r.passed and "untracked" in r.detail
 
 
 # ---- error paths ----
