@@ -1,0 +1,14 @@
+{
+  "id": "b2-multi-file",
+  "task": "Add a UserService class that depends on a new UserRepository. Both go in src/users/. Wire them together.",
+  "expectations": [
+    {"type": "file_exists", "path": "src/users/service.py"},
+    {"type": "file_exists", "path": "src/users/repository.py"},
+    {"type": "function_defined", "file": "src/users/service.py", "name": "UserService"},
+    {"type": "function_defined", "file": "src/users/repository.py", "name": "UserRepository"},
+    {"type": "file_contains", "path": "src/users/service.py", "pattern": "UserRepository"},
+    {"type": "manifest_contains_dispatch", "skill": "design", "count_min": 1, "count_max": 2},
+    {"type": "manifest_contains_dispatch", "skill": "build-implementer", "count_min": 1, "count_max": 4}
+  ],
+  "_notes": "Probes plan dependency ordering (repository before service) and multi-file orchestration. Expects design to fire (non-trivial), then plan + implementer dispatches. file_contains check confirms wiring: service references the repository."
+}
