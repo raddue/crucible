@@ -275,6 +275,60 @@ def test_synthetic_records_do_not_consume_window_slot(tmp_path, capsys):
     )
 
 
+def test_real_pr_records_count_as_qualifying_window_runs(tmp_path, capsys):
+    """source=='real-pr' records carry per-lens real-PR rates and MUST qualify,
+    participating in the trend/sunset window (mirrors the synthetic-exclusion
+    test, but real-pr DOES count)."""
+    hp = tmp_path / "history.jsonl"
+    for i in range(5):
+        _append_history(f"R-rpr{i}", f"2026-05-2{i}T00:00:00+00:00",
+                        _grouped(real_rate=0.5), "real-pr", path=hp)
+    rc = report(window=5, sunset_threshold=0.70, history_path=hp)
+    assert rc == 0
+    out = capsys.readouterr().out
+    surgical_line = [l for l in out.splitlines() if l.startswith("Surgical")][0]
+    assert "SUNSET" in surgical_line, (
+        "real-pr records carry real-PR data and must qualify — 5 such runs "
+        "below threshold should fire SUNSET"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (f2) non-positive window is clamped to 1 (no false SUNSET on unmeasured lens)
+# ---------------------------------------------------------------------------
+
+
+def test_window_zero_clamps_to_one_no_false_sunset(tmp_path, capsys):
+    """window==0 must clamp to 1; without the clamp `qualifying[-0:]` selects the
+    whole list and `len(present) >= 0` fires a spurious SUNSET on lenses with
+    ZERO real-PR data. One qualifying run with a null DRY rate → DRY must NOT
+    show SUNSET (it has no real-PR data)."""
+    hp = tmp_path / "history.jsonl"
+    _seed_qualifying(hp, n=1, real_rate=0.5)  # Surgical present, DRY/SRP/OCP null
+    rc = report(window=0, sunset_threshold=0.70, history_path=hp)
+    assert rc == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    # Unmeasured lens must not be falsely sunset.
+    dry_line = [l for l in out.splitlines() if l.startswith("DRY")][0]
+    assert "SUNSET" not in dry_line
+    assert "need 1 runs" in dry_line  # clamped window is 1
+    # Clamp warning emitted to stderr.
+    assert "clamped to 1" in captured.err
+
+
+def test_window_negative_clamps_to_one(tmp_path, capsys):
+    """window<0 also clamps to 1 (left-trim slice would otherwise mis-window)."""
+    hp = tmp_path / "history.jsonl"
+    _seed_qualifying(hp, n=1, real_rate=0.5)
+    rc = report(window=-1, sunset_threshold=0.70, history_path=hp)
+    assert rc == 0
+    captured = capsys.readouterr()
+    dry_line = [l for l in captured.out.splitlines() if l.startswith("DRY")][0]
+    assert "SUNSET" not in dry_line
+    assert "clamped to 1" in captured.err
+
+
 # ---------------------------------------------------------------------------
 # (g) per-iter gating regression: score(per_iter=True) appends zero history
 # ---------------------------------------------------------------------------

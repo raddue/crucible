@@ -1729,8 +1729,8 @@ def report(
     """#291 Task 4: print a per-lens real-PR pass-rate trend + advisory SUNSET?.
 
     Read-only; ALWAYS returns 0. Loads history.jsonl, filters to QUALIFYING runs
-    (records carrying real-PR data — source == "all"; source == "synthetic"
-    records are skipped so they never consume a window slot), takes the last
+    (records carrying real-PR data — source in {"all", "real-pr"}; source ==
+    "synthetic" records are skipped so they never consume a window slot), takes the last
     `window` qualifying records, and renders a fixed-width table to stdout: one
     row per lens (Surgical/DRY/SRP/OCP, from _LENS_COLUMN_VALUES minus "none"),
     one column per qualifying windowed run, a `mean` column (over non-null runs),
@@ -1742,6 +1742,14 @@ def report(
     qualifying-run count, not the raw record count. Prints `no history yet` and
     returns 0 when the file is absent/empty or has no qualifying runs.
     """
+    # Clamp non-positive window to 1: window==0 makes qualifying[-0:] select the
+    # WHOLE list and `len(present) >= 0` is always True, firing a false SUNSET on
+    # lenses with zero real-PR data; window<0 left-trims. Report is advisory and
+    # always returns 0, so clamp (not hard-error) and warn.
+    if window < 1:
+        print(f"[warn] non-positive window {window} clamped to 1", file=sys.stderr)
+        window = 1
+
     if history_path is None:
         history_path = _resolve_history_path()
 
@@ -1758,9 +1766,10 @@ def report(
         except json.JSONDecodeError:
             continue
 
-    # Filter to qualifying runs: carry real-PR data. source == "all" qualifies;
-    # source == "synthetic" never consumes a window slot.
-    qualifying = [r for r in records if r.get("source") == "all"]
+    # Filter to qualifying runs: carry real-PR data. source == "all" and
+    # source == "real-pr" qualify (a real-pr-scoped score run carries per-lens
+    # real-PR rates); source == "synthetic" never consumes a window slot.
+    qualifying = [r for r in records if r.get("source") in ("all", "real-pr")]
     if not qualifying:
         print("no history yet")
         return 0
