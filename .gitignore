@@ -2,6 +2,8 @@ node_modules/
 .worktrees/
 docs/plans/
 docs/prds/
+docs/compass.md
+docs/handoffs/
 skills/*-workspace/
 skills/skill-creator/
 skills/stocktake/results.json
