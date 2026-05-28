@@ -75,11 +75,31 @@ def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
     if env_override:
         return Path(env_override)
     return _EVALS_DIR / "last_run.json"
+
+
+def _resolve_history_path() -> Path:
+    """#291: resolve the lens-health history log path at CALL TIME.
+
+    Mirrors `_resolve_output_path`'s call-time `_EVALS_DIR` resolution rather
+    than binding a module-level `_HISTORY_PATH` at import. The score-test
+    harness (`test_run_evals_score.py::_seed_dispatch_dir`) monkeypatches
+    `_EVALS_DIR` to `tmp_path`; resolving here means that single monkeypatch
+    keeps history writes inside the test sandbox. An import-time constant would
+    bind to the REAL `_EVALS_DIR` and existing score tests would silently
+    append to the real `skills/temper/evals/history.jsonl`.
+    """
+    return _EVALS_DIR / "history.jsonl"
 # SP-R7-C: declared in Task 6 (not Task 8) so test_run_evals_score.py's
 # `_seed_dispatch_dir` helper can `monkeypatch.setattr(run_evals, "_BASELINE_PATH", ...)`
 # without raising AttributeError. The `_write_baseline` / `_compare_baseline` helper
 # functions that USE this constant are still added in Task 8 (stubs added below in Task 6).
 _BASELINE_PATH = _EVALS_DIR / "baseline.json"
+
+# #291: rolling lens-health history log cap (most-recent K records kept).
+# The history.jsonl path itself is resolved at call time via
+# `_resolve_history_path()` (NOT a module-level constant) so the `_EVALS_DIR`
+# test monkeypatch covers it — see that helper's docstring.
+_HISTORY_CAP = 50
 
 # Task 2 (#290 S1): empirical-tolerance calibration artifact path. The header
 # schema is enforced by `test_calibration_json_schema`. Mutations land via
@@ -1340,6 +1360,69 @@ def _per_fixture_pass_rates(fixtures: list[dict]) -> dict[str, float]:
     return rates
 
 
+def _append_history(
+    run_id: str,
+    run_at: str,
+    grouped: dict[str, Any],
+    source: str,
+    *,
+    path: Path | None = None,
+    cap: int = _HISTORY_CAP,
+) -> None:
+    """#291 Task 2: append one per-run lens-health record to history.jsonl.
+
+    Builds a single record from the already-computed `grouped` summary:
+      - run_id, run_at (ISO-8601, copied from the run payload), source
+        (score()'s --source scope: "all" | "synthetic" | "real-pr")
+      - per_lens: copied from grouped["per_trial_rates"]
+        (shape {lens: {synthetic, real-pr}})
+      - by_source: {source: {pass, total}} rolled up from
+        grouped["by_source"] using _render_grouped_summary's PASS-over-total
+        convention — pass = count of PASS verdicts, total = len(entries), so
+        N/A-verdict fixtures count in `total` and never in `pass`.
+
+    Reads existing lines (tolerating an absent file on first run and skipping
+    malformed lines rather than crashing — CI starts from an empty/absent
+    history because the file is gitignored), appends the new record, keeps only
+    the last `cap` records, and rewrites atomically via `_atomic_write_text`.
+
+    When `path is None`, resolves it via `_resolve_history_path()` at call time
+    so the `_EVALS_DIR` test monkeypatch covers isolation; `path` stays an
+    injectable override for direct unit tests.
+    """
+    if path is None:
+        path = _resolve_history_path()
+
+    by_source_counts: dict[str, dict[str, int]] = {}
+    for src_key, entries in (grouped.get("by_source") or {}).items():
+        n_pass = sum(1 for e in entries if e.get("verdict") == "PASS")
+        by_source_counts[src_key] = {"pass": n_pass, "total": len(entries)}
+
+    record = {
+        "run_id": run_id,
+        "run_at": run_at,
+        "source": source,
+        "per_lens": grouped.get("per_trial_rates", {}),
+        "by_source": by_source_counts,
+    }
+
+    existing: list[str] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                json.loads(line)
+            except json.JSONDecodeError:
+                # Skip malformed prior lines rather than crashing.
+                continue
+            existing.append(line)
+
+    existing.append(json.dumps(record))
+    kept = existing[-cap:] if cap and len(existing) > cap else existing
+    _atomic_write_text(path, "\n".join(kept) + "\n")
+
+
 def score(
     run_id: str,
     *,
@@ -1535,6 +1618,18 @@ def score(
     # QG R2 Fix 1: atomic write — prevents truncated last_run/per-iter on SIGINT/OOM/disk-full
     _atomic_write_text(out_path, json.dumps(payload, indent=2))
 
+    # #291 Task 3: append one lens-health history record per CANONICAL run.
+    # Gated on `not per_iter`: per-iter writes target .calibrate-state/ (one per
+    # calibration baseline_runs iteration) and must NOT be logged as runs — they
+    # would contaminate the trend series + the N-run sunset window. Telemetry is
+    # advisory and must never gate: a history-write failure logs [warn] to stderr
+    # and leaves score()'s return code unchanged.
+    if not per_iter:
+        try:
+            _append_history(run_id, payload["run_at"], grouped, source)
+        except Exception as e:  # noqa: BLE001 — telemetry must not gate score()
+            print(f"[warn] lens-health history append failed: {e}", file=sys.stderr)
+
     # --write-baseline + --compare-baseline — see Task 8 (stubs raise NotImplementedError)
     if write_baseline:
         _write_baseline(payload, current_template_sha)
@@ -1622,6 +1717,111 @@ def _render_summary(fixture_results: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# #291 Task 4: lens-health report subcommand (advisory; never gates)
+# ---------------------------------------------------------------------------
+
+
+def report(
+    window: int = 5,
+    sunset_threshold: float = 0.70,
+    history_path: Path | None = None,
+) -> int:
+    """#291 Task 4: print a per-lens real-PR pass-rate trend + advisory SUNSET?.
+
+    Read-only; ALWAYS returns 0. Loads history.jsonl, filters to QUALIFYING runs
+    (records carrying real-PR data — source in {"all", "real-pr"}; source ==
+    "synthetic" records are skipped so they never consume a window slot), takes the last
+    `window` qualifying records, and renders a fixed-width table to stdout: one
+    row per lens (Surgical/DRY/SRP/OCP, from _LENS_COLUMN_VALUES minus "none"),
+    one column per qualifying windowed run, a `mean` column (over non-null runs),
+    and a `SUNSET?` column.
+
+    SUNSET? fires only when the lens has real-PR data in ALL `window` qualifying
+    runs AND every such rate is < sunset_threshold; otherwise the cell shows
+    `n/a (need {window} runs)`. The need-N guard fires on the PER-LENS-PRESENT
+    qualifying-run count, not the raw record count. Prints `no history yet` and
+    returns 0 when the file is absent/empty or has no qualifying runs.
+    """
+    # Clamp non-positive window to 1: window==0 makes qualifying[-0:] select the
+    # WHOLE list and `len(present) >= 0` is always True, firing a false SUNSET on
+    # lenses with zero real-PR data; window<0 left-trims. Report is advisory and
+    # always returns 0, so clamp (not hard-error) and warn.
+    if window < 1:
+        print(f"[warn] non-positive window {window} clamped to 1", file=sys.stderr)
+        window = 1
+
+    if history_path is None:
+        history_path = _resolve_history_path()
+
+    if not history_path.exists():
+        print("no history yet")
+        return 0
+
+    records: list[dict] = []
+    for line in history_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    # Filter to qualifying runs: carry real-PR data. source == "all" and
+    # source == "real-pr" qualify (a real-pr-scoped score run carries per-lens
+    # real-PR rates); source == "synthetic" never consumes a window slot.
+    qualifying = [r for r in records if r.get("source") in ("all", "real-pr")]
+    if not qualifying:
+        print("no history yet")
+        return 0
+
+    windowed = qualifying[-window:]
+    lens_cols = tuple(v for v in _LENS_COLUMN_VALUES if v != "none")
+
+    # Per-lens real-PR rate series across the windowed qualifying runs.
+    def _rate(rec: dict, lens: str):
+        return ((rec.get("per_lens") or {}).get(lens) or {}).get("real-pr")
+
+    # Column widths.
+    n_cols = len(windowed)
+    cell_w = 7  # fits "1.00" / "n/a"
+    lens_w = max((len(l) for l in lens_cols), default=8)
+    lens_w = max(lens_w, len("lens"))
+
+    def _fmt_rate(v) -> str:
+        return f"{v:.2f}" if isinstance(v, (int, float)) else "n/a"
+
+    # Header
+    header = "lens".ljust(lens_w)
+    for i in range(n_cols):
+        header += " | " + f"r{i + 1}".rjust(cell_w)
+    header += " | " + "mean".rjust(cell_w) + " | " + "SUNSET?"
+    print(f"lens-health trend (last {n_cols} qualifying real-PR run(s), "
+          f"sunset<{sunset_threshold:.2f} across full window of {window})")
+    print(header)
+    print("-" * len(header))
+
+    for lens in lens_cols:
+        series = [_rate(rec, lens) for rec in windowed]
+        present = [v for v in series if isinstance(v, (int, float))]
+        row = lens.ljust(lens_w)
+        for v in series:
+            row += " | " + _fmt_rate(v).rjust(cell_w)
+        mean_val = (sum(present) / len(present)) if present else None
+        row += " | " + (_fmt_rate(mean_val)).rjust(cell_w)
+
+        # SUNSET? only when lens has real-PR data in ALL `window` qualifying
+        # runs AND every rate < threshold. Guard fires on per-lens-present count.
+        if len(present) >= window and all(v < sunset_threshold for v in present):
+            sunset_cell = "SUNSET"
+        else:
+            sunset_cell = f"n/a (need {window} runs)"
+        row += " | " + sunset_cell
+        print(row)
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1672,6 +1872,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="(#290 S1) emit a placeholder calibration.json header if absent. "
              "Full calibration is computed by scripts/calibrate_tolerance.py "
              "after k=3 baseline runs via the 3-step protocol.")
+
+    # report — #291 Task 4 (advisory lens-health trend; always exits 0)
+    sp_report = sub.add_parser(
+        "report", help="Print per-lens real-PR pass-rate trend + advisory SUNSET? flag"
+    )
+    sp_report.add_argument("--window", type=int, default=5,
+        help="Number of most-recent qualifying runs in the trend window (default 5).")
+    sp_report.add_argument("--sunset-threshold", type=float, default=0.70,
+        help="Real-PR pass-rate below which a lens is flagged for sunset across the full window (default 0.70).")
+    sp_report.add_argument("--history", default=None,
+        help="Path to history.jsonl (overridable for test isolation).")
 
     # Legacy mock/replay paths (back-compat, no subcommand)
     # S3: All legacy flags use --legacy-* prefix to eliminate collision with subcommand flags.
@@ -1737,6 +1948,13 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
         return rc
+
+    if args.cmd == "report":
+        return report(
+            window=args.window,
+            sunset_threshold=args.sunset_threshold,
+            history_path=Path(args.history) if args.history else None,
+        )
 
     # Legacy mock/replay path — preserved unchanged
     return _legacy_main(args)
