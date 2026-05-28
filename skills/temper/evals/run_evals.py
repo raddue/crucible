@@ -75,11 +75,31 @@ def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
     if env_override:
         return Path(env_override)
     return _EVALS_DIR / "last_run.json"
+
+
+def _resolve_history_path() -> Path:
+    """#291: resolve the lens-health history log path at CALL TIME.
+
+    Mirrors `_resolve_output_path`'s call-time `_EVALS_DIR` resolution rather
+    than binding a module-level `_HISTORY_PATH` at import. The score-test
+    harness (`test_run_evals_score.py::_seed_dispatch_dir`) monkeypatches
+    `_EVALS_DIR` to `tmp_path`; resolving here means that single monkeypatch
+    keeps history writes inside the test sandbox. An import-time constant would
+    bind to the REAL `_EVALS_DIR` and existing score tests would silently
+    append to the real `skills/temper/evals/history.jsonl`.
+    """
+    return _EVALS_DIR / "history.jsonl"
 # SP-R7-C: declared in Task 6 (not Task 8) so test_run_evals_score.py's
 # `_seed_dispatch_dir` helper can `monkeypatch.setattr(run_evals, "_BASELINE_PATH", ...)`
 # without raising AttributeError. The `_write_baseline` / `_compare_baseline` helper
 # functions that USE this constant are still added in Task 8 (stubs added below in Task 6).
 _BASELINE_PATH = _EVALS_DIR / "baseline.json"
+
+# #291: rolling lens-health history log cap (most-recent K records kept).
+# The history.jsonl path itself is resolved at call time via
+# `_resolve_history_path()` (NOT a module-level constant) so the `_EVALS_DIR`
+# test monkeypatch covers it — see that helper's docstring.
+_HISTORY_CAP = 50
 
 # Task 2 (#290 S1): empirical-tolerance calibration artifact path. The header
 # schema is enforced by `test_calibration_json_schema`. Mutations land via
