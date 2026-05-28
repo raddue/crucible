@@ -1,0 +1,12 @@
+{
+  "id": "b4-design-required",
+  "task": "Add caching to the user lookup path.",
+  "mode": "feature",
+  "expectations": [
+    {"type": "manifest_contains_dispatch", "skill": "design", "count_min": 1, "count_max": 2},
+    {"type": "file_does_not_exist", "path": "handoff-1-to-2.md"},
+    {"type": "file_does_not_exist", "path": "src/users/cache.py"},
+    {"type": "working_tree_unchanged_from", "baseline_sha": "BASELINE"}
+  ],
+  "_notes": "Deliberately ambiguous task. design dispatch returns NEEDS_CLARIFICATION; mock-user-input/ is empty so build's AskUserQuestion in Phase 1 raises MockUserInputMissing and halts before Phase 2. PASS signal: design dispatched + no phase-2 handoff + no source modifications. False-pass mode (pre-design crash) caught by the manifest_contains_dispatch expectation."
+}

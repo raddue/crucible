@@ -26,6 +26,24 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 <!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
 
+## Mock Dispatch Mode (eval-gate)
+
+This mode exists for the `skills/build/evals/` eval-gate harness. It is enabled **iff** `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set in the environment. Production runs MUST leave this variable unset, in which case this mode is a no-op and the orchestrator behaves exactly as if this section were not present.
+
+**Env-var contract.** Three variables, all consumed only when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set:
+
+- `CRUCIBLE_BUILD_EVAL_MOCK_DIR=<path>` — directory of canned subagent return receipts. Filenames follow `<seq>-<template-name>.md` with fallback `<template-name>.md` (e.g. `1-plan-writer.md`, then `plan-writer.md`). Missing mock → halt immediately with a clear error; no silent fallthrough.
+- `CRUCIBLE_BUILD_EVAL_MODE=feature|refactor` — pre-set answer to the Mode Detection prompt. When present, the orchestrator skips the AskUserQuestion call in Mode Detection and uses this value.
+- `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR=<path>` — directory of canned user-input turns, named `turn-<N>.md`. Each AskUserQuestion call (other than Mode Detection, which uses `CRUCIBLE_BUILD_EVAL_MODE`) consumes the next sequential turn. If the next turn-file is missing, halt before proceeding — this is the b4 fixture's design: build correctly stops when it needs input it does not have.
+
+**Substitution rule (defined ONCE here; referenced from intercept sites below):** at every dispatch site, the dispatch file is STILL written to the normal dispatch dir (trace integrity preserved). Only the Task/Agent tool invocation is replaced — instead of invoking the tool, read `$CRUCIBLE_BUILD_EVAL_MOCK_DIR/<seq>-<template-name>.md` (or `<template-name>.md`) and treat its contents as the subagent's return receipt. Apply the normal receipt linter and manifest sweep as if the receipt had come from a live agent.
+
+**Boundary behavior.** `MockNotFound` / `MockUserInputMissing` errors raised by the mock loader halt the build run with a clear stderr message. They do not silently fall through. The eval-gate harness detects these halts via on-disk artifacts (absent phase-handoff manifests, pipeline-active marker still at the original phase) — the harness does NOT catch these exceptions across the build-runtime boundary.
+
+**Pointer reminders.** Sections that reference these env vars (Mode Detection, Phase 1 Step 2 / 2.5 / 3, Phase 2 Step 1 / 2, Phase 3 Step 3) contain short inline pointers back to this section. The substitution rule is defined here only; the pointers exist so a reader scanning a dispatch site doesn't need to re-derive the contract.
+
+**See also:** `skills/build/evals/README.md` for harness usage; `skills/shared/dispatch-convention.md` for the dispatch-file protocol the substitution rule preserves.
+
 ## Cairn (Layer 3)
 
 The orchestrator maintains an Invariant Cairn per `shared/cairn-convention.md`. Build-specific bindings:
@@ -511,6 +529,8 @@ Before dispatching the design skill, determine whether this build is:
 
 The user's answer sets the mode for the entire pipeline. No special syntax needed.
 
+> **Eval-gate pointer (Mock Dispatch Mode):** if `CRUCIBLE_BUILD_EVAL_MODE` is set, use its value (`feature` or `refactor`) as the mode-detection answer and skip the AskUserQuestion call. The substitution rule lives in the `## Mock Dispatch Mode (eval-gate)` section near the top of this file.
+
 ### Mode Propagation
 
 Propagate refactor mode to subagents through:
@@ -610,6 +630,8 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - **OVERRIDE:** When design completes and the design doc is saved, do NOT follow design's "Implementation" section (do not chain into planning or worktree from there). Return control to this build skill — Phase 2 handles planning with its own subagent-based approach.
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
+
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, innovate, quality-gate, PRD writer, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
 
 ### Step 2: Innovate and Red-Team the Design
 
@@ -737,6 +759,8 @@ Before dispatching the Plan Writer, verify the gate ledger and write a handoff m
 
 ## Phase 2: Plan (Autonomous)
 
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the Plan Writer, Plan Reviewer, innovate, and quality-gate dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. The substitution does not change Phase 2's structure or the gate-ledger writes.
+
 ### Step 1: Write the Plan
 
 Dispatch a **Plan Writer** subagent (Opus):
@@ -803,6 +827,8 @@ Write a handoff manifest:
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 2 -> Phase 3 (Execute)","detail":{"skill":"build","from":"2","to":"3"}}`.
 
 ## Phase 3: Execute (Autonomous, Team-Based)
+
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all per-task dispatches in this phase (implementer, reviewer, cleanup, test-coverage, test-gap-writer, adversarial-tester, architecture-reviewer) use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. TeamCreate and TaskCreate calls run normally — only the Task/Agent tool invocations on teammates are substituted.
 
 ### Step 0: Load Module Context for Subagents
 
@@ -1194,6 +1220,8 @@ Write the handoff manifest:
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 3 -> Phase 4 (Completion)","detail":{"skill":"build","from":"3","to":"4"}}`.
 
 ## Phase 4: Completion
+
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, the temper, inquisitor, optional siege, quality-gate, forge, cartographer, and finish dispatches in this phase use the mock-dir substitution rule defined in the `## Mock Dispatch Mode (eval-gate)` section. Local test-suite execution (`pytest`, etc.) runs normally — substitution applies only to subagent dispatches.
 
 After all tasks complete:
 

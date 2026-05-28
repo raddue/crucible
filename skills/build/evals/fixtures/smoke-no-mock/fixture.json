@@ -1,0 +1,10 @@
+{
+  "id": "smoke-no-mock",
+  "task": "Add a function add(a, b) to src/math.py that returns a + b.",
+  "no_mock": true,
+  "expectations": [
+    {"type": "file_exists", "path": "src/math.py"},
+    {"type": "function_defined", "file": "src/math.py", "name": "add"}
+  ],
+  "_notes": "Smoke fixture: verifies build's Mock Dispatch Mode is a TRUE no-op when CRUCIBLE_BUILD_EVAL_MOCK_DIR is unset. Runs build with real subagent dispatches against a trivial task. k=1 (not part of k=3 majority); excluded from run-all by default; opt-in via --include-smoke. Cost: ~50-100K tokens, ~10-30 minutes wall-clock. If this fixture FAILS, Task 2's SKILL.md edit broke production behavior — ROLLBACK Task 2 before continuing."
+}

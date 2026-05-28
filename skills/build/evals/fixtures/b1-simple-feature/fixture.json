@@ -1,0 +1,11 @@
+{
+  "id": "b1-simple-feature",
+  "task": "Add a function get_user_email(user_id) to src/users.py that returns the email string for a given user id.",
+  "expectations": [
+    {"type": "file_exists", "path": "src/users.py"},
+    {"type": "function_defined", "file": "src/users.py", "name": "get_user_email"},
+    {"type": "manifest_does_not_contain", "skill": "design"},
+    {"type": "manifest_contains_dispatch", "skill": "plan-writer", "count_min": 1, "count_max": 2}
+  ],
+  "_notes": "Probes build's ability to NOT over-ceremonialize. A trivial single-function add should skip design (or design returns 'no design needed'). Expectations focus on the artifact (file + function present) and the orchestration shape (plan-writer ran, design did not). Mock dispatches cover plan-writer, build-implementer, build-reviewer, cleanup, and finish."
+}
