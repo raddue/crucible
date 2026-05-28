@@ -76,6 +76,8 @@ SRP findings never exceed **Minor** (see Re-attribution).
 
 Flag a NEW `elif` / `case` / `match` arm added to a chain that dispatches on a discriminator (string tag, enum, type name) WHEN a registry or strategy table for that same discriminator already exists. Cite the registry's path in a `File:` line alongside the new arm's location. If you cannot locate the registry, DROP the finding — no false positives.
 
+OCP is the only lens that may cite a path outside the diff (the registry); for Surgical/DRY/SRP, every cited path must appear in the diff under review.
+
 Do not flag chains where no registry exists, or conditionals on a non-discriminator value (e.g. `if x > threshold`).
 
 OCP findings never exceed **Minor** (see Re-attribution).
@@ -89,7 +91,7 @@ When one set of lines triggers more than one lens:
 
 ### Re-attribution
 
-The Minor ceiling on DRY/SRP/OCP is mutually exclusive with escalation. When a DRY/SRP/OCP issue is genuinely worse than Minor (e.g. the two diverging copies will silently behave differently in production), DROP the lens finding entirely and re-emit ONE finding at its true **Significant** or **Fatal** severity, tagged `Lens: <name> (re-attributed)`. Emit either the Minor lens finding or the escalated re-attributed finding — never both.
+The Minor ceiling on DRY/SRP/OCP is mutually exclusive with escalation. When a DRY/SRP/OCP issue is genuinely worse than Minor (e.g. the two diverging copies will silently behave differently in production), DROP the lens finding entirely and re-emit ONE finding at its true **Significant** or **Fatal** severity, tagged `Lens: <name> (re-attributed)`. Re-emit it as an ordinary finding in the main numbered list at its true Significant or Fatal severity. Emit either the Minor lens finding or the escalated re-attributed finding — never both.
 
 ## How to Report Findings
 
