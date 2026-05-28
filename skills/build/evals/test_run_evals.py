@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from skills.build.evals.run_evals import score, stage
 
 

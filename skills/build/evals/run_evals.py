@@ -104,10 +104,9 @@ def stage(fixture_id: str, work_root: Path, fixtures_root: Path | None = None) -
         if fixture.mode is not None:
             env["CRUCIBLE_BUILD_EVAL_MODE"] = fixture.mode
         if fixture.mock_user_input_dir is not None:
+            # Present even when empty (b4's dir holds only .gitkeep): build's
+            # AskUserQuestion finds no turn-N reply and halts cleanly.
             env["CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR"] = str(fixture.mock_user_input_dir)
-        elif (fixture_dir / "mock-user-input").exists():
-            # directory was empty (b4); still point at it so build halts cleanly
-            env["CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR"] = str(fixture_dir / "mock-user-input")
 
     return StageResult(fixture_id=fixture_id, workdir=workdir, baseline_sha=sha, env=env)
 

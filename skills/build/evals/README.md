@@ -60,9 +60,9 @@ The mocked fixtures cannot prove that the production (unmocked) path still works
 
 ## Test isolation
 
-`stage` creates a fresh tmpdir as the project root, copies the fixture's `seed/` into it, runs `git init && commit` to establish a baseline, writes the baseline SHA to `<workdir>/.eval-baseline-sha` (used by the `working_tree_unchanged_from` expectation's `BASELINE` placeholder), sets `HOME=<workdir>/.home` so build's `~/.claude/projects/<hash>/memory/` writes land in the tmpdir, and uses a fresh dispatch session for `/tmp/crucible-dispatch-<sid>/` isolation.
+`stage` creates a fresh tmpdir as the project root, copies the fixture's `seed/` into it, runs `git init && commit` to establish a baseline, writes the baseline SHA to `<workdir>/.eval-baseline-sha` (used by the `working_tree_unchanged_from` expectation's `BASELINE` placeholder), and sets `HOME=<workdir>/.home` so build's `~/.claude/projects/<hash>/memory/` writes land in the tmpdir.
 
-Tmpdirs are preserved on FAIL for debugging; clean on PASS (rmdir at the end of `score`).
+In v0.1 tmpdirs are **always preserved** (no automatic cleanup) — remove `/tmp/build-evals-work/` manually when done. `score` does not delete the workdir on PASS, and `stage` does not create a per-run dispatch session; both are v0.2 follow-ups.
 
 ## Adding a new fixture
 
