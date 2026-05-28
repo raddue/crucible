@@ -10,6 +10,13 @@ skills/stocktake/results.json
 skills/temper/evals/last_run.json
 src/
 tests/
+
+# Build-evals fixtures contain seed src/ and tests/ dirs that are fixture
+# data (not project source) — re-include them so the harness can ship.
+!skills/build/evals/fixtures/**/src/
+!skills/build/evals/fixtures/**/src/**
+!skills/build/evals/fixtures/**/tests/
+!skills/build/evals/fixtures/**/tests/**
 package.json
 package-lock.json
 tsconfig.json

@@ -1,0 +1,7 @@
+# Intentionally empty: see b4-design-required/fixture.json _notes.
+#
+# When build's mock-mode AskUserQuestion call hits this directory and finds no
+# turn-1.md, it raises MockUserInputMissing inside build's process — causing
+# build to halt before Phase 2. That halt is the b4 PASS signal, detected by
+# the harness via on-disk artifact absence (no handoff-1-to-2.md, no source
+# modifications), not by catching the exception across the runtime boundary.
