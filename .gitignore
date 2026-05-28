@@ -29,3 +29,5 @@ mcp-servers/**/__pycache__/
 /skills/temper/evals/.calibrate-state/
 /skills/temper/evals/baseline.json
 /skills/temper/evals/.opus-ceiling.json
+# #291 lens-health telemetry rolling history log (CI starts from empty/absent)
+/skills/temper/evals/history.jsonl
