@@ -71,6 +71,9 @@ _mcp_server_stdio_mod = ModuleType("mcp.server.stdio")
 _mcp_types_mod = ModuleType("mcp.types")
 
 _mcp_server_mod.Server = _MockServer
+# Mirror server.py's `from mcp.server import Server, InitializationOptions, NotificationOptions` (ref #313).
+_mcp_server_mod.InitializationOptions = MagicMock()
+_mcp_server_mod.NotificationOptions = MagicMock()
 _mcp_server_stdio_mod.stdio_server = MagicMock()
 _mcp_types_mod.Tool = _MockTool
 _mcp_types_mod.TextContent = _MockTextContent
