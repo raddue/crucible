@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 import pytest
 
@@ -48,21 +49,24 @@ def test_legacy_mock_reviewer_matches_snapshot(tmp_path):
             f"BOTH bootstrap_snapshot.py and mock_snapshot.json before pushing."
         )
     snapshot = json.loads(_SNAPSHOT.read_text())
-    # S-R7-2: snapshot is a structured envelope {"bootstrap_python": "X.Y", "verdicts": {...}}.
-    # Pin the snapshot to the bootstrapping Python's MAJOR.MINOR so cross-env drift
-    # surfaces loudly. If lens_runner output is empirically version-stable across
-    # 3.10/3.11/3.12 (per AC-8), this check can be softened to a warning via a
-    # follow-up issue once stability is empirically established.
-    # TODO(S-R7-2): track cross-version stability; relax to warning once confirmed.
+    # S-R7-2 (resolved, ref #311): snapshot is a structured envelope
+    # {"bootstrap_python": "X.Y", "verdicts": {...}}. Cross-version stability of
+    # lens_runner output was empirically confirmed 3.12->3.14, so the bootstrap_python
+    # pin is softened from a hard assert to a non-fatal warning. The verdict-equality
+    # assertion below remains the real drift signal.
     expected_py = snapshot.get("bootstrap_python")
     runtime_py = f"{sys.version_info.major}.{sys.version_info.minor}"
-    assert expected_py == runtime_py, (
-        f"snapshot was bootstrapped under Python {expected_py!r} but tests are running "
-        f"under {runtime_py!r}. Either (a) re-bootstrap under Python {runtime_py} via "
-        f"`python -m skills.temper.evals.bootstrap_snapshot`, or (b) if you have "
-        f"empirically confirmed cross-version stability of lens_runner output, "
-        f"update the snapshot's `bootstrap_python` field manually and document why."
-    )
+    if expected_py != runtime_py:
+        warnings.warn(
+            f"temper-evals snapshot bootstrapped under Python {expected_py}, running "
+            f"under {runtime_py}; verdict-equality still enforced.",
+            stacklevel=2,
+        )
+        print(
+            f"[temper-evals] snapshot bootstrap_python={expected_py} runtime={runtime_py}; "
+            f"verdict-equality still enforced.",
+            file=sys.stderr,
+        )
     expected = snapshot["verdicts"]
     # S-R4-2: sanity-floor assertions. If a prior bootstrap silently produced a
     # truncated/empty snapshot (e.g. subprocess error swallowed), the equality

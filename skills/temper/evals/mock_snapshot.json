@@ -1,5 +1,5 @@
 {
-  "bootstrap_python": "3.12",
+  "bootstrap_python": "3.14",
   "verdicts": {
     "1a": "PASS",
     "1b": "PASS",
