@@ -185,7 +185,7 @@ this exact order (R7-F3):
    `[OPEN] Started new arc <new> with prior arc <old> still active — prior arc moved to open_loops`.
 
 **Paused-entry grammar (formal):**
-`[paused] #<NNN>: <subject> @ <YYYY-MM-DDTHH:MM>` (minute-resolution UTC).
+`[paused] #<NNN>: <subject> @ <YYYY-MM-DDTHH:MM:SS>` (second-resolution UTC).
 
 **Dedup on thrash:** if a `[paused] #<old-id>:` entry already exists in
 `open_loops`, UPDATE it in place (refresh subject + timestamp) rather than
@@ -194,12 +194,14 @@ entry.
 
 **D8.5 resume advisory:** stderr `[RESUME] Resuming paused arc <X>`.
 
-**Known v1 grammar restriction (D8.5):** `current_arc` subjects cannot contain
-the literal substring ` @ ` (space-at-space). D8.5 uses ` @ ` as the
-timestamp delimiter when scanning paused entries. A subject such as "review @
-noon" would corrupt D8.5 parsing. **This is a known limitation.** v1.1 will
-relax D8.5 match to anchor on timestamp shape only. Do not silently remove this
-restriction in cleanup — it is a tracked design debt.
+**Grammar restriction (D8.5, v1.1):** `current_arc` subjects may contain literal
+`@` characters — including ` @ ` (space-at-space) — but may **not** contain a
+` @ <timestamp-shape>` sequence (anywhere in the subject) matching the
+paused-entry delimiter shape
+` @ \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}` (e.g. ` @ 2026-05-20T10:00:00`), which
+would collide with D8.5 paused-arc parsing. A subject such as "review @ noon" is
+permitted; "prior @ 2026-05-20T10:00:00" is rejected. (v1 rejected any ` @ `;
+v1.1 narrows the guard to the timestamp shape only — see #286.)
 
 ## CLI surface
 
