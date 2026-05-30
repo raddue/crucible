@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "crucible-consensus": {
+      "command": "bash",
+      "args": ["-c", "source /mnt/e/Coding/crucible/.envrc && python3 /mnt/e/Coding/crucible/mcp-servers/crucible-consensus/server.py"],
+      "env": {
+        "PROJECT_DIR": "/mnt/e/Coding/crucible"
+      }
+    }
+  }
+}
