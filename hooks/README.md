@@ -96,7 +96,7 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
 }
 ```
 
-> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.)
+> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.) The maintainer's actual user-global registration uses `Write|Edit` (see the MIN-5-R6 Parity Note below); the `*` shown here is simply the simplest illustrative form.
 
 ### Verification
 
@@ -151,7 +151,7 @@ Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/set
       {
         "matcher": "Agent",
         "hooks": [
-          { "type": "command", "command": "bash /mnt/e/Coding/crucible/hooks/build-routing-advisor.sh", "timeout": 500 }
+          { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/build-routing-advisor.sh", "timeout": 500 }
         ]
       }
     ]

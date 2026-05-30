@@ -9,8 +9,8 @@
 # all utility failures → exit 0 silently.
 #
 # Configured in ~/.claude/settings.json:
-#   "hooks": { "PreToolUse": [{ "matcher": "Agent",
-#     "command": "bash hooks/build-routing-advisor.sh", "timeout": 500 }] }
+#   "hooks": { "PreToolUse": [{ "matcher": "Agent", "hooks": [{ "type": "command",
+#     "command": "bash hooks/build-routing-advisor.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally
 set +e

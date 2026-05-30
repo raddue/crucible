@@ -5,7 +5,7 @@
 # Must ALWAYS exit 0 — never block tool execution.
 #
 # Configured in .claude/settings.json:
-#   "hooks": { "PostToolUse": [{ "command": "bash hooks/session-index.sh", "timeout": 500 }] }
+#   "hooks": { "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash hooks/session-index.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally
 set +e
