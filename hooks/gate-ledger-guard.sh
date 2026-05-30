@@ -6,7 +6,7 @@
 # Exit 0 = allow, non-zero = block (reason on stderr).
 #
 # Configured in .claude/settings.json:
-#   "hooks": { "PreToolUse": [{ "command": "bash hooks/gate-ledger-guard.sh", "timeout": 500 }] }
+#   "hooks": { "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash hooks/gate-ledger-guard.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally
 set +e

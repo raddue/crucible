@@ -5,7 +5,7 @@
 # Must ALWAYS exit 0 — never block tool execution.
 #
 # Configured in .claude/settings.json:
-#   "hooks": { "PostToolUse": [{ "command": "bash hooks/session-index.sh", "timeout": 500 }] }
+#   "hooks": { "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash hooks/session-index.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally
 set +e
@@ -36,7 +36,15 @@ esac
 
 # ── Compute session index path ──────────────────────────────────────────
 PROJECT_DIR="$(pwd)"
-PROJECT_HASH="$(echo -n "$PROJECT_DIR" | sha256sum | cut -c1-16)"
+# Guard sha256sum: it is absent on minimal/older macOS, where a bare call would
+# yield an empty hash and land the index in the wrong path. Fall back to
+# shasum -a 256 (always present on Darwin); both emit the same SHA-256 hex, so
+# the resolved path is identical for anyone who has either tool.
+if command -v sha256sum &>/dev/null; then
+  PROJECT_HASH="$(echo -n "$PROJECT_DIR" | sha256sum | cut -c1-16)"
+else
+  PROJECT_HASH="$(echo -n "$PROJECT_DIR" | shasum -a 256 | cut -c1-16)"
+fi
 CLAUDE_PROJECTS_DIR="$HOME/.claude/projects/$PROJECT_HASH"
 SESSION_INDEX_BASE="$CLAUDE_PROJECTS_DIR/memory/session-index"
 
