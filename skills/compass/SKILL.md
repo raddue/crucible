@@ -74,7 +74,7 @@ python scripts/compass.py <subcommand> [args]
 - `current_arc` must match `#NNN: <subject>` (leading `#` required) or be empty string (arc-closure).
 - `last_meaningful_commit` must contain a colon (`sha:subject`). `<pending>` and `<pending-merge:#NNN>` are valid sentinels.
 - Setting `current_arc` to `<pending>` directly raises `ValueError` — that sentinel is internal to bootstrap only.
-- `current_arc` subjects cannot contain the literal substring ` @ ` (space-at-space) — known v1 grammar restriction (D8.5 delimiter conflict).
+- `current_arc` subjects may contain literal `@` characters but cannot contain a ` @ <timestamp-shape>` sequence (` @ YYYY-MM-DDTHH:MM:SS`) anywhere in the value — it would collide with the D8.5 paused-entry delimiter (v1.1; see #286).
 
 ## Integration points
 

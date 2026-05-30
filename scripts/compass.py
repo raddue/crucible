@@ -37,6 +37,12 @@ SPIN_INTERVAL_S = 0.05
 PAUSED_LINE_RE = re.compile(
     r"^\[paused\] #(?P<id>\d+): .+ @ \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$"
 )
+# v1.1 (D8.5): only a ` @ <timestamp-shape>` suffix collides with the paused
+# delimiter, so reject just that shape instead of any literal ' @ '. A subject
+# like "review @ noon" is now permitted; "prior @ 2026-05-20T10:00:00" is not.
+CURRENT_ARC_TS_COLLISION_RE = re.compile(
+    r" @ \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+)
 TICKET_ID_RE = re.compile(r"^#(\d+):")
 CURRENT_ARC_GRAMMAR_RE = re.compile(r"^#\d+:\s")
 COMMIT_GRAMMAR_RE = re.compile(r"^[^:]+:.+")  # sha:subject (must contain colon)
@@ -422,11 +428,12 @@ def _validate_value(field, value):
         if value in ("", "<pending>"):
             # empty is arc-closure; <pending> is rejected at higher level (R15-S2)
             return
-        if " @ " in value:
+        if CURRENT_ARC_TS_COLLISION_RE.search(value):
             raise ValueError(
-                f"current_arc cannot contain literal ' @ ' (space-at-space) — "
-                f"this is a known v1 grammar restriction (D8.5 delimiter conflict). "
-                f"Got: {value!r}"
+                f"current_arc cannot contain a ' @ <timestamp>' sequence (anywhere) "
+                f"matching the D8.5 paused-entry delimiter shape "
+                f"(' @ YYYY-MM-DDTHH:MM:SS') — it would collide with paused-arc "
+                f"parsing. Got: {value!r}"
             )
         if not CURRENT_ARC_GRAMMAR_RE.match(value):
             raise ValueError(

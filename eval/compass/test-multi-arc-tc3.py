@@ -336,20 +336,49 @@ def test_tc3_15_paused_entry_timestamp_is_second_resolution(tmp_path):
     )
 
 
-def test_tc3_16_current_arc_space_at_space_rejection(tmp_path):
-    """current_arc with ' @ ' (space-at-space) raises ValueError (D8.5 delimiter conflict)."""
+def test_tc3_16_current_arc_timestamp_shape_rejection(tmp_path):
+    """v1.1: current_arc rejects only a ' @ <timestamp-shape>' suffix (D8.5 collision),
+    not any literal ' @ '. A subject like 'review @ noon' is now permitted."""
     r = _update(tmp_path, "current_arc", ["#1: base"])
     assert r.returncode == 0, f"Bootstrap failed: {r.stderr}"
 
-    # Contains literal ' @ ' — must be rejected (known v1 grammar restriction)
+    # ' @ <ISO timestamp>' shape — must still be rejected (would collide with D8.5 parser)
     r = _update(tmp_path, "current_arc", ["#273: subject @ 2026-05-19T10:00:00"])
     assert r.returncode != 0, (
-        "Expected failure for current_arc with ' @ ' delimiter (D8.5 conflict, known v1 restriction)"
+        "Expected failure for current_arc with ' @ <timestamp>' suffix (D8.5 collision)"
     )
 
-    # Without space-at-space — must succeed
+    # ' @ ' that is NOT a timestamp shape — now valid under v1.1
+    r = _update(tmp_path, "current_arc", ["#273: review @ noon"])
+    assert r.returncode == 0, f"Subject 'review @ noon' should be valid under v1.1: {r.stderr}"
+
+    # @mention (no space-at-space) — still valid
     r = _update(tmp_path, "current_arc", ["#273: subject with @mention"])
-    assert r.returncode == 0, f"Subject with @mention (no space-at-space) should be valid: {r.stderr}"
+    assert r.returncode == 0, f"Subject with @mention should be valid: {r.stderr}"
+
+
+def test_tc3_16b_d8_d85_thrash_with_literal_at_in_subject(tmp_path):
+    """v1.1: D8/D8.5 round-trip thrash works on subjects containing literal '@'.
+    The paused-entry delimiter must still parse despite '@' in the subject body."""
+    a = "#100: review @ noon"
+    b = "#200: deploy @ dusk"
+    for arc in (a, b, a, b):
+        r = _update(tmp_path, "current_arc", [arc])
+        assert r.returncode == 0, f"Thrash set {arc!r} failed: {r.stderr}"
+
+    content = (tmp_path / COMPASS_REL).read_text()
+    # D11 dedup still holds: at most one [paused] #100: entry despite the '@' subject
+    loops = _parse_open_loops(content)
+    paused_a = [l for l in loops if "[paused] #100:" in l]
+    assert len(paused_a) == 1, f"Expected exactly one [paused] #100: after A→B→A→B thrash, got: {paused_a}"
+
+    # Resume A → D8.5 must remove the paused #100 entry even though its subject has '@'
+    r = _update(tmp_path, "current_arc", [a])
+    assert r.returncode == 0, f"Resume {a!r} failed: {r.stderr}"
+    loops = _parse_open_loops((tmp_path / COMPASS_REL).read_text())
+    assert not [l for l in loops if "[paused] #100:" in l], (
+        f"D8.5 should remove [paused] #100: on resume despite '@' in subject, got: {loops}"
+    )
 
 
 def test_tc3_17_update_many_append_dedup(tmp_path):
