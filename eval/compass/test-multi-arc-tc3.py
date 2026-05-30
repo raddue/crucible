@@ -370,7 +370,7 @@ def test_tc3_16b_d8_d85_thrash_with_literal_at_in_subject(tmp_path):
     # D11 dedup still holds: at most one [paused] #100: entry despite the '@' subject
     loops = _parse_open_loops(content)
     paused_a = [l for l in loops if "[paused] #100:" in l]
-    assert len(paused_a) <= 1, f"Expected ≤1 [paused] #100: after thrash, got: {paused_a}"
+    assert len(paused_a) == 1, f"Expected exactly one [paused] #100: after A→B→A→B thrash, got: {paused_a}"
 
     # Resume A → D8.5 must remove the paused #100 entry even though its subject has '@'
     r = _update(tmp_path, "current_arc", [a])

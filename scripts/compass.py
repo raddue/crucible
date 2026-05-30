@@ -430,8 +430,8 @@ def _validate_value(field, value):
             return
         if CURRENT_ARC_TS_COLLISION_RE.search(value):
             raise ValueError(
-                f"current_arc cannot contain a ' @ <timestamp>' suffix matching "
-                f"the D8.5 paused-entry delimiter shape "
+                f"current_arc cannot contain a ' @ <timestamp>' sequence (anywhere) "
+                f"matching the D8.5 paused-entry delimiter shape "
                 f"(' @ YYYY-MM-DDTHH:MM:SS') — it would collide with paused-arc "
                 f"parsing. Got: {value!r}"
             )

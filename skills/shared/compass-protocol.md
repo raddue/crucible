@@ -196,7 +196,8 @@ entry.
 
 **Grammar restriction (D8.5, v1.1):** `current_arc` subjects may contain literal
 `@` characters — including ` @ ` (space-at-space) — but may **not** contain a
-` @ <timestamp-shape>` suffix matching the paused-entry delimiter shape
+` @ <timestamp-shape>` sequence (anywhere in the subject) matching the
+paused-entry delimiter shape
 ` @ \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}` (e.g. ` @ 2026-05-20T10:00:00`), which
 would collide with D8.5 paused-arc parsing. A subject such as "review @ noon" is
 permitted; "prior @ 2026-05-20T10:00:00" is rejected. (v1 rejected any ` @ `;
