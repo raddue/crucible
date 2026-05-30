@@ -70,17 +70,29 @@ def test_load_evals_noop_when_key_absent(tmp_path):
     assert "expectations" not in evals[1]
 
 
-def test_real_evals_json_is_noop():
-    """The live evals.json must round-trip cleanly through _load_evals (no
-    global_expectations key yet — that's a later task)."""
+def test_real_evals_json_folds_preflight_global():
+    """The live evals.json now carries the global Pre-flight matcher (T4).
+    `_load_evals` must surface it and fold it into EVERY eval's expectations."""
     from skills.temper.evals.run_evals import _EVALS_JSON
 
     raw = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
     evals, globals_returned = _load_evals(_EVALS_JSON)
-    assert globals_returned == []
-    # Expectation lists must be byte-for-byte identical to the on-disk file.
+
+    # The single global expectation is the Pre-flight report-has-block matcher.
+    assert globals_returned == [
+        {
+            "type": "mechanical",
+            "check": "report-has-block",
+            "params": {"heading": "Pre-flight"},
+        }
+    ]
+
+    # Every eval's loaded expectations = its on-disk expectations + each global.
     for raw_ev, loaded_ev in zip(raw["evals"], evals):
-        assert raw_ev.get("expectations") == loaded_ev.get("expectations")
+        expected = list(raw_ev.get("expectations") or []) + globals_returned
+        assert loaded_ev.get("expectations") == expected
+        # And the Pre-flight matcher is present on each eval.
+        assert globals_returned[0] in loaded_ev["expectations"]
 
 
 def test_stage_and_score_fixture_sha_match_with_global_expectations(tmp_path):

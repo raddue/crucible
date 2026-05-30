@@ -22,3 +22,10 @@ tenant-B's row. Tenancy fires at Important.
    `AND tenant_id = :tenant_id` to the WHERE clause; otherwise a
    correctly-signed callback from tenant-A can mutate any order whose
    id is known/guessable across the whole table.
+
+### Pre-flight
+
+- Prerequisite: the `orders` table already carries `tenant_id` and `order_id`
+  columns (stated in the diff context) — satisfied by the existing schema.
+- `verify_signature` and the per-tenant auth context already exist; the fix
+  resolves `tenant_id` from that context and needs no new migration.

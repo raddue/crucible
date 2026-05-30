@@ -10,3 +10,9 @@ and leaves the rest of the module untouched. No lens findings.
 ### Issues
 
 No findings.
+
+### Pre-flight
+
+- No external prerequisites — the change is self-contained within `src/clean.py`.
+- `slugify_with_max_length` reuses the existing `slugify` helper; no new config,
+  schema, or call-site obligation is introduced.

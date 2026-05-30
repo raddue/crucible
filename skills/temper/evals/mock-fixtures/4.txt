@@ -20,3 +20,10 @@ add the new arm to the registry instead of growing the conditional.
    through `dispatch`), not by extending the elif ladder in
    `src/handler.py`. Each future op then becomes a one-line registry
    entry — open for extension, closed for modification.
+
+### Pre-flight
+
+- Prerequisite: `handle_restore` must exist in `.handlers` — it is already
+  imported in this diff, so the dependency is satisfied.
+- No schema change or config key is introduced; routing through the existing
+  `HANDLERS` registry is a local refactor.

@@ -1,5 +1,14 @@
 {
   "skill_name": "temper",
+  "global_expectations": [
+    {
+      "type": "mechanical",
+      "check": "report-has-block",
+      "params": {
+        "heading": "Pre-flight"
+      }
+    }
+  ],
   "evals": [
     {
       "id": "1a",
@@ -478,6 +487,91 @@
           "check": "category-finding-does-not-fire",
           "params": {
             "category": "Tenancy"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "findings-count-at-least",
+          "params": {
+            "n": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "9-enumerate-sites-partial",
+      "source": "synthetic",
+      "lens_column": "none",
+      "pr_description": "Add idempotency guards to the new `apply_order_writes` path in `migrations/0042_orders.py`. The migration performs three `INSERT ... ON CONFLICT` upserts (orders, order_lines, order_audit) so a replayed migration does not duplicate rows.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The diff adds three `ON CONFLICT` upsert sites to a single migration file.\n\n```diff\n--- /dev/null\n+++ b/migrations/0042_orders.py\n@@ -0,0 +1,60 @@\n+\"\"\"backfill orders, order_lines, order_audit with idempotent upserts\"\"\"\n+from alembic import op\n+\n+\n+def upgrade():\n+    # site 1: orders\n+    op.execute(\n+        \"INSERT INTO orders (id, status) \"\n+        \"SELECT id, 'migrated' FROM staging_orders \"\n+        \"ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status\"\n+    )\n+\n+    # site 2: order_lines\n+    op.execute(\n+        \"INSERT INTO order_lines (id, order_id, qty) \"\n+        \"SELECT id, order_id, qty FROM staging_order_lines \"\n+        \"ON CONFLICT (id) DO UPDATE SET qty = EXCLUDED.qty\"\n+    )\n+\n+    # site 3: order_audit\n+    op.execute(\n+        \"INSERT INTO order_audit (id, order_id, event) \"\n+        \"SELECT id, order_id, event FROM staging_order_audit \"\n+        \"ON CONFLICT DO NOTHING\"\n+    )\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format.",
+      "expected_output": "A single finding enumerates all three ON CONFLICT sites in the same migration file (cites three File: lines) and names the third site as MISSING a proper conflict target / guard.",
+      "files": [
+        "migrations/0042_orders.py"
+      ],
+      "allowed_files": [
+        "migrations/0042_orders.py"
+      ],
+      "lens_under_test": "enumerate-sites",
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "finding-cites-n-files",
+          "params": {
+            "n": 3
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "finding-body-contains",
+          "params": {
+            "pattern": "MISSING"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "findings-count-at-least",
+          "params": {
+            "n": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "10-preflight-missing-migration",
+      "source": "synthetic",
+      "lens_column": "none",
+      "pr_description": "Add a `tier` read to the account handler in `src/handler.py` so premium accounts get the expedited path. The handler reads `accounts.tier` from the row returned by the existing query.",
+      "prompt": "Review the following diff using the temper-reviewer checklist. Treat this as the full set of changes under review. The base reference is `main`; assume the diff represents `main..HEAD`. The handler now reads a new `accounts.tier` column.\n\n```diff\n--- a/src/handler.py\n+++ b/src/handler.py\n@@ -80,6 +80,12 @@ def handle_account(account_id):\n     row = db.execute(\n         \"SELECT * FROM accounts WHERE id = :id\",\n         {\"id\": account_id},\n     ).fetchone()\n     if row is None:\n         return None\n+    # New: premium accounts get the expedited path.\n+    if row.tier == \"premium\":\n+        return expedite(row)\n     return standard(row)\n```\n\nApply the standard reviewer output format (### Code Review with Verdict, Issues, etc.). Tag any Targeted Lens findings with `Lens:` lines per the canonical Report Format. Include a `### Pre-flight` section enumerating prerequisites and their status.",
+      "expected_output": "An ordinary correctness finding fires on handler.py, and the Pre-flight block flags the `accounts.tier` column migration as MISSING from this diff.",
+      "files": [
+        "src/handler.py"
+      ],
+      "allowed_files": [
+        "src/handler.py"
+      ],
+      "lens_under_test": "preflight-missing",
+      "replicate_rule": {
+        "trials": 5,
+        "threshold": 3
+      },
+      "expectations": [
+        {
+          "type": "mechanical",
+          "check": "report-block-contains",
+          "params": {
+            "heading": "Pre-flight",
+            "pattern": "MISSING"
+          }
+        },
+        {
+          "type": "mechanical",
+          "check": "finding-body-contains",
+          "params": {
+            "pattern": "MISSING"
           }
         },
         {

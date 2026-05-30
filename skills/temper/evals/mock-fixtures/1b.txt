@@ -19,3 +19,9 @@ the immediate problem is scope, not duplication.
    precedence: do not file a DRY finding for the banner/footer near-clone
    here — the duplication is real but the immediate ask is to land the
    reformat surgically; a DRY refactor belongs in a follow-up.)
+
+### Pre-flight
+
+- No external prerequisites — the change is self-contained within `src/foo.py`.
+- Both `render_banner` and `render_footer` are pure formatters with no new
+  config or downstream call-site dependencies.

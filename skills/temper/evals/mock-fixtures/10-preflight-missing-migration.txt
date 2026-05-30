@@ -1,0 +1,29 @@
+### Code Review
+
+Verdict: changes-requested
+
+The handler now branches on `row.tier`, but the diff reads a column the
+schema does not yet have and does not guard against the column being absent.
+The required migration for `accounts.tier` is MISSING from this diff, so the
+read will raise on any environment that has not been hand-patched.
+
+### Issues
+
+1. handle_account reads accounts.tier with no migration and no guard
+   - File: src/handler.py:88
+   - Severity: Important
+   - Lens: Surgical
+   The new branch dereferences `row.tier`, but the column `accounts.tier`
+   is introduced by no migration in this change set — the migration is
+   MISSING. On a fresh or production database the `SELECT *` row will not
+   carry a `tier` attribute and `row.tier` raises `AttributeError`. Ship the
+   schema migration alongside this read, and treat an absent/NULL tier as the
+   standard path rather than letting the access fault.
+
+### Pre-flight
+
+- New column `accounts.tier` read at `src/handler.py:88` — migration
+  **MISSING** from this diff. The handler assumes the column exists; no
+  Alembic revision adding it is present in the change set.
+- `expedite()` and `standard()` are pre-existing helpers in this module — no
+  new prerequisite there.
