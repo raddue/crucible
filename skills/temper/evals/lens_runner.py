@@ -49,6 +49,19 @@ _REPORT_SECTIONS = frozenset(
     {"Pre-flight", "Strengths", "Overall", "Recommendations", "Assessment"}
 )
 
+# Trailing parenthetical annotation on a heading, e.g. the "(feature delivery)"
+# in `### Pre-flight (feature delivery)`. Stripped before the _REPORT_SECTIONS
+# membership test so a decorated heading still suppresses phantom findings.
+_HEADING_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def _section_key(heading: str | None) -> str | None:
+    """Normalize a `### ` heading to its bare section name for _REPORT_SECTIONS
+    lookup: drop a trailing parenthetical annotation and a trailing colon."""
+    if heading is None:
+        return None
+    return _HEADING_ANNOTATION_RE.sub("", heading).strip().rstrip(":")
+
 
 # ---------------------------------------------------------------------------
 # Parser
@@ -95,7 +108,7 @@ def _parse_findings(output: str) -> list[dict]:
         # Numbered/list items inside report-prose sections (esp. Pre-flight)
         # are NOT findings — skip them. Boundary pre-pass is unchanged so block
         # extents for real findings stay correct.
-        if current_section in _REPORT_SECTIONS:
+        if _section_key(current_section) in _REPORT_SECTIONS:
             continue
 
         # Find this finding's end: next boundary strictly after idx.
@@ -478,7 +491,7 @@ def report_has_block(output: str, heading: str, min_chars: int = 1) -> Result:
     blocks = _report_blocks(output, heading)
     if not blocks:
         return ("FAIL", f"no ### {heading} heading")
-    nonws = sum(1 for c in "".join(blocks) if not c.isspace())
+    nonws = sum(1 for c in "\n".join(blocks) if not c.isspace())
     if nonws >= min_chars:
         return ("PASS", f"### {heading} block has {nonws} non-ws char(s)")
     return ("FAIL", f"### {heading} block empty ({nonws} < {min_chars} non-ws char(s))")
@@ -488,8 +501,9 @@ def report_block_contains(
     output: str, heading: str, pattern: str, case_insensitive: bool = True
 ) -> Result:
     """PASS if `pattern` matches (regex search) within the union of all
-    `### <heading>` blocks."""
-    union = "".join(_report_blocks(output, heading))
+    `### <heading>` blocks. Blocks are joined with a newline so a pattern can
+    never falsely match across a block boundary (e.g. two Pre-flight sections)."""
+    union = "\n".join(_report_blocks(output, heading))
     flags = re.I if case_insensitive else 0
     if re.search(pattern, union, flags):
         return ("PASS", f"{pattern!r} found in ### {heading} block(s)")

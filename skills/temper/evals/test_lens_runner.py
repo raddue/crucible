@@ -818,6 +818,58 @@ def test_report_block_contains_matches_second_block():
     assert verdict == "PASS"
 
 
+# Two Pre-flight blocks; the pattern "AB" spans the boundary — "...A" ends the
+# first block, "B..." starts the second. Blocks must be joined with a newline so
+# the regex can never falsely match across the boundary.
+SAMPLE_CROSS_BLOCK_PREFLIGHT = """
+### Pre-flight
+- ends in A
+
+### Issues
+
+1. **Real finding**
+   - File: src/foo.py:1
+   - Severity: Minor
+   - Lens: DRY
+   - Issue: real.
+
+### Pre-flight
+- B begins here
+"""
+
+
+def test_report_block_contains_no_cross_block_false_match():
+    # "A\nB" must NOT match "AB" across the block boundary (newline-joined union).
+    verdict, _ = report_block_contains(
+        SAMPLE_CROSS_BLOCK_PREFLIGHT, heading="Pre-flight", pattern="AB"
+    )
+    assert verdict == "FAIL"
+
+
+# A decorated Pre-flight heading must still suppress phantom findings.
+SAMPLE_PREFLIGHT_ANNOTATED_HEADING = """
+### Pre-flight (feature delivery)
+1. Foo checklist item
+2. Bar checklist item
+
+### Issues
+
+1. **Real finding**
+   - File: src/foo.py:10-12
+   - Severity: Minor
+   - Lens: DRY
+   - Issue: real.
+"""
+
+
+def test_annotated_preflight_heading_still_suppresses_phantom_findings():
+    from skills.temper.evals.lens_runner import _parse_findings
+
+    findings = _parse_findings(SAMPLE_PREFLIGHT_ANNOTATED_HEADING)
+    assert len(findings) == 1
+    assert findings[0]["section"] == "Issues"
+
+
 # ---------------------------------------------------------------------------
 # aggregate_replicates
 # ---------------------------------------------------------------------------

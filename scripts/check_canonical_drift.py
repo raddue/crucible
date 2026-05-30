@@ -55,6 +55,12 @@ DISCIPLINE_PINS = [
 PREFLIGHT_PINS = [
     "### Pre-flight",
     "deployed right now",
+    # Load-bearing authoring instructions: pin the format ("dash bullets"),
+    # the always-emit mandate, and the MISSING marker so a divergence in any of
+    # the three templates is caught, not just the heading + intro phrase.
+    "dash bullets",
+    "Always emit",
+    "MISSING",
 ]
 
 def extract_canon(text: str) -> str:

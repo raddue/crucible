@@ -351,10 +351,13 @@ def _validate_global_expectations(global_expectations: list[dict]) -> None:
                 f"global_expectations[{idx}] must have type=='mechanical' "
                 f"(got {ge.get('type')!r})"
             )
-        check = ge.get("check")
+        # Normalize snake_case → kebab-case exactly as evaluate_expectation does
+        # at runtime, so a global with check "report_has_block" is accepted here
+        # rather than rejected only to resolve fine when actually dispatched.
+        check = lens_runner._normalize_check_name(ge.get("check"))
         if check not in lens_runner._CHECK_REGISTRY:
             raise FixtureValidationError(
-                f"global_expectations[{idx}] check {check!r} not in "
+                f"global_expectations[{idx}] check {ge.get('check')!r} not in "
                 f"lens_runner._CHECK_REGISTRY"
             )
 
@@ -1569,7 +1572,11 @@ def score(
     # Recompute per-trial fixture_sha; refuse mismatches unless --force-rescore.
     # `_load_evals` folds global_expectations into each eval IN PLACE before the
     # sha is recomputed below, mirroring stage() so the shas match.
-    _evals_list, _ = _load_evals(_EVALS_JSON)
+    _evals_list, _global_expectations = _load_evals(_EVALS_JSON)
+    # Validate globals here too: score may run against an evals.json edited after
+    # stage, and a malformed global would otherwise fold a silent FAIL/N/A into
+    # every fixture instead of being rejected loudly.
+    _validate_global_expectations(_global_expectations)
     fixtures_by_id = {f["id"]: f for f in _evals_list}
 
     # Task 10 (#290): score-time --source filter. Restrict fixtures_by_id to
@@ -2034,9 +2041,14 @@ def _legacy_main(args: argparse.Namespace) -> int:
     # Load fixtures via the shared `_load_evals` path so any top-level
     # global_expectations are folded into each eval identically to stage/score.
     try:
-        fixtures, _ = _load_evals(_EVALS_JSON)
+        fixtures, _global_expectations = _load_evals(_EVALS_JSON)
     except (OSError, json.JSONDecodeError) as e:
         print(f"[fatal] cannot load evals.json: {e}", file=sys.stderr)
+        return 2
+    try:
+        _validate_global_expectations(_global_expectations)
+    except FixtureValidationError as e:
+        print(f"[fatal] {e}", file=sys.stderr)
         return 2
 
     if args.legacy_fixture:

@@ -171,3 +171,10 @@ def test_validate_global_expectations_rejects_non_mechanical():
 def test_validate_global_expectations_accepts_valid():
     good = [{"type": "mechanical", "check": "all-findings-have-file-line"}]
     _validate_global_expectations(good)  # no raise
+
+
+def test_validate_global_expectations_accepts_snake_case_check():
+    # snake_case must be normalized to kebab-case (as runtime dispatch does)
+    # rather than rejected only to resolve fine when actually run.
+    good = [{"type": "mechanical", "check": "report_has_block"}]
+    _validate_global_expectations(good)  # no raise
