@@ -26,11 +26,41 @@ maintainers reading the regexes see them immediately):
 from __future__ import annotations
 
 import re
-import sys
 from typing import Literal
 
 Verdict = Literal["PASS", "FAIL", "N/A"]
 Result = tuple[Verdict, str]
+
+
+class MutexViolationError(ValueError):
+    """Raised when a single finding is tagged with both Lens: and Category:.
+
+    These dimensions are mutually exclusive per Design D7. The scorer catches
+    this and fails the fixture loudly rather than silently merging both fields.
+    """
+
+    pass
+
+
+# Report-prose sections under which numbered/list items are NOT findings.
+# A `### Pre-flight` block (and friends) may contain numbered checklists; those
+# must not be parsed as phantom findings.
+_REPORT_SECTIONS = frozenset(
+    {"Pre-flight", "Strengths", "Overall", "Recommendations", "Assessment"}
+)
+
+# Trailing parenthetical annotation on a heading, e.g. the "(feature delivery)"
+# in `### Pre-flight (feature delivery)`. Stripped before the _REPORT_SECTIONS
+# membership test so a decorated heading still suppresses phantom findings.
+_HEADING_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def _section_key(heading: str | None) -> str | None:
+    """Normalize a `### ` heading to its bare section name for _REPORT_SECTIONS
+    lookup: drop a trailing parenthetical annotation and a trailing colon."""
+    if heading is None:
+        return None
+    return _HEADING_ANNOTATION_RE.sub("", heading).strip().rstrip(":")
 
 
 # ---------------------------------------------------------------------------
@@ -48,9 +78,12 @@ _CATEGORY_RE = re.compile(r"^\s*[-*]?\s*Category:\s+(\S+)\s*$")
 
 def _parse_findings(output: str) -> list[dict]:
     """Return list of findings with keys file, line_range, severity, lens,
-    lens_reattributed, category, body, section. Pathless findings include
-    file=None. A WARNING is emitted to stderr when a finding carries both
-    Lens: and Category: lines (mutex tripwire — does not fail the parse)."""
+    lens_reattributed, category, cited_files, body, section. Pathless findings
+    include file=None. A MutexViolationError is raised when a finding carries
+    both Lens: and Category: lines (mutex tripwire — fails the parse).
+
+    Numbered/list items inside report-prose sections (see _REPORT_SECTIONS,
+    esp. `### Pre-flight`) are skipped — they are not findings."""
     lines = output.splitlines()
 
     # Pre-pass: identify boundary line indices (finding headers + ### headings).
@@ -72,11 +105,18 @@ def _parse_findings(output: str) -> list[dict]:
         if not _FINDING_HEADER_RE.match(line):
             continue
 
+        # Numbered/list items inside report-prose sections (esp. Pre-flight)
+        # are NOT findings — skip them. Boundary pre-pass is unchanged so block
+        # extents for real findings stay correct.
+        if _section_key(current_section) in _REPORT_SECTIONS:
+            continue
+
         # Find this finding's end: next boundary strictly after idx.
         end = next(b for b in boundaries if b > idx)
 
         block = lines[idx + 1 : end]
         header_line = line
+        cited_files: list[tuple[str, tuple[int, int]]] = []
         file_path: str | None = None
         line_range: tuple[int, int] | None = None
         severity: str | None = None
@@ -87,10 +127,9 @@ def _parse_findings(output: str) -> list[dict]:
         for child in block:
             m = _FILE_RE.match(child)
             if m:
-                file_path = m.group(1)
                 lo = int(m.group(2))
                 hi = int(m.group(3)) if m.group(3) else lo
-                line_range = (lo, hi)
+                cited_files.append((m.group(1), (lo, hi)))
                 continue
             m = _SEVERITY_RE.match(child)
             if m:
@@ -106,13 +145,15 @@ def _parse_findings(output: str) -> list[dict]:
                 category = m.group(1)
                 continue
 
-        # Mutex tripwire: WARN only, don't fail the parse. A 3rd category
-        # arrival triggers a hard mutex check upgrade (filed as follow-up).
+        # First citation drives the back-compat scalar file/line_range fields.
+        if cited_files:
+            file_path = cited_files[0][0]
+            line_range = cited_files[0][1]
+
+        # Mutex tripwire: a finding cannot carry both a Lens: and a Category:.
         if lens is not None and category is not None:
-            print(
-                f"WARNING: finding has both Lens: {lens} and Category: {category} "
-                f"(mutex violation, see #267); header: {header_line.strip()!r}",
-                file=sys.stderr,
+            raise MutexViolationError(
+                f"finding tagged both Lens: {lens} and Category: {category}"
             )
 
         # Capture finding body (header + block lines, joined) for
@@ -124,6 +165,7 @@ def _parse_findings(output: str) -> list[dict]:
             {
                 "file": file_path,
                 "line_range": line_range,
+                "cited_files": cited_files,
                 "severity": severity,
                 "lens": lens,
                 "lens_reattributed": reattributed,
@@ -134,6 +176,29 @@ def _parse_findings(output: str) -> list[dict]:
         )
 
     return findings
+
+
+def _report_blocks(output: str, heading: str) -> list[str]:
+    """Return the text blocks under every `### <heading>` section.
+
+    Each block runs from the line after the heading to the next `### ` heading
+    or EOF, joined by newlines. The heading line itself is excluded."""
+    heading_re = re.compile(rf"^###\s+{re.escape(heading)}\s*$")
+    next_heading_re = re.compile(r"^###\s+")
+    lines = output.splitlines()
+    blocks: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        if heading_re.match(lines[i]):
+            j = i + 1
+            while j < n and not next_heading_re.match(lines[j]):
+                j += 1
+            blocks.append("\n".join(lines[i + 1 : j]))
+            i = j
+        else:
+            i += 1
+    return blocks
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +425,91 @@ def no_lens_findings_overlap_region(
     return ("PASS", f"no overlap between {primary_lens} and {secondary_lens} regions")
 
 
+def finding_cites_n_files(
+    output: str,
+    n: int | None = None,
+    files: list[str] | None = None,
+    lens: str | None = None,
+    category: str | None = None,
+) -> Result:
+    """Assert findings cite enough File: sites and/or specific paths.
+
+    `n` counts File: citation SITES (not distinct paths) across matching
+    findings. `files` checks distinct-path coverage. Findings are filtered by
+    `lens`/`category` when given. At least one of n/files is required."""
+    findings = _parse_findings(output)
+    matching = [
+        f
+        for f in findings
+        if (lens is None or f["lens"] == lens)
+        and (category is None or f["category"] == category)
+    ]
+
+    if n is None and files is None:
+        return ("N/A", "no n or files param")
+
+    if n is not None:
+        sites = sum(len(f["cited_files"]) for f in matching)
+        if sites < n:
+            return ("FAIL", f"{sites} File: citation site(s), need ≥ {n}")
+
+    if files is not None:
+        distinct_paths = {
+            path for f in matching for (path, _rng) in f["cited_files"]
+        }
+        missing = set(files) - distinct_paths
+        if missing:
+            return ("FAIL", f"missing cited path(s): {', '.join(sorted(missing))}")
+
+    scope = []
+    if n is not None:
+        scope.append(f"≥ {n} site(s)")
+    if files is not None:
+        scope.append(f"{len(files)} required path(s) covered")
+    return ("PASS", "; ".join(scope))
+
+
+def finding_body_contains(
+    output: str, pattern: str, case_insensitive: bool = True
+) -> Result:
+    """Positive mirror of finding_body_does_not_contain. PASS if ANY finding's
+    body contains `pattern` (substring match)."""
+    findings = _parse_findings(output)
+    if not findings:
+        return ("N/A", "no findings")
+    needle = pattern.lower() if case_insensitive else pattern
+    for f in findings:
+        haystack = f["body"].lower() if case_insensitive else f["body"]
+        if needle in haystack:
+            return ("PASS", f"{pattern!r} appears in finding at {f['file']}")
+    return ("FAIL", f"{pattern!r} appears in no finding body")
+
+
+def report_has_block(output: str, heading: str, min_chars: int = 1) -> Result:
+    """PASS if a `### <heading>` block exists with >= min_chars non-whitespace
+    characters. Distinguishes 'no heading' from 'heading present but empty'."""
+    blocks = _report_blocks(output, heading)
+    if not blocks:
+        return ("FAIL", f"no ### {heading} heading")
+    nonws = sum(1 for c in "\n".join(blocks) if not c.isspace())
+    if nonws >= min_chars:
+        return ("PASS", f"### {heading} block has {nonws} non-ws char(s)")
+    return ("FAIL", f"### {heading} block empty ({nonws} < {min_chars} non-ws char(s))")
+
+
+def report_block_contains(
+    output: str, heading: str, pattern: str, case_insensitive: bool = True
+) -> Result:
+    """PASS if `pattern` matches (regex search) within the union of all
+    `### <heading>` blocks. Blocks are joined with a newline so a pattern can
+    never falsely match across a block boundary (e.g. two Pre-flight sections)."""
+    union = "\n".join(_report_blocks(output, heading))
+    flags = re.I if case_insensitive else 0
+    if re.search(pattern, union, flags):
+        return ("PASS", f"{pattern!r} found in ### {heading} block(s)")
+    return ("FAIL", f"{pattern!r} not found in ### {heading} block(s)")
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher + replicate aggregator
 # ---------------------------------------------------------------------------
@@ -377,7 +527,11 @@ _CHECK_REGISTRY = {
     "category-finding-fires": category_finding_fires,
     "category-finding-does-not-fire": category_finding_does_not_fire,
     "finding-body-does-not-contain": finding_body_does_not_contain,
+    "finding-body-contains": finding_body_contains,
     "findings-count-at-least": findings_count_at_least,
+    "finding-cites-n-files": finding_cites_n_files,
+    "report-has-block": report_has_block,
+    "report-block-contains": report_block_contains,
 }
 
 # Checks that take (output, fixture, ocp_carveout) — fixture-aware.

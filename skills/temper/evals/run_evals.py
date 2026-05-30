@@ -304,6 +304,64 @@ class BaselineQualityError(FixtureValidationError):
 _SOURCE_PR_RE = re.compile(r"^#\d+ @ [0-9a-f]{7,40}$")
 
 
+def _load_evals(path: Path) -> tuple[list[dict], list[dict]]:
+    """Load evals.json and fold any top-level `global_expectations` into each eval.
+
+    Reads the JSON at `path`, extracts the optional top-level
+    `global_expectations` array (default `[]`), and appends EVERY global
+    expectation entry to EACH eval's `expectations` list (creating the list if
+    absent). The append mutates the eval dicts IN PLACE so that any subsequent
+    `fixture_sha(fix)` reflects the merged expectations — and does so
+    identically across the `stage` and `score` load paths (their shas match).
+
+    On the current evals.json (no `global_expectations` key) this is a clean
+    no-op: each eval is returned unchanged and `global_expectations` is `[]`.
+
+    Returns: `(evals, global_expectations)`.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    evals = data.get("evals", [])
+    global_expectations = data.get("global_expectations", []) or []
+    if global_expectations:
+        for ev in evals:
+            if not isinstance(ev, dict):
+                continue
+            exps = ev.get("expectations")
+            if not isinstance(exps, list):
+                exps = []
+                ev["expectations"] = exps
+            for ge in global_expectations:
+                exps.append(ge)
+    return evals, global_expectations
+
+
+def _validate_global_expectations(global_expectations: list[dict]) -> None:
+    """Validate each top-level `global_expectations` entry (Pre-flight matcher).
+
+    Every entry must be a dict with `type == "mechanical"` and a `check` present
+    in `lens_runner._CHECK_REGISTRY`. Raises `FixtureValidationError` otherwise.
+    """
+    for idx, ge in enumerate(global_expectations):
+        if not isinstance(ge, dict):
+            raise FixtureValidationError(
+                f"global_expectations[{idx}] is not an object: {ge!r}"
+            )
+        if ge.get("type") != "mechanical":
+            raise FixtureValidationError(
+                f"global_expectations[{idx}] must have type=='mechanical' "
+                f"(got {ge.get('type')!r})"
+            )
+        # Normalize snake_case → kebab-case exactly as evaluate_expectation does
+        # at runtime, so a global with check "report_has_block" is accepted here
+        # rather than rejected only to resolve fine when actually dispatched.
+        check = lens_runner._normalize_check_name(ge.get("check"))
+        if check not in lens_runner._CHECK_REGISTRY:
+            raise FixtureValidationError(
+                f"global_expectations[{idx}] check {ge.get('check')!r} not in "
+                f"lens_runner._CHECK_REGISTRY"
+            )
+
+
 def _validate_fixtures(
     evals_data: dict,
     *,
@@ -725,12 +783,16 @@ def stage(
     if timeout < 1:
         raise ValueError(f"--timeout must be >= 1 (got {timeout})")
 
-    # Load fixtures
-    evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+    # Load fixtures. `_load_evals` folds any top-level `global_expectations`
+    # into each eval's `expectations` list IN PLACE before any fixture_sha is
+    # computed, so stage- and score-side shas stay identical.
+    fixtures, global_expectations = _load_evals(_EVALS_JSON)
     # Task 8 (#290 F2): schema gate at stage-time. Raises FixtureValidationError
-    # for any (a)-(k) failure; rc=2 propagates via the main() handler.
-    _validate_fixtures(evals_data, strict_source_pr=strict_source_pr)
-    fixtures = evals_data.get("evals", [])
+    # for any (a)-(k) failure; rc=2 propagates via the main() handler. Pass the
+    # post-merge fixtures so validation sees the same records that get hashed.
+    _validate_fixtures({"evals": fixtures}, strict_source_pr=strict_source_pr)
+    # Global Pre-flight matcher: validate each global_expectations entry.
+    _validate_global_expectations(global_expectations)
 
     # --source filter
     if source != "all":
@@ -907,7 +969,16 @@ def _aggregate_from_outputs(
                 per_trial_verdicts.append("N/A")
                 per_trial_rationales.append("dispatch failure: no reviewer output")
                 continue
-            verdict, rationale = lens_runner.evaluate_expectation(expectation, out, fix)
+            try:
+                verdict, rationale = lens_runner.evaluate_expectation(expectation, out, fix)
+            except lens_runner.MutexViolationError:
+                # T1: a reviewer finding tagged with BOTH Lens: and Category:
+                # is a mutex violation (Design D7). Score the trial FAIL with a
+                # clear rationale instead of letting the raise crash the run.
+                verdict, rationale = (
+                    "FAIL",
+                    "mutex violation: finding tagged both Lens and Category",
+                )
             per_trial_verdicts.append(verdict)
             per_trial_rationales.append(rationale)
         aggregated = lens_runner.aggregate_replicates(per_trial_verdicts, threshold)  # type: ignore[arg-type]
@@ -1498,9 +1569,15 @@ def score(
                     file=sys.stderr,
                 )
 
-    # Recompute per-trial fixture_sha; refuse mismatches unless --force-rescore
-    evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
-    fixtures_by_id = {f["id"]: f for f in evals_data.get("evals", [])}
+    # Recompute per-trial fixture_sha; refuse mismatches unless --force-rescore.
+    # `_load_evals` folds global_expectations into each eval IN PLACE before the
+    # sha is recomputed below, mirroring stage() so the shas match.
+    _evals_list, _global_expectations = _load_evals(_EVALS_JSON)
+    # Validate globals here too: score may run against an evals.json edited after
+    # stage, and a malformed global would otherwise fold a silent FAIL/N/A into
+    # every fixture instead of being rejected loudly.
+    _validate_global_expectations(_global_expectations)
+    fixtures_by_id = {f["id"]: f for f in _evals_list}
 
     # Task 10 (#290): score-time --source filter. Restrict fixtures_by_id to
     # those matching the requested source. Trials referencing filtered-out
@@ -1528,7 +1605,7 @@ def score(
     by_fixture: dict[str, list[tuple[int, dict, str | None]]] = {}
     # Track fixture ids in the live evals.json (pre-filter) for distinguishing
     # "filtered-out" (skip silently) from "deleted-from-evals" (fatal).
-    _all_evals_ids = {f["id"] for f in evals_data.get("evals", [])}
+    _all_evals_ids = {f["id"] for f in _evals_list}
     for entry in manifest["trials"]:
         seq = entry["seq"]
         fid = entry["fixture_id"]
@@ -1961,14 +2038,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _legacy_main(args: argparse.Namespace) -> int:
-    # Load fixtures
+    # Load fixtures via the shared `_load_evals` path so any top-level
+    # global_expectations are folded into each eval identically to stage/score.
     try:
-        evals_data = json.loads(_EVALS_JSON.read_text(encoding="utf-8"))
+        fixtures, _global_expectations = _load_evals(_EVALS_JSON)
     except (OSError, json.JSONDecodeError) as e:
         print(f"[fatal] cannot load evals.json: {e}", file=sys.stderr)
         return 2
+    try:
+        _validate_global_expectations(_global_expectations)
+    except FixtureValidationError as e:
+        print(f"[fatal] {e}", file=sys.stderr)
+        return 2
 
-    fixtures = evals_data.get("evals", [])
     if args.legacy_fixture:
         fixtures = [f for f in fixtures if f["id"] == args.legacy_fixture]
         if not fixtures:

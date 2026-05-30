@@ -13,12 +13,15 @@ import json
 import pytest
 
 from skills.temper.evals.lens_runner import (
+    MutexViolationError,
     aggregate_replicates,
     all_findings_have_file_line,
     category_finding_does_not_fire,
     category_finding_fires,
     evaluate_expectation,
+    finding_body_contains,
     finding_body_does_not_contain,
+    finding_cites_n_files,
     findings_count_at_least,
     lens_finding_cites_file,
     lens_finding_does_not_fire,
@@ -26,6 +29,8 @@ from skills.temper.evals.lens_runner import (
     lens_findings_in_allowed_files,
     no_lens_findings_overlap_region,
     reattributed_finding_fires,
+    report_block_contains,
+    report_has_block,
 )
 
 
@@ -596,10 +601,9 @@ def test_category_does_not_leak_into_lens_field():
     assert findings[0]["lens"] is None  # category does not populate lens field
 
 
-def test_mutex_tripwire_warns_on_both_tags(capsys):
-    """When a finding has both Lens: and Category:, parser logs WARNING to
-    stderr but still parses both fields. Verdict-affecting checks may then
-    flag the inconsistency independently."""
+def test_mutex_raises_on_both_tags():
+    """When a finding has both Lens: and Category:, the parser raises
+    MutexViolationError — the two dimensions are mutually exclusive."""
     sample = """
 ### Code Review
 
@@ -611,14 +615,259 @@ def test_mutex_tripwire_warns_on_both_tags(capsys):
 """
     from skills.temper.evals.lens_runner import _parse_findings
 
-    findings = _parse_findings(sample)
+    with pytest.raises(MutexViolationError):
+        _parse_findings(sample)
+
+
+# ---------------------------------------------------------------------------
+# D1a regression: report-prose sections do not emit phantom findings
+# ---------------------------------------------------------------------------
+
+SAMPLE_PREFLIGHT_NUMBERED = """
+### Pre-flight
+1. Foo checklist item
+2. Bar checklist item
+
+### Issues
+
+1. **Real finding**
+   - File: src/foo.py:10-12
+   - Severity: Minor
+   - Lens: DRY
+   - Issue: real.
+"""
+
+
+def test_preflight_numbered_list_emits_zero_phantom_findings():
+    """Numbered items under ### Pre-flight must not parse as findings."""
+    from skills.temper.evals.lens_runner import _parse_findings
+
+    findings = _parse_findings(SAMPLE_PREFLIGHT_NUMBERED)
+    # Only the one real finding under ### Issues survives.
     assert len(findings) == 1
     assert findings[0]["lens"] == "DRY"
-    assert findings[0]["category"] == "Tenancy"
-    captured = capsys.readouterr()
-    assert "WARNING" in captured.err
-    assert "Lens: DRY" in captured.err
-    assert "Category: Tenancy" in captured.err
+    assert findings[0]["section"] == "Issues"
+
+
+# ---------------------------------------------------------------------------
+# cited_files accumulation (multiple File: lines per finding)
+# ---------------------------------------------------------------------------
+
+SAMPLE_THREE_FILE_LINES = """
+### Issues
+
+1. **Triple citation**
+   - File: src/foo.py:10-12
+   - File: src/foo.py:30-31
+   - File: src/foo.py:50
+   - Severity: Minor
+   - Lens: DRY
+   - Issue: duplicated across three sites.
+"""
+
+
+def test_cited_files_accumulates_all_file_lines():
+    from skills.temper.evals.lens_runner import _parse_findings
+
+    findings = _parse_findings(SAMPLE_THREE_FILE_LINES)
+    assert len(findings) == 1
+    f = findings[0]
+    assert len(f["cited_files"]) == 3
+    assert f["file"] == f["cited_files"][0][0]
+    assert f["file"] == "src/foo.py"
+    assert f["line_range"] == (10, 12)
+
+
+# ---------------------------------------------------------------------------
+# finding_cites_n_files
+# ---------------------------------------------------------------------------
+
+
+def test_finding_cites_n_files_site_count_pass():
+    verdict, _ = finding_cites_n_files(SAMPLE_THREE_FILE_LINES, n=3)
+    assert verdict == "PASS"
+
+
+def test_finding_cites_n_files_site_count_fail():
+    verdict, _ = finding_cites_n_files(SAMPLE_THREE_FILE_LINES, n=4)
+    assert verdict == "FAIL"
+
+
+def test_finding_cites_n_files_distinct_paths_pass():
+    verdict, _ = finding_cites_n_files(
+        SAMPLE_SRP_AND_DRY_DISJOINT, files=["src/svc.py"]
+    )
+    assert verdict == "PASS"
+
+
+def test_finding_cites_n_files_distinct_paths_fail():
+    verdict, rationale = finding_cites_n_files(
+        SAMPLE_SRP_AND_DRY_DISJOINT, files=["src/svc.py", "src/missing.py"]
+    )
+    assert verdict == "FAIL"
+    assert "src/missing.py" in rationale
+
+
+def test_finding_cites_n_files_na_when_no_params():
+    verdict, _ = finding_cites_n_files(SAMPLE_THREE_FILE_LINES)
+    assert verdict == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# finding_body_contains
+# ---------------------------------------------------------------------------
+
+
+def test_finding_body_contains_pass():
+    verdict, _ = finding_body_contains(SAMPLE_AI_SLOP, pattern="over-defensive")
+    assert verdict == "PASS"
+
+
+def test_finding_body_contains_fail():
+    verdict, _ = finding_body_contains(SAMPLE_AI_SLOP, pattern="totally-absent-phrase")
+    assert verdict == "FAIL"
+
+
+def test_finding_body_contains_na_when_no_findings():
+    verdict, _ = finding_body_contains(SAMPLE_NO_CATEGORY, pattern="anything")
+    assert verdict == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# report_has_block / report_block_contains
+# ---------------------------------------------------------------------------
+
+SAMPLE_REPORT_WITH_BLOCKS = """
+### Pre-flight
+Scope looks correct; touched 3 files.
+
+### Issues
+
+1. **A finding**
+   - File: src/foo.py:1
+   - Severity: Minor
+   - Lens: DRY
+"""
+
+SAMPLE_REPORT_EMPTY_BLOCK = """
+### Pre-flight
+
+
+### Issues
+- Verdict: Clean
+"""
+
+SAMPLE_TWO_PREFLIGHT = """
+### Pre-flight
+
+
+### Pre-flight
+Second block has real content here.
+
+### Issues
+- Verdict: Clean
+"""
+
+
+def test_report_has_block_present_nonempty_pass():
+    verdict, _ = report_has_block(SAMPLE_REPORT_WITH_BLOCKS, heading="Pre-flight")
+    assert verdict == "PASS"
+
+
+def test_report_has_block_missing_heading_fail():
+    verdict, rationale = report_has_block(
+        SAMPLE_REPORT_WITH_BLOCKS, heading="Strengths"
+    )
+    assert verdict == "FAIL"
+    assert "no ###" in rationale
+
+
+def test_report_has_block_whitespace_only_fail():
+    verdict, rationale = report_has_block(
+        SAMPLE_REPORT_EMPTY_BLOCK, heading="Pre-flight"
+    )
+    assert verdict == "FAIL"
+    assert "empty" in rationale
+
+
+def test_report_has_block_two_blocks_union_counted():
+    # First Pre-flight is empty, second has content; union is non-empty → PASS.
+    verdict, _ = report_has_block(SAMPLE_TWO_PREFLIGHT, heading="Pre-flight")
+    assert verdict == "PASS"
+
+
+def test_report_block_contains_pass():
+    verdict, _ = report_block_contains(
+        SAMPLE_REPORT_WITH_BLOCKS, heading="Pre-flight", pattern="Scope"
+    )
+    assert verdict == "PASS"
+
+
+def test_report_block_contains_fail():
+    verdict, _ = report_block_contains(
+        SAMPLE_REPORT_WITH_BLOCKS, heading="Pre-flight", pattern="nonexistent-token"
+    )
+    assert verdict == "FAIL"
+
+
+def test_report_block_contains_matches_second_block():
+    # Pattern only present in the 2nd Pre-flight block → union search PASSes.
+    verdict, _ = report_block_contains(
+        SAMPLE_TWO_PREFLIGHT, heading="Pre-flight", pattern="real content"
+    )
+    assert verdict == "PASS"
+
+
+# Two Pre-flight blocks; the pattern "AB" spans the boundary — "...A" ends the
+# first block, "B..." starts the second. Blocks must be joined with a newline so
+# the regex can never falsely match across the boundary.
+SAMPLE_CROSS_BLOCK_PREFLIGHT = """
+### Pre-flight
+- ends in A
+
+### Issues
+
+1. **Real finding**
+   - File: src/foo.py:1
+   - Severity: Minor
+   - Lens: DRY
+   - Issue: real.
+
+### Pre-flight
+- B begins here
+"""
+
+
+def test_report_block_contains_no_cross_block_false_match():
+    # "A\nB" must NOT match "AB" across the block boundary (newline-joined union).
+    verdict, _ = report_block_contains(
+        SAMPLE_CROSS_BLOCK_PREFLIGHT, heading="Pre-flight", pattern="AB"
+    )
+    assert verdict == "FAIL"
+
+
+# A decorated Pre-flight heading must still suppress phantom findings.
+SAMPLE_PREFLIGHT_ANNOTATED_HEADING = """
+### Pre-flight (feature delivery)
+1. Foo checklist item
+2. Bar checklist item
+
+### Issues
+
+1. **Real finding**
+   - File: src/foo.py:10-12
+   - Severity: Minor
+   - Lens: DRY
+   - Issue: real.
+"""
+
+
+def test_annotated_preflight_heading_still_suppresses_phantom_findings():
+    from skills.temper.evals.lens_runner import _parse_findings
+
+    findings = _parse_findings(SAMPLE_PREFLIGHT_ANNOTATED_HEADING)
+    assert len(findings) == 1
+    assert findings[0]["section"] == "Issues"
 
 
 # ---------------------------------------------------------------------------

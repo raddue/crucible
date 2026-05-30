@@ -19,3 +19,10 @@ to import `util.normalize_input` instead of re-rolling it.
    the existing helper rather than copying it — the duplicate regex
    `_PARSER_WS_RE` is also redundant. Drop `_clean_token` and call
    `normalize_input` directly from `parse_header` and `parse_record`.
+
+### Pre-flight
+
+- No external prerequisites — the change is self-contained across `src/parser.py`
+  and `src/util.py`.
+- `util.normalize_input` already exists and is importable; reusing it introduces
+  no new dependency or schema obligation.
