@@ -15,13 +15,17 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
   "hooks": {
     "PostToolUse": [
       {
-        "command": "bash hooks/session-index.sh",
-        "timeout": 500
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bash hooks/session-index.sh", "timeout": 500 }
+        ]
       }
     ]
   }
 }
 ```
+
+> Each event entry needs a `matcher` plus a nested `hooks` array whose items carry `"type": "command"`. A flat `{ "command": ... }` entry parses but Claude Code silently ignores it, so the hook never fires. `timeout` is in seconds.
 
 ### Verification
 
@@ -67,7 +71,7 @@ Remove the `PostToolUse` entry from your `settings.json`. Existing session index
 ### Dependencies
 
 - `jq` must be installed and on the PATH
-- `sha256sum` (standard on Linux, available via coreutils on macOS)
+- `sha256sum` (standard on Linux, coreutils on macOS) — falls back to `shasum -a 256` when absent, so minimal/older macOS still works
 
 ## Gate Ledger Guard
 
@@ -82,15 +86,17 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
   "hooks": {
     "PreToolUse": [
       {
-        "command": "bash hooks/gate-ledger-guard.sh",
-        "timeout": 500
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bash hooks/gate-ledger-guard.sh", "timeout": 500 }
+        ]
       }
     ]
   }
 }
 ```
 
-> **Note:** No `matcher` field — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated.
+> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.) The maintainer's actual user-global registration uses `Write|Edit` (see the MIN-5-R6 Parity Note below); the `*` shown here is simply the simplest illustrative form.
 
 ### Verification
 
@@ -144,8 +150,9 @@ Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/set
     "PreToolUse": [
       {
         "matcher": "Agent",
-        "command": "bash /mnt/e/Coding/crucible/hooks/build-routing-advisor.sh",
-        "timeout": 500
+        "hooks": [
+          { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/build-routing-advisor.sh", "timeout": 500 }
+        ]
       }
     ]
   }
