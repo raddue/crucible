@@ -264,6 +264,9 @@ AI agents produce characteristic padding patterns that aren't bugs but inflate d
 - Missing coverage: [specific code paths without tests]
 - Stale / dead tests: [tests that need updating or removal]
 
+### Pre-flight
+If this PR were deployed right now, what would have to be true for it to actually deliver the feature it claims to deliver? Always emit this block. Enumerate prerequisites — config, environment variables, schema/migrations, downstream services, feature flags — as dash bullets, and for each verify it against the diff or mark it **MISSING**. If the change is self-contained, state explicitly: "No external prerequisites — change is self-contained."
+
 ### Overall
 - Combined verdict: Approved | Needs Fixes (list them) | Escalate
 

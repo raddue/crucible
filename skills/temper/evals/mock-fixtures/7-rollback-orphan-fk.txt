@@ -23,3 +23,10 @@ Rollback fires at Important.
    `op.drop_column("customers", "region_id")` before dropping
    `regions`. Reversibility of migrations is a hard requirement —
    without it, prod rollback ladders break.
+
+### Pre-flight
+
+- Prerequisite: the `customers` table already exists — satisfied; this migration
+  only adds the `region_id` column and the new `regions` parent table.
+- Revision chain is declared (`Revises: 9c81e2d`); no out-of-band schema step is
+  required to apply `upgrade()`.

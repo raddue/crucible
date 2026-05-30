@@ -1,6 +1,7 @@
 {
   "bootstrap_python": "3.14",
   "verdicts": {
+    "10-preflight-missing-migration": "PASS",
     "1a": "PASS",
     "1b": "PASS",
     "2": "PASS",
@@ -11,6 +12,7 @@
     "6-tenancy-forged-callback": "PASS",
     "7-rollback-orphan-fk": "PASS",
     "8-defense-in-depth-not-slop": "PASS",
+    "9-enumerate-sites-partial": "PASS",
     "dry-real": "N/A",
     "mixed-real": "N/A",
     "ocp-real": "N/A",

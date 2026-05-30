@@ -1,0 +1,34 @@
+### Code Review
+
+Verdict: changes-requested
+
+The migration adds three `INSERT ... ON CONFLICT` upsert sites in the same
+file. The first two sites declare an explicit conflict target and upsert
+correctly, but the third site uses `ON CONFLICT DO NOTHING` with no conflict
+target — on a replay it silently drops audit rows instead of upserting them,
+so the third site is MISSING the idempotency guarantee the other two provide.
+
+### Issues
+
+1. order_audit upsert at site 3 is MISSING a conflict target — not idempotent
+   - File: migrations/0042_orders.py:18
+   - File: migrations/0042_orders.py:34
+   - File: migrations/0042_orders.py:51
+   - Severity: Important
+   - Category: Rollback
+   All three upsert sites live in the same migration. Site 1 (orders, :18)
+   and site 2 (order_lines, :34) both name an explicit `ON CONFLICT (id)`
+   target and refresh the conflicting row, so a replayed migration converges.
+   Site 3 (order_audit, :51) instead uses `ON CONFLICT DO NOTHING` with no
+   target column — the guard is effectively MISSING there, so a replay leaves
+   audit rows stale and divergent from orders/order_lines. Give site 3 the
+   same explicit conflict target and `DO UPDATE` arm as the other two so all
+   three sites are idempotent.
+
+### Pre-flight
+
+- All three target tables (`orders`, `order_lines`, `order_audit`) and their
+  `staging_*` sources already exist from prior migrations — no schema
+  prerequisite is introduced by this diff.
+- No external prerequisites — the change is self-contained within this
+  migration file.

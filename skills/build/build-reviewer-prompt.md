@@ -218,6 +218,9 @@ Task tool (general-purpose, model: opus or sonnet — lead decides per task comp
     - **Missing coverage:** [List with specific code paths]
     - **Test quality issues:** [List — independence, determinism, mock overuse, wrong test level]
 
+    ### Pre-flight
+    Always emit. If this PR were deployed right now, what must be true for it to actually deliver its claimed feature? List prerequisites — config, env vars, schema/migrations, downstream services, feature flags — as dash bullets, verifying each against the diff or marking it **MISSING**. If self-contained, state: "No external prerequisites — change is self-contained."
+
     ### Overall
     - **Combined verdict:** Approved | Needs fixes (list them) | Escalate
 

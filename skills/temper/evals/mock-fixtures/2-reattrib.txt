@@ -18,3 +18,9 @@ input; the new parser-side helper silently drops that bound.
    silently relaxes a bound the other enforces. Re-attributing this
    from DRY → Correctness: either call `normalize_input` from
    `parser.py` or apply the same `MAX_LEN` cap inline.
+
+### Pre-flight
+
+- No external prerequisites — both `src/parser.py` and `src/util.py` already
+  exist and the `MAX_LEN` constant is defined in `util`.
+- The fix reuses the existing bound; it adds no new config key or migration.

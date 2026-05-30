@@ -49,6 +49,20 @@ DISCIPLINE_PINS = [
     "callback",
 ]
 
+# Pre-flight feature-delivery section pins (#295) — must appear in BOTH
+# canonical and build-paraphrase (file-level grep). The "deployed right now"
+# phrase is a verbatim drift-check pin; "### Pre-flight" anchors the section.
+PREFLIGHT_PINS = [
+    "### Pre-flight",
+    "deployed right now",
+    # Load-bearing authoring instructions: pin the format ("dash bullets"),
+    # the always-emit mandate, and the MISSING marker so a divergence in any of
+    # the three templates is caught, not just the heading + intro phrase.
+    "dash bullets",
+    "Always emit",
+    "MISSING",
+]
+
 def extract_canon(text: str) -> str:
     # Include Targeted Lenses + the sibling ### Lens precedence... section
     # (where the co-fire table lives), stopping at the next non-precedence ###.
@@ -86,6 +100,9 @@ def check_disciplines(name: str, text: str) -> list[str]:
         if title not in text:
             errs.append(f"{name}: missing discipline title '{title}'")
     for pin in DISCIPLINE_PINS:
+        if pin not in text:
+            errs.append(f"{name}: missing pin '{pin}'")
+    for pin in PREFLIGHT_PINS:
         if pin not in text:
             errs.append(f"{name}: missing pin '{pin}'")
     return errs
