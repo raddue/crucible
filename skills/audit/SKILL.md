@@ -601,6 +601,16 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 5. **Cleanup:** Delete `scratch/<run-id>/` after all applicable Phase 4 steps have resolved (filing decision made; cartographer step run-or-skipped per artifact type). Do not clean up prematurely -- the report on disk is needed for compaction recovery during Phase 4.
 
+## Terminal Verdict Emit
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+At the end of the audit's report/output (Phase 4, after the ranked findings are presented and before scratch cleanup), append ONE **Tier B STUB** JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md` (importable: `scripts/ledger_append.py`).
+
+- Honor `CRUCIBLE_CALIBRATION_DISABLED=1` — return BEFORE any lock acquisition or filesystem write. Dedup via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="audit"` BEFORE `append()`; skip if it returns True.
+- Populate ONLY meaningful values: `schema_version: 1`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "audit"`, `tier: "B"`, `verdict` (audit is find-and-report; a completed report → `PASS`; an early abort/escalation routed to the user → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the manifest files reviewed, repo-relative; for non-code artifacts the audited file path), `artifact_type` (`code` | `design` | `plan`; map `concept` → `other`).
+- Set ALL calibration fields EXPLICITLY null per the "Tier-B null semantics" of `shared/ledger-append.md`: `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0` and `comment: null`. Keep `backfilled: false`, `falsified: null`, `falsified_by: null`.
+
 ## Prompt Templates
 
 ### Code Audit Templates

@@ -212,6 +212,16 @@ Output the aggregated INQUISITOR REPORT including fix outcomes. The report must 
 - Code review re-run recommended: YES/NO
 ```
 
+## Terminal Verdict Emit
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+After the aggregated INQUISITOR REPORT is emitted (Step 5: Final Report — the terminal point of an inquisitor run), append ONE **Tier B STUB** JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md` (importable: `scripts/ledger_append.py`).
+
+- Honor `CRUCIBLE_CALIBRATION_DISABLED=1` — return BEFORE any lock acquisition or filesystem write. Dedup via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="inquisitor"` BEFORE `append()`; skip if it returns True.
+- Populate ONLY meaningful values: `schema_version: 1`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "inquisitor"`, `tier: "B"`, `verdict` (all dimensions clean or all FAILs fixed within the cap → `PASS`; a dimension escalated to the user after the 2-attempt cap or cascading-fix escalation → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the files in the investigated feature diff, repo-relative), `artifact_type: "code"` (inquisitor only operates on behavioral code diffs).
+- Set ALL calibration fields EXPLICITLY null per the "Tier-B null semantics" of `shared/ledger-append.md`: `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0` and `comment: null`. Keep `backfilled: false`, `falsified: null`, `falsified_by: null`.
+
 ## Guardrails
 
 **Inquisitor subagents must NOT:**

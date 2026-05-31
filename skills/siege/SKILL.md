@@ -677,6 +677,28 @@ Chains inherit exploitability from their weakest link: if ANY step in the chain 
 [Which agents examined which files -- partition summary]
 ```
 
+## Calibration Ledger Emit (Tier A)
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+**Ledger append at terminal verdict.** When the security gate reaches its terminal verdict (Phase 4 — clean passage at zero Critical + zero High, or an escalation/stagnation exit), append ONE JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md`. Siege is a **Tier A** emitter: all calibration fields are populated. The importable implementation is `scripts/ledger_append.py` (`scripts.ledger_append`).
+
+- **Kill-switch (L-6):** If `CRUCIBLE_CALIBRATION_DISABLED=1`, return BEFORE any lock acquisition or filesystem state change — no mkdir, no holder write, no append.
+- **Dedup (L-2):** Call `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="siege"` BEFORE `append()`, and skip the emit if it returns True. The `append()` helper does NOT scan existing entries — honoring L-2 is the caller's responsibility.
+
+Field values for the siege entry:
+
+- `skill: "siege"`, `tier: "A"`.
+- `artifact_type`: per the gated artifact — `"code"` for code (the default), else the artifact's type (`design` | `plan` | `mixed` maps to its dominant component; use `other` only when no schema value applies). Use the artifact-type detection from Phase 1 Step 2.
+- `verdict`: map siege's terminal state to the schema enum — terminal clean (zero Critical + zero High) → `PASS`; user escalation / accepted-risk override / `DIMINISHING_RETURNS` escalation → `ESCALATED`; stagnation-judge `STAGNATION` exit → `STAGNATION`.
+- `severity_histogram`: build by counting the **final surviving findings** — the set remaining at terminal verdict, as enumerated in the Output-Format final report (Critical / High / Medium / Low sections) — per their per-finding severities, using the siege→schema mapping **Critical→fatal, High→significant, Medium→minor, Low→nit**. The report's surviving-findings set is the source of truth; aggregate the severity counts across it. This makes the mechanical WHS rule `(fatal + significant) >= 1` equivalent to "had ≥1 Critical or High" — exactly siege's gate criterion.
+- `would_have_shipped_without_gate`: do NOT set by hand — it follows mechanically from the histogram per L-3 (`(fatal + significant) >= 1`). Emit the histogram and let the boolean follow.
+- `findings_count`: total surviving findings across all severities. `rounds`: the Phase 4 gate round count. `confidence`: derive mechanically — `1.00` for a clean terminal PASS (zero Critical + zero High); for an escalation/stagnation exit, lower it toward `0.50` in proportion to unresolved Critical+High findings (e.g., `1.00 - min(0.50, 0.10 × unresolved_critical_high)`). Siege has no separate scoring loop; this keeps the field reproducible across runs rather than free-chosen.
+- `artifact_hash`: sha256 of the gated artifact bytes (the commit-anchor target). `chunk_hash: null` (siege does not chunk).
+- `gated_files`: the manifest files reviewed (repo-relative). `highest_finding`: one-line quote of the most severe surviving finding, or null if none.
+- `predicted_falsifier`: write `"<DEFERRED:pre-phase-7>"` ONLY when `verdict ∈ {PASS, FAIL}` AND `artifact_type == "code"`; otherwise `null` (all escalation verdicts and all non-code artifact types).
+- Schema-fixed: `schema_version: 1`, `backfilled: false`, `falsified: null`, `falsified_by: null`, `gated_files_truncated: 0`, `comment: null`. `run_id` is a UUIDv7 (`scripts/uuid7.py`). `timestamp` is ISO-8601 UTC.
+
 ## Persistence
 
 ### Threat Model
