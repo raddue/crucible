@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(bash -il -c 'echo \"shell started ok\"' 2>&1)",
-      "Bash(notify-send \"Claude Code\" \"Session complete. All work merged and CI green.\" --urgency=normal)",
-      "WebFetch(domain:github.com)"
-    ]
-  }
-}

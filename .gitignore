@@ -1,5 +1,9 @@
 node_modules/
 .worktrees/
+# Local Claude Code session state / ambient config — never committed
+.claude/
+.envrc
+.mcp.json
 docs/plans/
 docs/prds/
 docs/compass.md
