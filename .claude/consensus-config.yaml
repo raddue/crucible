@@ -1,0 +1,21 @@
+# =============================================================================
+# Consensus & External Review Configuration
+# =============================================================================
+# API keys are referenced by environment variable name.
+# Never paste raw API keys into this file.
+# This file is gitignored — it will not be committed.
+# =============================================================================
+
+external_review:
+  enabled: true
+  timeout_seconds: 180
+  temperature: 0.3
+  models:
+    - provider: google
+      model_id: gemini-2.5-pro
+      api_key_env: GOOGLE_API_KEY
+  skills:
+    code_review: true
+    quality_gate: true
+    red_team: true
+    inquisitor: false  # 5 * N API calls per run — opt in when needed

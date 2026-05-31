@@ -1,4 +1,4 @@
-"""T-C7: Doctor subcommand — self-diagnostic, schema validation, C-9 invariant.
+"""T-C7: Doctor subcommand — self-diagnostic, schema validation, C-9 git-tracking advisory.
 
 RED phase: scripts/compass.py does not exist. Tests will fail at subprocess
 invocation. Collection must succeed.
@@ -186,28 +186,83 @@ next
     )
 
 
-# ── T-C7.8: C-9 invariant — docs/compass.md is NOT gitignored ─────────────────
+# ── T-C7.8: git-tracking mode is advisory INFO, never a doctor FAIL (#308 reconciliation) ─
 
-def test_tc7_8_c9_invariant_docs_compass_not_gitignored(tmp_path):
-    """C-9: doctor checks that docs/compass.md is NOT gitignored.
+def _git(args, cwd):
+    return subprocess.run(["git"] + args, cwd=str(cwd), capture_output=True, text=True)
 
-    Uses git check-ignore semantic check (catches broad patterns like docs/, *.md, etc.).
-    This test runs against the ACTUAL repo root (not tmp_path) since .gitignore is repo-scoped.
+
+def test_tc7_8_gitignored_compass_is_advisory_not_fail(tmp_path):
+    """Whether compass.md is committed or gitignored is a per-repo policy choice,
+    not a violation. #308 deliberately gitignored it (local session state); doctor
+    must report the tracking mode as INFO and NOT FAIL on account of it.
+
+    Supersedes the old C-9 'must-not-be-gitignored' assertion, which #308 made
+    stale (doctor then false-FAILed in this repo). See the committed/shared-mode
+    case in the companion test below.
     """
-    repo_root = Path(__file__).resolve().parents[2]
-    compass_path = repo_root / "docs" / "compass.md"
-
-    # Use git check-ignore: exit 0 means IS ignored (bad), exit non-0 means NOT ignored (good)
-    r = subprocess.run(
-        ["git", "check-ignore", "docs/compass.md"],
-        cwd=str(repo_root),
-        capture_output=True, text=True,
+    (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / COMPASS_REL).write_text(CANONICAL_COMPASS)
+    # A real git repo whose .gitignore ignores compass.md (the #308 local-only mode).
+    _git(["init"], tmp_path)
+    (tmp_path / ".gitignore").write_text("docs/compass.md\n")
+    # Guard against a vacuous pass: confirm the fixture actually ignores the file.
+    ci = _git(["check-ignore", "docs/compass.md"], tmp_path)
+    assert ci.returncode == 0, (
+        f"fixture setup failed — compass.md is not actually gitignored: {ci.stdout!r} {ci.stderr!r}"
     )
-    # Exit 0 from git check-ignore means the file IS gitignored — that would violate C-9
-    assert r.returncode != 0, (
-        f"C-9 violation: docs/compass.md appears to be gitignored! "
-        f"git check-ignore exit={r.returncode}, stdout={r.stdout!r}. "
-        "Remove it from .gitignore — compass.md is repo-scoped persistent state and must be committed."
+
+    r = _run(["doctor"], tmp_path)
+    # Gitignored is NOT a failure: doctor exits 0 on this valid canonical compass.
+    assert r.returncode == 0, (
+        f"doctor must NOT fail when compass.md is gitignored (per-repo policy choice). "
+        f"returncode={r.returncode}, stdout={r.stdout!r}, stderr={r.stderr!r}"
+    )
+    # The stale C-9 violation language must be gone.
+    assert "C-9 violation" not in r.stdout, (
+        f"doctor must not emit the stale C-9 violation. stdout: {r.stdout!r}"
+    )
+    # Tracking mode is surfaced as advisory INFO.
+    assert "git-tracking" in r.stdout and "local-only" in r.stdout, (
+        f"doctor should report git-tracking local-only mode as INFO. stdout: {r.stdout!r}"
+    )
+
+
+def test_tc7_8b_tracked_compass_reports_committed_mode(tmp_path):
+    """The committed/shared mode (compass.md not gitignored) is also reported as
+    advisory INFO and exits 0 — the other half of the per-repo policy choice."""
+    (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / COMPASS_REL).write_text(CANONICAL_COMPASS)
+    _git(["init"], tmp_path)
+    # No .gitignore entry → not ignored → committed/shared mode.
+    r = _run(["doctor"], tmp_path)
+    assert r.returncode == 0, f"doctor failed in committed mode: {r.stdout!r} / {r.stderr!r}"
+    assert "C-9 violation" not in r.stdout
+    assert "git-tracking" in r.stdout and "committed/shared" in r.stdout, (
+        f"doctor should report git-tracking committed/shared mode as INFO. stdout: {r.stdout!r}"
+    )
+
+
+def test_tc7_8c_non_git_repo_reports_undetermined_not_committed(tmp_path):
+    """Outside a git repo, `git check-ignore` exits 128 (not exit 1). Doctor must
+    NOT mislabel that as 'committed/shared mode' — it reports the mode as
+    undetermined and still exits 0 (no FAIL)."""
+    (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / COMPASS_REL).write_text(CANONICAL_COMPASS)
+    # Deliberately NO `git init` — tmp_path is not a git repo.
+    # Guard against /tmp accidentally being inside a parent repo (would make this vacuous).
+    ci = _git(["check-ignore", "docs/compass.md"], tmp_path)
+    if ci.returncode != 128:
+        pytest.skip(f"tmp_path is inside a git repo (check-ignore exit={ci.returncode}); cannot exercise the 128 path")
+
+    r = _run(["doctor"], tmp_path)
+    assert r.returncode == 0, f"doctor should still exit 0 outside a git repo: {r.stdout!r} / {r.stderr!r}"
+    assert "C-9 violation" not in r.stdout
+    assert "committed/shared" not in r.stdout, (
+        f"doctor must NOT claim committed/shared mode outside a git repo. stdout: {r.stdout!r}"
+    )
+    assert "undetermined" in r.stdout, (
+        f"doctor should report git-tracking mode undetermined outside a git repo. stdout: {r.stdout!r}"
     )
 
 

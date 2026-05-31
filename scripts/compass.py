@@ -753,8 +753,8 @@ def _cmd_doctor(path="docs/compass.md"):
         info.append(f"file: {path} — NOT FOUND (bootstrap state will be used on next update)")
         # Still report line count as 0
         info.append("lines: 0/40")
-        # C-9 invariant: check git check-ignore
-        _doctor_c9(path, issues)
+        # git-tracking mode (advisory INFO, not a FAIL)
+        _doctor_c9(path, info)
         # Lock state
         _doctor_lock(path, info)
         _print_doctor(info, warnings, issues)
@@ -814,8 +814,8 @@ def _cmd_doctor(path="docs/compass.md"):
         else:
             info.append(f"open-loops: {len(state.get('open_loops', []))} (none paused)")
 
-    # C-9 invariant: docs/compass.md must not be gitignored
-    _doctor_c9(path, issues)
+    # git-tracking mode (advisory INFO, not a FAIL)
+    _doctor_c9(path, info)
 
     # Lock state
     _doctor_lock(path, info)
@@ -827,20 +827,30 @@ def _cmd_doctor(path="docs/compass.md"):
     return 0 if not issues else 1
 
 
-def _doctor_c9(path, issues):
-    """Check C-9: docs/compass.md must NOT be gitignored."""
+def _doctor_c9(path, info):
+    """Report compass.md's git-tracking mode (advisory, never a doctor FAIL).
+
+    Whether compass.md is committed or gitignored is a per-repo policy choice,
+    not a violation: a team repo may commit it to share arc state (the original
+    C-9 intent), while a solo/scratch repo may gitignore it as local session
+    state (see #308). Doctor surfaces the mode as INFO so `doctor` output stays
+    informative without imposing one policy. (Was a hard C-9 FAIL pre-#286-tail.)
+    """
     import subprocess as _sp
     try:
         r = _sp.run(
             ["git", "check-ignore", path],
             capture_output=True, text=True,
         )
+        # git check-ignore exit codes: 0 = ignored, 1 = not ignored (in a repo),
+        # 128 = error (not a git repo, or other fatal). Only 0/1 carry a tracking
+        # mode; anything else means we can't determine one — don't assert.
         if r.returncode == 0:
-            issues.append(
-                f"C-9 violation: {path} is gitignored — "
-                "compass.md is repo-scoped persistent state and must be committed"
-            )
-        # Non-zero = not ignored = good (no issue added)
+            info.append(f"git-tracking: {path} is gitignored (local-only mode)")
+        elif r.returncode == 1:
+            info.append(f"git-tracking: {path} is not gitignored (committed/shared mode)")
+        else:
+            info.append(f"git-tracking: {path} mode undetermined (not a git repo or git error)")
     except FileNotFoundError:
         # git not available — skip check
         pass

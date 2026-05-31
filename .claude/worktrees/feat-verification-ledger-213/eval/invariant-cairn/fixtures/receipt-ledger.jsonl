@@ -1,0 +1,9 @@
+{"dispatch_id":"design/1-designer","hash_prefix":"a1b2c3d4e5f6","verdict":"PASS","witness_ran":"TRACE#2"}
+{"dispatch_id":"design/1-reviewer","hash_prefix":"1111222233ff","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"design/1-innovator","hash_prefix":"2222333344ee","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"design/1-red-team","hash_prefix":"3333444455dd","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"plan/2-writer","hash_prefix":"1234567890ab","verdict":"PASS","witness_ran":"TRACE#3"}
+{"dispatch_id":"plan/2-reviewer","hash_prefix":"4444555566cc","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"plan/2-qg","hash_prefix":"5555666677bb","verdict":"PASS","witness_ran":"TRACE#2"}
+{"dispatch_id":"execute/3-impl-1","hash_prefix":"9876abcdef01","verdict":"PASS","witness_ran":"SKIPPED:tooling-absent"}
+{"dispatch_id":"execute/3-impl-2","hash_prefix":"fedcba987654","verdict":"PASS","witness_ran":"TRACE#2"}
