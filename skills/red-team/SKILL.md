@@ -217,6 +217,18 @@ Red-team operates in two modes depending on the caller:
 
 **Multi-model consensus:** When invoked by quality-gate on consensus-eligible rounds, quality-gate handles the multi-model dispatch via the consensus MCP tool. Red-team itself does not call consensus — the quality-gate orchestrator substitutes a consensus call for the red-team dispatch on eligible rounds. When invoked standalone, red-team uses single-model dispatch only.
 
+## Terminal Verdict Emit
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+**Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate owns the ledger emit on that path (no double-emission).
+
+When the iterative loop reaches its terminal verdict (clean — no Fatal/Significant — or an escalation exit: stagnation / architectural concern), append ONE **Tier B STUB** JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md` (importable: `scripts/ledger_append.py`).
+
+- Honor `CRUCIBLE_CALIBRATION_DISABLED=1` — return BEFORE any lock acquisition or filesystem write. Dedup via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="red-team"` BEFORE `append()`; skip if it returns True.
+- Populate ONLY meaningful values: `schema_version: 1`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "red-team"`, `tier: "B"`, `verdict` (map clean → `PASS`; stagnation → `STAGNATION`; any other escalation → `ESCALATED`; architectural → `ARCHITECTURAL`), `timestamp` (ISO-8601 UTC), `gated_files` (the reviewed artifact's files, repo-relative), `artifact_type`.
+- Set ALL calibration fields EXPLICITLY null per the "Tier-B null semantics" of `shared/ledger-append.md`: `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0` and `comment: null`. Keep `backfilled: false`, `falsified: null`, `falsified_by: null`.
+
 ## External Model Review (Optional)
 
 **Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate handles its own external review integration.
