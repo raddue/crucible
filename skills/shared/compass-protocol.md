@@ -68,8 +68,12 @@ Recovery: re-acquire lock, revert the write, release. Exit 2, stderr advisory.
 Note: the user-facing display cap is 5 entries; the hard-cap that raises
 `OpenLoopsCapError` is 10. D8 paused-pushes accumulate in this headroom.
 
-**C-9 invariant:** `docs/compass.md` is NOT gitignored. Verified via
-`git check-ignore docs/compass.md` semantic check.
+**C-9 (advisory):** `docs/compass.md`'s git-tracking mode is a per-repo policy
+choice — committed (shared arc state) or gitignored (local session state, as in
+this repo per #308). `doctor` reports the mode as INFO via the
+`git check-ignore docs/compass.md` semantic check and does **not** fail on
+either. (Originally a hard "must be committed" invariant; relaxed once #308
+deliberately gitignored compass.md.)
 
 ## Bootstrap sentinel `<pending>`
 
@@ -284,4 +288,4 @@ Post-finish cleared state (`current_arc == ''`):
 | C-6 | D8.5 fires before D8.1 no-op short-circuit | Carve-out order above |
 | C-7 | `Updated:` bumped iff any field delta (including side effects) | D11 rule in `_apply_patch` |
 | C-8 | D14: compass emits from orchestrators only (best-effort, v1) | Call-site convention |
-| C-9 | `docs/compass.md` NOT gitignored | `git check-ignore docs/compass.md` check |
+| C-9 | git-tracking mode (committed vs gitignored) reported as advisory INFO, never a failure | `git check-ignore docs/compass.md` check in `_doctor_c9` |

@@ -1,0 +1,50 @@
+{
+  "skill_name": "review-feedback",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Got this code review comment on our PR:\n\n**Reviewer:** \"The `legacyFormatDate()` function in `src/utils/dates.ts` is dead code — it's not called anywhere. Remove it to keep the codebase clean.\"\n\nHere's the function:\n```typescript\n// src/utils/dates.ts\nexport function legacyFormatDate(date: Date): string {\n  return `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()}`;\n}\n\nexport function formatDate(date: Date): string {\n  return date.toISOString().split('T')[0];\n}\n```\n\nAnd here's a grep showing usage:\n```\n$ grep -r 'legacyFormatDate' --include='*.ts' --include='*.tsx'\nsrc/utils/dates.ts:export function legacyFormatDate(date: Date): string {\nsrc/utils/dates.ts:// Old format, see legacyFormatDate\nscripts/migrate-reports.ts:import { legacyFormatDate } from '../src/utils/dates';\nscripts/migrate-reports.ts:  const formatted = legacyFormatDate(record.createdAt);\ntests/utils/dates.test.ts:import { legacyFormatDate } from '../../src/utils/dates';\ntests/utils/dates.test.ts:  expect(legacyFormatDate(new Date('2024-01-15'))).toBe('1/15/2024');\n```\n\nHow should I handle this review comment?",
+      "expected_output": "Agent should push back on the reviewer's suggestion. The grep shows legacyFormatDate IS used — in scripts/migrate-reports.ts and has tests. The reviewer's claim that it's 'dead code' is factually wrong. Agent should provide the grep evidence and decline to remove it.",
+      "files": [],
+      "expectations": [
+        "Agent does NOT blindly implement the reviewer's suggestion to remove the function",
+        "Agent checks the codebase for actual usage before acting",
+        "Agent identifies that legacyFormatDate is used in scripts/migrate-reports.ts",
+        "Agent identifies that legacyFormatDate has an existing test in tests/utils/dates.test.ts",
+        "Agent pushes back with specific evidence (the grep results) showing the function is not dead code",
+        "Agent does NOT use performative language ('Great point!', 'You're absolutely right!', 'Thanks for catching that!')",
+        "Agent's response is technically grounded, not emotionally performative"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "PR review feedback from an external contributor on our internal CLI tool (used by ~5 developers on our team):\n\n```\nReviewer comments on src/cli/validate.ts:\n\n1. \"Add comprehensive input validation with detailed error messages for every field\"\n2. \"Implement a retry mechanism with exponential backoff for the validation API calls\"\n3. \"Add structured logging (Winston or Pino) instead of console.log\"\n4. \"Add circuit breaker pattern for the external validation service\"\n5. \"Add OpenTelemetry tracing spans for each validation step\"\n```\n\nCurrent implementation:\n```typescript\n// src/cli/validate.ts\nexport async function validateConfig(configPath: string): Promise<ValidationResult> {\n  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));\n  const response = await fetch(`${API_URL}/validate`, {\n    method: 'POST',\n    body: JSON.stringify(config),\n  });\n  if (!response.ok) {\n    console.log(`Validation failed: ${response.status}`);\n    return { valid: false, errors: await response.json() };\n  }\n  console.log('Validation passed');\n  return { valid: true, errors: [] };\n}\n```\n\nThis is a simple CLI tool used internally. How should I respond?",
+      "expected_output": "Agent should evaluate each suggestion against the actual context (internal CLI, 5 developers). Most suggestions are overengineering for this scale. Input validation (1) is reasonable. Retry (2) might be reasonable for network calls. Structured logging (3), circuit breaker (4), and OpenTelemetry (5) are massive overkill for an internal CLI used by 5 people. Agent should push back on YAGNI grounds.",
+      "files": [],
+      "expectations": [
+        "Agent evaluates each suggestion individually rather than accepting or rejecting all as a batch",
+        "Agent considers the context: internal CLI tool, ~5 developers, simple use case",
+        "Agent identifies that circuit breaker pattern (item 4) is overengineering for this scale",
+        "Agent identifies that OpenTelemetry tracing (item 5) is overengineering for this scale",
+        "Agent applies YAGNI reasoning — not all 'professional' patterns are appropriate for every codebase",
+        "Agent accepts or partially accepts at least one reasonable suggestion (input validation or retry)",
+        "Agent pushes back with technical reasoning, not just 'I don't think we need this'"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Got a PR review with 5 items. Here's the code and the feedback:\n\n```typescript\n// src/services/notification.ts\nimport { db } from '../db';\nimport { sendEmail } from '../email';\n\nexport async function notifyUser(userId: string, message: string) {\n  const user = await db.users.findById(userId);\n  if (!user) throw new Error(`User ${userId} not found`);\n  \n  await sendEmail(user.email, 'Notification', message);\n  await db.notifications.create({ userId, message, sentAt: new Date() });\n}\n```\n\nReviewer feedback:\n1. \"Change `findById` to `findUnique` — that's the Prisma convention\" (Note: our project uses Knex, not Prisma)\n2. \"The Error message includes the userId which could be a PII leak in logs. Use a generic message instead.\"\n3. \"Add a return type annotation to notifyUser\"\n4. \"What happens if sendEmail succeeds but the db.notifications.create fails? Shouldn't these be in a transaction?\"\n5. \"Can you clarify what you mean by item 4? Are you suggesting we wrap the email send AND the db write in a transaction, or just the db operations? Email sends can't be rolled back.\"\n\nWait, item 5 is my question back to the reviewer — they haven't responded yet. How should I handle this feedback?",
+      "expected_output": "Agent should: (1) Reject item 1 — project uses Knex not Prisma, so findUnique is wrong for this codebase. (2) Accept item 2 — valid security concern. (3) Accept item 3 — reasonable improvement. (4+5) Don't implement item 4 yet — there's an outstanding clarifying question and the items may be interrelated. Should not implement any of items 4/5 until clarification arrives.",
+      "files": [],
+      "expectations": [
+        "Agent rejects item 1, noting the project uses Knex not Prisma — findUnique is the wrong API",
+        "Agent accepts item 2 as a valid security concern (PII in error messages)",
+        "Agent accepts item 3 as a reasonable improvement (return type annotation)",
+        "Agent does NOT implement item 4 before the clarifying question (item 5) is answered",
+        "Agent recognizes the dependency between items 4 and 5 — partial understanding could lead to wrong implementation",
+        "Agent's response distinguishes between items it can act on now vs items that need clarification",
+        "Agent does NOT use performative agreement language for correct items — just states the fix or acts"
+      ]
+    }
+  ]
+}

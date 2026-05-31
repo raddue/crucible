@@ -28,7 +28,7 @@ Most users never invoke compass directly — it fires automatically through `bui
 
 ## File location
 
-`docs/compass.md` — committed to the repo (C-9 invariant). Verified by `git check-ignore docs/compass.md`.
+`docs/compass.md` — either committed (shared arc state) or gitignored (local session state); this is a per-repo policy choice. `doctor` reports the mode as advisory INFO via `git check-ignore docs/compass.md` and never fails on it (C-9, #308).
 
 ## Schema
 
@@ -108,7 +108,7 @@ Direct writes to `open_loops` by integration sites are prohibited (D8 direct-wri
 
 ## Key invariants
 
-- **C-9:** `docs/compass.md` is NOT gitignored. Verified via `git check-ignore docs/compass.md`.
+- **C-9:** `docs/compass.md`'s git-tracking mode (committed vs gitignored) is a per-repo policy choice. `doctor` reports it as advisory INFO via `git check-ignore docs/compass.md`; neither mode is a failure (#308 reconciliation).
 - **C-4:** 40-line hard cap. Any write producing >40 lines is rejected; no partial write occurs.
 - **D11:** Idempotency — same `update --field X --value Y` applied twice yields the same state. True no-ops do not bump `Updated:`.
 - **D14:** Compass emits only from skill orchestrators, never from sub-agents (best-effort, v1).

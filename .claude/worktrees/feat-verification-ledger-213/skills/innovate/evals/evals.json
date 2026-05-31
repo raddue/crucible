@@ -1,0 +1,50 @@
+{
+  "skill_name": "innovate",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use the innovate skill on this finalized design doc:\n\n## Design: Batch Invoice Processing\n\n**Context:** Accounting team manually processes ~200 invoices/day. We're building automation.\n\n**Architecture:**\n- Upload CSV of invoices via admin UI\n- Backend parses CSV, validates each row against schema\n- Valid invoices are created in the database\n- Invalid rows are collected and returned as an error report\n- Invoices in 'pending' status are sent to the payment processor (Stripe) in a nightly batch job\n\n**Components:**\n- `POST /api/invoices/upload` — accepts CSV, returns validation report\n- `InvoiceParser` — CSV parsing and schema validation\n- `InvoiceBatcher` — nightly cron job that processes pending invoices via Stripe\n- PostgreSQL tables: `invoices`, `invoice_errors`, `payment_results`\n\n**Constraints:** Team of 2, 6-week timeline. Node.js/Express/PostgreSQL stack.\n\n**What's been decided:**\n- CSV format: amount, vendor_email, due_date, description, po_number\n- Validation: amount > 0, valid email, due_date in future, PO number matches pattern\n- Nightly batch at 2 AM UTC\n- Stripe payment intents for each invoice",
+      "expected_output": "Innovation should propose something that addresses a real gap in the design. Strong candidates: idempotency handling (what if the same CSV is uploaded twice?), a progress/status tracking mechanism for the batch job, or a webhook/notification when the batch completes. Should NOT propose scope-expanding features like a full dashboard or ML-based categorization.",
+      "files": [],
+      "expectations": [
+        "Proposes exactly ONE addition, not a feature wishlist",
+        "The proposed addition addresses a genuine gap or risk in the design — not cosmetic",
+        "Proposal includes a 'why this over alternatives' comparison with at least one runner-up",
+        "Proposal states the expected impact (what it enables or what risk it mitigates)",
+        "Proposal states the cost in terms of added complexity or scope",
+        "Proposal fits within the stated constraints (2 engineers, 6 weeks, existing stack)",
+        "Proposal is specific enough to implement (not vague like 'add better error handling')"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Use the innovate skill on this finalized implementation plan:\n\n## Plan: Add Search to Product Catalog\n\n**Task 1:** Add a `GET /api/products/search?q=term&category=X&minPrice=N&maxPrice=N` endpoint\n**Task 2:** Implement full-text search using PostgreSQL `tsvector` and `tsquery` on product name and description\n**Task 3:** Add indexed `category` and `price` columns for filtering\n**Task 4:** Add relevance ranking using `ts_rank()` and sort by relevance by default\n**Task 5:** Add pagination using our existing `paginate()` helper (cursor-based)\n**Task 6:** Update frontend search component to use the new endpoint with debounced input\n**Task 7:** Write integration tests for search with various query combinations\n**Task 8:** Add a search analytics table to log queries (for future relevance tuning)\n\n**Context:** E-commerce app, ~50k products, PostgreSQL 15, Express, React. Current 'search' is just a `LIKE '%term%'` query on product name. Team of 4, 2-sprint timeline (4 weeks).\n\n**Already decided:** PostgreSQL full-text search (not Elasticsearch — not enough scale to justify ops overhead). Cursor-based pagination reuses existing infrastructure.",
+      "expected_output": "This plan is already quite comprehensive. The innovation should find something genuinely missing — perhaps search suggestions/autocomplete (leveraging the tsvector already being built), handling typos/fuzzy matching (pg_trgm), or search result caching for popular queries. Should NOT expand into recommendations, A/B testing, or other large-scope additions that don't fit the timeline.",
+      "files": [],
+      "expectations": [
+        "Proposes exactly ONE addition, not a feature wishlist",
+        "The proposed addition builds on existing plan components rather than introducing entirely new infrastructure",
+        "Proposal fits within the 4-week timeline and doesn't require new infrastructure beyond PostgreSQL",
+        "Proposal includes why this addition over alternatives",
+        "Proposal states impact and cost",
+        "Proposal is genuinely useful — not obvious busywork that adds complexity without proportional value",
+        "Proposal does NOT expand scope dramatically (no Elasticsearch, no ML, no A/B testing)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use the innovate skill on this finalized design doc:\n\n## Design: Rate Limiter Middleware\n\n**Context:** Our public API is getting hammered by a few aggressive clients. Need rate limiting.\n\n**Architecture:**\n- Express middleware using Redis for distributed counting\n- Sliding window algorithm (vs fixed window to prevent burst-at-boundary)\n- Rate limits: 100 req/min for authenticated users, 20 req/min for anonymous\n- Response headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset\n- 429 Too Many Requests response with Retry-After header when exceeded\n\n**Implementation:**\n- Redis MULTI/EXEC for atomic increment + expiry\n- Lua script for sliding window calculation\n- Per-IP for anonymous, per-API-key for authenticated\n- Configurable limits per endpoint group (e.g., /api/search gets lower limit)\n- Graceful degradation: if Redis is down, allow requests through (fail-open)\n\n**Constraints:** Solo developer, 1-week timeline. Must not add latency > 5ms per request.\n\n**Testing:** Unit tests with Redis mock, integration tests with Redis testcontainer, load test with k6.\n\n**Already decided:** Redis (already in stack for sessions), sliding window (not token bucket — simpler mental model for API consumers), fail-open (availability > protection).",
+      "expected_output": "This design is already thorough. The innovation should propose something that addresses a real edge case or operational need without breaking the 1-week solo constraint. Maybe: graduated response (slow-down before hard block), client notification/warning at 80% of limit, or monitoring/alerting for rate limit events. Should NOT propose complex additions like ML-based anomaly detection.",
+      "files": [],
+      "expectations": [
+        "Proposes exactly ONE addition, not a feature wishlist",
+        "Proposal fits within the 1-week solo developer constraint",
+        "Proposal does NOT add more than 5ms latency (respects the stated constraint)",
+        "Proposal addresses a gap that the existing design doesn't cover",
+        "Proposal includes why this over alternatives",
+        "Proposal states impact and cost",
+        "Proposal is proportionate to the project scope — not overengineering for a 1-week middleware"
+      ]
+    }
+  ]
+}

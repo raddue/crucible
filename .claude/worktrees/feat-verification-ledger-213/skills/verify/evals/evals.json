@@ -1,0 +1,64 @@
+{
+  "skill_name": "verify",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I've just finished implementing the user registration feature. Here are the requirements:\n\n1. Users can register with email and password\n2. Passwords must be at least 8 characters with one uppercase and one number\n3. Email verification is sent after registration\n4. Duplicate emails are rejected with a clear error message\n5. Registration events are logged to the audit trail\n\nHere's my test output:\n```\nRUNNING tests/registration.test.js\n✓ should create a new user with valid email and password (12ms)\n✓ should reject password shorter than 8 characters (3ms)\n✓ should reject password without uppercase letter (2ms)\n✓ should reject password without number (2ms)\n✓ should reject duplicate email with 409 status (8ms)\n✓ should hash password before storage (5ms)\n✓ should return user object without password field (3ms)\n\n7 tests passed, 0 failed\n```\n\nHere's the implementation:\n```javascript\n// src/routes/auth.js\nrouter.post('/register', async (req, res) => {\n  const { email, password } = req.body;\n  \n  // Validate password\n  if (password.length < 8) return res.status(400).json({ error: 'Password too short' });\n  if (!/[A-Z]/.test(password)) return res.status(400).json({ error: 'Password needs uppercase' });\n  if (!/[0-9]/.test(password)) return res.status(400).json({ error: 'Password needs number' });\n  \n  // Check duplicate\n  const existing = await User.findOne({ email });\n  if (existing) return res.status(409).json({ error: 'Email already registered' });\n  \n  // Create user\n  const hashed = await bcrypt.hash(password, 10);\n  const user = await User.create({ email, password: hashed });\n  \n  res.status(201).json({ id: user.id, email: user.email });\n});\n```\n\nAll tests pass. This looks good to ship, right?",
+      "expected_output": "Agent should identify that requirements 3 (email verification) and 5 (audit trail logging) are not implemented and not tested. The 7 passing tests only cover requirements 1, 2, and 4. Passing tests does not mean requirements are met. Should NOT declare ready to ship.",
+      "files": [],
+      "expectations": [
+        "Agent does NOT declare the work ready to ship or complete",
+        "Agent identifies that email verification (requirement 3) is neither implemented nor tested",
+        "Agent identifies that audit trail logging (requirement 5) is neither implemented nor tested",
+        "Agent explicitly compares the requirements list against the test coverage and implementation",
+        "Agent recognizes that 7/7 tests passing does not mean all requirements are met",
+        "Agent provides a specific list of what's missing before the work can be considered complete",
+        "Agent does not use hedging language like 'looks good but maybe check...' — states the gaps definitively"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I fixed the currency formatting bug where formatCurrency(0.1) was returning '$0.1' instead of '$0.10'. Here's my regression test and it passes:\n\n```javascript\n// tests/currency.test.js\ndescribe('formatCurrency', () => {\n  // ... existing tests ...\n  \n  test('regression: should format small decimals correctly', () => {\n    expect(formatCurrency(1000)).toBe('$1,000.00');\n    expect(formatCurrency(99.99)).toBe('$99.99');\n    expect(formatCurrency(0)).toBe('$0.00');\n  });\n});\n```\n\n```\nRUNNING tests/currency.test.js\n✓ should format whole numbers (2ms)\n✓ should format with comma separators (1ms)\n✓ should handle negative numbers (1ms)\n✓ regression: should format small decimals correctly (1ms)\n\n4 tests passed, 0 failed\n```\n\nRegression test passes. Ready to commit the fix?",
+      "expected_output": "Agent should catch that the regression test doesn't actually test the reported bug. The bug was formatCurrency(0.1) returning '$0.1' but the test checks formatCurrency(1000), formatCurrency(99.99), and formatCurrency(0) — none of which reproduce the original bug. The test passes but proves nothing about the fix.",
+      "files": [],
+      "expectations": [
+        "Agent does NOT approve the commit as ready",
+        "Agent identifies that the regression test does not test the actual bug scenario (formatCurrency(0.1))",
+        "Agent notes the specific gap: the bug was about 0.1 returning '$0.1' but the test checks 1000, 99.99, and 0 instead",
+        "Agent recommends adding a test case that specifically asserts formatCurrency(0.1) === '$0.10'",
+        "Agent recognizes that a passing regression test that doesn't test the bug provides false confidence",
+        "Agent suggests additional edge cases for the same class of bug (e.g., 0.2, 0.01, 1.1)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Just finished the TypeScript migration for the utils module. ESLint is clean:\n\n```\n$ npx eslint src/utils/ --ext .ts\n\n✨ No problems found\n```\n\nHere's a sample of the migrated code:\n\n```typescript\n// src/utils/config.ts\ninterface AppConfig {\n  apiUrl: string;\n  timeout: number;\n  retries: number;\n  features: FeatureFlags;\n}\n\ninterface FeatureFlags {\n  darkMode: boolean;\n  betaAccess: boolean;\n}\n\nexport function loadConfig(): AppConfig {\n  return {\n    apiUrl: process.env.API_URL,  // string | undefined assigned to string\n    timeout: parseInt(process.env.TIMEOUT),  // number | NaN assigned to number\n    retries: process.env.RETRIES as unknown as number,  // string cast to number\n    features: {\n      darkMode: process.env.DARK_MODE,  // string | undefined assigned to boolean\n      betaAccess: process.env.BETA === 'true'\n    }\n  };\n}\n```\n\n```typescript\n// src/utils/retry.ts\nexport async function withRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T> {\n  let lastError: Error;\n  for (let i = 0; i <= maxRetries; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      lastError = e as Error;\n    }\n  }\n  throw lastError;  // possibly used before assigned\n}\n```\n\nLinter is green, so we're good to merge the migration, right?",
+      "expected_output": "Agent should identify that ESLint passing does not mean TypeScript compiles. The code has multiple type errors: process.env values are string|undefined being assigned to string/number/boolean without proper conversion. The 'as unknown as number' cast is a dangerous type assertion. The lastError variable may be used before being assigned. Agent should insist on running tsc before claiming the migration is complete.",
+      "files": [],
+      "expectations": [
+        "Agent does NOT approve the merge based on ESLint alone",
+        "Agent identifies that linter passing does not verify TypeScript compilation (tsc)",
+        "Agent identifies the type error: process.env.API_URL is string|undefined but apiUrl expects string",
+        "Agent identifies the dangerous cast: 'as unknown as number' bypasses type safety on RETRIES",
+        "Agent identifies the type error: process.env.DARK_MODE is string|undefined but darkMode expects boolean",
+        "Agent recommends running tsc (TypeScript compiler) as the actual verification step for a TS migration",
+        "Agent identifies the 'possibly used before assigned' issue with lastError in retry.ts"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "My refactoring agent just finished migrating our API endpoints from Express to Fastify. Here's what it reported:\n\n```\n✅ Migration Complete!\n\nSummary:\n- Migrated 5 route files to Fastify\n- Updated all middleware to Fastify hooks\n- Updated error handling to Fastify format\n- All existing tests pass\n\nFiles changed:\n- src/routes/users.ts ✅\n- src/routes/orders.ts ✅\n- src/routes/products.ts ✅\n- src/routes/auth.ts ✅\n- src/routes/webhooks.ts ✅\n- src/middleware/auth.ts ✅\n- src/middleware/rateLimit.ts ✅\n- src/app.ts ✅\n```\n\nHere's the actual git diff summary:\n\n```\n$ git diff --stat\n src/routes/users.ts    | 45 +++++++++-------\n src/routes/orders.ts   | 38 +++++++------\n src/routes/products.ts | 52 +++++++++---------\n src/middleware/auth.ts  | 28 ++++++----\n src/app.ts             | 15 +++---\n 5 files changed, 112 insertions(+), 66 deletions(-)\n```\n\nAgent says it's done. Let's commit and push?",
+      "expected_output": "Agent should NOT trust the agent's report. The report claims 8 files changed but git diff shows only 5. Missing: auth.ts routes, webhooks.ts routes, and rateLimit.ts middleware were NOT actually modified. Agent should identify the discrepancy and investigate the missing files before declaring completion.",
+      "files": [],
+      "expectations": [
+        "Agent does NOT approve committing based on the agent's success report alone",
+        "Agent independently compares the agent's claimed changes against the actual git diff",
+        "Agent identifies that auth.ts routes file is listed as migrated but not in the diff",
+        "Agent identifies that webhooks.ts routes file is listed as migrated but not in the diff",
+        "Agent identifies that rateLimit.ts middleware is listed as migrated but not in the diff",
+        "Agent notes the discrepancy: agent claims 8 files changed, git shows 5",
+        "Agent recommends investigating the 3 missing files before declaring migration complete"
+      ]
+    }
+  ]
+}
