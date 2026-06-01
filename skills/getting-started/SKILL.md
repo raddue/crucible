@@ -17,6 +17,20 @@ test -f scripts/compass.py && python scripts/compass.py read --compact 2>/dev/nu
 
 If the output is non-empty, print it verbatim so the user sees session-resume context. If the output contains `[STALE]`, surface that to the user. Do NOT emit `compass update` from this skill — getting-started reads only.
 
+## Calibration Snapshot (Read-Only Session Init)
+
+Read-only, advisory, never blocking — runs after the compass read and before any user-facing branch. Silent no-op when nothing applies (off-repo, pre-bootstrap, fresh data, or kill-switched). Never auto-invokes `/calibration-reconcile`.
+
+```bash
+# Reconciliation-staleness nudge (reads the central ledger store; silent if the
+# data is fresh, absent, or CRUCIBLE_CALIBRATION_DISABLED=1).
+test -f scripts/brier_advisory.py && python3 scripts/brier_advisory.py stale-check 2>/dev/null || true
+# Latest weekly ledger summary (repo-local committed artifact; skip if none).
+ls docs/ledger/weekly-*.md >/dev/null 2>&1 && head -n 3 "$(ls -1 docs/ledger/weekly-*.md | sort | tail -1)" || true
+```
+
+Print any non-empty output verbatim. If both produce nothing (first-time-ever, pre-`/ledger`-run), skip silently — show no calibration section at all.
+
 ## The Rule
 
 **Invoke relevant skills BEFORE taking action or responding.** Skills encode hard-won process discipline — skipping them loses that value.
