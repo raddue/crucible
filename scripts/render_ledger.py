@@ -28,13 +28,14 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from scripts.ledger_reduce import reduce as _falsification_reduce  # noqa: E402
+from scripts.ledger_append import default_ledger_dir  # noqa: E402
 
-# Defaults are CWD-relative: /ledger is invoked from the repo root, and the
-# ledger lives under that repo's working tree. Keeping these relative (rather
-# than pinned to this file's REPO_ROOT) lets the tool operate on whatever repo
-# it is run from, and lets tests isolate via a chdir into tmp_path.
-LEDGER_PATH = os.path.join(".crucible", "ledger", "runs.jsonl")
-FALSIFICATION_PATH = os.path.join(".crucible", "ledger", "falsification.jsonl")
+# Defaults point at the central machine-local store (#270): the live ledger
+# aggregates every repo's gating runs into ~/.claude/crucible/ledger (override
+# via CRUCIBLE_LEDGER_DIR). Tests / the committed in-repo fixture pass an
+# explicit --ledger. falsification.jsonl lives beside runs.jsonl in that store.
+LEDGER_PATH = os.path.join(default_ledger_dir(), "runs.jsonl")
+FALSIFICATION_PATH = os.path.join(default_ledger_dir(), "falsification.jsonl")
 REPORT_DIR = os.path.join("docs", "ledger")
 
 # 3x the 4-week rolling median per §4a. Starting heuristic; re-evaluate after a
@@ -186,12 +187,26 @@ def week_summary(entries: list) -> dict:
             slot["significant_rate"] = 0.0
             slot["fatal_rate"] = 0.0
 
+    # Per-repo provenance breakdown (schema v2 `repo` field). Counts all
+    # non-backfilled runs (Tier A + Tier B stubs); v1 rows carry no `repo`
+    # key and bucket under 'unknown'. `caught` is the WHS-true subset.
+    per_repo = {}
+    for e in entries:
+        if e.get("backfilled") is True:
+            continue
+        repo = e.get("repo") or "unknown"
+        rslot = per_repo.setdefault(repo, {"runs": 0, "caught": 0})
+        rslot["runs"] += 1
+        if e.get("would_have_shipped_without_gate") is True:
+            rslot["caught"] += 1
+
     return {
         "total_runs": len(entries),
         "verdicts": _verdict_breakdown(entries),
         "caught_count": caught_count(entries),
         "backfilled": backfilled,
         "per_skill": per_skill,
+        "per_repo": per_repo,
     }
 
 
@@ -381,6 +396,26 @@ def render_week(week: str, entries: list, *, baseline_medians=None,
     )
     lines.append("")
 
+    # Per-repo provenance breakdown (schema v2 `repo`); all non-backfilled
+    # runs, v1 rows with no `repo` bucket under 'unknown'.
+    per_repo = summary.get("per_repo", {})
+    active_repos = {r: v for r, v in per_repo.items() if v["runs"] > 0}
+    if active_repos:
+        # "runs" = all non-backfilled gating runs in that repo (Tier A + Tier B
+        # stubs), NOT the strict severity-bearing forward set — a Tier-B-only
+        # repo still shows its review activity here. "caught" is the WHS-true
+        # subset, matching the honest headline.
+        lines.append("## Per-repo breakdown")
+        lines.append("")
+        lines.append("| repo | runs | caught |")
+        lines.append("|------|-----:|-------:|")
+        # Sort by runs desc, then repo name for determinism.
+        for repo in sorted(active_repos,
+                           key=lambda r: (-active_repos[r]["runs"], r)):
+            v = active_repos[repo]
+            lines.append(f"| {repo} | {v['runs']} | {v['caught']} |")
+        lines.append("")
+
     # Backfilled historical context — SEPARATE from the caught headline.
     backfilled_entries = [e for e in entries if e.get("backfilled") is True]
     if backfilled_entries:
@@ -498,11 +533,13 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--ledger", default=LEDGER_PATH,
-        help="path to runs.jsonl (default: .crucible/ledger/runs.jsonl)",
+        help="path to runs.jsonl (default: central store "
+             "~/.claude/crucible/ledger/runs.jsonl, override via CRUCIBLE_LEDGER_DIR)",
     )
     parser.add_argument(
         "--falsification", default=FALSIFICATION_PATH,
-        help="path to falsification.jsonl (default: .crucible/ledger/falsification.jsonl)",
+        help="path to falsification.jsonl (default: central store "
+             "~/.claude/crucible/ledger/falsification.jsonl)",
     )
     parser.add_argument(
         "--out-dir", default=REPORT_DIR,

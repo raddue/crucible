@@ -8,10 +8,12 @@ origin: crucible
 
 # Ledger weekly renderer
 
-Renders `docs/ledger/weekly-YYYY-Www.md` from `.crucible/ledger/runs.jsonl`
-(plus `falsification.jsonl` for the cross-link). The SKILL.md is a thin prompt
-wrapper; the source of truth is the testable Python core at
-`scripts/render_ledger.py`.
+Renders `docs/ledger/weekly-YYYY-Www.md` from the **central ledger**
+`~/.claude/crucible/ledger/runs.jsonl` (override `CRUCIBLE_LEDGER_DIR`; plus
+`falsification.jsonl` beside it for the cross-link). The SKILL.md is a thin
+prompt wrapper; the source of truth is the testable Python core at
+`scripts/render_ledger.py`. Reports are written to `docs/ledger/` relative to
+your cwd — run from the crucible repo to update the committed reports.
 
 **Skill type:** Utility — direct execution, no subagent dispatch.
 
@@ -21,17 +23,20 @@ Manual `/ledger [--weeks N]` (default `N=1`, the most recent ISO week).
 
 ## What it does
 
-Invoke the renderer directly:
+Invoke the renderer directly. Resolve `scripts/render_ledger.py` by **absolute
+path** from the plugin root (it self-locates its own modules via `__file__`, so
+no `PYTHONPATH` is needed and it runs from any cwd):
 
 ```
-python3 scripts/render_ledger.py --weeks N
+python3 <plugin_root>/scripts/render_ledger.py --weeks N
 ```
 
 That command:
 
-1. Reads `.crucible/ledger/runs.jsonl`. **First-time-ever: if the file is
-   MISSING, print "no ledger data yet" and exit 0 — do NOT write an empty
-   report.**
+1. Reads the central ledger `~/.claude/crucible/ledger/runs.jsonl` (the
+   `--ledger` default; `CRUCIBLE_LEDGER_DIR` overrides). **First-time-ever: if
+   the file is MISSING, print "no ledger data yet" and exit 0 — do NOT write an
+   empty report.**
 2. Groups entries by ISO week (`YYYY-Www`).
 3. For each of the most-recent `N` weeks, writes `docs/ledger/weekly-YYYY-Www.md`.
 

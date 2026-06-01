@@ -13,18 +13,66 @@ version: 1
 
 ## When to emit
 
-Emit one JSONL line to `.crucible/ledger/runs.jsonl` at terminal verdict
-emission (after the verdict marker has been written; the two writes are
-independent — marker durability and ledger durability are not interlocked).
-Dedup by `(run_id, skill)` before append: callers MUST invoke
-`scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` and skip
-the emit if it returns True. The `append()` helper does **not** scan the
-ledger for prior entries — honoring L-2 is the caller's responsibility.
-Append is idempotent across retries only when callers honor this discipline.
+Emit one JSONL line to the **central ledger** at terminal verdict emission
+(after the verdict marker has been written; the two writes are independent —
+marker durability and ledger durability are not interlocked).
 
 Read in-process verdict state directly. Do **not** re-parse the on-disk marker
 file: parse-roundtrip drift is a real failure mode and the dedup check makes
 double-emit harmless.
+
+## Where it writes — the central store (#270)
+
+The live ledger is **machine-local and shared across every repo**:
+`~/.claude/crucible/ledger/runs.jsonl` (override with `CRUCIBLE_LEDGER_DIR`).
+It is deliberately **not** inside any git repo — entries carry private file
+paths and verbatim finding quotes, and crucible is public. Gating skills run
+in arbitrary repos (Riftlock, DriftMap, …); they all aggregate here so
+`/ledger` can render one honest cross-repo headline with a per-repo breakdown.
+`scripts.ledger_append.default_ledger_path()` is the single source of truth for
+this path; the renderer imports it too.
+
+## How to emit — `emit` CLI by absolute path (cwd-independent)
+
+A gating skill runs with an arbitrary cwd, so a bare `import
+scripts.ledger_append` does **not** resolve. Locate the script by absolute path
+from the plugin root and invoke its `emit` subcommand:
+
+```
+# 1. Resolve the script from THIS skill's base directory. The plugin layout is
+#    invariant: <plugin_root>/skills/<name>/ and <plugin_root>/scripts/.
+#    realpath resolves the ~/.claude/skills/<name> symlink BEFORE applying ../..,
+#    so this works for both symlinked and native plugin installs.
+plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+script="$plugin_root/scripts/ledger_append.py"
+
+# 2. Fallback if the computed path is missing: try the native plugin install,
+#    then any symlinked skill dir. (Pick the first that exists.)
+#      ~/.claude/plugins/*/scripts/ledger_append.py
+#      realpath of ~/.claude/skills/*/../../scripts/ledger_append.py
+# 3. Still unresolved → emit a one-line stderr warning and SKIP. The ledger is
+#    advisory; a missing emit must NEVER block or fail the gate.
+
+# 4. Emit. '-' means the central default path; the CLI dedups, auto-fills
+#    `repo` + `schema_version`, and appends. Pure stdlib + absolute path ⇒ no
+#    PYTHONPATH and no cwd dependency.
+python3 "$script" emit - '<json-entry>'
+```
+
+The `emit` subcommand is the canonical write path. It:
+
+- resolves `-` to `default_ledger_path()` (the central store);
+- honors `CRUCIBLE_CALIBRATION_DISABLED=1` as a **graceful skip** (no-op, exit 0);
+- **dedups by `(run_id, skill)`** before appending (L-2) and skips on a hit
+  (exit 0) — `append()` does not scan the ledger, so the CLI owns this;
+- **fills `repo`** (git-toplevel basename, cwd-basename fallback) when the
+  entry omits it, and **forces `schema_version`** to the current value (`emit`
+  is always a current-schema forward capture);
+- returns 0 on success / graceful skip, 1 only on a real append rejection.
+
+Idempotent across retries because dedup runs first. (The `append()` library
+function and the legacy positional `<ledger_path> <json>` CLI form remain for
+in-process callers and back-compat; new emit sites use `emit`.)
 
 ## Kill-switch (L-6) — emit-side enforcement
 
@@ -38,13 +86,21 @@ emit normally — that data is the entire point. Only set the env var when
 running against test fixtures, eval corpora, or CI smoke tests that would
 otherwise pollute the ledger. See `docs/CONTRIBUTING-CALIBRATION.md`.
 
-## Schema v1 (22 fields)
+## Schema v2 (23 fields)
+
+v2 adds one nullable provenance field, `repo`, to v1 (#270). Readers stay
+backward-compatible: v1 rows (no `repo`, `schema_version: 1`) read fine and
+bucket under `repo: "unknown"` in the renderer. The `emit` CLI fills `repo`
+when absent and forces `schema_version: 2` (it is always a current-schema
+forward capture); the legacy positional `append` form leaves `schema_version`
+caller-set, so direct callers like the v1 backfill stay v1.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "<UUIDv7 — sortable, millisecond-precision, unique>",
   "skill": "quality-gate | red-team | siege | inquisitor | audit",
+  "repo": "<basename of git toplevel; cwd basename fallback; 'unknown' on v1 rows>",
   "tier": "A | B",
   "artifact_type": "code | design | plan | hypothesis | mockup | translation | other",
   "verdict": "PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION",
@@ -230,7 +286,7 @@ tracking); not relied upon for cross-writer atomicity.
 | L-2 | Unique `(run_id, skill)` | Caller dedup before append |
 | L-3 | Mechanical WHS from histogram | Schema rule (above) |
 | L-4 | Falsification hash-keyed (`ledger_entry_hash`) | `falsification.jsonl` (Phase 4) |
-| L-6 | Emit-side kill-switch | Early return in `append()` |
+| L-6 | Emit-side kill-switch | Early return in `append()` + `_cli_emit` graceful skip |
 | L-7 | Migration protocol (forward-compat / never-decrease) | `docs/ledger/MIGRATION-PROTOCOL.md` |
 | L-8 | 16 KiB line cap + truncation + sidecar | `_truncate_payload` + line-bytes check |
 | L-9 | Latest-entry-wins reduction (file-position) | `shared/ledger-reduce.md` |
@@ -268,7 +324,20 @@ def uuid7() -> str:
 
 ```python
 #!/usr/bin/env python3
-"""Canonical ledger append protocol — mkdir-lock + holder file + single-write() syscall."""
+"""Canonical ledger append protocol — mkdir-lock + holder file + single-write() syscall.
+
+Protocol-as-spec lives in skills/shared/ledger-append.md. This module is the
+importable, executable single source of truth used by T-1 subprocesses, by Tier A
+emit call-sites, and by the Phase 3 backfill script.
+
+Invariants enforced here:
+- L-1 append-only (O_APPEND, never rewrite a line)
+- L-6 kill-switch (CRUCIBLE_CALIBRATION_DISABLED=1 → no-op return BEFORE any lock)
+- L-8 16 KiB line cap + gated_files truncation at 500 + highest_finding cap at 256 chars
+- Crash-window recovery (>60s stale lockdir with branch A live/dead, branch B malformed)
+
+Pure stdlib. No third-party deps.
+"""
 import datetime as _dt
 import errno
 import json
@@ -279,10 +348,10 @@ from typing import Optional
 
 LOCK_DIRNAME = ".lock-runs-jsonl"
 HOLDER_FILENAME = "holder"
-SPIN_INTERVAL_S = 0.05
-INITIAL_SPIN_CAP_S = 5.0
-RECOVERY_SPIN_CAP_S = 300.0
-STALE_THRESHOLD_S = 60.0
+SPIN_INTERVAL_S = 0.05          # 50 ms backoff
+INITIAL_SPIN_CAP_S = 5.0        # initial spin cap before stale-recovery
+RECOVERY_SPIN_CAP_S = 300.0     # cap once we know holder is alive (branch A EPERM/0)
+STALE_THRESHOLD_S = 60.0        # lockdir age past which we enter stale-recovery
 
 
 def _now_iso() -> str:
@@ -293,68 +362,164 @@ def _kill_switch_active() -> bool:
     return os.environ.get("CRUCIBLE_CALIBRATION_DISABLED") == "1"
 
 
+# --------------------------------------------------------------------------- #
+# Central-store path + provenance resolution (#270).                          #
+#                                                                             #
+# The live ledger is machine-local and aggregates EVERY repo's gating runs    #
+# into one place — never inside any git repo, because entries carry private   #
+# file paths and verbatim finding quotes and crucible is a public repo.       #
+# These helpers are the single source of truth for the path; render_ledger    #
+# imports them. default_repo() shells to git and is therefore CLI-only —      #
+# append() stays free of git/subprocess side effects (INV-2).                 #
+# --------------------------------------------------------------------------- #
+SCHEMA_VERSION = 2
+
+
+def default_ledger_dir() -> str:
+    """Directory holding the live ledger. A non-empty CRUCIBLE_LEDGER_DIR wins
+    (tests, fixtures); an empty/unset value falls back to ~/.claude/crucible/
+    ledger — a ~-rooted path that is never inside a git working tree (INV-1)."""
+    env = os.environ.get("CRUCIBLE_LEDGER_DIR")
+    if env:
+        return env
+    return os.path.join(os.path.expanduser("~"), ".claude", "crucible", "ledger")
+
+
+def default_ledger_path() -> str:
+    return os.path.join(default_ledger_dir(), "runs.jsonl")
+
+
+def default_repo(start_dir: Optional[str] = None) -> str:
+    """Provenance label for the repo a gating run happened in: the basename of
+    the git toplevel, falling back to the basename of the start dir / cwd when
+    not in a git repo (or git is absent). Never raises (INV-7). CLI-only — not
+    reachable from append() (INV-2)."""
+    base = start_dir or os.getcwd()
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["git", "-C", base, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        top = proc.stdout.strip()
+        if proc.returncode == 0 and top:
+            return os.path.basename(top.rstrip("/")) or top
+    except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
+        pass
+    return os.path.basename(os.path.abspath(base)) or "unknown"
+
+
 def _warn(msg: str) -> None:
     print(f"[ledger_append WARN] {msg}", file=sys.stderr)
 
 
-def _truncate_payload(entry, max_gated_files, max_highest_finding_chars,
-                       overflow_dir, run_id, skill):
+def _truncate_payload(entry: dict, max_gated_files: int,
+                       max_highest_finding_chars: int) -> tuple[dict, Optional[list]]:
+    """Apply L-8 truncation in-place on a shallow copy.
+
+    Returns (truncated_entry, overflow_list_or_None). Sidecar I/O is the caller's
+    responsibility — deferred to AFTER the line-bytes size check passes to avoid
+    orphan-sidecar leaks on oversize rejection (review finding S-3).
+    """
     out = dict(entry)
+    overflow: Optional[list] = None
     gated = out.get("gated_files")
     if isinstance(gated, list) and len(gated) > max_gated_files:
-        full = list(gated)
-        out["gated_files"] = full[:max_gated_files]
-        out["gated_files_truncated"] = len(full) - max_gated_files
-        if overflow_dir is not None:
-            try:
-                os.makedirs(overflow_dir, exist_ok=True)
-                sidecar = os.path.join(overflow_dir, f"{run_id}.{skill}.txt")
-                with open(sidecar, "w", encoding="utf-8") as f:
-                    for p in full:
-                        f.write(p + "\n")
-            except OSError as e:
-                _warn(f"sidecar write failed: {e}")
+        overflow = list(gated)
+        out["gated_files"] = overflow[:max_gated_files]
+        out["gated_files_truncated"] = len(overflow) - max_gated_files
     else:
         out.setdefault("gated_files_truncated", 0)
+
     hf = out.get("highest_finding")
     if isinstance(hf, str) and len(hf) > max_highest_finding_chars:
         out["highest_finding"] = hf[:max_highest_finding_chars]
-    return out
+    return out, overflow
 
 
-def _try_stale_recovery(lockdir):
+def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
+    """L-2 caller-side dedup. Returns True if (run_id, skill) already in ledger.
+
+    Callers MUST invoke this BEFORE append() to honor invariant L-2. The append
+    helper does not scan for prior entries. Full-scan; bounded by current ledger
+    size (acceptable while ledger is sub-MB; future rotation lands in v1.1).
+    """
+    if not os.path.exists(ledger_path):
+        return False
+    try:
+        with open(ledger_path, "rb") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if obj.get("run_id") == run_id and obj.get("skill") == skill:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _try_stale_recovery(lockdir: str) -> bool:
+    """Returns True if recovery freed the lockdir (caller should retry mkdir).
+
+    Branch A: holder file present and parses → check liveness via os.kill(pid, 0).
+      - returns 0 (alive): keep waiting, do NOT rmdir.
+      - ProcessLookupError (ESRCH): dead → unlink holder + rmdir + signal retry.
+      - PermissionError (EPERM): alive under another uid → keep waiting.
+    Branch B: holder missing or malformed → definitively crashed mid-acquire; rmdir.
+    """
     holder = os.path.join(lockdir, HOLDER_FILENAME)
     try:
         with open(holder, "r", encoding="utf-8") as f:
             line = f.read().strip()
+        # holder format: <run_id>:<skill>:<pid>:<iso_ts>
         parts = line.split(":")
         if len(parts) < 4:
             raise ValueError("malformed holder")
         pid = int(parts[2])
     except (OSError, ValueError):
+        # Branch B: missing or malformed holder
         try:
-            try: os.unlink(holder)
-            except OSError: pass
+            try:
+                os.unlink(holder)
+            except OSError:
+                pass
             os.rmdir(lockdir)
             return True
         except OSError:
             return False
+
+    # Branch A: liveness probe
     try:
         os.kill(pid, 0)
-        return False  # alive
+        # Alive — do NOT rmdir
+        return False
     except ProcessLookupError:
-        try: os.unlink(holder)
-        except OSError: pass
+        # Dead (ESRCH) — recover
+        try:
+            os.unlink(holder)
+        except OSError:
+            pass
         try:
             os.rmdir(lockdir)
             return True
         except OSError:
             return False
     except PermissionError:
+        # EPERM — alive under another uid; keep waiting
         return False
 
 
-def _acquire_lock(lockdir):
+def _acquire_lock(lockdir: str) -> bool:
+    """Block until lockdir is acquired or recovery escalation gives up.
+
+    Returns True on acquisition. Returns False if all recovery paths exhausted.
+    Total max wait: ~5s initial spin + ~300s recovery spin = 305s per attempt.
+    """
     spin_started = time.monotonic()
     while True:
         try:
@@ -364,62 +529,187 @@ def _acquire_lock(lockdir):
             pass
         except OSError as e:
             if e.errno != errno.EEXIST:
+                _warn(f"mkdir lockdir errored: {e}")
                 return False
+
         elapsed = time.monotonic() - spin_started
+        # Check lockdir age for stale-recovery eligibility
         try:
             st = os.stat(lockdir)
             lockdir_age = time.time() - st.st_mtime
         except FileNotFoundError:
+            # vanished between EEXIST and stat — retry immediately
             continue
+
         if lockdir_age > STALE_THRESHOLD_S:
-            if _try_stale_recovery(lockdir):
-                continue
+            recovered = _try_stale_recovery(lockdir)
+            if recovered:
+                continue  # retry mkdir
+            # alive-holder branch — keep spinning under the extended cap
             if elapsed > RECOVERY_SPIN_CAP_S:
+                _warn(f"lock acquisition exhausted recovery cap at {lockdir}")
                 return False
         else:
+            if elapsed > INITIAL_SPIN_CAP_S:
+                # Loop continues; we'll re-evaluate stale once lockdir_age crosses threshold
+                pass
             if elapsed > (INITIAL_SPIN_CAP_S + RECOVERY_SPIN_CAP_S):
+                _warn(f"lock acquisition timed out at {lockdir}")
                 return False
         time.sleep(SPIN_INTERVAL_S)
 
 
-def append(ledger_path, entry, *, max_line_bytes=16384, max_gated_files=500,
-           max_highest_finding_chars=256, overflow_dir=None):
+def append(
+    ledger_path: str,
+    entry: dict,
+    *,
+    max_line_bytes: int = 16384,
+    max_gated_files: int = 500,
+    max_highest_finding_chars: int = 256,
+    overflow_dir: Optional[str] = None,
+) -> bool:
+    """Append one JSONL line to ledger_path under the canonical lock protocol.
+
+    Returns True on successful append; False on kill-switch no-op or rejection.
+    """
+    # L-6 kill-switch: BEFORE any lock acquisition or filesystem state change.
     if _kill_switch_active():
         return False
+
     run_id = entry.get("run_id", "unknown")
     skill = entry.get("skill", "unknown")
+
     if overflow_dir is None:
         overflow_dir = os.path.join(os.path.dirname(ledger_path) or ".", "overflow")
-    payload = _truncate_payload(entry, max_gated_files, max_highest_finding_chars,
-                                 overflow_dir, run_id, skill)
+
+    # L-8 truncation. Sidecar I/O is deferred until after the size check (S-3 fix).
+    payload, overflow_files = _truncate_payload(
+        entry, max_gated_files, max_highest_finding_chars,
+    )
+
     line = json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n"
     line_bytes = line.encode("utf-8")
     if len(line_bytes) > max_line_bytes:
-        _warn(f"oversize line rejected (run_id={run_id} skill={skill} bytes={len(line_bytes)})")
+        _warn(
+            f"oversize line rejected after truncation (run_id={run_id} "
+            f"skill={skill} bytes={len(line_bytes)} cap={max_line_bytes})"
+        )
         return False
+
     ledger_dir = os.path.dirname(ledger_path) or "."
-    os.makedirs(ledger_dir, exist_ok=True)
+    try:
+        os.makedirs(ledger_dir, exist_ok=True)
+    except OSError as e:
+        _warn(f"could not create ledger dir {ledger_dir}: {e}")
+        return False
+
     lockdir = os.path.join(ledger_dir, LOCK_DIRNAME)
     if not _acquire_lock(lockdir):
+        _warn(f"failed to acquire lock for {ledger_path} (run_id={run_id} skill={skill})")
         return False
+
     holder_path = os.path.join(lockdir, HOLDER_FILENAME)
     try:
+        # Step 2: write identity inside the lockdir
         with open(holder_path, "w", encoding="utf-8") as hf:
             hf.write(f"{run_id}:{skill}:{os.getpid()}:{_now_iso()}")
+
+        # L-8 sidecar: write only AFTER the size check passed, inside the lock.
+        # Avoids orphan-sidecar leaks when the ledger append itself is rejected.
+        if overflow_files is not None:
+            try:
+                os.makedirs(overflow_dir, exist_ok=True)
+                sidecar = os.path.join(overflow_dir, f"{run_id}.{skill}.txt")
+                with open(sidecar, "w", encoding="utf-8") as f:
+                    for p in overflow_files:
+                        f.write(p + "\n")
+            except OSError as e:
+                _warn(f"sidecar write failed for run_id={run_id} skill={skill}: {e}")
+
+        # Step 3: single-write() syscall append. ≤16 KiB ⇒ atomic on ext4/APFS/9p.
         fd = os.open(ledger_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:
             written = os.write(fd, line_bytes)
             if written != len(line_bytes):
+                # L-1 hazard: a partial line is on disk. Terminate it with a
+                # newline so the reducer's per-line JSON parse skips this
+                # fragment cleanly rather than corrupting downstream lines.
+                # We still report failure to the caller.
+                try:
+                    os.write(fd, b"\n")
+                    os.fsync(fd)
+                except OSError:
+                    pass
+                _warn(
+                    f"short write detected; line terminator forced "
+                    f"(wrote={written} expected={len(line_bytes)} "
+                    f"run_id={run_id} skill={skill})"
+                )
                 return False
             os.fsync(fd)
         finally:
             os.close(fd)
         return True
     finally:
-        try: os.unlink(holder_path)
-        except OSError: pass
-        try: os.rmdir(lockdir)
-        except OSError: pass
+        # Step 4: release — unlink holder first, then rmdir lockdir.
+        try:
+            os.unlink(holder_path)
+        except OSError:
+            pass
+        try:
+            os.rmdir(lockdir)
+        except OSError:
+            pass
+
+
+def _cli_emit(ledger_arg: str, entry: dict) -> int:
+    """`emit` subcommand: the canonical forward-capture write path.
+
+    Resolves '-' to the central default, honors the kill-switch as a graceful
+    skip, dedups by (run_id, skill), fills `repo` when absent and forces
+    `schema_version` to the current value, then appends. Pure stdlib + invoked
+    by absolute path ⇒ no PYTHONPATH and no cwd dependency (INV-5/INV-6).
+    Graceful no-ops (kill-switch, duplicate) return 0; only a real append
+    rejection returns 1 (INV-9)."""
+    ledger_path = default_ledger_path() if ledger_arg == "-" else ledger_arg
+
+    # L-6 graceful skip: kill-switch is a no-op, not a failure.
+    if _kill_switch_active():
+        print("[ledger_append] calibration disabled; emit skipped", file=sys.stderr)
+        return 0
+
+    # `emit` is always a current-schema forward capture: stamp schema_version
+    # unconditionally (an emitter sending the stale `1` must not produce a
+    # hybrid v1+repo row). Fill `repo` when absent OR explicitly null/empty —
+    # setdefault would miss the null case, silently voiding provenance.
+    if not entry.get("repo"):
+        entry["repo"] = default_repo()
+    entry["schema_version"] = SCHEMA_VERSION
+
+    run_id = entry.get("run_id", "unknown")
+    skill = entry.get("skill", "unknown")
+    if caller_dedup(ledger_path, run_id, skill):
+        print(f"[ledger_append] duplicate (run_id={run_id} skill={skill}); "
+              f"emit skipped", file=sys.stderr)
+        return 0
+
+    return 0 if append(ledger_path, entry) else 1
+
+
+if __name__ == "__main__":
+    # Two CLI forms:
+    #   emit <ledger_path|-> <json>   — dedup + auto-fill + append (canonical)
+    #   <ledger_path> <json>          — legacy append-only (back-compat)
+    argv = sys.argv
+    if len(argv) >= 4 and argv[1] == "emit":
+        sys.exit(_cli_emit(argv[2], json.loads(argv[3])))
+    if len(argv) >= 3 and argv[1] != "emit":
+        ok = append(argv[1], json.loads(argv[2]))
+        sys.exit(0 if ok else 1)
+    print("usage: ledger_append.py emit <ledger_path|-> <json-entry>\n"
+          "       ledger_append.py <ledger_path> <json-entry>  (legacy, append-only)",
+          file=sys.stderr)
+    sys.exit(2)
 ```
 
 The canonical importable module is at `scripts/ledger_append.py` (also

@@ -223,10 +223,10 @@ Red-team operates in two modes depending on the caller:
 
 **Direct invocation only.** When operating in single-pass mode (invoked by quality-gate), skip this section entirely — quality-gate owns the ledger emit on that path (no double-emission).
 
-When the iterative loop reaches its terminal verdict (clean — no Fatal/Significant — or an escalation exit: stagnation / architectural concern), append ONE **Tier B STUB** JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md` (importable: `scripts/ledger_append.py`).
+When the iterative loop reaches its terminal verdict (clean — no Fatal/Significant — or an escalation exit: stagnation / architectural concern), emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
 
-- Honor `CRUCIBLE_CALIBRATION_DISABLED=1` — return BEFORE any lock acquisition or filesystem write. Dedup via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="red-team"` BEFORE `append()`; skip if it returns True.
-- Populate ONLY meaningful values: `schema_version: 1`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "red-team"`, `tier: "B"`, `verdict` (map clean → `PASS`; stagnation → `STAGNATION`; any other escalation → `ESCALATED`; architectural → `ARCHITECTURAL`), `timestamp` (ISO-8601 UTC), `gated_files` (the reviewed artifact's files, repo-relative), `artifact_type`.
+- The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), dedup by `(run_id, skill="red-team")` (L-2), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — never block.
+- Populate ONLY meaningful values (`repo` is auto-filled by the `emit` CLI): `schema_version: 2`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "red-team"`, `tier: "B"`, `verdict` (map clean → `PASS`; stagnation → `STAGNATION`; any other escalation → `ESCALATED`; architectural → `ARCHITECTURAL`), `timestamp` (ISO-8601 UTC), `gated_files` (the reviewed artifact's files, repo-relative), `artifact_type`.
 - Set ALL calibration fields EXPLICITLY null per the "Tier-B null semantics" of `shared/ledger-append.md`: `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0` and `comment: null`. Keep `backfilled: false`, `falsified: null`, `falsified_by: null`.
 
 ## External Model Review (Optional)

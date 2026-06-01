@@ -681,10 +681,9 @@ Chains inherit exploitability from their weakest link: if ANY step in the chain 
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-**Ledger append at terminal verdict.** When the security gate reaches its terminal verdict (Phase 4 — clean passage at zero Critical + zero High, or an escalation/stagnation exit), append ONE JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md`. Siege is a **Tier A** emitter: all calibration fields are populated. The importable implementation is `scripts/ledger_append.py` (`scripts.ledger_append`).
+**Ledger emit at terminal verdict.** When the security gate reaches its terminal verdict (Phase 4 — clean passage at zero Critical + zero High, or an escalation/stagnation exit), emit ONE JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`. Siege is a **Tier A** emitter: all calibration fields are populated.
 
-- **Kill-switch (L-6):** If `CRUCIBLE_CALIBRATION_DISABLED=1`, return BEFORE any lock acquisition or filesystem state change — no mkdir, no holder write, no append.
-- **Dedup (L-2):** Call `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="siege"` BEFORE `append()`, and skip the emit if it returns True. The `append()` helper does NOT scan existing entries — honoring L-2 is the caller's responsibility.
+- **Mechanics owned by the `emit` CLI:** it honors `CRUCIBLE_CALIBRATION_DISABLED=1` as a graceful skip (L-6), dedups by `(run_id, skill="siege")` before appending (L-2), and auto-fills `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — never block the gate. You construct the entry's calibration fields below.
 
 Field values for the siege entry:
 
@@ -697,7 +696,7 @@ Field values for the siege entry:
 - `artifact_hash`: sha256 of the gated artifact bytes (the commit-anchor target). `chunk_hash: null` (siege does not chunk).
 - `gated_files`: the manifest files reviewed (repo-relative). `highest_finding`: one-line quote of the most severe surviving finding, or null if none.
 - `predicted_falsifier`: write `"<DEFERRED:pre-phase-7>"` ONLY when `verdict ∈ {PASS, FAIL}` AND `artifact_type == "code"`; otherwise `null` (all escalation verdicts and all non-code artifact types).
-- Schema-fixed: `schema_version: 1`, `backfilled: false`, `falsified: null`, `falsified_by: null`, `gated_files_truncated: 0`, `comment: null`. `run_id` is a UUIDv7 (`scripts/uuid7.py`). `timestamp` is ISO-8601 UTC.
+- Schema-fixed: `backfilled: false`, `falsified: null`, `falsified_by: null`, `gated_files_truncated: 0`, `comment: null`. `run_id` is a UUIDv7 (`scripts/uuid7.py`). `timestamp` is ISO-8601 UTC. (`schema_version` and `repo` are stamped by the `emit` CLI — do not hand-set them.)
 
 ## Persistence
 
