@@ -143,28 +143,31 @@ def test_ledger_unparseable_rate():
 
 
 def test_referencing_form_uncheckable_not_in_hitrate():
-    """Regression (adversarial Finding 2): `referencing`/`hash` forms parse but
-    aren't auto-checkable at v1. They must NOT sit in the hit-rate denominator
-    (which would structurally drag siege's rate to 0 — siege is steered toward
-    `referencing`). They still count in total_non_null (unparseable_rate denom)
-    but are NOT unparseable."""
+    """v1.1 (#343): `touching`, `referencing`, and `revert`-verb `hash` are ALL
+    auto-checkable and sit in the hit-rate denominator. Only a NON-revert `hash`
+    predicate (e.g. `fix of artifact_hash=…`) stays `uncheckable` — it has no
+    candidate population, so it must NOT drag the hit-rate to 0. Original
+    adversarial Finding 2 (uncheckable forms excluded from the denominator) still
+    holds for that residual case. All count in total_non_null; none unparseable."""
     from scripts.render_ledger import predicate_rates
     entries = [
         _entry(run_id="t1", skill="siege",
-               predicted_falsifier="fix touching src/foo.py within 30d"),   # touching -> hit-rate denom
+               predicted_falsifier="fix touching src/foo.py within 30d"),       # checkable
         _entry(run_id="t2", skill="siege",
-               predicted_falsifier="CVE referencing token-refresh within 90d"),  # uncheckable
+               predicted_falsifier="CVE referencing token-refresh within 90d"),  # checkable (v1.1)
         _entry(run_id="t3", skill="siege",
-               predicted_falsifier="revert of artifact_hash=deadbeef within 30d"),  # uncheckable
+               predicted_falsifier="revert of artifact_hash=deadbeef within 30d"),  # checkable (v1.1)
+        _entry(run_id="t4", skill="siege",
+               predicted_falsifier="fix of artifact_hash=deadbeef within 30d"),  # non-revert hash -> uncheckable
     ]
     rates = predicate_rates(entries, {}, now="2026-03-01T00:00:00Z")
     sg = rates.get("siege", {})
-    _check("T-13.9 parseable (hit-rate denom) == 1 (touching only)",
-           sg.get("parseable") == 1, f"got {sg}")
-    _check("T-13.10 uncheckable == 2 (referencing + hash)",
-           sg.get("uncheckable") == 2, f"got {sg}")
-    _check("T-13.11 total_non_null == 3, unparseable == 0",
-           sg.get("total_non_null") == 3 and sg.get("unparseable") == 0,
+    _check("T-13.9 parseable (hit-rate denom) == 3 (touching + referencing + revert-hash)",
+           sg.get("parseable") == 3, f"got {sg}")
+    _check("T-13.10 uncheckable == 1 (non-revert hash only)",
+           sg.get("uncheckable") == 1, f"got {sg}")
+    _check("T-13.11 total_non_null == 4, unparseable == 0",
+           sg.get("total_non_null") == 4 and sg.get("unparseable") == 0,
            f"got {sg}")
     _check("T-13.12 unparseable_rate == 0.0 (none are free-form prose)",
            sg.get("unparseable_rate") == 0.0, f"got {sg}")

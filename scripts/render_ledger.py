@@ -31,6 +31,7 @@ from scripts.ledger_reduce import reduce as _falsification_reduce  # noqa: E402
 from scripts.ledger_append import default_ledger_dir  # noqa: E402
 from scripts.reconcile_ledger import (  # noqa: E402
     parse_predicate,
+    predicate_checkable,
     ledger_entry_hash,
     PREDICATE_SENTINEL,
     GRACE_DAYS,
@@ -278,6 +279,45 @@ def falsified_count(falsification_path: str) -> int:
     return sum(1 for rec in reduced.values() if rec.get("falsified") is True)
 
 
+def falsified_breakdown(falsification_path: str) -> dict:
+    """Per-source counts of falsified entries (#342), via the L-9 reduction.
+
+    Source derivation: walkback/predicate entries carry a top-level `via`;
+    manual entries do NOT — they carry `falsified_by.manual_override == true`
+    and no `via`. A `bad_implementation` signal (top-level or nested
+    `signal_type`) is counted as its own source. Precedence:
+      via=="walkback"        -> walkback
+      via=="predicate"       -> predicate
+      signal_type=="bad_implementation" -> bad_implementation
+      else (manual_override) -> manual_override
+    The four counts sum to `falsified_count` (each falsified entry hits exactly
+    one bucket).
+    """
+    return _breakdown_from_reduced(_falsification_reduce(falsification_path))
+
+
+def _breakdown_from_reduced(reduced: dict) -> dict:
+    """Core of `falsified_breakdown` over an already-reduced map (so the renderer
+    doesn't re-read falsification.jsonl)."""
+    out = {"walkback": 0, "predicate": 0, "manual_override": 0,
+           "bad_implementation": 0}
+    for rec in reduced.values():
+        if rec.get("falsified") is not True:
+            continue
+        via = rec.get("via") or (rec.get("falsified_by") or {}).get("via")
+        sig = rec.get("signal_type") \
+            or (rec.get("falsified_by") or {}).get("signal_type")
+        if via == "walkback":
+            out["walkback"] += 1
+        elif via == "predicate":
+            out["predicate"] += 1
+        elif sig == "bad_implementation":
+            out["bad_implementation"] += 1
+        else:
+            out["manual_override"] += 1
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Predicate calibration (predicted_falsifier — design §3a, Phase 7)           #
 # --------------------------------------------------------------------------- #
@@ -337,12 +377,12 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
         if parsed is None:
             slot["unparseable"] += 1
             continue
-        # v1 only auto-checks the `touching` form (reconciler limitation). The
-        # `hash` / `referencing` forms parse but cannot fire yet, so counting
-        # them in the hit-rate DENOMINATOR would structurally drag the rate to 0
-        # (siege is steered toward `referencing`). Track them as `uncheckable`,
-        # excluded from hit_rate until v1.1 wires their walks.
-        if parsed.get("form") != "touching":
+        # v1.1 auto-checks touching, referencing, and revert-verb `hash` forms
+        # (single source of truth: `predicate_checkable`). A non-revert `hash`
+        # predicate has no candidate population, so counting it in the hit-rate
+        # DENOMINATOR would structurally drag the rate to 0. Track it as
+        # `uncheckable`, excluded from hit_rate.
+        if not predicate_checkable(parsed):
             slot["uncheckable"] += 1
             continue
         # Parseable + auto-checkable: counts toward the hit-rate denominator once
@@ -545,6 +585,14 @@ def render_week(week: str, entries: list, *, baseline_medians=None,
         f"Falsified ledger entries (all-time, via the L-9 reduction over "
         f"`falsification.jsonl`): **{falsified}**."
     )
+    if falsified > 0:
+        bd = _breakdown_from_reduced(falsification_reduced or {})
+        parts = [f"{k.replace('_', ' ')} {bd[k]}"
+                 for k in ("walkback", "predicate", "manual_override",
+                           "bad_implementation") if bd[k]]
+        if parts:
+            lines.append("")
+            lines.append(f"_By source: {', '.join(parts)}._")
     if falsified == 0:
         lines.append("")
         lines.append(
@@ -587,14 +635,15 @@ def render_week(week: str, entries: list, *, baseline_medians=None,
                     f"unparseable (> {_fmt_pct(VAGUENESS_RATE_THRESHOLD)}). Tighten "
                     f"the emit prompt before relying on the hit-rate."
                 )
-            # Transparency: `hash`/`referencing` predicates parse but aren't
-            # auto-checkable at v1, so they're excluded from the hit-rate.
+            # Transparency: a non-revert `hash` predicate parses but has no
+            # candidate population, so it's excluded from the hit-rate.
+            # Self-suppresses when uncheckable == 0.
             if r.get("uncheckable"):
                 lines.append(
                     f"_{r['uncheckable']} `{skill}` predicate"
-                    f"{'' if r['uncheckable'] == 1 else 's'} use the "
-                    f"`hash`/`referencing` form — parseable but not auto-checkable "
-                    f"at v1, so excluded from the hit-rate denominator._"
+                    f"{'' if r['uncheckable'] == 1 else 's'} use the non-revert "
+                    f"`hash` form — parseable but not auto-checkable, so excluded "
+                    f"from the hit-rate denominator._"
                 )
         lines.append("")
     else:

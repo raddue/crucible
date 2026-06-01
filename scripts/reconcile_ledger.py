@@ -213,19 +213,30 @@ def reconcile(
     # attribution, regardless of whether the algorithm would have matched its
     # hash, and reserve that hash so the algorithm pass skips it (S-3).
     for h, mo in manual.items():
-        entry = {
-            "ledger_entry_hash": h,
-            "falsified": mo.get("falsified", True),
-            "falsified_by": mo.get("falsified_by", {
+        # #342: signal_type distinguishes a plain manual override from a
+        # `bad_implementation` signal ("a verdict accepted as PASS led to a bad
+        # implementation"). Default `manual_override` (back-compat). Inject it
+        # into falsified_by on BOTH construction paths — the default-built dict
+        # AND a user-supplied falsified_by (which would otherwise miss it).
+        signal_type = mo.get("signal_type", "manual_override")
+        falsified_by = mo.get("falsified_by")
+        if falsified_by is None:
+            falsified_by = {
                 "commit": mo.get("commit"),
                 "reason": mo.get("reasoning", "manual attribution"),
                 "confidence": mo.get("confidence", "low"),
                 "cross_cut": mo.get("cross_cut", False),
                 "manual_override": True,
-            }),
+            }
+        falsified_by = {**falsified_by, "signal_type": signal_type}
+        entry = {
+            "ledger_entry_hash": h,
+            "falsified": mo.get("falsified", True),
+            "falsified_by": falsified_by,
             "confidence": mo.get("confidence", "low"),
             "reasoning": mo.get("reasoning", "manual attribution"),
             "cross_cut": mo.get("cross_cut", False),
+            "signal_type": signal_type,
         }
         seen_hashes.add(h)
         _ledger_append(falsification_path, entry)
@@ -358,8 +369,31 @@ def compute_brier(
     acc: Dict[str, List[float]] = {}
 
     for e in ledger_entries:
+        # Hoist the falsification lookup ABOVE the artifact_type gate so the
+        # #342 non-code admission can consult it.
+        run_id = e.get("run_id", "unknown")
+        skill = e.get("skill", "unknown")
+        h = ledger_entry_hash(run_id, skill)
+        fals = falsification_map.get(h)
+
+        # #342 scoped relaxation: a NON-code verdict is admitted into the Brier
+        # sample ONLY when a human has supplied a definitive `bad_implementation`
+        # outcome (⇒ actual=0). Absent that, a non-code verdict's outcome is
+        # unknown (auto-falsification can never reach it) and it stays excluded —
+        # we never assume a non-code PASS was correct just because nothing
+        # falsified it. Code verdicts are unaffected.
         if e.get("artifact_type") != "code":
-            continue
+            # `bad_implementation` is a PASS-side marker ("a verdict accepted as
+            # PASS led to a bad implementation"). On a non-code FAIL it is
+            # out-of-contract — NOT admitted (its outcome is undefined and
+            # auto-falsification can never reach it), so we require verdict==PASS
+            # here. Absent a PASS-side bad_implementation attribution, a non-code
+            # verdict's outcome is unknown and stays excluded.
+            sig = (fals or {}).get("signal_type") \
+                or ((fals or {}).get("falsified_by") or {}).get("signal_type")
+            if not (fals and bool(fals.get("falsified"))
+                    and sig == "bad_implementation" and e.get("verdict") == "PASS"):
+                continue
         if e.get("backfilled"):
             continue
         verdict = e.get("verdict")
@@ -376,11 +410,6 @@ def compute_brier(
         # Must be older than the grace period.
         if grace_cutoff is not None and not (ts < grace_cutoff):
             continue
-
-        run_id = e.get("run_id", "unknown")
-        skill = e.get("skill", "unknown")
-        h = ledger_entry_hash(run_id, skill)
-        fals = falsification_map.get(h)
 
         # Cross-cut falsifications are excluded from the denominator.
         if fals is not None and fals.get("cross_cut"):
@@ -542,12 +571,103 @@ def _predicate_fired(parsed: dict, entry_dt, candidates: List[dict]):
     return None
 
 
+def predicate_checkable(parsed: Optional[dict]) -> bool:
+    """Single source of truth (used by BOTH the reconciler and render_ledger):
+    is this parsed predicate auto-checkable at v1.1?
+
+      touching    -> True  (file-intersection walk)
+      referencing -> True  (commit-message token scan)
+      hash        -> True ONLY when verb == "revert" (verb-gated revert-only;
+                     a `fix of artifact_hash=…` stays uncheckable — there is no
+                     candidate population for it without exact-hash matching)
+      else / None -> False
+    """
+    if not parsed:
+        return False
+    form = parsed.get("form")
+    if form in ("touching", "referencing"):
+        return True
+    if form == "hash":
+        return parsed.get("verb") == "revert"
+    return False
+
+
+def _hash_fired(parsed: dict, entry_dt, revert_candidates: List[dict],
+                gated_files: List[str], entry_artifact_hash):
+    """`hash` form — verb-gated revert-only matcher (design #343).
+
+    A `revert of artifact_hash=<hex> [without touching <files>] within Nd`
+    predicate FIRES when an actual revert commit lands strictly after the verdict
+    and within the window, touches at least one of the verdict's `gated_files`,
+    and touches NONE of the `without_files` exclusion patterns.
+
+    Hash bind: the parsed `artifact_hash` must be a case-insensitive prefix of
+    (or equal to) the LEDGER ENTRY's own `artifact_hash` — hashes may be
+    abbreviated. A predicate naming a different artifact than the verdict it is
+    attached to is malformed and does NOT fire; a null/empty entry hash also
+    fails the bind (older rows) → no fire (safe). This makes the parsed hash
+    load-bearing, not decorative.
+    """
+    if not parsed or entry_dt is None or parsed.get("form") != "hash":
+        return None
+    if parsed.get("verb") != "revert":
+        return None
+    # Hash bind — the predicate must name THIS verdict's artifact.
+    pred_hash = (parsed.get("artifact_hash") or "").lower()
+    entry_hash = (entry_artifact_hash or "").lower()
+    if not pred_hash or not entry_hash or not entry_hash.startswith(pred_hash):
+        return None
+    gated = set(gated_files or [])
+    without = parsed.get("without_files") or []
+    window_end = entry_dt + _dt.timedelta(days=parsed["within_days"])
+    for cand in revert_candidates or []:
+        merge_dt = _parse_iso(cand.get("merge_time"))
+        if merge_dt is None or not (entry_dt < merge_dt <= window_end):
+            continue
+        touched = cand.get("touched_files") or []
+        # Disqualify if the revert touches any excluded path (path-aware glob).
+        if any(_glob_match(tf, pat) for tf in touched for pat in without):
+            continue
+        # Must touch at least one gated file.
+        if any(tf in gated for tf in touched):
+            return cand
+    return None
+
+
+def _referencing_fired(parsed: dict, entry_dt, reference_candidates: List[dict]):
+    """`referencing` form — commit-message token scan matcher (design #343).
+
+    A `<verb> referencing <token> within Nd` predicate FIRES when a candidate
+    commit lands strictly after the verdict and within the window AND mentions
+    the token as a DELIMITED unit. The non-word lookarounds `(?<!\\w)…(?!\\w)`
+    (NOT raw substring, NOT `\\b…\\b`) correctly match `closes #341` / `ping
+    @handle` while rejecting `#3419` and `authentication` — `\\b` would silently
+    fail on tokens that begin/end with a non-word char (`#341`, `@handle`).
+    """
+    if not parsed or entry_dt is None or parsed.get("form") != "referencing":
+        return None
+    token = parsed.get("token") or ""
+    if not token:
+        return None
+    pat = re.compile(rf"(?<!\w){re.escape(token)}(?!\w)", re.I)
+    window_end = entry_dt + _dt.timedelta(days=parsed["within_days"])
+    for cand in reference_candidates or []:
+        merge_dt = _parse_iso(cand.get("merge_time"))
+        if merge_dt is None or not (entry_dt < merge_dt <= window_end):
+            continue
+        if pat.search(cand.get("message") or ""):
+            return cand
+    return None
+
+
 def reconcile_predicates(
     ledger_entries: List[dict],
     candidates: List[dict],
     falsification_path: str,
     *,
     now: str,
+    revert_candidates: Optional[List[dict]] = None,
+    reference_candidates: Optional[List[dict]] = None,
 ) -> "tuple[List[dict], List[dict]]":
     """Phase 7 second pass (design §3a). Runs AFTER the file-intersection walkback.
 
@@ -565,8 +685,14 @@ def reconcile_predicates(
 
     Returns (classifications, appended). `classifications` has one record per
     non-null predicate — {ledger_entry_hash, skill, sentinel, parseable, fired,
-    unparseable} — for tests; /ledger derives its own rates from runs.jsonl.
+    unparseable, uncheckable} — for tests; /ledger derives its own rates from
+    runs.jsonl. Dispatch by form: touching→`_predicate_fired`, hash→`_hash_fired`
+    (verb-gated revert-only), referencing→`_referencing_fired`. A parseable but
+    not-`predicate_checkable` predicate is classified `uncheckable` and appends
+    nothing.
     """
+    revert_candidates = revert_candidates or []
+    reference_candidates = reference_candidates or []
     classifications: List[dict] = []
     appended: List[dict] = []
     for e in ledger_entries:
@@ -580,7 +706,8 @@ def reconcile_predicates(
         if pf == PREDICATE_SENTINEL:
             classifications.append({
                 "ledger_entry_hash": h, "skill": skill, "sentinel": True,
-                "parseable": False, "fired": False, "unparseable": False})
+                "parseable": False, "fired": False, "unparseable": False,
+                "uncheckable": False})
             continue
 
         # Predicates are only defined for code artifacts (emit rule). A stray
@@ -592,20 +719,43 @@ def reconcile_predicates(
         if parsed is None:
             classifications.append({
                 "ledger_entry_hash": h, "skill": skill, "sentinel": False,
-                "parseable": False, "fired": False, "unparseable": True})
+                "parseable": False, "fired": False, "unparseable": True,
+                "uncheckable": False})
+            continue
+
+        # Parseable but not auto-checkable (e.g. a non-revert `hash` predicate):
+        # classified `uncheckable`, excluded from the hit-rate denominator.
+        if not predicate_checkable(parsed):
+            classifications.append({
+                "ledger_entry_hash": h, "skill": skill, "sentinel": False,
+                "parseable": False, "fired": False, "unparseable": False,
+                "uncheckable": True})
             continue
 
         entry_dt = _parse_iso(e.get("timestamp"))
-        cand = _predicate_fired(parsed, entry_dt, candidates)
+        form = parsed.get("form")
+        if form == "touching":
+            cand = _predicate_fired(parsed, entry_dt, candidates)
+        elif form == "hash":
+            cand = _hash_fired(parsed, entry_dt, revert_candidates,
+                               e.get("gated_files") or [], e.get("artifact_hash"))
+        else:  # referencing
+            cand = _referencing_fired(parsed, entry_dt, reference_candidates)
         fired = cand is not None
         classifications.append({
             "ledger_entry_hash": h, "skill": skill, "sentinel": False,
-            "parseable": True, "fired": fired, "unparseable": False})
+            "parseable": True, "fired": fired, "unparseable": False,
+            "uncheckable": False})
 
         if fired:
+            _how = {
+                "touching": "touched a predicted file",
+                "hash": "reverted the predicted artifact",
+                "referencing": "referenced the predicted token",
+            }.get(form, "matched the predicate")
             reason = (
                 f"predicted_falsifier {pf!r} fired: {parsed['verb']} "
-                f"{cand.get('commit', '?')} touched a predicted file within the "
+                f"{cand.get('commit', '?')} {_how} within the "
                 f"{parsed['within_days']}d window"
             )
             entry = {
@@ -742,6 +892,98 @@ def _git_gh_regression_commits() -> List[str]:
     return shas
 
 
+_REVERT_BRANCH_RE = re.compile(r"(?:^|[\s/'\"])revert/", re.I)
+
+
+def discover_revert_candidates(lookback_days: int = 30) -> List[dict]:
+    """Discover revert commits within lookback_days (#343 `hash` form).
+
+    `git revert` writes subject `Revert "<orig>"`, so `^Revert` anchors the
+    canonical form deterministically; we ALSO include merge commits of a
+    `revert/*` branch. Each: {"commit", "touched_files", "merge_time",
+    "message"}. Deterministic over a local clone (same class as the existing
+    `touching` discovery). NOT exercised by unit tests.
+    """
+    since = (
+        _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)
+    ).strftime("%Y-%m-%d")
+    out: List[dict] = []
+    seen: set = set()
+
+    # (a) canonical `git revert` commits: subject begins with `Revert`.
+    log = _git([
+        "log", f"--since={since}", "--grep=^Revert",
+        "--pretty=format:%H%x1f%cI%x1f%s",
+    ])
+    if log:
+        for line in log.splitlines():
+            parts = line.split("\x1f")
+            if len(parts) < 3:
+                continue
+            sha, when, subject = parts[0], parts[1], parts[2]
+            if sha in seen:
+                continue
+            seen.add(sha)
+            out.append({"commit": sha, "touched_files": _touched_files(sha),
+                        "merge_time": when, "message": subject})
+
+    # (b) merges of a revert/* branch.
+    mlog = _git([
+        "log", "--merges", f"--since={since}",
+        "--pretty=format:%H%x1f%cI%x1f%s",
+    ])
+    if mlog:
+        for line in mlog.splitlines():
+            parts = line.split("\x1f")
+            if len(parts) < 3:
+                continue
+            sha, when, subject = parts[0], parts[1], parts[2]
+            if sha in seen or not _REVERT_BRANCH_RE.search(subject or ""):
+                continue
+            seen.add(sha)
+            out.append({"commit": sha, "touched_files": _touched_files(sha),
+                        "merge_time": when, "message": subject})
+    return out
+
+
+def discover_reference_commits(tokens: List[str], lookback_days: int = 30) -> List[dict]:
+    """Discover commits whose message mentions any of `tokens` (#343 `referencing`).
+
+    A coarse `git log -i --grep=<token>` pre-filter over ALL commits in the
+    window (referencing is about any mention, not just fix-merges); the pure
+    `_referencing_fired` matcher then applies the exact word-boundary check.
+    Each: {"commit", "merge_time", "message"} (full subject+body). NO `gh` PR
+    scan — PR search is non-deterministic/mutable and would make a shared-ledger
+    Brier depend on which machine/when reconcile ran (determinism invariant).
+    NOT exercised by unit tests.
+    """
+    since = (
+        _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)
+    ).strftime("%Y-%m-%d")
+    out: List[dict] = []
+    seen: set = set()
+    for token in {t for t in tokens if t}:
+        log = _git([
+            "log", "-i", f"--grep={token}", f"--since={since}",
+            "--pretty=format:%H%x1f%cI%x1f%B%x1e",
+        ])
+        if not log:
+            continue
+        for rec in log.split("\x1e"):
+            rec = rec.strip("\n")
+            if not rec.strip():
+                continue
+            parts = rec.split("\x1f")
+            if len(parts) < 3:
+                continue
+            sha, when, message = parts[0].strip(), parts[1].strip(), parts[2]
+            if sha in seen:
+                continue
+            seen.add(sha)
+            out.append({"commit": sha, "merge_time": when, "message": message})
+    return out
+
+
 def fix_branch_sizes(days: int = 90) -> List[int]:
     """Touched-file counts of fix/hotfix merges over the prior `days` (a
     DISTINCT 90-day window from the 30-day candidate lookback)."""
@@ -812,8 +1054,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     # §3a Phase 7 second pass: pre-registered predicate walk. Runs AFTER the
     # walkback so a fired predicate wins precedence under L-9 (latest-wins).
     entries = load_jsonl(args.ledger)
+    # #343: per-form candidate populations (SEPARATE lists, not added to
+    # `candidates`, so walkback/touching is unregressed). Reference tokens are
+    # extracted once from the referencing predicates present in the ledger.
+    revert_candidates = discover_revert_candidates(lookback_days=args.lookback_days)
+    ref_tokens: List[str] = []
+    for e in entries:
+        pf = e.get("predicted_falsifier")
+        if not pf or pf == PREDICATE_SENTINEL:
+            continue
+        parsed = parse_predicate(pf)
+        if parsed and parsed.get("form") == "referencing":
+            ref_tokens.append(parsed["token"])
+    reference_candidates = (
+        discover_reference_commits(ref_tokens, lookback_days=args.lookback_days)
+        if ref_tokens else []
+    )
     classifications, predicate_appended = reconcile_predicates(
         entries, candidates, args.falsification, now=now,
+        revert_candidates=revert_candidates,
+        reference_candidates=reference_candidates,
     )
     parseable = sum(1 for c in classifications if c.get("parseable"))
     unparseable = sum(1 for c in classifications if c.get("unparseable"))

@@ -182,6 +182,20 @@ Invoke crucible:test-coverage with:
 - Context: [description of changes]
 ```
 
+## Calibration ledger emit (Tier B stub — standalone only)
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+**Standalone top-level invocation ONLY.** Emit a ledger row IFF `test-coverage` was invoked as its own top-level run (a user `/test-coverage`, or the Standalone caller-integration path above). When dispatched **inline** by a host skill (`debugging` Phase 5, `build` Phase 3, `finish` Step 2.5), emit **nothing** — that host owns its own ledger row. The terminal "Test Alignment Audit Report" is the single emit point; emit once there, not mid-audit.
+
+When (and only when) running standalone, emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
+
+- Mint exactly ONE UUIDv7 (`scripts/uuid7.py`) at the start of the standalone run and reuse it for the single emit. `(run_id, skill="test-coverage")` dedup (L-2) guarantees idempotency.
+- The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — a missing emit must **never block** the skill.
+- Populate ONLY meaningful values: `schema_version: 2`, `run_id`, `skill: "test-coverage"`, `tier: "B"`, `verdict` (all affected tests pass post-alignment with no coincidence flags and no fix failures → `PASS`; coincidence tests flagged or fix failures needing caller judgment → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the audited test files, repo-relative), `artifact_type: "code"`.
+- Set ALL calibration fields EXPLICITLY null per "Tier-B null semantics": `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0`, `comment: null`, `backfilled: false`, `falsified: null`, `falsified_by: null`.
+- **No advisory wiring.** test-coverage emits PASS/FAIL but no probability, so Brier is not viable and no `brier_advisory` is read here by design.
+
 ## Guardrails
 
 **The audit agent must NOT:**

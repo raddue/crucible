@@ -220,6 +220,24 @@ The reconciler and `/ledger` early-return on it (`if predicted_falsifier ==
 parseable nor unparseable. New emits MUST NOT write the sentinel — write a real
 predicate or `null` per the rules above.
 
+## Manual-attribution `signal_type` (reconcile-side; NOT a runs field)
+
+`signal_type` is an **optional field on `manual-attribution.jsonl` entries** (and
+the `falsification.jsonl` entry the reconciler derives from them) — it is **not** a
+`runs.jsonl` field, so the `emit` CLI never writes it. Enum:
+
+- `manual_override` (default when omitted) — a plain human override of the
+  algorithm's attribution.
+- `bad_implementation` — "a verdict accepted as PASS led to a bad implementation"
+  (a design-level wrong call, downstream rework, or an abandoned approach that no
+  path-touching fix captures). This is the seam that lets a **non-code** verdict be
+  Brier-scored: `compute_brier` admits a non-code verdict into the sample only when
+  it carries a `bad_implementation` falsification. PASS-side only. Full semantics +
+  JSONL shape live in `skills/calibration-reconcile/SKILL.md`.
+
+The reconciler threads `signal_type` onto both the top level of the derived
+falsification entry and into its `falsified_by`.
+
 ## L-2 uniqueness clarification
 
 Uniqueness is on `(run_id, skill)` regardless of `run_id` format.
