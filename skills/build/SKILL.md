@@ -849,6 +849,8 @@ Write a handoff manifest:
      - Non-match companion files are NOT loaded for implementers
   5. **`Last loaded` update:** Loading is pure-read. After all implementer dispatches for the current phase complete, batch-update the `Last loaded` field to today on all signatures that were loaded. Do NOT update during dispatch — defer to after all subagents are dispatched.
 
+- **Grudge pre-flight (regression-oracle, #271):** Before dispatching implementers, query the **Book of Grudges** for each task's in-scope files and inject any matches into that implementer's dispatch file as a hard **DO NOT REPEAT** constraint (sibling to defect-signature loading). Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <task files…>`; non-empty output lists past regressions held against those files. Best-effort: if the helper is unresolved, emit a one-line stderr warning and continue — a missing pre-flight must NEVER block the build. See `skills/grudge/SKILL.md`.
+
 ### Step 0.5: Gate Ledger — Phase 3 Start
 
 **Write Phase 3 IN_PROGRESS** to the gate ledger (after Phase 2 PASS verification).
