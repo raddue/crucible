@@ -173,22 +173,52 @@ Severity-Histogram / Gated-Files / Highest-Finding ride alongside the marker
 as additive fields (post-`MarkerVersion: 2`) and map 1:1 to the
 corresponding `snake_case` ledger keys.
 
-### `predicted_falsifier` deferred-sentinel protocol (Phase 1 → Phase 7 bridge)
+### `predicted_falsifier` protocol (predicted-falsifier prediction market, Phase 7)
 
-The field is in the schema from Phase 1 but its real emit-rules ship in Phase 7.
+A pre-registered, machine-checkable predicate co-emitted with each Tier A
+verdict (design §3a). It converts the ledger from a scorecard into a prediction
+market: every PASS/FAIL is a dated, falsifiable hypothesis. The reconciler's
+second pass parses it and checks whether it fired; `/ledger` surfaces per-skill
+hit-rate and unparseable-rate.
 
-- **Tier A emits write `predicted_falsifier: "<DEFERRED:pre-phase-7>"`** ONLY
-  when both conditions hold: `verdict ∈ {PASS, FAIL}` AND `artifact_type ==
-  "code"`. All other Tier A cases (escalation verdicts STAGNATION /
-  ESCALATED / ARCHITECTURAL / SUSTAINED_REGRESSION; non-code artifact types
-  design / plan / hypothesis / mockup / translation / other) write
-  `predicted_falsifier: null`.
-- **Tier B emits always write `null`.**
+**When to emit (Tier A only — `quality-gate`, `siege`):**
+
+- **MANDATORY non-null** whenever `verdict ∈ {PASS, FAIL}` AND `artifact_type ==
+  "code"`. In one sentence, describe the future evidence that would prove this
+  verdict wrong. Prefer the **canonical grammar** so the reconciler can
+  auto-check it:
+
+  ```
+  <predicate> ::= <verb> "touching" <file-list> "within" <N> "d"
+                | <verb> "of" "artifact_hash=" <hex> ["without" "touching" <file-list>] "within" <N> "d"
+                | <verb> "referencing" <token> "within" <N> "d"
+  <verb>      ::= "fix" | "hotfix" | "revert" | "merge" | "CVE" | "postmortem"
+  <file-list> ::= <path-or-glob> ("," <path-or-glob>)*
+  <N>         ::= 1-365 (integer days)
+  ```
+
+  Examples: `fix touching src/auth/token.ts within 30d` ·
+  `hotfix touching src/api/*,src/db/migrate.ts within 14d` ·
+  `CVE referencing token-refresh within 90d`.
+
+  Free-form prose is permitted but counts as **unparseable** for auto-checking
+  (surfaced in `/ledger`'s `unparseable_predicate_rate`, never rejected at emit).
+  Max 256 chars. Auto-checking covers the `touching` form at v1.
+- **`null`** for all other Tier A cases: escalation verdicts (STAGNATION /
+  ESCALATED / ARCHITECTURAL / SUSTAINED_REGRESSION — not predictions about
+  artifact correctness) and all non-code artifact types (design / plan /
+  hypothesis / mockup / translation / other — non-code calibration is deferred
+  to v1.1).
+- **Tier B emits always write `null`** (consistent with their stub posture).
 - **Backfilled entries always write `null`** (cannot be retroactively
   pre-registered).
 
-Phase 7 parsers MUST early-return on the sentinel before any regex matching
-(`if predicted_falsifier == "<DEFERRED:pre-phase-7>": return excluded`).
+**Bootstrap sentinel (historical).** Between the Phase 1 and Phase 7 merges,
+Tier A wrote the literal `"<DEFERRED:pre-phase-7>"` in place of a real predicate.
+The reconciler and `/ledger` early-return on it (`if predicted_falsifier ==
+"<DEFERRED:pre-phase-7>": exclude from both rate denominators`); it is neither
+parseable nor unparseable. New emits MUST NOT write the sentinel — write a real
+predicate or `null` per the rules above.
 
 ## L-2 uniqueness clarification
 

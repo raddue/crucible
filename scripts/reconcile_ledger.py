@@ -7,12 +7,15 @@ Brier calibration scores, and writes a falsification log.
 Architecture (binding):
   - PURE core (no subprocess/git, deterministic, drives off injected data):
       ledger_entry_hash, reconcile, compute_brier, load_jsonl,
-      read_manual_attribution
+      read_manual_attribution, parse_predicate, reconcile_predicates
   - GIT layer (subprocess; NOT exercised by unit tests):
       discover_candidates, fix_branch_sizes, cross_cut_threshold_from, main
 
-Scope: design §3 steps 1-6 ONLY. The predicted-falsifier predicate parser /
-"second pass" is Phase 7 and explicitly OUT OF SCOPE here.
+Scope: design §3 steps 1-6 (file-intersection walkback + Brier) PLUS the Phase 7
+second pass (design §3a): the predicted-falsifier predicate parser and walk.
+`main()` runs the walkback first, then the predicate pass; the predicate pass
+appends after the walkback so L-9 (latest-wins) gives a fired predicate
+precedence over a walkback match on the same verdict (design §3a step 2).
 
 The Brier formula `brier = mean((confidence - actual)^2)` (contract L-10).
 
@@ -58,6 +61,11 @@ MULTI_FILE_LOW = 5
 MIN_CONFIDENCE = 0.5
 # Verdict-type classifier (T-11): only these count for Brier.
 BRIER_VERDICTS = {"PASS", "FAIL"}
+# Phase 1->Phase 7 bridge sentinel. Entries bearing it are bootstrap-window
+# emits with no real predicate; excluded from BOTH predicate rate denominators
+# (design §3a bootstrap-window paragraph / contract R4-S2). Parsers MUST
+# early-return on it before any regex matching.
+PREDICATE_SENTINEL = "<DEFERRED:pre-phase-7>"
 
 
 # --------------------------------------------------------------------------- #
@@ -272,6 +280,13 @@ def reconcile(
         else:
             days_delta = float("inf")
         confidence = _confidence_label(days_delta, len(touched), cross_cut)
+        # Phase 7 (design §3a step 3 / plan combination rule): a file-intersection
+        # walkback is the COARSER heuristic — it caps at "medium". Only a
+        # self-declared predicted_falsifier that fires earns "high" (set in
+        # reconcile_predicates). This demotes the heuristic relative to sharp,
+        # pre-registered predictions.
+        if confidence == "high":
+            confidence = "medium"
 
         reason = (
             f"fix {cand.get('commit', '?')} touched "
@@ -287,10 +302,12 @@ def reconcile(
                 "reason": reason,
                 "confidence": confidence,
                 "cross_cut": cross_cut,
+                "via": "walkback",
             },
             "confidence": confidence,
             "reasoning": reason,
             "cross_cut": cross_cut,
+            "via": "walkback",
         }
 
         # Append-only write (L-1). The append helper honors the kill-switch and
@@ -320,9 +337,12 @@ def compute_brier(
       - if a matching falsification entry exists, its cross_cut must be False
         (cross-cut excluded from the denominator)
 
-    actual = 1 iff CORRECT: a PASS NOT marked falsified, OR any FAIL (at v1
-      every FAIL => actual=1, since predicates are Phase 7).
-    actual = 0 iff WRONG: a PASS that WAS marked falsified: true.
+    actual = 1 iff CORRECT: a PASS NOT marked falsified, OR a FAIL whose
+      predicted_falsifier did NOT fire.
+    actual = 0 iff WRONG: a PASS that WAS marked falsified: true, OR a FAIL
+      whose predicted_falsifier fired (L-10 FAIL-side flip, Phase 7) — detected
+      via a falsification entry carrying via == "predicate". A walkback-only
+      falsification does NOT flip a FAIL.
 
     Returns {"<skill>": {"n": int, "brier": float, "last_updated": iso}}.
     """
@@ -366,9 +386,21 @@ def compute_brier(
         if fals is not None and fals.get("cross_cut"):
             continue
 
-        # Determine actual.
+        # Determine actual (contract L-10; Phase 7 completes the FAIL-side flip).
         if verdict == "FAIL":
-            actual = 1  # v1: every FAIL is correct (predicates are Phase 7)
+            # A FAIL is WRONG (actual=0) ONLY if its predicted_falsifier fired —
+            # signalled by a falsification entry with via == "predicate". A
+            # walkback-only match (a later fix touching the gated files) is the
+            # gate working as intended, NOT the FAIL being wrong, so it does not
+            # flip the FAIL. With no fired predicate, a FAIL defaults to actual=1.
+            via = None
+            if fals is not None:
+                via = fals.get("via") or (fals.get("falsified_by") or {}).get("via")
+            predicate_fired = (
+                fals is not None and bool(fals.get("falsified"))
+                and via == "predicate"
+            )
+            actual = 0 if predicate_fired else 1
         else:  # PASS
             falsified = bool(fals.get("falsified")) if fals is not None else False
             actual = 0 if falsified else 1
@@ -383,6 +415,218 @@ def compute_brier(
         brier = sum(errs) / n if n else 0.0
         out[skill] = {"n": n, "brier": brier, "last_updated": last}
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Predicted-falsifier second pass (design §3a, Phase 7) — PURE                #
+# --------------------------------------------------------------------------- #
+
+# Canonical grammar (design §3a, v1). Three forms; verbs are case-insensitive.
+_PRED_VERB = r"(fix|hotfix|revert|merge|cve|postmortem)"
+_PRED_TOUCHING = re.compile(
+    rf"^{_PRED_VERB}\s+touching\s+(.+?)\s+within\s+(\d+)\s*d$", re.I)
+_PRED_HASH = re.compile(
+    rf"^{_PRED_VERB}\s+of\s+artifact_hash=([0-9a-f]+)"
+    rf"(?:\s+without\s+touching\s+(.+?))?\s+within\s+(\d+)\s*d$", re.I)
+_PRED_REF = re.compile(
+    rf"^{_PRED_VERB}\s+referencing\s+(\S+)\s+within\s+(\d+)\s*d$", re.I)
+
+
+def _split_file_list(s: str) -> List[str]:
+    return [p.strip() for p in s.split(",") if p.strip()]
+
+
+def _valid_days(n: int) -> bool:
+    return 1 <= n <= 365
+
+
+def parse_predicate(text) -> Optional[dict]:
+    """Parse a `predicted_falsifier` string against the canonical grammar (§3a).
+
+    Returns a dict describing the predicate on success, or None on PARSE FAILURE
+    (an unparseable / free-form prose predicate). The caller is responsible for
+    early-returning on the bootstrap sentinel BEFORE calling this — the sentinel
+    is neither parseable nor unparseable (it is excluded from both buckets).
+
+    Forms:
+      touching    -> {"form": "touching", "verb", "files": [...], "within_days"}
+      hash        -> {"form": "hash", "verb", "artifact_hash",
+                      "without_files": [...], "within_days"}
+      referencing -> {"form": "referencing", "verb", "token", "within_days"}
+    """
+    if not text or not isinstance(text, str):
+        return None
+    s = text.strip()
+
+    m = _PRED_TOUCHING.match(s)
+    if m:
+        n = int(m.group(3))
+        if not _valid_days(n):
+            return None
+        files = _split_file_list(m.group(2))
+        if not files:
+            return None
+        return {"form": "touching", "verb": m.group(1).lower(),
+                "files": files, "within_days": n}
+
+    m = _PRED_HASH.match(s)
+    if m:
+        n = int(m.group(4))
+        if not _valid_days(n):
+            return None
+        return {"form": "hash", "verb": m.group(1).lower(),
+                "artifact_hash": m.group(2).lower(),
+                "without_files": _split_file_list(m.group(3)) if m.group(3) else [],
+                "within_days": n}
+
+    m = _PRED_REF.match(s)
+    if m:
+        n = int(m.group(3))
+        if not _valid_days(n):
+            return None
+        return {"form": "referencing", "verb": m.group(1).lower(),
+                "token": m.group(2), "within_days": n}
+
+    return None
+
+
+def _glob_match(path: str, pattern: str) -> bool:
+    """Path-aware glob: a `*` matches within ONE path segment and does NOT cross
+    `/` (shell/git non-recursive semantics).
+
+    `fnmatch` alone treats `/` as an ordinary character, so `src/auth/*` would
+    over-match `src/auth/sub/deep/x.ts` and credit a verdict for an unrelated
+    deep-tree fix — silently corrupting calibration (a fired predicate flips a
+    FAIL's Brier `actual` 1->0). We require equal segment counts and fnmatch each
+    segment pairwise, so `src/auth/*` matches `src/auth/token.ts` but not
+    `src/auth/sub/x.ts`. Exact (glob-free) paths fall out as segment-wise equality.
+    """
+    import fnmatch
+    p_seg = path.split("/")
+    pat_seg = pattern.split("/")
+    if len(p_seg) != len(pat_seg):
+        return False
+    # fnmatchcase (NOT fnmatch): case-SENSITIVE regardless of host OS. git paths
+    # are case-sensitive posix; plain fnmatch case-folds on macOS/Windows, which
+    # would make calibration non-reproducible across machines feeding one ledger.
+    return all(fnmatch.fnmatchcase(a, b) for a, b in zip(p_seg, pat_seg))
+
+
+def _predicate_fired(parsed: dict, entry_dt, candidates: List[dict]):
+    """Return the candidate that FIRED `parsed` within its window, else None.
+
+    v1 auto-checks the `touching` form ONLY (design §3a: "For the <verb> touching
+    <file-list> within <N>d form: scan ..."). The `hash` and `referencing` forms
+    parse successfully but have no candidate-side signal to match at v1, so they
+    never fire — they sit in the parseable denominator (a confirmed-or-not
+    prediction the reconciler cannot yet auto-check), never the numerator. This
+    is the documented v1 limitation; a v1.1 may wire artifact_hash / token walks.
+
+    A candidate fires when its merge lands strictly AFTER the verdict and within
+    `within_days`, AND any touched file matches any file-list pattern (exact or
+    fnmatch glob).
+    """
+    if not parsed or entry_dt is None or parsed.get("form") != "touching":
+        return None
+    window_end = entry_dt + _dt.timedelta(days=parsed["within_days"])
+    patterns = parsed["files"]
+    for cand in candidates:
+        merge_dt = _parse_iso(cand.get("merge_time"))
+        if merge_dt is None:
+            continue
+        if not (entry_dt < merge_dt <= window_end):
+            continue
+        for tf in (cand.get("touched_files") or []):
+            if any(_glob_match(tf, pat) for pat in patterns):
+                return cand
+    return None
+
+
+def reconcile_predicates(
+    ledger_entries: List[dict],
+    candidates: List[dict],
+    falsification_path: str,
+    *,
+    now: str,
+) -> "tuple[List[dict], List[dict]]":
+    """Phase 7 second pass (design §3a). Runs AFTER the file-intersection walkback.
+
+    For each ledger entry carrying a non-null `predicted_falsifier`:
+      - sentinel  -> excluded from both rate buckets; append nothing.
+      - non-code  -> skipped (predicates are defined for code artifacts only).
+      - parseable + fired in-window -> append a falsification entry with
+        confidence:"high", via:"predicate". Because this runs after the walkback
+        and L-9 is latest-wins, a fired predicate takes precedence over a
+        walkback match on the same hash (design §3a step 2).
+      - parseable + not fired  -> append nothing (counts toward the hit-rate
+        denominator only; surfaced by /ledger).
+      - unparseable            -> append nothing; do NOT auto-falsify; the
+        walkback outcome (if any) stands (design §3a step 1, parse-failure path).
+
+    Returns (classifications, appended). `classifications` has one record per
+    non-null predicate — {ledger_entry_hash, skill, sentinel, parseable, fired,
+    unparseable} — for tests; /ledger derives its own rates from runs.jsonl.
+    """
+    classifications: List[dict] = []
+    appended: List[dict] = []
+    for e in ledger_entries:
+        pf = e.get("predicted_falsifier")
+        if pf is None:
+            continue
+        run_id = e.get("run_id", "unknown")
+        skill = e.get("skill", "unknown")
+        h = ledger_entry_hash(run_id, skill)
+
+        if pf == PREDICATE_SENTINEL:
+            classifications.append({
+                "ledger_entry_hash": h, "skill": skill, "sentinel": True,
+                "parseable": False, "fired": False, "unparseable": False})
+            continue
+
+        # Predicates are only defined for code artifacts (emit rule). A stray
+        # predicate on a non-code entry is out of scope — skip without counting.
+        if e.get("artifact_type") != "code":
+            continue
+
+        parsed = parse_predicate(pf)
+        if parsed is None:
+            classifications.append({
+                "ledger_entry_hash": h, "skill": skill, "sentinel": False,
+                "parseable": False, "fired": False, "unparseable": True})
+            continue
+
+        entry_dt = _parse_iso(e.get("timestamp"))
+        cand = _predicate_fired(parsed, entry_dt, candidates)
+        fired = cand is not None
+        classifications.append({
+            "ledger_entry_hash": h, "skill": skill, "sentinel": False,
+            "parseable": True, "fired": fired, "unparseable": False})
+
+        if fired:
+            reason = (
+                f"predicted_falsifier {pf!r} fired: {parsed['verb']} "
+                f"{cand.get('commit', '?')} touched a predicted file within the "
+                f"{parsed['within_days']}d window"
+            )
+            entry = {
+                "ledger_entry_hash": h,
+                "falsified": True,
+                "falsified_by": {
+                    "commit": cand.get("commit"),
+                    "reason": reason,
+                    "confidence": "high",
+                    "cross_cut": False,
+                    "via": "predicate",
+                },
+                "confidence": "high",
+                "reasoning": reason,
+                "cross_cut": False,
+                "via": "predicate",
+            }
+            _ledger_append(falsification_path, entry)
+            appended.append(entry)
+
+    return classifications, appended
 
 
 # --------------------------------------------------------------------------- #
@@ -565,9 +809,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         cross_cut_threshold=threshold, lookback_days=args.lookback_days, now=now,
     )
 
-    # Recompute Brier over the full ledger + reduced falsification map.
-    fmap = _falsification_reduce(args.falsification)
+    # §3a Phase 7 second pass: pre-registered predicate walk. Runs AFTER the
+    # walkback so a fired predicate wins precedence under L-9 (latest-wins).
     entries = load_jsonl(args.ledger)
+    classifications, predicate_appended = reconcile_predicates(
+        entries, candidates, args.falsification, now=now,
+    )
+    parseable = sum(1 for c in classifications if c.get("parseable"))
+    unparseable = sum(1 for c in classifications if c.get("unparseable"))
+
+    # Recompute Brier over the full ledger + reduced falsification map (which now
+    # includes any predicate-sourced entries, predicate winning per L-9).
+    fmap = _falsification_reduce(args.falsification)
     brier = compute_brier(entries, fmap, now=now)
 
     # Write brier-rolling.json (gitignored).
@@ -582,6 +835,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print(f"[calibration-reconcile] candidates={len(candidates)} "
           f"cross_cut_threshold={threshold} falsified+={len(appended)} "
+          f"predicate_falsified+={len(predicate_appended)} "
+          f"predicates(parseable={parseable} unparseable={unparseable}) "
           f"skills_scored={len(brier)}")
     return 0
 
