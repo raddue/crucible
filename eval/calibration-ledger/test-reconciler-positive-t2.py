@@ -3,7 +3,14 @@
 
 A forward ledger entry (backfilled:false, artifact_type:code) whose `gated_files`
 intersect an injected candidate's `touched_files`, with the candidate `merge_time`
-within 14 days AFTER the entry's `timestamp`, gets falsified with confidence: high.
+within 14 days AFTER the entry's `timestamp`, gets falsified.
+
+Phase 7 (design §3a step 3 / plan combination rule): a file-intersection walkback
+is the COARSER heuristic and now caps at confidence **medium** — only a fired
+predicted_falsifier earns "high". Pre-Phase-7 this assertion expected "high"; the
+demotion is intentional (it rewards skills that write sharp, pre-registered
+predictions over the coarse file-overlap heuristic). See T-12 for the predicate
+path that earns "high".
 
 Drives the PURE reconcile() with an INJECTED candidate list — no real git.
 """
@@ -55,7 +62,7 @@ def _entry(**kw):
     return base
 
 
-def test_positive_high_confidence():
+def test_positive_walkback_confidence():
     from scripts.reconcile_ledger import reconcile, ledger_entry_hash
     tmp = tempfile.mkdtemp(prefix="t2-")
     try:
@@ -86,8 +93,11 @@ def test_positive_high_confidence():
                    f"got {e.get('ledger_entry_hash')}")
             _check("T-2.3 falsified == true", e.get("falsified") is True,
                    f"got {e.get('falsified')}")
-            _check("T-2.4 confidence == high", e.get("confidence") == "high",
+            _check("T-2.4 walkback confidence capped at medium (Phase 7 §3a)",
+                   e.get("confidence") == "medium",
                    f"got {e.get('confidence')}")
+            _check("T-2.4b walkback entry tagged via:walkback",
+                   e.get("via") == "walkback", f"got {e.get('via')}")
             _check("T-2.5 falsified_by.commit recorded",
                    (e.get("falsified_by") or {}).get("commit") == "deadbeef",
                    f"got {e.get('falsified_by')}")
@@ -103,7 +113,7 @@ def test_positive_high_confidence():
 
 
 def main():
-    test_positive_high_confidence()
+    test_positive_walkback_confidence()
     failures = sum(1 for r in _results if not r)
     if failures:
         print(f"\n{failures} assertion(s) FAILED")

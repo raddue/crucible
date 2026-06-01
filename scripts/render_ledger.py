@@ -29,6 +29,12 @@ if REPO_ROOT not in sys.path:
 
 from scripts.ledger_reduce import reduce as _falsification_reduce  # noqa: E402
 from scripts.ledger_append import default_ledger_dir  # noqa: E402
+from scripts.reconcile_ledger import (  # noqa: E402
+    parse_predicate,
+    ledger_entry_hash,
+    PREDICATE_SENTINEL,
+    GRACE_DAYS,
+)
 
 # Defaults point at the central machine-local store (#270): the live ledger
 # aggregates every repo's gating runs into ~/.claude/crucible/ledger (override
@@ -42,6 +48,14 @@ REPORT_DIR = os.path.join("docs", "ledger")
 # quarter of forward data.
 INFLATION_FACTOR = 3.0
 MIN_BASELINE_WEEKS = 4
+
+# Predicate-rate bootstrap: until this many parseable predicates exist for a
+# skill, its hit/unparseable rates are not statistically meaningful and the
+# steady-state vagueness-drift advisory is suppressed (design §3a / plan 7.5).
+PREDICATE_BOOTSTRAP_MIN = 10
+# One-shot Phase-7 regression gate: a first-report unparseable rate above this
+# fires the vagueness advisory even before the bootstrap window fills.
+VAGUENESS_RATE_THRESHOLD = 0.5
 
 
 # --------------------------------------------------------------------------- #
@@ -265,6 +279,95 @@ def falsified_count(falsification_path: str) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Predicate calibration (predicted_falsifier — design §3a, Phase 7)           #
+# --------------------------------------------------------------------------- #
+
+def _parse_ts(ts):
+    """Tolerant ISO-8601 parse -> aware UTC datetime, or None. (Mirrors the
+    reconciler's parser without importing a private helper.)"""
+    if not ts or not isinstance(ts, str):
+        return None
+    s = ts.strip().replace("Z", "+00:00")
+    try:
+        dt = _dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt.astimezone(_dt.timezone.utc)
+
+
+def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
+    """Per-skill predicate hit-rate + unparseable-rate (design §3a).
+
+    For each entry carrying a non-null `predicted_falsifier`:
+      - the bootstrap sentinel is EXCLUDED from both denominators;
+      - `total_non_null` counts every real (non-sentinel) predicate — the
+        denominator for `unparseable_rate`;
+      - `unparseable` counts free-form (non-grammar) predicates;
+      - `parseable` counts grammar-valid predicates that are ALSO outside the
+        30-day grace period — the denominator for `hit_rate` (a predicate still
+        inside grace has not yet had a full chance to fire);
+      - `hit_count` counts those parseable-outside-grace entries whose reduced
+        falsification record carries `via == "predicate"` (a fired prediction).
+
+    Returns {skill: {total_non_null, parseable, unparseable, hit_count,
+    hit_rate, unparseable_rate}}.
+    """
+    now_dt = _parse_ts(now)
+    grace_cutoff = (now_dt - _dt.timedelta(days=GRACE_DAYS)) if now_dt else None
+
+    per_skill = {}
+    for e in entries:
+        pf = e.get("predicted_falsifier")
+        if pf is None:
+            continue
+        # Bootstrap-window sentinel: excluded from BOTH denominators — and it must
+        # not even materialize a per-skill slot (a sentinel-only skill has no
+        # predicate data to report).
+        if pf == PREDICATE_SENTINEL:
+            continue
+        skill = e.get("skill") or "unknown"
+        slot = per_skill.setdefault(skill, {
+            "total_non_null": 0, "parseable": 0, "uncheckable": 0,
+            "unparseable": 0, "hit_count": 0,
+        })
+        slot["total_non_null"] += 1
+        parsed = parse_predicate(pf)
+        if parsed is None:
+            slot["unparseable"] += 1
+            continue
+        # v1 only auto-checks the `touching` form (reconciler limitation). The
+        # `hash` / `referencing` forms parse but cannot fire yet, so counting
+        # them in the hit-rate DENOMINATOR would structurally drag the rate to 0
+        # (siege is steered toward `referencing`). Track them as `uncheckable`,
+        # excluded from hit_rate until v1.1 wires their walks.
+        if parsed.get("form") != "touching":
+            slot["uncheckable"] += 1
+            continue
+        # Parseable + auto-checkable: counts toward the hit-rate denominator once
+        # it is outside the grace window (it has had a full chance to fire).
+        ts = _parse_ts(e.get("timestamp"))
+        outside_grace = grace_cutoff is None or (ts is not None and ts < grace_cutoff)
+        if not outside_grace:
+            continue
+        slot["parseable"] += 1
+        h = ledger_entry_hash(e.get("run_id", "unknown"), skill)
+        fals = falsification_reduced.get(h)
+        if fals is not None:
+            via = fals.get("via") or (fals.get("falsified_by") or {}).get("via")
+            if bool(fals.get("falsified")) and via == "predicate":
+                slot["hit_count"] += 1
+
+    out = {}
+    for skill, s in per_skill.items():
+        hit_rate = (s["hit_count"] / s["parseable"]) if s["parseable"] else 0.0
+        unp_rate = (s["unparseable"] / s["total_non_null"]) if s["total_non_null"] else 0.0
+        out[skill] = {**s, "hit_rate": hit_rate, "unparseable_rate": unp_rate}
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # Commit citation (v1-schema limitation)                                      #
 # --------------------------------------------------------------------------- #
 
@@ -297,7 +400,8 @@ def _fmt_pct(x: float) -> str:
 
 
 def render_week(week: str, entries: list, *, baseline_medians=None,
-                falsified=0, is_first_of_month=False) -> str:
+                falsified=0, is_first_of_month=False,
+                falsification_reduced=None, now=None) -> str:
     """Render the markdown report for one ISO week.
 
     Sections: honest "caught N" headline, verdict breakdown, raw per-skill
@@ -449,6 +553,58 @@ def render_week(week: str, entries: list, *, baseline_medians=None,
         )
     lines.append("")
 
+    # Predicate calibration (predicted_falsifier — §3a, Phase 7).
+    p_rates = predicate_rates(entries, falsification_reduced or {}, now=now)
+    active = {s: r for s, r in p_rates.items() if r["total_non_null"] > 0}
+    lines.append("## Predicate calibration (`predicted_falsifier`)")
+    lines.append("")
+    if active:
+        lines.append("| skill | parseable | hit_rate | unparseable_rate |")
+        lines.append("|-------|----------:|---------:|-----------------:|")
+        for skill in sorted(active):
+            r = active[skill]
+            lines.append(
+                f"| {skill} | {r['parseable']} | "
+                f"{_fmt_pct(r['hit_rate'])} | {_fmt_pct(r['unparseable_rate'])} |"
+            )
+        lines.append("")
+        for skill in sorted(active):
+            r = active[skill]
+            # Bootstrap bracket: rates not yet statistically meaningful.
+            if r["parseable"] < PREDICATE_BOOTSTRAP_MIN:
+                lines.append(
+                    f"_[predicate-rate bootstrap: `{skill}` has only "
+                    f"{r['parseable']} entr"
+                    f"{'y' if r['parseable'] == 1 else 'ies'} with parseable "
+                    f"predicates so far — rates not yet statistically meaningful; "
+                    f"vagueness-drift advisory suppressed]_"
+                )
+            # One-shot regression gate (§3a risk-check): fires even pre-bootstrap.
+            if r["unparseable_rate"] > VAGUENESS_RATE_THRESHOLD:
+                lines.append(
+                    f"- ⚠ **predicate vagueness** (`{skill}`): "
+                    f"{_fmt_pct(r['unparseable_rate'])} of non-null predicates are "
+                    f"unparseable (> {_fmt_pct(VAGUENESS_RATE_THRESHOLD)}). Tighten "
+                    f"the emit prompt before relying on the hit-rate."
+                )
+            # Transparency: `hash`/`referencing` predicates parse but aren't
+            # auto-checkable at v1, so they're excluded from the hit-rate.
+            if r.get("uncheckable"):
+                lines.append(
+                    f"_{r['uncheckable']} `{skill}` predicate"
+                    f"{'' if r['uncheckable'] == 1 else 's'} use the "
+                    f"`hash`/`referencing` form — parseable but not auto-checkable "
+                    f"at v1, so excluded from the hit-rate denominator._"
+                )
+        lines.append("")
+    else:
+        lines.append(
+            "_No pre-registered predicates this week (Tier A code PASS/FAIL "
+            "verdicts emit `predicted_falsifier`; pre-Phase-7 sentinel entries "
+            "are excluded)._"
+        )
+        lines.append("")
+
     # Monthly spot-check checklist (§4a) — first /ledger run of the month.
     if is_first_of_month:
         lines.append("## Monthly spot-check")
@@ -564,6 +720,9 @@ def main(argv=None) -> int:
         return 0
 
     falsified = falsified_count(args.falsification)
+    # Reduce once and reuse for the predicate hit-rate cross-reference.
+    falsification_reduced = _falsification_reduce(args.falsification)
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     weeks_sorted = sorted(groups.keys(), reverse=True)  # most recent first
     selected = weeks_sorted[: max(args.weeks, 0)]
@@ -581,6 +740,8 @@ def main(argv=None) -> int:
             baseline_medians={},  # v1: no forward rolling history yet -> silent
             falsified=falsified,
             is_first_of_month=(wk in first_of_month),
+            falsification_reduced=falsification_reduced,
+            now=now,
         )
         out_path = os.path.join(args.out_dir, f"weekly-{wk}.md")
         with open(out_path, "w", encoding="utf-8") as f:
