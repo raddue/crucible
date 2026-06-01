@@ -180,6 +180,8 @@ The anchor protects against external changes to the branch, not internal fix com
 
 Before dispatching any agents, the orchestrator pre-fetches live intelligence. This runs once per Siege invocation, not per agent.
 
+**Calibration advisory (print-only, at entry).** First, resolve `scripts/brier_advisory.py` by absolute path from the plugin root (same resolution as the ledger emit at terminal verdict) and run `python3 <script> advisory siege`. If it prints a line, surface that line verbatim before recon begins; if it prints nothing, say nothing. The script reads the central store (`~/.claude/crucible/ledger/brier-rolling.json` + `falsification.jsonl`, override `CRUCIBLE_LEDGER_DIR`) and is silent unless siege has ≥5 falsifiable verdicts with a Brier > 0.25 over trustworthy (≤30-day-old) reconciliation data. It honors `CRUCIBLE_CALIBRATION_DISABLED=1` as a graceful skip. If the script can't be resolved, skip silently — a missing advisory must never block the gate. No behavior change; advisory print only.
+
 **What is fetched:**
 
 | Source | Method | Content | Fallback |
