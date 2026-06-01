@@ -19,6 +19,7 @@ import fnmatch
 import glob as _glob
 import json
 import os
+import re as _re
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -30,8 +31,17 @@ from grudge_append import (  # noqa: E402
 )
 
 SIG_READ_CAP_BYTES = 256 * 1024  # fix #7: bound signature-match file reads
+SIG_MATCH_TIMEOUT_S = 2.0  # wall-clock guard so a pathological signature regex can never hang a pre-flight
 DEFAULT_LIMIT = 5
 _GLOB_CHARS = set("*?[")
+
+
+def _qwarn(msg: str) -> None:
+    print(f"[grudge_query WARN] {msg}", file=sys.stderr)
+
+
+class _SigTimeout(Exception):
+    """Raised by the SIGALRM handler when a signature match overruns its budget."""
 
 
 def _glob_match(path: str, pattern: str) -> bool:
@@ -49,10 +59,16 @@ def _glob_match(path: str, pattern: str) -> bool:
 def _path_match(scope_norm: str, stored: str) -> bool:
     """Exact normalized equality, unless the stored path carries glob metachars
     (then path-aware glob). Fix #1: stored files_touched are concrete paths, so
-    exact equality is the correct default — not _glob_match's depth-pinned glob."""
+    exact equality is the correct default — not _glob_match's depth-pinned glob.
+
+    Exact equality is tried FIRST, before the metachar check: a real filename can
+    legally contain `[ ] ? *` (e.g. Next.js dynamic routes `pages/[id].js`), and
+    such a literal path must match itself rather than being misread as a glob."""
+    if scope_norm == stored:
+        return True
     if any(c in stored for c in _GLOB_CHARS):
         return _glob_match(scope_norm, stored)
-    return scope_norm == stored
+    return False
 
 
 def parse_grudge(path: str) -> Optional[Dict]:
@@ -65,7 +81,12 @@ def parse_grudge(path: str) -> Optional[Dict]:
         return None
     if not text.startswith("---"):
         return None
-    parts = text.split("---", 2)
+    # Split only on a '---' that is alone on its own line. A naive
+    # text.split("---", 2) breaks on the first '---' ANYWHERE — including inside
+    # a frontmatter value (`symptom: regression --- see PR`) or a body fence
+    # (markdown rules / diffs in a repro), both common — truncating the
+    # frontmatter and silently dropping files_touched so the grudge never matches.
+    parts = _re.split(r"(?m)^---[ \t]*$", text, maxsplit=2)
     if len(parts) < 3:
         return None
     fm_block, body = parts[1], parts[2]
@@ -117,39 +138,93 @@ def survivors(grudge: Dict, repo_root: str) -> List[str]:
 
     A glob entry (e.g. `src/auth/*`) can't be existence-checked literally — it
     "survives" iff the pattern still matches at least one real file. Concrete
-    paths survive iff they exist."""
+    paths survive iff they exist.
+
+    Literal existence is checked FIRST: a real file whose name contains glob
+    metachars (e.g. `pages/[id].js`) exists on disk but `glob.glob` would read
+    `[id]` as a character class and find nothing — so a literal-exists hit must
+    win before the glob fallback, else the grudge is wrongly judged stale (and
+    `--cull` would delete it)."""
     out = []
     for f in grudge.get("files_touched", []):
-        if any(c in f for c in _GLOB_CHARS):
-            if _glob.glob(os.path.join(repo_root, f)):
-                out.append(f)
-        elif os.path.exists(os.path.join(repo_root, f)):
+        full = os.path.join(repo_root, f)
+        if os.path.exists(full):
+            out.append(f)
+        elif any(c in f for c in _GLOB_CHARS) and _glob.glob(full):
             out.append(f)
     return out
 
 
 def _signature_hit(signature: str, scope_files: List[str], repo_root: str) -> bool:
     """Defensive signature match (fix #7): compile as regex, fall back to literal
-    substring on re.error; cap file read size."""
+    substring on re.error; cap file read size.
+
+    A stored signature is free text and may be a catastrophic-backtracking regex
+    (`(a+)+$`); run unguarded it can hang the host for minutes, violating the
+    pre-flight's NEVER-block contract (and quality-gate wires --with-signatures).
+    Each per-file match therefore runs under a SIGALRM wall-clock budget; on
+    timeout the whole signature scan is abandoned (treated as no-hit) with a
+    stderr warning. When no usable timer exists (e.g. imported on a worker
+    thread — SIGALRM is main-thread-only), degrade to literal substring matching,
+    which cannot backtrack, rather than risk a hang."""
     sig = (signature or "").strip()
     if not sig:
         return False
-    import re
-    matcher = None
     try:
-        rx = re.compile(sig)
+        rx = _re.compile(sig)
+        regex_ok = True
+    except _re.error:
+        rx = None
+        regex_ok = False
+
+    import signal as _signal
+    import threading
+    can_arm = (
+        hasattr(_signal, "SIGALRM")
+        and threading.current_thread() is threading.main_thread()
+    )
+    if regex_ok and can_arm:
         matcher = lambda s: rx.search(s) is not None  # noqa: E731
-    except re.error:
-        matcher = lambda s: sig in s  # noqa: E731 — literal fallback
-    for f in scope_files:
-        p = os.path.join(repo_root, f)
-        try:
-            with open(p, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read(SIG_READ_CAP_BYTES)
-        except OSError:
-            continue
-        if matcher(content):
-            return True
+        armed = True
+    else:
+        matcher = lambda s: sig in s  # noqa: E731 — literal, ReDoS-proof
+        armed = False
+
+    def _on_alarm(signum, frame):  # noqa: ANN001
+        raise _SigTimeout()
+
+    old_handler = _signal.signal(_signal.SIGALRM, _on_alarm) if armed else None
+    try:
+        for f in scope_files:
+            p = os.path.join(repo_root, f)
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read(SIG_READ_CAP_BYTES)
+            except OSError:
+                continue
+            if armed:
+                _signal.setitimer(_signal.ITIMER_REAL, SIG_MATCH_TIMEOUT_S)
+            try:
+                if matcher(content):
+                    return True
+            except _SigTimeout:
+                _qwarn(
+                    f"signature match exceeded {SIG_MATCH_TIMEOUT_S}s on {f}; "
+                    f"abandoning signature scan (a pre-flight must never block)"
+                )
+                return False
+            finally:
+                if armed:
+                    _signal.setitimer(_signal.ITIMER_REAL, 0)
+    except _SigTimeout:
+        # The alarm can fire in the sub-microsecond gap between a match returning
+        # and the inner finally disarming the timer, escaping the inner except.
+        # Catch it here too so a timeout can never propagate out uncaught.
+        _qwarn("signature match timed out at the deadline boundary; treating as no-hit")
+        return False
+    finally:
+        if armed and old_handler is not None:
+            _signal.signal(_signal.SIGALRM, old_handler)
     return False
 
 
