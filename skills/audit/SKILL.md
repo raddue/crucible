@@ -605,10 +605,10 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-At the end of the audit's report/output (Phase 4, after the ranked findings are presented and before scratch cleanup), append ONE **Tier B STUB** JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md` (importable: `scripts/ledger_append.py`).
+At the end of the audit's report/output (Phase 4, after the ranked findings are presented and before scratch cleanup), emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
 
-- Honor `CRUCIBLE_CALIBRATION_DISABLED=1` — return BEFORE any lock acquisition or filesystem write. Dedup via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` with `skill="audit"` BEFORE `append()`; skip if it returns True.
-- Populate ONLY meaningful values: `schema_version: 1`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "audit"`, `tier: "B"`, `verdict` (audit is find-and-report; a completed report → `PASS`; an early abort/escalation routed to the user → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the manifest files reviewed, repo-relative; for non-code artifacts the audited file path), `artifact_type` (`code` | `design` | `plan`; map `concept` → `other`).
+- The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), dedup by `(run_id, skill="audit")` (L-2), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — never block.
+- Populate ONLY meaningful values (`repo` is auto-filled by the `emit` CLI): `schema_version: 2`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "audit"`, `tier: "B"`, `verdict` (audit is find-and-report; a completed report → `PASS`; an early abort/escalation routed to the user → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the manifest files reviewed, repo-relative; for non-code artifacts the audited file path), `artifact_type` (`code` | `design` | `plan`; map `concept` → `other`).
 - Set ALL calibration fields EXPLICITLY null per the "Tier-B null semantics" of `shared/ledger-append.md`: `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0` and `comment: null`. Keep `backfilled: false`, `falsified: null`, `falsified_by: null`.
 
 ## Prompt Templates

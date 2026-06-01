@@ -1015,7 +1015,7 @@ Highest-Finding: "<one-line quote of the most severe finding, or empty string if
 
 <!-- CANONICAL: shared/ledger-append.md -->
 
-**Ledger append at verdict-emit.** When emitting your terminal verdict, also append one JSONL line to `.crucible/ledger/runs.jsonl` per the canonical protocol at `skills/shared/ledger-append.md`. Honor `CRUCIBLE_CALIBRATION_DISABLED=1` by returning before any lock acquisition. Dedup by `(run_id, skill)` via `scripts.ledger_append.caller_dedup(ledger_path, run_id, skill)` BEFORE invoking `append()` — the append helper does NOT scan existing entries; honoring L-2 is the caller's responsibility.
+**Ledger emit at verdict-emit.** When emitting your terminal verdict, also emit one JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`, override `CRUCIBLE_LEDGER_DIR`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'` (`-` = central default). The `emit` CLI owns the mechanics: it honors `CRUCIBLE_CALIBRATION_DISABLED=1` as a graceful skip, dedups by `(run_id, skill)` (L-2), and auto-fills `repo` + `schema_version` — so you only construct the entry. If the script can't be resolved, warn to stderr and skip; a missing emit must never block the gate.
 
 **MarkerVersion semantics:** Every verdict marker written by this version of the gate or later carries `MarkerVersion: 2` as its first line. Consumers gate version-aware parsing on this stamp:
 

@@ -37,6 +37,53 @@ def _kill_switch_active() -> bool:
     return os.environ.get("CRUCIBLE_CALIBRATION_DISABLED") == "1"
 
 
+# --------------------------------------------------------------------------- #
+# Central-store path + provenance resolution (#270).                          #
+#                                                                             #
+# The live ledger is machine-local and aggregates EVERY repo's gating runs    #
+# into one place — never inside any git repo, because entries carry private   #
+# file paths and verbatim finding quotes and crucible is a public repo.       #
+# These helpers are the single source of truth for the path; render_ledger    #
+# imports them. default_repo() shells to git and is therefore CLI-only —      #
+# append() stays free of git/subprocess side effects (INV-2).                 #
+# --------------------------------------------------------------------------- #
+SCHEMA_VERSION = 2
+
+
+def default_ledger_dir() -> str:
+    """Directory holding the live ledger. A non-empty CRUCIBLE_LEDGER_DIR wins
+    (tests, fixtures); an empty/unset value falls back to ~/.claude/crucible/
+    ledger — a ~-rooted path that is never inside a git working tree (INV-1)."""
+    env = os.environ.get("CRUCIBLE_LEDGER_DIR")
+    if env:
+        return env
+    return os.path.join(os.path.expanduser("~"), ".claude", "crucible", "ledger")
+
+
+def default_ledger_path() -> str:
+    return os.path.join(default_ledger_dir(), "runs.jsonl")
+
+
+def default_repo(start_dir: Optional[str] = None) -> str:
+    """Provenance label for the repo a gating run happened in: the basename of
+    the git toplevel, falling back to the basename of the start dir / cwd when
+    not in a git repo (or git is absent). Never raises (INV-7). CLI-only — not
+    reachable from append() (INV-2)."""
+    base = start_dir or os.getcwd()
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["git", "-C", base, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        top = proc.stdout.strip()
+        if proc.returncode == 0 and top:
+            return os.path.basename(top.rstrip("/")) or top
+    except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
+        pass
+    return os.path.basename(os.path.abspath(base)) or "unknown"
+
+
 def _warn(msg: str) -> None:
     print(f"[ledger_append WARN] {msg}", file=sys.stderr)
 
@@ -290,10 +337,51 @@ def append(
             pass
 
 
+def _cli_emit(ledger_arg: str, entry: dict) -> int:
+    """`emit` subcommand: the canonical forward-capture write path.
+
+    Resolves '-' to the central default, honors the kill-switch as a graceful
+    skip, dedups by (run_id, skill), fills `repo` when absent and forces
+    `schema_version` to the current value, then appends. Pure stdlib + invoked
+    by absolute path ⇒ no PYTHONPATH and no cwd dependency (INV-5/INV-6).
+    Graceful no-ops (kill-switch, duplicate) return 0; only a real append
+    rejection returns 1 (INV-9)."""
+    ledger_path = default_ledger_path() if ledger_arg == "-" else ledger_arg
+
+    # L-6 graceful skip: kill-switch is a no-op, not a failure.
+    if _kill_switch_active():
+        print("[ledger_append] calibration disabled; emit skipped", file=sys.stderr)
+        return 0
+
+    # `emit` is always a current-schema forward capture: stamp schema_version
+    # unconditionally (an emitter sending the stale `1` must not produce a
+    # hybrid v1+repo row). Fill `repo` when absent OR explicitly null/empty —
+    # setdefault would miss the null case, silently voiding provenance.
+    if not entry.get("repo"):
+        entry["repo"] = default_repo()
+    entry["schema_version"] = SCHEMA_VERSION
+
+    run_id = entry.get("run_id", "unknown")
+    skill = entry.get("skill", "unknown")
+    if caller_dedup(ledger_path, run_id, skill):
+        print(f"[ledger_append] duplicate (run_id={run_id} skill={skill}); "
+              f"emit skipped", file=sys.stderr)
+        return 0
+
+    return 0 if append(ledger_path, entry) else 1
+
+
 if __name__ == "__main__":
-    # CLI form: python -m scripts.ledger_append <ledger_path> <json-entry>
-    if len(sys.argv) < 3:
-        print("usage: ledger_append.py <ledger_path> <json-entry>", file=sys.stderr)
-        sys.exit(2)
-    ok = append(sys.argv[1], json.loads(sys.argv[2]))
-    sys.exit(0 if ok else 1)
+    # Two CLI forms:
+    #   emit <ledger_path|-> <json>   — dedup + auto-fill + append (canonical)
+    #   <ledger_path> <json>          — legacy append-only (back-compat)
+    argv = sys.argv
+    if len(argv) >= 4 and argv[1] == "emit":
+        sys.exit(_cli_emit(argv[2], json.loads(argv[3])))
+    if len(argv) >= 3 and argv[1] != "emit":
+        ok = append(argv[1], json.loads(argv[2]))
+        sys.exit(0 if ok else 1)
+    print("usage: ledger_append.py emit <ledger_path|-> <json-entry>\n"
+          "       ledger_append.py <ledger_path> <json-entry>  (legacy, append-only)",
+          file=sys.stderr)
+    sys.exit(2)
