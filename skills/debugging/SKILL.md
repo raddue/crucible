@@ -319,6 +319,8 @@ Before any dispatch work, check for a crashed prior debugging session:
    - Non-match companion file IS loaded for investigators, truncated to 50 entries at load time with note "(list truncated to 50 most recent entries)"
 5. **`Last loaded` update:** Loading is pure-read. After all investigator dispatches complete, batch-update the `Last loaded` field to today on all signatures that were loaded.
 
+**Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See `skills/grudge/SKILL.md`.
+
 If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
 
 ### Domain Detection
@@ -729,6 +731,8 @@ The test-coverage skill handles its own fix dispatch and revert-on-failure logic
 **Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. Input: reviewer gap findings + fix diff + test-coverage audit report (if available from Step 2.5). The agent writes tests only for gaps specifically flagged in the review — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit). Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
 **If all tests PASS:** Debugging workflow is complete.
+
+**Record the grudge (regression-oracle, #271).** Once the root cause is confirmed and the fix is verified, record a grudge so this bug can never silently re-ship. Best-effort (a failed record logs to stderr and never fails the workflow): resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_append.py" --symptom "<observable failure>" --root-cause "<confirmed cause>" --files "<comma-separated files_touched>" --signature "<optional regex/snippet fingerprint>" --commit "$(git rev-parse HEAD)" --repro "<minimal repro>" --why "<why it kept happening>"`. See `skills/grudge/SKILL.md`.
 
 **If some tests FAIL** (gaps reveal incomplete fix coverage):
 1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, gap descriptions, and the original bug context (hypothesis, root cause)

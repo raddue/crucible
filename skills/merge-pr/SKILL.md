@@ -265,6 +265,23 @@ Branch <branch-name> cleaned up.
 Main branch CI: passing.
 ```
 
+### Step 7.5: Record a grudge if this was a fix (regression-oracle, #271)
+
+If the merged PR's title/type is `fix(*)` (a conventional-commit bug fix), record a grudge so the bug it fixed can never silently re-ship. Best-effort — a failed record logs to stderr and never fails the merge (which has already completed):
+
+```bash
+# only for fix(*) PRs
+plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+python3 "$plugin_root/scripts/grudge_append.py" \
+  --symptom "<PR title minus the fix() prefix>" \
+  --root-cause "<from PR body, if stated>" \
+  --files "<comma-separated files the PR changed>" \
+  --commit "<squash/merge SHA>" \
+  --why "<from PR body, if stated>"
+```
+
+Non-`fix(*)` PRs record nothing. See `skills/grudge/SKILL.md`.
+
 ## Common Mistakes
 
 **Merging without checking CI**
