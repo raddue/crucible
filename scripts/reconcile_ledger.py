@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 from typing import Dict, List, Optional
 
@@ -191,10 +192,38 @@ def reconcile(
     indexed.sort(key=lambda pair: pair[0])
 
     appended: List[dict] = []
-    # Track hashes already falsified in THIS run so one fix doesn't double-count
-    # the same ledger entry across multiple candidates.
+    # Track hashes already attributed in THIS run so one verdict isn't
+    # double-counted. Manual entries claim their hash first (S-3), and the
+    # algorithm pass skips a verdict once attributed, falling through to the
+    # next-earliest UNSEEN overlapping verdict (S-2).
     seen_hashes = set()
 
+    # --- §3.5 manual pass FIRST (authoritative) ---------------------------- #
+    # Manual attribution is read first and overrides the algorithm. A human
+    # asserting a missed falsification (or suppressing a wrong one) is a
+    # first-class entry: we emit one falsification entry for EVERY manual
+    # attribution, regardless of whether the algorithm would have matched its
+    # hash, and reserve that hash so the algorithm pass skips it (S-3).
+    for h, mo in manual.items():
+        entry = {
+            "ledger_entry_hash": h,
+            "falsified": mo.get("falsified", True),
+            "falsified_by": mo.get("falsified_by", {
+                "commit": mo.get("commit"),
+                "reason": mo.get("reasoning", "manual attribution"),
+                "confidence": mo.get("confidence", "low"),
+                "cross_cut": mo.get("cross_cut", False),
+                "manual_override": True,
+            }),
+            "confidence": mo.get("confidence", "low"),
+            "reasoning": mo.get("reasoning", "manual attribution"),
+            "cross_cut": mo.get("cross_cut", False),
+        }
+        seen_hashes.add(h)
+        _ledger_append(falsification_path, entry)
+        appended.append(entry)
+
+    # --- §3.3/§3.4 algorithm pass ----------------------------------------- #
     for cand in candidates:
         touched = set(cand.get("touched_files") or [])
         if not touched:
@@ -202,7 +231,10 @@ def reconcile(
         merge_dt = _parse_iso(cand.get("merge_time"))
         cross_cut = len(touched) > cross_cut_threshold
 
-        # Walkback: earliest ledger entry meeting ALL §3.3 conditions.
+        # Walkback: earliest UNSEEN ledger entry meeting ALL §3.3 conditions.
+        # The seen-check is INSIDE the loop so a candidate whose earliest match
+        # is already attributed falls through to the next-earliest unseen
+        # overlapping verdict rather than being dropped entirely (S-2).
         match = None
         for ts, e in indexed:
             # (c) artifact_type == "code"
@@ -218,18 +250,20 @@ def reconcile(
             # (b) entry timestamp < candidate merge_time
             if merge_dt is not None and not (ts < merge_dt):
                 continue
-            match = (ts, e)
+            run_id = e.get("run_id", "unknown")
+            skill = e.get("skill", "unknown")
+            h = ledger_entry_hash(run_id, skill)
+            # Skip already-attributed verdicts (manual pass or a prior
+            # candidate this run); keep scanning for the next-earliest unseen.
+            if h in seen_hashes:
+                continue
+            match = (ts, e, gated, h)
             break
 
         if match is None:
             continue
 
-        ts, e = match
-        run_id = e.get("run_id", "unknown")
-        skill = e.get("skill", "unknown")
-        h = ledger_entry_hash(run_id, skill)
-        if h in seen_hashes:
-            continue
+        ts, e, gated, h = match
         seen_hashes.add(h)
 
         # §3.4 confidence
@@ -258,27 +292,6 @@ def reconcile(
             "reasoning": reason,
             "cross_cut": cross_cut,
         }
-
-        # §3.5 manual override wins (keyed by ledger_entry_hash).
-        if h in manual:
-            mo = manual[h]
-            # Manual fields override the algorithm's; preserve provenance of the
-            # candidate under falsified_by while letting the human flip verdict /
-            # confidence / cross_cut / reasoning.
-            entry["falsified"] = mo.get("falsified", entry["falsified"])
-            if "confidence" in mo:
-                entry["confidence"] = mo["confidence"]
-            if "cross_cut" in mo:
-                entry["cross_cut"] = mo["cross_cut"]
-            if "reasoning" in mo:
-                entry["reasoning"] = mo["reasoning"]
-            entry["falsified_by"] = mo.get("falsified_by", {
-                "commit": cand.get("commit"),
-                "reason": entry["reasoning"],
-                "confidence": entry["confidence"],
-                "cross_cut": entry["cross_cut"],
-                "manual_override": True,
-            })
 
         # Append-only write (L-1). The append helper honors the kill-switch and
         # the 16 KiB cap; a no-op return does not stop us from reporting the
@@ -314,9 +327,12 @@ def compute_brier(
     Returns {"<skill>": {"n": int, "brier": float, "last_updated": iso}}.
     """
     now_dt = _parse_iso(now)
-    grace_cutoff = None
-    if now_dt is not None:
-        grace_cutoff = now_dt - _dt.timedelta(days=GRACE_DAYS)
+    # Fail-CLOSED: a calibration metric must not admit verdicts whose age it
+    # cannot evaluate. If `now` is unparseable, the 30-day grace filter cannot
+    # be applied, so exclude EVERYTHING rather than fail open (S-1).
+    if now_dt is None:
+        return {}
+    grace_cutoff = now_dt - _dt.timedelta(days=GRACE_DAYS)
 
     # accumulate squared errors per skill
     acc: Dict[str, List[float]] = {}
@@ -387,6 +403,20 @@ def _git(args: List[str], cwd: Optional[str] = None) -> Optional[str]:
     return proc.stdout
 
 
+_FIX_MERGE_RE = re.compile(r"(?:^|[\s/'\"])(?:hot)?fix/", re.I)
+
+
+def _is_fix_merge_subject(subject: str) -> bool:
+    """True iff a merge-commit subject references a fix/* or hotfix/* branch.
+
+    Anchored on a branch boundary (start-of-string / whitespace / slash /
+    quote) so it matches `fix/` and `hotfix/` but NOT `prefix/`, `affix/`,
+    `suffix/` where the token is mid-word (S-4)."""
+    if not subject:
+        return False
+    return _FIX_MERGE_RE.search(subject) is not None
+
+
 def discover_candidates(lookback_days: int = 30) -> List[dict]:
     """Discover fix/* hotfix/* merges within lookback_days, plus regression
     issues with a referenced commit (best-effort).
@@ -411,8 +441,7 @@ def discover_candidates(lookback_days: int = 30) -> List[dict]:
             if len(parts) < 3:
                 continue
             sha, when, subject = parts[0], parts[1], parts[2]
-            low = subject.lower()
-            if "fix/" not in low and "hotfix/" not in low:
+            if not _is_fix_merge_subject(subject):
                 continue
             touched = _touched_files(sha)
             candidates.append({
@@ -460,7 +489,6 @@ def _git_gh_regression_commits() -> List[str]:
         issues = json.loads(proc.stdout)
     except (json.JSONDecodeError, ValueError):
         return []
-    import re
     shas: List[str] = []
     sha_re = re.compile(r"\b([0-9a-f]{7,40})\b")
     for iss in issues:
@@ -488,8 +516,7 @@ def fix_branch_sizes(days: int = 90) -> List[int]:
         if len(parts) < 2:
             continue
         sha, subject = parts[0], parts[1]
-        low = subject.lower()
-        if "fix/" not in low and "hotfix/" not in low:
+        if not _is_fix_merge_subject(subject):
             continue
         sizes.append(len(_touched_files(sha)))
     return sizes
