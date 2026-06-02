@@ -18,6 +18,22 @@ Task tool (general-purpose, model: opus):
     conventions to identify which files are MOST LIKELY to contain
     inconsistencies worth investigating.
 
+    ## The Systemic-Only Rule (binding)
+
+    An audit finding must be SYSTEMIC: a pattern recurring across multiple
+    sites, a structural property of the subsystem, or a divergence from
+    documented intent -- with NO single reproduction. A finding that has
+    one concrete reproduction is an instance bug and out of scope, even
+    when it spans multiple files (a cross-file single defect is delve's,
+    not audit's); route it to /delve. The discriminator is "is there one
+    concrete reproduction?", not file count.
+
+    Note (systemic-only): you are triaging for SYSTEMIC drift -- a pattern
+    or convention that recurs inconsistently across the subsystem, not a
+    single deviating line that is itself a bug. A one-site deviation with a
+    concrete reproduction is an instance bug for /delve, not a consistency
+    finding.
+
     ## Your Lens: Consistency (Phase A -- Triage)
 
     **Core question:** "Does this code follow its own patterns?"
@@ -33,8 +49,10 @@ Task tool (general-purpose, model: opus):
       error handling approaches
 
     **What you are NOT looking for:**
-    - Logic bugs or correctness issues (that's the Correctness lens)
-    - Missing error handling (that's the Robustness lens)
+    - Logic bugs or correctness issues / single reproducible defects
+      (instance bugs -> /delve)
+    - A single missing error handler (instance bug -> /delve); systemic
+      absence of error-handling discipline is the Robustness lens
     - Architectural concerns like coupling or dependency direction
       (that's the Architecture lens)
 
@@ -120,6 +138,23 @@ Task tool (general-purpose, model: opus):
     suspected inconsistencies. Your job is to examine the actual source
     code and determine which suspicions are real.
 
+    ## The Systemic-Only Rule (binding)
+
+    An audit finding must be SYSTEMIC: a pattern recurring across multiple
+    sites, a structural property of the subsystem, or a divergence from
+    documented intent -- with NO single reproduction. A finding that has
+    one concrete reproduction is an instance bug and out of scope, even
+    when it spans multiple files (a cross-file single defect is delve's,
+    not audit's); route it to /delve. The discriminator is "is there one
+    concrete reproduction?", not file count.
+
+    For this lens specifically: a consistency finding is SYSTEMIC drift --
+    a PATTERN of a convention applied inconsistently across two or more
+    sites (the common case), or a pure STRUCTURAL-PROPERTY consistency
+    finding that may carry a single site per the Sites guidance below. A
+    single deviating line that is itself a reproducible bug is an instance
+    bug -> /delve, not a consistency finding.
+
     ## Your Lens: Consistency (Phase B -- Confirmation)
 
     **Core question:** "Does this code follow its own patterns?"
@@ -172,10 +207,19 @@ Task tool (general-purpose, model: opus):
     ## What You Must NOT Do
 
     - Do NOT suggest fixes (audit is report-only)
-    - Do NOT flag correctness bugs (Correctness lens handles that)
-    - Do NOT flag robustness gaps (Robustness lens handles that)
+    - Do NOT report a single-reproduction finding as a lens finding -- the
+      Systemic-Only Rule routes it to /delve; record any you noticed in
+      passing under "Out-of-scope instance bugs (noted for /delve)" in your
+      output so it is never dropped
+    - Do NOT flag correctness bugs / single reproducible defects (-> /delve)
+    - Do NOT flag a single missing error handler (-> /delve); systemic
+      absence is the Robustness lens
     - Do NOT flag architectural concerns (Architecture lens handles that)
-    - Do NOT confirm a finding without specific code evidence
+    - Do NOT confirm a PATTERN finding without specific code evidence at
+      two or more sites (a one-site deviation with a concrete reproduction
+      is an instance bug -> /delve); a pure STRUCTURAL-PROPERTY finding may
+      carry a single site or the whole-subsystem marker per the Sites
+      guidance in the Output Format
     - Do NOT exceed 5 findings unless you have strong justification
 
     ## Context Self-Monitoring
@@ -205,6 +249,16 @@ Task tool (general-purpose, model: opus):
     - **Severity:** Fatal/Significant/Minor
     - **File:** path/to/file.ext
     - **Line range:** L42-L58
+    - **Sites:** [{file: path/to/a.ext, line: 42}, {file: path/to/b.ext, line: 88}, ...]
+      (every site the drift spans -- a representative line at each
+      divergent site, plus a site showing the convention the others
+      should follow. Two or more sites are required for a PATTERN finding
+      (consistency drift is inherently a recurrence across sites, so keep
+      2+ here as the norm). A pure STRUCTURAL-PROPERTY finding may carry a
+      single site, or the whole-subsystem marker
+      `sites: [whole-subsystem]` when no discrete second site exists. A
+      divergence-from-intent finding follows the same rule as its
+      category.)
     - **Evidence:** [The specific code showing the inconsistency. Quote
       the inconsistent code AND the pattern it should follow.]
     - **Convention violated:** [Which convention or pattern is broken]
@@ -215,6 +269,15 @@ Task tool (general-purpose, model: opus):
     ### Rejected Suspicions
     [Brief list of Agent A's flags that turned out to be false positives,
     with one-line explanation of why each was rejected]
+
+    ### Out-of-scope instance bugs (noted for /delve)
+    [Single-reproduction defects you noticed IN PASSING while analyzing --
+    a bug with ONE concrete reproduction, out of scope for this systemic
+    lens. Do NOT hunt for these; just record any you happened to see so
+    they are never lost. One line each: `file:line -- one-line description`.
+    The orchestrator routes these to /delve, or lists them under the
+    "Out-of-scope instance bugs (install /delve to triage)" stub when
+    /delve is absent. Omit this section if you noticed none.]
 
     ### Files Needing Deeper Inspection
     [List any summarized files where the summary raised suspicion but
