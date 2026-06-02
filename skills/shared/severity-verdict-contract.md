@@ -3,15 +3,17 @@
 > **Sole authority** for the severity scale and verify-gate verdict vocabulary used by
 > the **review trio** — `delve` / `delve-engine`, `temper`, and `audit`. Per invariant
 > **I11**, no trio skill defines its own severity scale or verdict vocabulary; they emit
-> and consume the ones pinned here.
+> and consume the ones pinned here. (**I11**: no review-trio skill defines its own
+> severity scale or verdict vocabulary — this contract is that single source.)
 >
 > **Consumed via** `<!-- CANONICAL: shared/severity-verdict-contract.md -->` — link this
 > file, never copy its tables (copying causes drift).
 >
 > **Producers / consumers:**
-> - `shared/delve-engine.md` (authored in #330) — **emits** `{severity, verdict}` per this
->   contract on every record.
-> - `temper` (reshaped in #333) — **consumes** the gating rule below to build its tracked set `T`.
+> - `shared/delve-engine.md` (to be authored in #330) — **will emit** `{severity, verdict}`
+>   per this contract on every record.
+> - `temper` — already **emits** this 4-tier Critical/Important/Minor/Suggestion scale today; #333
+>   reshapes it to also **consume** the verdict-keyed gating rule below to build its tracked set `T`.
 > - `audit` (reshaped in #332) — emits systemic findings on this severity scale and, under
 >   `--bugs`, consumes delve's `{severity, verdict}` records. **Until #332 lands, audit still
 >   emits on the 3-tier `severity-rubric.md` scale; its migration onto this contract is part of
@@ -24,9 +26,10 @@
 ## 1. Severity scale
 
 Four tiers. Use the single most severe applicable tier; do not stack (no "low-Critical",
-no "Important+"). The right-hand column is the only thing that gates merge.
+no "Important+"). Severity sets the gating *band*; §3 combines it with the verify-gate
+verdict to decide whether a finding actually gates.
 
-| Severity | Meaning | Gates merge? |
+| Severity | Meaning | In gating band (C/I)? |
 |---|---|---|
 | **Critical** | If shipped, the change fails at its primary purpose: data loss/corruption, crash on a reachable path, security hole (RCE/injection/auth bypass), broken core contract. | **Yes** |
 | **Important** | Meaningfully degrades correctness or robustness but the change still works: a real defect on a non-primary path, a missing check at a trust boundary, a regression a user would hit but route around. | **Yes** |
@@ -54,9 +57,11 @@ contract pins only the vocabulary and what each verdict means for gating.)
 
 ## 3. The gating rule (tracked set `T`)
 
-`temper`'s merge gate keys on the **tracked set `T`** — the findings that gate merge. A kept
-finding enters `T` **iff** its verdict is `CONFIRMED` **or** `PLAUSIBLE` **and** its severity
-is `Critical` **or** `Important`:
+`temper`'s merge gate keys on the **tracked set `T`** — the findings that gate merge. `T` is
+computed **by `temper`** from the `{severity, verdict}` records `delve-engine` emits (and the
+records `audit --bugs` cross-checks); `delve-engine` and `audit --bugs` **emit** those records
+but do not themselves compute `T`. A kept finding enters `T` **iff** its verdict is `CONFIRMED`
+**or** `PLAUSIBLE` **and** its severity is `Critical` **or** `Important`:
 
 > **T = { CONFIRMED, PLAUSIBLE } × { Critical, Important }**
 
@@ -76,9 +81,9 @@ Reading the matrix:
   path — not this contract — that decides how such a member later leaves `T`.
 - **Below C/I, verdict stops mattering for gating.** A `CONFIRMED@Suggestion` is reported at its
   own Suggestion tier and never gates — handled exactly as a `Minor` finding is. A `PLAUSIBLE`
-  below C/I is handled the same way. "Folds into the non-gating Minor/Suggestion bucket" means the
-  finding **leaves the merge gate**, *not* that its severity tier is rewritten — the tier is
-  preserved verbatim in the report (§1: do not stack severities).
+  below C/I is handled the same way. A finding below C/I **leaves the merge gate** but keeps its
+  severity tier verbatim in the report (§1: do not stack severities) — leaving the gate is **not**
+  a tier rewrite.
 - **`REFUTED` is dropped at every severity** — it never reaches output, so its severity is moot.
 
 `audit --bugs` consumes the same kept set (`CONFIRMED` + `PLAUSIBLE`) when cross-checking its
@@ -103,17 +108,20 @@ this table pins the **severity band each angle may emit**.
 
 - The three **bug angles** (line-by-line, removed-behavior, cross-file tracer) may emit the full
   scale; whether they gate is decided by §3 against the verify-gate verdict.
-- The four **quality angles** (reuse, simplification, efficiency, altitude) are **capped at
-  Minor/Suggestion by construction** — they never emit Critical or Important, so they **never
-  enter `T` regardless of verdict** (a `CONFIRMED@Minor` reuse finding is still non-gating). This
-  matches the severity ceilings already enforced in `shared/reviewer-common.md` (e.g. the DRY
-  lens's "Severity ceiling: Minor"). A genuinely Critical/Important concern that surfaces while
+- The four **quality angles** (reuse, simplification, efficiency, altitude — angle names defined by
+  `shared/delve-engine.md`, #330) are **capped at Minor/Suggestion by construction** — they never
+  emit Critical or Important, so they **never enter `T` regardless of verdict** (a `CONFIRMED@Minor`
+  reuse finding is still non-gating). This mirrors, *as an analogy of ceiling-discipline only* (not a
+  one-to-one angle→lens mapping), the per-lens Minor ceilings `shared/reviewer-common.md` places on
+  its *quality* lenses (DRY / SRP / OCP); reviewer-common's Surgical-Changes lens is a scope/bug lens
+  that may emit Critical/Important and is **not** one of these four quality angles. A genuinely
+  Critical/Important concern that surfaces while
   running a quality angle is a **bug-angle finding** and is re-attributed to the owning bug angle
   (and to a Correctness/Architecture concern), exactly as reviewer-common's DRY re-attribution
   escape hatch already does — it is not emitted as a Critical "quality" finding.
 
 This makes "every finder angle × every verdict/severity" total: bug angles span the full matrix
-of §3; quality angles occupy only the two non-gating rows/columns and are dropped from `T` by
+of §3; quality angles occupy only the two non-gating rows/columns and are ineligible for `T` by
 the cap, never by an ad-hoc rule.
 
 ## 5. Relationship to `shared/severity-rubric.md`
@@ -126,7 +134,7 @@ different machines:
 | **Scale** | Critical / Important / Minor / Suggestion (4-tier) | Fatal / Significant / Minor (3-tier) |
 | **Verdicts** | CONFIRMED / PLAUSIBLE / REFUTED (verify gate) | none (red-team assigns severity directly) |
 | **Purpose** | Instance-bug **merge gate** for the review trio | **Adversarial convergence scoring** (weighted Fatal=3 / Significant=1 / Minor=0) |
-| **Used by** | `delve` / `delve-engine`, `temper`, `audit` (after its #332 reshape) | `quality-gate`, `red-team`, `siege`, `audit` (until #332), `inquisitor`, `build` |
+| **Used by** | `delve` / `delve-engine`, `temper`, `audit` (after its #332 reshape) | `quality-gate`, `red-team`, `siege`, `audit` (until #332), `inquisitor`, `build` (per `severity-rubric.md`'s own consumer declaration) |
 
 **`audit` is mid-migration and appears in both columns during the transition.** Today it emits on
 `severity-rubric.md`'s 3-tier scale; the Review-Trio Reshape (#332) moves its systemic findings onto
