@@ -69,7 +69,9 @@ It reads `runs.jsonl` and `manual-attribution.jsonl` from the central store and
 5. **Manual override** (`read_manual_attribution`): read
    `manual-attribution.jsonl` **first**; entries there (keyed by
    `ledger_entry_hash`) override the algorithm's attribution. Missing file ⇒
-   empty overrides (no error).
+   empty overrides (no error). An entry may carry an optional `signal_type`
+   (`manual_override` (default) | `bad_implementation`) — see
+   [Non-code `bad_implementation` signal](#non-code-bad_implementation-signal).
 6. **Kill-switch:** see above — `CRUCIBLE_CALIBRATION_DISABLED=1` ⇒ no-op exit.
 
 ## Brier scoring (contract L-10)
@@ -87,10 +89,11 @@ brier = mean((confidence - actual)^2)
 - **actual = 0** iff WRONG: a `PASS` that WAS marked `falsified: true` (looked
   up in the **L-9 latest-entry-wins reduction** over `falsification.jsonl` via
   `scripts.ledger_reduce.reduce`, the canonical helper cited above).
-- **Falsifiable sample filters (ALL must hold):** `artifact_type == "code"`;
-  `backfilled == false`; `verdict ∈ {PASS, FAIL}` with `confidence >= 0.5`;
-  entry older than the 30-day grace period; AND if a matching falsification
-  entry exists, its `cross_cut` must be `false`.
+- **Falsifiable sample filters (ALL must hold):** `artifact_type == "code"`
+  **OR** a non-code verdict carrying a `bad_implementation` falsification (see
+  below); `backfilled == false`; `verdict ∈ {PASS, FAIL}` with
+  `confidence >= 0.5`; entry older than the 30-day grace period; AND if a
+  matching falsification entry exists, its `cross_cut` must be `false`.
 - **Verdict-type classifier (T-11):** only `PASS`/`FAIL` count. `STAGNATION`,
   `ESCALATED`, `ARCHITECTURAL`, `SUSTAINED_REGRESSION` are excluded from both
   numerator AND denominator.
@@ -98,9 +101,44 @@ brier = mean((confidence - actual)^2)
   still compute `n`; just don't gate). The advisory threshold is `brier > 0.25`
   (consumed in Phase 6 — here we only compute and store).
 
+## Non-code `bad_implementation` signal
+
+Auto-falsification (walkback + predicted_falsifier) is code-artifact-centric: a
+verdict is only falsified when a later fix/revert touches a gated path or fires a
+predicate. That can **never reach a non-code verdict** (a design-doc or plan
+`PASS`), and it misses the case where a `PASS` was accepted but the resulting
+implementation later proved bad for reasons no path-touching fix captures — a
+design-level wrong call, downstream rework, or an abandoned approach.
+
+To score those, a human adds a `manual-attribution.jsonl` entry with
+`signal_type: "bad_implementation"`:
+
+```json
+{"ledger_entry_hash": "<sha256(run_id:skill)>", "falsified": true,
+ "confidence": "high", "signal_type": "bad_implementation",
+ "reasoning": "design PASS led to a full rework of the persistence layer"}
+```
+
+- It is a **PASS-side marker**: "a verdict accepted as PASS led to a bad
+  implementation." On a `PASS` it sets `actual = 0` (the verdict was
+  overconfident); on a `FAIL` it is out-of-contract and silently ignored.
+- It works for **non-code** artifacts (`design`/`plan`/…): such a verdict is
+  admitted into the Brier sample **only** when it carries this signal — absent it,
+  a non-code verdict's outcome is unknown and stays excluded (we never assume a
+  non-code PASS was correct just because nothing falsified it). The usual filters
+  still apply (PASS/FAIL, `confidence >= 0.5`, outside grace, non-cross-cut), so a
+  Tier-B `confidence: null` verdict is render-counted but not Brier-scored.
+- It also works on a **code** PASS (downstream rework that no path-touching fix
+  caught), flipping `actual` like any other PASS falsification.
+
+`/ledger` breaks the falsified count down by source (`walkback` / `predicate` /
+`manual_override` / `bad_implementation`).
+
 ## Outputs
 
 - **`falsification.jsonl`** — APPEND-ONLY (L-1/L-9). Each entry:
-  `{ledger_entry_hash, falsified, falsified_by, confidence, reasoning, cross_cut}`.
+  `{ledger_entry_hash, falsified, falsified_by, confidence, reasoning, cross_cut}`
+  — plus an optional `signal_type` (`manual_override` | `bad_implementation`) on
+  manual-attribution-sourced entries.
 - **`brier-rolling.json`** (gitignored) —
   `{"<skill>": {"n": int, "brier": float, "last_updated": "<iso>"}, ...}`.
