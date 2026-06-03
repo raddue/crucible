@@ -1,0 +1,51 @@
+### Pre-flight
+- Diff is substantive: a concurrency guard plus a validation tweak.
+- Subset is MIXED: one escalation-eligible member + one not-yet-re-adjudicated,
+  with NO genuinely-stuck member.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. suspected lost wakeup on the condition variable
+   - File: src/queue.py:48
+   - Summary: suspected lost wakeup on the condition variable
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Readjudicated: false
+
+2. missing length check before slice
+   - File: src/queue.py:71
+   - Summary: missing length check before slice
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. suspected lost wakeup on the condition variable
+   - File: src/queue.py:48
+   - Summary: suspected lost wakeup on the condition variable
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Outcome: ESCALATE
+   - Readjudicated: true
+
+2. missing length check before slice
+   - File: src/queue.py:71
+   - Summary: missing length check before slice
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+- The previously-seen unresolved subset is MIXED: one escalation-eligible member
+  plus one not-yet-re-adjudicated member, with NO genuinely-stuck member → Defer
+  one round (§3.5 branch table, row 3). Next round it reduces to SOLELY
+  escalation-eligible → Architectural, or shrinks normally.

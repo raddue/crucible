@@ -1,0 +1,49 @@
+### Pre-flight
+- Diff is substantive: several candidates surfaced; only the gating 2x2 enters T.
+- Below-C/I candidates and REFUTED candidates stay OUT of T.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. null-deref on the uninitialized handle
+   - File: src/io.py:12
+   - Summary: null-deref on the uninitialized handle
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+2. stylistic naming nit on the new helper
+   - File: src/io.py:40
+   - Summary: stylistic naming nit on the new helper
+   - Severity: Minor
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+3. suspected leak later proven a false positive
+   - File: src/io.py:55
+   - Summary: suspected leak later proven a false positive
+   - Severity: Important
+   - Verdict: REFUTED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Clean
+
+1. null-deref on the uninitialized handle
+   - File: src/io.py:12
+   - Summary: null-deref on the uninitialized handle
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: RESOLVED
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Clean
+- Only the Critical/CONFIRMED candidate satisfied the gating 2x2 and entered T.
+  The Minor/CONFIRMED candidate (below the C/I band) and the Important/REFUTED
+  candidate (not a gating verdict) were NOT admitted to T. T's single member
+  resolved in round 2 → Clean.

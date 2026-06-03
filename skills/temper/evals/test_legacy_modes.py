@@ -51,7 +51,7 @@ def test_legacy_mock_reviewer_matches_snapshot(tmp_path):
     snapshot = json.loads(_SNAPSHOT.read_text())
     # S-R7-2 (resolved, ref #311): snapshot is a structured envelope
     # {"bootstrap_python": "X.Y", "verdicts": {...}}. Cross-version stability of
-    # lens_runner output was empirically confirmed 3.12->3.14, so the bootstrap_python
+    # convergence_runner output was empirically confirmed 3.12->3.14, so the bootstrap_python
     # pin is softened from a hard assert to a non-fatal warning. The verdict-equality
     # assertion below remains the real drift signal.
     expected_py = snapshot.get("bootstrap_python")

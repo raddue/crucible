@@ -1,0 +1,46 @@
+### Pre-flight
+- Diff is substantive: a concurrency-sensitive change with no runnable repro.
+- Member is a repro-less PLAUSIBLE@Critical that resists both discharge paths.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. suspected ordering hazard between cache write and invalidation
+   - File: src/cache.py:60
+   - Summary: suspected ordering hazard between cache write and invalidation
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. suspected ordering hazard between cache write and invalidation
+   - File: src/cache.py:60
+   - Summary: suspected ordering hazard between cache write and invalidation
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Architectural
+
+1. suspected ordering hazard between cache write and invalidation
+   - File: src/cache.py:60
+   - Summary: suspected ordering hazard between cache write and invalidation
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Outcome: ESCALATE
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Architectural
+- Round 2: the carried member is still readjudicated==false → Defer-one-round
+  (its re-verification pass had not landed). Round 3: re-verified, it can neither
+  be re-derived REFUTED nor downgraded → escalation-eligible. The previously-seen
+  unresolved subset is SOLELY escalation-eligible → Architectural. Stagnation is
+  subordinate to escalation: it does NOT wait for the 2-round antecedent.

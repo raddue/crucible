@@ -1,0 +1,93 @@
+### Pre-flight
+- Diff is substantive: each round's fix introduces a fresh gating finding.
+- Continuous new-member admission → Stagnation never fires; Max-Rounds terminates.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. drip member round 1
+   - File: src/drip.py:10
+   - Summary: drip member round 1
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Issues-Found
+
+1. drip member round 1
+   - File: src/drip.py:10
+   - Summary: drip member round 1
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: RESOLVED
+   - Readjudicated: true
+
+2. drip member round 2
+   - File: src/drip.py:20
+   - Summary: drip member round 2
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 2
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Issues-Found
+
+2. drip member round 2
+   - File: src/drip.py:20
+   - Summary: drip member round 2
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 2
+   - Outcome: RESOLVED
+   - Readjudicated: true
+
+3. drip member round 3
+   - File: src/drip.py:30
+   - Summary: drip member round 3
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 3
+   - Readjudicated: false
+
+### Round 4
+- Round-Verdict: Issues-Found
+
+3. drip member round 3
+   - File: src/drip.py:30
+   - Summary: drip member round 3
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 3
+   - Outcome: RESOLVED
+   - Readjudicated: true
+
+4. drip member round 4
+   - File: src/drip.py:40
+   - Summary: drip member round 4
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 4
+   - Readjudicated: false
+
+### Round 5
+- Round-Verdict: Max-Rounds
+
+4. drip member round 4
+   - File: src/drip.py:40
+   - Summary: drip member round 4
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 4
+   - Outcome: STILL-GATING
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Max-Rounds
+- Each round resolved the carried member AND admitted a fresh gating member, so no
+  round was Clean (new-admit never Clean) and Stagnation never fired (each round
+  showed progress on the previously-seen subset). Termination is guaranteed by the
+  round cap — Max-Rounds, not Stagnation.

@@ -1,0 +1,52 @@
+### Pre-flight
+- Diff is substantive: a behavior change plus a fix that touches a new region.
+- delve-engine R1 + R2 Track-A fan-out dispatched.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. unbounded retry loop
+   - File: src/client.py:40
+   - Summary: unbounded retry loop
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Issues-Found
+
+1. unbounded retry loop
+   - File: src/client.py:40
+   - Summary: unbounded retry loop
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: RESOLVED
+   - Readjudicated: true
+
+2. fix dropped the timeout on the new backoff path
+   - File: src/client.py:55
+   - Summary: fix dropped the timeout on the new backoff path
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 2
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Clean
+
+2. fix dropped the timeout on the new backoff path
+   - File: src/client.py:55
+   - Summary: fix dropped the timeout on the new backoff path
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 2
+   - Outcome: RESOLVED
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Clean
+- Round 2 was NOT Clean even though the carried member resolved, because Track A
+  admitted a new gating member that round (new-admit round is never Clean).
+  Round 3 resolved it and admitted nothing new → Clean.

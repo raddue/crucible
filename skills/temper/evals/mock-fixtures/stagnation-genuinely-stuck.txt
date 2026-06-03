@@ -1,0 +1,59 @@
+### Pre-flight
+- Diff is substantive: a fix the fixer keeps attempting and failing.
+- Member is code-resolvable (not escalation-eligible) but never resolves.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. integer overflow on the size accumulator
+   - File: src/sizer.py:33
+   - Summary: integer overflow on the size accumulator
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. integer overflow on the size accumulator
+   - File: src/sizer.py:33
+   - Summary: integer overflow on the size accumulator
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Issues-Found
+
+1. integer overflow on the size accumulator
+   - File: src/sizer.py:33
+   - Summary: integer overflow on the size accumulator
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: true
+
+### Round 4
+- Round-Verdict: Stagnation
+
+1. integer overflow on the size accumulator
+   - File: src/sizer.py:33
+   - Summary: integer overflow on the size accumulator
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Stagnation
+- The member's once-only defer was spent at round 2 (readjudicated set during the
+  defer). Round 3 is the first non-deferred round it contributes a genuinely-stuck
+  (readjudicated==true && !escalation-eligible && unresolved) non-shrink
+  observation (eligible at R+1). Round 4 is the second consecutive non-deferred
+  non-shrink → Stagnation FIRES (R+2 earliest). The defer round is skipped in the
+  consecutive-round sequence.

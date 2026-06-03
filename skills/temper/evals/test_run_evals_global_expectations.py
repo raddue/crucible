@@ -6,9 +6,6 @@ Covers (T2):
   - stage- and score-side `fixture_sha` match for the same fixture once the
     global expectations are folded in (the merged expectations list is
     identical across both load paths).
-  - a reviewer output with a finding tagged BOTH `Lens:` and `Category:` scores
-    a per-trial FAIL with the mutex rationale through `_aggregate_from_outputs`
-    (not an uncaught raise).
   - an invalid `global_expectations` entry (unknown check) raises
     `FixtureValidationError` at validation.
 """
@@ -17,10 +14,8 @@ import json
 
 import pytest
 
-from skills.temper.evals import lens_runner
 from skills.temper.evals.run_evals import (
     FixtureValidationError,
-    _aggregate_from_outputs,
     _load_evals,
     _validate_global_expectations,
 )
@@ -116,44 +111,6 @@ def test_stage_and_score_fixture_sha_match_with_global_expectations(tmp_path):
 
     assert stage_fix["expectations"] == score_fix["expectations"]
     assert fixture_sha(stage_fix) == fixture_sha(score_fix)
-
-
-def test_mutex_violation_scores_trial_fail(monkeypatch):
-    """A reviewer output with a finding carrying BOTH Lens: and Category: must
-    score a per-trial FAIL with the mutex rationale, not raise."""
-    reviewer_output = (
-        "### Findings\n\n"
-        "1. Something is wrong\n"
-        "   - File: src/foo.py:10\n"
-        "   - Severity: Important\n"
-        "   - Lens: DRY\n"
-        "   - Category: Tenancy\n"
-        "   This is the body.\n"
-    )
-    # Sanity: confirm the parser itself raises on this output.
-    with pytest.raises(lens_runner.MutexViolationError):
-        lens_runner.evaluate_expectation(
-            {"type": "mechanical", "check": "all-findings-have-file-line"},
-            reviewer_output,
-            {"id": "x"},
-        )
-
-    fix = {
-        "id": "mutex-fix",
-        "expectations": [
-            {"type": "mechanical", "check": "all-findings-have-file-line"},
-        ],
-    }
-    result = _aggregate_from_outputs(
-        fix, [reviewer_output], n_trials=1, threshold=1
-    )
-
-    er = result["expectations"][0]
-    assert er["per_trial_verdicts"] == ["FAIL"]
-    assert er["per_trial_rationales"] == [
-        "mutex violation: finding tagged both Lens and Category"
-    ]
-    assert result["verdict"] == "FAIL"
 
 
 def test_validate_global_expectations_rejects_unknown_check():

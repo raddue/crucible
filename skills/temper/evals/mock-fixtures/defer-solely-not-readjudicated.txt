@@ -1,0 +1,50 @@
+### Pre-flight
+- Diff is substantive: two related guards added across one module.
+- Two members carried into round 2 still awaiting their re-verification pass.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. off-by-one in window bound
+   - File: src/window.py:12
+   - Summary: off-by-one in window bound
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+2. unchecked None on the empty-window path
+   - File: src/window.py:30
+   - Summary: unchecked None on the empty-window path
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. off-by-one in window bound
+   - File: src/window.py:12
+   - Summary: off-by-one in window bound
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+2. unchecked None on the empty-window path
+   - File: src/window.py:30
+   - Summary: unchecked None on the empty-window path
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+- The previously-seen unresolved subset is SOLELY members not yet re-adjudicated
+  this round (readjudicated==false) → Defer one round to give each its
+  re-adjudication pass (§3.5 branch table, row 2). The defer round does NOT count
+  toward the Stagnation consecutive-round sequence.

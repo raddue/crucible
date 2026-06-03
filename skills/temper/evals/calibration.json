@@ -1,11 +1,20 @@
 {
-  "calibrated_at": "2026-05-25T00:00:00Z",
+  "calibrated_at": "2026-06-03T00:00:00Z",
   "baseline_runs": 3,
-  "per_lens_sigma_empirical": {
-    "Surgical": 0.0,
-    "DRY": 0.0,
-    "SRP": 0.0,
-    "OCP": 0.0
+  "verdict_schema": [
+    "Clean",
+    "Issues-Found",
+    "Stagnation",
+    "Architectural",
+    "Max-Rounds",
+    "Defer-one-round"
+  ],
+  "per_verdict_sigma_empirical": {
+    "Clean": 0.0,
+    "Issues-Found": 0.0,
+    "Stagnation": 0.0,
+    "Architectural": 0.0,
+    "Max-Rounds": 0.0
   },
   "sigma_worst": 0.0,
   "t_emp": 0.0,
@@ -14,6 +23,6 @@
   "tolerance": 0.45,
   "design_ceiling": 0.7,
   "ceiling_binding": false,
-  "method": "min(max(2x empirical sigma over k=3 synth-only baseline runs, 0.447 analytic floor), 0.7 design ceiling)",
-  "note": "Placeholder baseline pending real k=3 calibration runs via the 3-step stage / /temper-eval-collect / score protocol (#297). Empirical sigmas zeroed; analytic floor (0.447) is binding. Run scripts/calibrate_tolerance.py to refresh after collecting baseline data."
+  "method": "min(max(2x empirical sigma over k=3 synth-only convergence baseline runs, 0.447 analytic floor), 0.7 design ceiling)",
+  "note": "Placeholder baseline pending real k=3 calibration runs via the 3-step stage / /temper-eval-collect / score protocol. Schema retargeted (#333) from PASS/FAIL lens columns to the convergence verdicts. Empirical sigmas zeroed; analytic floor (0.447) is binding. Run scripts/calibrate_tolerance.py to refresh after collecting baseline data."
 }
