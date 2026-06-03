@@ -32,9 +32,11 @@ See [docs/architecture.md](docs/architecture.md) for how the orchestrator skills
 ```bash
 git clone git@github.com:raddue/crucible.git ~/repos/crucible
 ln -sf ~/repos/crucible/skills/* ~/.claude/skills/
+mkdir -p ~/.claude/agents
+ln -sf ~/repos/crucible/agents/* ~/.claude/agents/
 ```
 
-Or, when available on the marketplace: `claude plugin install raddue/crucible`.
+Or, when available on the marketplace: `claude plugin install raddue/crucible`. Note: the per-role model pins are currently delivered by the symlink install above — under a plugin install the agent types are namespaced (`crucible:…`) and bare-name dispatch resolution is unconfirmed (see [harness-adapter §8](skills/shared/harness-adapter.md#8-per-harness-install-manifest)).
 
 ### Cursor / OpenAI Codex / Amp / Cline
 

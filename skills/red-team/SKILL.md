@@ -134,7 +134,17 @@ Use the `red-team-prompt.md` template in this directory. Provide:
 - Project context (existing systems, constraints, tech stack)
 - What the artifact is supposed to accomplish
 
-Model: **Opus** (adversarial analysis needs the best model)
+Dispatched as the `crucible-red-team` agent type, which pins the model to **Opus** —
+adversarial analysis needs the best model (see `agents/crucible-red-team.md`). The pin
+is enforced by the agent def regardless of the orchestrator's own model; do not pass a
+call-level `model:`.
+
+If `subagent_type: crucible-red-team` fails to resolve (the agent defs are not installed —
+see `shared/harness-adapter.md` §8), fall back to `general-purpose` on the inherited model
+and emit a one-time visible warning ("agent type `crucible-red-team` not installed; the
+red-team is running on the inherited/session model — recall guarantee NOT enforced; install
+per harness-adapter §8") rather than degrading silently. The trigger is the observable
+type-resolution failure, not a transcript/metadata read.
 
 ### 3. Process findings
 
@@ -144,7 +154,7 @@ Model: **Opus** (adversarial analysis needs the best model)
 
 ### 4. Re-review after fixes
 
-Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weighted score and compare:
+Dispatch a NEW Devil's Advocate subagent (fresh, no prior context, `subagent_type: crucible-red-team`). Compute weighted score and compare:
 - **Strictly lower weighted score:** Progress. Loop back to step 3.
 - **Same or higher weighted score:** Stagnation. Escalate to user with findings from both rounds.
 
@@ -156,7 +166,7 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context). Compute weig
 
 ## Depth Calibration
 
-If a reviewer returns fewer findings than expected, the review is likely shallow. Dispatch a second reviewer with the instruction: "A prior reviewer found N issues. Find what they missed."
+If a reviewer returns fewer findings than expected, the review is likely shallow. Dispatch a second reviewer (`subagent_type: crucible-red-team`, same Opus pin) with the instruction: "A prior reviewer found N issues. Find what they missed."
 
 | Artifact | Expected findings (Fatal + Significant) | Minimum dimensions covered |
 |---|---|---|
