@@ -27,7 +27,7 @@ Shared iterative red-teaming mechanism invoked at the end of artifact-producing 
 
 Apply Tier 1 (structural) and Tier 2 (witness verification) lint per `shared/return-convention.md` to every Task return before acting on the declared VERDICT. The canonical grammar (CLAIM citations, WITNESS rules, verb-binding, byte-range limits, lint-failure handling) lives in that document. Build, siege, and audit apply the same linter.
 
-**Quality-gate-specific obligations:** Receipts from red-team, fix, judge, verifier, and dependency-audit subagents are all linted before their VERDICT is consumed. A lint failure is treated as structurally `BLOCKED` regardless of declared VERDICT — see "Lint failure handling" in the shared convention.
+**Quality-gate-specific obligations:** Receipts from red-team, fix, judge, verifier (the fix-verification dispatch; the persistence-checker JSON output is consumed directly, not receipt-linted — see Persistence Check), and dependency-audit subagents are all linted before their VERDICT is consumed. A lint failure is treated as structurally `BLOCKED` regardless of declared VERDICT — see "Lint failure handling" in the shared convention.
 
 ## Cairn (Layer 3)
 
@@ -206,12 +206,12 @@ The user's response routes to: continue (loop with suppression intact), escalate
 2. **Pre-flight dependency audit (delegated).** As of 2026-05-16, dependency-vulnerability scanning is `crucible:dependency-audit`, invoked by the parent orchestrator in parallel with quality-gate. Quality-gate itself no longer runs this step. If invoked standalone on a code artifact and the user expects dependency scanning, point them to `/dependency-audit`.
 2.5. **Security surface detection and siege dispatch.** Run the detection heuristic (see Security Surface Detection and Siege Dispatch). If `security_surface: detected` AND `skip_siege: false`, OR if `force_siege: true`, dispatch `crucible:siege` in parallel with the first red-team round. The two skills proceed independently. The orchestrator awaits both before terminal verdict.
 3. Prepares the artifact for review (see Artifact Preparation below)
-4. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round). Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate.
+4. Invokes `crucible:red-team` as a **single-pass reviewer** (one dispatch = one review round) via `subagent_type: crucible-red-team`, which pins this **single-model** red-team dispatch to **Opus** regardless of the orchestrator's own model (`agents/crucible-red-team.md`; the prose model line in `red-team/SKILL.md` is now descriptive only). On consensus-eligible rounds (Multi-Model Red-Team Review), the single-model dispatch is replaced by `consensus_query(mode: "review")`, whose model membership is resolved by the operator's `consensus_query` configuration — NOT by this pin. Quality-gate owns the iteration loop; red-team produces findings for one round and returns. Red-team does NOT run its own stagnation loop when invoked by quality-gate. If the harness reports that `subagent_type: crucible-red-team` fails to resolve (the agent defs are not installed on this machine — see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose` on the orchestrator's inherited model and the Opus recall guarantee is **not** enforced; in that case the orchestrator emits a one-time visible warning ("agent type `crucible-red-team` not installed; the red-team is running on the inherited/session model — recall guarantee NOT enforced; install per harness-adapter §8") rather than degrading silently. The trigger is the observable type-resolution failure, not a transcript or metadata read.
 5. If red-team finds **zero Fatal and zero Significant issues:** artifact is a *candidate* PASS — the round is candidate-clean, but the terminal verdict is deferred until look-harder verification completes. Order of operations on a candidate-clean round (0 Fatal, 0 Significant) — see `## Security Surface Detection and Siege Dispatch > Decision and Dispatch > Awaiting siege` for cross-reference:
    1. Await siege completion (if dispatched and still running) — see `## Security Surface Detection and Siege Dispatch > Decision and Dispatch > Awaiting siege`.
    2. If `SiegeVerdict != PASS`: skip look-harder + Minor Issue Handling, write verdict marker with `Verdict: ESCALATED, Reason: siege-blocked`, surface siege findings, and exit. Look-harder is SKIPPED entirely — the round was never going to be PASS.
    3. **Look-harder precedence gate.** Before invoking look-harder, evaluate Exit Precedence slots #3 (sustained-regression) and #4 (no-op-fix) per existing logic. (**This is a distinct mechanism from Exit Precedence's "Pre-precedence resolution" step at `## Escalation > Exit Precedence`** — that step is specifically the no-op → architectural re-dispatch path, run before precedence evaluation on rounds with active architectural candidates. The "Look-harder precedence gate" here is a much narrower check: it inspects whether a non-Clean-Pass slot would have won precedence on this candidate-clean round, and short-circuits look-harder if so.) A 0F/0S round cannot logically co-fire with sustained-regression (the weighted score on 0F/0S is 0, so `score(N) > score(N-1) > score(N-2)` cannot hold), but no-op-fix CAN co-fire (the fix agent may have returned a byte-identical artifact that the red-team also finds clean). If either slot fires, look-harder is SKIPPED ENTIRELY — the round was never going to be PASS. Look-harder is reached only when Clean Pass (slot #1) would otherwise win precedence.
-   4. **Look-harder verification (Component 1 / #265).** Same-model re-dispatch of red-team with the shared tightened-rubric addendum (`skills/quality-gate/tightened-rubric-addendum.md`) concatenated to `red-team-prompt.md` body by the orchestrator. The re-dispatch is the same model, same artifact, fresh dispatch — only the rubric is tightened; no prior-round context leaks (anti-anchoring preserved). Look-harder is SKIPPED on the following conditions; the orchestrator records `LookHarderSkippedReason` in the verdict marker and proceeds to sub-step 5:
+   4. **Look-harder verification (Component 1 / #265).** Re-dispatch of red-team (`subagent_type: crucible-red-team`, the same enforced **Opus** pin as every red-team round — "same model" here means the pinned red-team model, NOT the orchestrator's) with the shared tightened-rubric addendum (`skills/quality-gate/tightened-rubric-addendum.md`) concatenated to `red-team-prompt.md` body by the orchestrator. The re-dispatch is the same model, same artifact, fresh dispatch — only the rubric is tightened; no prior-round context leaks (anti-anchoring preserved). Look-harder is SKIPPED on the following conditions; the orchestrator records `LookHarderSkippedReason` in the verdict marker and proceeds to sub-step 5:
       - **`circuit-breaker`** — global round 15 (runaway protection takes precedence; this matches the pre-precedence architectural re-dispatch behavior of the 15-round limit).
       - **`tail-rubric-already-applied`** — the candidate-clean round's red-team dispatch already carried `tail_rubric: true` (i.e., LOCAL round ≥ `ceil(suppression_threshold * 0.6)` on a `suppression_threshold ≥ 5` gate). The same-model re-dispatch with the identical addendum adds no signal beyond sampling variance.
       - **Already fired this chunk** — `look-harder-fired-on-round` is non-null in any prior `round-N-flags.md` of the in-progress chunk per the all-files recovery scan (see Compaction Recovery). Skip silently; no `LookHarderSkippedReason` recorded (the field is for circuit-breaker / tail-rubric-already-applied only).
@@ -441,7 +441,7 @@ The orchestrator coordinates the loop but does NOT fix artifacts directly. Fixes
 
 **Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason "pre-qg-fix-round-N". Non-code artifacts (design, plan, hypothesis, mockup, translation) skip this step — they are fully captured by the existing artifact-N.md snapshots.
 
-The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round.
+The fix agent (the design / plan / code / mockup / translation rows above) is dispatched with `subagent_type: crucible-qg-fix`, which **inherits the session model** (`agents/crucible-qg-fix.md`) — the fix output is re-reviewed by the now-Opus red-team each round, so a weaker fixer costs at most an extra round, never a missed bug; do not pass a call-level `model:`. (The `hypothesis` row is the one exception — it routes to the **debugging skill's own** hypothesis-refinement agent, not `crucible-qg-fix`; that agent is outside this skill's surface.) The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round.
 
 The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
 
@@ -508,7 +508,7 @@ The `suppressed-signal` and `no-op-fix` fields are copied from `round-N-score.md
 
 After each fix agent completes and before the next red-team round, dispatch a **Fix Verifier** — a dedicated Sonnet agent that checks whether each fix actually resolves its stated finding. No re-fix sub-loop; the verifier checks once, and its output feeds into the fix journal for the next round.
 
-**Dispatch method:** Task tool (model: Sonnet), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator includes all input in the dispatch file directly.
+**Dispatch method:** Task tool, `subagent_type: crucible-qg-verifier` (the agent def pins **Sonnet** — `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator includes all input in the dispatch file directly.
 
 **Input the orchestrator provides:**
 1. Round N findings (the findings the fix agent was asked to address)
@@ -577,7 +577,7 @@ If no checkpoints exist (checkpoint skill unavailable), escalate without the res
 
 When the `consensus_query` MCP tool is available and consensus mode `verdict` is enabled:
 
-1. Instead of dispatching a single Sonnet judge via Task tool, call
+1. Instead of dispatching a single judge via Task tool (`subagent_type: crucible-qg-judge`), call
    `consensus_query(mode: "verdict")` with:
    - prompt: the stagnation judge prompt from `stagnation-judge-prompt.md`
    - context: round N findings, round N-1 findings, latest fix journal entry,
@@ -591,7 +591,8 @@ When the `consensus_query` MCP tool is available and consensus mode `verdict` is
        exist, include the dissent summary in the escalation message:
        "Stagnation detected (consensus: N/M models agree, dissent: [summary])."
    - If `status: "unavailable"`:
-     - Fall back to single-Sonnet judge dispatch (existing behavior)
+     - Fall back to the single-judge dispatch (`subagent_type: crucible-qg-judge`, see
+       **Judge Dispatch → Dispatch method**)
 
 3. The comparison file (`round-N-comparison.md`) includes the consensus
    metadata: models queried, models responded, agreement level, and any
@@ -610,7 +611,7 @@ The orchestrator dispatches a **persistence checker** between a non-clean red-te
 
 **Verifier-error rounds** (where the round-N fix-verifier dispatch failed or its `### Verifier Assessment` sub-section is malformed/absent) implicitly skip the persistence checker per fail-open semantics — the `≥1 Unresolved` gate is vacuous, so the trigger does not fire. The F1 promotion is also skipped (vacuous gating on condition (d) below).
 
-**Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Sonnet Task with `persistence-checker-prompt.md` as the prompt. Inputs supplied verbatim by the orchestrator:
+**Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Task with `subagent_type: crucible-qg-verifier` (reused — both the fix verifier and the persistence checker are Sonnet mechanical structural checks; the agent def pins **Sonnet**, `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`) and `persistence-checker-prompt.md` as the prompt. The persistence checker emits a JSON correspondence object, not an Evidence Receipt — the shared `crucible-qg-verifier` def is deliberately return-format-neutral so it does not conflict with that (the persistence checker is not a receipt-bearing role — its JSON is consumed directly by the orchestrator, written to `round-(N+1)-persistence.md` per the flow below, and is NOT run through the receipt linter; this is a pre-existing exemption that #352 does not change). Inputs supplied verbatim by the orchestrator:
 
 1. `round-N-findings.md` (prior round's findings)
 2. `round-(N+1)-findings.md` (current round's findings)
@@ -650,7 +651,7 @@ For thresholds 3-5 the short window means no silent-seed pass is feasible; the j
 
 **At round `suppression_threshold` and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
-**Dispatch method:** Task tool (model: Sonnet). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
+**Dispatch method:** Task tool, `subagent_type: crucible-qg-judge` (the agent def pins **Sonnet** — `agents/crucible-qg-judge.md`; do not pass a call-level `model:`). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
 
 **Input the orchestrator provides:**
 1. The content of `round-N-findings.md` (current round)
@@ -761,8 +762,8 @@ Minor issues do not trigger fix rounds and do not count toward stagnation. Howev
 **After the gate completes** (artifact approved or stagnation escalated):
 
 1. **Consolidate:** Collect all Minor observations from all rounds, deduplicate.
-2. **Quick-fix pass:** Dispatch a fix subagent with the consolidated minors and the final artifact. The fix agent addresses easy wins only — changes that are simple, low-risk, and unambiguous (typos, naming inconsistencies, missing edge-case guards, trivial cleanup). It skips anything requiring judgment or design decisions.
-3. **Present remainder:** Output any minors the fix agent skipped as "Remaining minor observations" so the user can decide whether to address them. No further red-team round on the quick fixes — the gate is already complete.
+2. **Quick-fix pass:** Dispatch a fix subagent (`subagent_type: crucible-qg-fix`, same fix type as the main loop, so it inherits the session model — `agents/crucible-qg-fix.md`; do not pass a call-level `model:`) with the consolidated minors and the final artifact. The fix agent addresses easy wins only — changes that are simple, low-risk, and unambiguous (typos, naming inconsistencies, missing edge-case guards, trivial cleanup). It skips anything requiring judgment or design decisions.
+3. **Present remainder:** Output any minors the fix agent skipped as "Remaining minor observations" so the user can decide whether to address them. No further red-team round on the quick fixes — the gate is already complete. (Because this post-pass quick-fix is **not** re-reviewed, its edits ship on the inherited model unverified — a bounded residual accepted in the #352 plan: blast radius is consolidated Minors on an already-passed artifact, and routing through `crucible-qg-fix` keeps it from becoming a silent escapee if the fix tier ever moves off `inherit`.)
 
 ## Pre-Flight Dependency Audit
 

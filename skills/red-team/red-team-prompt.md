@@ -5,8 +5,12 @@
 
 Use this template when dispatching a devil's advocate subagent in Phase 2, Step 3.
 
+The `crucible-red-team` agent type pins the model to Opus (`agents/crucible-red-team.md`),
+so the model is enforced by the agent def — do NOT add a call-level `model:` parameter
+(it would override the def; see `shared/harness-adapter.md` Mapping 1b).
+
 ```
-Task tool (general-purpose, model: opus):
+Task tool (subagent_type: crucible-red-team):
   description: "Red team implementation plan for [feature]"
   prompt: |
     You are the Devil's Advocate. Your job is to ATTACK this artifact — find every way it could fail, every assumption that's wrong, every better approach that was overlooked.

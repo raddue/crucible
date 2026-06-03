@@ -46,7 +46,7 @@ fields map onto it. The authored source of truth is the Claude-Code `name` + `de
 |---|---|---|---|---|
 | Skill identifier | `name:` | (file name `<name>.md`; no `name` key) | prompt metadata `name`/title | command/rule name |
 | Trigger + one-line purpose | `description:` (triggers live here) | `description:` | prompt metadata description | rule description |
-| Dispatch agent selection | n/a (Task tool picks per call) | `agent:` (named agent profile) | n/a | n/a |
+| Dispatch agent selection | model-critical roles use named agent types (`agents/<role>.md`, `model:` frontmatter — `crucible-red-team`=opus, `crucible-qg-judge`/`crucible-qg-verifier`=sonnet, `crucible-qg-fix`=inherit; see Mapping 1b); other dispatches stay per-call general-purpose (Task tool picks) | `agent:` (named agent profile) | n/a | n/a |
 | "this command spawns a subagent" | n/a (decided in body) | `subtask: true` | n/a (sequential) | n/a (sequential) |
 | Argument substitution | body reads invocation args | `$ARGUMENTS` token | prompt arg convention | command arg convention |
 | File include | body reads paths via tools | `@file` include | prompt include | rule include |
@@ -58,6 +58,80 @@ subtasks. Nothing in the authored body changes — only the frontmatter is re-ex
 **Marker note.** The engine-dispatch marker (`` `dispatch: delve-engine` ``) is deliberately NOT one
 of these frontmatter fields — it lives as a column-0 body line under a `## Dispatch` heading (see §7),
 so that no harness's frontmatter loader parses or strips it.
+
+## 2b. Mapping 1b — Per-role model tiers (recall-critical dispatch model enforcement)
+
+The quality-gate / red-team loop is **recall-critical**: an Opus reviewer finds Fatals a Sonnet
+reviewer misses (an Opus orchestrator caught 2 Fatals in 1 round that a Sonnet orchestrator missed in
+8). When the model is left to "whatever the orchestrator passes / inherits", a Sonnet orchestrator
+**silently degrades the red-team to Sonnet**. The fix (#352) is to bind the model **per role** so the
+review tier is enforced independent of the orchestrator. This mapping records the per-role tiers and
+how each harness expresses (or degrades on) the binding.
+
+**Role → model tier (authored intent):**
+
+| Role (agent type) | Tier | Why |
+|---|---|---|
+| `crucible-red-team` | **opus** | Recall-critical adversarial review (every **single-model** red-team round, look-harder, Devil's Advocate, depth-calibration second reviewer, re-review). The load-bearing pin. |
+| `crucible-qg-judge` | **sonnet** | Stagnation judge — mechanical cross-round finding comparison; cheap. |
+| `crucible-qg-verifier` | **sonnet** | Fix verifier **+** persistence checker — mechanical structural checks; cheap. One def, reused. |
+| `crucible-qg-fix` | **inherit** | Fix agent / Plan Writer (main loop, re-reviewed each round by the now-Opus red-team) **+** post-pass minor quick-fix. Inheriting keeps it cheap under a Sonnet orchestrator and strong under an Opus one; a weaker fixer costs at most an extra round, never a missed bug. |
+
+**Consensus-mode caveat.** Consensus-mode red-team rounds (quality-gate's Multi-Model Red-Team Review) resolve their model membership through the operator's `consensus_query` configuration, NOT the `crucible-red-team` pin — on those rounds the operator owns the consensus member tier. The Opus pin scopes to single-model dispatches.
+
+**Standalone-`/red-team` fix dispatch — deliberate exclusion, not an oversight.** These pins cover the quality-gate fix sites; the standalone-`/red-team` fix-mechanism dispatch (`red-team/SKILL.md` fix-mechanism table — Plan Writer / Fix subagent) is intentionally left on the inherited model (it is caller/artifact-determined — that table routes "Standalone → caller decides") and is inherit-equivalent to `crucible-qg-fix` today. A future editor who moves `crucible-qg-fix` off `inherit` should re-evaluate that standalone red-team fix site too, or it stays a silent escapee on the inherited model.
+
+**Namespacing (the `crucible-` prefix is deliberate).** Claude Code discovers agent types from
+`<project>/.claude/agents/` AND `~/.claude/agents/`, and on a name collision the **higher-priority
+location wins** — priority order: managed > `--agents` CLI > `.claude/agents/` (project) >
+`~/.claude/agents/` (user) > plugin (official subagents docs, "Choose the subagent scope"; confirmed
+via claude-code-guide 2026-06-03). Because Crucible installs these defs at **user level** for
+cross-project reach, a consuming project's own same-named `<project>/.claude/agents/` def would
+silently shadow the Crucible one. The `crucible-` prefix on every agent-type `name` / `subagent_type`
+makes that collision implausible — it is the deliberate guard against the shadow.
+
+**Precedence (why the agent-def `model:` actually binds).** The model is resolved by the chain
+`CLAUDE_CODE_SUBAGENT_MODEL` env > call-level `model:` > **agent-def `model:`** > session inherit
+(official subagents docs `https://code.claude.com/docs/en/subagents.md`, "Choose a model"; confirmed
+via claude-code-guide 2026-06-03). Two consequences are load-bearing: (1) the agent-def `model:`
+**does** override the inherited session model — that is what defeats the Sonnet-orchestrator
+degradation; (2) a **call-level `model:`** would override the agent-def, so the rewired dispatches
+**drop the call-level `model:`** entirely — the agent def is the single binding source. `model:
+inherit` is a documented-valid value (omitting the field has the same effect), which is why
+`crucible-qg-fix` may carry it explicitly.
+
+**Global `CLAUDE_CODE_SUBAGENT_MODEL` sits above the pin — keep it off gate machines.** Because it
+tops the precedence chain, exporting it (e.g. to `sonnet`) re-degrades the recall-critical red-team by
+overriding the `crucible-red-team` Opus pin — so do not set it on a machine that runs the gate. This is
+operator-controlled and deliberate (a machine-wide choice, bounded like the operator-default floor
+documented for Codex/Cursor/Pi), NOT the silent orchestrator-inherit degradation #352 targets.
+
+**Prose model words in the skill bodies are descriptive, not binding.** Phrases like "a dedicated Sonnet
+agent" or "single Sonnet judge" describe today's intent — the agent def's `model:` is the single binding
+source; to change a role's tier, edit the agent def, not the prose.
+
+**Per-harness expression:**
+
+| Harness | How the per-role tier is expressed | Status |
+|---|---|---|
+| **Claude Code** | `~/.claude/agents/crucible-<role>.md` with `model:` frontmatter (symlinked from `<repo>/agents/`). The agent-def `model:` binds via the precedence chain above. | **Confirmed** mechanism (docs; runtime-proven by the on-disk transcript read in the enforcement-proof note below). |
+| **OpenCode** | An `agent:` profile per role, named with the intended tier; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #335 confirms. If it cannot, OpenCode degrades to the operator-default floor below. |
+| **Codex / Cursor / Pi** | no first-class per-agent model pin | **Degradation:** model = whatever the harness runs; the recall guarantee relies on the **operator setting a strong default model**. Bounded and documented, never silent. |
+
+**Enforcement is proven by the on-disk subagent transcript model, not a pre-dispatch intent field
+(#335 cross-link).** Two readouts must not be conflated:
+- The session-index `model_tier` field (`dispatch-convention.md`) is set from the dispatch
+  **decision** — the orchestrator's PRE-dispatch intent, before the subagent runs. It would report
+  `opus` even if the agent-def silently failed to bind. **It cannot prove enforcement.**
+- Claude Code writes each Task/Agent subagent dispatch to a per-subagent on-disk transcript at
+  `<project>/<session-id>/subagents/agent-<id>.jsonl`, whose **assistant** records carry
+  `message.model` = the model the subagent **actually ran on** (empirically confirmed to exist on this
+  machine: Opus and Sonnet values observed across real transcripts; the `<synthetic>` sentinel is real
+  and must be filtered). Enforcement is proven by reading that file and confirming `crucible-red-team`
+  executed on `claude-opus-4-*` (qg-* on `claude-sonnet-4-*`). A
+  model-discriminating *behavioral* fixture is explicitly out of scope (a behavioral PASS is consistent
+  with the pin having silently failed). This direct read is the #335 runtime defense against the
+  "documented contract can drift" risk below.
 
 ## 3. Mapping 2 — Command-file location
 
@@ -195,16 +269,38 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 ### Claude Code *(validated #335)*
 - **Where:** `skills/<name>/SKILL.md` under `.claude/skills/` (or plugin-namespaced); shared
   `shared/*.md` installed alongside, referenced via `<!-- CANONICAL: ... -->`.
+- **Agent defs (model enforcement, Mapping 1b):** symlink `<repo>/agents/*.md` →
+  `~/.claude/agents/` (user-level, mirroring the `skills/` symlink — `ln -sf "$PWD"/agents/*
+  ~/.claude/agents/`), so `crucible-red-team` / `crucible-qg-judge` / `crucible-qg-verifier` /
+  `crucible-qg-fix` are discoverable in every project. Without this step the named `subagent_type`s
+  fail to resolve and the recall guarantee degrades (see Mapping 1b's degradation note / the
+  quality-gate fallback warning). On Claude Code an uninstalled `subagent_type` surfaces as a
+  catchable **Task-tool resolution error** — not a silent substitution of a default agent — and that
+  observable error is what fires the non-silent fallback warning (hence the trigger is the
+  type-resolution failure, not a transcript read). A harness that silently substitutes a default on an
+  unknown type cannot fire that warning, so on such a harness install MUST be verified out-of-band —
+  this manifest is that check. Bare-name `subagent_type` resolution for these four defs is **verified
+  for the user-level symlink install** (`~/.claude/agents/`, where agents load by bare `name`). Under a
+  **plugin install**, Claude Code namespaces plugin agents (`crucible:crucible-red-team`), and
+  bare-name `subagent_type` resolution for plugin-provided agents is **UNCONFIRMED** — the docs specify
+  scoping for `@`-mention / `--agent`, not for the Task-tool `subagent_type` field (cf. the OpenCode
+  row's "Authored-to-spec, UNCONFIRMED" / "#335 confirms" status). Until plugin-scoped dispatch is confirmed, the
+  model-enforcement guarantee is delivered by the **symlink install**; a plugin install whose bare type
+  fails to resolve takes the documented **non-silent fallback** above, not silent degradation.
 - **Frontmatter:** `name:` + `description:` (Mapping 1).
 - **Invoked:** `/<name>` (e.g. `/delve`, `/temper`, `/audit`). `/code-review` built-in stays an
   optional accelerator (I1), never a dependency.
 - **Dispatch:** Task / Agent tool, disk-mediated per `shared/dispatch-convention.md` (Mapping 3). Full
-  parallel fan-out.
+  parallel fan-out. Model-critical roles route through the named agent types above (Mapping 1b).
 - **Degrades:** does not — parallel primitive present.
 - **Comments:** forge CLI rows in Mapping 5 (§6) via shell; paste-mode otherwise.
 
 ### OpenCode *(validated #335 — BYO reference harness)*
 - **Where:** `.opencode/commands/<name>.md`; shared files installed alongside.
+- **Agent defs (model enforcement, Mapping 1b):** author one `agent:` profile per role
+  (`crucible-red-team`=opus, etc.) and name it from the skill frontmatter. **Authored-to-spec,
+  unconfirmed** — whether an OpenCode `agent:` profile can pin a model is #335's confirmation; if it
+  cannot, this row degrades to the operator-default floor (set a strong default model).
 - **Frontmatter:** `description:` + `agent:` + `subtask: true`; body uses `$ARGUMENTS` and `@file`
   includes (Mapping 1).
 - **Invoked:** `/<name>`.
@@ -215,6 +311,8 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 
 ### Codex CLI *(authored-to; runtime validation deferred)*
 - **Where:** the Codex prompts directory (prompt file + metadata header).
+- **Agent defs (model enforcement, Mapping 1b):** no first-class per-agent model pin → **degrades**;
+  the recall guarantee relies on the operator setting a strong default model.
 - **Frontmatter:** prompt metadata `name`/description (Mapping 1).
 - **Invoked:** the harness's prompt-invocation convention.
 - **Dispatch:** no first-class parallel-subagent primitive → **Mapping 4 sequential passes** (one per
@@ -224,6 +322,8 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 
 ### Cursor *(authored-to; runtime validation deferred)*
 - **Where:** the Cursor commands / rules location.
+- **Agent defs (model enforcement, Mapping 1b):** no first-class per-agent model pin → **degrades**;
+  the recall guarantee relies on the operator setting a strong default model.
 - **Frontmatter:** rule name + description (Mapping 1).
 - **Invoked:** the harness's command-invocation convention.
 - **Dispatch:** no first-class parallel-subagent primitive → **Mapping 4 sequential passes** + one-time
