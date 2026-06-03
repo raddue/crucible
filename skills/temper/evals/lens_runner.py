@@ -707,7 +707,10 @@ def stagnation_subordinate_to_escalation(output: str, round: int) -> Result:
     ]
     if not prev_unresolved:
         return ("N/A", f"round {round} has no previously-seen unresolved member")
-    solely_escalation = all(m["outcome"] == "ESCALATE" for m in prev_unresolved)
+    solely_escalation = all(
+        m["outcome"] == "ESCALATE" and m["readjudicated"] is True
+        for m in prev_unresolved
+    )
     rv = _round_verdicts(output).get(round)
     if solely_escalation:
         if rv == "Architectural":
@@ -727,13 +730,55 @@ def stagnation_subordinate_to_escalation(output: str, round: int) -> Result:
     )
 
 
-def defer_once_only(output: str, file: str, summary: str | None = None) -> Result:
-    """PASS iff the member at `file` is deferred at most once across the run.
+def _stable_member_key(f: dict) -> tuple:
+    """Drift-immune sub-identity for once-only defer grouping = {file, summary,
+    severity}.
 
-    Once-only defer is keyed on `readjudicated` (§3.5): a member defers in the
-    round where it carries in still `readjudicated == false`; a subsequent round
-    must NOT defer it again (it routes to Architectural/Stagnation instead). This
-    check asserts the member contributes to AT MOST ONE Defer-one-round round.
+    DELIBERATELY DROPS the volatile ``line`` and ``verdict`` fields from
+    ``_member_identity``. The fix-verification loop edits code as it goes, so a
+    member's reported ``line`` shifts when lines are inserted/removed above it,
+    and its contract ``verdict`` can be re-derived between rounds. Keying the
+    once-only count on those volatile fields lets a GENUINE double-defer of the
+    SAME member evade detection (it would split into two distinct keys). The
+    stable sub-key ``{file, summary, severity}`` keeps the same member fused
+    across rounds so a true second defer is always caught.
+
+    DO NOT re-introduce ``line``/``verdict`` into this key — that is the
+    look-harder regression this fix locks out.
+    """
+    return (f.get("file"), f.get("summary"), f.get("severity"))
+
+
+def defer_once_only(output: str, file: str, summary: str | None = None) -> Result:
+    """PASS iff no member at `file` is *deferred-for* in ≥2 Defer-one-round rounds.
+
+    Once-only defer (§3.4/§3.5): "Defer-one-round is ONCE-ONLY per member, keyed
+    on ``readjudicated``." A member may *trigger* AT MOST ONE Defer-one-round.
+
+    **deferred-FOR (the trigger) — a member is deferred-for in round R iff ALL:**
+      (a) round R's Round-Verdict is ``Defer-one-round``;
+      (b) the member is carried-in (``admitted is not None and admitted < R``);
+      (c) the member is live (``outcome in _LIVE_OUTCOMES``);
+      (d) the member's ``readjudicated is False`` in round R.
+
+    Clause (d) is the crux. ``Defer-one-round`` is a PER-ROUND verdict; a round
+    may legitimately defer because of a *not-yet-readjudicated sibling* (the
+    §3.5 MIXED row). A member that appears in that same Defer round with
+    ``readjudicated is True`` is CARRIED-THROUGH, NOT deferred-for — it already
+    had its single defer (deferring SETS the flag; an already-set member does
+    NOT defer again, §3.5). So a ``readjudicated == true`` member does NOT
+    consume a defer and must NOT count toward the violation. This is what makes
+    the legal MIXED carry-through PASS instead of false-FAILing.
+
+    **Once-only rule:** FAIL iff some member is deferred-for in ≥2 DISTINCT
+    Defer-one-round rounds. N/A if there are no Defer-one-round rounds at all;
+    PASS if there are but no member is deferred-for twice.
+
+    **Drift-immune keying:** the per-member deferred-for rounds are grouped by
+    the STABLE sub-identity ``{file, summary, severity}`` (see
+    ``_stable_member_key``), NOT the volatile 5-field ``_member_identity`` — so
+    a genuine double-defer is caught even when the member's ``line``/``verdict``
+    drifted between the two defer rounds.
     """
     findings = [
         f
@@ -743,28 +788,41 @@ def defer_once_only(output: str, file: str, summary: str | None = None) -> Resul
     if not findings:
         return ("FAIL", f"no member at {file}")
     round_verdicts = _round_verdicts(output)
-    # Rounds in which this member was present, carried-in (admitted before the
-    # round), still readjudicated==false, AND the round resolved to Defer.
-    defer_rounds = sorted(
-        {
-            f["round"]
-            for f in findings
-            if f["round"] is not None
+
+    defer_rounds_present = any(v == "Defer-one-round" for v in round_verdicts.values())
+
+    # Group deferred-FOR rounds per member by the drift-immune stable sub-key.
+    by_member: dict[tuple, set[int]] = {}
+    for f in findings:
+        if (
+            f["round"] is not None
+            and round_verdicts.get(f["round"]) == "Defer-one-round"
             and f["admitted"] is not None
             and f["admitted"] < f["round"]
+            and f["outcome"] in _LIVE_OUTCOMES
             and f["readjudicated"] is False
-            and round_verdicts.get(f["round"]) == "Defer-one-round"
-        }
-    )
-    if len(defer_rounds) <= 1:
-        return (
-            "PASS",
-            f"member at {file} deferred in rounds {defer_rounds} (≤ 1 — once-only respected)",
-        )
+        ):
+            # Deferred-FOR: this round deferred BECAUSE this not-yet-readjudicated
+            # carried-and-live member needs its re-adjudication pass.
+            by_member.setdefault(_stable_member_key(f), set()).add(f["round"])
+
+    # Once-only violation: the same member deferred-for in ≥2 distinct Defer rounds.
+    for identity, deferred_for_rounds in by_member.items():
+        if len(deferred_for_rounds) >= 2:
+            return (
+                "FAIL",
+                f"once-only-defer violated: member {identity} deferred-for in rounds "
+                f"{sorted(deferred_for_rounds)}",
+            )
+
+    if not defer_rounds_present:
+        return ("N/A", f"no Defer-one-round round at {file}")
+
+    all_defer_for_rounds = sorted({r for rounds in by_member.values() for r in rounds})
     return (
-        "FAIL",
-        f"member at {file} deferred in rounds {defer_rounds} — once-only violated "
-        f"(a member with readjudicated==true must not defer again)",
+        "PASS",
+        f"member(s) at {file} deferred-for in rounds {all_defer_for_rounds} "
+        f"(each ≤ 1 — once-only respected)",
     )
 
 

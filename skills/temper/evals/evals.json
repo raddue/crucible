@@ -329,13 +329,6 @@
             "verdict": "Defer-one-round",
             "round": 2
           }
-        },
-        {
-          "type": "mechanical",
-          "check": "stagnation-subordinate-to-escalation",
-          "params": {
-            "round": 2
-          }
         }
       ]
     },

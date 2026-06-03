@@ -578,6 +578,19 @@ def test_branch_genuinely_stuck_to_stagnation():
     assert v == "PASS"
 
 
+def test_solely_escalation_requires_readjudicated_true():
+    # A subset that is solely ESCALATE but NOT yet readjudicated (readjudicated
+    # == false) is NOT escalation-eligible (§3.5: escalation-eligible only after
+    # the re-verification pass). It must NOT satisfy the SOLELY-escalation ->
+    # Architectural row — the check is N/A, not a PASS/FAIL on that row.
+    not_yet = ARCHITECTURAL.replace(
+        "   - Outcome: ESCALATE\n   - Readjudicated: true",
+        "   - Outcome: ESCALATE\n   - Readjudicated: false",
+    )
+    v, _ = stagnation_subordinate_to_escalation(not_yet, round=3)
+    assert v == "N/A"
+
+
 def test_stagnation_subordinate_fails_if_escalation_subset_mislabeled():
     bad = ARCHITECTURAL.replace(
         "### Round 3\n- Round-Verdict: Architectural",
@@ -646,6 +659,363 @@ def test_defer_once_only_fail_on_double_defer():
     v, why = defer_once_only(double, "src/x.py")
     assert v == "FAIL"
     assert "once-only" in why
+
+
+def test_defer_once_only_pass_carry_through_readjudicated_true():
+    # CORRECTED SEMANTICS (replaces the old fail_on_redefer_of_readjudicated test,
+    # which encoded the now-known-WRONG model). A member deferred-FOR once in R2
+    # (readjudicated==false), then appearing in a SECOND Defer round R3 with
+    # readjudicated==TRUE, is CARRIED-THROUGH in R3, NOT deferred-for again
+    # (deferring SETS the flag; an already-set member does not defer again, §3.5).
+    # R3 deferred because of a *different* not-yet-readjudicated sibling. The
+    # member is deferred-for in exactly ONE round -> PASS (no once-only violation).
+    carry_through = """
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+2. sibling
+   - File: src/x.py:9
+   - Summary: sibling
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+2. sibling
+   - File: src/x.py:9
+   - Summary: sibling
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: true
+
+### Round 3
+- Round-Verdict: Defer-one-round
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: true
+
+2. sibling
+   - File: src/x.py:9
+   - Summary: sibling
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+"""
+    # `m` is deferred-for in R2 only (readjudicated==false); in R3 it is
+    # carried-through (readjudicated==true) -> not deferred-for again -> PASS.
+    v, why = defer_once_only(carry_through, "src/x.py", "m")
+    assert v == "PASS", why
+
+
+# ---------------------------------------------------------------------------
+# defer-once-only: FOUR boundary tests locking all sides (#333)
+#
+#   #1 legal single defer-for          -> PASS
+#   #2 legal MIXED carry-through       -> PASS
+#   #3 illegal deferred-for-twice      -> FAIL
+#   #4 drift-immune deferred-for-twice -> FAIL (line/verdict differ between rounds)
+#
+# #3 and #4 are verified to FAIL against a wrong implementation and PASS only
+# against the correct deferred-for + stable-key model.
+# ---------------------------------------------------------------------------
+
+
+def test_defer_once_only_boundary1_legal_single_defer_for_passes():
+    # #1: a member deferred-FOR in EXACTLY ONE Defer-one-round round -> PASS.
+    single = """
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. solo
+   - File: src/s.py:5
+   - Summary: solo
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. solo
+   - File: src/s.py:5
+   - Summary: solo
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Issues-Found
+
+1. solo
+   - File: src/s.py:5
+   - Summary: solo
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Issues-Found
+"""
+    v, why = defer_once_only(single, "src/s.py")
+    assert v == "PASS", why
+
+
+def test_defer_once_only_boundary2_legal_mixed_carry_through_passes():
+    # #2: a Defer-one-round round defers because of a readjudicated==false sibling;
+    # a readjudicated==true ESCALATE member is carried through that Defer round
+    # (and a later one) but is NEVER deferred-for -> PASS.
+    mixed = """
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. escalator
+   - File: src/q.py:48
+   - Summary: escalator
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Readjudicated: false
+
+2. laggard
+   - File: src/q.py:71
+   - Summary: laggard
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. escalator
+   - File: src/q.py:48
+   - Summary: escalator
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Outcome: ESCALATE
+   - Readjudicated: true
+
+2. laggard
+   - File: src/q.py:71
+   - Summary: laggard
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+"""
+    # The readjudicated==true escalation-eligible member is carried-through, never
+    # deferred-for -> PASS.
+    v, why = defer_once_only(mixed, "src/q.py", "escalator")
+    assert v == "PASS", why
+    # And the whole file passes too (laggard deferred-for once, escalator never).
+    v2, why2 = defer_once_only(mixed, "src/q.py")
+    assert v2 == "PASS", why2
+
+
+def test_defer_once_only_boundary3_illegal_deferred_for_twice_fails():
+    # #3: the SAME member is deferred-FOR (readjudicated==false trigger) in TWO
+    # distinct Defer-one-round rounds -> FAIL. Verified to FAIL against current
+    # impl and PASS-the-assertion after the fix.
+    double = """
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Defer-one-round
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+"""
+    v, why = defer_once_only(double, "src/x.py")
+    assert v == "FAIL", why
+    assert "once-only-defer" in why
+
+
+def test_defer_once_only_boundary4_drift_immune_deferred_for_twice_fails():
+    # #4 (the look-harder regression, LOCKED): same as #3 — the SAME member
+    # deferred-for in TWO Defer rounds — but its reported `line` AND `verdict`
+    # DIFFER between the two defer rounds (line drifted as code was edited above
+    # it; verdict re-derived). Keying once-only on the volatile 5-field identity
+    # would split these into two keys and FALSE-PASS. The stable sub-key
+    # {file, summary, severity} keeps them fused -> must still FAIL.
+    drift = """
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. m
+   - File: src/x.py:1
+   - Summary: m
+   - Severity: Important
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Round 3
+- Round-Verdict: Defer-one-round
+
+1. m
+   - File: src/x.py:42
+   - Summary: m
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+"""
+    # line 1->42 and verdict PLAUSIBLE->CONFIRMED both drift across the two defer
+    # rounds; the stable {file, summary, severity} key must still catch the
+    # double-defer.
+    v, why = defer_once_only(drift, "src/x.py")
+    assert v == "FAIL", why
+    assert "once-only-defer" in why
+
+
+def test_defer_once_only_pass_single_defer_escalation_in_mixed():
+    # LEGAL boundary (§3.5 branch table, row 3, MIXED): a round resolves to
+    # Defer-one-round because of a NOT-YET-readjudicated sibling. An
+    # escalation-eligible member (ESCALATE, readjudicated==true) is carried
+    # through that SAME single Defer round — deferred only ONCE, not re-deferred.
+    # The over-firing prior fix false-FAILed this on the readjudicated==true
+    # trigger; the correct once-only discriminator (a member in ≥2 Defer rounds)
+    # must return PASS.
+    mixed = """
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. lost wakeup
+   - File: src/queue.py:48
+   - Summary: lost wakeup
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Readjudicated: false
+
+2. missing length check
+   - File: src/queue.py:71
+   - Summary: missing length check
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Defer-one-round
+
+1. lost wakeup
+   - File: src/queue.py:48
+   - Summary: lost wakeup
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Outcome: ESCALATE
+   - Readjudicated: true
+
+2. missing length check
+   - File: src/queue.py:71
+   - Summary: missing length check
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: STILL-GATING
+   - Readjudicated: false
+
+### Verdict
+- Final-Verdict: Defer-one-round
+"""
+    # The escalation-eligible member (selected by summary), carried through ONE
+    # Defer round only.
+    v, why = defer_once_only(mixed, "src/queue.py", "lost wakeup")
+    assert v == "PASS", why
+    # And the whole file (both members deferred once) must also PASS.
+    v2, why2 = defer_once_only(mixed, "src/queue.py")
+    assert v2 == "PASS", why2
 
 
 # ---------------------------------------------------------------------------
