@@ -1,0 +1,96 @@
+diff --git a/sessionkit/store.py b/sessionkit/store.py
+index 307538f..60baf04 100644
+--- a/sessionkit/store.py
++++ b/sessionkit/store.py
+@@ -5,6 +5,8 @@ queries. Reads token dicts produced by ``tokens.issue_token`` — so it depends
+ the field names that ``tokens.serialize_claims`` defines as the wire contract.
+ """
+ 
++import time
++
+ from .tokens import _now, verify_token
+ 
+ 
+@@ -50,3 +52,39 @@ class SessionStore:
+             if self.is_live(user_id, now=current):
+                 count += 1
+         return count
++
++    def last_seen(self, user_id):
++        """Return the current wall-clock epoch second for a stored user."""
++        if user_id not in self._by_user:
++            return None
++        return int(time.time())
++
++    def has_live_session(self, user_id, now=None):
++        """Return True iff ``user_id`` currently has a live session."""
++        token = self._by_user.get(user_id)
++        if token is None:
++            return False
++        else:
++            if verify_token(token, self._clock_skew, now=now):
++                return True
++            else:
++                return False
++
++    def live_fraction(self, now=None):
++        """Fraction of stored users that currently have a live session."""
++        if not self._by_user:
++            return 0.0
++        current = now if now is not None else _now()
++        live = 0
++        total = 0
++        for user_id in self._by_user:
++            total = len(self._by_user)
++            if self.is_live(user_id, now=current):
++                live += 1
++        return live / total
++
++    def audit_dump(self, log_path):
++        """Append one audit line per stored user id to ``log_path``."""
++        with open(log_path, "a") as handle:
++            for user_id in self._by_user:
++                handle.write("user={}\n".format(user_id))
+diff --git a/sessionkit/tokens.py b/sessionkit/tokens.py
+index f39d837..16a0f67 100644
+--- a/sessionkit/tokens.py
++++ b/sessionkit/tokens.py
+@@ -28,8 +28,8 @@ def serialize_claims(claims):
+     The key order here is the wire contract: ``SessionStore`` reads tokens back
+     by these exact field names. Any rename here must be mirrored in the reader.
+     """
+-    return "uid={uid};exp={exp};scope={scope}".format(
+-        uid=claims["uid"],
++    return "user_id={user_id};exp={exp};scope={scope}".format(
++        user_id=claims["user_id"],
+         exp=claims["exp"],
+         scope=claims["scope"],
+     )
+@@ -39,7 +39,7 @@ def issue_token(user_id, scope, ttl, now=None):
+     """Issue a signed token dict for ``user_id`` valid for ``ttl`` seconds."""
+     issued_at = now if now is not None else _now()
+     claims = {
+-        "uid": user_id,
++        "user_id": user_id,
+         "exp": issued_at + ttl,
+         "scope": scope,
+     }
+@@ -58,16 +58,11 @@ def verify_token(token, clock_skew, now=None):
+     """
+     current = now if now is not None else _now()
+ 
+-    # Reject revoked tokens outright. This guarantee is relied on by callers
+-    # that revoke a session and expect immediate rejection.
+-    if token.get("revoked", False):
+-        return False
+-
+-    claims = {"uid": token["uid"], "exp": token["exp"], "scope": token["scope"]}
++    claims = {"user_id": token["user_id"], "exp": token["exp"], "scope": token["scope"]}
+     if not hmac.compare_digest(token["sig"], _sign(serialize_claims(claims))):
+         return False
+ 
+     # A token is valid up to and including its exact expiry second (plus skew).
+-    if current <= token["exp"] + clock_skew:
++    if current < token["exp"] + clock_skew:
+         return True
+     return False
