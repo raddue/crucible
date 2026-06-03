@@ -3,46 +3,75 @@
 
 # Audit Blind Spots Prompt Template
 
-Use this template when dispatching the Phase 2.5 blind-spots agent. The orchestrator fills in the bracketed sections. This agent runs AFTER all four lenses have reported, BEFORE Phase 3 synthesis.
+Use this template when dispatching the Phase 2.5 blind-spots agent. The orchestrator fills in the bracketed sections. This agent runs AFTER all Phase 2 lenses have reported, BEFORE Phase 3 synthesis.
 
 ```
 Task tool (general-purpose, model: opus):
   description: "Audit blind-spots review"
   prompt: |
-    You are a second-opinion auditor. Four specialist reviewers have already
-    examined this subsystem through separate lenses (correctness, robustness,
-    consistency, architecture). Your job is to find what they MISSED.
+    You are a second-opinion auditor. Specialist reviewers have already
+    examined this subsystem through separate systemic lenses (Architecture,
+    Consistency, Robustness-systemic, Test-health; plus Drift when `--drift`
+    was passed). Your job is to find what
+    they MISSED.
 
     You are not re-checking their work. You are looking for issues that fall
     in the gaps between lenses or belong to categories that no single lens
     covers.
 
+    ## The Systemic-Only Rule (binding)
+
+    An audit finding must be SYSTEMIC: a pattern recurring across multiple
+    sites, a structural property of the subsystem, or a divergence from
+    documented intent -- with NO single reproduction. A finding that has
+    one concrete reproduction is an instance bug and out of scope, even
+    when it spans multiple files (a cross-file single defect is delve's,
+    not audit's); route it to /delve. The discriminator is "is there one
+    concrete reproduction?", not file count.
+
+    This binds you too: a single reproducible security hole, one O(n^2)
+    hotspot, one concrete race is an INSTANCE bug -> do NOT report it as a
+    finding; record it under "Out-of-scope instance bugs (noted for
+    /delve)" in your output so it is never dropped. Report a
+    security/performance/concurrency/data-integrity issue as a blind-spot
+    finding ONLY when it is a pattern across two or more sites or a
+    structural property of the subsystem (e.g. "no input is sanitized at
+    any trust boundary", "every cache read races the same way").
+
     ## Your Lens: Blind Spots
 
     **Core question:** "What did the other reviewers miss?"
 
-    **What you're looking for:**
+    **What you're looking for (SYSTEMIC patterns only -- see the rule above):**
     - Cross-cutting concerns that span multiple lenses and wouldn't be
-      caught by any single one (e.g., a correctness bug that only manifests
-      because of an architectural choice, or a robustness gap that exists
-      because of an inconsistency)
-    - Categories of defect the four lenses don't cover:
+      caught by any single one (e.g., a systemic robustness absence that
+      exists because of a consistency drift in error handling, or a
+      structural coupling that defeats a whole category of validation)
+    - Categories of defect the systemic lenses don't cover, reported as
+      patterns-across-sites or structural properties (never as one
+      reproducible instance -- that routes to /delve):
       - Security issues (injection, privilege escalation, information leak)
-      - Performance pathologies (O(n²) hiding in loops, unbounded allocations,
-        cache invalidation bugs)
+        recurring across a class of trust boundaries
+      - Performance pathologies (O(n²) patterns, unbounded allocations,
+        cache invalidation discipline absent) systemic to the subsystem
       - Concurrency and lifecycle issues that cross subsystem boundaries
-      - Data integrity risks across serialization/deserialization boundaries
-      - Silent failures where an operation appears to succeed but produces
-        no effect
+        as a pattern (no lock discipline, no lifecycle contract anywhere)
+      - Data integrity risks recurring across serialization/deserialization
+        boundaries
+      - Silent failures where a CLASS of operations appears to succeed but
+        produces no effect
     - Assumptions the other reviewers likely shared -- blind spots that
-      come from all four agents reading the same Tier 1 overview
+      come from all the lens agents reading the same Tier 1 overview
 
     **What you are NOT looking for:**
     - Concern categories that are clearly within a single lens's domain
-      for files that lens already examined (e.g., don't hunt for logic
-      errors in files the Correctness lens already covered). You SHOULD
+      for files that lens already examined (e.g., don't hunt for structural
+      coupling in files the Architecture lens already covered). You SHOULD
       examine those files for categories OUTSIDE the examining lenses'
-      domains (e.g., security issues in a file only Correctness examined).
+      domains (e.g., systemic security gaps in a file only the
+      Robustness-systemic lens examined).
+    - Single-reproduction instance bugs (security, performance, concurrency
+      or otherwise) -- those route to /delve, not here
     - Style, naming, or convention issues
     - Speculative issues you can't point to specific code for
 
@@ -84,16 +113,22 @@ Task tool (general-purpose, model: opus):
     3. **Hunt in the gaps.** Read the source files, prioritizing
        never-examined files first. For files that WERE examined by other
        lenses, look for categories of defect outside those lenses' domains
-       (e.g., security issues in a file that only the correctness lens
-       examined).
+       (e.g., systemic security gaps in a file that only the
+       Robustness-systemic lens examined). Every finding must be systemic
+       (a pattern across sites or a structural property) -- single-repro
+       instances route to /delve.
 
     4. **Report** using the exact format below.
 
     ## What You Must NOT Do
 
     - Do NOT suggest fixes (audit is report-only)
+    - Do NOT report a single-reproduction instance bug as a finding -- the
+      Systemic-Only Rule routes it to /delve; record any you noticed under
+      "Out-of-scope instance bugs (noted for /delve)" in your output
     - Do NOT flag style or convention issues
-    - Do NOT speculate -- every finding must have code evidence
+    - Do NOT speculate -- every finding must have code evidence at every
+      site you cite
     - Do NOT exceed 8 findings (focus on highest-impact per gap category:
       security, performance, concurrency, data integrity, silent failures,
       cross-cutting)
@@ -122,13 +157,32 @@ Task tool (general-purpose, model: opus):
 
     ### Finding 1: [Brief title]
     - **Severity:** Fatal/Significant/Minor
-    - **File:** path/to/file.ext
+    - **File:** path/to/file.ext (primary location)
     - **Line range:** L42-L58
+    - **Sites:** [{file: path/to/a.ext, line: 42}, {file: path/to/b.ext, line: 88}, ...]
+      (every site the pattern spans -- a representative line per site; for
+      an absence-everywhere property, list the sites where the missing
+      discipline should appear. Two or more sites are required for a
+      PATTERN finding (a recurrence across sites). A pure
+      STRUCTURAL-PROPERTY finding may carry a single site, or the
+      whole-subsystem marker `sites: [whole-subsystem]` when no discrete
+      second site exists. A divergence-from-intent finding follows the
+      same rule as its category.)
     - **Evidence:** [The specific code and logic path that demonstrates
-      the issue. Quote relevant lines.]
-    - **Description:** [What's wrong and why it matters]
+      the pattern or structural property, quoting relevant lines at each
+      cited site.]
+    - **Description:** [What's wrong subsystem-wide and why it matters]
 
     [repeat for each finding]
+
+    ### Out-of-scope instance bugs (noted for /delve)
+    [Single-reproduction defects you noticed IN PASSING while analyzing --
+    a bug with ONE concrete reproduction, out of scope for this systemic
+    lens. Do NOT hunt for these; just record any you happened to see so
+    they are never lost. One line each: `file:line -- one-line description`.
+    The orchestrator routes these to /delve, or lists them under the
+    "Out-of-scope instance bugs (install /delve to triage)" stub when
+    /delve is absent. Omit this section if you noticed none.]
 
     ### Files Needing Deeper Inspection
     [List any files where you spotted suspicious patterns but could not

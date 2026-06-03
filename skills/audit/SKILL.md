@@ -13,6 +13,8 @@ Adversarial review of code subsystems or non-code artifacts. Dispatches parallel
 
 **Purpose:** Review existing subsystems in a repo and report findings. Distinct from quality-gate (which fixes artifacts in a loop) -- audit is find-and-report only.
 
+**Code path is SYSTEMIC-ONLY.** On the `code` artifact type, audit reports **systemic health** — recurring patterns, structural properties, and absences across the subsystem, with **no single reproduction**. A defect with one concrete reproduction (even across multiple files) is an **instance bug** and belongs to `/delve`, not audit; audit routes it there (via the opt-in `--bugs` sub-path) or surfaces it under an explicit out-of-scope stub when `/delve` is absent. Maintainability/complexity/hotspot depth delegates to `/prospector`. See **The Systemic-Only Rule** below — it governs every code-path lens. (The non-code paths — design / plan / concept — are unchanged.)
+
 **Model:** Opus (orchestrator and analysis agents). Sonnet (scoping exploration). If the orchestrator session is not running Opus, warn: "Audit requires Opus-level reasoning for synthesis. Results may be degraded."
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
@@ -24,15 +26,19 @@ Audit supports 4 artifact types, each with tailored analytical lenses:
 
 | Artifact Type | Lens 1 | Lens 2 | Lens 3 | Lens 4 |
 |---|---|---|---|---|
-| `code` (default) | Correctness | Robustness | Consistency | Architecture |
+| `code` (default) | Architecture | Consistency | Robustness (systemic) | Test-health |
 | `design` | Technical Soundness | Integration Impact | Edge Cases | Scope Clarity |
 | `plan` | Feasibility | Risk & Dependencies | Completeness | Assumptions |
 | `concept` | Problem-Solution Fit | Feasibility & Cost | Stakeholder Alignment | Blind Assumptions |
 
+The `code` lenses are **systemic only** (see The Systemic-Only Rule). Maintainability/complexity is **not** a lens — audit delegates it to `/prospector`. Instance bugs are **not** a lens — audit delegates them to `/delve` via the opt-in `--bugs` sub-path.
+
 ### Invocation
 
 ```
-/audit save/load                                          # code (default)
+/audit save/load                                          # code (default) — systemic health
+/audit save/load --bugs                                   # + instance-bug sweep via /delve
+/audit save/load --drift intent=docs/plans/save-design.md # + divergence-from-intent section
 /audit docs/plans/2026-04-01-auth-design.md               # auto-detects design
 /audit docs/plans/2026-04-01-plan.md artifact_type: plan   # explicit type
 /audit "We should build a CLI tool that..."               # auto-detects concept
@@ -41,6 +47,8 @@ Audit supports 4 artifact types, each with tailored analytical lenses:
 **Parameters:**
 - `target` (required) — subsystem name, file path, or freeform text
 - `artifact_type` (optional) — `code | design | plan | concept`. Auto-detected if omitted.
+- `--drift intent=<path>` (optional, **code path only**) — opt-in mode. Adds a Drift section comparing the subsystem to the explicit intent artifact at `<path>` (design / spec / ADR / contract) and reporting divergence only. Keys on the supplied artifact, **not** git history; never auto-discovers one. `--drift` without `intent=` is a **usage error**. Without `--drift` the Drift section is neither produced nor advertised. See **`--drift` Mode** below.
+- `--bugs` (optional, **code path only**) — also run `/delve` over the subsystem and append instance bugs in a SEPARATE "Instance Bugs (via delve)" section using delve's own schema. Enables the suppress-and-cite cross-check. See **`--bugs` Sub-Path** below.
 
 ### Auto-Detection
 
@@ -54,6 +62,66 @@ Priority chain when `artifact_type` is not provided:
 6. Ambiguous → ask user: "I detected a markdown document but can't determine its type. Is this a design doc, plan, or concept?"
 
 **Limitation:** Frontmatter-based detection relies on Crucible's `source` field convention. Repos without this convention will hit the "ambiguous → ask user" fallback more often. The explicit `artifact_type` parameter is the reliable path for any repo.
+
+## The Systemic-Only Rule (code path)
+
+Every `code`-path lens — Architecture, Consistency, Robustness (systemic), Test-health, the Phase 2.5 Blind-spots agent, and the opt-in `--drift` prompt — is governed by this rule. It is written verbatim into each of those prompts (invariant I3) and is repeated here as the orchestrator-side guardrail:
+
+> An audit finding must be SYSTEMIC: a pattern recurring across multiple sites, a structural property of the subsystem, or a divergence from documented intent — with **NO single reproduction**. A finding that has one concrete reproduction is an **instance bug** and out of scope, even when it spans multiple files (a cross-file single defect is delve's, not audit's); route it to `/delve`. The discriminator is **"is there one concrete reproduction?"**, not file count.
+
+**What this removes from audit's code path:** the old instance `Correctness` and `Robustness` lenses are gone. Single-site correctness/robustness bugs are `/delve`'s. audit's kept `Robustness (systemic)` lens covers only subsystem-wide robustness **patterns / absences** (e.g. "no locking discipline across any mutation path", "no boundary validates input anywhere") — never a single-site robustness bug.
+
+**Delegation contracts:**
+- **Maintainability / complexity / hotspots → `/prospector`** (it owns git-churn metrics + redesign). Not an audit lens.
+- **Instance bugs → `/delve`** (only when the user passes `--bugs`; see `--bugs` Sub-Path). When `/delve` is not installed, see the `/delve`-absent fallback.
+- **Test authoring → out of scope** for audit (audit never authors or fixes tests); test **staleness → `test-coverage`**. The Test-health lens only diagnoses + prioritizes systemic coverage gaps; it is never diff-scoped.
+
+### Code Finding Schema — mandatory `sites`
+
+Every systemic code finding carries, in addition to the common fields, a mandatory enumeration of the sites the pattern spans:
+
+```
+sites: [{file, line}, {file, line}, ...]
+```
+
+`sites` is a first-class field of audit's core code-output schema. A representative line per site is acceptable (e.g. a function header, or — for a "validates nothing at any boundary" property — a site with no single firing line). **The `sites` requirement is conditioned on the finding's category (per the three-way Systemic-Only Rule):** a PATTERN finding (a recurrence across sites) enumerates **two or more** sites; a pure STRUCTURAL-PROPERTY finding (e.g. a god object, an in-memory-only design, a missing layer) may carry a **single** representative site or the `sites: [whole-subsystem]` marker when no discrete second site exists; a divergence-from-intent finding follows the rule for its own category. The everywhere-absence case already described stays as-is (an absence-property site with no single firing line). The `/delve`-absent fallback and the `--bugs` suppress-and-cite coverage check both rely on `sites`, so it is never omitted on a code finding; a `whole-subsystem` marker is treated exactly like an absence-property site — **never covered** by any single delve instance (so a finding carrying it never reaches FULL coverage and always falls to PARTIAL → report-whole). (Non-code findings use `section`, not `sites` — see Non-Code Finding Format.)
+
+## `--drift` Mode (code path, opt-in)
+
+Drift compares the subsystem against an **explicit intent artifact** and reports divergence from it. It exists alongside `/prospector` without colliding: **prospector keys on git history** ("how did it get this way", churn, vestigial structure); **Drift keys on a design artifact** ("does it still match what we said").
+
+- Runs **only** under `audit --drift intent=<path>`. The `<path>` is an explicit design / spec / ADR / contract artifact.
+- **`--drift` without `intent=` is a usage error** — report it and stop; never auto-discover an intent artifact (auto-discovery would reopen the prospector collision).
+- Reports **divergence only**. It must never silently re-derive friction from scratch — that is prospector's job.
+- Without `--drift`, the Drift section is **neither produced nor advertised** (no dead-by-default section).
+- **Drift carries the Systemic-Only Rule (I8):** a single-reproduction intent-divergence (one site bypassing a documented contract, with a concrete reproduction) is a delve instance — route it to `/delve`, do not report it as a Drift finding. A divergence-from-intent with no single repro is an audit Drift finding: a PATTERN divergence recurs across **two or more sites**, while a whole-subsystem STRUCTURAL divergence (e.g. a mandated layer/store the subsystem lacks entirely) may carry a **single** representative site or the `sites: [whole-subsystem]` marker — mirroring the Code Finding Schema's category-conditioned `sites` rule. Drift findings carry `sites`.
+
+Operationally: when `--drift intent=<path>` is passed, the orchestrator reads the intent artifact, dispatches the Drift lens via `audit-drift-prompt.md` (which embeds the Systemic-Only Rule), and folds its findings into Phase 3 synthesis under a "Drift / Intent" theme.
+
+## `--bugs` Sub-Path (code path, opt-in)
+
+`--bugs` is the **sole data channel** by which audit cross-checks its systemic findings against concrete instance bugs. When passed, audit itself invokes the `/delve` **skill** over the subsystem and has delve's emitted instance records in hand.
+
+**Invocation contract (pinned by construction):** audit invokes `/delve` with **`effort=high`** and **`scope` = the full audited subsystem** (the same subsystem audit reports on). audit MUST drive delve at `high`, not delve's unstated default (which could be `medium`). The `/audit` API has no effort param of its own; `--bugs` always pins high + full-subsystem, so the suppress-and-cite scope/effort precondition holds by construction.
+
+> **Dispatch marker (forward reference).** audit reaches `delve-engine` only **transitively**, through the `/delve` skill — it does **not** dispatch the engine directly and so does **not** carry the engine marker `dispatch: delve-engine` (out of scope for the I2 allowlist grep, whose set is exactly `{delve, temper}`). audit carries a separate `dispatch: delve` (skill) marker; that canonical column-0 marker line is added to this skill's body when the harness-adapter dispatch wiring lands (**#334**) — it is **not** present yet. This sentence references the marker phrase inline only.
+
+**Output — a SEPARATE section.** delve's findings are appended under a clearly-headed **"Instance Bugs (via delve)"** section using delve's own eight-field schema (`{file, line, summary, failure_scenario, severity, verdict, scope, effort}`) — **never inline-merged** into audit's systemic findings.
+
+### Suppress-and-cite gate
+
+The "cite delve, don't re-report" rule fires **only** on the `--bugs` channel (audit has no other substrate to read delve records from; the same-session / out-of-band path is dropped — there is no specified store where delve persists records for audit to discover).
+
+- **Suppression is per-finding, all-or-nothing at FULL coverage.** audit suppresses (cites-not-reports) a WHOLE systemic finding only when EVERY one of its enumerated `sites` is covered by a qualifying delve instance, citing those instances instead of re-reporting them.
+- **Coverage match is NOT exact `{file,line}` equality.** audit's systemic lens picks a representative line per site while delve reports the line where the defect FIRES, so the same defect routinely carries a different line integer in the two records. A delve instance **covers** an audit site when they share the same `file` **AND** fall within the same enclosing symbol/function — or, when no enclosing symbol resolves, within a `±K`-line window. **`K = 10` lines, a single RUN-LEVEL config value** — fixed per run, not a per-call or per-implementer choice, so coverage verdicts stay deterministic within a run. **Absence-property sites are never covered.** A site with no resolvable line / no enclosing symbol (an everywhere-absence property, e.g. "no boundary validates input anywhere") is treated as **never covered** by any delve instance — a single-firing-line instance bug cannot cover an everywhere-absence — so a finding carrying such a site can never reach FULL coverage and always falls to PARTIAL → report-whole.
+- **PARTIAL coverage → report the WHOLE finding.** When some-but-not-all sites are covered, audit reports the WHOLE systemic finding with a **"not cross-checked / partially covered"** note and cites delve for the covered sites within that finding. It NEVER emits a residual finding over only the uncovered sites.
+- **Without `--bugs`:** audit has no instance set to read — it reports systemic patterns normally and notes **"instances not cross-checked (run audit --bugs to cross-check)."**
+
+**Scope/effort guard (forward-looking, defense-in-depth — NOT done-gating).** Suppression requires delve's recorded `scope` to cover the audited sites AND delve's recorded `effort` tier to be **at or above high** (anything below high is always insufficient). On the only current channel (`--bugs`), this precondition is satisfied **vacuously by construction** (it pins high + full-subsystem), so the "delve scope/effort insufficient → don't suppress" branch is **not reachable today** — it is a forward-looking guard for any future additional channel that might supply delve records at lower effort or narrower scope, kept so an incomplete instance set can never mask a real systemic finding. It is distinct from the PARTIAL-coverage branch above, which IS reachable on the `--bugs` path.
+
+### `/delve`-absent fallback
+
+The Systemic-Only Rule suppresses re-reporting a single-reproduction finding **only when `/delve` is installed** to receive the routing. When `/delve` is NOT installed, audit MUST still surface single-reproduction findings — it does not silently drop them. Such findings are emitted under an explicit **"Out-of-scope instance bugs (install /delve to triage)"** stub section, assembled (Phase 3) from the per-lens **"Out-of-scope instance bugs (noted for /delve)"** sections each code lens records when it notices a single-reproduction defect in passing. Absent delve, a finding would otherwise be neither reported (Systemic-Only Rule) nor routed (no `/delve`) — a silent drop of a real instance bug, the exact recall hole this redesign closes. The stub keeps the finding visible until delve is installed; audit never both suppresses a finding AND lacks a routing target. (audit core ships before delve per the milestone dependency graph, so the fallback is load-bearing, not hypothetical.)
 
 ### Non-Code Lens Configurations
 
@@ -91,10 +159,12 @@ Non-code findings use the same severity levels (Fatal/Significant/Minor) but rep
 | Field | Code | Non-Code |
 |---|---|---|
 | Location | `file` + `line_range` | `section` (nearest markdown heading, e.g., `## Key Decisions > DEC-3`) |
-| Lens-specific | `scenario`, `failure_scenario`, `convention_violated`, `impact` | `concern` |
+| Lens-specific | `failure_pattern`, `impact`, `convention_violated`, `coverage_gap`, `intent_reference` | `concern` |
 | Evidence | Code quotes | Document text quotes |
 
 For artifacts without markdown headings, `section` uses a brief quoted phrase from the opening of the relevant paragraph.
+
+The non-code field names `convention_violated` / `impact` intentionally overlap the code lenses' fields but are path-disjoint — the non-code and code paths never run together for a single artifact, so there is no ambiguity.
 
 ### Non-Code Blind-Spots Categories
 
@@ -117,7 +187,11 @@ Per-task quality gates (red-team, inquisitor) review artifacts produced during d
 |-------|---------|------|--------|-------|
 | red-team | A single artifact just produced | During creation | Yes (loop) | One doc/plan/impl |
 | inquisitor | A complete implementation diff | During build phase 4 | Yes (automated fix cycle) | Changes only (diffs) |
-| **audit** | Existing code subsystems or non-code artifacts | On demand | No (reports only) | Existing codebase or documents |
+| delve | **Instance bugs** — one concrete defect with a reproduction (even across files) | On demand | `--fix` (working tree) | A diff or a path |
+| temper | The merge **gate** verdict | On a PR / diff | Yes (fix-verification loop) | A diff |
+| **audit** | **Systemic** code health (patterns / structural properties / absences, no single repro) + non-code artifacts | On demand | No (reports only) | Existing subsystem or document |
+
+audit and delve split on **instance vs systemic**: a finding with one concrete reproduction is delve's (route via `--bugs`); a no-single-repro pattern across the subsystem is audit's. The discriminator is "is there one concrete reproduction?", not file count.
 
 ## Communication Requirement (Non-Negotiable)
 
@@ -132,7 +206,7 @@ Every status update must include:
 **After compaction:** Re-read the scratch directory and current state before continuing. See the Compaction Recovery section (orchestrator-level recovery) below.
 
 **Examples of GOOD narration:**
-> "Phase 2: Correctness and Robustness lenses complete (4 findings, 2 findings). Architecture still in flight. Consistency Agent A returned -- flagged 6 files, dispatching Agent B."
+> "Phase 2: Architecture and Robustness (systemic) lenses complete (2 findings, 1 finding). Test-health still in flight. Consistency Agent A returned -- flagged 6 files, dispatching Agent B."
 
 > "Phase 2 complete. All 4 lenses reported: 14 total findings. Moving to Phase 3 synthesis."
 
@@ -172,11 +246,12 @@ Append after the shared header:
 
 ```
 ## Lenses (code audit)
-- Correctness: DONE (4 findings)
-- Robustness: DONE (2 findings)
-- Architecture: IN PROGRESS
-- Consistency: PENDING
+- Architecture: DONE (2 findings)
+- Consistency: IN PROGRESS
+- Robustness (systemic): DONE (1 finding)
+- Test-health: PENDING
 - Blind-spots: PENDING
+- Drift / Intent: PENDING (only under --drift)
 
 ## Lenses (design audit — example)
 - Technical Soundness: DONE (3 findings)
@@ -201,7 +276,7 @@ When health is YELLOW or RED, include `**Suggested Action:**` with a concrete, c
 ### Inline CLI Format
 
 Output concise inline status alongside the status file write:
-- **Minor transitions** (dispatch, completion): one-liner, e.g. `Phase 2 [3/5 lenses] Robustness complete (2 findings) | GREEN | 22m`
+- **Minor transitions** (dispatch, completion): one-liner, e.g. `Phase 2 [3/4 lenses] Robustness complete (2 findings) | GREEN | 22m` (denominator is the dispatched Phase-2 lens count: 4 by default, 5 under `--drift`)
 - **Phase changes and escalations**: expanded block with `---` separators
 - **Health transitions**: always expanded with old -> new health
 
@@ -278,7 +353,7 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 **Phase-specific recovery (code):**
 - **Phase 1:** If `manifest.md` exists but `gate-approved.md` does not, re-present the manifest to the user for confirmation.
 - **Phase 2:** Check which lenses have findings files. Dispatch any remaining lenses.
-- **Phase 2.5:** If all four lens findings files exist but `blindspots-findings.md` does not, rebuild the coverage map from partition records and findings files (see Coverage Map Construction), then dispatch the blind-spots agent. If `blindspots-findings.md` exists but `blindspots-followup-findings.md` does not, re-read `blindspots-findings.md` for a "Files Needing Deeper Inspection" section. If present and the audit is under the ~20 agent cap, dispatch the follow-up (writing to `blindspots-followup-findings.md`); otherwise mark for the standard "Areas not fully covered" disclosure in the Phase 3 report. If both `blindspots-findings.md` and `blindspots-followup-findings.md` exist, or if `blindspots-findings.md` exists and has no "Files Needing Deeper Inspection" section, Phase 2.5 is complete.
+- **Phase 2.5:** If all four systemic lens findings files (plus `drift-findings.md` when `--drift` was passed) exist but `blindspots-findings.md` does not, rebuild the coverage map from partition records and findings files (see Coverage Map Construction), then dispatch the blind-spots agent. If `blindspots-findings.md` exists but `blindspots-followup-findings.md` does not, re-read `blindspots-findings.md` for a "Files Needing Deeper Inspection" section. If present and the audit is under the ~20 agent cap, dispatch the follow-up (writing to `blindspots-followup-findings.md`); otherwise mark for the standard "Areas not fully covered" disclosure in the Phase 3 report. If both `blindspots-findings.md` and `blindspots-followup-findings.md` exist, or if `blindspots-findings.md` exists and has no "Files Needing Deeper Inspection" section, Phase 2.5 is complete.
 - **Phase 3:** If compaction occurs during synthesis, re-read all findings files (including blindspots) and re-run synthesis. This is safe — synthesis is idempotent.
 - **Phase 4:** If `report.md` exists, re-read it and continue with cross-referencing/filing.
 
@@ -412,12 +487,12 @@ If the subsystem is too large to summarize within the 800-line Tier 1 cap:
 - **Soft cap: 4 chunks maximum.** If more than 4 chunks would be needed, advise the user to narrow the subsystem scope instead.
 - Present the chunking plan at the Phase 1 user gate. Show the full agent-budget breakdown so the user approves the **worst-case** total, not a partial slice:
   - **Scoping:** 1 agent (mandatory — recon or fallback scoping agent, run in Phase 1)
-  - **Per chunk:** 6 agents (mandatory — Correctness, Robustness, Consistency-A, Consistency-B, Architecture, Blind-spots)
+  - **Per chunk:** 6 agents (mandatory — Architecture, Consistency-A, Consistency-B, Robustness-systemic, Test-health, Blind-spots), **plus 1 Drift agent per chunk when `--drift` is passed** (the Drift lens is dispatched per chunk alongside the others)
   - **Cross-chunk blind-spots:** 1 agent (mandatory if N>1, else 0)
   - **Optional blind-spots follow-ups:** up to N agents (one per chunk, dispatched only when a chunk's blind-spots agent lists "Files Needing Deeper Inspection" AND budget allows)
-  - **Formula:** `1 (scoping) + N × 6 (per-chunk) + (1 if N>1 else 0) (cross-chunk) + up to N (optional follow-ups)`
-  - **Worst-case for N=4:** `1 + 24 + 1 + 4 = 30 agents` — over the 20-agent hard cap; re-gate per the agent-budget rule (narrow scope, reduce chunks, or raise the cap).
-  - Message: "This subsystem is large. I'll audit it in N chunks. Worst-case agent budget: [scoping 1] + [N×6 per-chunk] + [cross-chunk 1 if N>1] + [up to N optional follow-ups] = [worst-case total]. Mandatory floor (no follow-ups): [1 + N×6 + cross-chunk]. Chunk descriptions: [list]. Approve worst-case total?"
+  - **Formula:** `1 (scoping) + N × 6 (per-chunk) + (N if --drift else 0) (per-chunk Drift) + (1 if N>1 else 0) (cross-chunk) + up to N (optional follow-ups)`
+  - **Worst-case for N=4 (no `--drift`):** `1 + 24 + 0 + 1 + 4 = 30 agents` — over the 20-agent hard cap; re-gate per the agent-budget rule (narrow scope, reduce chunks, or raise the cap). With `--drift` the per-chunk Drift term adds N (e.g. `+4` at N=4).
+  - Message: "This subsystem is large. I'll audit it in N chunks. Worst-case agent budget: [scoping 1] + [N×6 per-chunk] + [N per-chunk Drift if --drift] + [cross-chunk 1 if N>1] + [up to N optional follow-ups] = [worst-case total]. Mandatory floor (no follow-ups): [1 + N×6 + (N if --drift) + cross-chunk]. Chunk descriptions: [list]. Approve worst-case total?"
 - **20-agent budget is a HARD CAP, tracked across all phases.** The orchestrator maintains a running count of dispatched agents. Before any dispatch that would cross the cap (chunked analysis lenses, blind-spots, follow-ups, cross-chunk), if the projected total exceeds the user-approved number, re-gate: present the projected total and the remaining work, and ask the user whether to (a) raise the cap, (b) skip optional dispatches (follow-ups first, then cross-chunk blind-spots), or (c) abort.
 - Each chunk gets its own set of analysis agents.
 - Synthesis (Phase 3) merges findings across all chunks.
@@ -425,37 +500,11 @@ If the subsystem is too large to summarize within the 800-line Tier 1 cap:
 
 ### The 4 Lenses
 
-Each lens is dispatched as a parallel agent using its prompt template.
+Each lens is dispatched as a parallel agent using its prompt template. All four code lenses are **systemic only** and carry the Systemic-Only Rule (I3); a finding with one concrete reproduction is `/delve`'s, not a lens finding.
 
-All lenses output structured findings with these common fields: `{severity, file, line_range, evidence, description}`. Individual lenses add lens-specific fields (e.g., Correctness adds `scenario`, Robustness adds `failure_scenario`, Architecture adds `impact`, Consistency adds `convention_violated`). The orchestrator's Phase 3 deduplication uses the common fields for matching; lens-specific fields are preserved in the final report.
+All lenses output structured findings with these common fields: `{severity, file, line_range, evidence, description}`, plus the mandatory **`sites: [{file,line}, ...]`** enumeration on every code finding (see Code Finding Schema). Individual lenses add lens-specific fields (e.g., Robustness-systemic adds `failure_pattern`, Architecture adds `impact`, Consistency adds `convention_violated`, Test-health adds `coverage_gap` and `priority_rationale`, and — under `--drift` — Drift adds `intent_reference`). These canonical snake_case identifiers correspond to the bold human labels the prompt output templates emit: `failure_pattern` ↔ "Failure pattern:", `impact` ↔ "Impact:", `convention_violated` ↔ "Convention violated:", `coverage_gap` ↔ "Coverage gap:", `priority_rationale` ↔ "Priority rationale:", and `intent_reference` ↔ "Intent reference:". The orchestrator maps between identifier and label when preserving these fields. The orchestrator's Phase 3 deduplication uses the common fields for matching; lens-specific fields are preserved in the final report.
 
-#### Correctness
-
-**Prompt:** `audit-correctness-prompt.md`
-**Question:** "What's actually broken or will break?"
-**Looks for:** Bugs, race conditions, edge cases, logic errors, off-by-one, null dereferences, unreachable code paths.
-**Gets:** Files with core logic, state management, data flow.
-**Dispatch:** Single agent.
-
-#### Robustness
-
-**Prompt:** `audit-robustness-prompt.md`
-**Question:** "What happens when things go wrong?"
-**Looks for:** Missing error handling at boundaries, unhandled failure modes, missing validation, silent data corruption, resource leaks.
-**Gets:** Files at system boundaries, I/O, serialization.
-**Dispatch:** Single agent.
-
-#### Consistency
-
-**Prompt:** `audit-consistency-prompt.md`
-**Question:** "Does this code follow its own patterns?"
-**Looks for:** Pattern violations, naming drift, convention breaks, inconsistent error handling styles, mixed paradigms.
-**Dispatch:** Two sequential agents (orchestrator dispatches Agent A, reads results, then dispatches a separate Agent B).
-
-- **Agent A:** Receives the Tier 1 overview (which includes the file manifest with role descriptions) + conventions.md from cartographer if available. The overview IS the summary -- do not add additional file-level summaries. Returns: list of files flagged for suspected inconsistencies with rationale. Subject to the 1500-line hard cap.
-- **Agent B:** Receives full source for Agent A's flagged files only. Subject to the same 1500-line hard cap. If Agent A flags more files than fit, the orchestrator applies the same overflow-summary mechanism (summarize overflow files, include full source for highest-priority flags, dispatch follow-up if needed). Returns: confirmed findings with evidence.
-- **Zero-flag case:** If Agent A flags zero files, the orchestrator skips Agent B dispatch and writes empty marker files: `consistency-b-findings.md` and `consistency-b-partition.md` each containing only `(no files flagged for deep review)`. Downstream consumers — compaction recovery, Phase 3 reading list, Coverage Map construction — treat these markers as "Phase 2 complete for Consistency" and proceed without error.
-- **Timing:** Agent A dispatches in parallel with the other three lenses. Agent B dispatches after Agent A completes. The orchestrator proceeds to Phase 3 once all lenses (including Consistency Agent B) have reported. The other three lenses may finish earlier -- this is expected and acceptable.
+**Maintainability / complexity is not a lens** — when hotspot / complexity / churn depth is wanted, audit calls `/prospector` (delegation, not duplication). **Instance correctness / single-site robustness bugs are not lenses** — they route to `/delve` via `--bugs`.
 
 #### Architecture
 
@@ -463,6 +512,36 @@ All lenses output structured findings with these common fields: `{severity, file
 **Question:** "Is this well-structured?"
 **Looks for:** Coupling issues, abstraction leaks, missing contracts, dependency direction violations, god objects, circular dependencies.
 **Gets:** Tier 1 overview + public API surfaces.
+**Dispatch:** Single agent.
+
+#### Consistency
+
+**Prompt:** `audit-consistency-prompt.md`
+**Question:** "Does this code follow its own patterns?"
+**Looks for:** Pattern violations, naming drift, convention breaks, inconsistent error handling styles, mixed paradigms — across the subsystem (systemic drift, not a single deviating line that is itself a bug).
+**Dispatch:** Two sequential agents (orchestrator dispatches Agent A, reads results, then dispatches a separate Agent B).
+
+- **Agent A:** Receives the Tier 1 overview (which includes the file manifest with role descriptions) + conventions.md from cartographer if available. The overview IS the summary -- do not add additional file-level summaries. Returns: list of files flagged for suspected inconsistencies with rationale. Subject to the 1500-line hard cap.
+- **Agent B:** Receives full source for Agent A's flagged files only. Subject to the same 1500-line hard cap. If Agent A flags more files than fit, the orchestrator applies the same overflow-summary mechanism (summarize overflow files, include full source for highest-priority flags, dispatch follow-up if needed). Returns: confirmed findings with evidence.
+- **Zero-flag case:** If Agent A flags zero files, the orchestrator skips Agent B dispatch and writes empty marker files: `consistency-b-findings.md` and `consistency-b-partition.md` each containing only `(no files flagged for deep review)`. Downstream consumers — compaction recovery, Phase 3 reading list, Coverage Map construction — treat these markers as "Phase 2 complete for Consistency" and proceed without error.
+- **Timing:** Agent A dispatches in parallel with the other three lenses. Agent B dispatches after Agent A completes. The orchestrator proceeds to Phase 3 once all lenses (including Consistency Agent B) have reported. The other three lenses may finish earlier -- this is expected and acceptable.
+
+#### Robustness (systemic)
+
+**Prompt:** `audit-robustness-prompt.md`
+**Question:** "Where is the subsystem's robustness discipline systemically absent?"
+**Looks for:** Subsystem-wide robustness **patterns / absences** only — e.g. "no locking discipline across any mutation path", "no boundary validates input anywhere", "errors swallowed at every I/O site". The finding is the absence-across-sites, enumerated in `sites`.
+**Does NOT look for:** a single-site missing error handler, one unclosed resource, one unvalidated input — those are single-reproduction instance bugs and route to `/delve`.
+**Gets:** Files at system boundaries, I/O, serialization, mutation paths.
+**Dispatch:** Single agent.
+
+#### Test-health
+
+**Prompt:** `audit-testhealth-prompt.md`
+**Question:** "Where is the subsystem systemically under-tested?"
+**Looks for:** Codebase-wide systemic coverage gaps — categories of behavior, modules, or seams with no tests across the subsystem; structural testability problems. **Diagnose + prioritize only.**
+**Does NOT do:** author or fix tests (out of scope for audit); diff-scoped coverage checks; test **staleness** (route staleness to `test-coverage`).
+**Gets:** Tier 1 overview + test file manifest + source-to-test mapping.
 **Dispatch:** Single agent.
 
 ## Phase 2.5: Blind Spots
@@ -501,8 +580,8 @@ The blind-spots agent does NOT receive raw findings from the other lenses. Inste
 ## Coverage Map
 
 ### Files Examined by Lens (included in Tier 2 source)
-- path/to/file.ext: Correctness (2 findings), Architecture (1 finding)
-- path/to/other.ext: Robustness (1 finding), Correctness (0 findings)
+- path/to/file.ext: Architecture (1 finding), Robustness-systemic (1 finding)
+- path/to/other.ext: Consistency (1 finding), Test-health (0 findings)
 - path/to/examined-clean.ext: Architecture (0 findings)
 
 ### Files Never Examined (in manifest but not in any Tier 2 source)
@@ -510,14 +589,14 @@ The blind-spots agent does NOT receive raw findings from the other lenses. Inste
 - path/to/another-unseen.ext
 ```
 
-**Target: 30-50 lines.** No finding summaries, no concern category descriptions (the agent already knows the four lenses' domains from its prompt). Just the file-to-lens mapping and the examined/never-examined distinction. This maximizes source code budget.
+**Target: 30-50 lines.** No finding summaries, no concern category descriptions (the agent already knows the four — or five under `--drift` — lenses' domains from its prompt). Just the file-to-lens mapping and the examined/never-examined distinction. This maximizes source code budget.
 
 ### Coverage Map Construction (Orchestrator)
 
 To build the coverage map:
-1. Read all partition records from disk: `correctness-partition.md`, `robustness-partition.md`, `consistency-b-partition.md`, `architecture-partition.md`. These list the files each lens received as full source (written during Phase 2). Union of all partition files = the **examined set**. **Zero-flag marker handling:** if a partition file contains only the marker `(no files flagged for deep review)` (written by the Consistency zero-flag case), treat it as contributing **zero files** to the examined set — do not include the marker string as a path. The Consistency lens then contributes only to coverage from Agent A's triage (which is not source-level examination); its Tier 2 examination contribution is zero, and files only flagged by no other lens correctly appear in the never-examined set.
+1. Read all partition records from disk: `architecture-partition.md`, `consistency-b-partition.md`, `robustness-partition.md`, `testhealth-partition.md`, and `drift-partition.md` (only when `--drift` was passed -- the Drift lens runs in Phase 2, per chunk when chunked, and writes a Tier 2 source partition, so its examined files must join the examined set or they would be miscounted as never-examined). These list the files each lens received as full source (written during Phase 2). Union of all partition files = the **examined set**. **Zero-flag marker handling:** if a partition file contains only the marker `(no files flagged for deep review)` (written by the Consistency zero-flag case), treat it as contributing **zero files** to the examined set — do not include the marker string as a path. The Consistency lens then contributes only to coverage from Agent A's triage (which is not source-level examination); its Tier 2 examination contribution is zero, and files only flagged by no other lens correctly appear in the never-examined set.
 2. Read the Phase 1 manifest. Any manifest file NOT in the examined set = **never examined**.
-3. Read all findings files: correctness, robustness, consistency-b, architecture. Do NOT include consistency-a (triage only). Extract finding counts per lens per file.
+3. Read all findings files: architecture, consistency-b, robustness, testhealth, and drift (only when `--drift` was passed). Do NOT include consistency-a (triage only). Extract finding counts per lens per file.
 4. Overlay finding counts onto the examined set. Files in the examined set with no findings get "(0 findings)" for the lenses that examined them.
 5. List examined files with lens names and finding counts. List never-examined files separately.
 6. If the map exceeds 50 lines, abbreviate by grouping never-examined files by directory instead of listing individually.
@@ -549,7 +628,7 @@ If the audit is at or near the agent budget, skip the follow-up and include the 
 
 For chunked subsystems, the blind-spots agent runs **once per chunk** (not once for all chunks), receiving that chunk's coverage map + cross-chunk interface section. This keeps each dispatch within the 1500-line hard cap.
 
-**Cross-chunk blind spots:** After all per-chunk blind-spots agents complete, dispatch one additional **cross-chunk blind-spots agent**. This agent receives a purpose-built cross-chunk overview (NOT all individual coverage maps stacked):
+**Cross-chunk blind spots:** After all per-chunk blind-spots agents complete, dispatch one additional **cross-chunk blind-spots agent** (using `audit-blindspots-prompt.md`, with the cross-chunk overview substituted for the per-chunk coverage map -- so it carries the same Systemic-Only Rule and the `### Out-of-scope instance bugs (noted for /delve)` channel Phase 3 step 6 collects). This agent receives a purpose-built cross-chunk overview (NOT all individual coverage maps stacked):
 - A single merged view (~50-80 lines) listing only boundary files (files that appear in multiple chunks' interface sections) with their lens coverage across chunks
 - Source files from those cross-chunk boundaries
 - Subject to the same 1500-line hard cap
@@ -559,7 +638,7 @@ Per-chunk interior coverage is irrelevant to cross-chunk analysis -- keep it out
 **Cross-chunk boundary overview construction (orchestrator):**
 1. Identify boundary files: files that appear in 2+ chunks' Tier 1 "cross-chunk interface" sections.
 2. For each boundary file, collect lens coverage from all chunks' partition records + finding counts from all chunks' findings files.
-3. Format as: `path/file.ext: Chunk A [Correctness (1), Robustness (0)], Chunk B [Architecture (2)]`
+3. Format as: `path/file.ext: Chunk A [Architecture (1), Robustness-systemic (0)], Chunk B [Consistency (2)]`
 4. List only boundary files. Interior files are irrelevant to cross-chunk analysis.
 5. If >80 lines, group by chunk boundary pair (e.g., "Chunk A <-> Chunk B boundary files").
 
@@ -573,15 +652,17 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 ### Reading Findings
 
-**Code audits:** Read `correctness-findings.md`, `robustness-findings.md`, `consistency-b-findings.md`, `architecture-findings.md`, `blindspots-findings.md`, and if they exist: `blindspots-followup-findings.md`, `blindspots-crosschunk-findings.md`. Do NOT read `consistency-a-findings.md` (triage data, not confirmed findings).
+**Code audits:** Read `architecture-findings.md`, `consistency-b-findings.md`, `robustness-findings.md`, `testhealth-findings.md`, `blindspots-findings.md`, and if they exist: `blindspots-followup-findings.md`, `blindspots-crosschunk-findings.md`, `drift-findings.md` (only when `--drift` was passed). Do NOT read `consistency-a-findings.md` (triage data, not confirmed findings).
 
 **Non-code audits:** Read `<lens-name-kebab>-findings.md` for each of the 4 type-specific lenses (e.g., `technical-soundness-findings.md`, `integration-impact-findings.md`, `edge-cases-findings.md`, `scope-clarity-findings.md` for design), plus `noncode-blindspots-findings.md`.
 
-1. **Deduplicate:** When two findings reference the same location and describe the same underlying concern, merge into one finding noting both lenses. For code audits, match on overlapping `file` + `line_range`. For non-code audits, match on identical `section` headings. Use common fields (severity, evidence, description) for similarity comparison. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
-2. **Compounding risks:** After dedup, scan pairs of findings from different lenses that touch the same file or related files. Flag as compounding ONLY when you can articulate the specific mechanism by which the two findings combine into a worse problem (e.g., "this robustness gap means malformed input reaches this code path, where this correctness edge case causes data corruption"). File proximity alone is not compounding -- the findings must be causally related. Add a "Compounding" tag with the mechanism description to the grouped output.
+1. **Deduplicate:** When two findings reference the same location and describe the same underlying concern, merge into one finding noting both lenses. For code audits, match on overlapping `sites` (shared `file` + same enclosing symbol / `±K` window, `K=10` — the same coverage-match rule the suppress-and-cite gate uses; an absence-property site with no resolvable line/enclosing-symbol is never covered, exactly as in that gate). For non-code audits, match on identical `section` headings. Use common fields (severity, evidence, description) for similarity comparison. Preserve lens-specific fields from both. **Tie-breaking rule:** When in doubt, keep both findings as separate items but note they may be related. Err on the side of presenting more findings rather than silently merging.
+2. **Compounding risks:** After dedup, scan pairs of findings from different lenses that touch the same file or related files. Flag as compounding ONLY when you can articulate the specific mechanism by which the two findings combine into a worse problem (e.g., "this systemic robustness absence means malformed input reaches every mutation path, where the consistency drift in error handling lets one path silently corrupt state"). File proximity alone is not compounding -- the findings must be causally related. Add a "Compounding" tag with the mechanism description to the grouped output.
 3. **Severity-rank:** Fatal first, then Significant, then Minor.
-4. **Group by theme** (e.g., "Error Handling," "State Management," "API Contracts").
-5. **Write report** to `scratch/<run-id>/report.md`.
+4. **Group by theme** (e.g., "Error Handling," "State Management," "API Contracts"). When `--drift` ran, Drift findings group under a "Drift / Intent" theme.
+5. **`--bugs` suppress-and-cite (code audits with `--bugs` only):** Before writing the report, apply the suppress-and-cite gate (see `--bugs` Sub-Path). For each systemic finding, compare its `sites` against the delve instance records: FULL coverage → suppress the finding and cite the covering delve instances; PARTIAL coverage → keep the WHOLE finding with a "not cross-checked / partially covered" note citing delve for covered sites. delve's instances are written verbatim into the report's separate **"Instance Bugs (via delve)"** section (delve's own schema), never merged into the systemic findings.
+6. **Assemble the out-of-scope instance-bug stub (code audits):** Collect the `### Out-of-scope instance bugs (noted for /delve)` entries that each lens recorded in its output -- read the SAME set of findings files as the reading list above (architecture, consistency-b, robustness, testhealth, blindspots, and if they exist blindspots-followup, blindspots-crosschunk, and drift under `--drift`; never consistency-a) -- these are single-reproduction defects the lenses noticed in passing while hunting systemic patterns. Deduplicate by `file:line` + description. Then, depending on the delve channel: **with `--bugs`** delve already triaged the full subsystem, so fold these into the delve cross-check rather than double-reporting (a recorded bug already covered by a delve instance is dropped in favor of delve's record); any recorded instance bug NOT matched to a delve instance is appended to the **"Instance Bugs (via delve)"** section as an *audit-noted uncovered instance* (never dropped); **without `--bugs` but with `/delve` installed**, note that they route to `/delve` and offer `audit --bugs`; **when `/delve` is absent**, emit the deduped list under the **"Out-of-scope instance bugs (install /delve to triage)"** stub. A recorded instance bug is NEVER silently dropped -- this is the recall-hole closure the Systemic-Only Rule depends on.
+7. **Write report** to `scratch/<run-id>/report.md`.
 
 ## Phase 4: Reporting
 
@@ -617,14 +698,19 @@ At the end of the audit's report/output (Phase 4, after the ranked findings are 
 
 - `audit-scoping-prompt.md` -- Phase 1 subsystem scoping dispatch (`Agent tool, subagent_type: Explore, model: sonnet`)
 
-Analysis lens templates (all use `Task tool, general-purpose, model: opus`):
-- `audit-correctness-prompt.md` -- Correctness lens dispatch
-- `audit-robustness-prompt.md` -- Robustness lens dispatch
-- `audit-consistency-prompt.md` -- Consistency lens dispatch (documents two-agent protocol)
+Analysis lens templates (all use `Task tool, general-purpose, model: opus`; all carry the Systemic-Only Rule and emit the `sites` field):
 - `audit-architecture-prompt.md` -- Architecture lens dispatch
+- `audit-consistency-prompt.md` -- Consistency lens dispatch (documents two-agent protocol)
+- `audit-robustness-prompt.md` -- Robustness (systemic) lens dispatch — subsystem-wide patterns/absences only
+- `audit-testhealth-prompt.md` -- Test-health lens dispatch — systemic coverage gaps, diagnose + prioritize only
+
+Opt-in mode template (`Task tool, general-purpose, model: opus`):
+- `audit-drift-prompt.md` -- Drift / Intent dispatch, used ONLY under `--drift intent=<path>` (carries the Systemic-Only Rule; consumes the explicit intent artifact)
 
 Blind-spots template (`Task tool, general-purpose, model: opus`):
-- `audit-blindspots-prompt.md` -- Phase 2.5 gap-hunting dispatch (receives coverage map)
+- `audit-blindspots-prompt.md` -- Phase 2.5 gap-hunting dispatch (receives coverage map; carries the Systemic-Only Rule)
+
+> The instance `Correctness` lens and its `audit-correctness-prompt.md` template were **removed** in the systemic-only reshape — single-site correctness/robustness bugs route to `/delve` via `--bugs`.
 
 ### Non-Code Audit Templates
 
@@ -644,6 +730,7 @@ Each analysis template includes:
 **Analysis agents must NOT:**
 - Modify any code (audit is read-only)
 - Flag issues without specific code evidence (no speculation)
+- **Report a single-reproduction (instance) finding as a code-lens finding** — the Systemic-Only Rule routes it to `/delve` (or the `/delve`-absent stub). A code finding must be systemic: a multi-site pattern, a structural property, or an intent divergence, with no single reproduction.
 - Overlap with another lens's findings (if borderline, the more specific lens owns it)
 - Exceed 5 findings per lens without strong justification (focus on highest-impact issues). Exception: blind-spots lens cap is 8 findings due to its multi-category scope.
 
@@ -651,6 +738,9 @@ Each analysis template includes:
 - Proceed to Phase 2 without user-confirmed scoping manifest
 - File issues without explicit user approval
 - Silently drop findings that match existing issues (always show, let user decide)
+- **Silently drop a single-reproduction finding when `/delve` is absent** — surface it under the "Out-of-scope instance bugs (install /delve to triage)" stub.
+- **Run Drift without `--drift intent=<path>`, auto-discover an intent artifact, or advertise a Drift section when `--drift` was not passed.**
+- **Re-derive maintainability/complexity/hotspot friction inline** — delegate to `/prospector`. **Author or fix tests** — Test-health diagnoses + prioritizes only; staleness routes to `test-coverage`.
 - Exceed 1500 lines of total prompt content in any agent dispatch
 - Feed Phase 2 structural inferences to cartographer (Phase 1 manifest only)
 - Skip narration between agent dispatches (Communication Requirement)
@@ -660,6 +750,10 @@ Each analysis template includes:
 ## Red Flags
 
 - Treating this as a fix loop (audit reports, it does not fix)
+- **Reporting an instance bug (one concrete reproduction) as a systemic finding** — it is `/delve`'s, even across multiple files
+- **Suppressing a single-reproduction finding when `/delve` is absent** instead of surfacing it under the out-of-scope stub
+- **Re-implementing maintainability/complexity analysis** instead of delegating to `/prospector`; **authoring or fixing tests** instead of diagnosing systemic gaps
+- **Running or advertising Drift without `--drift intent=<path>`**, or auto-discovering an intent artifact
 - Hardcoding tracker-specific commands (use available environment tools)
 - Losing agent results to context compaction (write to disk immediately)
 - Skipping session metrics or decision journal
@@ -672,8 +766,11 @@ Each analysis template includes:
 | `crucible:recon` | Subsystem-manifest module | Phase 1 Code Path (subsystem scoping via structured manifest). Fallback: dispatch scoping agent via `audit-scoping-prompt.md`. |
 | `crucible:cartographer-skill` | Consult mode | Phase 1 (subsystem scoping and conventions) |
 | `crucible:cartographer-skill` | Record mode | Phase 4 (Phase 1 manifest only) |
+| `crucible:delve` | Instance-bug sweep | Code path, opt-in `--bugs`: invoked as a SKILL at `effort=high` over the full subsystem; feeds the suppress-and-cite gate. (audit reaches `delve-engine` only transitively through `/delve`; the `dispatch: delve` marker lands at #334.) |
+| `crucible:prospector` | Maintainability / complexity / hotspot depth | Code path, on request — audit delegates rather than re-deriving git-churn friction |
+| `crucible:test-coverage` | Test **staleness** | Code path — Test-health routes staleness here (Test-health itself only diagnoses systemic coverage gaps) |
 
-- **Dispatches:** Code audit templates (correctness, robustness, consistency [2 agents], architecture, blind-spots) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback).
+- **Dispatches:** Code audit templates (architecture, consistency [2 agents], robustness-systemic, test-health, blind-spots; drift when `--drift`) and non-code templates (noncode-lens [parameterized], noncode-blindspots). Scoping via recon (primary) or `audit-scoping-prompt.md` (fallback). Instance bugs delegated to the `/delve` skill on `--bugs`.
 - **Pairs with:** `crucible:forge` -- audit findings could inform retrospective if they reveal systemic patterns
 - **Called by:** Standalone only (user invokes directly). Not part of any pipeline.
 - **Does NOT use:** `crucible:quality-gate` (audit is not a fix loop), `crucible:red-team` (designed for single artifacts), `crucible:assay` (audit is find-and-report, not decision evaluation)
