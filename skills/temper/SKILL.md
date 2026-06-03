@@ -166,8 +166,6 @@ If the C/I count is strictly below `cap` on the first run, no gating finding was
 
 **Per-invocation dispatch-id** (concurrency isolation). Every `/temper` invocation generates a unique dispatch-id at Step 1: `temper-YYYYMMDDTHHmmss-<6-char-nonce>`. Generate via a cryptographic RNG (e.g., `python -c 'import secrets; print(secrets.token_hex(3))'` for 6 hex chars). If a dispatch file path already exists on disk, regenerate the nonce and retry — never overwrite. The dispatch file path and the `metadata.dispatch_id` field both include this id, so concurrent invocations (e.g., user-initiated overlapping with build's Phase 4) cannot collide. Round numbering remains per-invocation; the dispatch-id disambiguates `(skill, round)` traceability tuples in the external_review MCP and in any session-log consumers. (The R2+ Track-B per-member dispatches extend this stem with a `-m<NN>` member suffix — see Step 4.) Dispatches are disk-mediated per `shared/dispatch-convention.md`: write the filled prompt/inputs to a dispatch file (one file per dispatch-id), then dispatch a Task subagent that reads that file — never paste inputs directly into the Task tool prompt.
 
-> **Dispatch marker (forward reference).** The canonical column-0 `dispatch: delve-engine` marker line that the I2 allowlist grep keys on is added to temper's body when the harness-adapter wiring lands (#334) — it is **not** present yet. This sentence references the marker phrase inline only; per the marker grammar no temper file may start a line with the bare marker phrase before that wiring.
-
 #### Freshness Boundary
 
 Temper's core principle ("fresh agent every round, no anchoring beyond the enumerated `T`") is convention-plus-mechanism. Each round uses a **fresh agent** — no reviewer reuse — with one deliberate, documented exception: the R2+ per-member re-verifier (Track B) **must receive `T`** (the enumerated tracked set is its input — that *is* fix-verification). The exception is scoped to `T` only.
@@ -317,6 +315,14 @@ If the user explicitly asks ("post this to the PR", "leave a review comment"), p
 | PR merged or deleted | Do **not** offer paste-mode. Surface the findings locally: "The PR is no longer postable (merged / deleted). Findings remain in your session for reference." |
 
 Never post without an explicit user instruction. Findings live in the user's session by default.
+
+## Dispatch
+
+temper drives `shared/delve-engine.md` through the harness-adapter **fan-out mechanism** (`shared/harness-adapter.md` §4, §7), disk-mediated per `shared/dispatch-convention.md` — never a harness-specific call inline (I1). Round 1 drives the engine (high effort, bug-angle subset) to enumerate the tracked set `T`; Rounds 2+ re-hunt the changed range the same way. Where a harness has no parallel-subagent primitive, the adapter's **sequential fallback** (§5) runs the angles as multiple sequential passes, warning once that recall may drop.
+
+temper is one of the **exactly two** files that dispatch `delve-engine` directly (the other is `delve`). The canonical engine-dispatch marker line follows; the I2 allowlist test keys on it with the anchored pattern `grep -rn '^dispatch: delve-engine'`:
+
+dispatch: delve-engine
 
 ## Severity / Verdict Vocabulary
 

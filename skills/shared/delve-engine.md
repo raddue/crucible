@@ -199,11 +199,9 @@ primitive, the angles run as *multiple sequential passes* — one pass per angle
 into a single in-context pass (the single-pass mode is the recall-poor failure this engine exists to
 fix; the adapter warns once that recall may drop under the sequential fallback).
 
-Until #334 lands, treat dispatch as a placeholder and the sequential fallback as acceptable.
-
 This engine is the thing **dispatched**; it does not dispatch itself. The canonical
 `dispatch: delve-engine` marker that the I2 allowlist greps for lives in the BODY of the two direct
-dispatchers (`/delve`, `temper`) — added in #334 — never in this engine file.
+dispatchers (`/delve`, `temper`) — added at wiring time (#334) — never in this engine file.
 
 ## 8. Worked example (illustrative)
 

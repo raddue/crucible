@@ -107,8 +107,6 @@ Drive `shared/delve-engine.md` a **single** time with:
 
 The fan-out (finder angles) and the per-candidate verify gate run as parallel subagents **through the harness-adapter dispatch mechanism** — delve issues **no harness-specific call inline** (I1). On a harness with no parallel-subagent primitive, the adapter's **sequential fallback** runs the angles as multiple sequential passes (one per angle), never collapsed into a single in-context pass; it warns once that recall may drop.
 
-> **Dispatch marker (forward reference).** The canonical column-0 `dispatch: delve-engine` marker line that the I2 allowlist grep keys on is added to this skill's body when the harness-adapter wiring lands (#334) — it is **not** present yet. This sentence references the marker phrase inline only; per the marker grammar no file may start a line with the bare marker phrase before wiring.
-
 delve runs the engine **once**. There is no fix-verification loop and no second round — that cadence belongs to `temper`.
 
 ### Step 3: Report (always)
@@ -155,6 +153,14 @@ delve first writes the Step 3 formatted report body to a `findings.md` file, whi
 | PR merged or deleted | Do **not** offer paste-mode; surface locally: "The PR is no longer postable (merged / deleted). Findings remain in your session." |
 
 The findings are complete after Step 3 regardless of whether `--comment` succeeds.
+
+## Dispatch
+
+delve drives `shared/delve-engine.md` through the harness-adapter **fan-out mechanism** (`shared/harness-adapter.md` §4, §7) — never a harness-specific call inline (I1). Where a harness has no parallel-subagent primitive, the adapter's **sequential fallback** (§5) runs the angles as multiple sequential passes, warning once that recall may drop.
+
+delve is one of the **exactly two** files that dispatch `delve-engine` directly (the other is `temper`). The canonical engine-dispatch marker line follows; the I2 allowlist test keys on it with the anchored pattern `grep -rn '^dispatch: delve-engine'`:
+
+dispatch: delve-engine
 
 ## Example
 

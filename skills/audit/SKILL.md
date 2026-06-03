@@ -104,8 +104,6 @@ Operationally: when `--drift intent=<path>` is passed, the orchestrator reads th
 
 **Invocation contract (pinned by construction):** audit invokes `/delve` with **`effort=high`** and **`scope` = the full audited subsystem** (the same subsystem audit reports on). audit MUST drive delve at `high`, not delve's unstated default (which could be `medium`). The `/audit` API has no effort param of its own; `--bugs` always pins high + full-subsystem, so the suppress-and-cite scope/effort precondition holds by construction.
 
-> **Dispatch marker (forward reference).** audit reaches `delve-engine` only **transitively**, through the `/delve` skill — it does **not** dispatch the engine directly and so does **not** carry the engine marker `dispatch: delve-engine` (out of scope for the I2 allowlist grep, whose set is exactly `{delve, temper}`). audit carries a separate `dispatch: delve` (skill) marker; that canonical column-0 marker line is added to this skill's body when the harness-adapter dispatch wiring lands (**#334**) — it is **not** present yet. This sentence references the marker phrase inline only.
-
 **Output — a SEPARATE section.** delve's findings are appended under a clearly-headed **"Instance Bugs (via delve)"** section using delve's own eight-field schema (`{file, line, summary, failure_scenario, severity, verdict, scope, effort}`) — **never inline-merged** into audit's systemic findings.
 
 ### Suppress-and-cite gate
@@ -176,6 +174,12 @@ When auditing non-code artifacts, the blind-spots agent hunts for document-level
 - Scope boundary gaps (what's just outside scope that could cause problems?)
 - Silent dependencies (external factors assumed to remain true)
 - Logical leaps (conclusions not supported by the preceding argument)
+
+## Dispatch
+
+On the opt-in `--bugs` path, audit invokes the **`/delve` skill** — not `delve-engine` directly — at `effort=high` over the full audited subsystem; `/delve` is the file that dispatches the engine. audit therefore carries a **separate skill marker** (`dispatch: delve`), **not** the engine marker `dispatch: delve-engine`, and is **out of scope** for the I2 engine-marker allowlist grep (whose anchored `^dispatch: delve-engine` set is exactly `{delve, temper}`). The `/delve` skill it invokes itself fans out through the harness-adapter mechanism (with the sequential fallback applying inside delve's engine fan-out where no parallel-subagent primitive exists), so audit issues a single skill call rather than driving the fan-out itself. When `/delve` is not installed, the `/delve`-absent fallback above keeps single-reproduction findings visible rather than dropping them.
+
+dispatch: delve
 
 ## Why This Exists
 
@@ -766,7 +770,7 @@ Each analysis template includes:
 | `crucible:recon` | Subsystem-manifest module | Phase 1 Code Path (subsystem scoping via structured manifest). Fallback: dispatch scoping agent via `audit-scoping-prompt.md`. |
 | `crucible:cartographer-skill` | Consult mode | Phase 1 (subsystem scoping and conventions) |
 | `crucible:cartographer-skill` | Record mode | Phase 4 (Phase 1 manifest only) |
-| `crucible:delve` | Instance-bug sweep | Code path, opt-in `--bugs`: invoked as a SKILL at `effort=high` over the full subsystem; feeds the suppress-and-cite gate. (audit reaches `delve-engine` only transitively through `/delve`; the `dispatch: delve` marker lands at #334.) |
+| `crucible:delve` | Instance-bug sweep | Code path, opt-in `--bugs`: invoked as a SKILL at `effort=high` over the full subsystem; feeds the suppress-and-cite gate. (audit reaches `delve-engine` only transitively through `/delve`; it carries the separate `dispatch: delve` skill marker — see the Dispatch section.) |
 | `crucible:prospector` | Maintainability / complexity / hotspot depth | Code path, on request — audit delegates rather than re-deriving git-churn friction |
 | `crucible:test-coverage` | Test **staleness** | Code path — Test-health routes staleness here (Test-health itself only diagnoses systemic coverage gaps) |
 
