@@ -1,0 +1,32 @@
+### Pre-flight
+- Diff is substantive: locking change around a shared counter.
+- Member is a repro-less PLAUSIBLE@Critical (no runnable repro at R1).
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. possible race on shared counter under concurrent writers
+   - File: src/counter.py:22
+   - Summary: possible race on shared counter under concurrent writers
+   - Severity: Critical
+   - Verdict: PLAUSIBLE
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Clean
+
+1. possible race on shared counter under concurrent writers
+   - File: src/counter.py:22
+   - Summary: possible race on shared counter under concurrent writers
+   - Severity: Critical
+   - Verdict: REFUTED
+   - Admitted: 1
+   - Outcome: REFUTED-after-fix
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Clean
+- The repro-less PLAUSIBLE@Critical discharged ONLY by an actively re-derived
+  REFUTED-after-fix (the suspect unsynchronized path is provably gone — now under
+  a single lock). It was NOT discharged on fixer prose.

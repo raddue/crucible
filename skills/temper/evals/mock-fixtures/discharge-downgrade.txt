@@ -1,0 +1,32 @@
+### Pre-flight
+- Diff is substantive: error-message wording plus a guard tightening.
+- Member entered T at Important; the fix narrowed the blast radius.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. log line leaks an internal path on the error branch
+   - File: src/log.py:14
+   - Summary: log line leaks an internal path on the error branch
+   - Severity: Important
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+
+### Round 2
+- Round-Verdict: Clean
+
+1. log line leaks an internal path on the error branch
+   - File: src/log.py:14
+   - Summary: log line leaks an internal path on the error branch
+   - Severity: Minor
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: DOWNGRADED
+   - Readjudicated: true
+
+### Verdict
+- Final-Verdict: Clean
+- The member discharged via a code-based DOWNGRADED below the C/I band (the leaked
+  path is now redacted; only a non-sensitive tail remains → Minor). It leaves the
+  gating 2x2 per the contract.
