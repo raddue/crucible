@@ -1,4 +1,4 @@
-"""TDD test suite for lens_runner.py convergence checks (#333).
+"""TDD test suite for convergence_runner.py convergence checks (#333).
 
 These tests drive the fix-verification convergence model: the tracked-set T
 lifecycle, the four terminal verdicts + two continuation outcomes, the discharge
@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from skills.temper.evals.lens_runner import (
-    MutexViolationError,
+from skills.temper.evals.convergence_runner import (
     _is_gating,
     _parse_findings,
     aggregate_replicates,
@@ -404,15 +403,6 @@ def test_parse_findings_extracts_member_fields():
 def test_parse_findings_skips_report_prose_blocks():
     members = _parse_findings(CLEAN_AFTER_RESOLVE)
     assert all(m["section"] != "Pre-flight" for m in members)
-
-
-def test_mutex_violation_raises():
-    txt = (
-        "### Round 1\n\n1. x\n   - File: src/a.py:1\n"
-        "   - Lens: DRY\n   - Category: Tenancy\n"
-    )
-    with pytest.raises(MutexViolationError):
-        _parse_findings(txt)
 
 
 # ---------------------------------------------------------------------------

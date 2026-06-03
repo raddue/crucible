@@ -236,7 +236,7 @@ A member's `failure_scenario` may live in code the fixer did **not** touch this 
 `temper-reviewer.md` re-applies the contract verdicts/severity to the fixed code and emits, per member, one of:
 - **RESOLVED** — re-applying the contract verdict no longer establishes the defect (it would now be REFUTED, or the construct/path is gone). Member leaves `T`.
 - **REFUTED-after-fix** (repro-less `PLAUSIBLE@C/I` only) — the adjudicator actively **re-derives the contract's REFUTED verdict** against the fixed code (the suspect construct is provably gone). A **DISCHARGE** — member leaves `T`. (Same REFUTED verdict from the contract, re-applied; temper coins no new verdict.)
-- **code-based DOWNGRADE** — the adjudicator re-assigns `severity` per the contract's scale to a tier below C/I against the fixed code → it leaves the gating 2×2 (folds to Minor/Suggestion, reported verbatim). A **DISCHARGE** — member leaves `T`.
+- **DOWNGRADED** (code-based) — the adjudicator re-assigns `severity` per the contract's scale to a tier below C/I against the fixed code → it leaves the gating 2×2 (folds to Minor/Suggestion, reported verbatim). A **DISCHARGE** — member leaves `T`.
 - **STILL-GATING** — re-applying the contract re-affirms CONFIRMED/PLAUSIBLE @ C/I against the fixed code → stays in `T`.
 - **ESCALATE** (repro-less `PLAUSIBLE@C/I` only) — the adjudicator can **neither** re-derive REFUTED **nor** downgrade → the member is **escalation-eligible** (architectural / human-ack path, §3.3).
 

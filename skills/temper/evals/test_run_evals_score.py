@@ -657,7 +657,7 @@ def _seed_with_results(monkeypatch, tmp_path, run_id, outcomes_by_fixture):
 
     outcomes_by_fixture: dict[fixture_id, list[str|None]] — one entry per trial.
         Use None to simulate ERROR (dispatch failure); a non-empty string emits
-        a reviewer-shaped body. The body content drives lens_runner's verdict.
+        a reviewer-shaped body. The body content drives convergence_runner's verdict.
     """
     d = _seed_dispatch_dir(monkeypatch, tmp_path, run_id)
     manifest = json.loads((d / "stage-manifest.json").read_text())
@@ -787,7 +787,7 @@ def test_grouped_summary_error_excluded_from_denominator():
 
 def test_grouped_summary_na_maps_to_fail_not_error():
     """#333 (carries forward R3 SP1): ERROR maps ONLY from None reviewer_output;
-    lens_runner-inconclusive N/A trials are FAIL (counted in the denominator)."""
+    convergence_runner-inconclusive N/A trials are FAIL (counted in the denominator)."""
     from skills.temper.evals.run_evals import _compute_grouped_summary
     fixtures_by_id = {
         "fx-real": {"id": "fx-real", "source": "real-pr"},

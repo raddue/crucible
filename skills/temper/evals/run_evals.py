@@ -1,8 +1,8 @@
-"""Per-fixture temper lens eval runner (Task 6).
+"""Per-fixture temper convergence eval runner (Task 6).
 
 Dispatches the temper-reviewer prompt against each fixture in
 `evals.json`, collects reviewer outputs across N replicate trials, and
-evaluates the fixture's structured expectations via `lens_runner`.
+evaluates the fixture's structured expectations via `convergence_runner`.
 
 Supports two execution modes (live dispatch removed in #297 —
 use `stage` + `/temper-eval-collect` + `score` subcommands instead):
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import lens_runner
+from . import convergence_runner
 from ._dispatch_paths import fixture_sha, resolve_dispatch_dir, template_sha
 from ._runid import validate_run_id
 
@@ -78,7 +78,7 @@ def _resolve_output_path(run_id: str, *, per_iter: bool) -> Path:
 
 
 def _resolve_history_path() -> Path:
-    """#291: resolve the lens-health history log path at CALL TIME.
+    """#291: resolve the eval-run history log path at CALL TIME.
 
     Mirrors `_resolve_output_path`'s call-time `_EVALS_DIR` resolution rather
     than binding a module-level `_HISTORY_PATH` at import. The score-test
@@ -95,7 +95,7 @@ def _resolve_history_path() -> Path:
 # functions that USE this constant are still added in Task 8 (stubs added below in Task 6).
 _BASELINE_PATH = _EVALS_DIR / "baseline.json"
 
-# #291: rolling lens-health history log cap (most-recent K records kept).
+# #291: rolling eval-run history log cap (most-recent K records kept).
 # The history.jsonl path itself is resolved at call time via
 # `_resolve_history_path()` (NOT a module-level constant) so the `_EVALS_DIR`
 # test monkeypatch covers it — see that helper's docstring.
@@ -114,8 +114,7 @@ _FIXTURE_CONTENT_HEADER = (
 
 # Task 10 (#290): shared --source filter values.
 # Single source of truth for the `--source` argparse choices on both
-# `stage` (post-#297) and `score` subcommands. Also imported by
-# `lens_runner.py` separately (per #290 plan Task 10).
+# `stage` (post-#297) and `score` subcommands.
 _SOURCE_VALUES = ("synthetic", "real-pr", "all")
 
 
@@ -170,8 +169,9 @@ _LEAK_SEMANTIC_PRIMES = (
     r"\bdrive-by\b",
 )
 
-# Fatal pattern: `^Lens:` line (case-insensitive, multiline) — direct
-# collision with _LENS_RE parsing in lens_runner.
+# Fatal pattern: `^Lens:` line (case-insensitive, multiline) — a leaked
+# `Lens:` line in a pr_description is lens-vocab contamination of the
+# fixture, so it is rejected outright.
 _LEAK_FATAL_LENS_LINE_RE = re.compile(r"^\s*Lens:", re.IGNORECASE | re.MULTILINE)
 
 
@@ -183,9 +183,9 @@ def _check_pr_description_leakage(
     Returns: list of WARNING strings (substring + word-boundary + semantic-prime
     hits). Emits each warning to stderr as a side effect.
 
-    Raises: FixtureValidationError if a `^Lens:` line is present — that
-    pattern directly collides with `_LENS_RE` parsing downstream and is
-    not survivable.
+    Raises: FixtureValidationError if a `^Lens:` line is present — a literal
+    `Lens:` line is lens-vocab contamination of the fixture and is not
+    survivable.
 
     Task 8 will call this from `_validate_fixtures` once per fixture.
     """
@@ -196,7 +196,7 @@ def _check_pr_description_leakage(
     if _LEAK_FATAL_LENS_LINE_RE.search(pr_description):
         raise FixtureValidationError(
             f"pr_description for fixture {fixture_id!r} contains a literal "
-            f"'Lens:' line, which collides with downstream `_LENS_RE` parsing"
+            f"'Lens:' line (lens-vocab contamination)"
         )
 
     warnings: list[str] = []
@@ -280,7 +280,7 @@ def _validate_global_expectations(global_expectations: list[dict]) -> None:
     """Validate each top-level `global_expectations` entry (Pre-flight matcher).
 
     Every entry must be a dict with `type == "mechanical"` and a `check` present
-    in `lens_runner._CHECK_REGISTRY`. Raises `FixtureValidationError` otherwise.
+    in `convergence_runner._CHECK_REGISTRY`. Raises `FixtureValidationError` otherwise.
     """
     for idx, ge in enumerate(global_expectations):
         if not isinstance(ge, dict):
@@ -295,11 +295,11 @@ def _validate_global_expectations(global_expectations: list[dict]) -> None:
         # Normalize snake_case → kebab-case exactly as evaluate_expectation does
         # at runtime, so a global with check "report_has_block" is accepted here
         # rather than rejected only to resolve fine when actually dispatched.
-        check = lens_runner._normalize_check_name(ge.get("check"))
-        if check not in lens_runner._CHECK_REGISTRY:
+        check = convergence_runner._normalize_check_name(ge.get("check"))
+        if check not in convergence_runner._CHECK_REGISTRY:
             raise FixtureValidationError(
                 f"global_expectations[{idx}] check {ge.get('check')!r} not in "
-                f"lens_runner._CHECK_REGISTRY"
+                f"convergence_runner._CHECK_REGISTRY"
             )
 
 
@@ -766,19 +766,10 @@ def _aggregate_from_outputs(
                 per_trial_verdicts.append("N/A")
                 per_trial_rationales.append("dispatch failure: no reviewer output")
                 continue
-            try:
-                verdict, rationale = lens_runner.evaluate_expectation(expectation, out, fix)
-            except lens_runner.MutexViolationError:
-                # T1: a reviewer finding tagged with BOTH Lens: and Category:
-                # is a mutex violation (Design D7). Score the trial FAIL with a
-                # clear rationale instead of letting the raise crash the run.
-                verdict, rationale = (
-                    "FAIL",
-                    "mutex violation: finding tagged both Lens and Category",
-                )
+            verdict, rationale = convergence_runner.evaluate_expectation(expectation, out, fix)
             per_trial_verdicts.append(verdict)
             per_trial_rationales.append(rationale)
-        aggregated = lens_runner.aggregate_replicates(per_trial_verdicts, threshold)  # type: ignore[arg-type]
+        aggregated = convergence_runner.aggregate_replicates(per_trial_verdicts, threshold)  # type: ignore[arg-type]
         passes = sum(1 for v in per_trial_verdicts if v == "PASS")
         rationale = f"{passes}/{n_trials} trials PASS (threshold {threshold})"
         expectation_results.append(
@@ -1060,9 +1051,9 @@ def _classify_trial_outcome(
     - PASS:  reviewer output present, every expectation verdict at this trial
       index is 'PASS'.
     - FAIL:  reviewer output present, at least one expectation verdict is
-      non-'PASS' (FAIL or N/A from lens_runner inconclusive aggregation).
+      non-'PASS' (FAIL or N/A from convergence_runner inconclusive aggregation).
 
-    Per R3 S-1, lens_runner-inconclusive 'N/A' verdicts (reviewer output
+    Per R3 S-1, convergence_runner-inconclusive 'N/A' verdicts (reviewer output
     present, aggregation ambiguous) map to FAIL — NOT ERROR.
     """
     if reviewer_output is None:
@@ -1196,13 +1187,13 @@ def _append_history(
     path: Path | None = None,
     cap: int = _HISTORY_CAP,
 ) -> None:
-    """#291 Task 2: append one per-run lens-health record to history.jsonl.
+    """#291 Task 2: append one per-run eval-health record to history.jsonl.
 
     Builds a single record from the already-computed `grouped` summary:
       - run_id, run_at (ISO-8601, copied from the run payload), source
         (score()'s --source scope: "all" | "synthetic" | "real-pr")
-      - per_lens: copied from grouped["per_trial_rates"]
-        (shape {lens: {synthetic, real-pr}})
+      - per_lens: copied from grouped["per_trial_rates"] (legacy key name
+        retained for history-log back-compat; shape {key: {synthetic, real-pr}})
       - by_source: {source: {pass, total}} rolled up from
         grouped["by_source"] using _render_grouped_summary's PASS-over-total
         convention — pass = count of PASS verdicts, total = len(entries), so
@@ -1390,7 +1381,7 @@ def score(
         out = _parse_result_file(result_path) if result_path.exists() else None
         by_fixture.setdefault(fid, []).append((entry["trial"], entry, out))
 
-    # Run lens_runner per fixture
+    # Run convergence_runner per fixture
     # QG R1 Fix 2: honor manifest's trials_override header (if set) as the
     # canonical n_trials per fixture, not the evals.json replicate_rule. Falls
     # back to per-fixture manifest-trial count when no override was recorded
@@ -1451,7 +1442,7 @@ def score(
     # QG R2 Fix 1: atomic write — prevents truncated last_run/per-iter on SIGINT/OOM/disk-full
     _atomic_write_text(out_path, json.dumps(payload, indent=2))
 
-    # #291 Task 3: append one lens-health history record per CANONICAL run.
+    # #291 Task 3: append one eval-health history record per CANONICAL run.
     # Gated on `not per_iter`: per-iter writes target .calibrate-state/ (one per
     # calibration baseline_runs iteration) and must NOT be logged as runs — they
     # would contaminate the trend series + the N-run sunset window. Telemetry is
@@ -1461,7 +1452,7 @@ def score(
         try:
             _append_history(run_id, payload["run_at"], grouped, source)
         except Exception as e:  # noqa: BLE001 — telemetry must not gate score()
-            print(f"[warn] lens-health history append failed: {e}", file=sys.stderr)
+            print(f"[warn] eval-health history append failed: {e}", file=sys.stderr)
 
     # --write-baseline + --compare-baseline — see Task 8 (stubs raise NotImplementedError)
     if write_baseline:

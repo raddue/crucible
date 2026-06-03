@@ -78,17 +78,20 @@ def test_legacy_replay_mode_still_works(monkeypatch, tmp_path):
     assert out.exists()
 
 
-# Vector 3: lens_runner.evaluate_expectation and aggregate_replicates contracts
-# remained intact through the refactor. _aggregate_from_outputs is the new
-# wrapper that calls them; verify with a real expectation that they still work.
-def test_lens_runner_evaluate_contract_unchanged():
-    """The lens_runner public surface used by score()/legacy must still work."""
-    from skills.temper.evals import lens_runner
+# Vector 3: convergence_runner.evaluate_expectation and aggregate_replicates
+# contracts remained intact through the refactor. _aggregate_from_outputs is the
+# new wrapper that calls them; verify with a real expectation that they still work.
+# (Renamed from lens_runner -> convergence_runner in #333; this is a misfiled
+# temper-harness test that still lives in the inquisitor regression file —
+# relocation tracked as a follow-up.)
+def test_convergence_runner_evaluate_contract_unchanged():
+    """The convergence_runner public surface used by score()/legacy must still work."""
+    from skills.temper.evals import convergence_runner
     # Use a real fixture's expectation shape (verdict_contains is common)
     fix = {"id": "x", "expected_output": "test"}
     expectation = {"check": "verdict_contains", "params": {"value": "approve"}}
     reviewer_out = "### Code Review\nVerdict: approve\nNo findings.\n"
-    verdict, rationale = lens_runner.evaluate_expectation(expectation, reviewer_out, fix)
+    verdict, rationale = convergence_runner.evaluate_expectation(expectation, reviewer_out, fix)
     assert verdict in ("PASS", "FAIL", "N/A")
     assert isinstance(rationale, str)
 

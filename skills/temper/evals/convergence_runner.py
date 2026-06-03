@@ -47,10 +47,8 @@ unreviewable``.
 
 Reused infra (model-agnostic, retained from the old harness): the finding
 parser primitives, ``finding_body_contains/_not``, ``report_has_block``,
-``report_block_contains``, ``findings_count_at_least``,
-``all_findings_have_file_line``, ``category_finding_fires/_not``, the
-``evaluate_expectation`` dispatcher, ``MutexViolationError``, and
-``aggregate_replicates``.
+``findings_count_at_least``, ``all_findings_have_file_line``, the
+``evaluate_expectation`` dispatcher, and ``aggregate_replicates``.
 
 Stdlib only.
 """
@@ -62,17 +60,6 @@ from typing import Literal
 
 Verdict = Literal["PASS", "FAIL", "N/A"]
 Result = tuple[Verdict, str]
-
-
-class MutexViolationError(ValueError):
-    """Raised when a single finding is tagged with both Lens: and Category:.
-
-    Retained from the old harness so global_expectations mutex wiring keeps
-    working. The scorer catches this and fails the fixture loudly rather than
-    silently merging both fields.
-    """
-
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -143,8 +130,6 @@ _OUTCOME_RE = re.compile(
 )
 _READJUD_RE = re.compile(r"^\s*[-*]?\s*Readjudicated:\s+(true|false)\s*$", re.I)
 _ADMITTED_RE = re.compile(r"^\s*[-*]?\s*Admitted:\s+(\d+)\s*$")
-_LENS_RE = re.compile(r"^\s*[-*]?\s*Lens:\s+(\S+)\s*(\(re-attributed\))?\s*$")
-_CATEGORY_RE = re.compile(r"^\s*[-*]?\s*Category:\s+(\S+)\s*$")
 
 # Canonical-case maps so case-insensitive matches normalize to the spec spelling.
 _OUTCOME_CANON = {
@@ -169,11 +154,10 @@ def _parse_findings(output: str) -> list[dict]:
     Each record carries: file, line (int|None), line_range, summary, severity,
     verdict (contract verdict), outcome (R2+ adjudication or None), readjudicated
     (bool|None), admitted (int|None), round (int|None — the `### Round N` it sits
-    under), lens, lens_reattributed, category, cited_files, body, section.
+    under), cited_files, body, section.
 
     Numbered/list items inside report-prose sections (see _REPORT_SECTIONS) are
-    skipped. A MutexViolationError is raised when a finding carries both a Lens:
-    and a Category: line (retained mutex tripwire).
+    skipped.
     """
     lines = output.splitlines()
 
@@ -218,9 +202,6 @@ def _parse_findings(output: str) -> list[dict]:
         outcome: str | None = None
         readjudicated: bool | None = None
         admitted: int | None = None
-        lens: str | None = None
-        reattributed = False
-        category: str | None = None
 
         for child in block:
             m = _FILE_RE.match(child)
@@ -266,15 +247,6 @@ def _parse_findings(output: str) -> list[dict]:
             if m:
                 admitted = int(m.group(1))
                 continue
-            m = _LENS_RE.match(child)
-            if m:
-                lens = m.group(1)
-                reattributed = m.group(2) is not None
-                continue
-            m = _CATEGORY_RE.match(child)
-            if m:
-                category = m.group(1)
-                continue
 
         # Resolve the back-compat scalar file/line_range fields. An explicit
         # `Line:` wins; otherwise the first `File: path:lo-hi` citation supplies it.
@@ -285,11 +257,6 @@ def _parse_findings(output: str) -> list[dict]:
         line_val = explicit_line
         if line_val is None and line_range is not None:
             line_val = line_range[0]
-
-        if lens is not None and category is not None:
-            raise MutexViolationError(
-                f"finding tagged both Lens: {lens} and Category: {category}"
-            )
 
         body = "\n".join([header_line, *block])
 
@@ -306,9 +273,6 @@ def _parse_findings(output: str) -> list[dict]:
                 "readjudicated": readjudicated,
                 "admitted": admitted,
                 "round": current_round,
-                "lens": lens,
-                "lens_reattributed": reattributed,
-                "category": category,
                 "body": body,
                 "section": current_section,
             }
@@ -445,67 +409,6 @@ def report_has_block(output: str, heading: str, min_chars: int = 1) -> Result:
     if nonws >= min_chars:
         return ("PASS", f"### {heading} block has {nonws} non-ws char(s)")
     return ("FAIL", f"### {heading} block empty ({nonws} < {min_chars} non-ws char(s))")
-
-
-def report_block_contains(
-    output: str, heading: str, pattern: str, case_insensitive: bool = True
-) -> Result:
-    """PASS if `pattern` matches (regex search) within the union of all
-    `### <heading>` blocks."""
-    union = "\n".join(_report_blocks(output, heading))
-    flags = re.I if case_insensitive else 0
-    if re.search(pattern, union, flags):
-        return ("PASS", f"{pattern!r} found in ### {heading} block(s)")
-    return ("FAIL", f"{pattern!r} not found in ### {heading} block(s)")
-
-
-_SEVERITY_ORDER = {"Critical": 4, "Important": 3, "Minor": 2, "Suggestion": 1}
-
-
-def _severity_at_least(actual: str | None, floor: str) -> bool:
-    if actual is None:
-        return False
-    return _SEVERITY_ORDER.get(actual, 0) >= _SEVERITY_ORDER.get(floor, 0)
-
-
-def category_finding_fires(
-    output: str,
-    category: str,
-    severity: str | None = None,
-    severity_at_least: str | None = None,
-) -> Result:
-    """Category-tagged finding fires (retained — used by category fixtures)."""
-    findings = _parse_findings(output)
-    for f in findings:
-        if f["category"] != category:
-            continue
-        if severity is not None and f["severity"] != severity:
-            continue
-        if severity_at_least is not None and not _severity_at_least(
-            f["severity"], severity_at_least
-        ):
-            continue
-        return ("PASS", f"Category: {category} at {f['severity']} fires")
-    descr = (
-        f"Severity: {severity}"
-        if severity
-        else f"Severity ≥ {severity_at_least}"
-        if severity_at_least
-        else "any severity"
-    )
-    return ("FAIL", f"no Category: {category} finding at {descr}")
-
-
-def category_finding_does_not_fire(output: str, category: str) -> Result:
-    findings = _parse_findings(output)
-    for f in findings:
-        if f["category"] == category:
-            return (
-                "FAIL",
-                f"unexpected Category: {category} finding at {f['file']} "
-                f"(severity {f['severity']})",
-            )
-    return ("PASS", f"no Category: {category} findings")
 
 
 # ---------------------------------------------------------------------------
@@ -837,9 +740,6 @@ _CHECK_REGISTRY = {
     "finding-body-does-not-contain": finding_body_does_not_contain,
     "finding-body-contains": finding_body_contains,
     "report-has-block": report_has_block,
-    "report-block-contains": report_block_contains,
-    "category-finding-fires": category_finding_fires,
-    "category-finding-does-not-fire": category_finding_does_not_fire,
     # Convergence model (#333 §3)
     "member-enters-t": member_enters_T,
     "member-resolved": member_resolved,
