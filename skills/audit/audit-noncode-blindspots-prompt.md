@@ -47,9 +47,17 @@ Task tool (general-purpose, model: opus):
     later. Do not self-censor findings because another lens *might* have
     found the same thing.
 
-    ## Artifact
+    ## Artifact (<type>)
 
-    [PASTE: Full artifact content]
+    The artifact under review is in the `## Artifact (<type>)` section of the shared
+    dispatch-context bundle:
+
+    [PASTE: absolute path to scratch/<run-id>/dispatch-context.md]
+
+    Read that section in full. (The same file also carries Supporting Context
+    and Operating Environment sections used by the lenses; you only need the
+    Artifact section, but you may consult the others if useful.) If you cannot
+    read the file, abort and report the missing path.
 
     ## Lens Summary
 

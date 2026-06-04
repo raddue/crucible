@@ -62,6 +62,17 @@ delegates instance bugs to `delve` and complexity to `prospector`. Milestone #13
   and carries a separate skill marker. (#334)
 - **Per-role subagent model enforcement** for the quality-gate / red-team loop
   via named `crucible-*` agent types (orthogonal #352, shipped alongside). (#352)
+- **`audit` non-code path polish bundle.** (1) Non-code lens and blind-spots
+  dispatches now read the artifact + supporting context + operating environment
+  from a single shared `dispatch-context.md` bundle (assembled once in Phase 1)
+  instead of inlining the full context into every per-lens dispatch — the bundle
+  is held to a 1500-line ceiling with a deterministic truncation order (artifact
+  never truncated). (2) Phase-4 cross-referencing scales down for non-code
+  findings (label + title-keyword search, capped, best-effort skip — non-code
+  findings have no path/symbol anchor). (3) Tightened the Feasibility vs Risk &
+  Dependencies lens-overlap on `plan` artifacts. (4) Scratch + stale cleanup
+  documented as best-effort under `.claude/`-path-blocking safety hooks. (5)
+  Documented the pipeline-status Read-before-Write first-write requirement. (#256)
 
 ### Removed
 
