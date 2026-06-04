@@ -103,6 +103,17 @@ Critical/Important is a **bug-angle** finding and is re-attributed to the owning
 Correctness/Architecture concern), exactly as `reviewer-common.md`'s DRY re-attribution does — it is
 never emitted as a Critical "quality" finding.
 
+> **Parallel taxonomy — intentional, not a duplicate (#358).** These angles overlap by intuition
+> with the prompt-reviewer *Targeted Lenses* in `shared/reviewer-common.md` but are a deliberately
+> separate vocabulary: `Reuse` mirrors the `DRY` lens; `Altitude` is adjacent to — but distinct
+> from — `SRP` (abstraction *placement* vs. unit *cohesion*); the lenses' `Surgical Changes` and
+> `OCP` have no angle counterpart. The angles lack a precedence / co-fire resolution table (the
+> lenses' Surgical-wins, SRP-contains-DRY, co-fire rules) and are capped *by construction*; but both
+> share a re-attribution mechanism — a genuinely Critical/Important concern is re-attributed to the
+> owning bug angle (mirroring the lenses' DRY escape hatch) rather than emitted as a capped quality
+> finding — because the two serve different machines: this portable engine vs. a live gating
+> reviewer. Synced by intent, never by shared text.
+
 **4.4 Reuse.** New code that duplicates an existing helper/utility instead of calling it, or two
 near-identical blocks introduced in the same diff that would predictably need the same future fix.
 

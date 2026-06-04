@@ -33,6 +33,17 @@
 
 > Four named lenses focus the review on disciplines code-review agents reliably drift on. Each lens emits findings tagged with the lens name (`Lens: <name>`) in addition to the standard finding fields. **Every finding emitted from any lens MUST include a `File:` line in the exact format `File: <path>:<line>` or `File: <path>:<lo>-<hi>` (e.g., `File: src/foo.py:42` or `File: src/foo.py:42-58`). Function names, class names, or parenthetical locators (e.g., `src/foo.py (render_banner)` or `src/foo.py:get_timeout_seconds`) are INVALID — use the actual line number from the diff's `@@` hunks. Findings without a numeric `File:` line are invalid and MUST be dropped before emit.** Prose-only suggestions ("consider being more DRY") are not findings.
 
+> **Parallel taxonomy — intentional, not a duplicate (#358).** The delve-engine
+> (`shared/delve-engine.md`) carries its own *quality angles* (Reuse / Simplification /
+> Efficiency / Altitude) for the instance-bug fan-out. They overlap by intuition but are
+> deliberately separate: `Reuse` mirrors the `DRY` lens; `Altitude` is adjacent to — but distinct
+> from — `SRP` (abstraction *placement* vs. unit *cohesion*); `Surgical Changes` and `OCP` have no
+> angle counterpart. The angles are capped non-gating *by construction* and lack a precedence /
+> co-fire resolution table (the lenses' Surgical-wins, SRP-contains-DRY, co-fire rules); but they
+> share a re-attribution mechanism — a genuinely Critical/Important concern is re-attributed to the
+> owning bug angle (mirroring DRY's escape hatch here) rather than emitted as a capped quality
+> finding. The two vocabularies are kept in sync by *intent*, never by shared text.
+
 #### Surgical Changes (precedence: highest)
 
 > Every changed line should trace to what the user asked for. Drive-by reformatting and adjacent-code "improvements" muddy diffs and increase review burden disproportionately.
