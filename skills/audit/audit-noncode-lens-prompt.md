@@ -26,32 +26,33 @@ Task tool (general-purpose, model: opus):
     - Style or formatting issues
     - Speculative concerns you can't ground in specific artifact text
 
-    ## Artifact ({{ARTIFACT_TYPE}})
+    ## Shared Dispatch Context
 
-    {{ARTIFACT_CONTENT}}
+    Your full context — the artifact under review, supporting context, and
+    operating environment — lives in a single shared file:
 
-    ## Supporting Context
+    {{DISPATCH_CONTEXT_PATH}}
 
-    {{SUPPORTING_CONTEXT}}
+    **Read that file first.** It contains exactly three sections:
 
-    If no supporting context is provided, evaluate the artifact on its
-    own merits.
+    - `## Artifact ({{ARTIFACT_TYPE}})` — the {{ARTIFACT_TYPE}} document you
+      are auditing. Read it carefully, end to end.
+    - `## Supporting Context` — referenced docs, fetched issue bodies, and
+      project memory. If this section is `(none)` or empty, evaluate the
+      artifact on its own merits.
+    - `## Operating Environment` — the executor's actual constraints
+      (toolchain capacities, framework versions, hard caps of skills the
+      artifact names as its execution vehicle, tracker conventions, and any
+      stale-data caveats). For Feasibility and Risk & Dependencies lenses on
+      plan and concept artifacts this is load-bearing: ground your findings
+      in these specific constraints rather than abstract "this is generally
+      hard" reasoning. If this section is empty, `(none detected)`, or marked
+      skipped (common for design artifacts), evaluate without
+      environment-specific grounding and do NOT invent constraints not
+      listed there.
 
-    ## Operating Environment
-
-    {{OPERATING_ENVIRONMENT}}
-
-    The Operating Environment block describes the executor's actual
-    constraints — toolchain capacities, framework versions, hard caps of
-    skills the artifact names as its execution vehicle, tracker conventions,
-    and any stale-data caveats. For Feasibility and Risk & Dependencies
-    lenses on plan and concept artifacts, this is load-bearing: ground
-    your findings in these specific constraints rather than abstract
-    "this is generally hard" reasoning.
-
-    If the block is empty or absent (common for design artifacts), evaluate
-    the artifact without environment-specific grounding. Do not invent
-    constraints not listed here.
+    If you cannot read the shared file, abort and report the missing path —
+    do not proceed without your context.
 
     ## Your Job
 

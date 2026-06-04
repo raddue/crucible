@@ -136,8 +136,8 @@ The Systemic-Only Rule suppresses re-reporting a single-reproduction finding **o
 
 | Lens | Core Question | Focus Areas | Exclusions |
 |---|---|---|---|
-| Feasibility | "Can this actually be executed as described?" | Resource requirements vs availability, timeline realism, skill/capability assumptions, tooling prerequisites | Risk identification (Risk & Dependencies lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens) |
-| Risk & Dependencies | "What could derail execution?" | External dependency risks, sequencing risks, single points of failure, rollback provisions, blast radius of partial failure | Execution feasibility (Feasibility lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens) |
+| Feasibility | "Can this actually be executed as described?" | Resource requirements vs availability, timeline realism, skill/capability assumptions, tooling prerequisites | Risk identification (Risk & Dependencies lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens). **Sequencing-risk-of-resource-exhaustion belongs to Risk & Dependencies** — Feasibility owns "can the resource constraint be satisfied at all"; Risk owns "what happens if it is satisfied unevenly or in the wrong order." |
+| Risk & Dependencies | "What could derail execution?" | External dependency risks, sequencing risks, single points of failure, rollback provisions, blast radius of partial failure | Execution feasibility (Feasibility lens), missing sections (Completeness lens), environmental assumptions (Assumptions lens). **Whether a resource constraint can be met at all belongs to Feasibility** — Risk owns the consequences of uneven or mis-sequenced satisfaction, not the bare can-it-be-met question. |
 | Completeness | "What's missing from this plan?" | Phases covered, milestones defined, success criteria measurable, testing strategy present, communication plan | Execution feasibility (Feasibility lens), risk identification (Risk & Dependencies lens), environmental assumptions (Assumptions lens) |
 | Assumptions | "What's being taken for granted?" | Environmental assumptions, team capacity assumptions, technical assumptions, timeline assumptions, stakeholder alignment assumptions | Execution feasibility (Feasibility lens), risk identification (Risk & Dependencies lens), missing sections (Completeness lens) |
 
@@ -219,6 +219,8 @@ Every status update must include:
 ## Pipeline Status
 
 Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
+
+**Read-then-Write on the first write of a run.** The Write tool refuses to overwrite a pre-existing file that has not been Read in the current session, so a `pipeline-status.md` left behind by a prior skill run makes the *first* status write fail with "File has not been read yet." On the FIRST status write of an audit run, Read the existing `pipeline-status.md` first (its contents belong to another run — ignore them) and then Write. Subsequent writes within the same run need no re-Read — except after a compaction, which resets the session's read-tracking, so the first write post-compaction must Read first (the Compaction Recovery / Pipeline Status step already does this).
 
 ### Write Triggers
 
@@ -319,6 +321,8 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 
 All relative paths in this document (e.g., `scratch/<run-id>/manifest.md`) are relative to `~/.claude/projects/<project-hash>/memory/audit/`.
 
+**Stale cleanup is best-effort.** Both the start-of-run stale-cleanup here and the Phase 4 end-of-run cleanup delete directories under `~/.claude/projects/`. In environments where a safety hook blocks shell access to `.claude/` paths, those deletes fail; treat a blocked delete as a no-op (do not retry or escalate). A blocked GC simply defers reaping — scratch directories accumulate harmlessly until a run executes in a context where the delete is permitted. Never let a failed cleanup abort or degrade an audit.
+
 **Stale cleanup:** At the start of each audit run, delete scratch directories whose **`heartbeat.md` mtime** (or, if `heartbeat.md` is absent, the most-recent file mtime inside the directory) is older than 1 hour. The orchestrator writes `scratch/<run-id>/heartbeat.md` at every narration point (see Communication Requirement and Pipeline Status Write Triggers), so an active audit always has a fresh heartbeat even during the long Phase 2 dispatch → first lens completion gap when no other scratch files are being written. Do not delete directories whose heartbeat is within the 1-hour window (they belong to concurrent or long-running sessions).
 
 **User-gate exceptions to stale cleanup.** User gates can idle for hours between the orchestrator's last narration and the user's response, during which no heartbeat is refreshed. Two exceptions protect these directories:
@@ -365,7 +369,7 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 
 (The artifact type was already recovered by Step 1 above via `artifact-type.md`.)
 
-1. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation. **Supporting-context recovery:** If `gate-approved.md` is absent and `supporting-context.md` is absent, re-run step 4 (supporting-context gathering). If `supporting-context.md` exists, reuse it as-is rather than re-running step 4 (avoids non-deterministic re-resolution). If `dispatch-context.md` is absent, re-run step 4.5 (operating-environment gathering) before proceeding to Phase 2 — this applies to all non-code types including `design`, because step 4.5 now always writes the file (a stub for skipped design artifacts), so absence unambiguously means lost-to-compaction.
+1. **Phase 1 recovery:** If `artifact-type.md` exists but `gate-approved.md` does not, re-present the scope summary to the user for confirmation. The over-ceiling case needs no special recovery handling: the warning is informational and the truncated bundle (Supporting Context and Operating Environment trimmed to empty) is deterministically rebuilt by the existing "dispatch-context.md absent → re-run step 4.5" rule below, so re-presenting the scope summary is the only step required. **Supporting-context recovery:** If `gate-approved.md` is absent and `supporting-context.md` is absent, re-run step 4 (supporting-context gathering). If `supporting-context.md` exists, reuse it as-is rather than re-running step 4 (avoids non-deterministic re-resolution). If `dispatch-context.md` is absent, re-run step 4.5 (shared dispatch-bundle assembly: artifact + supporting context + operating environment) before proceeding to Phase 2 — this applies to all non-code types including `design`, because step 4.5 always writes the bundle file (with the operating-environment section stubbed for skipped design artifacts), so absence unambiguously means lost-to-compaction.
 2. **Phase 2 recovery:** Look for `<lens-name-kebab>-findings.md` files matching the type's lens names (e.g., `technical-soundness-findings.md` for design). Dispatch any lenses that don't have findings files.
 3. **Phase 2.5 recovery:** If all 4 lens findings exist but `noncode-blindspots-findings.md` does not, build the lens summary and dispatch the non-code blind-spots agent. If `noncode-blindspots-findings.md` exists, Phase 2.5 is complete.
 4. **Phase 3/4 recovery:** Same as code path — re-read findings, re-run synthesis if needed, continue with reporting.
@@ -411,7 +415,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    - **Project-memory references** — bare filenames or relative paths that match Crucible-style memory conventions (see Project-Memory Reference Resolution below)
    - **Skill name references** — names of skills the artifact mentions (e.g., "the `riftlock-standards` skill", "`feedback_use_component_library`")
 
-   For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 800 lines total.** This keeps non-code dispatches within the 1500-line hard cap when combined with artifact content (typically ~300-500 lines), operating environment (≤500 lines), and template overhead. If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 800-line context cap reached]". If no references found: proceed with artifact-only context.
+   For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 800 lines total.** This bounds the Supporting Context section of the shared dispatch-context bundle (step 4.5), which the lens agents read as a file alongside the artifact (~300-500 lines) and operating environment (≤500 lines). These are per-section soft caps and can sum above the bundle's hard ceiling; step 4.5 enforces the actual 1500-line ceiling on the assembled bundle via a deterministic truncation order, with Supporting Context truncated first. If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 800-line context cap reached]". If no references found: proceed with artifact-only context.
 
    **Project-Memory Reference Resolution.** A reference that does not resolve repo-relative is tried against the project-memory directory at `~/.claude/projects/<project-hash>/memory/`:
    - If the reference is a path (e.g., `memory/cartographer/conventions.md`), try `<project-memory-root>/cartographer/conventions.md`.
@@ -434,7 +438,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
 
    Otherwise gather normally — the design has executor-touching content that needs grounded constraints.
 
-   When the predicate skips the gather, **the orchestrator must still write a stub `dispatch-context.md` containing `## Operating Environment\n(skipped — design artifact, predicate-determined no-op)`** so that absence of the file unambiguously means "lost to compaction" during recovery. The stub is a *determined* no-op (driven by the predicate), not an arbitrary skip.
+   When the predicate skips the gather, the bundle below is still written in full; only its **Operating Environment section** becomes the stub `## Operating Environment\n(skipped — design artifact, predicate-determined no-op)`. Because the bundle file is always written for every non-code type, absence of the file unambiguously means "lost to compaction" during recovery. The stub is a *determined* no-op (driven by the predicate), not an arbitrary skip.
 
    Inspect:
    - The project's `CLAUDE.md` for toolchain / build / framework constraints
@@ -442,10 +446,19 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    - The skill(s) the artifact names as its execution vehicle (e.g., `/audit`, `/build`, `/debug`) — pull their hard caps, budgets, and red flags from the named skill's SKILL.md
    - The tracker conventions from `preferences.md` if present
 
-   Bundle these into a `## Operating Environment` block. **Soft cap: 500 lines.** Write to `scratch/<run-id>/dispatch-context.md` so lens dispatches reference the same file rather than each prompt copy-pasting 500 lines × 5 dispatches. If the bundle is empty (no relevant constraints found), record `## Operating Environment\n(none detected)` and proceed — the lens prompts treat an empty block as a no-op.
+   Bundle these into a `## Operating Environment` block. **Soft cap: 500 lines.** If empty (no relevant constraints found), record `## Operating Environment\n(none detected)` — the lens prompts treat an empty block as a no-op.
+
+   **Assemble the shared dispatch-context bundle (closing action of this step).** Write `scratch/<run-id>/dispatch-context.md` as the SINGLE shared context every Phase 2/2.5 non-code agent reads, with exactly these three sections in order:
+   - `## Artifact (<type>)` — the full artifact content (the audited file's text, or, for a freeform `concept`, the input text). This is the only persisted copy of the artifact, so freeform input is not lost to compaction.
+   - `## Supporting Context` — the bundle written to `supporting-context.md` in step 4 (reuse it verbatim; if step 4 found no references, write `(none)`).
+   - `## Operating Environment` — the block assembled above (real, `(none detected)`, or the design-skip stub).
+
+   Lens dispatches reference this one file by path instead of each dispatch copy-pasting the artifact + ≤800 supporting + ≤500 environment lines (~N× the bundle across N lenses). The win is *where the bytes live*: the large artifact/supporting/operating-environment content is lifted out of **each** per-lens dispatch — the per-lens dispatch file now carries the lens template plus a one-line pointer to the bundle, not N copies of the content — so the bundle is read once and referenced N times instead of inlined N times. (The Task-tool pointer prompt stays within dispatch-convention's ≤120-token sizing; the dispatch file itself remains the full lens template, which the bundle pointer keeps from ballooning, not from being tiny.) Separately, the **shared bundle** is governed by its own explicit **1500-line hard ceiling** — applied as a distinct backstop, not merely by the per-section soft caps (which sum to ~1800 — the truncatable overhead alone is ≤1300, and a large never-truncated artifact pushes the bundle over — and so cannot enforce the ceiling on their own).
+
+   **Bundle hard ceiling and truncation order.** The `## Artifact` section is the irreducible floor — **NEVER truncated**, because it is the thing under review. If the assembled bundle would exceed **1500 lines total**, truncate the supporting/operating-environment overhead around the artifact deterministically: the `## Supporting Context` section first (lowest priority; it already carries the step-4 "[truncated …]" logic), then the `## Operating Environment` section if the bundle is still over. Record any truncation applied here in the affected section with a note: "[truncated — 1500-line bundle ceiling reached]". This bounds the supporting + operating-environment **overhead** added around the artifact, not the artifact's own volume. The degenerate case where the artifact alone exceeds 1500 lines (an unusually large single-pass non-code artifact, since the non-code path has no chunking escape) is just this truncation order taken to its limit: dropping `## Supporting Context` then `## Operating Environment` trims **both to empty**, leaving the artifact plus the truncation notes. This is mechanical and deterministic — re-running step 4.5 on the same artifact reproduces the identical truncated bundle — so there is no special state to record and nothing for recovery to get wrong. Surface it as an informational note at the Phase-1 user gate (step 5): the artifact alone exceeds the ceiling, so Supporting Context and Operating Environment were dropped, and the user MAY narrow scope. Narrowing is just the normal scope-confirmation flow (re-scope the artifact, re-run from step 4) — not a special degenerate branch, and it needs no special marker.
 
    Anti-rationalization (plan/concept only): skipping this step because "the constraints are obvious" produces generic feasibility findings ("sampling is generally hard") instead of concrete ones grounded in the executor's actual caps. For plan/concept, always run. (For `design`, the skip path is governed by the predicate above, not orchestrator judgment.)
-5. **Present user gate:** Before presenting, write `scratch/<run-id>/gate-pending.md` (contents: timestamp + "awaiting user scope approval") so stale-cleanup protects this directory across an idle gate (see Scratch Directory). Then prompt: "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Operating environment: [one-line summary of bundled constraints, if any]. Proceed?"
+5. **Present user gate:** Before presenting, write `scratch/<run-id>/gate-pending.md` (contents: timestamp + "awaiting user scope approval") so stale-cleanup protects this directory across an idle gate (see Scratch Directory). Then prompt: "Auditing [artifact name] as a [type]. Supporting context: [list of referenced docs, if any]. Operating environment: [one-line summary of bundled constraints, if any]. [if the artifact alone exceeds the 1500-line ceiling: note that Supporting Context and Operating Environment were dropped to fit; you may narrow scope.] Proceed?"
 6. **Write gate marker:** On approval, delete `gate-pending.md` and write `scratch/<run-id>/gate-approved.md` (same as code path).
 
 ## Phase 2: Analysis
@@ -455,12 +468,12 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
 Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel, using `audit-noncode-lens-prompt.md` with lens-specific instruction injection.
 
 For each of the 4 lenses matching the artifact type (see Artifact Types table):
-1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`, `{{OPERATING_ENVIRONMENT}}`. The `{{OPERATING_ENVIRONMENT}}` slot is filled from `scratch/<run-id>/dispatch-context.md` (see Phase 1 step 4.5). For `design` artifacts where Phase 1 skipped the gathering, the stub file contains `## Operating Environment\n(skipped — design artifact)` — the prompt template handles this no-op case.
+1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, and `{{DISPATCH_CONTEXT_PATH}}` (the absolute path to `scratch/<run-id>/dispatch-context.md`). The artifact content, supporting context, and operating environment are **not** inlined per-lens — they live once in the shared dispatch-context bundle (assembled in Phase 1 step 4.5) and each lens reads them from that file. This keeps the artifact/context bytes out of every lens dispatch (read once from the bundle, not copy-pasted once per lens). For `design` artifacts where Phase 1 skipped the operating-environment gather, the bundle's Operating Environment section is the stub `(skipped — design artifact, predicate-determined no-op)` — the prompt template handles this no-op case.
 2. Dispatch via disk-mediated dispatch
 3. Write findings to `scratch/<run-id>/<lens-name-kebab>-findings.md` (e.g., `technical-soundness-findings.md`)
 
 **Key differences from code path:**
-- Full artifact content to each lens (no Tier 1/Tier 2 tiering — non-code artifacts are small)
+- Full artifact content available to each lens via the shared dispatch-context bundle (no Tier 1/Tier 2 tiering — non-code artifacts are small)
 - All single-agent (no dual-agent Consistency pattern)
 - No partition records (all lenses see the full artifact)
 - Findings use `section` instead of `file` + `line_range`, and `concern` instead of lens-specific code fields
@@ -562,7 +575,7 @@ Dispatch: `Task tool (general-purpose, model: opus)` using `audit-noncode-blinds
 [repeat for each lens]
 ```
 
-The blind-spots agent receives the full artifact content + lens summary and hunts for document-level gaps (see Non-Code Blind-Spots Categories above). Write findings to `scratch/<run-id>/noncode-blindspots-findings.md`.
+The blind-spots agent reads the full artifact from the shared dispatch-context bundle's `## Artifact` section (`scratch/<run-id>/dispatch-context.md`, the same file the lenses read — no separate artifact copy) and receives the lens summary, then hunts for document-level gaps (see Non-Code Blind-Spots Categories above). Write findings to `scratch/<run-id>/noncode-blindspots-findings.md`.
 
 **No follow-up dispatches** for non-code (the artifact is fully visible to the blind-spots agent — there are no "never-examined files").
 
@@ -673,7 +686,8 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 1. Present the ranked, grouped findings to user.
 
 2. **Cross-reference existing issues:** Using whatever tools are available in the environment (MCP servers, CLIs, etc.), search for existing open issues using specific file paths and error descriptions from findings as search terms.
-   - **Budget:** Cross-reference the top 10 findings by severity (Fatal first, then Significant). Check at most 2-3 search queries per finding.
+   - **Budget (code findings):** Cross-reference the top 10 findings by severity (Fatal first, then Significant). Check at most 2-3 search queries per finding — code findings carry `file`/`sites` that map to natural path and symbol search terms.
+   - **Non-code findings (design / plan / concept) — scaled-down strategy:** non-code findings carry a `section` (a markdown heading), not a `file`/symbol, so there is nothing to grep by path. Do NOT run the per-finding code search above. Instead search by (a) the audited issue's labels when the artifact maps to a tracked issue, and (b) keywords from the document title — capped at **5 queries total for the whole run** (not per-finding). If neither anchor exists (no tracked issue, generic title), skip cross-referencing entirely and note "cross-referencing skipped — non-code findings have no symbol/path anchors." Cross-referencing here is best-effort; the absence of a match is never itself a finding.
    - If the tracker is slow or unresponsive after 3+ failed/timed-out queries, skip remaining cross-references.
    - Present at most 2-3 candidate matches per finding.
    - Flag likely duplicates with "Possible existing issue: [reference]" -- never silently drop a finding; let user decide.
@@ -684,7 +698,7 @@ The blind-spots agent does NOT analyze compounding risks from existing findings.
 
 4. **Record to cartographer (code audits only):** After completion, dispatch cartographer recorder (Mode 1) with the Phase 1 manifest only. The manifest was deliberately scoped during exploration and is reliable structural data. Do NOT feed incidental observations from Phase 2 bug-hunting agents to cartographer -- those are unverified structural inferences. **Skip for non-code audits** — no subsystem manifest to record.
 
-5. **Cleanup:** Delete `scratch/<run-id>/` after all applicable Phase 4 steps have resolved (filing decision made; cartographer step run-or-skipped per artifact type). Do not clean up prematurely -- the report on disk is needed for compaction recovery during Phase 4.
+5. **Cleanup:** Delete `scratch/<run-id>/` after all applicable Phase 4 steps have resolved (filing decision made; cartographer step run-or-skipped per artifact type). Do not clean up prematurely -- the report on disk is needed for compaction recovery during Phase 4. **Cleanup is best-effort** (see Scratch Directory): where a safety hook blocks shell access to `.claude/` paths, the delete may fail — treat that as a no-op, not an error, and do not retry or escalate. The next run's stale-cleanup is the authoritative GC (itself best-effort under the same constraint); a lingering directory is harmless.
 
 ## Terminal Verdict Emit
 
@@ -718,8 +732,8 @@ Blind-spots template (`Task tool, general-purpose, model: opus`):
 
 ### Non-Code Audit Templates
 
-- `audit-noncode-lens-prompt.md` -- Parameterized lens dispatch for all non-code artifact types. Orchestrator fills `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, `{{ARTIFACT_CONTENT}}`, `{{SUPPORTING_CONTEXT}}`, `{{OPERATING_ENVIRONMENT}}`.
-- `audit-noncode-blindspots-prompt.md` -- Non-code blind-spots dispatch (receives lens summary, not coverage map)
+- `audit-noncode-lens-prompt.md` -- Parameterized lens dispatch for all non-code artifact types. Orchestrator fills `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, and `{{DISPATCH_CONTEXT_PATH}}` (the artifact, supporting context, and operating environment are read by the agent from the shared bundle at that path, not inlined per dispatch).
+- `audit-noncode-blindspots-prompt.md` -- Non-code blind-spots dispatch (receives lens summary; reads the artifact from the shared dispatch-context bundle, not coverage map)
 
 Each analysis template includes:
 - Dispatch metadata (for orchestrator reference): `Task tool (general-purpose, model: opus)`
@@ -745,7 +759,7 @@ Each analysis template includes:
 - **Silently drop a single-reproduction finding when `/delve` is absent** — surface it under the "Out-of-scope instance bugs (install /delve to triage)" stub.
 - **Run Drift without `--drift intent=<path>`, auto-discover an intent artifact, or advertise a Drift section when `--drift` was not passed.**
 - **Re-derive maintainability/complexity/hotspot friction inline** — delegate to `/prospector`. **Author or fix tests** — Test-health diagnoses + prioritizes only; staleness routes to `test-coverage`.
-- Exceed 1500 lines of total prompt content in any agent dispatch
+- Exceed 1500 lines of total prompt content in any agent dispatch — this cap governs inlined prompt content per dispatch, and for non-code the shared dispatch-context bundle is held to the same 1500-line ceiling via the step-4.5 truncation order (artifact never truncated; Supporting Context then Operating Environment trimmed if over)
 - Feed Phase 2 structural inferences to cartographer (Phase 1 manifest only)
 - Skip narration between agent dispatches (Communication Requirement)
 - Dispatch more than ~20 agents without user awareness (chunking approval includes agent count)
