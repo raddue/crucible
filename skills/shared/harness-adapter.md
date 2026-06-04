@@ -18,15 +18,16 @@
 > OpenCode ships none. Crucible therefore owns its instance engine (`delve-engine`) as a portable
 > skill, and host built-ins are **optional accelerators layered in when present, never dependencies**
 > (I1). Every review skill is *authored to run* on Claude Code, OpenCode, Codex CLI, and Cursor; this
-> milestone **validates** Claude Code + OpenCode at runtime (#335). Codex / Cursor / Pi runtime
-> validation is an explicit follow-up, not a milestone gate.
+> milestone **validates** Claude Code at runtime (#335); OpenCode runtime validation is the
+> non-gating follow-up #337. Codex / Cursor / Pi runtime validation is a further follow-up, not a
+> milestone gate.
 
 ## 1. Supported harnesses
 
 | Harness | Command/skill model | Subagent primitive | Built-in review (accelerator only) | Validation status |
 |---|---|---|---|---|
 | **Claude Code** | `.claude/skills/<name>/SKILL.md`, `name`/`description` frontmatter | Task / Agent tool (parallel) + disk-mediated dispatch (`shared/dispatch-convention.md`) | `/code-review` built-in (optional) | **Validated this milestone (#335)** |
-| **OpenCode** | `.opencode/commands/<name>.md`, `description`/`agent`/`subtask` frontmatter, `$ARGUMENTS` + `@file` includes | `subtask: true` command (parallel where the host model supports it) | none — BYO reference harness | **Validated this milestone (#335)** |
+| **OpenCode** | `.opencode/commands/<name>.md`, `description`/`agent`/`subtask` frontmatter, `$ARGUMENTS` + `@file` includes | `subtask: true` command (parallel where the host model supports it) | none — BYO reference harness | **Runtime validation: non-gating follow-up #337** |
 | **Codex CLI** | prompt file in the Codex prompts dir, prompt metadata header | sequential in-context (no first-class parallel-subagent primitive) → **degradation fallback** | `@codex review` (closed product feature, optional) | Authored-to; runtime validation deferred |
 | **Cursor** | rule / command file in the Cursor commands location | sequential in-context → **degradation fallback** | Bugbot (closed, server-side, optional) | Authored-to; runtime validation deferred |
 | **Pi** | unknown / BYO | unknown → assume **degradation fallback** until probed | unknown | Unknown / BYO; not authored-against |
@@ -115,7 +116,7 @@ source; to change a role's tier, edit the agent def, not the prose.
 | Harness | How the per-role tier is expressed | Status |
 |---|---|---|
 | **Claude Code** | `~/.claude/agents/crucible-<role>.md` with `model:` frontmatter (symlinked from `<repo>/agents/`). The agent-def `model:` binds via the precedence chain above. | **Confirmed** mechanism (docs; runtime-proven by the on-disk transcript read in the enforcement-proof note below). |
-| **OpenCode** | An `agent:` profile per role, named with the intended tier; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #335 confirms. If it cannot, OpenCode degrades to the operator-default floor below. |
+| **OpenCode** | An `agent:` profile per role, named with the intended tier; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #337 confirms. If it cannot, OpenCode degrades to the operator-default floor below. |
 | **Codex / Cursor / Pi** | no first-class per-agent model pin | **Degradation:** model = whatever the harness runs; the recall guarantee relies on the **operator setting a strong default model**. Bounded and documented, never silent. |
 
 **Enforcement is proven by the on-disk subagent transcript model, not a pre-dispatch intent field
@@ -284,7 +285,7 @@ the install checklist — concrete enough to install by (AC6 doc portion).
   **plugin install**, Claude Code namespaces plugin agents (`crucible:crucible-red-team`), and
   bare-name `subagent_type` resolution for plugin-provided agents is **UNCONFIRMED** — the docs specify
   scoping for `@`-mention / `--agent`, not for the Task-tool `subagent_type` field (cf. the OpenCode
-  row's "Authored-to-spec, UNCONFIRMED" / "#335 confirms" status). Until plugin-scoped dispatch is confirmed, the
+  row's "Authored-to-spec, UNCONFIRMED" / "#337 confirms" status). Until plugin-scoped dispatch is confirmed, the
   model-enforcement guarantee is delivered by the **symlink install**; a plugin install whose bare type
   fails to resolve takes the documented **non-silent fallback** above, not silent degradation.
 - **Frontmatter:** `name:` + `description:` (Mapping 1).
@@ -295,11 +296,11 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 - **Degrades:** does not — parallel primitive present.
 - **Comments:** forge CLI rows in Mapping 5 (§6) via shell; paste-mode otherwise.
 
-### OpenCode *(validated #335 — BYO reference harness)*
+### OpenCode *(runtime validation: non-gating follow-up #337 — BYO reference harness)*
 - **Where:** `.opencode/commands/<name>.md`; shared files installed alongside.
 - **Agent defs (model enforcement, Mapping 1b):** author one `agent:` profile per role
   (`crucible-red-team`=opus, etc.) and name it from the skill frontmatter. **Authored-to-spec,
-  unconfirmed** — whether an OpenCode `agent:` profile can pin a model is #335's confirmation; if it
+  unconfirmed** — whether an OpenCode `agent:` profile can pin a model is #337's confirmation; if it
   cannot, this row degrades to the operator-default floor (set a strong default model).
 - **Frontmatter:** `description:` + `agent:` + `subtask: true`; body uses `$ARGUMENTS` and `@file`
   includes (Mapping 1).
@@ -338,6 +339,7 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 
 > **Drift risk (design §9, R5).** This is a documented contract, not a runtime check, so it can drift
 > from a harness's actual behavior as harnesses evolve. The milestone's defense is the #335 portability
-> validation (Claude Code + OpenCode against the same fixture) — runtime evidence for the two reference
-> harnesses — plus the I2 grep test for the marker invariant. Codex / Cursor / Pi rows are
+> validation (Claude Code against the fixture) — runtime evidence for the reference harness — with the
+> OpenCode runtime floor as the non-gating follow-up #337, plus the I2 grep test for the marker
+> invariant. Codex / Cursor / Pi rows are
 > authored-to-spec and should be confirmed against the live harness before relying on them.

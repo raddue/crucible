@@ -1,0 +1,92 @@
+# Changelog
+
+Notable changes to the Crucible skill library. Format loosely follows
+[Keep a Changelog](https://keepachangelog.com/); entries are grouped by
+milestone since skills ship as a library rather than a versioned binary.
+
+## Review-Trio Reshape — 2026-06-03
+
+Splits the code-review trio on an **instance-vs-systemic** axis. `delve` (new)
+owns one-reproduction instance bugs as a portable fan-out engine; `temper` gains
+fix-verification convergence; `audit` becomes a systemic-only reporter that
+delegates instance bugs to `delve` and complexity to `prospector`. Milestone #13
+(epic #338), tickets #328–#336.
+
+### Added
+
+- **`/delve`** — standalone instance-bug reviewer. Drives the shared
+  `delve-engine` once (parallel finder fan-out + one-verifier-per-candidate
+  verify gate) over a diff, PR, or path and prints ranked, verified defects with
+  reproductions. Report-only; `--fix` (working-tree edits) and `--comment`
+  (forge post-back) are opt-in. Forge-agnostic. (#331)
+- **`shared/delve-engine.md`** — the Crucible-owned, harness-portable
+  instance-bug engine: seven finder angles (three bug, four capped non-gating
+  quality) plus a one-verifier-per-candidate verify gate. (#330)
+- **`shared/severity-verdict-contract.md`** — the single severity scale, the
+  verify-gate verdict vocabulary (CONFIRMED / PLAUSIBLE / REFUTED), and the
+  gating rule `T = {CONFIRMED, PLAUSIBLE} × {Critical, Important}`, shared by the
+  whole trio (one scale, no per-skill fork). (#328)
+- **`shared/harness-adapter.md`** — portability convention + per-harness install
+  manifest (documented contract + install step, no runtime shim). (#329)
+- **`audit --bugs`** — opt-in sub-path that runs `/delve` over the audited
+  subsystem and appends a separate instance-bug section using delve's schema. (#332)
+- **`audit --drift intent=<path>`** — opt-in divergence-from-intent section
+  comparing a subsystem against an explicit intent artifact. (#332)
+- **Multi-angle detection fixture** (`skills/temper/evals/fixtures/multi-angle/`)
+  and the live Claude-Code recall-floor validation: a standalone full-7-angle
+  `delve` fan-out on the parallel-dispatch path recalls 7/7 planted bugs. (#333, #335)
+- **I2 marker-allowlist checker** (`scripts/check_i2_marker.py`, a stdlib-only
+  Python checker mirroring the repo's existing `scripts/check_*.py` pattern, run
+  as `python3 scripts/check_i2_marker.py` and wired into the `/stocktake` skill's
+  Phase 1 structural-invariants step) — an anchored, set-equality check that the
+  engine-dispatch marker (the column-0 body line `^dispatch: delve-engine`,
+  written here only inline/backtick-wrapped as `` `dispatch: delve-engine` ``)
+  appears in exactly the two direct dispatchers `{delve, temper}` — any stray
+  extra dispatcher or missing one fails. (#336)
+
+### Changed
+
+- **`audit` code path is now systemic-only** — it reports recurring patterns,
+  structural properties, and absences with no single reproduction. A defect with
+  one concrete reproduction (even across files) is an instance bug and routes to
+  `/delve`. (#332)
+- **`temper` converges by fix-verification of an enumerated tracked set.** Round 1
+  drives `delve-engine` (bug-angle subset, high effort) to enumerate the tracked
+  set `T`; later rounds re-verify each member against the fixed code and admit any
+  new gating finding the fix introduced. Convergence is the resolution status of
+  `T`'s members, never a cross-round Critical+Important count. The fix-loop
+  interface is unchanged (`max_rounds`, `external_review=skip` preserved). (#333)
+- **Engine-dispatch wiring.** The two direct dispatchers (`/delve`, `temper`)
+  carry a column-0 body marker line wiring them to the harness-adapter fan-out
+  mechanism; `audit` reaches the engine only transitively via the `/delve` skill
+  and carries a separate skill marker. (#334)
+- **Per-role subagent model enforcement** for the quality-gate / red-team loop
+  via named `crucible-*` agent types (orthogonal #352, shipped alongside). (#352)
+
+### Removed
+
+- **`audit` no longer finds instance bugs by default.** One-reproduction defects
+  are `delve`'s; audit's `code` lenses are systemic-only. Mitigate with
+  `audit --bugs` (see Migration). (#332)
+
+### Migration
+
+Skills are Markdown — there is **no data migration**. Behavioral notes:
+
+- **`audit` users lose instance bug-finding by default.** Previously `/audit`
+  surfaced concrete one-reproduction defects; the reshaped code path is
+  systemic-only. To get the old instance-bug coverage, run **`/audit --bugs`**
+  (appends a `/delve` instance sweep) or invoke **`/delve`** directly on the diff
+  or subsystem. When `/delve` is not installed, audit surfaces an explicit
+  out-of-scope stub rather than silently dropping instance findings.
+- **`temper` has no interface change.** Round 1 is internally richer (it drives
+  the engine fan-out instead of one holistic reviewer), but the invocation shape
+  is unchanged — `max_rounds=<N>` and `external_review=skip` work as before. No
+  caller update is required.
+- **`/delve` is authored fresh** with a clean retrospective slate. It is **not**
+  seeded from the repo's `code-review` directory — that lineage is `temper`'s
+  ancestor (pre-rename), not delve's. On Claude Code the built-in `/code-review`
+  command still exists and is an optional accelerator, never a dependency.
+- **OpenCode runtime validation is deferred to the non-gating follow-up #337.**
+  The milestone gate (#335) validates Claude Code only; skills remain authored
+  harness-neutral via the harness-adapter.

@@ -50,6 +50,11 @@ Present inventory table:
 | Skill | Files | Lines | Last Modified | Description |
 |-------|-------|-------|---------------|-------------|
 
+**Structural invariants (repo-level).** Run the tracked invariant checker from the repo root and treat a non-zero exit as a stocktake failure to surface:
+- `python3 scripts/check_i2_marker.py` — the I2 engine-dispatch marker allowlist: the set of files carrying a column-0 `` `dispatch: delve-engine` `` body line must equal exactly `{delve, temper}` (a stray third dispatcher or a missing one fails). Added #336.
+
+(Other tracked checkers under `scripts/check_*.py` may be run here too as they are brought into alignment.)
+
 ### Phase 2 — Quality Evaluation
 
 Dispatch an Opus Explore agent with all skill contents and the evaluation checklist.
