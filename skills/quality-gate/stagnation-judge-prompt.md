@@ -55,13 +55,14 @@ Build the comparison table (see Output Format below).
 - Any recurring Fatal → **STAGNATION**. A Fatal that survives a fix attempt is genuinely stuck.
 - Only recurring Significants (no recurring Fatals) AND at least one new finding → **PROGRESS**. However, check prior comparison files: if the same Significant recurs for 2 consecutive rounds (appeared in rounds N-2, N-1, and N), treat as stuck → **STAGNATION**.
 - Only recurring Significants, no new findings → **STAGNATION**.
+- **Minor accumulation (zero recurring F/S).** Maintain the persisted **"Consecutive recurring-Minor rounds"** counter (Output Format → Classification). **Increment** it when this round has **zero recurring Fatals and zero recurring Significants** AND Minors are recurring or the Minor count is non-decreasing across this and the prior comparison round; **reset to 0** otherwise. When that counter reaches **2** (this round plus the prior comparison file's persisted value), classify **DIMINISHING_RETURNS** — the loop is surfacing spec-hygiene without converging it. A single round (counter = 1) is not enough. This sits alongside the recurring-Significant bullets above and does not touch the recurring-F/S STAGNATION cases (their "recurring Fatal" / "recurring Significant" preconditions are mutually exclusive with "zero recurring F/S"). **Fail-open:** if uncertain whether Minors are recurring, classify as New, reset the counter, and prefer PROGRESS. **DR-Cause on this path:** when this rule fires, emit `DR-Cause: minor-accumulation`.
 
 ### Step 4: Consecutive-Round Tracking (only when all findings are new)
 
 Read prior comparison files to determine if this is the second consecutive all-new-all-Structural round:
 
 - **First all-Structural round** (no prior comparison file shows all-Structural, or prior round was not all-Structural): verdict = **PROGRESS**. Continue to confirm classification is stable.
-- **Second consecutive all-Structural round** (prior comparison file also shows all-new-all-Structural): verdict = **DIMINISHING_RETURNS**.
+- **Second consecutive all-Structural round** (prior comparison file also shows all-new-all-Structural): verdict = **DIMINISHING_RETURNS** → emit `DR-Cause: structural-saturation`.
 
 ### Fail-Open Defaults
 
@@ -80,6 +81,8 @@ Return exactly this structure:
 
 **Verdict:** PROGRESS | STAGNATION | DIMINISHING_RETURNS
 
+**DR-Cause:** minor-accumulation | structural-saturation | none
+
 ### Comparison Table
 | Round N-1 Finding | Round N Finding | Match | Fix Status | Reasoning |
 |---|---|---|---|---|
@@ -90,9 +93,12 @@ Return exactly this structure:
 - **New findings:** [list or "None"]
 - **Difficulty classes (if all new):** [Surface/Structural per finding, or "N/A"]
 - **Consecutive structural rounds:** [0 | 1 | 2]
+- **Consecutive recurring-Minor rounds:** [0 | 1 | 2]
 
 ### Reasoning
 [1-2 sentences explaining the verdict]
 ~~~
 
-**Important:** Do not pad, hedge, or add caveats outside the structure. The orchestrator parses the Verdict line directly.
+**DR-Cause emission.** On any **DIMINISHING_RETURNS** verdict, set `DR-Cause` to the cause of *this* firing: `minor-accumulation` (Step 3 Mixed Minor-accumulation rule) or `structural-saturation` (Step 4 all-Structural rule). On **any non-DIMINISHING_RETURNS verdict** (PROGRESS / STAGNATION), emit `DR-Cause: none`.
+
+**Important:** Do not pad, hedge, or add caveats outside the structure. The orchestrator parses the `Verdict:` and `DR-Cause:` lines directly (it reads the `DR-Cause:` line the same way it reads the `Verdict:` line).

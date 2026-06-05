@@ -4,6 +4,46 @@ Notable changes to the Crucible skill library. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); entries are grouped by
 milestone since skills ship as a library rather than a versioned binary.
 
+## QG Stagnation-Score Cleanup — 2026-06-05
+
+Makes the quality-gate stagnation *judge* (not the weighted score) Minor-aware,
+reconciles the contradicting Minor prose, documents siege-once-on-full-artifact
+for chunked gates, and adds a `DR-Cause` telemetry discriminator. The weighted
+score (`Fatal=3, Significant=1, Minor=0`) is unchanged. Tickets #260, #258.
+
+### Changed
+
+- **Stagnation judge is Minor-aware.** A new Step-3 Mixed-branch rule in
+  `stagnation-judge-prompt.md` classifies `DIMINISHING_RETURNS` when Minors
+  recur/accumulate at a flat score with **zero recurring Fatals/Significants**,
+  corroborated over 2 rounds via a persisted "Consecutive recurring-Minor rounds"
+  counter (analogous to the existing all-Structural counter); fail-open to
+  PROGRESS. Reconciled the `## Minor Issue Handling` prose accordingly — Minors
+  still never enter the weighted score and never trigger fix rounds, but the
+  judge may weigh sustained Minor accumulation at round ≥ threshold. The weighted
+  score is unchanged. (#260)
+- **Chunked-gate siege scope** is now documented as dispatched **once on the full
+  artifact**, not per-chunk, with the acknowledged chunk-local sink tradeoff. (#258)
+
+### Added
+
+- **`DR-Cause` judge discriminator** — a `DR-Cause: minor-accumulation |
+  structural-saturation | none` Output-Format line emitted per DIMINISHING_RETURNS
+  path (parsed like `Verdict:`), plus a convergence-log-only `dr_cause` field
+  (`minor-accumulation | structural-saturation | consensus | null`,
+  key-presence-versioned, **no `marker_version` bump**, no verdict-marker field),
+  with the canonical denominator rule reconciled to filter on `dr_cause`
+  key-presence. The orchestrator composes a distinct minor-accumulation
+  DIMINISHING_RETURNS user message at both escalation sites. (#260)
+- **`scripts/check_qg_stagnation_minor.py`** — a stdlib structural checker (path-
+  pinned to the judge prompt + `quality-gate/SKILL.md`) guarding the Minor-aware
+  rule, the counter line, the `DR-Cause` enum, the reconciled Minor prose, and the
+  convergence-log `dr_cause` value set; wired into `/stocktake`. (#260)
+
+Disposition: #258(1) fixed (siege-once doc); #258(2) closed accepted/inherent for
+short thresholds; #258(3) (`diminishing-returns` rename) closed won't-fix
+(contract-risk-exceeds-benefit).
+
 ## Review-Trio Reshape — 2026-06-03
 
 Splits the code-review trio on an **instance-vs-systemic** axis. `delve` (new)
