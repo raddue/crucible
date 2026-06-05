@@ -660,10 +660,12 @@ For thresholds 3-5 the short window means no silent-seed pass is feasible; the j
 4. The content of any prior `round-*-comparison.md` files (for consecutive-round state tracking)
 5. The full content of `stagnation-judge-prompt.md` as the agent's instructions
 
-**Reading the verdict:** The judge returns a structured verdict: **PROGRESS**, **STAGNATION**, or **DIMINISHING_RETURNS**.
+**Reading the verdict:** The judge returns a structured verdict: **PROGRESS**, **STAGNATION**, or **DIMINISHING_RETURNS**. The orchestrator **parses the judge's `DR-Cause:` line the same way it parses the `Verdict:` line**, writes the resolved value into `round-N-comparison.md`, and uses it for (a) selecting the DIMINISHING_RETURNS user-facing message below and (b) the convergence-log `dr_cause` field (`none → null` on write — see Convergence Telemetry).
 - **PROGRESS** → loop again
 - **STAGNATION** → escalate: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list from judge]. Escalating."
-- **DIMINISHING_RETURNS** → escalate: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list from judge]. Presenting for user judgment."
+- **DIMINISHING_RETURNS** → escalate, with the message **keyed off `DR-Cause`** (the judge emits which cause fired; the orchestrator — not the judge — composes the matching user-facing message). `minor-accumulation` is the only special arm; everything else routes to the default message so every DR exit has a defined message:
+  - When `DR-Cause = minor-accumulation` → "Quality gate: Minors are accumulating at a flat score while Fatal/Significant findings still churn without converging. Recurring Minors: [list from judge]. This is user-judgment, not a forced fix loop (Minors never trigger fix rounds). Presenting for user judgment."
+  - Otherwise (`structural-saturation`, `consensus`, or absent/unattributable) → "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list from judge]. Presenting for user judgment."
 
 **The judge also writes:** a `round-N-comparison.md` file. The orchestrator saves the judge's full output as `round-N-comparison.md` in the scratch directory. This file is used by future judge dispatches for consecutive-round tracking.
 
@@ -722,6 +724,8 @@ A chunked gate has two independent round counters: a **local** counter per chunk
 
 **Cross-chunk round:** After all chunks complete, the final integration round increments the global counter but is conceptually its own "mini-chunk" with `suppression_threshold` = 5 (lower, because integration issues should escalate faster than within-chunk issues). Consensus is mandatory for the cross-chunk round (single-model review is too narrow for integration-surface bugs).
 
+**Siege on chunked gates:** siege dispatches **once on the full artifact**, not per-chunk (see Security Surface Detection → Dispatch timing → Chunked-gate siege scope for the rationale and the chunk-local tradeoff).
+
 **Canonical `chunk_id` grammar (INV-A15 / #265).** Chunk identifiers used in marker fields (`LookHarderRounds`, `PersistentFindingRounds`), convergence-log entries (`look_harder_rounds`, `persistent_finding_rounds`), and scratch directory names are restricted to TWO forms:
 
 - `chunk-<N>` where `<N>` is a positive integer matching the chunk's directory name (`chunk-1`, `chunk-2`, ...). Used for author-defined chunks.
@@ -757,7 +761,7 @@ Include these in the dispatch prompt alongside the standard red-team template. T
 
 ## Minor Issue Handling
 
-Minor issues do not trigger fix rounds and do not count toward stagnation. However, they accumulate across rounds and contain useful information. Do not silently discard them.
+Minor issues still **do not enter the weighted score and never trigger fix rounds**, but the **stagnation judge may weigh sustained Minor accumulation** at round ≥ threshold (per D1 — see the Step 3 Mixed-branch Minor-accumulation rule in `stagnation-judge-prompt.md`). They accumulate across rounds and contain useful information. Do not silently discard them.
 
 **After the gate completes** (artifact approved or stagnation escalated):
 
@@ -817,6 +821,8 @@ After detection runs:
 - Else → no siege dispatch (log as "no-security-surface")
 
 **Dispatch timing:** Immediately before the first red-team round, in parallel. Quality-gate's loop proceeds independently; siege runs on its own scratch directory and its own counters.
+
+**Chunked-gate siege scope:** When a *chunked* gate detects a security surface, dispatch `/siege` **once on the full artifact**, NOT per-chunk. Rationale: siege is expensive (~6 Opus agents) and security surfaces are typically cross-cutting (auth / data-flow span chunk boundaries), so per-chunk dispatch both multiplies cost *and* misses cross-chunk interactions. **Acknowledged tradeoff (R1 M2):** once-on-full-artifact can under-weight a chunk-*local* sink that only a per-chunk view would surface; this is accepted because (a) siege itself reasons over the full artifact and (b) the per-chunk red-team loop runs on each chunk and would independently flag a local injection sink.
 
 **Awaiting siege (all exit paths):** Before writing any terminal verdict marker, the orchestrator verifies siege has completed. This applies to ALL exits — PASS, ARCHITECTURAL, SUSTAINED_REGRESSION, STAGNATION, ESCALATED. If siege is still running:
 
@@ -1098,8 +1104,12 @@ Fields mirror the verdict marker plus `threshold` (the active `suppression_thres
 - `look_harder_skipped_reason`: enum value `"circuit-breaker"` | `"tail-rubric-already-applied"` recorded on a per-run basis. First reason recorded if multiple skips occur. `null` when no skip occurred.
 - `persistent_finding_rounds`: JSON list, same element grammar as `look_harder_rounds`. Empty list `[]` when no rounds produced `persistent_finding_count ≥ 1`.
 - `persistent_check_count`: integer count of persistence-checker dispatches (error dispatches DO count). Defaults to 0. Invariant: `len(persistent_finding_rounds) ≤ persistent_check_count`.
+- `dr_cause`: convergence-log JSON **only** (there is **no verdict-marker `dr_cause` field** and **no `marker_version` bump** — key presence resolves the null ambiguity). Value set: `"minor-accumulation" | "structural-saturation" | "consensus" | null`.
+  Populated from the judge's `DR-Cause:` discriminator when the resolved reason is `diminishing-returns`, else `null`. The orchestrator **translates `none → null`** when writing — it must NOT write the literal string `"none"`.
+  On a **consensus-resolved** DR exit (no single-judge discriminator line to read), set the sentinel `"consensus"`; a `"consensus"` value **cannot attribute** minor-accumulation vs. structural-saturation, since consensus synthesis collapses the cause.
+  Key-presence semantics: every **post-D5** entry carries the `dr_cause` key (value in `{minor-accumulation, structural-saturation, consensus, null}`); every **pre-D5** entry lacks it entirely. A present-but-`null` value means "this DR-eligible run did not exit on diminishing-returns," not "unknown vintage."
 
-**Version-aware backward compatibility (canonical):** Existing convergence-log entries written before this version was deployed lack `marker_version`, `artifact_hash`, and the new telemetry fields. Consumers MUST treat any missing field on a legacy entry as `null` (unknown), NOT as `false` / `0` / `[]`. **Legacy entries are explicitly excluded from any rate-denominator computation** — clean-confirmation rates, non-clean rates, persistence-checker correlation rates, and the recurrence-rate measurements in Open Questions are computed only over entries with `marker_version: 2`. Forge consumers analyzing pre-design entries treat all new fields as `null` and skip those entries when computing rates.
+**Version-aware backward compatibility (canonical):** Existing convergence-log entries written before this version was deployed lack `marker_version`, `artifact_hash`, and the new telemetry fields. Consumers MUST treat any missing field on a legacy entry as `null` (unknown), NOT as `false` / `0` / `[]`. **Legacy entries are explicitly excluded from any rate-denominator computation** — clean-confirmation rates, non-clean rates, persistence-checker correlation rates, and the recurrence-rate measurements in Open Questions are computed only over entries with `marker_version: 2`. Forge consumers analyzing pre-design entries treat all new fields as `null` and skip those entries when computing rates. **`dr_cause` firing-rate denominators filter on `dr_cause` key-presence** (post-D5 entries always carry the key), **not on `marker_version` alone** — so a pre-D5 (`marker_version:2`-but-no-`dr_cause`) entry is not pulled into a `dr_cause` denominator.
 
 **Size management:** The log is append-only. Rotate via mtime check: if the file exceeds 10,000 lines, the next gate run renames it to `convergence-log-<YYYY-MM>.jsonl` (archive) and starts a fresh log. Archives are never deleted by quality-gate — the user manages retention.
 
@@ -1157,7 +1167,7 @@ Exit modes beyond clean approval. **Single-round stagnation, single-round regres
 - **Sustained regression** (any round) → escalate immediately: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." Verdict: `SUSTAINED_REGRESSION`. Applies pre-threshold too — guarantees loop termination under suppression.
 - **No-op fix** (any round) → escalate immediately on byte-identical artifact OR all-Unresolved verifier (see Fix Mechanism > No-Op Fix Detection). Verdict: `ESCALATED`. Applies pre-threshold too.
 - **Stagnation** (round ≥ threshold) → escalate to user with recurring/new classification from the judge: "Stagnation detected: Round N has [X] recurring issues from round N-1 and [Y] new issues. Recurring: [list]. Escalating." Verdict: `STAGNATION`.
-- **Diminishing returns** (round ≥ threshold) → escalate to user with structural findings from the judge: "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment." Verdict: `ESCALATED`.
+- **Diminishing returns** (round ≥ threshold) → escalate to user, message **keyed off the judge's `DR-Cause`** (Verdict: `ESCALATED` in every case). `minor-accumulation` is the only special arm; everything else routes to the default message so every DR exit has a defined message. When `DR-Cause = minor-accumulation`: "Quality gate: Minors are accumulating at a flat score while Fatal/Significant findings still churn without converging. Recurring Minors: [list]. Presenting for user judgment (Minors never trigger fix rounds — this is a judgment call, not a forced fix)." Otherwise (`structural-saturation`, `consensus`, or absent/unattributable): "Quality gate has resolved all prior issues. Round N found [X] new findings, all Structural (require design-level decisions). Remaining findings: [list]. Presenting for user judgment."
 - **Single-round regression** (round ≥ `suppression_threshold`) → escalate immediately, no judge needed: "Round N score (X) is higher than Round N-1 score (Y). The fix cycle introduced new issues. Escalating." Verdict: `ESCALATED`.
 - **Global safety limit reached (15 rounds)** → escalate to user with full round history. Applies regardless of `suppression_threshold`. Verdict: `ESCALATED`.
 - **Architectural concerns** → fix agent returns `VERDICT: ARCHITECTURAL_BLOCK` (see Architectural Concerns Exit). Escalate immediately, terminal verdict `ARCHITECTURAL`. Applies at any round.
