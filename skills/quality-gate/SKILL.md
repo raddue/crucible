@@ -29,6 +29,8 @@ Apply Tier 1 (structural) and Tier 2 (witness verification) lint per `shared/ret
 
 **Quality-gate-specific obligations:** Receipts from red-team, fix, judge, verifier (the fix-verification dispatch; the persistence-checker JSON output is consumed directly, not receipt-linted — see Persistence Check), and dependency-audit subagents are all linted before their VERDICT is consumed. A lint failure is treated as structurally `BLOCKED` regardless of declared VERDICT — see "Lint failure handling" in the shared convention.
 
+**Red-team receipts lint clean (#366).** Red-team returns a structured `RCPT v1.1` receipt (not prose), so its receipt passes Tier-1/Tier-2 normally — it does **not** lint-to-`BLOCKED`. The red-team **findings** themselves come from the **cited artifact** the receipt pins (`round-N-findings.md`, an `[FINDINGS_OUTPUT_PATH]` the orchestrator supplies — see the score step and writer-inversion below), which the orchestrator reads directly; the receipt's VERDICT is the witness-verified PASS/FAIL boundary plus the supersession/tripwire anchor, not the findings channel. This makes the `:44`/`:56`/`:62` couplings operational (red-team genuinely emits a receipt).
+
 ## Cairn (Layer 3)
 
 Per `shared/cairn-convention.md`. Quality-gate-specific bindings:
@@ -54,6 +56,13 @@ Namespace CLAIM-key discriminators as `quality-gate:<key>` (e.g. `quality-gate:s
 **Sweep (dispatch-loop clause):** The orchestrator MAY NOT dispatch the next round until it has: (1) linted; (2) appended; (3) processed SUPERSEDES; (4) evaluated self-checks; (5) evaluated forward-checks against every active prior entry (TRIPWIRE ∪ TRIPWIRE-CHILD); (6) Read each firing M's full receipt and narrated the re-read; (7) then dispatch.
 
 **Fix-agent supersession.** A QG fix-agent supersedes the prior FAIL red-team receipt. `SUPERSEDES: <fail-prefix>` + cited CLAIM + `exec`/`grep` witness with `ran=TRACE#N`. Tier-2 re-runs the witness against the fix — only survives if clean.
+
+**Fix-agent superseding-witness by artifact class (#366).** Because the red-team FAIL receipt is now a real supersession anchor, the convention's witness-evidence requirement (a FAIL / `SUSPICION ≥ 0.30` predecessor demands the superseding `WITNESS` be `kind ∈ {exec, grep}` + `ran=TRACE#N`) is live on the fix-agent's superseding receipt:
+
+- **Test-less artifacts (test-less design / plan / doc gates — the dominant QG case):** the fix-agent's superseding receipt carries a **`grep` witness against the revised artifact** proving the superseded red-team **finding-anchor** text **no longer appears** (`kind=grep`, `ran=TRACE#N`), **plus** the justification CLAIM citing the FAIL receipt's prefix (`from=<fail-prefix>#…`, per the SUPERSEDES Tier-1 justification requirement in `return-convention.md`). This is what makes the supersession survive Tier-2 — the original concern demonstrably no longer reproduces.
+- **Artifacts WITH tests:** the existing `run-tests` exec witness applies (the `run-tests` mandatory-work declaration above).
+
+**Clean-PASS TRIPWIRE predicate (#366, SP2).** Per the convention's TRIPWIRE-none rule at `return-convention.md` (the Tripwire Manifest section, ~`:427`), `TRIPWIRE: none` is permitted **only** on a PASS receipt with `SUSPICION=0.00`; a FAIL red-team receipt carries `TRIPWIRE: verdict=FAIL`. This is a pointer to the canonical rule, not a redeclaration of the grammar (per CLAUDE.md "link, never copy").
 
 **Stagnation-judge tripwires.** A stagnation judge's receipt declaring `TRIPWIRE: peer-dispatch-disagrees(count)` lets a later round's divergent issue-count fire a re-read, surfacing judge-vs-judge disagreement without a separate escalation channel.
 
@@ -227,6 +236,8 @@ The user's response routes to: continue (loop with suppression intact), escalate
 
         After step 3, the round becomes a normal non-clean round and proceeds to the fix loop (step 6 below). Do NOT re-dispatch siege — siege's prior verdict carries forward; the existing siege-await ordering applies on the next candidate-clean round without a fresh siege dispatch. The terminal sentinel `round-N-complete.md` is NOT written (round became non-terminal). `LookHarderFiredCount` is incremented and the round's LOCAL number is appended to `LookHarderRounds`. `round-N-look-harder.md` is retained as a separate telemetry artifact.
 
+        **Stale-pin inertness (#366) — no supersession needed.** The candidate-clean PASS red-team receipt pinned the pre-overwrite `round-N-findings.md` sha256 in its `ARTIFACTS`; the INV-A17 overwrite makes that pinned hash **stale**. This stale pin is **inert** and needs **no `SUPERSEDES:`**: (a) the candidate-clean PASS receipt's Tier-2 ran **once at insertion** against the then-current file (pre-overwrite) and passed, and (b) no manifest-sweep step re-hashes a prior entry's pinned `ARTIFACTS` against disk after insertion (see the SP3 negative invariant in the invariant table) — so nothing ever reads the stale pin again. The demotion is recorded by the existing INV-A17 mechanism (the overwrite + the Phase-2 flags write), **not** by supersession: a demotion ("the prior clean verdict was wrong", whose witness MUST fire) is the opposite of supersession's semantics ("the prior concern no longer reproduces", whose witness must NOT fire), so `SUPERSEDES:` is the wrong primitive for a demotion. The look-harder FAIL receipt is therefore a normal fresh manifest entry, not a superseding one.
+
       Look-harder does NOT increment the gate's round counter (INV-A2). It is a verification step within slot #1; if it confirms, slot #1 stands; if it demotes, slot #1 is invalidated.
 
    5. Proceed to **Minor Issue Handling** (quick-fix pass on consolidated minors). Minor Issue Handling does not re-trigger siege — it operates on a known-passed artifact.
@@ -250,6 +261,11 @@ The user's response routes to: continue (loop with suppression intact), escalate
    e. If Significant-severity Unresolved: appended to fix journal as informational context
    f. Invoke a FRESH red-team on the revised artifact (no anchoring)
 7. Track weighted score between rounds (Fatal=3, Significant=1):
+
+   **Score source (#366).** The weighted score is computed by the **orchestrator counting the cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections** (the entries under each heading) — **not** from the receipt's CLAIMS. The receipt's `SEVERITY-COUNTS:` line and CLAIMS `*-count=` values are **reviewer-declared cross-checks**: on disagreement with the orchestrator's own section count, the orchestrator **trusts its own count for scoring and flags the discrepancy** in the narration log. This keeps the score un-spoofable — a fabricated declared count cannot move it. The receipt's role is narrower than the score: trust-check VERDICT boundary, supersession anchor (`:56`), tripwire participation (`:44`), and hash-pinned findings artifact.
+
+   **Findings path & writer-inversion (#366).** The `[FINDINGS_OUTPUT_PATH]` is **orchestrator-supplied**: the orchestrator supplies it = the round's `round-N-findings.md` path when it composes the red-team dispatch (it already owns that path). The red-team reviewer is now the **initial writer** of `round-N-findings.md` (it `WROTE`s the file; the receipt's TRACE carries that write) — QG no longer transcribes the reviewer's prose return into that file; it only **reads** the cited artifact (for fix-agent context, the stagnation judge, and look-harder/persistence diffs). The prepended `SEVERITY-COUNTS:` first line is benign for the persistence-checker (it matches findings by title/root-cause, not line number) and tolerated by the look-harder format.
+
    - **Strictly lower score** → progress, loop again
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below)
 8. Read the judge's verdict and act on it (see Stagnation Detection below). See `## Stagnation Detection > Persistence Check` for the orchestrator step that runs BEFORE judge dispatch (Component 4 / #265), and `## Stagnation Detection > Verdict-Level Promotion` for the post-judge promotion step that may convert a `PROGRESS` verdict to `STAGNATION, Reason: persistent-finding-corroborated`.
@@ -1265,6 +1281,7 @@ The invariants below govern the look-harder verification (Component 1), the tail
 | INV-A15 | `chunk_id` grammar restricted to `chunk-<N>` (positive integer) | `cross-chunk`; gate refuses to start on non-conforming chunk dirs |
 | INV-A16 | `ChunkHash` on per-chunk markers only; omitted on non-chunked markers and on cross-chunk integration marker |
 | INV-A17 | On a look-harder-demoted round, `round-N-findings.md` is overwritten with look-harder findings before fix dispatch; `round-N-look-harder.md` is retained |
+| INV-A18 | No manifest-sweep step re-hashes a prior manifest entry's pinned `ARTIFACTS` against disk after insertion (the sweep only re-reads a receipt's text on a tripwire fire) — this is the load-bearing fact making a look-harder-demoted candidate-clean receipt's now-stale pinned hash inert (#366, SP3) |
 
 ### Testable (INV-T1 — INV-T16, with T2b/T2c/T5b suffix variants)
 

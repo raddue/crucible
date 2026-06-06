@@ -107,7 +107,7 @@ Cost-cap signal: <fired | not fired>
 (none)
 ```
 
-The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signal_findings` values (those args control prompts, not emission).
+The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signal_findings` values (those args control prompts, not emission). The ledger format is **unchanged**; its `Total findings: N (F: x, S: y, M: z)` counts now derive from the orchestrator's own section count of the cited findings file (the same single source as the score, #366), with the receipt's `SEVERITY-COUNTS:` line as a declared cross-check.
 
 **Diminishing-return signal (standalone-mode, interactive only, #303):** When `dr_signal_findings != null` AND LOCAL round ≥ 2 AND the count of NEW (delta-vs-prior-round) Fatal+Significant findings ≤ `dr_signal_findings`, emit prompt: "Red-team round N surfaced only K NEW Fatal+Significant findings. Diminishing returns reached. Continue or escalate?" Non-interactive: log `DR signal: fired` in the round ledger; no prompt; loop continues.
 
@@ -148,13 +148,19 @@ type-resolution failure, not a transcript/metadata read.
 
 ### 3. Process findings
 
-- **No Fatal/Significant issues:** Artifact is approved. Proceed.
-- **Fatal/Significant issues found:** Compute the weighted score (Fatal=3, Significant=1). Dispatch fix mechanism. Then go to step 4.
+**Single source of truth (#366).** The reviewer `WROTE`s its rich findings to the cited findings file (`[FINDINGS_OUTPUT_PATH]`) and returns an `RCPT v1.1` receipt citing it. **Both** the qualitative branches below **and** the weighted-score loop (step 4) derive from the **orchestrator's own count of the cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections** — the **same single source**, so the qualitative verdict and the score cannot diverge. The receipt's CLAIMS / `SEVERITY-COUNTS:` line remain reviewer-declared cross-checks, **not** the score source.
+
+- **No Fatal/Significant issues** (cited findings file has zero `### Fatal Challenges` / `### Significant Challenges` entries)**:** Artifact is approved. Proceed.
+- **Fatal/Significant issues found** (cited findings file has ≥1 such entry)**:** Compute the weighted score (Fatal=3, Significant=1) from those sections. Dispatch fix mechanism. Then go to step 4.
 - **Architectural concerns:** Escalate to user immediately. Do not attempt to fix.
+
+**Tier-1 structural lint (standalone, #366).** The **same** `RCPT v1.1` receipt `red-team-prompt.md` emits is received here regardless of caller. Standalone runs the v1.1 **Tier-1** structural linter **only** (per `shared/return-convention.md`'s Integration Checklist — link it, don't copy), including the mandatory `TRIPWIRE:` / `SUPERSEDES:` structural checks. Standalone does **NOT** run QG's **Layer-2 sweep** — the tripwire manifest, the 7-step dispatch-loop sweep, `SUPERSEDES:` processing, and `receipt-ledger.jsonl` parent-child binding are **QG-only** (only QG has the multi-dispatch manifest those operate over). In standalone the `TRIPWIRE:` / `SUPERSEDES:` lines are validated structurally but are **inert as tripwires** (no manifest to sweep). A Tier-2 witness re-read of the receipt's grep is permitted but optional.
+
+<!-- CANONICAL: shared/return-convention.md -->
 
 ### 4. Re-review after fixes
 
-Dispatch a NEW Devil's Advocate subagent (fresh, no prior context, `subagent_type: crucible-red-team`). Compute weighted score and compare:
+Dispatch a NEW Devil's Advocate subagent (fresh, no prior context, `subagent_type: crucible-red-team`). Compute the weighted score from the **same single source** — the orchestrator's count of the new round's cited findings file's `### Fatal Challenges` / `### Significant Challenges` sections (not from the return prose, not from CLAIMS) — and compare:
 - **Strictly lower weighted score:** Progress. Loop back to step 3.
 - **Same or higher weighted score:** Stagnation. Escalate to user with findings from both rounds.
 
