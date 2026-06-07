@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Runtime receipt linter (Ledger Return Protocol). Tier-1 (v1 structural, ported
-verbatim from eval/ledger-return-protocol/lint.py) + Tier-2 parts 1-2 (disk sha256 +
-witness byte-range). stdlib-only, argparse-free. Exit 0=pass, 1=fail; bullets on stderr.
+"""Runtime receipt linter (Ledger Return Protocol). Tier-1 (v1 structural, a verbatim
+port of the former eval-only eval/ledger-return-protocol/lint.py, removed in #369) +
+Tier-2 parts 1-2 (disk sha256 + witness byte-range). stdlib-only, argparse-free.
+Exit 0=pass, 1=fail; bullets on stderr.
 
 Usage:
   rcpt_verify.py [--tier1|--tier2] [--root DIR] [--strict] [FILE|-]
@@ -19,9 +20,10 @@ class LintError(Exception):
     pass
 
 
-# ── Tier-1 (v1 structural) — ported VERBATIM from eval/ledger-return-protocol/lint.py
-#    (lint.py SECTIONS..lint_receipt, the eval-validated v1 layer). Do NOT re-derive:
-#    the differential oracle gate (scripts/_oracle_gate.py) proves byte-equivalence.
+# ── Tier-1 (v1 structural) — ported VERBATIM from the former eval-only lint.py
+#    (SECTIONS..lint_receipt, the eval-validated v1 layer; lint.py removed in #369).
+#    Do NOT re-derive: the differential oracle gate proved byte-equivalence before
+#    lint.py was deleted (the permanent CI guard is --selftest).
 SECTIONS = ["RCPT", "VERDICT", "ARTIFACTS", "TRACE", "CLAIMS", "WITNESS", "SUSPICION", "NEXT"]
 UNRUNNABLE_VOCAB = {
     "sandbox-restricted", "tooling-absent", "platform-incompatible",
