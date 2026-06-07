@@ -354,6 +354,135 @@ def tier2_artifacts(artifacts, trace, root, strict):
     return notes
 
 
+def derive_art_name(cited, verdict):
+    """Derive the body-lookup artifact name from the cited TRACE entry, EXACTLY as
+    lint.py's tier2_verify (PASS: EXEC out= OR READ/WROTE cited path) and
+    tier2_verify_fail (FAIL: EXEC out= only) do. Returns None when no body lookup
+    applies (→ clean). Shared by verify_witness (message/control) and the --eval
+    caller (body fetch) so the two Tier-2 paths cannot diverge on art_name."""
+    m = re.search(r"out=(\S+?)#([LB]\d+-[LB]\d+)", cited["args"]) if cited["verb"] == "EXEC" else None
+    if verdict == "FAIL":
+        # tier2_verify_fail — EXEC-only (lint.py:370-373)
+        if not m:
+            return None
+        return m.group(1)
+    # verdict == PASS — tier2_verify (lint.py:315-326)
+    if not m and cited["verb"] in {"READ", "WROTE"}:
+        path_m = re.match(r"^(\S+)", cited["args"])
+        return path_m.group(1) if path_m else None
+    if m:
+        return m.group(1)
+    return None
+
+
+def verify_witness(body_text, witness, verdict, cited) -> bool:
+    """Pure expect-fail decision core — the ONE shared, deliberately-non-verbatim
+    factor of lint.py's tier2_verify (verdict=PASS) and tier2_verify_fail (verdict=FAIL).
+    Returns True if the witness is clean; RAISES LintError with the BYTE-IDENTICAL
+    message string of the source function on the branch that would FAIL (message
+    fidelity is load-bearing for the --eval byte-diff). `cited` = the WHOLE parsed
+    cited TRACE entry; `body_text` = the resolved body for derive_art_name(cited, verdict)
+    (None ⇒ no body ⇒ clean, reproducing lint.py's `art_name not in artifact_bodies: return`).
+    Shared by the disk reader (cited #L/#B range) and the --eval inline-body path.
+
+    ASYMMETRY (reproduced exactly): the PASS leg (tier2_verify) inspects the body for
+    grep-kind READ/WROTE witnesses; the FAIL leg (tier2_verify_fail) body lookup is
+    EXEC-only — so the SAME grep:READ/WROTE witness whose body matches expect-fail
+    raises under PASS but returns clean under FAIL. derive_art_name keys this on verdict."""
+    if not witness["ran"].startswith("TRACE#"):
+        return True
+    art_name = derive_art_name(cited, verdict)
+    if art_name is None:
+        return True
+    if body_text is None:
+        return True  # reproduces lint.py `if art_name not in artifact_bodies: return`
+    kind = witness["kind"]
+    expect_fail = witness["expect_fail"]
+    body = body_text
+    if verdict == "FAIL":
+        # tier2_verify_fail (lint.py:377-390)
+        exit_m = re.search(r"exit=(-?\d+)", cited["args"])
+        exit_success = exit_m and int(exit_m.group(1)) == 0
+        pattern = None
+        if expect_fail.startswith("/") and expect_fail.endswith("/"):
+            pattern = expect_fail[1:-1]
+        elif expect_fail.startswith('"') and expect_fail.endswith('"'):
+            pattern = re.escape(expect_fail[1:-1])
+        content_match = bool(pattern and re.search(pattern, body))
+        if exit_success and not content_match:
+            raise LintError(
+                f"Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
+                f"expect-fail {expect_fail} (weak positive-evidence check)"
+            )
+        return True
+    # verdict == PASS — tier2_verify (lint.py:330-355)
+    if kind == "exec":
+        em = re.match(r"exit(!?=)(-?\d+)", expect_fail)
+        if em:
+            op, n = em.group(1), int(em.group(2))
+            exit_m = re.search(r"exit=(-?\d+)", cited["args"])
+            if exit_m:
+                actual = int(exit_m.group(1))
+                failed = (actual != 0) if op == "!=" else (actual == n)
+                if failed:
+                    raise LintError(
+                        f"Tier-2: WITNESS expect-fail exit-clause matches actual exit={actual} "
+                        f"(witness would have fired → PASS rejected)"
+                    )
+            return True
+    # regex / literal expect-fail
+    pattern = None
+    if expect_fail.startswith("/") and expect_fail.endswith("/"):
+        pattern = expect_fail[1:-1]
+    elif expect_fail.startswith('"') and expect_fail.endswith('"'):
+        pattern = re.escape(expect_fail[1:-1])
+    if pattern and re.search(pattern, body):
+        raise LintError(
+            f"Tier-2: WITNESS expect-fail regex /{pattern}/ matches body of {art_name} "
+            f"(witness would have fired → PASS rejected)"
+        )
+    return True
+
+
+def _read_cited_range(path: pathlib.Path, cited):
+    """Read ONLY the cited #L<a>-L<b> (line) / #B<a>-B<b> (byte) range from disk.
+    Deliberate (M2): lint.py's inline tier2_verify reads the WHOLE body, but the disk
+    reader reads only the cited range (fixture-4(g)-guarded). READ/WROTE entries carry
+    no #range → read whole file (the grep-on-READ/WROTE path; not in natural corpus)."""
+    m = re.search(r"out=\S+?#([LB])(\d+)-[LB](\d+)", cited["args"])
+    if not m:
+        return path.read_text()
+    kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+    if kind == "L":
+        lines = path.read_text().splitlines(keepends=True)
+        return "".join(lines[a - 1:b])  # 1-based inclusive
+    return path.read_bytes()[a:b].decode("utf-8", errors="replace")
+
+
+def tier2_witness(witness, trace, root, strict, verdict):
+    """Part 2. Resolve the cited TRACE artifact via resolve_base, read ONLY the cited
+    #L/#B range from disk, then call the shared verify_witness. Absent witness file:
+    path-shaped + --strict -> FAIL; else UNVERIFIABLE (non-fatal). Returns UNVERIFIABLE
+    notes; raises LintError on FAIL (incl. verify_witness's byte-identical messages)."""
+    if not witness["ran"].startswith("TRACE#"):
+        return []
+    idx = int(witness["ran"][len("TRACE#"):])
+    if not 1 <= idx <= len(trace):
+        return []
+    cited = trace[idx - 1]
+    art_name = derive_art_name(cited, verdict)
+    if art_name is None:
+        return []
+    resolved = resolve_base(art_name, root)
+    if resolved is None:
+        if strict and is_path_shaped(art_name):
+            raise LintError(f"Tier-2 --strict: witness artifact {art_name} absent under all bases")
+        return [f"UNVERIFIABLE: witness {art_name} (no file under root)"]
+    body_text = _read_cited_range(resolved, cited)
+    verify_witness(body_text, witness, verdict, cited)  # raises on FAIL
+    return []
+
+
 def _usage_exit():
     sys.stderr.write(__doc__)
     return 2

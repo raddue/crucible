@@ -180,5 +180,104 @@ class TestTier2Artifacts(unittest.TestCase):
             self.assertIn("UNVERIFIABLE", notes[0])
 
 
+class TestVerifyWitness(unittest.TestCase):
+    """Direct unit coverage of the factored verify_witness + derive_art_name."""
+
+    def _exec_cited(self, exit_code, art="test-output.log", rng="L1-L40"):
+        return {"n": 2, "verb": "EXEC",
+                "args": f"`grep x f`  exit={exit_code}  dur=0.1s  out={art}#{rng}"}
+
+    def _w(self, kind, expect, ran="TRACE#2"):
+        return {"kind": kind, "payload": "x", "expect_fail": expect, "ran": ran}
+
+    def test_pass_regex_match_raises_exact_message(self):
+        rv = _import_rv()
+        body = "starting\nerror: boom\n3 fail\n"
+        with self.assertRaises(rv.LintError) as cm:
+            rv.verify_witness(body, self._w("exec", "/error:/"), "PASS", self._exec_cited(0))
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2: WITNESS expect-fail regex /error:/ matches body of test-output.log "
+            "(witness would have fired → PASS rejected)")
+
+    def test_pass_regex_no_match_clean(self):
+        rv = _import_rv()
+        self.assertTrue(rv.verify_witness("all good\n", self._w("exec", "/error:/"),
+                                          "PASS", self._exec_cited(0)))
+
+    def test_pass_exit_clause_match_raises(self):
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError) as cm:
+            rv.verify_witness("body", self._w("exec", "exit!=0"), "PASS", self._exec_cited(1))
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2: WITNESS expect-fail exit-clause matches actual exit=1 "
+            "(witness would have fired → PASS rejected)")
+
+    def test_fail_no_evidence_raises_exact_message(self):
+        rv = _import_rv()
+        body = "starting tests...\nall tests passed, 220 passed.\n"
+        with self.assertRaises(rv.LintError) as cm:
+            rv.verify_witness(body, self._w("exec", "/\\d+ fail/"), "FAIL", self._exec_cited(0))
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
+            "expect-fail /\\d+ fail/ (weak positive-evidence check)")
+
+    def test_fail_with_content_match_clean(self):
+        rv = _import_rv()
+        body = "3 fail, 17 pass\n"
+        self.assertTrue(rv.verify_witness(body, self._w("exec", "/\\d+ fail/"),
+                                          "FAIL", self._exec_cited(0)))
+
+    def test_s3_asymmetry_grep_read_pass_raises_fail_clean(self):
+        rv = _import_rv()
+        cited = {"n": 1, "verb": "READ", "args": "src/foo.ts sha256:" + "a" * 64}
+        w = self._w("grep", "/error:/", ran="TRACE#1")
+        body = "line\nerror: bad\n"
+        # PASS leg inspects the READ/WROTE body → raises
+        with self.assertRaises(rv.LintError):
+            rv.verify_witness(body, w, "PASS", cited)
+        # FAIL leg is EXEC-only → never inspects the READ body → clean
+        self.assertTrue(rv.verify_witness(body, w, "FAIL", cited))
+
+
+class TestTier2Witness(unittest.TestCase):
+    def _w(self, expect, ran="TRACE#2"):
+        return {"kind": "exec", "payload": "x", "expect_fail": expect, "ran": ran}
+
+    def test_range_only_read_ignores_outside_match(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            lines = [f"line {i}\n" for i in range(1, 50)]
+            lines[44] = "BOOM here\n"  # line 45 (index 44), outside L1-L40
+            (root / "out.log").write_text("".join(lines))
+            cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#L1-L40"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            # reads ONLY lines 1-40 → BOOM not seen → no raise
+            notes = rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+            self.assertEqual(notes, [])
+
+    def test_absent_witness_basename_unverifiable(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=ephemeral.log#L1-L5"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            notes = rv.tier2_witness(self._w("/x/"), trace, root, True, "PASS")
+            self.assertEqual(len(notes), 1)
+            self.assertIn("UNVERIFIABLE", notes[0])
+
+    def test_absent_witness_pathshaped_strict_raises(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=logs/run.log#L1-L5"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            with self.assertRaises(rv.LintError):
+                rv.tier2_witness(self._w("/x/"), trace, root, True, "PASS")
+
+
 if __name__ == "__main__":
     unittest.main()
