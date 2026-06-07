@@ -403,7 +403,7 @@ Cartographer and Forge are complementary:
 
 During feed-forward, both run:
 1. `crucible:forge` feed-forward → process warnings
-2. `crucible:cartographer` consult → structural awareness
+2. `crucible:cartographer-skill` consult → structural awareness
 
 During retrospective, Forge captures whether the Cartographer's information was accurate or stale.
 
