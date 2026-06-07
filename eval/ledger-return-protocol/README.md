@@ -20,7 +20,7 @@ Layer 2 adds `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:`
 - `tripwire/scenario-disagreement.jsonl` — two `/quality-gate` judges with opposite `severity-max`; first declares `peer-dispatch-disagrees(severity)`; sweep fires on the second's return.
 - `tripwire/scenario-supersession.jsonl` — M (FAIL, `claims-touch(auth/**)`) is superseded by K (PASS, same glob, cites M in CLAIMS, `exec` witness); later N edits `src/auth/login.ts`. M's tripwire does NOT fire (superseded); K's tripwire fires.
 
-The reference sweep is `tripwire/sweep.py`. Like `lint.py`, it's an eval artifact — the canonical linter + sweep lives as prose pseudocode in `skills/shared/return-convention.md` and the three pilot SKILL.md files.
+The reference sweep is `tripwire/sweep.py`. It's an eval artifact — the canonical linter + sweep lives as prose pseudocode in `skills/shared/return-convention.md` and the three pilot SKILL.md files. Its Tier-1 layer is the runtime tool `scripts/rcpt_verify.py` (the deterministic stdlib port that replaced the former eval-only reference linter, #369), loaded by path.
 
 ## Files
 
@@ -30,7 +30,8 @@ The reference sweep is `tripwire/sweep.py`. Like `lint.py`, it's an eval artifac
 - `inject/shape-b-witness-matches-expectfail.jsonl` — PASS with WITNESS whose cited EXEC would have fired.
 - `inject/shape-c-skipped-without-next.jsonl` — PASS with `ran=SKIPPED` but NEXT doesn't nominate the witness.
 - `inject/shape-d-fail-without-evidence.jsonl` — FAIL with no evidence of failure in the cited range.
-- `lint.py` — reference implementation of the two-tier linter (Python, for eval use only — the canonical linter lives as prose pseudocode in pilot skill SKILL.md).
+- The two-tier linter is the runtime tool `scripts/rcpt_verify.py`; this eval drives it via `--eval` (Check 2/3). The canonical linter still lives as prose pseudocode in the pilot SKILL.md files — the tool is a deterministic port of that grammar.
+- `tier2-fixtures/` — committed Tier-2 disk-fixture corpus (real on-disk artifacts + a driver manifest) exercised by `rcpt_verify.py --selftest`, plus the frozen `--eval` golden stdout.
 - `measure.py` — computes p50/p90/mean size ratio and compares to 0.25 target.
 - `run-eval.sh` — end-to-end runner; exits non-zero on any failure.
 
@@ -53,6 +54,6 @@ The design doc's original target was ≤ 0.25. During this eval we calibrated an
 
 The calibrated target of 0.40 is the observed p90 + a small safety margin. The absolute context saving at p50 ≈ 0.34 is still substantial: **~66% reduction on the return channel**, which is the practical number for capacity planning.
 
-## Why a reference Python linter exists
+## Why a runtime Python linter exists
 
-The canonical linter is **prose pseudocode** inside `skills/build/SKILL.md`, `skills/quality-gate/SKILL.md`, and `skills/siege/SKILL.md`. The Python implementation in `lint.py` is an *eval artifact* — its sole purpose is to let the injection tests exercise the same rules an orchestrator would apply in-context. It is not runtime infrastructure and is not invoked by any pilot skill.
+The canonical linter is **prose pseudocode** inside `skills/build/SKILL.md`, `skills/quality-gate/SKILL.md`, and `skills/siege/SKILL.md`. The Python implementation now lives at `scripts/rcpt_verify.py` (#369) — a deterministic, stdlib-only runtime tool that orchestrators invoke per receipt (the prose pseudocode is its spec + fallback). This eval exercises the same rules an orchestrator applies in-context by driving the tool via `--eval`; the tool's `--selftest` is the CI gate.
