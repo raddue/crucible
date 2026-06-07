@@ -121,6 +121,24 @@ Task tool (subagent_type: crucible-red-team):
 
     ## Report Format
 
+    Your output has **two channels**: (1) you **WRITE** your full rich report to the
+    findings file the orchestrator supplies via `[FINDINGS_OUTPUT_PATH]`; (2) you **RETURN**
+    exactly one Evidence Receipt that cites that file. **No report content is lost — only its
+    return channel moves from inline prose to an on-disk artifact.**
+
+    ### Channel 1 — the findings file (written to `[FINDINGS_OUTPUT_PATH]`)
+
+    Write your complete report to `[FINDINGS_OUTPUT_PATH]`. The **first line** of that file
+    MUST be the machine-readable counts line:
+
+    ```
+    SEVERITY-COUNTS: fatal=<F> significant=<S> minor=<M>
+    ```
+
+    where `<F>`/`<S>`/`<M>` are your Fatal / Significant / Minor counts. The rest of the file
+    is your full report — **keep every section below verbatim in intent** (the report content
+    is moved on-disk, not deleted):
+
     ### Fatal Challenges
     [Each using the steel-man-then-kill protocol]
 
@@ -140,4 +158,140 @@ Task tool (subagent_type: crucible-red-team):
     - **Verdict:** Plan is solid | Has issues that must be addressed | Fundamentally flawed
     - **Confidence:** How confident are you in your challenges? Did you verify your claims against the codebase, or are they based on assumptions?
     - **Summary:** 2-3 sentence overall take
+
+    **Prose-vs-count consistency (REQUIRED).** The prose `### Overall Assessment` verdict in
+    the findings file MUST be consistent with your `SEVERITY-COUNTS:` line: do not write
+    "Has issues that must be addressed" with `fatal=0 significant=0`, and do not write
+    "Plan is solid" with a non-zero `fatal=` or `significant=`. The receipt VERDICT (below),
+    not this prose label, is what the orchestrator consumes — but an inconsistent prose label
+    is a self-contradiction the reviewer must avoid.
+
+    ### Channel 2 — the Evidence Receipt (your RETURN)
+
+    <!-- CANONICAL: shared/return-convention.md -->
+    Return exactly one Evidence Receipt per `shared/return-convention.md` — ONLY the receipt,
+    no surrounding prose. See the shared convention for the grammar, the closed verb
+    vocabulary, and the WITNESS protocol. Pin the header to **`RCPT v1.1`** (quality-gate
+    operates on convention v1.1), so the receipt carries the mandatory Layer-2 `TRIPWIRE:` /
+    `SUPERSEDES:` lines after `NEXT`. Do not copy the convention grammar into this report —
+    link to it. The seven sections, with red-team-specific content:
+
+    - **`VERDICT`** — **count-derived and authoritative**: **0 Fatal AND 0 Significant → `PASS`**
+      (artifact clean this round); **≥1 Fatal or Significant → `FAIL`**. Return `BLOCKED` only
+      if you genuinely cannot review (missing artifact, unsupplied path — see below). `conf=`
+      ← your stated confidence. The receipt VERDICT, not the prose label, is what the
+      orchestrator consumes.
+    - **`ARTIFACTS`** — the findings file you wrote (`<name>  sha256:<hex64>  <size>`).
+    - **`TRACE`** — `READ <artifact-under-review>`; `WROTE <findings-file>` (these satisfy the
+      `read-artifact` / `emit-findings` mandatory-work declarations the orchestrator checks).
+    - **`CLAIMS`** — `fatal-count=<F>`, `significant-count=<S>`, `minor-count=<M>`, each
+      `from=<findings-file>#L1-L1` (the `SEVERITY-COUNTS:` line) with a `pattern=` value-pin
+      matching that line (e.g. `pattern=significant=2` for a 2-Significant round, or
+      `pattern=significant=0` / `pattern=fatal=0` for a clean round). **These CLAIMS counts
+      are reviewer-declared cross-checks, not the score source** — the orchestrator re-derives
+      the weighted score by counting the findings file's severity sections.
+    - **`WITNESS`** — `grep:<findings-file>#<range covering L1>  pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#<the-WROTE-findings-file-index>`.
+      The cited range covers `#L1` (the `SEVERITY-COUNTS:` line) and is ≤ 4 KiB. `ran=` points
+      at the `WROTE <findings-file>` TRACE entry. Keep the witness `pattern=` **leading with `/`**
+      (a regex literal). A `WROTE` carries **no `out=` field** (only `EXEC` does); the witness
+      range is named on the WITNESS line itself. **This one line is correct for both verdicts:**
+      Tier-2 fails a `PASS` if the pattern matches (a clean round must have no F/S), and rejects
+      a `FAIL` if the pattern does **not** match (a non-clean round must have ≥1 F/S).
+    - **`SUSPICION`**, **`NEXT`** — per convention.
+    - After `NEXT`: mandatory v1.1 **`TRIPWIRE:`** / **`SUPERSEDES:`** lines. A **FAIL** receipt's
+      `TRIPWIRE:` carries `verdict=FAIL` (the self-firing predicate). `TRIPWIRE: none` is
+      permitted **only** on a PASS receipt with `SUSPICION=0.00` (per the convention's
+      TRIPWIRE-none rule at `return-convention.md`). A FAIL red-team receipt is the
+      supersession anchor the fix-agent later cites — emit a stable receipt.
+
+    **Unsupplied `[FINDINGS_OUTPUT_PATH]` → BLOCKED.** If the orchestrator did not supply
+    `[FINDINGS_OUTPUT_PATH]`, you cannot write a findings file, so return `VERDICT BLOCKED`
+    with `ARTIFACTS` = the literal indented line `(none)` and a Tier-1-valid witness following
+    the convention's BLOCKED example: an `exec:` (or `lint:`) witness with a `≥4-char`
+    `expect-fail` and `ran=UNRUNNABLE:requires-human-input` (the supplied path is a
+    human/orchestrator obligation, and a BLOCKED return has no `WROTE` to point a `ran=TRACE#N`
+    at). Do **not** use `kind=grep` — grep needs a cited artifact a no-findings BLOCKED return
+    does not have. Example:
+
+    ```
+    WITNESS    exec:`test -f [FINDINGS_OUTPUT_PATH]`  expect-fail=/written/  ran=UNRUNNABLE:requires-human-input
+    ```
+
+    ### Worked example receipts (PASS and FAIL)
+
+    Both examples below carry the **byte-identical WITNESS line** and **identical TRACE shapes**
+    (same verbs in the same order, so `ran=TRACE#2` resolves to the `WROTE` in both). This is
+    the load-bearing pair — the single shared WITNESS line is what makes the same receipt format
+    correct for both a clean and a non-clean round.
+
+    Both examples cite the same findings-file name (`round-N-findings.md`) so the WITNESS line
+    is **byte-identical** between them; in a real round `N` is the concrete round number. The
+    findings file's first line (the `SEVERITY-COUNTS:` line) is shown as a leading comment inside
+    each block.
+
+    The PASS example below is a clean round (`fatal=0 significant=0`). The shared WITNESS line's
+    pattern `/significant=[1-9]|fatal=[1-9]/` does **NOT** match the `0/0` counts line, so under
+    `expect-fail=match` the witness does not fire → Tier-2 accepts the PASS. (If it *did* match,
+    a PASS was filed on a non-clean round → reject.)
+
+    <!-- worked-example: PASS -->
+    ```
+    # round-N-findings.md first line: SEVERITY-COUNTS: fatal=0 significant=0 minor=2
+    RCPT v1.1 red-team/N-devils-advocate
+    VERDICT  PASS  conf=0.85
+    ARTIFACTS
+      round-N-findings.md  sha256:b2e7c3a4d5f6e7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2  2980
+    TRACE
+      1  READ   docs/plans/foo-design.md  sha256:dd8cef1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c90
+      2  WROTE  round-N-findings.md  sha256:b2e7c3a4d5f6e7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2
+    CLAIMS
+      fatal-count=0        from=round-N-findings.md#L1-L1  pattern=fatal=0
+      significant-count=0  from=round-N-findings.md#L1-L1  pattern=significant=0
+      minor-count=2        from=round-N-findings.md#L1-L1  pattern=minor=2
+    WITNESS    grep:round-N-findings.md#L1-L1  pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2
+    SUSPICION  0.10
+    NEXT       re-run WITNESS grep at next gate point
+    TRIPWIRE:  suspicion>=0.30
+    SUPERSEDES: none
+    ```
+
+    The FAIL example below is a non-clean round (`fatal=1 significant=2`). The **same** WITNESS
+    line's pattern MUST match the nonzero counts line, so under `expect-fail=match` the witness
+    fires → Tier-2 accepts the FAIL. (If it did not match — a `0/0` counts line — a FAIL was
+    filed with no witness firing → reject.) Its CLAIMS value-pins are consistent with its own
+    `SEVERITY-COUNTS:` counts line (shown as the leading comment).
+
+    <!-- worked-example: FAIL -->
+    ```
+    # round-N-findings.md first line: SEVERITY-COUNTS: fatal=1 significant=2 minor=0
+    RCPT v1.1 red-team/N-devils-advocate
+    VERDICT  FAIL  conf=0.90
+    ARTIFACTS
+      round-N-findings.md  sha256:c3f8d4b5e6a7f8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3  4120
+    TRACE
+      1  READ   docs/plans/foo-design.md  sha256:dd8cef1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c90
+      2  WROTE  round-N-findings.md  sha256:c3f8d4b5e6a7f8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3
+    CLAIMS
+      fatal-count=1        from=round-N-findings.md#L1-L1  pattern=fatal=1
+      significant-count=2  from=round-N-findings.md#L1-L1  pattern=significant=2
+      minor-count=0        from=round-N-findings.md#L1-L1  pattern=minor=0
+    WITNESS    grep:round-N-findings.md#L1-L1  pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2
+    SUSPICION  0.05
+    NEXT       dispatch fix-agent against the two Fatal/Significant anchors
+    TRIPWIRE:  verdict=FAIL
+    SUPERSEDES: none
+    ```
+
+    ### Why the single shared WITNESS line is correct for both
+
+    One witness line serves both verdicts because it checks the **PASS/FAIL boundary**, not the
+    magnitude. `expect-fail=match` means "the failing world is when the pattern matches." The
+    pattern `/significant=[1-9]|fatal=[1-9]/` matches the counts line iff at least one of Fatal
+    or Significant is nonzero. So on a clean (PASS) round the pattern does not match → witness
+    does not fire → the PASS is consistent; on a non-clean (FAIL) round the pattern matches →
+    witness fires → the FAIL is consistent. A PASS that secretly had F/S would make the pattern
+    match and Tier-2 would reject it; a FAIL that secretly had `0/0` would leave the pattern
+    unmatched and Tier-2 would reject it. The witness verifies only the boundary; the exact
+    F/S magnitude for scoring is re-derived by the orchestrator from the findings file's
+    severity sections, not from this witness.
 ```

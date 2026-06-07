@@ -210,7 +210,6 @@ Ready to implement auth feature
 
 **Called by:**
 - **design** (Phase 4) - REQUIRED when design is approved and implementation follows
-- **build** - REQUIRED before executing any tasks
 - Any skill needing isolated workspace
 
 **Pairs with:**

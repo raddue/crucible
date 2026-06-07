@@ -15,7 +15,7 @@ version: 1
 
 **Paste-only exemption:** If a future template is under 500 tokens total payload, uses the Task tool, and needs no file access, it may skip disk-mediation. No current templates qualify — all were promoted to disk-mediated after validation.
 
-**Excluded skills:** `skill-creator` is a meta-tool, not a production pipeline orchestrator. `stocktake` and `parallel` do not dispatch subagents.
+**Excluded skills:** `skill-creator` is a meta-tool, not a production pipeline orchestrator (its dispatches are A/B eval test-runs, not pipeline work). `stocktake`'s only subagent use is a single read-only Explore evaluation agent — not a disk-mediated pipeline dispatch. (`parallel` is a production dispatcher and is NOT excluded: it follows this convention and links it as canonical.)
 
 ## Dispatch Directory
 
