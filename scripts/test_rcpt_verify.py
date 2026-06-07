@@ -13,6 +13,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "rcpt_verify.py"
@@ -86,6 +87,52 @@ class TestV1CorpusEquivalence(unittest.TestCase):
                         raised,
                         f"{shape_path.name}/{rec.get('dispatch-id','?')} should Tier-1 LINT-FAIL",
                     )
+
+
+class TestBaseResolution(unittest.TestCase):
+    def test_resolve_base_binds_root_first(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            (repo / ".git").mkdir()
+            sub = repo / "sub"
+            sub.mkdir()
+            # file exists under both --root (sub) and repo-root
+            (sub / "f.txt").write_text("ROOT")
+            (repo / "f.txt").write_text("REPO")
+            got = rv.resolve_base("f.txt", sub)
+            self.assertEqual(got.read_text(), "ROOT")
+
+    def test_resolve_base_falls_to_repo_root(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            (repo / ".git").mkdir()
+            sub = repo / "sub"
+            sub.mkdir()
+            (repo / "only-at-repo.txt").write_text("REPO")
+            got = rv.resolve_base("only-at-repo.txt", sub)
+            self.assertIsNotNone(got)
+            self.assertEqual(got.read_text(), "REPO")
+
+    def test_resolve_base_absent_basename_none(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(rv.resolve_base("nope.md", pathlib.Path(td)))
+
+    def test_git_toplevel_handles_worktree_gitlink_file(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            wt = pathlib.Path(td)
+            # worktree: .git is a FILE (gitlink), not a dir
+            (wt / ".git").write_text("gitdir: /somewhere/.git/worktrees/x\n")
+            self.assertEqual(rv._git_toplevel(wt), wt)
+
+    def test_is_path_shaped(self):
+        rv = _import_rv()
+        self.assertTrue(rv.is_path_shaped("src/foo.ts"))
+        self.assertFalse(rv.is_path_shaped("findings.md"))
+        self.assertTrue(rv.is_path_shaped("/tmp/x"))
 
 
 if __name__ == "__main__":

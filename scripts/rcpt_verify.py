@@ -300,6 +300,41 @@ def lint_receipt(text):
     return verdict
 
 
+# ── Tier-2 shared base resolution ───────────────────────────────────────────
+def resolve_base(name: str, root: pathlib.Path):
+    """Probe {root, repo-root-of-root, absolute-as-is} in fixed order; return the
+    FIRST base where the file exists, else None. repo-root = git toplevel of `root`
+    (NOT this script's checkout). Used by part-1 hash, part-2 witness read, and --strict."""
+    cands = []
+    p = pathlib.Path(name)
+    if p.is_absolute():
+        cands.append(p)
+    else:
+        cands.append(root / name)
+        repo = _git_toplevel(root)
+        if repo:
+            cands.append(repo / name)
+    for c in cands:
+        if c.is_file():
+            return c
+    return None
+
+
+def _git_toplevel(start: pathlib.Path):
+    d = start if start.is_dir() else start.parent
+    for cur in [d, *d.parents]:
+        if (cur / ".git").exists():   # .exists() is DELIBERATE — handles the git-worktree
+            return cur                # `.git`-*file* gitlink (not a dir); do NOT "tighten"
+    return None   # stdlib-only: walk for .git rather than shelling out to git
+
+
+def is_path_shaped(name: str) -> bool:
+    """True if name carries a path separator or is absolute (a 'concrete path');
+    False for a bare basename. The --strict FAIL-vs-UNVERIFIABLE discriminator.
+    Intentionally POSIX-`/`-only (committed-corpus shape space)."""
+    return ("/" in name) or pathlib.Path(name).is_absolute()
+
+
 def _usage_exit():
     sys.stderr.write(__doc__)
     return 2
