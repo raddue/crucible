@@ -5,14 +5,21 @@ version: 1
 # Return Convention (Ledger Return Protocol)
 
 > Canonical reference for the subagent → orchestrator return channel.
-> Every subagent dispatched via `shared/dispatch-convention.md` MUST return exactly one
-> Evidence Receipt in the format defined below. Prose outside the receipt is a protocol
-> violation.
+> A skill **adopts** this convention by referencing it via
+> `<!-- CANONICAL: shared/return-convention.md -->`. Within an adopting skill, every
+> subagent it dispatches via `shared/dispatch-convention.md` MUST return exactly one
+> Evidence Receipt in the format defined below, and prose outside the receipt is a
+> protocol violation. This MUST binds **only** adopting skills — it is not a repo-wide
+> mandate on every dispatcher; a skill that does not carry the marker is not bound, and
+> its subagents returning prose is not a violation of this convention.
 >
-> **This is a shared skill reference, not a CLAUDE.md directive.** Pilot skills
-> (`/build`, `/quality-gate`, `/siege`) reference this file via
-> `<!-- CANONICAL: shared/return-convention.md -->`. Templates do not duplicate the
-> grammar; they link here.
+> **This is a shared skill reference, not a CLAUDE.md directive.** Adopting skills link
+> here rather than duplicating the grammar; a skill signals adoption by carrying a
+> `<!-- CANONICAL: shared/return-convention.md -->` marker. To enumerate the live adopter
+> set, grep `skills/` for that marker: every file it matches except this definition file
+> (which names the marker to define it, and is not itself an adopter) belongs to an
+> adopting skill. Rollout beyond the initial pilots is tracked in issue #202; the dated
+> entries in Version History below are historical, not the current adopter roster.
 
 ## Purpose
 
