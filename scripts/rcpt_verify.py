@@ -498,40 +498,170 @@ def _eval_tier2(witness, trace, bodies, verdict):
     verify_witness(body_text, witness, verdict, cited)
 
 
-def run_eval(path) -> int:
-    """Port of lint.py main(): per-line LINT-PASS/LINT-FAIL on stdout + trailing summary.
-    ALWAYS exits 0 for a readable file (F1) — per-record verdicts are stdout-only, never
-    the process exit code, so run-eval.sh's pipefail greps over all-FAIL inject shapes."""
+def _eval_record(rec):
+    """Classify one --eval record exactly as lint.py's main() loop does (Tier-1 then,
+    if inline artifact_bodies + verdict in {PASS,FAIL}, the Tier-2 dispatch via the shared
+    verify_witness). Returns ('LINT-PASS', verdict) or ('LINT-FAIL', error_string)."""
+    receipt_text = rec.get("receipt")
+    try:
+        verdict = lint_receipt(receipt_text)
+        bodies = rec.get("artifact_bodies", {})
+        if bodies and verdict in {"PASS", "FAIL"}:
+            sections = parse_receipt(receipt_text)
+            trace = parse_trace(sections["TRACE"])
+            witness = parse_witness(sections["WITNESS"])
+            _eval_tier2(witness, trace, bodies, verdict)
+        return ("LINT-PASS", verdict)
+    except LintError as e:
+        return ("LINT-FAIL", str(e))
+
+
+def _eval_text(path) -> str:
+    """The full --eval stdout (per-line columns + leading-`\\n` summary), byte-exact.
+    Shared by run_eval (prints it) and run_selftest's golden-string assertion, so the
+    printed format and the CI-pinned format can never drift."""
+    out = []
     total = 0
     passed = 0
     for line in pathlib.Path(path).read_text().splitlines():
         if not line.strip():
             continue
         rec = json.loads(line)
-        receipt_text = rec.get("receipt")
-        if not receipt_text:
+        if not rec.get("receipt"):
             continue
         total += 1
-        try:
-            verdict = lint_receipt(receipt_text)
-            # Tier-2 if inline artifact bodies supplied (synthetic injections do)
-            bodies = rec.get("artifact_bodies", {})
-            if bodies and verdict in {"PASS", "FAIL"}:
-                sections = parse_receipt(receipt_text)
-                trace = parse_trace(sections["TRACE"])
-                witness = parse_witness(sections["WITNESS"])
-                _eval_tier2(witness, trace, bodies, verdict)
-            print(f"{rec.get('dispatch-id','?'):30s}  LINT-PASS  ({verdict})")
+        disp, info = _eval_record(rec)
+        did = rec.get("dispatch-id", "?")
+        if disp == "LINT-PASS":
+            out.append(f"{did:30s}  LINT-PASS  ({info})")
             passed += 1
-        except LintError as e:
-            print(f"{rec.get('dispatch-id','?'):30s}  LINT-FAIL  {e}")
-    print(f"\nsummary: {passed}/{total} receipts passed lint")
+        else:
+            out.append(f"{did:30s}  LINT-FAIL  {info}")
+    out.append(f"\nsummary: {passed}/{total} receipts passed lint")
+    return "\n".join(out) + "\n"
+
+
+def run_eval(path) -> int:
+    """Port of lint.py main(): per-line LINT-PASS/LINT-FAIL on stdout + trailing summary.
+    ALWAYS exits 0 for a readable file (F1) — per-record verdicts are stdout-only, never
+    the process exit code, so run-eval.sh's pipefail greps over all-FAIL inject shapes."""
+    sys.stdout.write(_eval_text(path))
     return 0
 
 
+def _read_jsonl(path):
+    return [json.loads(l) for l in pathlib.Path(path).read_text().splitlines() if l.strip()]
+
+
 def run_selftest() -> int:
-    """The CI gate — implemented in Task 8."""
-    raise NotImplementedError("run_selftest is implemented in Task 8")
+    """CI gate: (i) v1 corpus classification via the --eval Tier-2 dispatch; (iii) Tier-2
+    disk fixtures; (iv) inline-vs-disk cross-check; (v) --eval stdout golden-string.
+    Exit 0 iff all pass; non-zero (never silent) on any failure or absent corpus."""
+    if not CORPUS_DIR.is_dir():
+        sys.stderr.write(f"corpus not found at {CORPUS_DIR}\n")
+        return 1
+    problems = []
+
+    # (i) v1 corpus — 5 samples lint-pass; 7 injections LINT-FAIL via the --eval Tier-2
+    #     dispatch (the 2 Tier-2-only rows 102/105 raise in verify_witness, NOT lint_receipt).
+    for rec in _read_jsonl(CORPUS_DIR / "sample-corpus/receipts.jsonl"):
+        disp, info = _eval_record(rec)
+        if disp != "LINT-PASS":
+            problems.append(f"sample {rec.get('dispatch-id','?')} expected LINT-PASS, got LINT-FAIL: {info}")
+    inject_shapes = sorted((CORPUS_DIR / "inject").glob("shape-*.jsonl"))
+    if not inject_shapes:
+        problems.append("no inject/shape-*.jsonl found")
+    for shape in inject_shapes:
+        for rec in _read_jsonl(shape):
+            if not rec.get("receipt"):
+                continue
+            disp, info = _eval_record(rec)
+            if disp != "LINT-FAIL":
+                problems.append(f"inject {shape.name}/{rec.get('dispatch-id','?')} "
+                                f"expected LINT-FAIL, got {disp} ({info})")
+
+    # (iii) Tier-2 disk fixtures — each fixture's expect realized against REAL files.
+    fx_dir = CORPUS_DIR / "tier2-fixtures"
+    for fx in _read_jsonl(fx_dir / "manifest.jsonl"):
+        got = _selftest_run_fixture(fx, fx_dir / fx["root"])
+        if got != fx["expect"]:
+            problems.append(f"fixture {fx['id']} expected {fx['expect']}, got {got}")
+
+    # (iv) cross-check: inline --eval verdict == disk tier2_witness verdict for the inject
+    #      rows carrying artifact_bodies (102/105). Also asserts the silent corpus invariant
+    #      that the inline body equals its cited #L/#B range (disk reads only the range).
+    for shape in inject_shapes:
+        for rec in _read_jsonl(shape):
+            bodies = rec.get("artifact_bodies")
+            if not bodies:
+                continue
+            problems.extend(_selftest_crosscheck(rec, bodies))
+
+    # (v) --eval stdout golden-string — pins the run-eval.sh-grepped byte format in CI.
+    golden = (fx_dir / "eval-golden.txt").read_text()
+    captured = _eval_text(CORPUS_DIR / "sample-corpus/receipts.jsonl")
+    if captured != golden:
+        problems.append("--eval stdout does NOT match committed eval-golden.txt (byte-format drift)")
+
+    if problems:
+        for p in problems:
+            sys.stderr.write(f"selftest FAIL: {p}\n")
+        return 1
+    print("selftest OK: v1 corpus + Tier-2 fixtures + cross-check + golden-string")
+    return 0
+
+
+def _selftest_run_fixture(fx, root) -> str:
+    """Run one committed Tier-2 fixture through Tier-1 + Tier-2; return 'pass'|'fail'."""
+    try:
+        text = fx["receipt"]
+        verdict = lint_receipt(text)
+        sections = parse_receipt(text)
+        artifacts = parse_artifacts(sections["ARTIFACTS"])
+        trace = parse_trace(sections["TRACE"])
+        witness = parse_witness(sections["WITNESS"])
+        tier2_artifacts(artifacts, trace, root, fx["strict"])
+        if verdict in {"PASS", "FAIL"}:
+            tier2_witness(witness, trace, root, fx["strict"], verdict)
+        return "pass"
+    except LintError:
+        return "fail"
+
+
+def _selftest_crosscheck(rec, bodies):
+    """Materialize an artifact_bodies inject's body to disk, run the disk tier2_witness
+    path, and assert it agrees with the inline --eval path. Returns a list of problems."""
+    import tempfile
+    problems = []
+    text = rec["receipt"]
+    did = rec.get("dispatch-id", "?")
+    verdict = lint_receipt(text)
+    sections = parse_receipt(text)
+    trace = parse_trace(sections["TRACE"])
+    witness = parse_witness(sections["WITNESS"])
+    idx = int(witness["ran"][len("TRACE#"):])
+    cited = trace[idx - 1]
+    art = derive_art_name(cited, verdict)
+    inline_disp = _eval_record(rec)[0]
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        body = bodies.get(art)
+        if body is not None:
+            (root / art).parent.mkdir(parents=True, exist_ok=True)
+            (root / art).write_text(body)
+            # corpus invariant: inline body == cited range (disk reads only the range)
+            cited_range = _read_cited_range(root / art, cited)
+            if cited_range != body:
+                problems.append(f"crosscheck {did}: inline body != cited range "
+                                f"(disk path reads only the range — fixture invariant broken)")
+        try:
+            tier2_witness(witness, trace, root, False, verdict)
+            disk_disp = "LINT-PASS"
+        except LintError:
+            disk_disp = "LINT-FAIL"
+    if disk_disp != inline_disp:
+        problems.append(f"crosscheck {did}: inline={inline_disp} != disk={disk_disp}")
+    return problems
 
 
 def _usage_exit():

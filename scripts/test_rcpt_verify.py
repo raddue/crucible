@@ -12,6 +12,7 @@ import importlib.util
 import json
 import pathlib
 import hashlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -311,6 +312,22 @@ class TestCliDispatch(unittest.TestCase):
         self.assertIn("102-inject", rb.stdout)
         rd = run("--eval", str(CORPUS / "inject/shape-d-fail-without-evidence.jsonl"))
         self.assertNotIn("LINT-PASS", rd.stdout)
+
+
+class TestSelftest(unittest.TestCase):
+    def test_selftest_green(self):
+        r = run("--selftest")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+
+    def test_selftest_corpus_absent_nonzero(self):
+        # Relocate the script where its __file__-anchored CORPUS_DIR does not exist.
+        with tempfile.TemporaryDirectory() as td:
+            relocated = pathlib.Path(td) / "rcpt_verify.py"
+            shutil.copy(SCRIPT, relocated)
+            r = subprocess.run([sys.executable, str(relocated), "--selftest"],
+                               capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("corpus not found", (r.stderr + r.stdout).lower())
 
 
 if __name__ == "__main__":
