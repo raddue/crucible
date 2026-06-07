@@ -21,7 +21,7 @@ python3 measure.py sample-corpus/prose-returns.jsonl sample-corpus/receipts.json
 echo
 
 echo "=== Check 2: sample-corpus receipts must all LINT-PASS ==="
-python3 lint.py sample-corpus/receipts.jsonl | tee /tmp/lint-sample.out
+python3 ../../scripts/rcpt_verify.py --eval sample-corpus/receipts.jsonl | tee /tmp/lint-sample.out
 fails=$(grep -c LINT-FAIL /tmp/lint-sample.out || true)
 if [[ "$fails" -ne 0 ]]; then
   echo "FAIL: $fails sample receipts failed lint"
@@ -33,7 +33,7 @@ echo
 echo "=== Check 3: synthetic injections must all LINT-FAIL ==="
 for shape in inject/shape-*.jsonl; do
   echo "-- $shape --"
-  python3 lint.py "$shape" | tee /tmp/lint-inject.out
+  python3 ../../scripts/rcpt_verify.py --eval "$shape" | tee /tmp/lint-inject.out
   passes=$(grep -c LINT-PASS /tmp/lint-inject.out || true)
   if [[ "$passes" -ne 0 ]]; then
     echo "FAIL: $passes injections slipped past the linter in $shape"
