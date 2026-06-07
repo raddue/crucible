@@ -279,5 +279,39 @@ class TestTier2Witness(unittest.TestCase):
                 rv.tier2_witness(self._w("/x/"), trace, root, True, "PASS")
 
 
+class TestCliDispatch(unittest.TestCase):
+    def test_tier1_good_receipt_stdin_silent_zero(self):
+        good = _load("sample-corpus/receipts.jsonl")[0]["receipt"]
+        r = run("--tier1", "-", stdin=good)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+
+    def test_tier1_malformed_exit1_stderr(self):
+        r = run("--tier1", "-", stdin="not a receipt")
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stderr.strip())
+
+    def test_eval_samples_pass(self):
+        r = run("--eval", str(CORPUS / "sample-corpus/receipts.jsonl"))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("LINT-PASS", r.stdout)
+        self.assertIn("summary: 5/5 receipts passed lint", r.stdout)
+
+    def test_eval_inject_all_fail_but_exit_zero(self):
+        # F1: --eval ALWAYS exits 0 for a readable file, even all-LINT-FAIL.
+        r = run("--eval", str(CORPUS / "inject/shape-a-skip-claim.jsonl"))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("LINT-FAIL", r.stdout)
+        self.assertNotIn("LINT-PASS", r.stdout)
+
+    def test_eval_tier2_only_rows_fail(self):
+        # 102-inject (PASS) and 105-inject (FAIL) must LINT-FAIL via the Tier-2 path.
+        rb = run("--eval", str(CORPUS / "inject/shape-b-witness-matches-expectfail.jsonl"))
+        self.assertNotIn("LINT-PASS", rb.stdout)
+        self.assertIn("102-inject", rb.stdout)
+        rd = run("--eval", str(CORPUS / "inject/shape-d-fail-without-evidence.jsonl"))
+        self.assertNotIn("LINT-PASS", rd.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

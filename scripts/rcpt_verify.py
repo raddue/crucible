@@ -483,17 +483,121 @@ def tier2_witness(witness, trace, root, strict, verdict):
     return []
 
 
+def _eval_tier2(witness, trace, bodies, verdict):
+    """Reproduce lint.py:411-418's Tier-2 dispatch for the --eval inline-body path,
+    routed through the shared verify_witness (PASS→tier2_verify, FAIL→tier2_verify_fail).
+    Raises LintError (byte-identical message) on FAIL; the caller prints it as LINT-FAIL."""
+    if not witness["ran"].startswith("TRACE#"):
+        return
+    idx = int(witness["ran"][len("TRACE#"):])
+    if not 1 <= idx <= len(trace):
+        return
+    cited = trace[idx - 1]
+    art_name = derive_art_name(cited, verdict)
+    body_text = bodies.get(art_name) if art_name else None
+    verify_witness(body_text, witness, verdict, cited)
+
+
+def run_eval(path) -> int:
+    """Port of lint.py main(): per-line LINT-PASS/LINT-FAIL on stdout + trailing summary.
+    ALWAYS exits 0 for a readable file (F1) — per-record verdicts are stdout-only, never
+    the process exit code, so run-eval.sh's pipefail greps over all-FAIL inject shapes."""
+    total = 0
+    passed = 0
+    for line in pathlib.Path(path).read_text().splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        receipt_text = rec.get("receipt")
+        if not receipt_text:
+            continue
+        total += 1
+        try:
+            verdict = lint_receipt(receipt_text)
+            # Tier-2 if inline artifact bodies supplied (synthetic injections do)
+            bodies = rec.get("artifact_bodies", {})
+            if bodies and verdict in {"PASS", "FAIL"}:
+                sections = parse_receipt(receipt_text)
+                trace = parse_trace(sections["TRACE"])
+                witness = parse_witness(sections["WITNESS"])
+                _eval_tier2(witness, trace, bodies, verdict)
+            print(f"{rec.get('dispatch-id','?'):30s}  LINT-PASS  ({verdict})")
+            passed += 1
+        except LintError as e:
+            print(f"{rec.get('dispatch-id','?'):30s}  LINT-FAIL  {e}")
+    print(f"\nsummary: {passed}/{total} receipts passed lint")
+    return 0
+
+
+def run_selftest() -> int:
+    """The CI gate — implemented in Task 8."""
+    raise NotImplementedError("run_selftest is implemented in Task 8")
+
+
 def _usage_exit():
     sys.stderr.write(__doc__)
     return 2
+
+
+def _verify_single(text, mode, root, strict) -> int:
+    """Single-receipt mode: Tier-1 (always) + Tier-2 (if --tier2). Exit 0 on pass,
+    1 on any LintError (bullet on stderr). UNVERIFIABLE notes are advisory (stderr, non-fatal)."""
+    try:
+        verdict = lint_receipt(text)
+        if mode == "tier2":
+            sections = parse_receipt(text)
+            artifacts = parse_artifacts(sections["ARTIFACTS"])
+            trace = parse_trace(sections["TRACE"])
+            witness = parse_witness(sections["WITNESS"])
+            notes = tier2_artifacts(artifacts, trace, root, strict)
+            if verdict in {"PASS", "FAIL"}:
+                notes += tier2_witness(witness, trace, root, strict, verdict)
+            for n in notes:
+                sys.stderr.write(n + "\n")
+    except LintError as e:
+        sys.stderr.write(f"{e}\n")
+        return 1
+    return 0
 
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         return _usage_exit()
-    # dispatch stub — filled in later tasks
-    return _usage_exit()
+    if argv[0] == "--selftest":
+        return run_selftest()
+    if argv[0] == "--eval":
+        if len(argv) != 2:
+            return _usage_exit()
+        return run_eval(argv[1])
+    # single-receipt mode — hand-parse flags (mirror check_*.py simplicity)
+    mode = "tier1"
+    root = None
+    strict = False
+    path = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--tier1":
+            mode = "tier1"
+        elif a == "--tier2":
+            mode = "tier2"
+        elif a == "--strict":
+            strict = True
+        elif a == "--root":
+            i += 1
+            if i >= len(argv):
+                return _usage_exit()
+            root = pathlib.Path(argv[i])
+        elif a == "-" or not a.startswith("--"):
+            path = a
+        else:
+            return _usage_exit()
+        i += 1
+    if root is None:
+        root = pathlib.Path.cwd()
+    text = sys.stdin.read() if path in (None, "-") else pathlib.Path(path).read_text()
+    return _verify_single(text, mode, root, strict)
 
 
 if __name__ == "__main__":
