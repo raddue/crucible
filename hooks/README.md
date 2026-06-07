@@ -317,3 +317,56 @@ Two capabilities MUST be added before the reconciler can support the promised pr
 ### PR discovery path
 
 Primary: `gh pr list --state merged --search "base:main merged:>=<SINCE>"` (handles squash-merged PRs uniformly). Fallback: `git log --merges --since=<SINCE>` (misses squash-merges; reports `pr_discovery_path: git-log-fallback` in the output so consumers know the coverage).
+
+## Receipt Verifier (SubagentStop, #369)
+
+`hooks/rcpt-verify-hook.sh` is a **never-fatal, pure-observer** SubagentStop advisory.
+When a subagent stops, it extracts the last text-bearing assistant message from the
+transcript and — if it carries an `RCPT v1` receipt block — runs the Tier-1 structural
+lint (`scripts/rcpt_verify.py --tier1 -`) over it, emitting a 2-line ADVISORY on stderr
+if the receipt is malformed. It **always exits 0** and performs **NO writes** (it does
+not block, edit, or record anything).
+
+### Setup (opt-in — NOT auto-enabled)
+
+```json
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bash hooks/rcpt-verify-hook.sh", "timeout": 500 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### How It Works
+
+1. Reads the SubagentStop JSON on stdin; `transcript_path` via `jq`. Missing `jq` /
+   `python3` / empty or unreadable transcript → `exit 0` silently.
+2. Selects the **last** record with `.message.role == "assistant"` whose content yields
+   non-empty text (a verbatim string, or the concatenated `.text` of `type=="text"`
+   blocks). Unrecognized shape / parse error / no text → `exit 0` silently.
+3. Gate: if the text contains no `RCPT v1` token → `exit 0` silently. Otherwise extracts
+   from the first column-0 `RCPT v1 ` line to end-of-message.
+4. Resolves the repo via `git rev-parse --show-toplevel` and gates on
+   `[ -f "$REPO/scripts/rcpt_verify.py" ]` — so a SubagentStop in a **non-crucible repo**
+   exits 0 silently with no spurious advisory (the existence gate; never-fatal holds
+   regardless).
+5. Pipes the receipt block to `--tier1 -`. On non-zero, prints the `[rcpt-verify]`
+   advisory (first stderr bullet) and **still exits 0**.
+
+### Testing
+
+```bash
+bash hooks/tests/test-rcpt-verify-hook.sh
+```
+
+### Dependencies
+
+`jq` and `python3` — both absent-tolerant (the hook exits 0 silently when either is
+missing). No `git` dependency beyond the optional repo-root resolution (absent → exit 0).
