@@ -51,7 +51,7 @@ def _require_catalog():
 class CatalogImportGuard(unittest.TestCase):
     """A dedicated FAILING test so the suite is RED while catalog.py is absent.
 
-    The 21 behavioral tests SKIP when the module is missing (so their intent
+    The 24 behavioral tests SKIP when the module is missing (so their intent
     stays legible); this one test turns the run red for the right reason.
     """
 
@@ -197,7 +197,7 @@ class CatalogTestBase(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# The 21 cases
+# The 24 cases
 # --------------------------------------------------------------------------
 class CatalogChecks(CatalogTestBase):
 
@@ -658,6 +658,79 @@ class CatalogChecks(CatalogTestBase):
         self.assertEqual(
             catalog.check(self.root), [],
             "the eval-claim phrase '13 core skills' must NOT be captured as a count token")
+
+    # 22 (regression — S2): a multi-paragraph intra-section intro must survive
+    # render verbatim (interior blank line preserved) and be idempotent. A
+    # non-blank-only join silently fused the two paragraphs into one block.
+    def test_section_intro_multiparagraph_preserved(self):
+        self.write_skill("alpha")
+        self.write_skill("bravo")
+        self._install_categories({"Framed": ["alpha", "bravo"]})
+        multi = "Para one.\n\nPara two."
+        body = (
+            "# Skill Catalog\n\n"
+            "<!-- CATALOG:START -->\n"
+            "## Framed\n\n"
+            f"{multi}\n\n"
+            "| Skill | Description |\n|---|---|\n"
+            "| **alpha** | alpha does a thing. |\n"
+            "| **bravo** | bravo does a thing. |\n\n"
+            "<!-- CATALOG:END -->\n"
+        )
+        self.write_skills_doc(body)
+        # alpha/bravo + workshop -> true n=3; workshop must be categorized + rowed.
+        self._install_categories({"Framed": ["alpha", "bravo"], "Ws": ["workshop"]})
+        body = (
+            "# Skill Catalog\n\n"
+            "<!-- CATALOG:START -->\n"
+            "## Framed\n\n"
+            f"{multi}\n\n"
+            "| Skill | Description |\n|---|---|\n"
+            "| **alpha** | alpha does a thing. |\n"
+            "| **bravo** | bravo does a thing. |\n\n"
+            "## Ws\n\n"
+            "| Skill | Description |\n|---|---|\n"
+            f"| **workshop** | {self.WORKSHOP_DESC} |\n\n"
+            "<!-- CATALOG:END -->\n"
+        )
+        self.write_skills_doc(body)
+        self.write_count_files(self._count_tokens(3))
+        doc = self.root / "docs" / "skills.md"
+
+        catalog.render(self.root)
+        first = doc.read_text(encoding="utf-8")
+        self.assertIn(multi, first,
+                      "both paragraphs AND the separating blank line must survive render")
+
+        catalog.render(self.root)
+        second = doc.read_text(encoding="utf-8")
+        self.assertEqual(first, second,
+                         "multi-paragraph-intro render must be idempotent on the 2nd render")
+
+    # 23 (regression — S3): a SKILL.md with no parseable name: must be flagged
+    # explicitly (was silently dropped, surfacing only as wrong-total drift).
+    def test_unparseable_name_flagged(self):
+        self.build_clean_fixture()  # otherwise-clean n=4 (alpha/bravo/charlie+ws)
+        # One skill dir whose frontmatter mis-cases the key (`Name:`), so
+        # parse_skill_names returns "" for it -> not in disk/CATEGORIES/rows.
+        self.write_skill("typo", raw_frontmatter="Name: typo\ndescription: oops")
+        errs = catalog.check(self.root)
+        self.assertTrue(
+            any("skills/typo/SKILL.md" in e and "name" in e.lower() for e in errs),
+            f"expected a no-name bullet naming skills/typo/SKILL.md: {errs}")
+
+    # 24 (regression — S4): a missing docs/skills.md must yield a graceful bullet
+    # rather than an uncaught FileNotFoundError.
+    def test_missing_skills_doc_graceful(self):
+        self.build_clean_fixture()
+        (self.root / "docs" / "skills.md").unlink()
+        try:
+            errs = catalog.check(self.root)
+        except FileNotFoundError as exc:  # pragma: no cover - guards the fix
+            self.fail(f"check must not raise on missing docs/skills.md: {exc!r}")
+        self.assertTrue(
+            any("docs/skills.md not found" in e for e in errs),
+            f"expected a 'docs/skills.md not found' bullet: {errs}")
 
 
 if __name__ == "__main__":

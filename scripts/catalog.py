@@ -74,6 +74,14 @@ END = "<!-- CATALOG:END -->"
 # Count-token surfaces. Expected value is ALWAYS runtime n — no literal stored.
 # Generic grammar requires a non-`skills` separator-or-nothing so an eval-claim
 # phrase ("N core skills") with an interposed word is NOT captured.
+#
+# DISCIPLINE (deliberate, gate-accepted; NOT a sentinel scheme): the grammar
+# matches ANY "N skills" / "N agent skills" phrase in a registered count-target
+# file, not a fenced sentinel — because plugin.json's published JSON description
+# string cannot carry a sentinel comment. So each registered count-target file
+# below must contain ONLY the catalog-total "N skills" / "N agent skills" token;
+# any OTHER count phrase added to these files MUST keep an interposed non-`skills`
+# word (e.g. "13 core skills") so the grammar does not capture it as the total.
 _GENERIC = re.compile(r"(~?)(\d+)([ -])(skills?)\b")
 _PLUGIN = re.compile(r"(\d+)( agent skills?)\b")
 COUNT_TARGETS: list[tuple[str, re.Pattern[str]]] = [
@@ -220,8 +228,25 @@ def check(root: pathlib.Path = ROOT) -> list[str]:
             errs.append(
                 f"- skill `{name}` is uncategorized — add it to CATEGORIES")
 
+    # (8) no-name guard: a skills/<dir>/SKILL.md whose `name:` does not parse is
+    # silently dropped from `disk`/n by parse_skill_names, surfacing only as a
+    # mysterious count drift against the wrong total. Flag the culprit directly.
+    for skill_md in sorted((root / "skills").glob("*/SKILL.md")):
+        fm = _frontmatter(skill_md.read_text(encoding="utf-8"))
+        if not _scalar_value(fm, "name"):
+            rel = skill_md.relative_to(root).as_posix()
+            errs.append(f"- {rel} has no parseable name: frontmatter")
+
+    # (9) missing doc: read docs/skills.md only after the disk-only checks above
+    # have accrued; a missing doc gets a graceful bullet (symmetry with the
+    # count-target path-existence handling), not an uncaught FileNotFoundError.
+    doc = root / "docs" / "skills.md"
+    if not doc.is_file():
+        errs.append("- docs/skills.md not found")
+        return errs
+
     # Catalog rows between the markers.
-    text = (root / "docs" / "skills.md").read_text(encoding="utf-8")
+    text = doc.read_text(encoding="utf-8")
     region = _catalog_region(text)
     if region is None:
         errs.append("- CATALOG markers not found in docs/skills.md")
@@ -285,8 +310,14 @@ def _rewrite_counts(root: pathlib.Path, n: int) -> None:
 
 
 def _section_intros(region: str) -> dict[str, str]:
-    """category -> verbatim intra-section intro prose (non-blank lines between a
-    `## Category` heading and its table), or absent when there is none."""
+    """category -> VERBATIM intra-section intro prose between a `## Category`
+    heading and its table, or absent when there is none.
+
+    Captures the exact text from after the heading up to (but not including) the
+    first table line (lstrip starts with `|`) or the next `## ` heading, then
+    strips leading/trailing blank lines while PRESERVING interior blank lines —
+    so a two-paragraph intro survives render byte-for-byte (a previous
+    non-blank-only join silently fused multi-paragraph intros into one block)."""
     intros: dict[str, str] = {}
     lines = region.splitlines()
     i = 0
@@ -295,18 +326,22 @@ def _section_intros(region: str) -> dict[str, str]:
         if line.startswith("## "):
             cat = line[3:].strip()
             j = i + 1
-            prose: list[str] = []
+            block: list[str] = []
             while j < len(lines):
                 cur = lines[j]
                 if cur.startswith("## "):
                     break
                 if cur.lstrip().startswith("|"):
                     break
-                if cur.strip():
-                    prose.append(cur)
+                block.append(cur)
                 j += 1
-            if prose:
-                intros[cat] = "\n".join(prose)
+            # Strip leading/trailing blank lines; keep interior blanks verbatim.
+            while block and not block[0].strip():
+                block.pop(0)
+            while block and not block[-1].strip():
+                block.pop()
+            if block:
+                intros[cat] = "\n".join(block)
             i = j
             continue
         i += 1
