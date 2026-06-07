@@ -2,7 +2,7 @@
 
 A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), [OpenAI Codex](https://openai.com/codex/), [Amp](https://amp.dev), [Cline](https://cline.bot), and any platform that supports the SKILL.md format.
 
-42 skills across the full development lifecycle — design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. Every skill is [eval-tested](docs/evals.md) with measured A/B deltas (49 execution evals + 18 sequence evals, +29% / +31% average).
+52 skills across the full development lifecycle — design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 13 core skills are [eval-tested](docs/evals.md) with measured A/B deltas (49 execution evals + 18 sequence evals, +29% / +31% average).
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged. Pipeline checkpoint system, auto skill extraction, structured context compression, and trajectory capture inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
@@ -58,7 +58,7 @@ For hooks (session activity index, build routing advisor), MCP-based external mo
 
 ## Documentation
 
-- [docs/skills.md](docs/skills.md) — full catalog of all 42 skills
+- [docs/skills.md](docs/skills.md) — full catalog of all 52 skills
 - [docs/architecture.md](docs/architecture.md) — how the orchestrator skills compose
 - [docs/configuration.md](docs/configuration.md) — Claude Code settings, hooks, MCP, env vars
 - [docs/evals.md](docs/evals.md) — full eval methodology and per-skill A/B deltas
