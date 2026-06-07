@@ -11,6 +11,7 @@ caught by the repo-wide `tests/` .gitignore rule).
 import importlib.util
 import json
 import pathlib
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -133,6 +134,50 @@ class TestBaseResolution(unittest.TestCase):
         self.assertTrue(rv.is_path_shaped("src/foo.ts"))
         self.assertFalse(rv.is_path_shaped("findings.md"))
         self.assertTrue(rv.is_path_shaped("/tmp/x"))
+
+
+class TestTier2Artifacts(unittest.TestCase):
+    def _art(self, name, data):
+        return {name: {"hash": hashlib.sha256(data).hexdigest(), "size": str(len(data))}}
+
+    def test_matching_hash_no_raise(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.txt").write_bytes(b"hello")
+            notes = rv.tier2_artifacts(self._art("f.txt", b"hello"), [], root, False)
+            self.assertEqual(notes, [])
+
+    def test_tampered_hash_raises(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.txt").write_bytes(b"changed")
+            with self.assertRaises(rv.LintError):
+                rv.tier2_artifacts(self._art("f.txt", b"hello"), [], root, False)
+
+    def test_absent_basename_unverifiable_even_strict(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            notes = rv.tier2_artifacts(self._art("findings.md", b"x"), [], root, True)
+            self.assertEqual(len(notes), 1)
+            self.assertIn("UNVERIFIABLE", notes[0])
+
+    def test_absent_pathshaped_strict_raises(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            with self.assertRaises(rv.LintError):
+                rv.tier2_artifacts(self._art("src/foo.ts", b"x"), [], root, True)
+
+    def test_absent_pathshaped_nonstrict_unverifiable(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            notes = rv.tier2_artifacts(self._art("src/foo.ts", b"x"), [], root, False)
+            self.assertEqual(len(notes), 1)
+            self.assertIn("UNVERIFIABLE", notes[0])
 
 
 if __name__ == "__main__":

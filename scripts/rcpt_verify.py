@@ -335,6 +335,25 @@ def is_path_shaped(name: str) -> bool:
     return ("/" in name) or pathlib.Path(name).is_absolute()
 
 
+def tier2_artifacts(artifacts, trace, root, strict):
+    """Part 1. For each ARTIFACTS <name>: resolve_base; if found, recompute sha256
+    and compare (mismatch -> FAIL). If absent: path-shaped + strict -> FAIL;
+    else UNVERIFIABLE (non-fatal). Returns list of UNVERIFIABLE notes; raises LintError on FAIL."""
+    notes = []
+    for name, meta in artifacts.items():
+        resolved = resolve_base(name, root)
+        if resolved is not None:
+            actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+            if actual != meta["hash"]:
+                raise LintError(f"Tier-2: ARTIFACTS {name} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
+            # <size> is parsed-but-not-validated, matching lint.py
+        else:
+            if strict and is_path_shaped(name):
+                raise LintError(f"Tier-2 --strict: path-shaped artifact {name} absent under all bases")
+            notes.append(f"UNVERIFIABLE: {name} (no file under root)")
+    return notes
+
+
 def _usage_exit():
     sys.stderr.write(__doc__)
     return 2
