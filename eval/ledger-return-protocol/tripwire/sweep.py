@@ -14,13 +14,20 @@ Runs the Tier-1 linter (from ../lint.py) extended for v1.1, then the sweep.
 
 Usage: python3 sweep.py <scenario.jsonl>
 """
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-import lint as layer1  # noqa: E402
+# Tier-1 linter now lives at scripts/rcpt_verify.py (the verbatim port of the deleted
+# eval-only lint.py, #369). Load it by path so sweep.py's lint_receipt / parse_* /
+# UNRUNNABLE_VOCAB / LintError references resolve against the single ported module.
+# parents[3] = repo root (eval/ledger-return-protocol/tripwire/sweep.py → ../../../).
+_RV_PATH = Path(__file__).resolve().parents[3] / "scripts/rcpt_verify.py"
+_rv_spec = importlib.util.spec_from_file_location("rcpt_verify", _RV_PATH)
+layer1 = importlib.util.module_from_spec(_rv_spec)
+_rv_spec.loader.exec_module(layer1)
 
 
 PREDICATE_VOCAB = {
