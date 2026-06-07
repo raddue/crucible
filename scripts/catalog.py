@@ -228,18 +228,56 @@ def check(root: pathlib.Path = ROOT) -> list[str]:
             errs.append(
                 f"- skill `{name}` is uncategorized — add it to CATEGORIES")
 
-    # (8) no-name guard: a skills/<dir>/SKILL.md whose `name:` does not parse is
-    # silently dropped from `disk`/n by parse_skill_names, surfacing only as a
-    # mysterious count drift against the wrong total. Flag the culprit directly.
+    # (8) no-name guard + duplicate-name guard: in one pass over the on-disk
+    # SKILL.md files, flag any whose `name:` does not parse (silently dropped
+    # from disk/n by parse_skill_names — surfacing only as mysterious count
+    # drift) AND accumulate name -> [reldir, ...] so two dirs declaring the SAME
+    # name (which dedupe in the parse_skill_names set, undercounting n and making
+    # the second dir invisible to every other guard) can be flagged explicitly.
+    by_name: dict[str, list[str]] = {}
     for skill_md in sorted((root / "skills").glob("*/SKILL.md")):
         fm = _frontmatter(skill_md.read_text(encoding="utf-8"))
-        if not _scalar_value(fm, "name"):
-            rel = skill_md.relative_to(root).as_posix()
+        rel = skill_md.relative_to(root).as_posix()
+        name = _scalar_value(fm, "name")
+        if not name:
             errs.append(f"- {rel} has no parseable name: frontmatter")
+            continue
+        by_name.setdefault(name, []).append(rel)
+    for name, rels in sorted(by_name.items()):
+        if len(rels) > 1:
+            errs.append(
+                f"- duplicate skill name `{name}` declared by "
+                + " and ".join(rels))
 
-    # (9) missing doc: read docs/skills.md only after the disk-only checks above
-    # have accrued; a missing doc gets a graceful bullet (symmetry with the
-    # count-target path-existence handling), not an uncaught FileNotFoundError.
+    # (7) count-target path existence + (5) count drift (every match == n, and
+    # ≥1 match per target). These are doc-INDEPENDENT (they read README /
+    # workshop / plugin.json against runtime n, never the catalog region), so
+    # they run BEFORE the missing-doc early return — a missing docs/skills.md
+    # must not mask a co-occurring count drift.
+    for relpath, regex in COUNT_TARGETS:
+        path = root / relpath
+        if not path.is_file():
+            errs.append(f"- registered count target `{relpath}` not found")
+            continue
+        content = path.read_text(encoding="utf-8")
+        matches = list(regex.finditer(content))
+        if not matches:
+            errs.append(
+                f"- registered count target `{relpath}` matched no count token "
+                "— grammar drift?")
+            continue
+        for mt in matches:
+            digits = mt.group(2) if regex is _GENERIC else mt.group(1)
+            if int(digits) != n:
+                errs.append(
+                    f"- count drift in `{relpath}`: token `{mt.group(0)}` "
+                    f"!= runtime skill count {n}")
+
+    # (9) missing doc: only the catalog-region-dependent checks (the bijection:
+    # omission/bogus/naming) need docs/skills.md, so a missing doc short-circuits
+    # ONLY those — the doc-independent bullets above have already accrued. Get a
+    # graceful bullet (symmetry with the count-target path-existence handling),
+    # not an uncaught FileNotFoundError.
     doc = root / "docs" / "skills.md"
     if not doc.is_file():
         errs.append("- docs/skills.md not found")
@@ -265,27 +303,6 @@ def check(root: pathlib.Path = ROOT) -> list[str]:
         if name not in rows:
             errs.append(
                 f"- skill `{name}` is omitted — no catalog row between the markers")
-
-    # (7) count-target path existence + (5) count drift (every match == n,
-    # and ≥1 match per target).
-    for relpath, regex in COUNT_TARGETS:
-        path = root / relpath
-        if not path.is_file():
-            errs.append(f"- registered count target `{relpath}` not found")
-            continue
-        content = path.read_text(encoding="utf-8")
-        matches = list(regex.finditer(content))
-        if not matches:
-            errs.append(
-                f"- registered count target `{relpath}` matched no count token "
-                "— grammar drift?")
-            continue
-        for mt in matches:
-            digits = mt.group(2) if regex is _GENERIC else mt.group(1)
-            if int(digits) != n:
-                errs.append(
-                    f"- count drift in `{relpath}`: token `{mt.group(0)}` "
-                    f"!= runtime skill count {n}")
 
     return errs
 
@@ -350,6 +367,8 @@ def _section_intros(region: str) -> dict[str, str]:
 
 def render(root: pathlib.Path = ROOT) -> None:
     doc = root / "docs" / "skills.md"
+    if not doc.is_file():
+        raise SystemExit("docs/skills.md not found")
     text = doc.read_text(encoding="utf-8")
     si = text.find(START)
     ei = text.find(END)

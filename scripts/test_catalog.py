@@ -51,7 +51,7 @@ def _require_catalog():
 class CatalogImportGuard(unittest.TestCase):
     """A dedicated FAILING test so the suite is RED while catalog.py is absent.
 
-    The 24 behavioral tests SKIP when the module is missing (so their intent
+    The behavioral tests SKIP when the module is missing (so their intent
     stays legible); this one test turns the run red for the right reason.
     """
 
@@ -197,7 +197,7 @@ class CatalogTestBase(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# The 24 cases
+# The behavioral cases
 # --------------------------------------------------------------------------
 class CatalogChecks(CatalogTestBase):
 
@@ -720,9 +720,16 @@ class CatalogChecks(CatalogTestBase):
             f"expected a no-name bullet naming skills/typo/SKILL.md: {errs}")
 
     # 24 (regression — S4): a missing docs/skills.md must yield a graceful bullet
-    # rather than an uncaught FileNotFoundError.
+    # rather than an uncaught FileNotFoundError — AND it must NOT mask the
+    # doc-independent count-target checks. A co-occurring count drift (README
+    # "999 skills" while n=4) must STILL be reported alongside the missing-doc
+    # bullet (the missing-doc early return only short-circuits the bijection).
     def test_missing_skills_doc_graceful(self):
         self.build_clean_fixture()
+        n = len(catalog.parse_skill_names(self.root))
+        # Drift README's count token so a doc-independent error co-occurs.
+        (self.root / "README.md").write_text(
+            "A toolkit of 999 skills.\n", encoding="utf-8")
         (self.root / "docs" / "skills.md").unlink()
         try:
             errs = catalog.check(self.root)
@@ -731,6 +738,49 @@ class CatalogChecks(CatalogTestBase):
         self.assertTrue(
             any("docs/skills.md not found" in e for e in errs),
             f"expected a 'docs/skills.md not found' bullet: {errs}")
+        self.assertTrue(
+            any(self._is_count_drift(e) and "999" in e for e in errs),
+            f"missing doc must NOT mask the co-occurring count drift (999 != {n}): {errs}")
+
+    # 25 (regression — R2-Significant): two skills/<dir>/SKILL.md declaring the
+    # SAME `name:` dedupe in parse_skill_names's set — undercounting n and making
+    # the second dir invisible to every bijection/name guard. The dedicated
+    # duplicate-name guard in check() must flag the collision explicitly.
+    def test_duplicate_name_flagged(self):
+        self.build_clean_fixture()  # otherwise-clean n=4 (alpha/bravo/charlie+ws)
+        # Two dirs declaring `name: dup`; the set dedupes them, so without the
+        # guard check would silently false-PASS. Give dup a row + category so the
+        # ONLY surfaced error is the duplicate-name collision.
+        self.write_skill("dup", raw_frontmatter="name: dup\ndescription: dup one")
+        d2 = self.root / "skills" / "dup-copy"
+        d2.mkdir(parents=True, exist_ok=True)
+        (d2 / "SKILL.md").write_text(
+            "---\nname: dup\ndescription: dup two\n---\n\n# dup-copy\n",
+            encoding="utf-8")
+        cats = dict(catalog.CATEGORIES)
+        cats["Core"] = cats["Core"] + ["dup"]
+        self._install_categories(cats)
+        rows = [("Core", [
+            ("alpha", "alpha does a thing."),
+            ("bravo", "bravo does a thing."),
+            ("charlie", "charlie does a thing."),
+            ("workshop", self.WORKSHOP_DESC),
+            ("dup", "dup does a thing."),
+        ])]
+        self.write_skills_doc(self.catalog_block(rows))
+        errs = catalog.check(self.root)
+        self.assertTrue(
+            any("duplicate" in e.lower() and "dup" in e for e in errs),
+            f"expected a duplicate-name bullet naming 'dup': {errs}")
+
+    # 26 (regression — R2-Minor): render must mirror check's graceful missing-doc
+    # handling — a clear SystemExit, not a bare FileNotFoundError (render is
+    # operator-invoked, so SystemExit is the right symmetry, not a bullet).
+    def test_render_missing_doc_errors(self):
+        self.build_clean_fixture()
+        (self.root / "docs" / "skills.md").unlink()
+        with self.assertRaises(SystemExit):
+            catalog.render(self.root)
 
 
 if __name__ == "__main__":
