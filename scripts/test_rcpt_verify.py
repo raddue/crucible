@@ -260,6 +260,54 @@ class TestTier2Witness(unittest.TestCase):
             notes = rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
             self.assertEqual(notes, [])
 
+    def test_byte_range_1based_inclusive(self):
+        # #B is 1-based INCLUSIVE, parallel to #L: #B2-B5 over "xBOOMy\n" reads bytes
+        # 2..5 = "BOOM" (endpoint byte 5 'M' included). /BOOM/ matches the cited range →
+        # witness would have fired → PASS rejected (raises). A half-open read would yield
+        # "OOM" and miss it, so the raise proves the endpoint byte is included.
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "out.log").write_bytes(b"xBOOMy\n")
+            cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#B2-B5"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            with self.assertRaises(rv.LintError):
+                rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+            # And the raw range reader returns exactly the inclusive slice.
+            self.assertEqual(rv._read_cited_range(root / "out.log", cited), "BOOM")
+
+    def test_a0_start_no_slice_from_end_witness_fires(self):
+        # Guard: a=0 start (#B0-B5 / #L0-L5) must NOT slice from the end. Pre-clamp,
+        # [a-1:b] = [-1:b] → empty/wrong body for files longer than b → witness silently
+        # bypassed → false PASS on disk. The expect-fail pattern sits in the LEADING
+        # bytes, so a correct [0:b] read contains it and the witness must FIRE (raise).
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            # "BOOM" in leading bytes; file far longer than b so [-1:b] would be empty.
+            (root / "out.log").write_bytes(b"BOOMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n")
+            cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#B0-B5"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            # Raw reader returns real leading content (not the empty [-1:b] slice).
+            # a=0 clamps to 1 → bytes [0:5] = "BOOMx" (5 leading bytes), not "".
+            self.assertEqual(rv._read_cited_range(root / "out.log", cited), "BOOMx")
+            # Witness fires → PASS rejected (no silent clean).
+            with self.assertRaises(rv.LintError):
+                rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+
+    def test_a0_line_start_no_slice_from_end_witness_fires(self):
+        # Parallel #L0-L5 guard: a=0 line start must clamp to 1, not slice from the end.
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            lines = ["BOOM here\n"] + [f"line {i}\n" for i in range(2, 50)]
+            (root / "out.log").write_text("".join(lines))
+            cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#L0-L5"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            self.assertIn("BOOM", rv._read_cited_range(root / "out.log", cited))
+            with self.assertRaises(rv.LintError):
+                rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+
     def test_absent_witness_basename_unverifiable(self):
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:

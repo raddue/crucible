@@ -455,10 +455,16 @@ def _read_cited_range(path: pathlib.Path, cited):
     if not m:
         return path.read_text()
     kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+    # Ranges are 1-based; a<1 is malformed, clamp to 1 so `[a-1:b]` never slices from
+    # the END (a=0 → [-1:b], an empty/wrong body that silently bypasses the witness).
+    if a < 1:
+        a = 1
+    # Both #L (line) and #B (byte) ranges are 1-based INCLUSIVE: #L1-L5 = 5 lines,
+    # #B1-B5 = bytes 1..5 = 5 bytes (parallel symmetric forms per return-convention).
     if kind == "L":
         lines = path.read_text().splitlines(keepends=True)
         return "".join(lines[a - 1:b])  # 1-based inclusive
-    return path.read_bytes()[a:b].decode("utf-8", errors="replace")
+    return path.read_bytes()[a - 1:b].decode("utf-8", errors="replace")  # 1-based inclusive
 
 
 def tier2_witness(witness, trace, root, strict, verdict):
@@ -525,7 +531,7 @@ def _eval_text(path) -> str:
     out = []
     total = 0
     passed = 0
-    for line in pathlib.Path(path).read_text().splitlines():
+    for line in _read_path_arg(path).splitlines():
         if not line.strip():
             continue
         rec = json.loads(line)
@@ -671,6 +677,23 @@ def _usage_exit():
     return 2
 
 
+def _read_path_arg(path):
+    """Read the top-level path argument, returning its text. Raises _PathReadError
+    (clean one-line stderr + usage exit 2) on a missing/unreadable file — instead of
+    leaking a FileNotFoundError/OSError traceback. Only guards the path read itself;
+    malformed JSON *content* inside a readable file is out of scope (left to json.loads)."""
+    try:
+        return pathlib.Path(path).read_text()
+    except OSError:
+        raise _PathReadError(path)
+
+
+class _PathReadError(Exception):
+    def __init__(self, path):
+        super().__init__(path)
+        self.path = path
+
+
 def _verify_single(text, mode, root, strict) -> int:
     """Single-receipt mode: Tier-1 (always) + Tier-2 (if --tier2). Exit 0 on pass,
     1 on any LintError (bullet on stderr). UNVERIFIABLE notes are advisory (stderr, non-fatal)."""
@@ -728,9 +751,13 @@ def main(argv=None) -> int:
         i += 1
     if root is None:
         root = pathlib.Path.cwd()
-    text = sys.stdin.read() if path in (None, "-") else pathlib.Path(path).read_text()
+    text = sys.stdin.read() if path in (None, "-") else _read_path_arg(path)
     return _verify_single(text, mode, root, strict)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except _PathReadError as e:
+        sys.stderr.write(f"rcpt_verify: cannot read {e.path}\n")
+        sys.exit(2)

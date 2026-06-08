@@ -151,6 +151,23 @@ add("g-range-extraction-outside",
     "g", "pass", False,
     "BOOM is on line 45, OUTSIDE the cited #L1-L40 → range-only read → no match → PASS")
 
+# ── (i) byte-range (#B) inclusivity: cited inclusive byte range matches expect-fail → FAIL ──
+#   #B2-B5 reads bytes 2..5 INCLUSIVE = read_bytes()[1:5] = "BOOM" (1-based inclusive,
+#   parallel to #L). The 'M' at byte 5 is the inclusive endpoint: a half-open [2:5] read
+#   would yield "OOM" and miss /BOOM/, so this fixture is load-bearing for the endpoint.
+ibody = "xBOOMy\n"
+h = write_file("i", "test-output.log", ibody)
+add("i-byte-range-inclusive-match",
+    receipt("build/i", [f"  test-output.log  sha256:{h}  {len(ibody.encode())}"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=test-output.log#B2-B5"],
+            ["  patch-applied=true  from=TRACE#1"],
+            "exec:`run`  expect-fail=/BOOM/  ran=TRACE#2"),
+    "i", "fail", False,
+    "#B2-B5 is 1-based inclusive (bytes 2..5 = 'BOOM'); /BOOM/ matches the cited range → "
+    "witness WOULD have fired → PASS rejected. Endpoint byte 'M' is inside the inclusive range.")
+
+
 # ── (h) synthetic path-shaped witness target absent under --strict → FAIL ──
 #   grep-kind witness on a READ of a path-shaped file absent on disk (NOT in ARTIFACTS,
 #   so Tier-2 part-1 stays clean — this isolates the part-2 witness-file disposition).
