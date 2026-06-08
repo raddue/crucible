@@ -10,17 +10,24 @@ Input: a JSONL scenario file. Each line is one of:
       receipt's Tier-1 lint failed
   - {"type": "expect-lint-pass"}                        — assert clean lint
 
-Runs the Tier-1 linter (from ../lint.py) extended for v1.1, then the sweep.
+Runs the Tier-1 linter (from ../../../scripts/rcpt_verify.py) extended for v1.1, then the sweep.
 
 Usage: python3 sweep.py <scenario.jsonl>
 """
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-import lint as layer1  # noqa: E402
+# Tier-1 linter now lives at scripts/rcpt_verify.py (the verbatim port of the former
+# eval-only reference linter, #369). Load it by path so sweep.py's lint_receipt /
+# parse_* / UNRUNNABLE_VOCAB / LintError references resolve against the single port.
+# parents[3] = repo root (eval/ledger-return-protocol/tripwire/sweep.py → ../../../).
+_RV_PATH = Path(__file__).resolve().parents[3] / "scripts/rcpt_verify.py"
+_rv_spec = importlib.util.spec_from_file_location("rcpt_verify", _RV_PATH)
+layer1 = importlib.util.module_from_spec(_rv_spec)
+_rv_spec.loader.exec_module(layer1)
 
 
 PREDICATE_VOCAB = {
@@ -355,7 +362,12 @@ def main():
                 last_firings = sweep(manifest, parsed)
                 manifest.append(entry)
                 last_parsed = parsed
-            except LintError as e:
+            except layer1.LintError as e:
+                # Catch the BASE layer1.LintError (raised by lint_receipt / parse_*),
+                # which also catches the local LintError subclass (raised by lint_v11).
+                # `except LintError` (the subclass) would NOT catch a base-class instance,
+                # so a Tier-1 grammar failure routed through the sweep would escape as an
+                # uncaught traceback instead of a graceful lint-fail classification.
                 last_lint_error = str(e)
                 last_firings = []
         elif rec["type"] == "expect-fire":

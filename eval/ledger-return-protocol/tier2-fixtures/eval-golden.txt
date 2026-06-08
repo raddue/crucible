@@ -1,0 +1,7 @@
+7-implementer                   LINT-PASS  (PASS)
+12-judge                        LINT-PASS  (PASS)
+8-implementer                   LINT-PASS  (FAIL)
+3-attacker                      LINT-PASS  (BLOCKED)
+15-reviewer                     LINT-PASS  (FAIL)
+
+summary: 5/5 receipts passed lint

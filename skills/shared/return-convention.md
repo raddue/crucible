@@ -129,6 +129,8 @@ When a subagent dispatches its own subagents (`DISPATCHED` verb), parent-fabrica
 
 The linter is prose-as-pseudocode embedded in each pilot skill. Orchestrators apply it to every received receipt before acting on the subagent's VERDICT.
 
+**Runtime tool (preferred — the pseudocode below is the spec + fallback).** Orchestrators MUST run `python3 scripts/rcpt_verify.py --tier2 --strict --root <dispatch-root> <receipt>` on every received receipt before acting on its VERDICT, and apply the pseudocode below in-context ONLY as the fallback when the tool is unavailable. `rcpt_verify.py` is a deterministic, stdlib-only port of this grammar (Tier 1 + Tier 2 parts 1–2). Pass `--strict` so resolvable path-shaped artifacts hard-FAIL on a sha256/witness mismatch while an unresolvable bare basename stays UNVERIFIABLE (never a false FAIL); always pass `--root <dispatch-root>` explicitly. The obligation to lint every return is unchanged — only the mechanism moves to a tool (which does not itself verify that the orchestrator invoked it). The pseudocode below remains the canonical specification; do not duplicate it into the script.
+
 ### Tier 1 — Structural (in-context, zero disk reads)
 
 ```

@@ -12,3 +12,6 @@ jobs:
       - run: python3 scripts/check_i2_marker.py
       - run: python3 scripts/check_qg_stagnation_minor.py
       - run: python3 scripts/catalog.py check
+      - run: python3 scripts/rcpt_verify.py --selftest
+      - run: python3 scripts/test_rcpt_verify.py
+      - run: bash hooks/tests/test-rcpt-verify-hook.sh
