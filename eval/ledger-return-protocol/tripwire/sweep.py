@@ -362,7 +362,12 @@ def main():
                 last_firings = sweep(manifest, parsed)
                 manifest.append(entry)
                 last_parsed = parsed
-            except LintError as e:
+            except layer1.LintError as e:
+                # Catch the BASE layer1.LintError (raised by lint_receipt / parse_*),
+                # which also catches the local LintError subclass (raised by lint_v11).
+                # `except LintError` (the subclass) would NOT catch a base-class instance,
+                # so a Tier-1 grammar failure routed through the sweep would escape as an
+                # uncaught traceback instead of a graceful lint-fail classification.
                 last_lint_error = str(e)
                 last_firings = []
         elif rec["type"] == "expect-fire":
