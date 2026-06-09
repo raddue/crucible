@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end eval for the Invariant Cairn (issue #204).
 #
-# Runs five checks:
+# Runs seven checks:
 #   1. Clean fixture passes phase-entry-check + reconciliation (happy path).
 #   2. Recovery correctness: a cairn written, destroyed in memory, re-read —
 #      all INVARIANTS + OPEN_OBLIGATIONS + PHASE recoverable.
@@ -9,6 +9,9 @@
 #   4. Reconciliation catches each of the five drift modes (a/b/c/d/e).
 #   5. Integration: a receipt with ran=SKIPPED promoted → OPEN_OBLIGATIONS,
 #      later closed by a real exec receipt, passes reconciliation.
+#   6. Skill-qualified cross-skill partition: a ledger shared by build + QG;
+#      the QG cairn counts only its quality-gate:round/1 entries.
+#   7. Drift-f: a 12-char prefix collision across the run escalates (Rules 2/4).
 
 set -euo pipefail
 
@@ -139,6 +142,33 @@ echo "=== Check 5: Layer 1+2 integration (SKIPPED-promoted obligation closed by 
 # validated this flow. Re-run explicitly as a named check:
 python3 cairn_lint.py reconcile fixtures/cairn-2026-04-20T12-00-00.md fixtures/receipt-ledger.jsonl fixtures/tripwire-manifest.json fixtures/active-run.md
 echo "  PASS  Layer 1+2 integration verified"
+echo
+
+echo "=== Check 6: skill-qualified cross-skill partition ==="
+# A single ledger shared by TWO skills (build:plan/2 + quality-gate:round/1).
+# The QG cairn's LEDGER says round/1 dispatches=3; the ledger has exactly 3
+# quality-gate:round/1 entries (the co-resident build:* entries must NOT inflate
+# the count). Positive proof Rule 1's skill-qualified phase partitions cleanly.
+python3 cairn_lint.py reconcile fixtures/cairn-multiskill-qg.md fixtures/receipt-ledger-multiskill.jsonl fixtures/tripwire-manifest.json fixtures/active-run-multiskill.md
+echo "  PASS  cross-skill partition: QG cairn counts only quality-gate:round/1 (build:* ignored)"
+# Negative sub-case: a stray siege:round/1 entry (sibling sub-skill sharing round/N)
+# must NOT change the QG cairn's count — distinct skill prefix disambiguates.
+tmp_ledger=$(mktemp)
+cat fixtures/receipt-ledger-multiskill.jsonl > "$tmp_ledger"
+printf '%s\n' '{"dispatch_id":"7-siege","phase":"siege:round/1","hash_prefix":"d0000001aaaa","verdict":"PASS","witness_ran":"TRACE#1"}' >> "$tmp_ledger"
+python3 cairn_lint.py reconcile fixtures/cairn-multiskill-qg.md "$tmp_ledger" fixtures/tripwire-manifest.json fixtures/active-run-multiskill.md
+rm -f "$tmp_ledger"
+echo "  PASS  stray siege:round/1 entry does not inflate quality-gate:round/1 count"
+echo
+
+echo "=== Check 7: drift-f — 12-char prefix collision escalates (Rules 2/4) ==="
+out=$(python3 cairn_lint.py reconcile fixtures/cairn-2026-04-20T12-00-00.md fixtures/drift-f-prefix-collision.jsonl fixtures/tripwire-manifest.json fixtures/active-run.md 2>&1 || true)
+if echo "$out" | grep -q "12-char prefix collision across run"; then
+  echo "  PASS  drift-f caught: $(echo "$out" | head -1)"
+else
+  echo "  FAIL  drift-f NOT caught: $out"
+  exit 1
+fi
 echo
 
 echo "=== ALL CHECKS PASSED ==="

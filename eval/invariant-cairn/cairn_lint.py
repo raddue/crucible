@@ -148,9 +148,15 @@ def parse_phase(phase_body_lines):
     m = re.match(r"^phase: (\S+) / (\d+)$", body[0].strip())
     if not m:
         raise CairnError(f"PHASE line 1 malformed: {body[0]!r}")
+    skill_m = next(
+        (re.match(r"^parent-skill: (.+)$", l.strip()) for l in body
+         if l.strip().startswith("parent-skill:")),
+        None,
+    )
     return {
         "phase": m.group(1),
         "counter": int(m.group(2)),
+        "parent-skill": skill_m.group(1).strip() if skill_m else None,
     }
 
 
@@ -253,12 +259,25 @@ def reconciliation_pass(sections, receipt_ledger, tripwire_manifest, active_run_
 
     # Rule 1: LEDGER dispatch-count consistency
     ledger_entries = parse_ledger_counts(sections["LEDGER"])
-    # Index by hash_prefix for obligation/invariant lookups (closed-by and ref use hash prefixes)
+    # Index by hash_prefix for obligation/invariant lookups (closed-by and ref use hash prefixes).
+    # `hash_prefix` is the eval-fixture stand-in for the production `rcpt_sha256[:12]` (12-char
+    # prefix): the prod reconciler resolves [ref:]/[closed-by:] prefixes against the first 12 hex
+    # chars of each entry's `rcpt_sha256`, requiring a unique match (see cairn-convention Rules 2/4).
+    # A 12-char-prefix collision across the run is a reconciliation failure → escalate; build the
+    # index only after confirming uniqueness so a duplicate cannot silently overwrite an entry.
+    seen_prefixes = set()
+    for r in receipt_ledger:
+        p = r["hash_prefix"]
+        if p in seen_prefixes:
+            raise CairnError(f"Rules 2/4: 12-char prefix collision across run: {p}")
+        seen_prefixes.add(p)
     ledger_by_id = {r["hash_prefix"]: r for r in receipt_ledger}
+    parent_skill = phase["parent-skill"]
     for entry in ledger_entries:
-        # Count ledger entries whose dispatch-id begins with "<phase>/<counter>-"
-        prefix = f"{entry['phase']}/{entry['counter']}-"
-        matching = [r for r in receipt_ledger if r["dispatch_id"].startswith(prefix)]
+        # Count ledger entries whose `phase` equals "<parent-skill>:<phase>/<counter>"
+        # (skill-qualified so sibling sub-skills sharing one ledger never collide)
+        matching = [r for r in receipt_ledger
+                    if r.get("phase") == f"{parent_skill}:{entry['phase']}/{entry['counter']}"]
         if len(matching) != entry["dispatches"]:
             # Only allow Rule 1 local repair in the narrow scope (current in-progress phase)
             # — here we just surface the mismatch.
@@ -299,7 +318,10 @@ def reconciliation_pass(sections, receipt_ledger, tripwire_manifest, active_run_
             if r["verdict"] != "PASS":
                 raise CairnError(f"Rule 2: closed-by {cb} verdict={r['verdict']}, expected PASS")
             # If obligation originated from a SKIPPED witness (ref present), closing receipt's
-            # witness must be ran=TRACE#N
+            # witness must be ran=TRACE#N.
+            # NOTE: `witness_ran` is the eval-fixture stand-in for the closing receipt's at-close-
+            # observed `ran=` disposition. Production reads this from the receipt in-hand at
+            # obligation-close time, NOT from the 4-key receipt-ledger (which has no `ran=` key).
             if obl.get("ref"):
                 witness_ran = r.get("witness_ran", "")
                 if witness_ran.startswith("SKIPPED:") or witness_ran.startswith("UNRUNNABLE:"):

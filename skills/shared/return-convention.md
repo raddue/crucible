@@ -60,7 +60,7 @@ NEXT       <one-line re-verification hint>  [; <hint>]
 
 ### Field rules
 
-- **Header line** — `RCPT v1 <skill>/<dispatch-id>`. `<skill>` matches `[a-z][a-z0-9-]*`. `<dispatch-id>` is the dispatch directory basename provided by the orchestrator.
+- **Header line** — `RCPT v1 <skill>/<dispatch-id>`. `<skill>` matches `[a-z][a-z0-9-]*`. `<dispatch-id>` is the dispatch-**file** basename `<N>-<template-name>` (per `shared/dispatch-convention.md` file naming; NOT the dispatch-*directory* basename) provided by the orchestrator.
 - **VERDICT** — one of `{PASS, FAIL, BLOCKED}`, followed by `conf=<N.NN>` where `N.NN` matches `(0\.\d{2}|1\.00)`.
   - `PASS` — subagent believes its objective was met.
   - `FAIL` — subagent believes its objective was not met.
@@ -121,8 +121,8 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 
 When a subagent dispatches its own subagents (`DISPATCHED` verb), parent-fabricated child verdicts are closed by the following rule:
 
-1. **Orchestrator-side recording.** On accepting any receipt, the orchestrator computes `sha256(normalize(receipt_text))` where `normalize` (a) strips trailing whitespace per line, (b) collapses `\r\n → \n`, (c) ensures exactly one trailing `\n`. It records `{dispatch-id, rcpt-sha256, verdict}` in the dispatch directory's `receipt-ledger.jsonl` (append-only) **synchronously, before returning control to any parent dispatch**.
-2. **Parent lint rule.** Every `DISPATCHED <skill>/<dispatch-id> verdict=<V> rcpt-sha256:<H>` line in a parent's TRACE must have a corresponding `receipt-ledger.jsonl` entry with matching `dispatch-id`, `rcpt-sha256`, and `verdict`. Tier-1 rejects on mismatch.
+1. **Orchestrator-side recording.** On accepting any receipt, the orchestrator computes `sha256(normalize(receipt_text))` where `normalize` (a) strips trailing whitespace per line, (b) collapses `\r\n → \n`, (c) ensures exactly one trailing `\n`. It records `{dispatch-id, phase, rcpt-sha256, verdict}` (the literal on-disk JSON keys are snake_case — `dispatch_id`/`phase`/`rcpt_sha256`/`verdict` — per `shared/dispatch-convention.md` › Receipt Ledger) in the **dispatch directory's** `receipt-ledger.jsonl` — a sibling of `manifest.jsonl` and the **canonical location** for the receipt ledger (see `shared/dispatch-convention.md` › "Receipt Ledger") — append-only, **synchronously, before returning control to any parent dispatch**. The ledger is session-scoped (it lives inside the per-session dispatch directory, never a shared project-memory file), so concurrent pipelines stay isolated. Field semantics: `dispatch-id` is the dispatch-file basename `<N>-<template-name>` (the same `<dispatch-id>` carried in the receipt header); `phase` is the orchestrator's current phase label, **skill-qualified** as `<skill>:<phase>/<counter>` — recorded so Layer 3 reconciliation can count dispatches per phase without parsing the phase-less `dispatch-id`. **Provenance:** the orchestrator stamps `phase` as its own skill name qualifying the byte-identical current value of **its own cairn's** PHASE `<phase>/<counter>` (read from the cairn it maintains, not reconstructed) — i.e. `<own-skill>:<own-cairn-PHASE-`<phase>/<counter>`>`. A sub-skill that maintains its own cairn (e.g. quality-gate's `round/N` → `quality-gate:round/N`) stamps its OWN cairn's skill-qualified phase even when it shares the parent's dispatch directory and `receipt-ledger.jsonl`; **cairn Reconciliation Rule 1 is therefore a per-cairn check** — each cairn counts only the ledger entries bearing its own `<skill>:<phase>/<counter>` strings, which cleanly partitions parent and child entries in a shared ledger. The skill prefix makes the phase globally unique across all cairns sharing one dispatch directory, so the per-cairn partition holds by construction: no phase-name-disjointness precondition is needed, and sibling sub-skills that independently use `round/N` (e.g. `siege` and `quality-gate`) are disambiguated by their distinct skill prefixes. A skill with no active cairn stamps its skill phase name and is not subject to Rule 1 (Rule 1 applies only to cairn-maintaining skills); a cairn-less skill that nonetheless records a ledger entry stamps `<skill>:standalone/<counter>` (no cairn PHASE `<phase>/<counter>` to source from) — today no cairn-less adopter writes ledger entries, so this is forward-looking.
+2. **Parent lint rule.** Every `DISPATCHED <skill>/<dispatch-id> verdict=<V> rcpt-sha256:<H>` line in a parent's TRACE must have a corresponding `receipt-ledger.jsonl` entry with matching `dispatch-id`, `rcpt-sha256`, and `verdict` (the `phase` field is not matched here — it exists for Layer 3 per-phase counting). Tier-1 rejects on mismatch.
 3. **Child lint propagation.** A child receipt that fails lint is recorded in the ledger with `verdict=BLOCKED`. A parent that claims `verdict=PASS` for that child hits the Tier-1 binding check and fails.
 
 ## Two-Tier Receipt Linter
@@ -155,7 +155,8 @@ for each EDIT / WROTE in TRACE:
 for each DISPATCHED in TRACE:
   fail if rcpt-sha256:<hex64> is missing
   fail if the (dispatch-id, rcpt-sha256, verdict) triple is not present in
-    receipt-ledger.jsonl (see Parent-Child Receipt Binding)
+    receipt-ledger.jsonl (subset match — `phase` is an extra ledger field NOT
+    part of this triple; see Parent-Child Receipt Binding)
 
 mandatory-work check: for every action the skill's RETURN FORMAT declares mandatory
   for this dispatch type, TRACE MUST contain the matching verb line OR a
