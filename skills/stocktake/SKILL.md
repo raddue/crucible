@@ -68,6 +68,8 @@ Each skill is evaluated against:
 - [ ] Scope fit — name, trigger, and content aligned
 - [ ] Actionability — concrete steps vs vague advice
 - [ ] Cross-references — do `crucible:` links resolve to existing skills?
+- [ ] Convention drift — does a skill that dispatches subagents carry the `<!-- CANONICAL: shared/dispatch-convention.md -->` / `return-convention.md` markers (vs. copying or omitting them)?
+- [ ] Eval presence — does the skill have an `evals/` directory, or is one warranted given its surface? (eval-before-publish; flag absence, don't auto-fail — evals are aspirational across the suite)
 
 Each skill gets a verdict:
 

@@ -25,6 +25,7 @@ Crucible's 49 execution evals measure quality once a skill is invoked. Selection
 3. **adversarial-scope** — red-team vs inquisitor vs audit vs siege
 4. **completion-claims** — verify vs finish
 5. **bug-handling** — debugging vs verify vs audit
+6. **build-vs-raw-dispatch** — build (full idea→PR pipeline) vs a single-skill dispatch (planning, test-driven-development, …)
 
 ## Difficulty Ratings
 

@@ -499,7 +499,7 @@ The Forge produces proposals for human review. It does not edit skill files. It 
 | `crucible:build` | Retrospective | Phase 4, after red-team, before finishing | Full build summary |
 | `crucible:debugging` | Retrospective | After fix verified | Bug description + hypothesis log |
 | `crucible:debugging` | Retrospective (diagnostic extraction) | After fix verified | Session artifacts → cartographer landmines with `dead_ends` + `diagnostic_path` |
-| `crucible:finish` | Retrospective | After Step 3, before Step 4 | Branch summary + review findings |
+| `crucible:finish` | Retrospective | Step 2.75, before red-team | Branch summary + review findings |
 | `crucible:design` | Feed-Forward | Before first question | Topic description |
 | `crucible:build` | Retrospective (decision extraction) | After fix verified | Decision journal + task list → cartographer decisions via recorder |
 | Any skill | Trajectory Record | After retrospective step 7 | Execution data + retrospective output (opt-in only) |

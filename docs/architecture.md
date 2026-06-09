@@ -11,6 +11,8 @@ The **build** skill is the main entry point for feature development. It chains t
 3. **Phase 3: Execute** (autonomous, team-based) — Dispatch implementers per task, de-sloppify cleanup, two-pass code review (code quality + test quality + AI slop signal detection), test alignment audit (crucible:test-coverage audits existing tests for staleness), test gap writer (fills coverage gaps with dedup-aware auto-retry), and adversarial tester (writes tests designed to break the implementation).
 4. **Phase 4: Complete** (autonomous) — Code review on full implementation, inquisitor (5 parallel adversarial dimensions against the full feature diff), quality gate, session metrics, full test suite, Forge retrospective, Cartographer recording, branch completion.
 
+Phase 4 also runs a conditional security pass and a supply-chain scan around the gate. **crucible:siege** is dispatched at Step 5.5 — sequentially *before* the quality gate — but only when security signals are detected (or siege is forced); if it completes clean, the build continues to the gate. **dependency-audit** (npm/cargo/pip-audit) runs alongside the gate as an independent supply-chain signal. Both can block completion, yet are deliberately kept out of the gate's weighted score (INV-2 — the score sums only the host red-team's own Fatal/Significant findings; siege, dependency-audit, and external-model signals are all excluded) and out of red-team's input (anti-anchoring: a sibling signal shares the artifact, never the reviewer's context).
+
 ## Knowledge accelerators
 
 The **forge** and **cartographer** skills are recommended (not required) knowledge accelerators. Forge learns about agent behavior (process wisdom), Cartographer learns about the codebase (domain wisdom — including defect signatures that surface known bug patterns proactively). Both accumulate across sessions.
@@ -40,6 +42,12 @@ The **replay** skill provides crash recovery and A/B experimentation for any pip
 ## Session continuity
 
 The **recall** skill queries the session activity index — a searchable log of file edits, git operations, test runs, and errors maintained by PostToolUse hooks. Compaction recovery steps in build, debugging, and spec re-read session state after context compression. Skills emit semantic events (phase transitions, design decisions) via an outbox pattern for cross-skill continuity.
+
+The **compass** skill maintains per-repo arc-state in `docs/compass.md` (current arc, last meaningful commit, open loops, next move, don't-forget items). It is auto-maintained by build, merge-pr, and finish, and read by getting-started, so a new session can recover *where the work was* without re-deriving it from git.
+
+## Calibration and regression memory
+
+These skills make Crucible's quality claims falsifiable and let past defects guard future ones. The **calibration ledger** is the epistemic backbone: Tier-A gate verdicts are appended to a machine-local central store (`~/.claude/crucible/ledger/`, never committed). **calibration-reconcile** later walks merged fix/hotfix branches to falsify those verdicts and computes per-skill Brier scores; **ledger** renders the weekly report — the honest "Crucible caught N silent bugs" headline, verdict breakdown, per-skill severity rates, and an inflation detector. The **grudge** skill (the Book of Grudges) is the complementary regression memory: every fixed bug is recorded as a machine-local, per-repo grudge, and skills query it for the files in scope before touching code, surfacing past regressions as forced "DO NOT REPEAT" context.
 
 ## Token efficiency
 
