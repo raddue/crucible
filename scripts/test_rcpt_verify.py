@@ -378,5 +378,48 @@ class TestSelftest(unittest.TestCase):
             self.assertIn("corpus not found", (r.stderr + r.stdout).lower())
 
 
+class TestV11Extension(unittest.TestCase):
+    """v1.1 Tier-1 extension (#369 fast-follow): RCPT v1.1 headers enforce the
+    receipt-local subset of return-convention.md §"Linter extension"; RCPT v1
+    receipts are NOT subject to it (version-dispatch). Manifest-relative rules
+    (SUPERSEDES uniqueness / no-double-supersede / witness-evidence trigger) are
+    out of single-receipt scope and NOT tested here."""
+
+    def test_conformant_v11_lints_pass(self):
+        rv = _import_rv()
+        for rec in _load("v11-corpus/receipts.jsonl"):
+            self.assertEqual(rv.lint_receipt(rec["receipt"]), "PASS",
+                             rec.get("dispatch-id"))
+
+    def test_each_inject_shape_raises(self):
+        rv = _import_rv()
+        shapes = sorted((CORPUS / "v11-inject").glob("shape-*.jsonl"))
+        self.assertTrue(shapes, "no v11-inject shapes found")
+        for shape in shapes:
+            for rec in _load(shape.relative_to(CORPUS).as_posix()):
+                with self.assertRaises(rv.LintError, msg=f"{shape.name} did not raise"):
+                    rv.lint_receipt(rec["receipt"])
+
+    def test_v1_receipt_not_v11_linted(self):
+        """A bare RCPT v1 receipt with no TRIPWIRE/SUPERSEDES must still lint
+        (version-dispatch): the v1.1 presence rules apply only to v1.1 headers."""
+        rv = _import_rv()
+        for rec in _load("sample-corpus/receipts.jsonl"):
+            self.assertIn(rv.lint_receipt(rec["receipt"]), {"PASS", "FAIL", "BLOCKED"})
+
+    def test_parse_v11_sections_returns_none_for_v1(self):
+        rv = _import_rv()
+        v1 = _load("sample-corpus/receipts.jsonl")[0]["receipt"]
+        self.assertIsNone(rv.parse_v11_sections(v1))
+
+    def test_parse_v11_sections_recovers_tail_for_v11(self):
+        rv = _import_rv()
+        v11 = _load("v11-corpus/receipts.jsonl")[0]["receipt"]
+        parsed = rv.parse_v11_sections(v11)
+        self.assertIsNotNone(parsed)
+        self.assertIsNotNone(parsed["tripwire"])
+        self.assertEqual(parsed["supersedes"], "none")
+
+
 if __name__ == "__main__":
     unittest.main()
