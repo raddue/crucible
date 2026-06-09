@@ -5,9 +5,13 @@ Tier-2 parts 1-2 (disk sha256 + witness byte-range). stdlib-only, argparse-free.
 Exit 0=pass, 1=fail; bullets on stderr.
 
 Usage:
-  rcpt_verify.py [--tier1|--tier2] [--root DIR] [--strict] [FILE|-]
+  rcpt_verify.py [--tier1|--tier2] [--root DIR] [--strict] [--ledger PATH] [FILE|-]
   rcpt_verify.py --selftest
   rcpt_verify.py --eval FILE.jsonl
+
+--ledger PATH (Tier-2 part-3): bind each DISPATCHED TRACE line to a receipt-ledger.jsonl
+entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a receipt that
+has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
 import json, re, sys, hashlib, pathlib
@@ -709,6 +713,53 @@ def run_eval(path) -> int:
     return 0
 
 
+def tier2_ledger(trace, ledger_path):
+    """Tier-2 part-3 — receipt-ledger binding (#369). For each DISPATCHED TRACE entry,
+    verify a matching row exists in the orchestrator-supplied `receipt-ledger.jsonl`
+    (`--ledger PATH`). The ledger row is the 4-key snake_case schema #383 pinned —
+    `{dispatch_id, phase, rcpt_sha256, verdict}` — and the binding match is the TRIPLE
+    `(dispatch_id, rcpt_sha256, verdict)`; **`phase` is NOT matched** (it is recorded for
+    cairn reconciliation, not binding — see `return-convention.md` "Parent-Child Receipt
+    Binding"). **Phase-exclusion holds by construction, not by a runtime branch:** the
+    DISPATCHED TRACE grammar carries no phase token (it is `<skill>/<dispatch-id>
+    verdict=… rcpt-sha256:…`), so there is nothing for the binding to match a ledger
+    `phase` against — the property is structural, and consequently no corpus row can
+    exercise a phase-mismatch (a phase-differs fixture would be vacuous). The DISPATCHED
+    token is `<skill>/<dispatch-id>`; the ledger `dispatch_id` is the phase-less
+    `<dispatch-id>` basename, so the `<skill>/` prefix is stripped before comparison. The
+    DISPATCHED line carries the child's `rcpt-sha256:<H>` literal, which is string-compared
+    to the ledger's `rcpt_sha256` — there is NO hash recompute (the verifier never holds
+    the child receipt's text; the orchestrator recorded the hash at dispatch). Raises
+    LintError on any DISPATCHED line with no full-triple match (hard FAIL, independent of
+    --strict — a declared dispatch that is not bound is a structural break). The ledger
+    read is guarded for both an absent/unreadable file (OSError) AND a malformed-JSONL or
+    non-object-row ledger (ValueError, incl. json.JSONDecodeError) → a clean LintError
+    bullet, never a traceback; non-dict rows are dropped (a non-object is not a valid
+    ledger entry, so a DISPATCHED line backed only by junk rows FAILs to bind). Returns []."""
+    dispatched = [t for t in trace if t["verb"] == "DISPATCHED"]
+    if not dispatched:
+        return []
+    try:
+        ledger = [e for e in _read_jsonl(ledger_path) if isinstance(e, dict)]
+    except (OSError, ValueError) as ex:
+        raise LintError(f"Tier-2 --ledger: cannot parse receipt-ledger {ledger_path}: {ex}")
+    for t in dispatched:
+        token = t["args"].split()[0] if t["args"].split() else ""
+        vm = re.search(r"verdict=(\S+)", t["args"])
+        hm = re.search(r"rcpt-sha256:([0-9a-f]{64})", t["args"])
+        if not token or not vm or not hm:
+            raise LintError(f"Tier-2 --ledger: DISPATCHED args lack token/verdict=/rcpt-sha256: {t['args']!r}")
+        verdict, h = vm.group(1), hm.group(1)
+        did = token.split("/", 1)[1] if "/" in token else token  # strip <skill>/ prefix
+        if not any(e.get("dispatch_id") == did and e.get("rcpt_sha256") == h
+                   and e.get("verdict") == verdict for e in ledger):
+            raise LintError(
+                f"Tier-2 --ledger: DISPATCHED {token} (verdict={verdict}, "
+                f"rcpt-sha256:{h[:12]}…) has no matching receipt-ledger entry "
+                f"(dispatch_id={did}; phase is not part of the match)")
+    return []
+
+
 def _read_jsonl(path):
     return [json.loads(l) for l in pathlib.Path(path).read_text().splitlines() if l.strip()]
 
@@ -788,11 +839,23 @@ def run_selftest() -> int:
     if captured != golden:
         problems.append("--eval stdout does NOT match committed eval-golden.txt (byte-format drift)")
 
+    # (vi) Tier-2 part-3 receipt-ledger binding — each ledger-manifest row's expect
+    #      realized by running tier2_ledger against a materialized ledger (absent
+    #      manifest is a HARD problem so a no-op port can't skip the binding silently).
+    ledger_manifest = fx_dir / "ledger-manifest.jsonl"
+    if not ledger_manifest.is_file():
+        problems.append(f"ledger-manifest not found at {ledger_manifest}")
+    else:
+        for fx in _read_jsonl(ledger_manifest):
+            got = _selftest_run_ledger_fixture(fx)
+            if got != fx["expect"]:
+                problems.append(f"ledger fixture {fx['id']} expected {fx['expect']}, got {got}")
+
     if problems:
         for p in problems:
             sys.stderr.write(f"selftest FAIL: {p}\n")
         return 1
-    print("selftest OK: v1 corpus + v1.1 extension + Tier-2 fixtures + cross-check + golden-string")
+    print("selftest OK: v1 corpus + v1.1 extension + Tier-2 fixtures + ledger binding + cross-check + golden-string")
     return 0
 
 
@@ -811,6 +874,31 @@ def _selftest_run_fixture(fx, root) -> str:
         return "pass"
     except LintError:
         return "fail"
+
+
+def _selftest_run_ledger_fixture(fx) -> str:
+    """Run one committed ledger-manifest row: materialize its ledger to a tmp
+    receipt-ledger.jsonl, parse the receipt's TRACE, run tier2_ledger. 'pass'|'fail'.
+    A row with a `"ledger_raw"` string field writes THAT verbatim (exercises the
+    malformed-JSONL / non-dict-row guard); else its `"ledger"` list is json.dumps-ed
+    line-per-entry. Any non-LintError Exception → 'error' so a guard regression shows
+    as a clean `expected fail, got error` selftest problem, not a crash."""
+    import tempfile
+    try:
+        sections = parse_receipt(fx["receipt"])
+        trace = parse_trace(sections["TRACE"])
+        with tempfile.TemporaryDirectory() as td:
+            led = pathlib.Path(td) / "receipt-ledger.jsonl"
+            if "ledger_raw" in fx:
+                led.write_text(fx["ledger_raw"])
+            else:
+                led.write_text("".join(json.dumps(e) + "\n" for e in fx["ledger"]))
+            tier2_ledger(trace, led)
+        return "pass"
+    except LintError:
+        return "fail"
+    except Exception:
+        return "error"
 
 
 def _selftest_crosscheck(rec, bodies):
@@ -871,7 +959,7 @@ class _PathReadError(Exception):
         self.path = path
 
 
-def _verify_single(text, mode, root, strict) -> int:
+def _verify_single(text, mode, root, strict, ledger=None) -> int:
     """Single-receipt mode: Tier-1 (always) + Tier-2 (if --tier2). Exit 0 on pass,
     1 on any LintError (bullet on stderr). UNVERIFIABLE notes are advisory (stderr, non-fatal)."""
     try:
@@ -884,8 +972,18 @@ def _verify_single(text, mode, root, strict) -> int:
             notes = tier2_artifacts(artifacts, trace, root, strict)
             if verdict in {"PASS", "FAIL"}:
                 notes += tier2_witness(witness, trace, root, strict, verdict)
+            # Part-3 receipt-ledger binding: only with an orchestrator-supplied --ledger
+            # (no default-path synthesis). A mismatch is a hard FAIL (strict-independent);
+            # absent --ledger is advisory UNVERIFIABLE, and only when there IS a DISPATCHED line.
+            if ledger is not None:
+                tier2_ledger(trace, ledger)
+            elif any(t["verb"] == "DISPATCHED" for t in trace):
+                notes.append("UNVERIFIABLE: ledger binding (no --ledger)")
             for n in notes:
                 sys.stderr.write(n + "\n")
+        elif ledger is not None:
+            sys.stderr.write("UNVERIFIABLE: --ledger ignored under --tier1 "
+                             "(binding is a Tier-2 check; re-run with --tier2)\n")
     except LintError as e:
         sys.stderr.write(f"{e}\n")
         return 1
@@ -906,6 +1004,7 @@ def main(argv=None) -> int:
     mode = "tier1"
     root = None
     strict = False
+    ledger = None
     path = None
     i = 0
     while i < len(argv):
@@ -921,6 +1020,11 @@ def main(argv=None) -> int:
             if i >= len(argv):
                 return _usage_exit()
             root = pathlib.Path(argv[i])
+        elif a == "--ledger":
+            i += 1
+            if i >= len(argv):
+                return _usage_exit()
+            ledger = pathlib.Path(argv[i])
         elif a == "-" or not a.startswith("--"):
             path = a
         else:
@@ -929,7 +1033,7 @@ def main(argv=None) -> int:
     if root is None:
         root = pathlib.Path.cwd()
     text = sys.stdin.read() if path in (None, "-") else _read_path_arg(path)
-    return _verify_single(text, mode, root, strict)
+    return _verify_single(text, mode, root, strict, ledger)
 
 
 if __name__ == "__main__":

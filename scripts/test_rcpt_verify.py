@@ -421,5 +421,159 @@ class TestV11Extension(unittest.TestCase):
         self.assertEqual(parsed["supersedes"], "none")
 
 
+class TestTier2Ledger(unittest.TestCase):
+    """Tier-2 part-3 receipt-ledger binding (#369 PR-B): each DISPATCHED TRACE line
+    must resolve to a receipt-ledger.jsonl entry on the (dispatch_id, rcpt_sha256,
+    verdict) triple — `phase` is NOT part of the match. Driven by the committed
+    tier2-fixtures/ledger-manifest.jsonl rows."""
+
+    def _run_row(self, rv, row):
+        with tempfile.TemporaryDirectory() as td:
+            led = pathlib.Path(td) / "receipt-ledger.jsonl"
+            if "ledger_raw" in row:
+                led.write_text(row["ledger_raw"])
+            else:
+                led.write_text("".join(json.dumps(e) + "\n" for e in row["ledger"]))
+            sections = rv.parse_receipt(row["receipt"])
+            trace = rv.parse_trace(sections["TRACE"])
+            try:
+                rv.tier2_ledger(trace, led)
+                return "pass"
+            except rv.LintError:
+                return "fail"
+
+    def test_ledger_manifest_rows(self):
+        rv = _import_rv()
+        rows = _load("tier2-fixtures/ledger-manifest.jsonl")
+        self.assertTrue(rows, "no ledger-manifest rows")
+        for row in rows:
+            self.assertEqual(self._run_row(rv, row), row["expect"], row["id"])
+
+    def test_blocked_child_binds(self):
+        """A verdict=BLOCKED DISPATCHED child binds to a verdict=BLOCKED ledger row
+        (binding runs regardless of the child's own verdict). Non-vacuity: flipping the
+        ledger row's verdict to PASS breaks the triple match and RAISES — proving the
+        row's verdict=BLOCKED is load-bearing in the bind."""
+        rv = _import_rv()
+        h = "e5" * 32
+        receipt = (
+            "RCPT v1.1 build/5-orchestrator\nVERDICT  PASS  conf=0.90\n"
+            "ARTIFACTS\n  plan.md  sha256:" + "a1" * 32 + "  900\nTRACE\n"
+            "  1  READ  plan.md  sha256:" + "b2" * 32 + "\n"
+            "  2  DISPATCHED  build/6-implementer  verdict=BLOCKED  rcpt-sha256:" + h + "\n"
+            "CLAIMS\n  dispatched-ok=true  from=TRACE#2\n"
+            "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
+            "SUSPICION  0.00\nNEXT       (none)\n"
+        )
+        trace = rv.parse_trace(rv.parse_receipt(receipt)["TRACE"])
+        with tempfile.TemporaryDirectory() as td:
+            led = pathlib.Path(td) / "receipt-ledger.jsonl"
+            row = {"dispatch_id": "6-implementer", "phase": "build:execute/3",
+                   "rcpt_sha256": h, "verdict": "BLOCKED"}
+            led.write_text(json.dumps(row) + "\n")
+            self.assertEqual(rv.tier2_ledger(trace, led), [])  # binds clean
+            # Non-vacuity: flip the verdict so the triple no longer matches → must raise.
+            led.write_text(json.dumps({**row, "verdict": "PASS"}) + "\n")
+            with self.assertRaises(rv.LintError):
+                rv.tier2_ledger(trace, led)
+
+    def test_leaf_receipt_noop(self):
+        """A leaf receipt (no DISPATCHED line) under --ledger is a clean no-op: zero
+        DISPATCHED entries → tier2_ledger returns [] for both a populated and an empty
+        ledger (the dominant case now that --ledger is mandatory)."""
+        rv = _import_rv()
+        receipt = (
+            "RCPT v1.1 build/6-implementer\nVERDICT  PASS  conf=0.90\n"
+            "ARTIFACTS\n  plan.md  sha256:" + "a1" * 32 + "  900\nTRACE\n"
+            "  1  READ  plan.md  sha256:" + "b2" * 32 + "\n"
+            "  2  EXEC  `npm test`  exit=0  dur=1.0s  out=test.log#L1-L5\n"
+            "CLAIMS\n  tests-green=true  from=TRACE#2\n"
+            "WITNESS    exec  expect-fail=/\\d+ fail/  ran=TRACE#2\n"
+            "SUSPICION  0.00\nNEXT       (none)\n"
+        )
+        trace = rv.parse_trace(rv.parse_receipt(receipt)["TRACE"])
+        with tempfile.TemporaryDirectory() as td:
+            led = pathlib.Path(td) / "receipt-ledger.jsonl"
+            led.write_text(json.dumps(
+                {"dispatch_id": "99-unrelated", "phase": "p", "rcpt_sha256": "f6" * 32,
+                 "verdict": "PASS"}) + "\n")
+            self.assertEqual(rv.tier2_ledger(trace, led), [])  # populated ledger → noop
+            led.write_text("")
+            self.assertEqual(rv.tier2_ledger(trace, led), [])  # empty ledger → noop
+
+
+class TestCliLedger(unittest.TestCase):
+    def _ledger_file(self, td, entries):
+        p = pathlib.Path(td) / "receipt-ledger.jsonl"
+        p.write_text("".join(json.dumps(e) + "\n" for e in entries))
+        return p
+
+    def test_cli_match_exit0(self):
+        rows = {r["id"]: r for r in _load("tier2-fixtures/ledger-manifest.jsonl")}
+        row = rows["ledger-match"]
+        with tempfile.TemporaryDirectory() as td:
+            led = self._ledger_file(td, row["ledger"])
+            r = run("--tier2", "--ledger", str(led), "-", stdin=row["receipt"])
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_cli_mismatch_exit1(self):
+        rows = {r["id"]: r for r in _load("tier2-fixtures/ledger-manifest.jsonl")}
+        row = rows["ledger-wrong-hash"]
+        with tempfile.TemporaryDirectory() as td:
+            led = self._ledger_file(td, row["ledger"])
+            r = run("--tier2", "--ledger", str(led), "-", stdin=row["receipt"])
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("ledger", r.stderr.lower())
+
+    def test_cli_no_ledger_dispatched_is_unverifiable_nonfatal(self):
+        rows = {r["id"]: r for r in _load("tier2-fixtures/ledger-manifest.jsonl")}
+        row = rows["ledger-match"]  # receipt has a DISPATCHED line
+        r = run("--tier2", "-", stdin=row["receipt"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("UNVERIFIABLE: ledger binding", r.stderr)
+
+    def test_cli_no_ledger_no_dispatched_is_silent(self):
+        """A receipt with no DISPATCHED line emits no ledger advisory."""
+        v1 = _load("sample-corpus/receipts.jsonl")[0]["receipt"]
+        r = run("--tier2", "-", stdin=v1)
+        self.assertNotIn("ledger binding", r.stderr)
+
+    def test_cli_malformed_ledger_exit1_no_traceback(self):
+        """A malformed-JSONL ledger gives exit 1 + a clean bullet, not a traceback."""
+        rows = {r["id"]: r for r in _load("tier2-fixtures/ledger-manifest.jsonl")}
+        row = rows["ledger-match"]  # any receipt with a DISPATCHED line
+        with tempfile.TemporaryDirectory() as td:
+            led = pathlib.Path(td) / "receipt-ledger.jsonl"
+            led.write_text("{ not json\n")
+            r = run("--tier2", "--ledger", str(led), "-", stdin=row["receipt"])
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+            self.assertIn("ledger", r.stderr.lower())
+
+    def test_cli_nondict_ledger_exit1_no_traceback(self):
+        """A non-dict ledger row gives exit 1 + a clean bullet, not a traceback."""
+        rows = {r["id"]: r for r in _load("tier2-fixtures/ledger-manifest.jsonl")}
+        row = rows["ledger-match"]
+        with tempfile.TemporaryDirectory() as td:
+            led = pathlib.Path(td) / "receipt-ledger.jsonl"
+            led.write_text('["x"]\n')
+            r = run("--tier2", "--ledger", str(led), "-", stdin=row["receipt"])
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+            self.assertIn("ledger", r.stderr.lower())
+
+    def test_cli_tier1_ledger_ignored_advisory_nonfatal(self):
+        """--ledger under --tier1 is never consulted (binding is Tier-2); a mismatching
+        ledger must NOT cause a FAIL — it emits a non-fatal advisory and exits 0."""
+        rows = {r["id"]: r for r in _load("tier2-fixtures/ledger-manifest.jsonl")}
+        row = rows["ledger-wrong-hash"]  # mismatching ledger + a DISPATCHED-line receipt
+        with tempfile.TemporaryDirectory() as td:
+            led = self._ledger_file(td, row["ledger"])
+            r = run("--tier1", "--ledger", str(led), "-", stdin=row["receipt"])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("--ledger ignored under --tier1", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
