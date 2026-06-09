@@ -32,6 +32,14 @@ UNRUNNABLE_VOCAB = {
 }
 LINT_RULES = {"all-claims-cited", "trace-consistent", "skip-declared"}
 
+# ── v1.1 Tier-1 extension (#369 fast-follow) — receipt-local subset of
+#    return-convention.md §"Linter extension (Tier-1 additions for v1.1 receipts)".
+#    Ported from eval/ledger-return-protocol/tripwire/sweep.py (which now delegates
+#    its receipt-local checks here — single source). Manifest-relative SUPERSEDES
+#    rules (uniqueness / no-double-supersede / witness-evidence trigger) are NOT
+#    here: a single receipt has no manifest to resolve them against.
+GLOB_ENTRIES_CAP = 8
+
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 CONF = re.compile(r"^(0\.\d{2}|1\.00)$")
 
@@ -299,7 +307,151 @@ def lint_receipt(text):
                                 f"CLAIM tests-pass=true cites TRACE#{idx} with exit={em.group(1)} "
                                 f"(structural contradiction)"
                             )
+    # v1.1 Tier-1 extension — version-dispatched; v1 receipts skip it entirely.
+    # Folded into lint_receipt so EVERY caller (_verify_single, _eval_record,
+    # run_selftest, the --tier1 hook) inherits v1.1 enforcement.
+    parsed_v11 = parse_v11_sections(text)
+    if parsed_v11 is not None:
+        lint_v11_local(parsed_v11)
     return verdict
+
+
+def parse_predicates(body):
+    """Parse a TRIPWIRE/TRIPWIRE-CHILD body (`|`-separated predicates) into a list,
+    enforcing the closed predicate vocabulary. `none` → []. Receipt-local."""
+    if body == "none":
+        return []
+    out = []
+    for p in (p.strip() for p in body.split("|")):
+        m = re.match(
+            r"^(suspicion>=[\d.]+|claims-touch\(.+?\)|wrote\(.+?\)|read\(.+?\)|"
+            r"exec-exit!=0|peer-dispatch-disagrees\((?:verdict|same-file|severity|count)\)|verdict=FAIL|always)$",
+            p,
+        )
+        if not m:
+            raise LintError(f"v1.1 TRIPWIRE unknown predicate: {p!r}")
+        out.append(p)
+    return out
+
+
+def expand_glob_entries(glob):
+    """Count alternation entries in a glob predicate body (comma-shortcut or {a,b,c}).
+    Counting only — never imports fnmatch (matching is sweep-only)."""
+    inside = re.search(r"\((.*)\)", glob)
+    if not inside:
+        return 1
+    body = inside.group(1)
+    # Sum alternation across the WHOLE body: split on TOP-LEVEL commas (commas not
+    # inside {…}); a {…} segment contributes its comma-count, a plain segment 1.
+    total = 0
+    depth = 0
+    seg = ""
+    segments = []
+    for ch in body:
+        if ch == "{":
+            depth += 1
+            seg += ch
+        elif ch == "}":
+            depth -= 1
+            seg += ch
+        elif ch == "," and depth == 0:
+            segments.append(seg)
+            seg = ""
+        else:
+            seg += ch
+    segments.append(seg)
+    for s in segments:
+        brace = re.search(r"\{([^{}]*)\}", s)
+        total += len(brace.group(1).split(",")) if brace else 1
+    return total
+
+
+def parse_v11_sections(text):
+    """Recover the v1.1 Layer-2 sections (TRIPWIRE / SUPERSEDES / TRIPWIRE-CHILD)
+    from the raw text tail after NEXT (parse_receipt's SECTIONS end at NEXT, so it
+    swallows them — the tail scan recovers them as their own post-NEXT lines).
+    Returns None for an RCPT v1 header (version-dispatch: v1 skips the extension).
+    Enforces presence of TRIPWIRE + SUPERSEDES and the TRIPWIRE-CHILD-required-when-
+    DISPATCHED rule; value checks live in lint_v11_local."""
+    if not re.match(r"^RCPT v1\.1 ", text.splitlines()[0] if text.splitlines() else ""):
+        return None
+    sections = parse_receipt(text)
+    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
+    tripwire = supersedes = trip_child = None
+    for line in (l for l in tail.splitlines()[1:] if l.strip()):
+        if line.startswith("TRIPWIRE-CHILD:"):
+            if trip_child is not None:
+                raise LintError("v1.1 section TRIPWIRE-CHILD duplicated")
+            trip_child = line[len("TRIPWIRE-CHILD:"):].strip()
+        elif line.startswith("TRIPWIRE:"):
+            if tripwire is not None:
+                raise LintError("v1.1 section TRIPWIRE duplicated")
+            tripwire = line[len("TRIPWIRE:"):].strip()
+        elif line.startswith("SUPERSEDES:"):
+            if supersedes is not None:
+                raise LintError("v1.1 section SUPERSEDES duplicated")
+            supersedes = line[len("SUPERSEDES:"):].strip()
+    if tripwire is None:
+        raise LintError("v1.1 receipt missing TRIPWIRE: line (own line after NEXT)")
+    if supersedes is None:
+        raise LintError("v1.1 receipt missing SUPERSEDES: line (own line after NEXT)")
+    # Empty-after-strip body is malformed (distinct from an absent line): the grammar
+    # is `<predicate>[ | …]*` OR `none`/`<prefix>`/`none` — bare `TRIPWIRE:` matches
+    # NEITHER, and "" would slip past both the `== "none"` two-leg gate and the
+    # `if not body` predicate-loop skip in lint_v11_local (false-PASS). TRIPWIRE-CHILD
+    # only when the line is PRESENT (absence stays `none` per return-convention.md:376).
+    if tripwire == "":
+        raise LintError("v1.1 TRIPWIRE: line has empty body (use a predicate or `none`)")
+    if supersedes == "":
+        raise LintError("v1.1 SUPERSEDES: line has empty body (use a prefix or `none`)")
+    if trip_child is not None and trip_child == "":
+        raise LintError("v1.1 TRIPWIRE-CHILD: line has empty body (use a predicate or `none`)")
+    if any(t["verb"] == "DISPATCHED" for t in parse_trace(sections["TRACE"])) and trip_child is None:
+        raise LintError(
+            "v1.1 receipt with DISPATCHED in TRACE must emit TRIPWIRE-CHILD: "
+            "(return-convention.md:456; the :376 'absence is none' parenthetical is "
+            "scoped to the no-DISPATCHED case — tension tracked in #387)"
+        )
+    return {"sections": sections, "tripwire": tripwire,
+            "supersedes": supersedes, "trip_child": trip_child}
+
+
+def lint_v11_local(parsed):
+    """Receipt-local v1.1 value checks: TRIPWIRE: none two-leg rule; predicate
+    vocabulary + glob-subset cap (TRIPWIRE and TRIPWIRE-CHILD); SUPERSEDES
+    justification-by-CLAIMS. No manifest access."""
+    sections = parsed["sections"]
+    susp_body = sections["SUSPICION"]
+    susp_tok = susp_body[0].split() if susp_body else []
+    if not susp_tok:
+        raise LintError("SUSPICION body empty")
+    suspicion = susp_tok[0]
+    verdict_body = sections["VERDICT"]
+    verdict_tok = verdict_body[0].split() if verdict_body else []
+    if not verdict_tok:
+        raise LintError("VERDICT body empty")
+    verdict = verdict_tok[0]
+    if parsed["tripwire"] == "none":
+        if verdict != "PASS" or suspicion != "0.00":
+            raise LintError(
+                f"TRIPWIRE: none requires VERDICT=PASS and SUSPICION=0.00 "
+                f"(got {verdict}+{suspicion})"
+            )
+    for body in (parsed["tripwire"], parsed["trip_child"]):
+        if not body or body == "none":
+            continue
+        for p in parse_predicates(body):
+            if p.startswith(("claims-touch(", "wrote(", "read(")) and \
+               expand_glob_entries(p) > GLOB_ENTRIES_CAP:
+                raise LintError(f"v1.1 glob entries exceed cap ({GLOB_ENTRIES_CAP}): {p}")
+    if parsed["supersedes"] != "none":
+        claims_body = "\n".join(sections["CLAIMS"])
+        for prefix in (s.strip() for s in parsed["supersedes"].split(",")):
+            if f"from={prefix}#" not in claims_body:
+                raise LintError(
+                    f"SUPERSEDES prefix {prefix} lacks CLAIMS justification "
+                    f"(expected a from={prefix}#… citation)"
+                )
 
 
 # ── Tier-2 shared base resolution ───────────────────────────────────────────
@@ -588,6 +740,31 @@ def run_selftest() -> int:
                 problems.append(f"inject {shape.name}/{rec.get('dispatch-id','?')} "
                                 f"expected LINT-FAIL, got {disp} ({info})")
 
+    # (ii) v1.1 Tier-1 extension — conformant v1.1 row lint-passes; one FAIL injection
+    #      per distinct receipt-local rule lint-fails. Globbed so a new rule's shape is
+    #      auto-covered; absent corpus is a HARD problem (a no-op port can't pass by
+    #      silently skipping a missing v1.1 corpus).
+    v11_corpus = CORPUS_DIR / "v11-corpus/receipts.jsonl"
+    v11_inject = CORPUS_DIR / "v11-inject"
+    if not v11_corpus.is_file():
+        problems.append(f"v1.1 corpus not found at {v11_corpus}")
+    else:
+        for rec in _read_jsonl(v11_corpus):
+            disp, info = _eval_record(rec)
+            if disp != "LINT-PASS":
+                problems.append(f"v11-corpus {rec.get('dispatch-id','?')} expected LINT-PASS, got LINT-FAIL: {info}")
+    v11_shapes = sorted(v11_inject.glob("shape-*.jsonl"))
+    if not v11_shapes:
+        problems.append(f"no v11-inject/shape-*.jsonl found under {v11_inject}")
+    for shape in v11_shapes:
+        for rec in _read_jsonl(shape):
+            if not rec.get("receipt"):
+                continue
+            disp, info = _eval_record(rec)
+            if disp != "LINT-FAIL":
+                problems.append(f"v11-inject {shape.name}/{rec.get('dispatch-id','?')} "
+                                f"expected LINT-FAIL, got {disp} ({info})")
+
     # (iii) Tier-2 disk fixtures — each fixture's expect realized against REAL files.
     fx_dir = CORPUS_DIR / "tier2-fixtures"
     for fx in _read_jsonl(fx_dir / "manifest.jsonl"):
@@ -615,7 +792,7 @@ def run_selftest() -> int:
         for p in problems:
             sys.stderr.write(f"selftest FAIL: {p}\n")
         return 1
-    print("selftest OK: v1 corpus + Tier-2 fixtures + cross-check + golden-string")
+    print("selftest OK: v1 corpus + v1.1 extension + Tier-2 fixtures + cross-check + golden-string")
     return 0
 
 

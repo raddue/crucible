@@ -30,12 +30,14 @@ layer1 = importlib.util.module_from_spec(_rv_spec)
 _rv_spec.loader.exec_module(layer1)
 
 
-PREDICATE_VOCAB = {
-    "suspicion>=", "claims-touch", "wrote", "read", "exec-exit!=0",
-    "peer-dispatch-disagrees", "verdict=FAIL", "always",
-}
-GLOB_ENTRIES_CAP = 8
+# Receipt-local v1.1 lint logic is single-sourced in scripts/rcpt_verify.py (#369
+# fast-follow). Re-export the cap, vocabulary, and helpers actually used by the sweep
+# (GLOB_ENTRIES_CAP, UNRUNNABLE_VOCAB, parse_predicates, expand_glob_entries) so the
+# sweep uses the IDENTICAL predicate parsing / glob counting as the runtime linter.
+GLOB_ENTRIES_CAP = layer1.GLOB_ENTRIES_CAP
 UNRUNNABLE_VOCAB = layer1.UNRUNNABLE_VOCAB
+parse_predicates = layer1.parse_predicates
+expand_glob_entries = layer1.expand_glob_entries
 
 
 class LintError(layer1.LintError):
@@ -65,6 +67,14 @@ def parse_receipt_v11(text):
             raise LintError("v1.1 receipt missing TRIPWIRE:")
         if supersedes is None:
             raise LintError("v1.1 receipt missing SUPERSEDES:")
+        # Empty-after-strip body is malformed (mirrors rcpt_verify.parse_v11_sections;
+        # keep linter↔sweep convergent). Absent TRIPWIRE-CHILD line stays `none`.
+        if tripwire == "":
+            raise LintError("v1.1 TRIPWIRE: line has empty body (use a predicate or `none`)")
+        if supersedes == "":
+            raise LintError("v1.1 SUPERSEDES: line has empty body (use a prefix or `none`)")
+        if trip_child is not None and trip_child == "":
+            raise LintError("v1.1 TRIPWIRE-CHILD: line has empty body (use a predicate or `none`)")
         # TRIPWIRE-CHILD required when TRACE contains any DISPATCHED verb
         trace_entries = layer1.parse_trace(sections["TRACE"])
         has_dispatched = any(t["verb"] == "DISPATCHED" for t in trace_entries)
@@ -79,38 +89,6 @@ def parse_receipt_v11(text):
     }
 
 
-def parse_predicates(body):
-    if body == "none":
-        return []
-    preds = [p.strip() for p in body.split("|")]
-    out = []
-    for p in preds:
-        # match predicate head
-        m = re.match(r"^(suspicion>=[\d.]+|claims-touch\(.+?\)|wrote\(.+?\)|read\(.+?\)|exec-exit!=0|peer-dispatch-disagrees\(\w+\)|verdict=FAIL|always)$", p)
-        if not m:
-            raise LintError(f"unknown predicate: {p!r}")
-        out.append(p)
-    return out
-
-
-def expand_glob_entries(glob):
-    """Count the number of alternation entries in {a,b,c}; expand comma shortcut."""
-    # glob may have comma shortcut: claims-touch(auth,payments)
-    # Expand to {auth,payments}/**
-    inside = re.search(r"\((.*)\)", glob)
-    if not inside:
-        return 1
-    body = inside.group(1)
-    # If body has commas and no braces, it's the shortcut form
-    if "," in body and "{" not in body:
-        return len(body.split(","))
-    # Count entries in {a,b,c}
-    brace = re.search(r"\{([^{}]*)\}", body)
-    if brace:
-        return len(brace.group(1).split(","))
-    return 1
-
-
 def compute_hash_prefix(receipt_text):
     import hashlib
     # normalize per Layer 1 binding rules
@@ -120,34 +98,19 @@ def compute_hash_prefix(receipt_text):
 
 
 def lint_v11(parsed, manifest):
-    """Tier-1 v1.1 extensions beyond Layer 1."""
+    """Tier-1 v1.1 extensions beyond Layer 1.
+
+    Receipt-local checks (TRIPWIRE: none two-leg, predicate vocabulary, glob cap,
+    SUPERSEDES justification-by-CLAIMS) are delegated to `layer1.lint_v11_local`
+    (single source — #369). Only the MANIFEST-dependent rules below stay here:
+    SUPERSEDES uniqueness / no-double-supersede / witness-evidence trigger — they
+    need the manifest the single-receipt runtime linter does not have."""
     if parsed["version"] != "1.1":
         return  # v1 receipts not required to carry Layer 2 sections
-    trip = parsed["tripwire"]
-    if trip is None:
-        raise LintError("TRIPWIRE line missing")
-    # TRIPWIRE=none requires PASS + suspicion=0.00
-    verdict_line = parsed["sections"]["VERDICT"][0]
-    verdict = verdict_line.split()[0]
-    susp_line = parsed["sections"]["SUSPICION"][0]
-    susp_val = susp_line.split()[0]
-    if trip == "none":
-        if verdict != "PASS" or susp_val != "0.00":
-            raise LintError(f"TRIPWIRE: none requires PASS+0.00, got {verdict}+{susp_val}")
-    else:
-        predicates = parse_predicates(trip)
-        for p in predicates:
-            # glob cap
-            if p.startswith(("claims-touch(", "wrote(", "read(")):
-                if expand_glob_entries(p) > GLOB_ENTRIES_CAP:
-                    raise LintError(f"glob entries exceed cap ({GLOB_ENTRIES_CAP}): {p}")
-    # SUPERSEDES
+    layer1.lint_v11_local(parsed)
     sup = parsed["supersedes"]
-    if sup is None:
-        raise LintError("SUPERSEDES line missing")
-    if sup != "none":
+    if sup and sup != "none":
         prefixes = [s.strip() for s in sup.split(",")]
-        claims_body = "\n".join(parsed["sections"]["CLAIMS"])
         for prefix in prefixes:
             # must resolve uniquely in manifest
             matches = [m for m in manifest if m["hash_prefix"] == prefix]
@@ -158,9 +121,6 @@ def lint_v11(parsed, manifest):
             pred = matches[0]
             if pred.get("superseded_by"):
                 raise LintError(f"SUPERSEDES cites already-superseded receipt: {prefix}")
-            # justification: prefix must appear in CLAIMS from=<prefix>
-            if f"from={prefix}#" not in claims_body:
-                raise LintError(f"SUPERSEDES prefix {prefix} has no CLAIMS justification (expected from={prefix}#…)")
             # witness-evidence requirement
             if pred["verdict"] == "FAIL" or pred["suspicion"] >= 0.30:
                 witness_line = parsed["sections"]["WITNESS"][0]
@@ -283,7 +243,7 @@ def sweep(manifest, new_parsed):
                 # Same-skill, discriminator mismatch
                 if m["skill"] != new_skill:
                     continue
-                dim_m = re.match(r"peer-dispatch-disagrees\((\w+)\)", p)
+                dim_m = re.match(r"peer-dispatch-disagrees\((verdict|same-file|severity|count)\)", p)
                 if not dim_m:
                     continue
                 dim = dim_m.group(1)
