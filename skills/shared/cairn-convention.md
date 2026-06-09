@@ -62,7 +62,7 @@ I-12 supersedes I-07: <≤240 char replacement fact>  [ref: <receipt-prefix-12>]
 
 ### Section bodies
 
-- **PHASE** — exactly three lines: `phase:`, `started-at:`, `parent-skill:`, in that order. No other keys.
+- **PHASE** — exactly three lines: `phase:`, `started-at:`, `parent-skill:`, in that order. No other keys. `parent-skill` MUST match the skill-name grammar `[a-z][a-z0-9-]*` (same as `return-convention.md`'s `<dispatch-id>` skill segment) — Rule 1 builds `f"{parent_skill}:{phase}/{counter}"` and matches by exact string equality, so a malformed value (spaces / title-case) is a cairn error, not a silent zero-count.
 - **INVARIANTS** — append-only, ordinal `I-NN` (zero-padded, monotonic, never reused). Each line ≤ 240 chars. Supersession form: `I-12 supersedes I-07: <replacement>`.
 - **OPEN_OBLIGATIONS** — mutable checklist. `- [ ]` or `- [x]`. Each line ≤ 240 chars. Closing an obligation flips the checkbox and appends a `[closed-by: …]` trailer; the original text is preserved.
 - **LEDGER** — append-only, one line per completed phase. The only section permitted to compact on budget pressure (see Budget below).
@@ -120,18 +120,19 @@ Lint failure at phase entry aborts the transition. The orchestrator narrates the
 After the structural Phase Entry Check passes but before phase-N+1 work begins, the orchestrator runs the **reconciliation pass** — a closed set of rules that compare the cairn's claims against ground truth on disk and in-context. This turns the cairn from an *asserted* recall substrate into a *verified* one.
 
 Inputs:
-- `~/.claude/projects/<project-hash>/memory/receipt-ledger.jsonl` (Layer 1)
+- `<dispatch-dir>/receipt-ledger.jsonl` (Layer 1) — the dispatch directory's append-only receipt ledger (canonical location per `shared/return-convention.md` / `shared/dispatch-convention.md`), resolved via the run's `dispatch_dir` (carried in the `.pipeline-active` marker) or, for a sealed/terminal run whose dispatch dir is gone, the durable session-namespaced scratch copy `<scratch>/crucible-dispatch-<session-id>/receipt-ledger.jsonl` (per `shared/dispatch-convention.md` › Receipt Ledger, and Recovery step 2). It is session-scoped, NOT a project-memory file, so concurrent pipelines stay isolated.
 - The in-context Tripwire Manifest (Layer 2)
 - `active-run.md` (this layer)
 
 ### Rules
 
-1. **LEDGER dispatch count consistency.** For each `LEDGER` line `<phase>/<counter> | dispatches=N receipts=N …`, `receipt-ledger.jsonl` must contain exactly N entries whose `dispatch-id` begins with `<phase>/<counter>-`.
+1. **LEDGER dispatch count consistency.** For each `LEDGER` line `<phase>/<counter> | dispatches=N receipts=N …`, `receipt-ledger.jsonl` must contain exactly N entries whose `phase` field equals `<parent-skill>:<phase>/<counter>` (skill-qualified with THIS cairn's `parent-skill`). (Every ledger entry carries a skill-qualified `phase` field per `shared/return-convention.md`; the `dispatch-id` is the phase-less file basename `<N>-<template-name>` and is NOT used for this grouping.) **Per-cairn:** this rule counts only entries whose `phase` matches THIS cairn's skill-qualified phase strings — a sub-skill sharing the dispatch directory writes its own cairn's skill-qualified phases, so parent and child entries partition cleanly in a shared ledger. The skill prefix makes the phase globally unique across all cairns sharing one dispatch directory, so the per-cairn partition holds by construction: no phase-name-disjointness precondition is needed, and sibling sub-skills that independently use `round/N` (e.g. `siege` and `quality-gate`) are disambiguated by their distinct skill prefixes.
    - **Local repair (append-only, narrow scope):** permitted ONLY when PHASE and LEDGER-tail agree on the current phase AND the only discrepancy is trailing receipts for the in-progress phase. Append missing receipts via a single atomic Write. Any other section mismatch is NOT locally repairable.
    - **Escalate** in all other cases, including any INVARIANTS or OPEN_OBLIGATIONS drift.
+   - **Receipt-less cairns.** For a receipt-less cairn (a cairn-maintaining skill that writes no `receipt-ledger.jsonl` entries — e.g. `innovate`, `forge`), Rule 1 is a no-op: its LEDGER lines carry `dispatches=0` — because they record no receipts (their subagents do not adopt `shared/return-convention.md`), NOT because they invoke no subagents — and there are no qualified entries to count.
 
 2. **OPEN_OBLIGATIONS closure evidence.** For every `[x]` obligation, the `[closed-by: …]` trailer must be one of:
-   - `[closed-by: <receipt-prefix-12>]` — direct close. Cited receipt must resolve to a `receipt-ledger.jsonl` entry with `verdict=PASS`. If the obligation was promoted from a Layer 2 `ran=SKIPPED` witness (obligation carries a `[ref: <receipt-prefix-12>]`), the closing receipt's WITNESS MUST have `ran=TRACE#N` (not SKIPPED/UNRUNNABLE).
+   - `[closed-by: <receipt-prefix-12>]` — direct close. The 12-hex-char prefix resolves against the **first 12 hex chars of a `receipt-ledger.jsonl` entry's `rcpt_sha256`**, and that resolution MUST be to a **unique** entry — a 12-char-prefix collision across the run is a reconciliation failure → escalate (mirroring the Layer 2 SUPERSEDES uniqueness rule). The resolved receipt must have `verdict=PASS`. If the obligation was promoted from a Layer 2 `ran=SKIPPED` witness (obligation carries a `[ref: <receipt-prefix-12>]`), the closing receipt's WITNESS MUST have `ran=TRACE#N` (not SKIPPED/UNRUNNABLE). The orchestrator observes this `ran=` disposition directly from the closing receipt **at obligation-close time** — it is holding (and has just linted) that receipt as it processes the `[closed-by:]` trailer — NOT from a `receipt-ledger.jsonl` field; the ledger's 4-key tuple `{dispatch_id, phase, rcpt_sha256, verdict}` supplies only the presence + verdict resolution.
    - `[closed-by: SUPERSEDED_BY=<later-prefix-12>]` — peer-supersession close. Layer 2 manifest must show `<orig-prefix> SUPERSEDED_BY=<later-prefix>` and the later receipt must have `verdict=PASS`. Layer 2's witness-evidence rule already gated the supersession; no additional re-run check here.
    - `[closed-by: phase/counter] [reason: <≤80 chars>]` — explicit discharge by orchestrator judgment (Rule 4 option-(b) discharges land here).
    - Any other form, or a cited receipt failing the checks, is a reconciliation failure → escalate.
@@ -139,7 +140,7 @@ Inputs:
 3. **Active-run singleton (detection-only).** `active-run.md` must exist (unless the run is terminally sealed) AND its `run-id` must match the cairn filename's `<run-id>`. Mismatch → escalate. **Detection, not prevention** — two orchestrators racing to create the marker will both succeed (Write is not CAS). The rule surfaces the race at the next phase entry so the user resolves it; filesystem-lock semantics are out of scope for a convention-only v1.
 
 4. **Invariant-receipt liveness (orchestrator decision point).** For every invariant carrying `[ref: <receipt-prefix-12>]`:
-   - The cited receipt must be present in `receipt-ledger.jsonl`. Absence → escalate.
+   - The cited 12-hex-char prefix must resolve against the **first 12 hex chars of a `receipt-ledger.jsonl` entry's `rcpt_sha256`**, and that resolution MUST be to a **unique** entry — a 12-char-prefix collision across the run is a reconciliation failure → escalate (mirroring the Layer 2 SUPERSEDES uniqueness rule). Absence → escalate.
    - If the Layer 2 Tripwire Manifest marks the receipt `SUPERSEDED_BY=<later-prefix>`, the orchestrator **must make an explicit recorded decision**: either (a) record a superseding invariant `I-NN supersedes I-OO: <≤240 char fact reflecting the resolution>`, or (b) append to OPEN_OBLIGATIONS a single closed entry `- [x] I-OO reviewed against supersession <later-prefix>; no update needed [closed-by: phase/counter] [reason: <≤80 chars>]`. One of the two must happen before the orchestrator proceeds; skipping both is a reconciliation failure. The rule is a decision point — not a mechanical semantic proof — because Layer 2's grounds-binding limitation propagates here. The recorded artifact is the falsifiable evidence.
 
 5. **Phase-transition atomicity witness.** On every Recovery Protocol invocation, the PHASE section's `phase: <name>/<counter>` must be consistent with the LEDGER tail:
@@ -165,11 +166,12 @@ Compaction rules (apply in order):
 Whenever the orchestrator might be post-auto-compaction (unfamiliar context, mid-phase with no clear recollection, tool result doesn't match expectations):
 
 1. Read `~/.claude/projects/<project-hash>/memory/cairn/active-run.md`. If absent → no active run; begin fresh.
-2. Read the corresponding `cairn-<run-id>.md` in full.
-3. Run the Phase Entry Check. On failure → narrate and escalate; do not proceed.
-4. Run the Reconciliation Pass. On failure → narrate the specific rule and escalate (or local-repair per Rule 1's narrow scope).
-5. Set internal phase state to PHASE's `phase:` value. Re-read INVARIANTS, OPEN_OBLIGATIONS, LEDGER fully into working context.
-6. Continue the run from where the cairn says we are. No retroactive re-dispatch — Layer 1's `receipt-ledger.jsonl` and Layer 2's manifest are authoritative for what happened; the cairn is authoritative for what's **load-bearing**.
+2. Resolve the dispatch directory — from `.pipeline-active`'s JSON `dispatch_dir` field (cross-session crash marker), or the within-session `.dispatch-active-<session-id>` marker's `dispatch-dir:` line — from which `<dispatch-dir>/receipt-ledger.jsonl` is resolved (for a sealed/terminal run whose dispatch dir is gone, use the durable session-namespaced scratch copy `<scratch>/crucible-dispatch-<session-id>/receipt-ledger.jsonl` per `shared/dispatch-convention.md` › "Receipt Ledger"). This must happen before the Reconciliation Pass, which reads the ledger in Rules 1/2/4.
+3. Read the corresponding `cairn-<run-id>.md` in full.
+4. Run the Phase Entry Check. On failure → narrate and escalate; do not proceed.
+5. Run the Reconciliation Pass. On failure → narrate the specific rule and escalate (or local-repair per Rule 1's narrow scope).
+6. Set internal phase state to PHASE's `phase:` value. Re-read INVARIANTS, OPEN_OBLIGATIONS, LEDGER fully into working context.
+7. Continue the run from where the cairn says we are. No retroactive re-dispatch — Layer 1's `receipt-ledger.jsonl` and Layer 2's manifest are authoritative for what happened; the cairn is authoritative for what's **load-bearing**.
 
 **Termination.** At the run's terminal phase sealing, delete `active-run.md` and leave `cairn-<run-id>.md` in place (append-only retention — same rationale as innovate scratch). "Terminal phase" is skill-specific; each pilot skill's `## Cairn (Layer 3)` section declares what terminal means for it.
 

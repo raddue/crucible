@@ -1,0 +1,6 @@
+{"dispatch_id":"1-writer","phase":"build:round/1","hash_prefix":"b0000001aaaa","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"2-qg-rt","phase":"quality-gate:round/1","hash_prefix":"c0000001bbbb","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"3-reviewer","phase":"build:round/1","hash_prefix":"b0000002cccc","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"4-qg-judge","phase":"quality-gate:round/1","hash_prefix":"c0000002dddd","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"5-builder","phase":"build:round/1","hash_prefix":"b0000003eeee","verdict":"PASS","witness_ran":"TRACE#1"}
+{"dispatch_id":"6-qg-fix","phase":"quality-gate:round/1","hash_prefix":"c0000003ffff","verdict":"PASS","witness_ran":"TRACE#1"}

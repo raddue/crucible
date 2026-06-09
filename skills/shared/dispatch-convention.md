@@ -228,15 +228,29 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 
 These aggregates feed into the chronicle signal's `efficiency` sub-object (see forge/SKILL.md Step 8.5).
 
+## Receipt Ledger
+
+Every dispatch directory also contains `receipt-ledger.jsonl` — the **Layer 1 receipt ledger**, a sibling of `manifest.jsonl`, written by the orchestrator per the Parent-Child Receipt Binding rule in `shared/return-convention.md`. **This is the canonical location for the receipt ledger.** It is a session-scoped file inside the per-session dispatch directory, NOT a shared project-memory file — co-locating it here keeps concurrent pipelines isolated (a shared ledger would interleave entries across runs and break the per-phase reconciliation count).
+
+Each line is an append-only JSON object `{dispatch-id, phase, rcpt-sha256, verdict}`. The literal on-disk JSON keys the writer emits are snake_case — **`{"dispatch_id": …, "phase": …, "rcpt_sha256": …, "verdict": …}`** — matching `manifest.jsonl`'s key convention and JSON idiom; these are the exact keys the part-3 `rcpt_verify.py --ledger` verifier and the cairn reconciler read. The hyphenated forms used in prose (`dispatch-id`, `rcpt-sha256`) are the conceptual names for the same fields. (The eval fixture's `hash_prefix` and `witness_ran` are eval-only stand-ins — for `rcpt_sha256`'s 12-char prefix and the receipt's WITNESS disposition respectively — NOT production keys. `witness_ran` in particular is the fixture stand-in for the closing receipt's `ran=` disposition that the orchestrator observes **from the receipt in-hand at obligation-close time** (cairn Rule 2); production never persists it as a ledger key.)
+- `dispatch-id` — the dispatch-file basename `<N>-<template-name>` (the same `<dispatch-id>` carried in the receipt header). Phase-less by design.
+- `phase` — the orchestrator's current phase label, **skill-qualified** as `<skill>:<phase>/<counter>` (e.g. `"phase": "quality-gate:round/1"`), where `<skill>` is the recording skill's name (the cairn's `parent-skill`, or its own skill name when no cairn is active). The skill prefix makes the phase globally unique across sibling cairns that share one dispatch directory, so two sub-skills that both use `round/N` (e.g. `siege` and `quality-gate`) never collide on the same `round/1`. Layer 3 (`shared/cairn-convention.md`, Reconciliation Rule 1) counts entries by this field for per-phase dispatch-count consistency.
+- `rcpt-sha256` — `sha256(normalize(receipt_text))` (normalize per `shared/return-convention.md`).
+- `verdict` — the child receipt's verdict (`PASS`/`FAIL`/`BLOCKED`).
+
+Layer 3 reconciliation and compaction recovery resolve the ledger via the run's dispatch-directory path, carried in the `.pipeline-active` marker's `dispatch_dir` field (see Pipeline-Active Marker above). After the run terminates and the dispatch directory is deleted (see Cleanup), post-terminal consumers (forge retrospectives, the receipt-binding audit) resolve the ledger from the durable, **session-namespaced** scratch copy `<scratch>/crucible-dispatch-<session-id>/receipt-ledger.jsonl` (the `<session-id>` from the `.pipeline-active` / `.dispatch-active-<session-id>` marker), NOT the deleted `/tmp` dispatch-dir path nor an un-namespaced flat path — the session-namespace keeps concurrent pipelines' durable copies isolated (same rationale as the live ledger above, and consistent with `replay`'s `<scratch>/crucible-dispatch-<session-id>/…` pattern). Both cleanup dispositions land the ledger at that path (see Cleanup).
+
+The ledger's `phase` field (`<skill>:<phase>/<counter>`) is intentionally distinct from `manifest.jsonl`'s per-entry `phase` (a bare string like `"2"`): the manifest tracks the pipeline phase for execution-trace purposes, while the ledger's skill-qualified `<skill>:<phase>/<counter>` is authoritative for cairn Reconciliation Rule 1's per-phase dispatch count.
+
 ## Cleanup
 
 **On successful pipeline completion:**
-1. Copy `manifest.jsonl` to the pipeline's persistent scratch directory (for forge retrospectives)
+1. Copy `manifest.jsonl` **and `receipt-ledger.jsonl`** to the session-namespaced subdirectory `<scratch>/crucible-dispatch-<session-id>/` of the pipeline's persistent scratch directory — so both land at `<scratch>/crucible-dispatch-<session-id>/…` (for forge retrospectives and post-hoc receipt-binding audit; the dispatch directory itself — and its `/tmp` ledger copy — is deleted in step 2)
 2. Delete the dispatch directory
 
 **On failure or escalation:**
-1. Copy the full dispatch directory to the pipeline's persistent scratch directory (durable record for inspection and replay)
-2. Leave the `/tmp` copy in place as well (`/tmp` is ephemeral; scratch copy is durable)
+1. Copy the dispatch directory itself — directory-into-directory, its basename `crucible-dispatch-<session-id>` preserved (the directory lands as a subdirectory of `<scratch>/`, NOT its contents flattened) — to the pipeline's persistent scratch directory (durable record for inspection and replay). Because the basename is preserved, this copy lands `receipt-ledger.jsonl` at the canonical session-namespaced path `<scratch>/crucible-dispatch-<session-id>/receipt-ledger.jsonl` — the same path the success disposition produces; flattening the contents would instead land it at the un-namespaced flat `<scratch>/receipt-ledger.jsonl` that L241 forbids consumers from reading. No separate flat copy is made.
+2. Leave the original `/tmp` dispatch directory in place as well (`/tmp` is ephemeral; the scratch copy is the durable artifact)
 
 Pipeline completion steps (build Phase 4, debugging Phase 5, etc.) each include cleanup.
 

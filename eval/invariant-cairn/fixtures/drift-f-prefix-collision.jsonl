@@ -1,0 +1,2 @@
+{"dispatch_id":"1-designer","phase":"build:design/1","hash_prefix":"a1b2c3d4e5f6","verdict":"PASS","witness_ran":"TRACE#2"}
+{"dispatch_id":"2-reviewer","phase":"build:design/1","hash_prefix":"a1b2c3d4e5f6","verdict":"PASS","witness_ran":"TRACE#1"}
