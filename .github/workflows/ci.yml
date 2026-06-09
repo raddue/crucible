@@ -17,3 +17,6 @@ jobs:
       - run: python3 scripts/rcpt_verify.py --selftest
       - run: python3 scripts/test_rcpt_verify.py
       - run: bash hooks/tests/test-rcpt-verify-hook.sh
+      - run: python3 scripts/check_calibration_dispatch.py --selftest
+      - run: python3 scripts/check_calibration_dispatch.py
+      - run: python3 scripts/test_brier_advise.py

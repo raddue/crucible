@@ -117,6 +117,9 @@ If the diff is empty or contains only non-behavioral files (`.md`, `.json`, `.ya
 
 ### Step 2: Dispatch 5 Parallel Inquisitor Subagents
 
+<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
+**Calibration-weighted dispatch (advisory).** Before the 5-dimension fan-out, derive the file list from Step 1's diff (`git diff --name-only <base>..HEAD`), resolve `scripts/brier_advisory.py` by absolute path from the plugin root, and run `python3 <script> advise inquisitor <file list…>`. If it prints a DispatchAdvice block, include it verbatim in each dimension subagent's dispatch context as scrutiny hints (NOT as findings, NOT scored). Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
+
 For each dimension, dispatch a fresh subagent (Opus) using `./inquisitor-prompt.md`:
 
 - Pass the full diff
