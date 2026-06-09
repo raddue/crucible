@@ -141,3 +141,38 @@ Skills are Markdown — there is **no data migration**. Behavioral notes:
 - **OpenCode runtime validation is deferred to the non-gating follow-up #337.**
   The milestone gate (#335) validates Claude Code only; skills remain authored
   harness-neutral via the harness-adapter.
+
+## Calibration Ledger, Regression Memory & Arc-State — 2026-06-01
+
+Backfilled record of the Epistemics Stack milestone (skills shipped 2026-05-20 →
+2026-06-01) — the calibration-ledger subsystem and its companion persistence
+skills that were not previously recorded here. The calibration ledger is the
+epistemic backbone of the Tier-A gate: gate verdicts are appended and later
+falsified against merged fixes, turning the suite's "caught a real bug" claims
+into measurable calibration scores.
+
+### Added
+
+- **`/compass`** — persistent per-repo arc-state in `docs/compass.md` (current
+  arc, last meaningful commit, open loops, next move, don't-forget items).
+  Auto-maintained by build, merge-pr, and finish; read by getting-started.
+  Tickets #273, #286, #308.
+- **`/ledger`** — weekly calibration-ledger renderer: the honest "Crucible
+  caught N silent bugs" headline, verdict breakdown, per-skill severity rates,
+  and an inflation detector. Backed by `scripts/render_ledger.py`,
+  `ledger_append.py`, and `ledger_reduce.py`. Ticket #272.
+- **`/calibration-reconcile`** — walks merged fix/hotfix branches to falsify the
+  originating gating verdicts, computes per-skill Brier calibration scores, and
+  appends a falsification record. Backed by `scripts/reconcile_ledger.py`,
+  `brier_advisory.py`, and `calibrate_tolerance.py`. Ticket #270.
+- **`/grudge`** — the Book of Grudges: a machine-local, per-repo (never
+  committed) cross-session bug graveyard. Every fixed bug is recorded as a
+  structured grudge; before touching code, skills query the grudgebook for the
+  files in scope and surface past regressions as forced "DO NOT REPEAT" context.
+  Backed by `scripts/grudge_append.py` and `grudge_query.py`. Ticket #271.
+
+### Note
+
+The calibration ledger is machine-local central (`~/.claude/crucible/ledger/`)
+and is **never committed**; only the fixture kill-switch
+(`CRUCIBLE_CALIBRATION_DISABLED=1`) silences it, and only for tests.
