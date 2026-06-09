@@ -726,6 +726,9 @@ Code artifacts vary in size. The orchestrator prepares the artifact based on sco
 
 **Grudge pre-flight (regression-oracle, #271).** On round 1, query the **Book of Grudges** for the gated files and include any matches in the red-team dispatch context as known prior regressions to check against — a reviewer should weight a past grudge on a touched file heavily. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <gated files…> --with-signatures`. Best-effort: if unresolved, emit a one-line stderr warning and continue — a missing pre-flight must NEVER block the gate. See `skills/grudge/SKILL.md`.
 
+<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
+**Calibration-weighted dispatch (advisory).** Beside the grudge pre-flight, on **round 1 only**, run `python3 "$plugin_root/scripts/brier_advisory.py" advise quality-gate <gated files…>`. If it prints a DispatchAdvice block, include it verbatim in each red-team reviewer's dispatch context as scrutiny hints (NOT as findings, NOT scored). Round-1-only injection keeps INV-A11 / the look-harder fresh-dispatch contract untouched. Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
+
 ### Chunked Gate Counter Semantics
 
 A chunked gate has two independent round counters: a **local** counter per chunk (resets to 1 at each chunk start) and a **global** counter (monotonic across all chunks). These counters drive different mechanisms; the spec made them collide before this section was added.

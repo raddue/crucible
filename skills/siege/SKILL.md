@@ -316,6 +316,9 @@ Pass relevant sections to agents as "prior threat context" (budget: 30 lines max
 
 All 6 agents are dispatched in parallel using `Task tool (general-purpose, model: opus)`. Fallback if parallel dispatch fails: sequential dispatch with user notification.
 
+<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
+**Calibration-weighted dispatch (advisory).** Before fanning out the 6 attacker agents, resolve `scripts/brier_advisory.py` by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/brier_advisory.py" advise siege <manifest files…>` over the finalized manifest (post attack-surface-gap additions). If it prints a DispatchAdvice block, add it verbatim to the Tier 1 overview every agent receives, as scrutiny hints (NOT as findings, NOT scored). Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
+
 ### Context Management (Tier 1 / Tier 2)
 
 Adopts audit's tiered context model with security-specific partitioning.

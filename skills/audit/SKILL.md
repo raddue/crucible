@@ -484,6 +484,9 @@ After all 4 lenses complete, proceed to Phase 2.5 (non-code blind-spots).
 
 Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel (matching inquisitor pattern). Fallback if parallel dispatch fails: dispatch sequentially via `Task tool (general-purpose, model: opus)`, with a one-time note to user: "Parallel dispatch unavailable -- running analysis lenses sequentially."
 
+<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
+**Calibration-weighted dispatch (advisory).** Before the lens fan-out, derive the file list from the audited subsystem's manifest files, resolve `scripts/brier_advisory.py` by absolute path from the plugin root, and run `python3 <script> advise audit <file list…>`. If it prints a DispatchAdvice block, add it verbatim to the Tier 1 overview every lens agent receives, as scrutiny hints (NOT as findings, NOT scored). Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
+
 **Write-on-complete:** As each agent completes, immediately write its findings to `scratch/<run-id>/<lens>-findings.md`. Do not wait for Phase 3. For the Consistency lens, use distinct filenames: `consistency-a-findings.md` for Agent A's triage output, `consistency-b-findings.md` for Agent B's confirmed findings.
 
 **Write partition records:** Before dispatching each lens, write the list of files sent as **full source** (not overflow summaries) to `scratch/<run-id>/<lens>-partition.md` (one file path per line). For Consistency, write only `consistency-b-partition.md` (Agent A receives the Tier 1 overview, not a Tier 2 source partition, so no partition record is needed for Agent A). These records are used by Phase 2.5 to build the coverage map and must survive compaction. Files sent as 2-3 line overflow summaries are NOT included in partition records -- those files count as never-examined for blind-spots purposes.

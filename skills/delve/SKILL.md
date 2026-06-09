@@ -107,6 +107,9 @@ Drive `shared/delve-engine.md` a **single** time with:
 
 The fan-out (finder angles) and the per-candidate verify gate run as parallel subagents **through the harness-adapter dispatch mechanism** — delve issues **no harness-specific call inline** (I1). On a harness with no parallel-subagent primitive, the adapter's **sequential fallback** runs the angles as multiple sequential passes (one per angle), never collapsed into a single in-context pass; it warns once that recall may drop.
 
+<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
+**Calibration-weighted dispatch (advisory).** Before driving the engine, derive the file list from the resolved `scope` (`git diff --name-only` for a range, or the path's file set), resolve `scripts/brier_advisory.py` by absolute path from the plugin root, and run `python3 <script> advise delve <file list…>`. If it prints a DispatchAdvice block, attach it verbatim to the per-angle finder prompt context the engine dispatches (the same engine-dispatch boundary on both the parallel and sequential-fallback paths), as scrutiny hints (NOT as findings, NOT scored). Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
+
 delve runs the engine **once**. There is no fix-verification loop and no second round — that cadence belongs to `temper`.
 
 ### Step 3: Report (always)
