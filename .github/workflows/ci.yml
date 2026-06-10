@@ -20,3 +20,5 @@ jobs:
       - run: python3 scripts/check_calibration_dispatch.py --selftest
       - run: python3 scripts/check_calibration_dispatch.py
       - run: python3 scripts/test_brier_advise.py
+      - run: python3 scripts/check_model_pins.py --selftest
+      - run: python3 scripts/check_model_pins.py

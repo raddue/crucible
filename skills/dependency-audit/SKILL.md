@@ -3,6 +3,7 @@ name: dependency-audit
 description: Ecosystem-appropriate dependency vulnerability audit. Walks the project for package.json, Cargo.toml, requirements.txt, pyproject.toml manifests and runs npm/cargo/pip-audit. Produces a structured supply-chain signal with normalized severities. Used by build alongside quality-gate; can also be invoked standalone. Triggers on /dependency-audit, 'audit dependencies', 'scan vulnerabilities', 'check CVEs'.
 origin: crucible
 ---
+<!-- MODEL-TIER: security-hard-out -->
 
 # Dependency Audit
 
