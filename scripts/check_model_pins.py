@@ -33,8 +33,11 @@ Pin-surface forms (all case-insensitive — the tree has real casing drift,
 e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
 or single/double-quoted, and form 1 tolerates leading whitespace — indented
 `model:` in nested config blocks is a live convention, see
-skills/consensus/SKILL.md — so the two most natural YAML value shapes
-cannot silently bypass rule (a)):
+skills/consensus/SKILL.md — and trailing text after the id, e.g. the
+`[1m]` context-window suffix in `claude-fable-5[1m]` (bracket-suffixed ids
+are this repo's own live pin convention): the value capture stops at the
+first non-id character and the match is never voided by what follows, so
+the natural YAML value shapes cannot silently bypass rule (a)):
   1. line-anchored `model: <value>` (frontmatter or any indented line)
   2. inline `Task tool (... model: <value> ...)`
   3. inline `Agent tool (... model: <value> ...)`
@@ -48,8 +51,9 @@ config. Those are operator-convention residuals, documented, not enforced.
 
 Known over-match (accepted): the line-anchored `model:` regex can hit example
 lines inside fenced code blocks in prose docs — including indented and/or
-quoted example lines, since the regex tolerates leading whitespace and
-surrounding quotes (the bypass-closing fixes from the #392 gate's round 1).
+quoted example lines, since the regex tolerates leading whitespace,
+surrounding quotes, and trailing text after the captured id (the
+bypass-closing fixes from the #392 gate's rounds 1-2).
 Harmless — the marker is matched
 as a STANDALONE line (has_marker), so a prose doc that merely *quotes* the
 marker string inline (the policy doc's "Marker convention", the stocktake
@@ -73,7 +77,7 @@ NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
 CARVE_OUTS = ("skills/audit/", "skills/test-coverage/", "skills/stocktake/")
 
 FRONTMATTER_PIN_RE = re.compile(
-    r"^[ \t]*model:\s*[\"']?([A-Za-z0-9._-]+)[\"']?(?=\s|#|$)",
+    r"^[ \t]*model:\s*[\"']?([A-Za-z0-9._-]+)[\"']?",
     re.IGNORECASE | re.MULTILINE)
 TASK_TOOL_PIN_RE = re.compile(
     r"Task tool\s*\([^)]*model:\s*[\"']?([A-Za-z0-9._-]+)", re.IGNORECASE)
@@ -84,8 +88,11 @@ AGENT_TOOL_PIN_RE = re.compile(
 def pins_in(text: str) -> list[str]:
     """All model-pin values across the three static pin-surface forms.
 
-    A trailing `# comment` after a frontmatter `model:` value is tolerated:
-    the value capture stops at the comment boundary, so the pin still matches."""
+    Trailing text after a frontmatter `model:` value — a `# comment`, a
+    `[1m]` context-window suffix, or any other non-id character — is
+    tolerated: the value capture stops at the id boundary and never voids
+    the match (gate round 2, S1: a rejecting trailing lookahead made
+    bracket-suffixed ids like `claude-fable-5[1m]` invisible to rule (a))."""
     return (FRONTMATTER_PIN_RE.findall(text)
             + TASK_TOOL_PIN_RE.findall(text)
             + AGENT_TOOL_PIN_RE.findall(text))
@@ -219,8 +226,8 @@ def selftest() -> int:
         ("agents/crucible-red-team.md",
          f"---\nmodel: fable  # pilot\n---\n{m}\nbody\n",
          True, "trailing `# comment` after a frontmatter fable value on a "
-               "stamped file is still caught — the (?=\\s|#|$) boundary lets "
-               "rule (a) fire (the value capture stops at the comment)"),
+               "stamped file is still caught (the value capture stops at "
+               "the comment boundary)"),
         ("agents/crucible-red-team.md",
          f"---\nmodel: opus  # keep\n---\n{m}\nbody\n",
          False, "trailing `# comment` after a non-fable frontmatter value is "
@@ -262,6 +269,18 @@ def selftest() -> int:
         ("skills/siege/SKILL.md", f'{m}\nmodel: "opus"\n',
          False, "quoted NON-fable value on a marked file stays clean (quote "
                 "tolerance does not over-fire)"),
+        ("skills/siege/SKILL.md",
+         f"---\nmodel: claude-fable-5[1m]\n---\n{m}\n",
+         True, "bracket-suffixed fable id `claude-fable-5[1m]` on a marked "
+               "file is caught (gate round 2, S1: the rejecting boundary "
+               "lookahead voided suffixed values)"),
+        ("skills/siege/SKILL.md", f'{m}\nmodel: "claude-fable-5[1m]"\n',
+         True, "quoted bracket-suffixed fable id on a marked file is caught "
+               "(gate round 2, S1)"),
+        ("agents/crucible-red-team.md",
+         f"---\nmodel: claude-opus-4-8[1m]\n---\n{m}\nbody\n",
+         False, "bracket-suffixed NON-fable id on a marked file stays clean "
+                "(suffix tolerance does not over-fire)"),
     ]
     failures = []
     for rel, text, expect_fail, reason in cases:
