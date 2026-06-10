@@ -2,6 +2,7 @@
 name: siege
 description: "Security audit of design docs, implementation plans, and code. Dispatches 6 parallel Opus agents across attacker perspectives, iterates until zero Critical + zero High findings, and maintains a persistent threat model. Triggers on 'siege', 'security audit', 'security review', 'threat model', or when audit detects security-relevant surfaces."
 ---
+<!-- MODEL-TIER: security-hard-out -->
 
 # Siege
 
