@@ -30,8 +30,12 @@ Security-surface set (evaluated on the repo-relative path):
     forcing a hard-out marker onto them would contradict the taxonomy.
 
 Pin-surface forms (all case-insensitive — the tree has real casing drift,
-e.g. `model: Sonnet` in skills/prospector/SKILL.md:335):
-  1. frontmatter/line-anchored `model: <value>`
+e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
+or single/double-quoted, and form 1 tolerates leading whitespace — indented
+`model:` in nested config blocks is a live convention, see
+skills/consensus/SKILL.md — so the two most natural YAML value shapes
+cannot silently bypass rule (a)):
+  1. line-anchored `model: <value>` (frontmatter or any indented line)
   2. inline `Task tool (... model: <value> ...)`
   3. inline `Agent tool (... model: <value> ...)`
 
@@ -43,7 +47,10 @@ ids, a .yaml — structurally invisible here), (c) other untracked operator
 config. Those are operator-convention residuals, documented, not enforced.
 
 Known over-match (accepted): the line-anchored `model:` regex can hit example
-lines inside fenced code blocks in prose docs. Harmless — the marker is matched
+lines inside fenced code blocks in prose docs — including indented and/or
+quoted example lines, since the regex tolerates leading whitespace and
+surrounding quotes (the bypass-closing fixes from the #392 gate's round 1).
+Harmless — the marker is matched
 as a STANDALONE line (has_marker), so a prose doc that merely *quotes* the
 marker string inline (the policy doc's "Marker convention", the stocktake
 bullet) is NOT treated as marked; rule (a) therefore cannot fire on a quoted
@@ -66,11 +73,12 @@ NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
 CARVE_OUTS = ("skills/audit/", "skills/test-coverage/", "skills/stocktake/")
 
 FRONTMATTER_PIN_RE = re.compile(
-    r"^model:\s*([A-Za-z0-9._-]+)(?=\s|#|$)", re.IGNORECASE | re.MULTILINE)
+    r"^[ \t]*model:\s*[\"']?([A-Za-z0-9._-]+)[\"']?(?=\s|#|$)",
+    re.IGNORECASE | re.MULTILINE)
 TASK_TOOL_PIN_RE = re.compile(
-    r"Task tool\s*\([^)]*model:\s*([A-Za-z0-9._-]+)", re.IGNORECASE)
+    r"Task tool\s*\([^)]*model:\s*[\"']?([A-Za-z0-9._-]+)", re.IGNORECASE)
 AGENT_TOOL_PIN_RE = re.compile(
-    r"Agent tool\s*\([^)]*model:\s*([A-Za-z0-9._-]+)", re.IGNORECASE)
+    r"Agent tool\s*\([^)]*model:\s*[\"']?([A-Za-z0-9._-]+)", re.IGNORECASE)
 
 
 def pins_in(text: str) -> list[str]:
@@ -228,6 +236,32 @@ def selftest() -> int:
                "is caught (capitalized Agent-tool form)"),
         ("skills/audit/audit-cve-prompt.md", f"{pin}\n",
          False, "carve-out dir beats cve stem"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nproviders:\n  - name: anthropic\n    model: claude-fable-5\n",
+         True, "indented fable pin in a nested config block on a marked file "
+               "is caught (gate round 1, S1: column-0-anchor bypass)"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nproviders:\n  - name: anthropic\n"
+         "    model: claude-sonnet-4-20250514\n",
+         False, "indented NON-fable pin on a marked file stays clean (indent "
+                "tolerance does not over-fire)"),
+        ("skills/siege/SKILL.md", f'{m}\nmodel: "fable"\n',
+         True, "double-quoted fable value on a marked file is caught "
+               "(gate round 1, S2: quoted-value bypass)"),
+        ("skills/siege/SKILL.md", f"{m}\nmodel: 'fable'\n",
+         True, "single-quoted fable value on a marked file is caught "
+               "(gate round 1, S2)"),
+        ("skills/siege/SKILL.md",
+         f'{m}\nTask tool (general-purpose, model: "fable"):\n',
+         True, "quoted fable value in the Task-tool form is caught "
+               "(gate round 1, S2)"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nAgent tool (subagent_type: general-purpose, model: 'fable')\n",
+         True, "quoted fable value in the Agent-tool form is caught "
+               "(gate round 1, S2)"),
+        ("skills/siege/SKILL.md", f'{m}\nmodel: "opus"\n',
+         False, "quoted NON-fable value on a marked file stays clean (quote "
+                "tolerance does not over-fire)"),
     ]
     failures = []
     for rel, text, expect_fail, reason in cases:
