@@ -40,8 +40,11 @@ decides`, see skills/build/build-reviewer-prompt.md) would otherwise hide
 a second-position fable (gate round 3, S1). Value-region boundaries:
 form 1 ends at the first `#` or end-of-line, so `model: opus  # never
 fable` is a non-fable pin whose comment merely MENTIONS fable; forms 2-3
-end at the closing paren — prose after the id but inside the parens is
-part of the region (accepted over-match, see below)):
+end at the FIRST closing paren (`[^)]*`) — prose after the id but inside
+the parens is part of the region (accepted over-match, see below).
+Accepted limitation: a nested parenthetical BEFORE `model:` inside a
+tool form closes the region early and truncates the scan (the known
+nested-paren Minor, accepted for v1)):
   1. line-anchored `model: <value>` (frontmatter or any indented line)
   2. inline `Task tool (... model: <value> ...)`
   3. inline `Agent tool (... model: <value> ...)`
@@ -53,11 +56,14 @@ consensus membership in untracked .claude/consensus-config.yaml (raw model
 ids, a .yaml — structurally invisible here), (c) other untracked operator
 config. Those are operator-convention residuals, documented, not enforced.
 
-Fenced-example handling (gate round 3, S2): lines inside ```-fenced code
-blocks are stripped before rule (a) scans for pins, so a MARKED security
-doc may document the banned form (a fenced `model: fable` counter-example)
-without tripping the gate. Fail-closed: an UNTERMINATED fence strips
-nothing — a real pin cannot hide behind an unclosed ```. Rule (b)'s
+Fenced-example handling (gate round 3, S2): lines inside ```- or
+~~~-fenced code blocks (fences close on the SAME character they opened
+with, per CommonMark) are stripped before rule (a) scans for pins, so a
+MARKED security doc may document the banned form (a fenced `model: fable`
+counter-example) without tripping the gate. Fail-closed: an UNTERMINATED
+fence strips nothing — a real pin cannot hide behind an unclosed one. A
+single leading U+FEFF BOM is stripped before scanning (it would otherwise
+defeat the line-anchored form-1 regex on the first line). Rule (b)'s
 pin-presence gate reads the RAW (unstripped) text: a fenced example pin
 can at worst DEMAND a marker on a security-named doc — an over-demand,
 never a missed fable pin. has_marker also reads raw text (a fence-buried
@@ -108,7 +114,8 @@ def pins_in(text: str) -> list[str]:
     repo's live disjunction convention (`model: opus or fable`) puts the
     pin of interest in the SECOND position (gate round 3, S1). Region
     boundaries: form 1 ends at `#` or end-of-line, so a trailing comment
-    can MENTION fable without firing; forms 2-3 end at the closing paren.
+    can MENTION fable without firing; forms 2-3 end at the FIRST closing
+    paren (the accepted nested-paren limitation — see module docstring).
     Quotes, `[1m]` suffixes, and connectives like ` or ` are non-id chars
     the token scan skips over — they never void a match (gate rounds 1-2);
     connective words come back as tokens, which is harmless: is_fable
@@ -120,17 +127,22 @@ def pins_in(text: str) -> list[str]:
 
 
 def strip_fences(text: str) -> str:
-    """Drop lines inside ```-fenced code blocks (fence lines included), so
-    rule (a) does not accuse a marked security doc of the very pin its
-    fenced counter-example warns against (gate round 3, S2). Fail-closed:
-    a fence with NO closing line strips nothing — everything after an
-    unterminated ``` is kept and scanned, so a real pin cannot hide there."""
+    """Drop lines inside ```- or ~~~-fenced code blocks (fence lines
+    included), so rule (a) does not accuse a marked security doc of the
+    very pin its fenced counter-example warns against (gate round 3, S2;
+    tilde fences: minor pass QF1). Per CommonMark a fence closes on the
+    SAME character it opened with: a ``` block is closed only by ``` and
+    a ~~~ block only by ~~~. Fail-closed: a fence with NO closing line
+    strips nothing — everything after an unterminated opener is kept and
+    scanned, so a real pin cannot hide there."""
     lines = text.splitlines()
     out, i, n = [], 0, len(lines)
     while i < n:
-        if lines[i].lstrip().startswith("```"):
+        head = lines[i].lstrip()
+        fence = next((f for f in ("```", "~~~") if head.startswith(f)), None)
+        if fence is not None:
             j = i + 1
-            while j < n and not lines[j].lstrip().startswith("```"):
+            while j < n and not lines[j].lstrip().startswith(fence):
                 j += 1
             if j < n:          # terminated block: drop it, fences included
                 i = j + 1
@@ -168,6 +180,11 @@ def is_security_surface(rel: str, text: str) -> bool:
 
 def check_file(rel: str, text: str) -> list[str]:
     """Return violation strings for one file (empty == OK)."""
+    if text.startswith("\ufeff"):
+        # A leading BOM would defeat the line-anchored form-1 regex on the
+        # first line (minor pass QF2). Strip a single leading BOM here (not
+        # in main()) so the no-filesystem selftest path is covered too.
+        text = text[1:]
     fails = []
     marked = has_marker(text)          # raw text: fences never hide a stamp
     # rule (a) scans fence-stripped text (S2); rule (b)'s pin-presence gate
@@ -362,6 +379,27 @@ def selftest() -> int:
          True, "rule (b)'s pin-presence gate reads the RAW text: a fenced "
                "pin on an unmarked security-named file still demands a "
                "marker (over-demand accepted, M2(r2)-shaped)"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nNever write this:\n~~~\nmodel: fable\n~~~\n",
+         False, "tilde-fenced `model: fable` counter-example on a MARKED "
+                "file does not trip rule (a) — ~~~ fences are stripped too "
+                "(minor pass QF1)"),
+        ("skills/siege/SKILL.md",
+         f"---\nmodel: fable\n---\n{m}\n~~~\nmodel: fable\n~~~\n",
+         True, "a real unfenced fable pin is still caught when a "
+               "tilde-fenced example is also present — stripping ~~~ "
+               "fences does not hide real pins (minor pass QF1)"),
+        ("skills/siege/SKILL.md",
+         f"\ufeffmodel: fable\n{m}\n",
+         True, "a leading BOM does not defeat the line-anchored form-1 "
+               "regex on the first line — the BOM is stripped before "
+               "scanning (minor pass QF2)"),
+        ("skills/siege/SKILL.md",
+         "<!--MODEL-TIER: security-hard-out-->\nprose\n",
+         True, "whitespace-variant marker is NOT a stamp — has_marker is "
+               "an exact byte-for-byte line match (line.strip() == MARKER), "
+               "so the dir-allowlist file counts as un-stamped and rule (b) "
+               "fires (minor pass QF4 regression pin, no behavior change)"),
     ]
     failures = []
     for rel, text, expect_fail, reason in cases:
