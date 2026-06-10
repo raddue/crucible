@@ -31,13 +31,17 @@ Security-surface set (evaluated on the repo-relative path):
 
 Pin-surface forms (all case-insensitive — the tree has real casing drift,
 e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
-or single/double-quoted, and form 1 tolerates leading whitespace — indented
-`model:` in nested config blocks is a live convention, see
-skills/consensus/SKILL.md — and trailing text after the id, e.g. the
-`[1m]` context-window suffix in `claude-fable-5[1m]` (bracket-suffixed ids
-are this repo's own live pin convention): the value capture stops at the
-first non-id character and the match is never voided by what follows, so
-the natural YAML value shapes cannot silently bypass rule (a)):
+or single/double-quoted, indented (form 1 — nested config is a live
+convention, see skills/consensus/SKILL.md), or bracket-suffixed
+(`claude-fable-5[1m]`, this repo's own live pin convention). EVERY
+id-shaped token in the value region is checked, not just the first — the
+repo's live disjunction convention (`model: opus or sonnet — lead
+decides`, see skills/build/build-reviewer-prompt.md) would otherwise hide
+a second-position fable (gate round 3, S1). Value-region boundaries:
+form 1 ends at the first `#` or end-of-line, so `model: opus  # never
+fable` is a non-fable pin whose comment merely MENTIONS fable; forms 2-3
+end at the closing paren — prose after the id but inside the parens is
+part of the region (accepted over-match, see below)):
   1. line-anchored `model: <value>` (frontmatter or any indented line)
   2. inline `Task tool (... model: <value> ...)`
   3. inline `Agent tool (... model: <value> ...)`
@@ -49,18 +53,27 @@ consensus membership in untracked .claude/consensus-config.yaml (raw model
 ids, a .yaml — structurally invisible here), (c) other untracked operator
 config. Those are operator-convention residuals, documented, not enforced.
 
-Known over-match (accepted): the line-anchored `model:` regex can hit example
-lines inside fenced code blocks in prose docs — including indented and/or
-quoted example lines, since the regex tolerates leading whitespace,
-surrounding quotes, and trailing text after the captured id (the
-bypass-closing fixes from the #392 gate's rounds 1-2).
-Harmless — the marker is matched
-as a STANDALONE line (has_marker), so a prose doc that merely *quotes* the
-marker string inline (the policy doc's "Marker convention", the stocktake
-bullet) is NOT treated as marked; rule (a) therefore cannot fire on a quoted
-`model: fable` example in such a doc — it fires only on a genuinely *stamped*
-file. Rule (b) only needs pin-presence as a gate; a false pin-positive can at
-worst require a marker on a security-named doc.
+Fenced-example handling (gate round 3, S2): lines inside ```-fenced code
+blocks are stripped before rule (a) scans for pins, so a MARKED security
+doc may document the banned form (a fenced `model: fable` counter-example)
+without tripping the gate. Fail-closed: an UNTERMINATED fence strips
+nothing — a real pin cannot hide behind an unclosed ```. Rule (b)'s
+pin-presence gate reads the RAW (unstripped) text: a fenced example pin
+can at worst DEMAND a marker on a security-named doc — an over-demand,
+never a missed fable pin. has_marker also reads raw text (a fence-buried
+marker still counts as a stamp; deliberate asymmetry — it subjects the
+file to MORE scrutiny under rule (a), never less).
+
+Known over-match (accepted): in NON-marked prose docs an unfenced
+line-anchored `model:` example still registers as a pin. Harmless — the
+marker is matched as a STANDALONE line (has_marker), so a prose doc that
+merely *quotes* the marker string inline (the policy doc's "Marker
+convention", the stocktake bullet) is NOT treated as marked; rule (a)
+therefore cannot fire there, and rule (b) can at worst require a marker
+on a security-named doc. On MARKED files one residual remains: an
+UNFENCED prose mention of fable after `model:` but inside a tool-form
+paren (e.g. `Task tool (..., model: opus — never fable)`) fires rule (a);
+write such notes outside the parens, after a `#` (form 1), or in a fence.
 
 Exits 0 if clean, 1 with a per-violation list otherwise. Stdlib only.
 """
@@ -76,26 +89,55 @@ NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
 CARVE_OUTS = ("skills/audit/", "skills/test-coverage/", "skills/stocktake/")
 
+# Each regex captures the VALUE REGION after `model:`, not a single token:
+# form 1 to the first `#` or end-of-line, forms 2-3 to the closing paren.
 FRONTMATTER_PIN_RE = re.compile(
-    r"^[ \t]*model:\s*[\"']?([A-Za-z0-9._-]+)[\"']?",
-    re.IGNORECASE | re.MULTILINE)
+    r"^[ \t]*model:([^\n#]*)", re.IGNORECASE | re.MULTILINE)
 TASK_TOOL_PIN_RE = re.compile(
-    r"Task tool\s*\([^)]*model:\s*[\"']?([A-Za-z0-9._-]+)", re.IGNORECASE)
+    r"Task tool\s*\([^)]*model:([^)]*)", re.IGNORECASE)
 AGENT_TOOL_PIN_RE = re.compile(
-    r"Agent tool\s*\([^)]*model:\s*[\"']?([A-Za-z0-9._-]+)", re.IGNORECASE)
+    r"Agent tool\s*\([^)]*model:([^)]*)", re.IGNORECASE)
+ID_TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 
 def pins_in(text: str) -> list[str]:
-    """All model-pin values across the three static pin-surface forms.
+    """All id-shaped tokens across the value regions of the three static
+    pin-surface forms.
 
-    Trailing text after a frontmatter `model:` value — a `# comment`, a
-    `[1m]` context-window suffix, or any other non-id character — is
-    tolerated: the value capture stops at the id boundary and never voids
-    the match (gate round 2, S1: a rejecting trailing lookahead made
-    bracket-suffixed ids like `claude-fable-5[1m]` invisible to rule (a))."""
-    return (FRONTMATTER_PIN_RE.findall(text)
-            + TASK_TOOL_PIN_RE.findall(text)
-            + AGENT_TOOL_PIN_RE.findall(text))
+    EVERY token in a value region is returned, not just the first — the
+    repo's live disjunction convention (`model: opus or fable`) puts the
+    pin of interest in the SECOND position (gate round 3, S1). Region
+    boundaries: form 1 ends at `#` or end-of-line, so a trailing comment
+    can MENTION fable without firing; forms 2-3 end at the closing paren.
+    Quotes, `[1m]` suffixes, and connectives like ` or ` are non-id chars
+    the token scan skips over — they never void a match (gate rounds 1-2);
+    connective words come back as tokens, which is harmless: is_fable
+    filters them and rule (b) only needs truthiness."""
+    regions = (FRONTMATTER_PIN_RE.findall(text)
+               + TASK_TOOL_PIN_RE.findall(text)
+               + AGENT_TOOL_PIN_RE.findall(text))
+    return [tok for region in regions for tok in ID_TOKEN_RE.findall(region)]
+
+
+def strip_fences(text: str) -> str:
+    """Drop lines inside ```-fenced code blocks (fence lines included), so
+    rule (a) does not accuse a marked security doc of the very pin its
+    fenced counter-example warns against (gate round 3, S2). Fail-closed:
+    a fence with NO closing line strips nothing — everything after an
+    unterminated ``` is kept and scanned, so a real pin cannot hide there."""
+    lines = text.splitlines()
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        if lines[i].lstrip().startswith("```"):
+            j = i + 1
+            while j < n and not lines[j].lstrip().startswith("```"):
+                j += 1
+            if j < n:          # terminated block: drop it, fences included
+                i = j + 1
+                continue       # unterminated: fall through, keep the lines
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
 
 
 def has_marker(text: str) -> bool:
@@ -127,8 +169,10 @@ def is_security_surface(rel: str, text: str) -> bool:
 def check_file(rel: str, text: str) -> list[str]:
     """Return violation strings for one file (empty == OK)."""
     fails = []
-    marked = has_marker(text)
-    fable_pins = [v for v in pins_in(text) if is_fable(v)]
+    marked = has_marker(text)          # raw text: fences never hide a stamp
+    # rule (a) scans fence-stripped text (S2); rule (b)'s pin-presence gate
+    # (is_security_surface below) stays on RAW text — over-demand, fail-closed.
+    fable_pins = [v for v in pins_in(strip_fences(text)) if is_fable(v)]
     if marked and fable_pins:
         fails.append(f"{rel}: fable pin on security-marked file "
                      f"(model-tier hard-out): {fable_pins}")
@@ -281,6 +325,43 @@ def selftest() -> int:
          f"---\nmodel: claude-opus-4-8[1m]\n---\n{m}\nbody\n",
          False, "bracket-suffixed NON-fable id on a marked file stays clean "
                 "(suffix tolerance does not over-fire)"),
+        ("skills/siege/SKILL.md",
+         f"---\nmodel: sonnet or fable\n---\n{m}\n",
+         True, "disjunction `model: sonnet or fable` on a marked file is "
+               "caught — every value-region token is scanned, not just the "
+               "first (gate round 3, S1)"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nTask tool (general-purpose, model: opus or fable):\n",
+         True, "disjunction in the Task-tool form is caught "
+               "(gate round 3, S1)"),
+        ("skills/siege/SKILL.md",
+         f"---\nmodel: opus or sonnet\n---\n{m}\n",
+         False, "the live build-prompt disjunction `model: opus or sonnet` "
+                "does not over-fire on a marked file"),
+        ("skills/siege/SKILL.md",
+         f"---\nmodel: opus  # never fable\n---\n{m}\n",
+         False, "a `#` comment MENTIONING fable after a non-fable "
+                "frontmatter value does not fire — the value region stops "
+                "at the comment boundary (gate round 3, S1 over-fire guard)"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nNever write this:\n```\nmodel: fable\n```\n",
+         False, "fenced `model: fable` counter-example on a MARKED file no "
+                "longer trips rule (a) — fences are stripped "
+                "(gate round 3, S2)"),
+        ("skills/siege/SKILL.md",
+         f"---\nmodel: fable\n---\n{m}\n```\nmodel: fable\n```\n",
+         True, "a real unfenced fable pin is still caught when a fenced "
+               "example is also present — stripping fences does not hide "
+               "real pins (gate round 3, S2)"),
+        ("skills/siege/SKILL.md",
+         f"{m}\n```\nmodel: fable\n",
+         True, "UNTERMINATED fence does not hide a pin — fail-closed, the "
+               "unclosed block is still scanned (gate round 3, S2)"),
+        ("skills/payloads/injection-vuln-prompt.md",
+         f"```\n{pin}\n```\n",
+         True, "rule (b)'s pin-presence gate reads the RAW text: a fenced "
+               "pin on an unmarked security-named file still demands a "
+               "marker (over-demand accepted, M2(r2)-shaped)"),
     ]
     failures = []
     for rel, text, expect_fail, reason in cases:
