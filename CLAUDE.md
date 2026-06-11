@@ -11,7 +11,10 @@ Markdown workflow). `shared/` holds canonical conventions every skill links to;
 lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 
 ## Running & testing
-- Internal TS/JS tests: `npm test` (vitest).
+- Internal tests are Python + bash: `scripts/check_*.py`, `scripts/test_*.py`,
+  and `hooks/tests/*.sh`, run individually; the gating subset also runs in
+  `.github/workflows/ci.yml` (full CI coverage is still being wired up — see #394).
+  (`npm test`/vitest is currently non-functional — no JS/TS tests are tracked; see #395.)
 - Skill behavior evals: defined in `skills/<skill>/evals/evals.json`, run via
   Anthropic's skill-creator (blind A/B); measured deltas live in `docs/evals.md`.
 - Install for live use: symlink skills into Claude Code —
@@ -33,9 +36,11 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 - **Find-and-report-only skills don't edit code.** `red-team`, `audit`,
   `code-review` report findings; they must not modify the artifact under review.
 - **The calibration ledger is the epistemic backbone.** Tier-A gate verdicts
-  append to `.crucible/ledger/runs.jsonl` (committed). The
-  `CRUCIBLE_CALIBRATION_DISABLED=1` kill-switch is fixture-only — never silence
-  production verdicts.
+  append to the machine-local central store `~/.claude/crucible/ledger/runs.jsonl`
+  (never committed — this repo is public; not to be confused with the deliberate
+  11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl`, which is
+  intentional — keep it). The `CRUCIBLE_CALIBRATION_DISABLED=1`
+  kill-switch is fixture-only — never silence production verdicts.
 - **Eval before you publish.** A skill change ships with its evals run; prefer
   anti-rationalization tables + stagnation detection over trusting the model to
   not shortcut under pressure.
