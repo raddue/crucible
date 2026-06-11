@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# scripts/run_tests.sh
+# Canonical test runner for Crucible — the single source of truth for the
+# repo's gating suite. Both CI (.github/workflows/ci.yml) and humans invoke
+# THIS script, so the local suite and the CI suite can never drift.
+#
+# Runs every suite even if an earlier one fails (no `set -e`), collects the
+# failures, and exits non-zero iff any suite failed. `::group::`/`::endgroup::`
+# markers fold each suite in the GitHub Actions log (and print harmlessly as
+# plain lines locally).
+#
+# Adding a suite? Add ONE `run` line below — it is then covered locally and in
+# CI atomically.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT" || exit 1
+
+failed=()
+total=0
+
+run() {
+  total=$((total + 1))
+  echo "::group::$*"
+  if "$@"; then
+    echo "::endgroup::"
+  else
+    echo "::endgroup::"
+    failed+=("$*")
+  fi
+}
+
+# --- Structural / canonical checks ---
+run python3 scripts/check_canonical_drift.py
+run python3 scripts/check_i2_marker.py
+run python3 scripts/check_qg_stagnation_minor.py
+run python3 scripts/check_crossref.py --selftest
+run python3 scripts/check_crossref.py
+run python3 scripts/catalog.py check
+
+# --- Receipt-verify (rcpt_verify) ---
+run python3 scripts/rcpt_verify.py --selftest
+run python3 scripts/test_rcpt_verify.py
+run bash hooks/tests/test-rcpt-verify-hook.sh
+
+# --- Calibration dispatch / Brier advisory ---
+run python3 scripts/check_calibration_dispatch.py --selftest
+run python3 scripts/check_calibration_dispatch.py
+run python3 scripts/test_brier_advise.py
+
+# --- Model-pin guardrail ---
+run python3 scripts/check_model_pins.py --selftest
+run python3 scripts/check_model_pins.py
+
+# --- Ledger write-path guard ---
+run python3 scripts/check_ledger_write_path.py --selftest
+run python3 scripts/check_ledger_write_path.py
+
+# --- #366 red-team <-> quality-gate receipt contract ---
+run python3 scripts/check_rt_receipt_contract.py
+
+# --- Catalog unit suite ---
+run python3 scripts/test_catalog.py
+
+# --- Build-routing advisor + reconcile hooks ---
+run bash hooks/tests/test-build-routing-advisor.sh
+run bash hooks/tests/test-gate-ledger-guard.sh
+run bash hooks/tests/tools/test-build-routing-reconcile.sh
+
+# --- Summary ---
+if [ ${#failed[@]} -ne 0 ]; then
+  echo
+  echo "FAILED (${#failed[@]}):"
+  for f in "${failed[@]}"; do echo "  - $f"; done
+  exit 1
+fi
+
+echo
+echo "All ${total} suite invocations passed."

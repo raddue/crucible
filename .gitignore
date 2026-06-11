@@ -21,6 +21,9 @@ tests/
 !skills/build/evals/fixtures/**/src/**
 !skills/build/evals/fixtures/**/tests/
 !skills/build/evals/fixtures/**/tests/**
+# Vestigial Node scaffolding from the original `npm init`. Crucible has no
+# JS/TS source — tests are Python + bash via scripts/run_tests.sh. Do NOT
+# un-ignore these; `npm test` is not the gate (see CLAUDE.md "Running & testing").
 package.json
 package-lock.json
 tsconfig.json

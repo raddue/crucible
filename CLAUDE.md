@@ -11,10 +11,12 @@ Markdown workflow). `shared/` holds canonical conventions every skill links to;
 lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 
 ## Running & testing
-- Internal tests are Python + bash: `scripts/check_*.py`, `scripts/test_*.py`,
-  and `hooks/tests/*.sh`, run individually; the gating subset also runs in
-  `.github/workflows/ci.yml` (full CI coverage is still being wired up — see #394).
-  (`npm test`/vitest is currently non-functional — no JS/TS tests are tracked; see #395.)
+- Internal tests are Python + bash (`scripts/check_*.py`, `scripts/test_*.py`,
+  `hooks/tests/*.sh`). Run the whole gating suite with **`bash scripts/run_tests.sh`**
+  — the single source of truth that `.github/workflows/ci.yml` also invokes, so
+  local and CI never drift. Add a suite by adding one `run` line to that script.
+  There is no JS/TS toolchain: any `package.json`/`tsconfig.json`/`node_modules/`
+  in your tree is vestigial `npm init` scaffolding (gitignored, never shipped).
 - Skill behavior evals: defined in `skills/<skill>/evals/evals.json`, run via
   Anthropic's skill-creator (blind A/B); measured deltas live in `docs/evals.md`.
 - Install for live use: symlink skills into Claude Code —
