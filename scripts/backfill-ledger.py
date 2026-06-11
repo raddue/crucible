@@ -2,7 +2,9 @@
 """Phase 3 — 90-day fix-branch ledger backfill.
 
 Walks merged `fix/*` and `hotfix/*` PRs in a lookback window and appends
-synthetic schema-v1 calibration entries to `.crucible/ledger/runs.jsonl`.
+synthetic schema-v1 calibration entries to the machine-local central ledger
+store (`default_ledger_dir()` → ~/.claude/crucible/ledger/runs.jsonl, override
+via CRUCIBLE_LEDGER_DIR) — the same store every reducer/render/reconcile reads.
 
 These entries seed the corpus to honor #272's "≥10 entries" intent WITHOUT
 polluting accuracy claims:
@@ -34,9 +36,24 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from scripts.ledger_append import append, caller_dedup  # noqa: E402
+from scripts.ledger_append import (  # noqa: E402
+    append,
+    caller_dedup,
+    default_ledger_dir,
+)
 
-LEDGER_PATH = os.path.join(REPO_ROOT, ".crucible", "ledger", "runs.jsonl")
+# Write to the machine-local central store every reader actually consumes
+# (#270): render_ledger / reconcile_ledger / brier_advisory all route through
+# default_ledger_dir() → ~/.claude/crucible/ledger (override via
+# CRUCIBLE_LEDGER_DIR). Pinning this to the in-repo .crucible/ tree — as an
+# earlier version did — both made the backfill a dead store (no reader reads it)
+# and leaked finding data into the PUBLIC repo tree. Do NOT reintroduce an
+# in-repo .crucible/ write path here. scripts/check_ledger_write_path.py is an
+# AST guard that flags any `.crucible` path-shaped STRING LITERAL in scripts/ —
+# it catches every realistic spelling (os.path.join, pathlib, concat, f-string,
+# variable segment, multi-line). The only uncaught case is a path assembled with
+# no `.crucible` literal at all (e.g. runtime string concat) — don't do that.
+LEDGER_PATH = os.path.join(default_ledger_dir(), "runs.jsonl")
 DEFAULT_LOOKBACK_DAYS = 90
 
 
