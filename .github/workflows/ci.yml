@@ -22,3 +22,5 @@ jobs:
       - run: python3 scripts/test_brier_advise.py
       - run: python3 scripts/check_model_pins.py --selftest
       - run: python3 scripts/check_model_pins.py
+      - run: python3 scripts/check_ledger_write_path.py --selftest
+      - run: python3 scripts/check_ledger_write_path.py
