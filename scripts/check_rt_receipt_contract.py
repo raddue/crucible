@@ -19,8 +19,17 @@ INTRODUCES (absent in the unedited file) so it discriminates RED→GREEN; [A6] i
 sole exception — a retain-guard that is GREEN at baseline and only goes RED if a
 future edit DELETES the rich findings sections.
 
+The quality-gate/SKILL.md present-pins that used to assert verbatim English prose
+([C14] "orchestrator-supplied", [C15] "cited artifact", [C18] witness phrasing, [C18b]
+"initial writer") were migrated to structural `<!-- CONTRACT:NAME -->` anchors (#399)
+so a benign wording edit on the repo's hottest file no longer trips CI — the anchor is
+the regression guard, the prose inside is freely editable. The code-token pins
+([C13] `### … Challenges`, [C16] `TRIPWIRE: none`, [C17] `ARTIFACTS`) stay verbatim:
+editing those IS a contract change. See scripts/CHECKER_CONVENTIONS.md.
+
 NO directory tree-walk: only the four named files are read, so the checker can never
-self-match its own literal pin strings. Stdlib only (`pathlib`, `re`, `sys`).
+self-match its own literal pin strings (CONTRACT anchors included). Stdlib only
+(`pathlib`, `re`, `sys`).
 Exits 0 if all assertions hold, 1 with a bulleted violation list otherwise.
 
 Mirrors `scripts/check_canonical_drift.py` and `scripts/check_i2_marker.py`.
@@ -243,20 +252,15 @@ def check_qg(text: str) -> list[str]:
             "the cited findings file with an explicit CLAIMS 'cross-check' disclaimer"
         )
 
-    # [C14] [FINDINGS_OUTPUT_PATH] named as orchestrator-supplied (NEW phrase only;
-    #       do NOT pin on round-N-findings.md which pre-exists ~10x).
-    if "orchestrator-supplied" not in text:
+    # [C15] :30 no longer implies red-team prose is linted-to-BLOCKED. Keyed to the
+    #       rule's structural CONTRACT anchor, not its prose — the rewrite's wording
+    #       ("findings come from the cited artifact") is now freely editable; only the
+    #       anchor is the regression guard (#399; see scripts/CHECKER_CONVENTIONS.md).
+    if "CONTRACT:rt-redteam-receipts-lint-clean" not in text:
         errs.append(
-            "[C14] quality-gate/SKILL.md: missing 'orchestrator-supplied' wording naming "
-            "[FINDINGS_OUTPUT_PATH] as supplied by the orchestrator"
-        )
-
-    # [C15] :30 no longer implies red-team prose is linted-to-BLOCKED — keyed to the
-    #       rewrite's positive token (findings come from the cited artifact).
-    if "cited artifact" not in text:
-        errs.append(
-            "[C15] quality-gate/SKILL.md: missing the :30 rewrite asserting red-team findings "
-            "come from the 'cited artifact' (negative-corruption phrasing not yet replaced)"
+            "[C15] quality-gate/SKILL.md: missing CONTRACT anchor "
+            "'rt-redteam-receipts-lint-clean' marking the red-team-receipts-lint-clean rule "
+            "(the rule's home paragraph was deleted, not merely reworded)"
         )
 
     # [C16] SP2 clean-PASS TRIPWIRE predicate as a contextual POINTER to the convention.
@@ -279,20 +283,23 @@ def check_qg(text: str) -> list[str]:
             "'re-hash'es a prior entry's pinned 'ARTIFACTS' 'after insertion')"
         )
 
-    # [C18] fix-agent test-less superseding-witness pattern (NEW phrasing only;
-    #       NOT bare 'revised artifact' which pre-exists).
-    c18_ok = ("test-less" in text and ("finding-anchor" in text or "no longer appears" in text))
-    if not c18_ok:
+    # [C18] fix-agent test-less superseding-witness pattern. Keyed to the rule's
+    #       CONTRACT anchor (#399) — the witness prose ('finding-anchor … no longer
+    #       appears') is now freely editable; the anchor is the regression guard.
+    if "CONTRACT:rt-fix-test-less-witness" not in text:
         errs.append(
-            "[C18] quality-gate/SKILL.md: missing fix-agent test-less superseding-witness pattern "
-            "('test-less' co-located with 'finding-anchor' / 'no longer appears')"
+            "[C18] quality-gate/SKILL.md: missing CONTRACT anchor 'rt-fix-test-less-witness' "
+            "marking the fix-agent test-less superseding-witness rule"
         )
 
-    # [C18b] writer-inversion token.
-    if "initial writer" not in text:
+    # [C14]+[C18b] findings-path & writer-inversion rule. ONE anchor guards both the
+    #       former [C14] ([FINDINGS_OUTPUT_PATH] is orchestrator-supplied) and [C18b]
+    #       (reviewer is the initial writer) — they share a home paragraph (#399).
+    if "CONTRACT:rt-findings-writer-inversion" not in text:
         errs.append(
-            "[C18b] quality-gate/SKILL.md: missing writer-inversion token 'initial writer' "
-            "(reviewer is the initial writer of round-N-findings.md)"
+            "[C14][C18b] quality-gate/SKILL.md: missing CONTRACT anchor "
+            "'rt-findings-writer-inversion' marking the findings-path/writer-inversion rule "
+            "(orchestrator-supplied [FINDINGS_OUTPUT_PATH] + reviewer-as-initial-writer)"
         )
 
     return errs

@@ -21,8 +21,18 @@ discipline assertion: a per-member adjudicator is not a holistic reviewer.
 Asserts canonical + build-paraphrase both contain: the 4 lens subsection
 headings, the 6 co-fire data-row conditions, the pinned severity-ceiling
 sentences, the Tenancy and Rollback discipline headings + Category values,
-the AI-Slop counter-rule, and the Pre-flight pins. Exits 0 if aligned, 1
-with a diff summary otherwise. Stdlib only.
+the AI-Slop counter-rule, and a non-empty Pre-flight CONTRACT block. Exits 0
+if aligned, 1 with a diff summary otherwise. Stdlib only.
+
+Pin discipline (#399, see scripts/CHECKER_CONVENTIONS.md): the Pre-flight
+section's pure-English present-pins ("deployed right now", "dash bullets",
+"Always emit") were migrated to a `<!-- CONTRACT:preflight:START/END -->` block
+so the authoring prose re-words freely; the block's presence-in-both plus the
+`MISSING` template token is the guard. The remaining pins stay verbatim BY
+DESIGN — the lens/co-fire/ceiling sentences and the AI-Slop counter-rule
+phrases ("defense-in-depth, not single-layer trust", "intentional
+defense-in-depth") are doctrine the two files must paraphrase consistently:
+the exact wording IS the cross-file contract, not incidental prose.
 """
 from __future__ import annotations
 import pathlib, re, sys
@@ -56,19 +66,17 @@ DISCIPLINE_PINS = [
     "callback",
 ]
 
-# Pre-flight feature-delivery section pins (#295) — must appear in BOTH
-# canonical and build-paraphrase (file-level grep). The "deployed right now"
-# phrase is a verbatim drift-check pin; "### Pre-flight" anchors the section.
-PREFLIGHT_PINS = [
-    "### Pre-flight",
-    "deployed right now",
-    # Load-bearing authoring instructions: pin the format ("dash bullets"),
-    # the always-emit mandate, and the MISSING marker so a divergence in any of
-    # the three templates is caught, not just the heading + intro phrase.
-    "dash bullets",
-    "Always emit",
-    "MISSING",
-]
+# Pre-flight feature-delivery section (#295) — must appear in BOTH canonical and
+# build-paraphrase. Migrated from verbatim prose pins ("deployed right now",
+# "dash bullets", "Always emit") to a structural CONTRACT block (#399): the
+# authoring prose inside the block is now freely editable on these reviewer
+# files; the block's PRESENCE-IN-BOTH (non-empty) is the drift guard, and the
+# `MISSING` prerequisite-marker token stays pinned as the one load-bearing
+# template token. See scripts/CHECKER_CONVENTIONS.md.
+PREFLIGHT_RE = re.compile(
+    r"<!-- CONTRACT:preflight:START.*?-->(.*?)<!-- CONTRACT:preflight:END",
+    re.DOTALL,
+)
 
 def extract_canon(text: str) -> str:
     # Include Targeted Lenses + the sibling ### Lens precedence... section
@@ -109,9 +117,16 @@ def check_disciplines(name: str, text: str) -> list[str]:
     for pin in DISCIPLINE_PINS:
         if pin not in text:
             errs.append(f"{name}: missing pin '{pin}'")
-    for pin in PREFLIGHT_PINS:
-        if pin not in text:
-            errs.append(f"{name}: missing pin '{pin}'")
+    # Pre-flight: structural CONTRACT block (#399) in place of the old prose pins.
+    m = PREFLIGHT_RE.search(text)
+    if m is None:
+        errs.append(f"{name}: missing Pre-flight CONTRACT block "
+                    "(<!-- CONTRACT:preflight:START --> … <!-- CONTRACT:preflight:END -->)")
+    elif not m.group(1).strip():
+        errs.append(f"{name}: Pre-flight CONTRACT block is empty")
+    elif "MISSING" not in m.group(1):
+        errs.append(f"{name}: Pre-flight CONTRACT block missing the `MISSING` "
+                    "prerequisite-marker token")
     return errs
 
 def main() -> int:
