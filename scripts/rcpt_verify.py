@@ -114,6 +114,8 @@ def parse_trace(body):
         line = raw.strip()
         if not line:
             continue
+        if line == "(none)":
+            return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
         parts = line.split(None, 2)
         if len(parts) < 2:
             raise LintError(f"TRACE malformed: {raw!r}")
@@ -138,9 +140,15 @@ def check_exec_range_bound(args_str):
     kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
     if b < a:
         raise LintError(f"EXEC range negative: {args_str}")
-    span_bytes = (b - a) if kind == "B" else (b - a) * 80  # 80 bytes/line conservative estimate
+    # Tier-1 is disk-free, so a line range can only be ESTIMATED (80 bytes/line). This
+    # under-counts long lines, so it is a cheap pre-filter only — the authoritative 4 KiB
+    # cap is enforced against the ACTUAL bytes read at Tier-2 (tier2_witness, #397 defect 4).
+    span_bytes = (b - a) if kind == "B" else (b - a) * 80
     if span_bytes > 4096:
         raise LintError(f"EXEC range exceeds 4 KiB: {args_str}")
+
+
+WITNESS_SPAN_CAP = 4096
 
 
 def parse_claims(body):
@@ -149,6 +157,8 @@ def parse_claims(body):
         line = raw.strip()
         if not line:
             continue
+        if line == "(none)":
+            return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
         # pattern= may be quoted (containing spaces) or a /regex/ form or bare
         m = re.match(
             r'^([^\s=]+)=(\S+)\s+from=(\S+)(?:\s+pattern=("[^"]*"|/[^/]*/|\S+))?$',
@@ -462,20 +472,37 @@ def lint_v11_local(parsed):
 def resolve_base(name: str, root: pathlib.Path):
     """Probe {root, repo-root-of-root, absolute-as-is} in fixed order; return the
     FIRST base where the file exists, else None. repo-root = git toplevel of `root`
-    (NOT this script's checkout). Used by part-1 hash, part-2 witness read, and --strict."""
+    (NOT this script's checkout). Used by part-1 hash, part-2 witness read, and --strict.
+
+    #397 containment: a candidate is read ONLY if its realpath (symlinks + `..`
+    resolved) is contained under `root` or the repo toplevel. A `..`-traversal,
+    an absolute-outside-root name, or an in-tree symlink whose TARGET escapes the
+    tree resolves to None — never an out-of-tree disk read while linting an
+    attacker-influenced receipt. (None then becomes UNVERIFIABLE, or path-shaped +
+    --strict FAIL, in the callers — the same shape as a genuinely-absent file.)"""
+    repo = _git_toplevel(root)
+    allowed = [root.resolve()] + ([repo.resolve()] if repo else [])
     cands = []
     p = pathlib.Path(name)
     if p.is_absolute():
         cands.append(p)
     else:
         cands.append(root / name)
-        repo = _git_toplevel(root)
         if repo:
             cands.append(repo / name)
     for c in cands:
-        if c.is_file():
-            return c
+        real = c.resolve()  # normalizes `..` and follows symlinks
+        if not any(_contained(real, base) for base in allowed):
+            continue  # containment violation — never read
+        if real.is_file():
+            return real
     return None
+
+
+def _contained(child: pathlib.Path, base: pathlib.Path) -> bool:
+    """True iff resolved `child` is `base` itself or lies beneath it. Both paths
+    must already be realpath-resolved by the caller (resolve_base does so)."""
+    return child == base or base in child.parents
 
 
 def _git_toplevel(start: pathlib.Path):
@@ -643,6 +670,32 @@ def tier2_witness(witness, trace, root, strict, verdict):
             raise LintError(f"Tier-2 --strict: witness artifact {art_name} absent under all bases")
         return [f"UNVERIFIABLE: witness {art_name} (no file under root)"]
     body_text = _read_cited_range(resolved, cited)
+    # #397 defect 4 — authoritative 4 KiB cap on the cited range (Tier-1's 80-bytes/line
+    # estimate under-counts long lines). The cap measures EXACTLY what the reader read:
+    #  - #L: len(body_text.encode("utf-8")) — the reader's own slice. read_text() decodes
+    #    losslessly (no errors=), so there is NO U+FFFD inflation on this path; this also
+    #    makes the cap byte-count equal the reader's str.splitlines() slice exactly (vs.
+    #    bytes.splitlines(), which diverges on exotic separators U+2028/NEL/VT/FF).
+    #  - #B: len(raw[a-1:b]) on the RAW on-disk bytes — matches the reader's read_bytes()
+    #    slice. NOT body_text: a #B range over invalid UTF-8 decodes each bad byte to
+    #    U+FFFD (3 bytes), which would inflate an in-budget range past the cap and
+    #    false-FAIL.
+    # Scoped to ranged out= citations (the EXEC#L/#B read budget per return-convention.md:224);
+    # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
+    m = re.search(r"out=\S+?#([LB])(\d+)-\1(\d+)", cited["args"])
+    if m:
+        kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+        if a < 1:  # 1-based; clamp matches _read_cited_range
+            a = 1
+        if kind == "L":
+            span = len(body_text.encode("utf-8"))
+        else:
+            span = len(resolved.read_bytes()[a - 1:b])
+        if span > WITNESS_SPAN_CAP:
+            raise LintError(
+                f"Tier-2: cited witness range exceeds 4 KiB actual bytes "
+                f"({span} > {WITNESS_SPAN_CAP}; Tier-1's line estimate under-counted)"
+            )
     verify_witness(body_text, witness, verdict, cited)  # raises on FAIL
     return []
 
