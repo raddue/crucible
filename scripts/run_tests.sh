@@ -49,6 +49,9 @@ run python3 scripts/check_calibration_dispatch.py --selftest
 run python3 scripts/check_calibration_dispatch.py
 run python3 scripts/test_brier_advise.py
 
+# --- Ledger pipeline pure core (#398 Phase 1) ---
+run python3 scripts/test_ledger_core.py
+
 # --- Model-pin guardrail ---
 run python3 scripts/check_model_pins.py --selftest
 run python3 scripts/check_model_pins.py
