@@ -575,5 +575,168 @@ class TestCliLedger(unittest.TestCase):
             self.assertNotIn("Traceback", r.stderr)
 
 
+class TestRootContainment(unittest.TestCase):
+    """#397 defect 2 — resolve_base must confine resolution to --root (or its git
+    toplevel). `..`-traversal and absolute-outside-root names must NOT be read; they
+    resolve to None (→ UNVERIFIABLE, or path-shaped+strict FAIL — never an out-of-tree
+    disk read while linting attacker-influenced receipts)."""
+
+    def test_resolve_base_rejects_dotdot_traversal(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            outer = pathlib.Path(td)
+            (outer / "secret.txt").write_text("TOP SECRET")
+            root = outer / "root"
+            root.mkdir()
+            # `../secret.txt` escapes root → must not resolve to the outer file
+            self.assertIsNone(rv.resolve_base("../secret.txt", root))
+
+    def test_resolve_base_rejects_absolute_outside_root(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            outer = pathlib.Path(td)
+            (outer / "secret.txt").write_text("TOP SECRET")
+            root = outer / "root"
+            root.mkdir()
+            self.assertIsNone(rv.resolve_base(str(outer / "secret.txt"), root))
+
+    def test_resolve_base_allows_absolute_inside_root(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            f = root / "in.txt"
+            f.write_text("OK")
+            got = rv.resolve_base(str(f), root)
+            self.assertIsNotNone(got)
+            self.assertEqual(got.read_text(), "OK")
+
+    def test_resolve_base_rejects_symlink_escape(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            outer = pathlib.Path(td)
+            (outer / "secret.txt").write_text("TOP SECRET")
+            root = outer / "root"
+            root.mkdir()
+            link = root / "link.txt"
+            link.symlink_to(outer / "secret.txt")  # in-tree name, out-of-tree target
+            self.assertIsNone(rv.resolve_base("link.txt", root))
+
+    def test_tier2_artifacts_traversal_strict_fails_not_reads(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            outer = pathlib.Path(td)
+            data = b"TOP SECRET"
+            (outer / "secret.txt").write_bytes(data)
+            root = outer / "root"
+            root.mkdir()
+            art = {"../secret.txt": {"hash": hashlib.sha256(data).hexdigest(),
+                                     "size": str(len(data))}}
+            # Even though the out-of-tree file's hash WOULD match, containment forbids
+            # the read → strict + path-shaped → FAIL (never a silent hash "proof").
+            with self.assertRaises(rv.LintError):
+                rv.tier2_artifacts(art, [], root, True)
+
+    def test_resolve_base_repo_toplevel_allowance_boundary(self):
+        rv = _import_rv()
+        # Pin the repo-toplevel allowance BOUNDARY: a file inside the repo but
+        # OUTSIDE --root resolves (the documented repo-allowance), while a
+        # `..`-traversal to a file OUTSIDE the repo still returns None.
+        with tempfile.TemporaryDirectory() as td:
+            parent = pathlib.Path(td)
+            outer = parent / "outer"  # the repo
+            outer.mkdir()
+            (outer / ".git").mkdir()  # dir, so _git_toplevel finds `outer` as repo toplevel
+            root = outer / "root"
+            root.mkdir()
+            (outer / "in-repo.txt").write_text("IN REPO")  # in repo, outside --root
+            (parent / "out-of-repo.txt").write_text("OUT OF REPO")  # sibling of repo, outside it
+            # in-repo file outside --root resolves via the repo-toplevel allowance
+            got = rv.resolve_base("in-repo.txt", root)
+            self.assertIsNotNone(got)
+            self.assertEqual(got.read_text(), "IN REPO")
+            # `../`-traversal from root up past the repo to the out-of-repo file → None
+            self.assertIsNone(rv.resolve_base("../../out-of-repo.txt", root))
+
+
+class TestNoneSentinelSymmetry(unittest.TestCase):
+    """#397 defect 3 — the `(none)` empty sentinel is accepted uniformly across
+    ARTIFACTS / TRACE / CLAIMS (it already was for ARTIFACTS/NEXT)."""
+
+    def test_parse_trace_accepts_none(self):
+        rv = _import_rv()
+        self.assertEqual(rv.parse_trace(["  (none)"]), [])
+
+    def test_parse_claims_accepts_none(self):
+        rv = _import_rv()
+        self.assertEqual(rv.parse_claims(["  (none)"]), [])
+
+    def test_full_receipt_none_trace_and_claims_lints(self):
+        rv = _import_rv()
+        receipt = (
+            "RCPT v1 build/x\n"
+            "VERDICT  BLOCKED  conf=0.50\n"
+            "ARTIFACTS\n  (none)\n"
+            "TRACE\n  (none)\n"
+            "CLAIMS\n  (none)\n"
+            "WITNESS    exec:`run`  expect-fail=/\\d+ fail/  ran=UNRUNNABLE:tooling-absent\n"
+            "SUSPICION  0.00\nNEXT       (none)\n"
+        )
+        self.assertEqual(rv.lint_receipt(receipt), "BLOCKED")
+
+
+class TestWitnessSpanCapActual(unittest.TestCase):
+    """#397 defect 4 — the Tier-1 (b-a)*80 estimate under-counts long lines; the
+    authoritative 4 KiB cap is enforced at Tier-2 against the ACTUAL bytes read."""
+
+    def _w(self, expect="/zzzzz-no-match/", ran="TRACE#2"):
+        return {"kind": "exec", "payload": "x", "expect_fail": expect, "ran": ran}
+
+    def test_long_lines_exceed_actual_cap_raises(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            # 40 lines × 200 bytes ≈ 8 KiB actual, but Tier-1 estimate (40-1)*80=3120 < 4096.
+            (root / "out.log").write_text("".join("X" * 199 + "\n" for _ in range(40)))
+            cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#L1-L40"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_witness(self._w(), trace, root, False, "PASS")
+            self.assertIn("4 KiB", str(cm.exception))
+
+    def test_short_lines_within_cap_clean(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "out.log").write_text("".join(f"line {i}\n" for i in range(1, 41)))
+            cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#L1-L40"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            self.assertEqual(rv.tier2_witness(self._w(), trace, root, False, "PASS"), [])
+
+    def test_byte_range_invalid_utf8_within_cap_no_false_fail(self):
+        # 4000 raw bytes of 0xFF: under WITNESS_SPAN_CAP (4096), but each byte decodes
+        # to U+FFFD (3 bytes), so len(body_text.encode()) ≈ 12000 would false-FAIL the
+        # cap. The raw-bytes measurement must keep this in-budget range clean. Tier-1's
+        # #B span is b-a (B1-B4000 → 3999 < 4096), so it passes Tier-1 too.
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "out.log").write_bytes(b"\xff" * 4000)
+            cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#B1-B4000"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            self.assertEqual(rv.tier2_witness(self._w(), trace, root, False, "PASS"), [])
+
+    def test_byte_range_raw_span_exceeds_cap_raises(self):
+        # The cap is real for #B too: 5000 raw bytes (> 4096) must still raise.
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "out.log").write_bytes(b"\xff" * 5000)
+            cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#B1-B5000"}
+            trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_witness(self._w(), trace, root, False, "PASS")
+            self.assertIn("4 KiB", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
