@@ -14,9 +14,11 @@ polluting accuracy claims:
     the mechanical WHS rule (L-3), so the entry is also excluded from the
     `/ledger` "caught N" headline.
 
-Structure: a testable PURE CORE (`pr_to_entry`, `build_entries`) plus a thin
-`fetch_prs()` gh shell. The smoke test exercises the pure core with synthetic
-PR dicts and never touches real `gh`/network.
+Structure: a testable PURE CORE (`pr_to_entry`, `build_entries`, `filter_ignored`)
+plus a thin `fetch_prs()` gh shell. The pure core is exercised by
+`scripts/test_stores.py` with synthetic PR dicts (and a throwaway git repo for
+`filter_ignored`); it never touches real `gh`/network. `fetch_prs()` is the only
+gh-shelling part and is intentionally left uncovered.
 
 Schema is the canonical 22-field v1 from `skills/shared/ledger-append.md`.
 Append + dedup go through `scripts.ledger_append` (the importable single source
@@ -226,7 +228,8 @@ def _gh_query(search: str) -> list:
 
 
 def fetch_prs() -> list:
-    """Fetch merged fix/* and hotfix/* PRs via gh. NOT covered by the smoke test.
+    """Fetch merged fix/* and hotfix/* PRs via gh. NOT covered by test_stores.py
+    (the gh-shelling boundary is intentionally left uncovered).
 
     CRITICAL: `gh --search` treats multiple space-separated terms as AND, not
     OR — so a single `head:fix/ head:hotfix/` query returns ZERO matches. We run
