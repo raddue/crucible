@@ -25,22 +25,22 @@ Asserts:
     - the bold-safe `DR-Cause:` label AND the bare enum value
       `minor-accumulation | structural-saturation | none` (two separate pins —
       never the combined `**DR-Cause:** value` substring that straddles `**`).
-  Group B (SKILL Minor prose, literal/path-pinned):
-    - the un-reconciled `do not trigger fix rounds and do not count toward
-      stagnation` clause is GONE;
-    - the reworded anchor `stagnation judge may weigh sustained Minor
-      accumulation` is present.
-    (Literal match — does NOT catch an arbitrary paraphrase that re-introduces
-    the claim in different words.)
-  Group C (SKILL convergence-log `dr_cause` schema), TWO-STAGE scoped:
-    - Stage 1: locate the `**Field semantics for the new entries:**` section
-      (skips any orchestrator-prose `dr_cause` mention ABOVE it);
-    - Stage 2: locate the `dr_cause` field bullet within that section;
-    - within that block require the quoted/literal enum forms
+  Group B (SKILL Minor prose):
+    - B1: the un-reconciled `do not trigger fix rounds and do not count toward
+      stagnation` clause is GONE — a verbatim REQUIRED-ABSENT guard (you cannot
+      marker-wrap an absent string; the exact wording is the thing barred);
+    - B2: the Minor-accumulation rule is present, asserted via the structural
+      `<!-- CONTRACT:qg-minor-stagnation-prose -->` anchor (#399) rather than the
+      old verbatim phrase, so the paragraph re-words freely on this hot file.
+  Group C (SKILL convergence-log `dr_cause` schema), CONTRACT-block scoped (#399):
+    - locate the `<!-- CONTRACT:qg-dr-cause:START -->` … `:END -->` block (this
+      replaces the brittle two-stage `**Field semantics…**`→bullet prose regex);
+    - require the block non-empty AND carrying the quoted/literal enum forms
       `"minor-accumulation"`, `"structural-saturation"`, `"consensus"`, and the
       `| null` value-set token (enumeration form, not incidental prose; the
       `consensus` sentinel is the load-bearing pin — absent from the judge
-      prompt's 3-value enum).
+      prompt's 3-value enum). The enum VALUES stay pinned: they are the JSON
+      contract, not editable prose. See scripts/CHECKER_CONVENTIONS.md.
 
 Every pin lies strictly INTERIOR to any `**…**` bold span (bare labels /
 values, never a substring that includes or straddles a `**`). Exits 0 when
@@ -102,50 +102,53 @@ def check_judge(text: str) -> list[str]:
 def check_skill(text: str) -> list[str]:
     errs: list[str] = []
 
-    # Group B: Minor prose reconciliation (literal, path-pinned).
+    # Group B: Minor prose reconciliation.
+    #   B1 (stale clause must be ABSENT) stays a verbatim guard — you cannot
+    #   marker-wrap an absent string, and the exact wording IS the thing barred.
     stale = "do not trigger fix rounds and do not count toward stagnation"
     if stale in text:
         errs.append(
             f"SKILL: un-reconciled Minor clause still present: '{stale}'"
         )
-    reworded = "stagnation judge may weigh sustained Minor accumulation"
-    if reworded not in text:
+    #   B2 (the reworded anchor must be PRESENT) migrated from verbatim prose to
+    #   a structural CONTRACT anchor (#399) — the Minor-stagnation paragraph on
+    #   the repo's hottest file is now freely re-wordable; the anchor is the guard.
+    if "CONTRACT:qg-minor-stagnation-prose" not in text:
         errs.append(
-            f"SKILL: missing reworded Minor anchor phrase: '{reworded}'"
+            "SKILL: missing CONTRACT anchor 'qg-minor-stagnation-prose' marking the "
+            "Minor-accumulation stagnation rule (the rule's paragraph was deleted, "
+            "not merely reworded)"
         )
 
-    # Group C: convergence-log dr_cause schema — TWO-STAGE scope.
-    sec = re.search(
-        r"\*\*Field semantics for the new entries:\*\*(.*?)(?=\n\*\*Version-aware|\Z)",
+    # Group C: convergence-log dr_cause value-set enum. The brittle two-stage
+    # prose-anchored scope ('**Field semantics for the new entries:**' → the
+    # dr_cause bullet) is replaced by a START/END CONTRACT block (#399); the
+    # enum VALUES inside stay pinned — they are the JSON contract, not prose.
+    m = re.search(
+        r"<!-- CONTRACT:qg-dr-cause:START.*?-->(.*?)<!-- CONTRACT:qg-dr-cause:END",
         text, re.DOTALL,
     )
-    if sec is None:
+    if m is None:
         errs.append(
-            "SKILL: '**Field semantics for the new entries:**' section not found"
+            "SKILL: dr_cause CONTRACT block not found "
+            "(<!-- CONTRACT:qg-dr-cause:START --> … <!-- CONTRACT:qg-dr-cause:END -->)"
         )
         return errs
 
-    field_block = re.search(
-        r"`dr_cause`(.*?)(?=\n- `|\n\*\*|\Z)",
-        sec.group(1), re.DOTALL,
-    )
-    if field_block is None:
-        errs.append(
-            "SKILL: `dr_cause` field bullet not found in the field-semantics section"
-        )
+    block = m.group(1)
+    if not block.strip():
+        errs.append("SKILL: dr_cause CONTRACT block is empty")
         return errs
-
-    block = field_block.group(1)
     for quoted in ('"minor-accumulation"', '"structural-saturation"', '"consensus"'):
         if quoted not in block:
             errs.append(
-                f"SKILL: dr_cause field block missing quoted enum value {quoted}"
+                f"SKILL: dr_cause CONTRACT block missing quoted enum value {quoted}"
             )
-    # Strengthened: require `null` as a value-set token (enumeration form
+    # Require `null` as a value-set token (enumeration form
     # `... | "consensus" | null`), not incidental prose like "null ambiguity".
     if "| null" not in block:
         errs.append(
-            "SKILL: dr_cause field block missing the `| null` value-set token"
+            "SKILL: dr_cause CONTRACT block missing the `| null` value-set token"
         )
 
     return errs
