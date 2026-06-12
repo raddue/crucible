@@ -55,6 +55,9 @@ run python3 scripts/test_ledger_core.py
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
+# --- Central-store mutators: grudge / render_ledger / backfill (#398 Phase 3) ---
+run python3 scripts/test_stores.py
+
 # --- Model-pin guardrail ---
 run python3 scripts/check_model_pins.py --selftest
 run python3 scripts/check_model_pins.py
