@@ -1,14 +1,16 @@
 # Eval Results
 
-13 core Crucible skills are evaluated using [Anthropic's official skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator) (`skill-creator`). This is the same eval methodology Anthropic built for measuring whether skills actually improve output quality — we use it here to prove that Crucible's skills deliver measurable value, not just vibes.
+Crucible skills are evaluated using [Anthropic's official skill evaluation framework](https://github.com/anthropics/skills/tree/main/skills/skill-creator) (`skill-creator`). 12 skills carry **execution evals** (the table below); a separate **sequence-eval** suite covers ordering boundaries (further down). This is the same eval methodology Anthropic built for measuring whether skills actually improve output quality — we use it here to prove that Crucible's skills deliver measurable value, not just vibes.
 
 ## How It Works
 
 The framework runs a **blind A/B test** for each skill:
 
-1. **With skill** — the prompt is executed following the skill's full methodology
-2. **Without skill** — the same prompt is given to the model with no skill instructions
-3. **Grading** — an independent grader agent scores both outputs against identical expectations, with no knowledge of which condition it's grading
+1. **With skill** — a neutralized task (methodology-specific language stripped) is executed with the skill's full methodology applied
+2. **Without skill** — the same neutralized task is given to the model with no skill instructions
+3. **Grading** — each output is scored by an independent blind grader against identical expectations, with no knowledge of which condition it's grading
+
+Neutralizing the task (so neither arm is *told* to "run a quality gate" or "run the inquisitor") is what isolates the skill itself rather than the prompt's wording.
 
 This isolates the skill's contribution. If both conditions score the same, the skill isn't adding value. If the skill condition scores higher, the delta quantifies exactly how much the methodology helps.
 
@@ -21,34 +23,36 @@ Expectations are a mix of **process assertions** and **domain-correctness assert
 
 This dual approach prevents skills from gaming the eval by producing well-formatted garbage. The process has to be right *and* the output has to be correct.
 
-## Skill-Value Deltas (Claude Opus 4.6)
+## Skill-Value Deltas (Claude Opus 4.8 — re-measured 2026-06-13)
 
-13 skills, 49 execution evals + 18 sequence evals, graded blind. Neutral baseline prompts (no methodology-specific language) to prevent contamination of the without-skill condition. Execution evals: **96% with skill vs 67% without, +29% average delta.** Sequence evals: **98% with skill vs 67% without, +31% average delta.**
+12 execution-eval skills, 52 evals, 475 assertions, graded blind. Both conditions receive the **same neutralized task** — methodology-specific language ("run a quality gate", "run the inquisitor") and any evaluator hints are stripped, so the without-skill arm is never told which methodology to run; the only difference between arms is whether the skill is applied. **Execution evals: 93% with skill vs 70% without, +23% overall delta.**
 
-**Skill value scales inversely with model capability.** The deltas above are measured against Claude Opus — the strongest model available. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), the structured methodology becomes scaffolding that keeps the model on track. A 14% delta on Opus could be a 40%+ delta on a model that doesn't naturally investigate before fixing.
+> This section previously reported the Claude Opus 4.6 run (**+29%** overall). The same suite on the stronger Opus 4.8 base model compresses to **+23%** — consistent with the inverse-capability thesis below and pointing in the direction it predicts. This is suggestive, not a controlled proof: the two runs differ in more than the base model (the methodology was also corrected between them), so the 6-point move can't be cleanly attributed to capability alone. The 4.6 figures remain in git history. The **sequence evals** further down have **not** been re-run on 4.8 and still reflect Opus 4.6.
+
+**Skill value scales inversely with model capability.** The structured methodology is scaffolding that keeps a model on track; the more capable the base model, the less lift it adds. The same suite moved **+29% on Opus 4.6 → +23% on Opus 4.8** — one datapoint consistent with that thesis (with the methodology caveat above, not a controlled comparison). The trend is not monotonic: the overall delta compressed, but a few individual skills' deltas rose on the stronger model. On weaker models (Sonnet, Haiku, or non-Anthropic models in tools like Cursor), we *expect* the deltas to widen substantially — a skill that adds little on Opus could project to a much larger delta on a model that doesn't natively follow that discipline. That widening is a prediction, not yet measured.
 
 | Skill | With | Without | Delta | Notes |
 |-------|------|---------|-------|-------|
-| quality-gate | 88% | 19% | **68%** | Process expectations 0/42 without skill. Iterative red-teaming is entirely skill-driven |
-| TDD | 100% | 47% | **53%** | Red-green-refactor discipline. Without the skill, agents skip "write failing test first" entirely |
-| planning | 100% | 61% | **39%** | Bite-sized TDD tasks with exact file paths, commands, and expected output |
-| design | 98% | 64% | **33%** | Investigated questions with hypotheses, multi-agent deep dives, and challengers |
-| test-coverage | 95% | 62% | **32%** | Coincidence test detection is entirely absent from baseline behavior |
-| audit | 95% | 64% | **31%** | Multi-lens methodology and no-fix discipline are clear differentiators |
-| review-feedback | 100% | 81% | **19%** | Technical rigor over performative agreement. Rejects wrong suggestions with evidence |
-| debugging | 97% | 83% | **14%** | Multi-phase investigation with hypothesis red-teaming and TDD discipline |
-| red-team | 98% | 85% | **13%** | Steel-man-then-kill protocol forces deeper reasoning per finding. Bidirectional severity calibration prevents inflation on clean artifacts |
-| inquisitor | 100% | 89% | **11%** | 5-dimension cross-component analysis catches subtle integration bugs |
-| innovate | 95% | 86% | **10%** | Structured divergent thinking with alternatives comparison and cost/impact analysis |
-| verify | 100% | 100% | **0%** | Model already catches false confidence claims without the skill |
+| quality-gate | 93% | 38% | **+55%** | Iterative red-teaming is entirely skill-driven; the baseline does one review pass and stops. Largest delta even on the strongest model |
+| TDD | 94% | 50% | **+44%** | Red-green-refactor discipline. Without the skill, agents write code-then-tests or skip "write failing test first" |
+| design | 100% | 64% | **+36%** | Investigated questions with hypotheses, multi-agent deep dives, and challengers vs a single one-shot design |
+| audit | 72% | 38% | **+34%** | Multi-lens methodology and no-fix discipline. (Absolute with-rate is capped because the multi-lens protocol is partly dispatch-based and this run executed as a single agent with no nested fan-out — so the multi-agent value wasn't exercised here — but the delta over baseline is still large) |
+| test-coverage | 92% | 73% | **+19%** | Coincidence/alignment-gap detection; the baseline checks surface coverage only |
+| innovate | 100% | 86% | **+14%** | Structured divergent alternatives with cost/impact analysis vs a shorter improvement list |
+| debugging | 96% | 83% | **+13%** | Multi-angle investigation before forming a hypothesis. The 4.8 baseline is already strong here but less systematic |
+| review-feedback | 100% | 95% | **+5%** | Near-ceiling baseline on 4.8 — the model already rebuts wrong suggestions with evidence; small residual lift |
+| red-team | 93% | 88% | **+5%** | The 4.8 baseline already finds most issues; steel-man-then-kill adds a modest edge (was +13% on 4.6) |
+| planning | 100% | 100% | **+0%** | On 4.8 the baseline already produces bite-sized, well-specified plans; the structure no longer adds measurable lift (was +39% on 4.6 — the clearest case of capability erasing a delta) |
+| verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
+| inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6) |
 
 ## Key Findings
 
-**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions. The model already knows the right answers — skills add the methodology and discipline to consistently surface them. Quality-gate's without-skill baseline scored 0/42 on process expectations (iterative rounds, severity tracking, stagnation detection, fix journals) while passing most domain-correctness expectations. The model finds the issues but never iterates.
+**Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions — the model already knows the right answers; skills add the methodology and discipline to consistently surface them. Quality-gate is the clearest example: the without-skill baseline finds many of the same issues but almost never *iterates* (no rounds, no severity tracking, no stagnation check, no fix journal), so it passes domain-correctness while failing the process assertions the skill exists to enforce.
 
-**Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +68%, TDD +53%, planning +39%) benefit most from structure. Skills where the model's baseline behavior already approximates the methodology (verify +0%) show minimal lift. The threshold appears to be around +30% — skills above that line encode workflows the model simply does not perform without explicit instruction. Red-team's delta moved from +2% to +13% after adding the steel-man-then-kill protocol (forces deeper reasoning per finding) and bidirectional severity calibration (prevents inflation on clean artifacts while promoting real design flaws with silent failure modes).
+**Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +55%, TDD +44%, design +36%, audit +34%) benefit most from structure. Skills whose baseline behavior already approximates the methodology on a strong model (planning +0%, verify −4%, inquisitor −8%) show no measurable lift — and as the base model gets stronger those deltas shrink toward zero (planning fell from +39% on 4.6 to +0% on 4.8). The skills above the ~+13% line encode workflows the model does not reliably perform unprompted; the skills below it encode discipline the model now largely self-supplies on Opus 4.8 but would still need on weaker models.
 
-## Sequence Evals: Ordering Discipline Under Pressure
+## Sequence Evals: Ordering Discipline Under Pressure (Claude Opus 4.6)
 
 Execution evals test whether a skill works once invoked. Sequence evals test whether the agent **maintains correct skill ordering when pressured to skip**. Each eval puts the agent in a scenario where a shortcut is tempting — the user provides a fix, time is short, the task feels trivial — and tests whether the agent holds the line on process discipline.
 
