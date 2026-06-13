@@ -413,7 +413,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    - Issue references (`#NNN`)
    - Explicit "see also" references
    - **Project-memory references** — bare filenames or relative paths that match Crucible-style memory conventions (see Project-Memory Reference Resolution below)
-   - **Skill name references** — names of skills the artifact mentions (e.g., "the `riftlock-standards` skill", "`feedback_use_component_library`")
+   - **Skill name references** — names of skills the artifact mentions (e.g., "the `project-standards` skill", "`feedback_use_component_library`")
 
    For each referenced file that exists locally: read and include as supporting context. For issue references: fetch title and body via `gh issue view`. **Soft cap: 800 lines total.** This bounds the Supporting Context section of the shared dispatch-context bundle (step 4.5), which the lens agents read as a file alongside the artifact (~300-500 lines) and operating environment (≤500 lines). These are per-section soft caps and can sum above the bundle's hard ceiling; step 4.5 enforces the actual 1500-line ceiling on the assembled bundle via a deterministic truncation order, with Supporting Context truncated first. If exceeded: prioritize files referenced in decision-critical sections (Key Decisions, Risk Areas) over background references. Truncate with note: "[truncated — 800-line context cap reached]". If no references found: proceed with artifact-only context.
 

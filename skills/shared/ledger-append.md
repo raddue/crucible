@@ -27,7 +27,7 @@ The live ledger is **machine-local and shared across every repo**:
 `~/.claude/crucible/ledger/runs.jsonl` (override with `CRUCIBLE_LEDGER_DIR`).
 It is deliberately **not** inside any git repo — entries carry private file
 paths and verbatim finding quotes, and crucible is public. Gating skills run
-in arbitrary repos (Riftlock, DriftMap, …); they all aggregate here so
+in arbitrary repos (any project on the machine, …); they all aggregate here so
 `/ledger` can render one honest cross-repo headline with a per-repo breakdown.
 `scripts.ledger_append.default_ledger_path()` is the single source of truth for
 this path; the renderer imports it too.

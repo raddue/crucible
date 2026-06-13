@@ -64,8 +64,8 @@ RCPT_BLOCK="$(printf '%s\n' "$TEXT" | awk '/^RCPT v1 /{p=1} p')"
 [ -z "$RCPT_BLOCK" ] && exit 0
 
 # ── 6. Resolve repo root + the existence gate (M2) ────────────────────
-# Without this gate a SubagentStop in a non-crucible repo (per MEMORY the user runs
-# gating skills in Riftlock/DriftMap) would `python3 <nonexistent>` → exit 2 → a
+# Without this gate a SubagentStop in a non-crucible repo (these gating skills run
+# in other repos too) would `python3 <nonexistent>` → exit 2 → a
 # misleading "structural lint failed" advisory on every receipt. Never-fatal holds
 # regardless; the gate prevents the spurious advisory.
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)"

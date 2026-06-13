@@ -153,22 +153,22 @@ def test_repo_population_git_and_fallback():
 
     # git repo -> toplevel basename, even from a subdir
     with tempfile.TemporaryDirectory(prefix="cs-git-") as gitparent:
-        repo_dir = os.path.join(gitparent, "riftlock")
+        repo_dir = os.path.join(gitparent, "repo-alpha")
         os.makedirs(os.path.join(repo_dir, "src"))
         try:
             subprocess.run(["git", "init", "-q"], cwd=repo_dir, check=True,
                            capture_output=True)
             got = default_repo(os.path.join(repo_dir, "src"))
             _check("INV-7 git repo -> toplevel basename from subdir",
-                   got == "riftlock", got)
+                   got == "repo-alpha", got)
         except (FileNotFoundError, subprocess.CalledProcessError):
             _check("INV-7 git repo -> toplevel basename (SKIPPED: no git)", True)
 
     # The emit CLI auto-stamps repo when the entry omits it. Emit from a SUBDIR
-    # of the git repo so the git-toplevel basename ("driftmap") genuinely
+    # of the git repo so the git-toplevel basename ("repo-beta") genuinely
     # differs from the cwd basename ("sub") — this exercises which branch fires.
     with tempfile.TemporaryDirectory(prefix="cs-emit-git-") as gp:
-        repo_dir = os.path.join(gp, "driftmap")
+        repo_dir = os.path.join(gp, "repo-beta")
         sub_dir = os.path.join(repo_dir, "sub")
         os.makedirs(sub_dir)
         central_dir = os.path.join(gp, "central")
@@ -182,8 +182,8 @@ def test_repo_population_git_and_fallback():
                      cwd=sub_dir,
                      extra_env={"CRUCIBLE_LEDGER_DIR": central_dir})
         rows = _read_lines(os.path.join(central_dir, "runs.jsonl"))
-        # git present -> toplevel basename "driftmap"; absent -> cwd basename "sub"
-        expected = "driftmap" if ok_git else "sub"
+        # git present -> toplevel basename "repo-beta"; absent -> cwd basename "sub"
+        expected = "repo-beta" if ok_git else "sub"
         _check("INV-7 emit auto-stamps repo (git toplevel, not cwd subdir)",
                proc.returncode == 0 and len(rows) == 1
                and rows[0].get("repo") == expected,
@@ -214,7 +214,7 @@ def test_mixed_v1_v2_read_dedup_render():
         _check("INV-8 v1 append ok",
                append(ledger, _v1("v1-a", "quality-gate"), overflow_dir=ov))
         _check("INV-8 v2 append ok",
-               append(ledger, _v2("v2-a", "siege", repo="riftlock"),
+               append(ledger, _v2("v2-a", "siege", repo="repo-alpha"),
                       overflow_dir=ov))
         # caller_dedup tolerates mixed rows
         _check("INV-8 dedup sees v1 row",
@@ -230,7 +230,7 @@ def test_mixed_v1_v2_read_dedup_render():
             repos = summary.get("per_repo", {})
             ok = (len(entries) == 2
                   and "unknown" in repos
-                  and "riftlock" in repos)
+                  and "repo-alpha" in repos)
             _check("INV-8 per_repo buckets v1->unknown, v2->repo", ok,
                    f"per_repo={repos}")
         except Exception as exc:  # noqa: BLE001
