@@ -4,6 +4,88 @@ Notable changes to the Crucible skill library. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); entries are grouped by
 milestone since skills ship as a library rather than a versioned binary.
 
+## v1.8.0 — Trust-Machinery Hardening & Test Coverage — 2026-06-12
+
+Two milestones land in this cut: the **Audit & Innovation Remediation** sweep
+(milestone 15) and **Consolidation & Code Quality** (milestone 16). The
+throughline came from the repo's own `/audit`: the trust/calibration machinery —
+the receipt linter, the calibration ledger, the on-disk lock protocols — was the
+*least-verified* code in the library, exactly where the epistemics live. So this
+release promotes the receipt linter from prose to a runtime tool, unifies the
+test runner so CI and local can never drift, and closes the coverage gap on the
+"epistemic backbone" with **+159 tests** across three new suites.
+
+### Added
+
+- **Runtime receipt linter** — the Ledger Return Protocol moves from in-context
+  pseudocode to an executable `scripts/rcpt_verify.py` (Tier-1 structural +
+  Tier-2 witness verification, `--strict`, `--root` containment, `--ledger`
+  receipt-ledger binding). Orchestrators (build, siege, quality-gate) now run the
+  tool on every received receipt before acting on its verdict. (#369, #382, #388,
+  #389, #383)
+- **Generated, drift-checked skill catalog** — `scripts/catalog.py` renders
+  `docs/skills.md` from each `SKILL.md` frontmatter and fails CI on drift, so the
+  catalog can no longer rot out of sync with the skills. (#364)
+- **Calibration-weighted dispatch (advisory)** — `brier_advisory.py advise`
+  surfaces, as print-only scrutiny hints, which gated files a skill's past *wrong*
+  verdicts touched (Brier + falsification + grudge signals). Never scored, never
+  blocking. (#372)
+- **Fable-5 model-tier guardrail** — `scripts/check_model_pins.py` + a
+  `model-tier-policy.md` guard the per-role model pins against an accidental
+  downgrade to a non-default tier on recall-critical roles. (#392)
+- **Canonical test runner** — `scripts/run_tests.sh` is now the single source of
+  truth that `.github/workflows/ci.yml` invokes wholesale, so CI ≡ local with
+  zero drift surface; five previously-orphaned suites/checkers were wired in.
+  (#394, #395)
+- **Calibration-ledger, lock & store test coverage (+159 tests)** — the epistemic
+  backbone, previously at zero coverage, gains `scripts/test_ledger_core.py` (89:
+  append/dedup/L-8 truncation, L-9 reduce, reconcile/Brier/predicate pure core),
+  `scripts/test_locks.py` (23: both bespoke mkdir-lock state machines +
+  crash-recovery + a real contention test), and `scripts/test_stores.py` (47:
+  grudge privacy guard, honest "caught N" headline + inflation detector, backfill
+  pure core). (#398)
+- **AST ledger-write-path guard** — `scripts/check_ledger_write_path.py` flags any
+  `scripts/**.py` that would write a `.crucible/` path inside a repo tree (the
+  store is machine-local and this repo is public). (#396)
+- **CONTRACT anchors for CI checkers** — `scripts/CHECKER_CONVENTIONS.md` plus a
+  migration of pin-strings on the highest-churn files from verbatim English prose
+  to structural `<!-- CONTRACT:NAME -->` anchors, so a benign wording edit no
+  longer breaks CI. (#399)
+- **Red-team as a first-class Evidence Receipt citizen** — red-team emits a
+  structured `RCPT v1.1` receipt that participates in the tripwire manifest and
+  supersession sweep like every other gate subagent. (#366)
+
+### Changed
+
+- **rcpt_verify hardening** — `--root` containment closes an arbitrary-file-read,
+  `(none)` sentinel parsing is symmetric, and the witness span-cap now measures
+  ACTUAL decoded/raw bytes (no U+FFFD inflation). (#397)
+- **Receipt mandate scoped to adopting skills** — the return-convention receipt
+  requirement applies to the skills that adopt it, not universally. (#368)
+- **P0 audit-remediation contract fixes** — dispatch/worktree/cross-reference
+  contract corrections plus a `check_crossref.py` invariant, later wired into CI.
+  (#367, #365, #385)
+- **Cross-skill doc-drift cluster reconciled** — A5/A19/A26/A47/A48/A50. (#370)
+- **canonical-drift checker repaired** and the reviewer-lenses vs delve-engine
+  angles documented as two *deliberately separate* vocabularies. (#358)
+
+### Fixed
+
+- **backfill ledger repointed** off the dead in-repo `.crucible/` store (a
+  public-tree leak risk) onto the machine-local central store. (#396)
+
+### Docs
+
+- **CLAUDE.md test + calibration-ledger claims corrected** to match the
+  central-store move and the canonical runner. (#407)
+- **2026-06-10 repo-improvement audit committed** in-repo as the milestone-16
+  source-of-record (lens findings + executed proofs + finding→issue traceability).
+  (#409)
+
+Two lock instance bugs surfaced by the audit (`ledger_append.py` held-but-fresh
+spin, `compass.py` dir-scoped lock identity) are deliberately **pinned as labeled
+characterization tests** in `test_locks.py`; their fixes remain tracked in #406.
+
 ## QG Stagnation-Score Cleanup — 2026-06-05
 
 Makes the quality-gate stagnation *judge* (not the weighted score) Minor-aware,
