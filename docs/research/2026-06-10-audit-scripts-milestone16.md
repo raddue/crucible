@@ -12,7 +12,7 @@ reasoning are not lost when that scratch is reclaimed.
 - **Subsystem audited (deep):** `scripts/` — the Python+shell tooling layer (26 tracked files)
 - **Methods:** `/audit` on `scripts/` (full protocol: scoping → 4 lenses + consistency-B → blind-spots → synthesis; **21 findings**); `/stocktake` full (52 skills, all 7 structural checkers green; **5 findings**); `/prospector` **Phase-1 only** (7 friction points); orchestrator-level CI/cross-cutting checks.
 - **Terminal verdict:** PASS (Tier-B ledger stub, run_id `019eb31a-5b34-7532-b15a-8ac7115bf6c5`).
-- **Dedupe baseline:** checked against milestones 3/4/10/12/15, the A0–A60 baseline (#363), and `docs/research/audit-innovate-2026-06-06.md`.
+- **Dedupe baseline:** checked against milestones 3/4/10/12/15, the A0–A60 baseline (#363), and `docs/research/audit-innovate-2026-06-06.md` (gitignored).
 
 ## Headline synthesis
 
