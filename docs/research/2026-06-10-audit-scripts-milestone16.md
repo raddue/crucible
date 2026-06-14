@@ -149,6 +149,6 @@ The `/audit scripts/` run read these in full and grounded findings in them: `led
 
 ## Provenance
 
-- Lens reports (source): `~/.claude/projects/-mnt-coding-Coding-crucible/memory/audit/scratch/2026-06-10T19-29-36/{architecture,blindspots,consistency-a,consistency-b,robustness,testhealth}-findings.md`, `coverage-map.md`, `manifest.md` — machine-local, reclaimable.
+- Lens reports (source): `~/.claude/projects/-home-user-crucible/memory/audit/scratch/2026-06-10T19-29-36/{architecture,blindspots,consistency-a,consistency-b,robustness,testhealth}-findings.md`, `coverage-map.md`, `manifest.md` — machine-local, reclaimable.
 - Dispatch manifest: `<scratch>/crucible-dispatch-1781119787/manifest.jsonl` (9 dispatches, all completed).
 - Backlog handoff (gitignored): `docs/handoffs/2026-06-10-audit-milestone16-backlog.md`.

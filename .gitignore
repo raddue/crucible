@@ -8,6 +8,10 @@ docs/plans/
 docs/prds/
 docs/compass.md
 docs/handoffs/
+# Local research scratch (dated audit/eval working dirs). Committed research
+# records live in docs/research/ directly; only the dated scratch is ignored.
+docs/research/audit-innovate-*.md
+docs/research/eval-rerun-*/
 skills/*-workspace/
 skills/skill-creator/
 skills/stocktake/results.json

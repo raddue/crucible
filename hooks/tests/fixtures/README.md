@@ -46,17 +46,17 @@ test/fixture use by `hooks/build-routing-advisor.sh`.
 | Variable | Exported? | Value | Implication |
 |---|---|---|---|
 | `CLAUDE_SESSION_ID` | **NO** | — | Plan AC S1-R6 conditional applies. T2 must use payload's `.session_id`, not env var. |
-| `CLAUDE_PROJECT_DIR` | YES | `/mnt/e/Coding/crucible` | Matches git-rev-parse; available as an alternative derivation path. |
-| `pwd` | — | `/mnt/e/Coding/crucible` | Matches cwd + git-rev-parse. |
-| `git rev-parse --show-toplevel` | — | `/mnt/e/Coding/crucible` | Matches. PROJECT_ROOT derivation is portable. |
+| `CLAUDE_PROJECT_DIR` | YES | `/home/user/crucible` | Matches git-rev-parse; available as an alternative derivation path. |
+| `pwd` | — | `/home/user/crucible` | Matches cwd + git-rev-parse. |
+| `git rev-parse --show-toplevel` | — | `/home/user/crucible` | Matches. PROJECT_ROOT derivation is portable. |
 
 ## Marker-path verification (plan S3-R1)
 
 - Live on-disk `.pipeline-active` marker (this pipeline) observed at:
-  `~/.claude/projects/-mnt-e-Coding-crucible/memory/.pipeline-active`
+  `~/.claude/projects/-home-user-crucible/memory/.pipeline-active`
 - Derivation rule: `~/.claude/projects/$(echo "$PROJECT_ROOT" | tr '/' '-')/memory/.pipeline-active`
 - The `transcript_path` in the captured payload also uses the dash-sanitized
-  projects directory (`-mnt-e-Coding-crucible`), confirming Claude Code's
+  projects directory (`-home-user-crucible`), confirming Claude Code's
   native convention. **The advisor MUST use `tr '/' '-'`, NOT the sha256
   derivation used by `hooks/session-index.sh`** — those write to different
   directories for unrelated reasons (pre-existing divergence, not this

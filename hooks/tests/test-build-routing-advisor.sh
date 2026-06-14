@@ -564,7 +564,7 @@ fi
 setup_case
 FIXTURE_PRIMARY="$SCRIPT_DIR/fixtures/agent-pretooluse-sample.json"
 # State file path when hook runs under real crucible cwd (git toplevel =
-# /mnt/e/Coding/crucible) — path is different from our FAKE_PROJECT path.
+# /home/user/crucible) — path is different from our FAKE_PROJECT path.
 REAL_PROJECT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REAL_HASH="$(echo "$REAL_PROJECT" | tr '/' '-')"
 REAL_STATE="$FAKE_HOME/.claude/projects/$REAL_HASH/memory/build-routing-advisor-state.md"
