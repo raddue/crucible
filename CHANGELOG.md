@@ -4,6 +4,22 @@ Notable changes to the Crucible skill library. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); entries are grouped by
 milestone since skills ship as a library rather than a versioned binary.
 
+## v1.8.1 — README eval-figure sync — 2026-06-14
+
+Docs-only patch. The README's headline A/B deltas still carried the Opus 4.6
+figures after `docs/evals.md` was re-measured on Opus 4.8; this syncs them and
+adds the inverse-capability thesis. No skill behavior changed.
+
+### Changed
+
+- **README eval figures synced to the Opus 4.8 re-measurement** — the headline
+  now matches `docs/evals.md`: execution evals **+23%** (52 evals, 475
+  assertions, graded blind on Opus 4.8; was the +29% Opus 4.6 figure), and
+  `quality-gate` **+55%** (93% vs 38%; was +68%). Sequence/ordering evals remain
+  **+31%** (Opus 4.6 — not yet re-run on 4.8), now labeled as such. Added the
+  "skill value scales inversely with model capability" framing (+29% on 4.6 →
+  +23% on 4.8). (#421 follow-up)
+
 ## v1.8.0 — Trust-Machinery Hardening & Test Coverage — 2026-06-12
 
 Two milestones land in this cut: the **Audit & Innovation Remediation** sweep

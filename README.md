@@ -2,7 +2,9 @@
 
 A collection of agent skills for systematic software development. Works with [Claude Code](https://claude.ai/code), [Cursor](https://cursor.com), [OpenAI Codex](https://openai.com/codex/), [Amp](https://amp.dev), [Cline](https://cline.bot), and any platform that supports the SKILL.md format.
 
-52 skills across the full development lifecycle — design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 13 core skills are [eval-tested](docs/evals.md) with measured A/B deltas (49 execution evals + 18 sequence evals, +29% / +31% average).
+52 skills across the full development lifecycle — design, planning, TDD implementation, code review, debugging, adversarial testing, and quality gates. 12 core skills are [eval-tested](docs/evals.md) with measured A/B deltas: **+23%** on execution evals (52 evals, 475 assertions, graded blind on Claude Opus 4.8) and **+31%** on sequence/ordering evals (18 evals, Opus 4.6 — not yet re-run on 4.8).
+
+Skill value scales inversely with model capability: the same execution suite moved **+29% on Opus 4.6 → +23% on Opus 4.8**. The methodology is scaffolding that keeps a model on track, so the stronger the base model, the less lift it adds — one datapoint consistent with that thesis (not a controlled comparison — the two runs differ in more than the base model, since the methodology was also corrected between them, so the move can't be cleanly attributed to capability alone; see the [eval caveats](docs/evals.md)). On weaker models (Sonnet, Haiku, or non-Anthropic models in Cursor/Codex), we *expect* the deltas to widen — a prediction, not yet measured.
 
 Originally forked from [obra/superpowers](https://github.com/obra/superpowers), now independently maintained and significantly diverged. Pipeline checkpoint system, auto skill extraction, structured context compression, and trajectory capture inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
@@ -16,7 +18,7 @@ Originally forked from [obra/superpowers](https://github.com/obra/superpowers), 
 
 ## What you get
 
-- **Iterative quality gates, not single-pass review** — `quality-gate` loops until clean (red-team → fix → fresh re-review), with weighted stagnation detection. Measured **+68% delta** (see [eval results](docs/evals.md)).
+- **Iterative quality gates, not single-pass review** — `quality-gate` loops until clean (red-team → fix → fresh re-review), with weighted stagnation detection. Measured **+55% delta** (93% with vs 38% without — the largest delta in the suite even on Opus 4.8; see [eval results](docs/evals.md)).
 - **Full pipeline orchestration** — `build` chains design → plan → execute → complete with shadow-git checkpoints, crash recovery, and structured compaction-state blocks. One command, idea to merged PR.
 - **Adversarial testing at every level** — `adversarial-tester` writes tests designed to break the implementation; `inquisitor` runs 5 parallel attack dimensions against the full feature diff; `siege` runs 6 attacker-perspective security agents until zero Critical/High.
 - **Token-efficient by design** — orchestrators use [disk-mediated dispatch](skills/shared/dispatch-convention.md): full subagent prompts go to `/tmp`, only ~100-token pointers enter orchestrator context. A full build saves 73-131K tokens of fossilized context.
