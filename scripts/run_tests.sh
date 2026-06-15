@@ -69,6 +69,19 @@ run python3 scripts/check_ledger_write_path.py
 # --- #366 red-team <-> quality-gate receipt contract ---
 run python3 scripts/check_rt_receipt_contract.py
 
+# --- Inquisitor eval harness (#424) ---
+run python3 scripts/check_inquisitor_helper_drift.py --selftest
+run python3 scripts/check_inquisitor_helper_drift.py
+run python3 scripts/check_judge_prompt_contract.py --selftest
+run python3 scripts/check_judge_prompt_contract.py
+run python3 scripts/check_ground_truth_provenance.py --selftest
+run python3 scripts/check_ground_truth_provenance.py
+run python3 scripts/check_inquisitor_secondary_count.py --selftest
+run python3 scripts/check_inquisitor_secondary_count.py
+run python3 skills/inquisitor/evals/test_run_evals_stage.py
+run python3 skills/inquisitor/evals/test_run_evals_score.py
+run python3 skills/inquisitor/evals/test_runid.py
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 

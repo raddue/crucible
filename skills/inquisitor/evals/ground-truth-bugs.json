@@ -1,0 +1,39 @@
+{
+  "_provenance": "Authored BLIND from the raw fixture diffs + factual codebase context only (design T1 / D4 / S4). The evals.json expected_output/expectations prose was withheld from the authoring subagent. The exact input fed is committed at ground-truth-bugs.provenance.md and scripts/check_ground_truth_provenance.py asserts that file leaks none of the evals.json expectation strings. off_axis=true marks defects the 5 inquisitor lenses (Wiring/Integration/Edge Cases/State & Lifecycle/Regression) do NOT target, so the WITHOUT arm gets credit for off-axis finds.",
+  "fixtures": [
+    {
+      "id": 1,
+      "bugs": [
+        { "bug_id": "f1-b1", "desc": "notifier.ts sendNotification writes sentAt: Date.now() (an epoch-ms number) into the notifications.sent_at TIMESTAMP column — a data-type/persistence mismatch (also the field is named sentAt, not sent_at).", "off_axis": true },
+        { "bug_id": "f1-b2", "desc": "scheduler.ts keeps scheduled jobs only in an in-process Map, so all pending notifications are silently lost on server restart or crash — no persistence.", "off_axis": false },
+        { "bug_id": "f1-b3", "desc": "notifications.ts /schedule computes delay = new Date(scheduledAt).getTime() - Date.now() and passes negative/NaN values straight into setTimeout, so a past or malformed scheduledAt fires immediately (or never) with no validation.", "off_axis": false },
+        { "bug_id": "f1-b4", "desc": "notifications.ts route calls crypto.randomUUID() with no import of node:crypto, so the handler throws a ReferenceError at request time.", "off_axis": false },
+        { "bug_id": "f1-b5", "desc": "notifier.ts performs fetch(payload.webhookUrl) — an unvalidated outbound POST to a caller-supplied URL — an SSRF / open webhook-relay security hole.", "off_axis": true },
+        { "bug_id": "f1-b6", "desc": "notifier.ts never checks fetch response.ok and has no error handling, so a non-2xx webhook or thrown fetch rejects inside the unawaited setTimeout callback as an unhandled promise rejection while the notifications row is still recorded.", "off_axis": true },
+        { "bug_id": "f1-b7", "desc": "app.ts wires no initialization for NotificationScheduler and routes/notifications.ts constructs its own instance, so cancel cannot reach a job scheduled by another instance and pending timers are never disposed on shutdown.", "off_axis": false }
+      ]
+    },
+    {
+      "id": 2,
+      "bugs": [
+        { "bug_id": "f2-b1", "desc": "rbac.ts calls db.users.findById(userId).select('role') and reads userRole.role, but findById returns a row (not a chainable builder), so .select is not a function or role is read off the wrong object.", "off_axis": false },
+        { "bug_id": "f2-b2", "desc": "The migration adds role with DEFAULT 'viewer' but no route grants viewers access and there is no path to assign admin/editor, so after deploy every existing user is locked out of the newly-protected mutating routes.", "off_axis": false },
+        { "bug_id": "f2-b3", "desc": "rbac.ts reads req.user?.id and sets req.userRole, but the Express Request type declares neither a role-aware user nor a userRole property (no module augmentation) — a TypeScript compile error.", "off_axis": false },
+        { "bug_id": "f2-b4", "desc": "Existing tests mock authMiddleware to set req.user as {id,email} with no DB role row, so requireRole's find('role') returns nothing and the now-403'd requests break previously-passing admin/content tests.", "off_axis": false },
+        { "bug_id": "f2-b5", "desc": "The role column is a bare VARCHAR(20) with no CHECK/enum constraint, so a typo or injected role value is stored and silently fails the includes() check — weak role validation.", "off_axis": true },
+        { "bug_id": "f2-b6", "desc": "rbac.ts has no try/catch around db.users.findById, so a transient DB error throws an unhandled rejection and the request fails unpredictably instead of returning a 500.", "off_axis": true }
+      ]
+    },
+    {
+      "id": 3,
+      "bugs": [
+        { "bug_id": "f3-b1", "desc": "paginate.ts assumes integer ids (parseInt(cursor), where id > cursor) but orders.ts paginates the UUID-keyed orders table, so parseInt yields NaN and the cursor WHERE clause returns wrong rows.", "off_axis": true },
+        { "bug_id": "f3-b2", "desc": "users.ts and orders.ts now return { data, nextCursor } instead of a flat array, breaking the frontend and existing integration tests that assert res.body is an array.", "off_axis": false },
+        { "bug_id": "f3-b3", "desc": "parsePaginationParams uses parseInt(String(query.limit)) || 20 so limit=0 silently becomes 20, and a malformed cursor passes String() into parseInt producing NaN in the SQL comparison — unvalidated pagination inputs.", "off_axis": true },
+        { "bug_id": "f3-b4", "desc": "paginate orders by id asc, but the orders table id is a non-numeric UUID, so Postgres orders it lexicographically and keyset pages come back in an unstable/incorrect order.", "off_axis": true },
+        { "bug_id": "f3-b5", "desc": "nextCursor is derived from data[data.length-1].id assuming a monotonic integer key; on the UUID orders table this can skip or duplicate rows across pages — a page-stability facet of the integer-id assumption.", "off_axis": true },
+        { "bug_id": "f3-b6", "desc": "tests/utils/paginate.test.ts exercises the helper against in-memory SQLite with integer ids while production orders use Postgres UUIDs, giving false confidence that pagination works for orders.", "off_axis": false }
+      ]
+    }
+  ]
+}

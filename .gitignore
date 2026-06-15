@@ -16,6 +16,8 @@ skills/*-workspace/
 skills/skill-creator/
 skills/stocktake/results.json
 skills/temper/evals/last_run.json
+skills/inquisitor/evals/last_run.json
+skills/inquisitor/evals/results.md
 src/
 tests/
 
