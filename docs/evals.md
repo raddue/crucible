@@ -44,13 +44,38 @@ This dual approach prevents skills from gaming the eval by producing well-format
 | red-team | 93% | 88% | **+5%** | The 4.8 baseline already finds most issues; steel-man-then-kill adds a modest edge (was +13% on 4.6) |
 | planning | 100% | 100% | **+0%** | On 4.8 the baseline already produces bite-sized, well-specified plans; the structure no longer adds measurable lift (was +39% on 4.6 — the clearest case of capability erasing a delta) |
 | verify | 96% | 100% | **−4%** | Within grading noise (n=27, a 1-assertion swing). The model catches false-confidence claims with or without the skill — was +0% on 4.6 |
-| inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6) |
+| inquisitor | 85% | 93% | **−8%** | This run executed as a single agent (no nested dispatch occurred), so the skill's core value — multi-agent cross-component *dispatch* — wasn't exercised, while the 4.8 baseline reviews the diff strongly on its own. The remaining gap is within grading noise (n=27, a 2-assertion swing); treat as ≈0, not a regression (was +11% on 4.6). A dedicated fan-out harness (#424) has since exercised the dispatch directly and still finds no identification-breadth lift — see *Inquisitor Fan-Out* below |
 
 ## Key Findings
 
 **Skills add process, not knowledge.** Domain-correctness assertions pass at similar rates for both conditions — the model already knows the right answers; skills add the methodology and discipline to consistently surface them. Quality-gate is the clearest example: the without-skill baseline finds many of the same issues but almost never *iterates* (no rounds, no severity tracking, no stagnation check, no fix journal), so it passes domain-correctness while failing the process assertions the skill exists to enforce.
 
 **Process-heavy skills show the largest deltas.** Skills encoding multi-step iterative workflows (quality-gate +55%, TDD +44%, design +36%, audit +34%) benefit most from structure. Skills whose baseline behavior already approximates the methodology on a strong model (planning +0%, verify −4%, inquisitor −8%) show no measurable lift — and as the base model gets stronger those deltas shrink toward zero (planning fell from +39% on 4.6 to +0% on 4.8). The skills above the ~+13% line encode workflows the model does not reliably perform unprompted; the skills below it encode discipline the model now largely self-supplies on Opus 4.8 but would still need on weaker models.
+
+## Inquisitor Fan-Out: A Direct Identification-Breadth Measurement (#424, Claude Opus 4.8)
+
+The inquisitor row above (**−8%**) came from the standard single-agent execution suite, where the skill's core mechanism — the 5-way parallel cross-component *dispatch* — never fired. A dedicated three-arm harness (`skills/inquisitor/evals/`) measures that mechanism directly: it stages the real fan-out and grades each arm against a blind, **skill-independent ground-truth bug list** (K=19 bugs across 3 feature diffs), authored from the raw diffs rather than inquisitor's dimension taxonomy. Phase 1 measures **identification breadth only** — dimension agents *describe* tests but do not run them (the fixtures are text diffs with no runner).
+
+- **WITH** — the real 5-way dimension fan-out + a 6th aggregation agent
+- **MID** — one agent applying all 5 lenses sequentially + the same aggregation framing (holds the scaffolding constant, varying only the fan-out delivery)
+- **WITHOUT** — one bare, neutralized-baseline agent
+
+**Result (5 trials, majority-collapsed per bug):**
+
+| Arm | Bugs identified | Rate |
+|-----|-----------------|------|
+| WITH (fan-out) | 17 / 19 | 0.895 |
+| MID (1 agent, all lenses) | 17 / 19 | 0.895 |
+| WITHOUT (bare prompt) | 19 / 19 | **1.000** |
+
+| Paired delta | Mean | Per-trial spread | Noise floor (no-α) | Outside noise? |
+|---|---|---|---|---|
+| WITH − MID (the fan-out itself) | **0.00** | [−0.11, +0.16] | 0.086 | no |
+| WITH − WITHOUT (total methodology) | **−0.04** | [−0.11, 0.00] | 0.051 | no |
+
+**The fan-out adds no identification breadth on Opus 4.8.** Five parallel fresh subagents (WITH) identified the same *net count* of bugs as one sequential all-lenses agent (MID) — net paired delta WITH−MID = 0.00 — so the dispatch's extra cost (5 dimension agents + an aggregation pass vs one) buys nothing *for bug identification*. They were not, however, the same bug *set*: the two arms diverged per-fixture in offsetting directions (MID caught one bug on fixture 1 that WITH missed; WITH caught one bug on fixture 3 that MID missed — one bug each way, netting to ~0), so the fan-out was not strictly dominated — but the net breadth delta is still zero and inside the noise. The full methodology landed slightly *below* a bare "review this diff for cross-component bugs" prompt (−0.04), and that bare prompt identified **all 19** bugs. No delta clears the re-run noise band (`beyond_spread` false everywhere). This confirms the −8% was not merely an artifact of dispatch-not-firing: when the dispatch *does* fire, it still adds nothing on this axis. (The judges' prose preambles produced asymmetric malformed-verdict counts — most on WITH — but malformed lines grade as FAIL, so the scoring is conservative against the fan-out, not for it.)
+
+**Why this is inconclusive, not condemning.** (1) **Ceiling effect** — WITHOUT scored 100% on every fixture, so these diffs have no headroom to reveal a positive delta; on Opus 4.8 the bugs are salient enough that a bare prompt finds them all. (2) **Execution is unmeasured** — Phase 1 stubs the test-writing/running half, which is where the fan-out's value (independent agents writing and *running* targeted tests) would show. The on-/off-axis split does not rescue the result either: on off-axis bugs (outside the 5 lenses) WITH and MID each scored 8/9 vs WITHOUT's 9/9. Per #424's go/no-go, a non-positive Phase-1 delta escalates to **Phase 1b** — a one-time seeded-repo execution measurement — before any redesign/demotion; it is a bounded deferral, not a verdict that the skill has no value.
 
 ## Sequence Evals: Ordering Discipline Under Pressure (Claude Opus 4.6)
 
