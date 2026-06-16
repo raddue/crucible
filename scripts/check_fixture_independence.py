@@ -176,9 +176,28 @@ def _rm(d):
     shutil.rmtree(d, ignore_errors=True)
 
 
+def _arg(flag):
+    args = sys.argv[1:]
+    if flag in args:
+        i = args.index(flag)
+        if i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
 def main() -> int:
-    repos = sorted(p for p in FIXTURES_DIR.glob("*")
-                   if (p / "manifest.json").exists()) if FIXTURES_DIR.exists() else []
+    only = _arg("--repo")
+    if only is not None:
+        repo = pathlib.Path(only)
+        if not (repo / "manifest.json").exists():
+            repo = FIXTURES_DIR / only
+        repos = [repo] if (repo / "manifest.json").exists() else []
+        if not repos:
+            print(f"FAIL — no manifest.json under {only!r}")
+            return 1
+    else:
+        repos = sorted(p for p in FIXTURES_DIR.glob("*")
+                       if (p / "manifest.json").exists()) if FIXTURES_DIR.exists() else []
     if not repos:
         print(f"OK — no seeded fixtures under {FIXTURES_DIR.relative_to(ROOT)} yet.")
         return 0
