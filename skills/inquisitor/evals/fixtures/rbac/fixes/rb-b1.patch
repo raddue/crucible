@@ -1,0 +1,11 @@
+--- a/src/rbac/roles.py
++++ b/src/rbac/roles.py
+@@ -15,7 +15,7 @@
+         # actions until someone narrows them. Manifests only when a Role is
+         # built with permissions=None and then checked at runtime.
+         if permissions is None:
+-            self.permissions = {"*"}
++            self.permissions = set()
+         else:
+             self.permissions = set(permissions)
+ 

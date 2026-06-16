@@ -1,0 +1,15 @@
+--- a/src/rbac/lookup.py
++++ b/src/rbac/lookup.py
+@@ -15,11 +15,7 @@
+     """
+     user = store.get_user(user_id)
+     if user is None:
+-        # rb-b8 (missing-user error path mis-handled -> wrongful ALLOW): an
+-        # unknown user should resolve to an empty permission set. Instead the
+-        # missing case returns a wildcard set treated as "all permissions", so a
+-        # principal the store never registered passes every check.
+-        return {"*"}
++        return set()
+     perms = set()
+     for role in store.roles_for_user(user_id):
+         if "*" in role.permissions:

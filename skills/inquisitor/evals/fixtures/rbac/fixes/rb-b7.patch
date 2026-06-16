@@ -1,0 +1,13 @@
+--- a/src/rbac/scopes.py
++++ b/src/rbac/scopes.py
+@@ -18,9 +18,4 @@
+         return set(granted)
+     if "*" in granted:
+         return set(requested)
+-    # rb-b7 (trusting client-supplied scope -> privilege escalation): the
+-    # effective set should be granted ∩ requested (a request can only narrow).
+-    # Instead it UNIONs the client-supplied scopes onto the granted set, so a
+-    # caller can self-elevate by simply asking for a permission it was never
+-    # granted.
+-    return set(granted) | set(requested)
++    return set(granted) & set(requested)

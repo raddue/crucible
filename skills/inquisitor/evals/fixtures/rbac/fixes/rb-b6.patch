@@ -1,0 +1,15 @@
+--- a/src/rbac/defaults.py
++++ b/src/rbac/defaults.py
+@@ -10,11 +10,7 @@
+     "admin": {"read", "write", "delete", "manage_users"},
+     "editor": {"read", "write"},
+     "viewer": {"read"},
+-    # rb-b6 (regression): a previously-correct grant was changed. The "auditor"
+-    # role historically granted "read" (the reports route depends on it); this
+-    # mapping was altered to grant "write" instead, dropping the read grant a
+-    # working path relied on.
+-    "auditor": {"write"},
++    "auditor": {"read"},
+ }
+ 
+ 

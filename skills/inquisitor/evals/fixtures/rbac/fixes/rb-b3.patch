@@ -1,0 +1,13 @@
+--- a/src/rbac/routes.py
++++ b/src/rbac/routes.py
+@@ -31,8 +31,6 @@
+ 
+ 
+ def delete_document(mw, request):
+-    # rb-b3 (wiring gap / missing authz check -> unauthenticated reaches the
+-    # handler): every other handler gates on mw.authorize(...) before acting.
+-    # This one was wired up without its check, so any request — including one
+-    # with no principal — performs the delete.
++    if not mw.authorize(request, "delete"):
++        return DENIED
+     return _ok("deleted")

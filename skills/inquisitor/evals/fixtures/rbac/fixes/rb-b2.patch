@@ -1,0 +1,11 @@
+--- a/src/rbac/store.py
++++ b/src/rbac/store.py
+@@ -50,7 +50,7 @@
+             # str() form of the id, which never matches the int keys in
+             # self._roles -> the assigned role resolves to nothing and a
+             # legitimately-permitted user is denied.
+-            role = self._roles.get(str(rid))
++            role = self._roles.get(rid)
+             if role is not None:
+                 resolved.append(role)
+         return resolved

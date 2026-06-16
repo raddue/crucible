@@ -1,0 +1,16 @@
+--- a/src/rbac/app.py
++++ b/src/rbac/app.py
+@@ -44,11 +44,7 @@
+         handler, required = entry
+         if required is not None:
+             allowed = self.mw.authorize(request, required)
+-            # rb-b5 (middleware result ignored -> denials don't take effect):
+-            # the decision is computed but the guard never returns DENIED on a
+-            # negative verdict, so the handler runs regardless of the verdict and
+-            # a denied principal still reaches the protected body.
+-            if allowed:
+-                return handler(self.mw, request)
++            if not allowed:
++                return DENIED
+             return handler(self.mw, request)
+         return handler(self.mw, request)

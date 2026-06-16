@@ -1,0 +1,14 @@
+--- a/src/rbac/middleware.py
++++ b/src/rbac/middleware.py
+@@ -27,10 +27,7 @@
+ 
+         Must be called whenever a user's roles/permissions change.
+         """
+-        # rb-b4 (stale cached role after update -> revoked access still works):
+-        # invalidation should evict the user's cache entry so a revocation takes
+-        # effect on the next check. Instead this is a no-op, so a principal whose
+-        # permission was revoked keeps passing checks from the stale cache.
++        self._perm_cache.pop(user_id, None)
+         return None
+ 
+     def authorize(self, request, required_permission):

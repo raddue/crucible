@@ -1,0 +1,1 @@
+{"repo_id":"rbac","pkg":"rbac","test_dir":"tests","runner_cmd":["python3","-m","pytest","-q"],"bug_ids":["rb-b1","rb-b2","rb-b3","rb-b4","rb-b5","rb-b6","rb-b7","rb-b8"],"n":8}
