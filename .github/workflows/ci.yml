@@ -8,6 +8,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # The inquisitor Phase-1b eval harness (#424) shells out to `python3 -m
+      # pytest` from its oracle/fixture checks, so a clean CI env must provision
+      # pytest. Pinned to the version the harness was authored/validated against
+      # for reproducibility of the measurement instrument.
+      - run: python3 -m pip install "pytest==9.0.3"
       # Single source of truth: scripts/run_tests.sh runs the same suite
       # locally and in CI, so the two can never drift. Add suites there.
       - run: bash scripts/run_tests.sh
