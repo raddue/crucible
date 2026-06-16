@@ -76,6 +76,14 @@ class BuildCollectArgsTest(unittest.TestCase):
         self.assertEqual(len(obj["units"]), 3)
         self.assertEqual({u["arm"] for u in obj["units"]}, {"neutral-proxy"})
 
+    def test_phase1_manifest_self_explaining_error(self):
+        # M-2: a Phase-1 (no-`mode`, dispatch_files-shaped) manifest must fail with a
+        # clear "exec/pilot-only" message, not a raw KeyError on cell["producers"].
+        d = self._write({"run_id": "x", "dispatch_files": ["a.md", "b.md"]})
+        with self.assertRaises(SystemExit) as cm:
+            _build_collect_args.build(d)
+        self.assertIn("exec/pilot-only", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

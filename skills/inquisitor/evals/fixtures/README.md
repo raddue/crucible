@@ -17,6 +17,25 @@ ground-truth-bugs.provenance.md   # blind boundary + post-blind off_axis pass re
 manifest.json               # repo id, pkg, test dir, runner cmd, bug ids, n
 ```
 
+### Committed substrate is annotated; the producer copy is NOT
+
+The committed `src/` annotates each seeded bug with its id + a plain-language
+description (`# BUG nt-b8: …`, `(nt-b1)`) — build scaffolding for the maintainer
+and the oracle, NOT a producer-visible artifact. The **producer never sees the
+committed tree**: `stage_exec`'s `copy_for` builds the agent sandbox with
+`_fixtures.copy_repo_for_producer`, which (F2) copies ONLY `src/` + `tests/` —
+never `exemplars/`, `fixes/`, `ground-truth-bugs*`, or `manifest.json` — and (F1)
+**strips all comments and docstrings from every producer-visible `*.py` (both the
+copied `src/` AND `tests/` subtrees)**, so no leak token or bug-describing prose
+survives (token-aware, code byte-identical). `scripts/check_fixture_producer_blind.py`
++ `_fixtures._assert_no_leak` + `_fixtures.assert_no_description_leak` (stage-time
+assertions) enforce, **across every producer-visible subtree (`src/` and `tests/`,
+not `src/` alone)**, that no producer copy carries a bug-id token, GT-description
+prose, or an answer-key path; `_assert_no_leak` additionally machine-checks the
+`tests/`-is-empty-except-`conftest.py` invariant. The oracle scores from this
+committed tree (`_FIXTURES_DIR`), not from the producer copy, so the annotations
+never reach the measured arm yet remain available to scoring.
+
 ## Variants (materialized, never committed)
 
 The oracle and the fixture-build invariant checker materialize three variant

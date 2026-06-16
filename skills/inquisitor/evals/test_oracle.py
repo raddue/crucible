@@ -116,6 +116,39 @@ class ErrorTruthTable(OracleTestBase):
         r = self.caught("x = 1\n")
         self.assertEqual(r["caught"], set())
 
+    def test_errored_discard_is_surfaced(self):
+        # S2: a test ERRORing on all-fixed (e.g. importing an unharvested helper)
+        # is ineligible AND counted in errored_discards (not silently lost).
+        r = self.caught("import does_not_exist_xyz\ndef test():\n    assert True\n")
+        self.assertEqual(r["caught"], set())
+        self.assertEqual(r["errored_discards"], 1)
+        self.assertEqual(r["flaky_discards"], 0)
+
+    def test_clean_run_reports_zero_errored_discards(self):
+        r = self.caught("from toy.calc import a\ndef test():\n    assert a() == 10\n")
+        self.assertEqual(r["caught"], {"b1"})
+        self.assertEqual(r["errored_discards"], 0)
+        self.assertEqual(r.get("errored_minus_discards", 0), 0)
+
+    def test_minus_variant_error_is_surfaced(self):
+        # S-1: an eligible test (GREEN on all-fixed, RED on base via `assert a()==10`)
+        # that takes a COLLECTION-time import error on exactly the minus-b3 variant.
+        # The module-level trap fires only when a/b are fixed but c is NOT — i.e.
+        # all-fixed-minus-b3 (a=10,b=20,c=3). On all-fixed (c=30) and on base (a=1)
+        # the condition is False, so collection succeeds there. The b3 cell is a
+        # stable ERROR: neither flaky nor a credit — it MUST bump errored_minus_discards
+        # so the lost b3 catch is observable, not silently dropped.
+        body = ("from toy.calc import a, b, c\n"
+                "if a() == 10 and b() == 20 and c() == 3:\n"
+                "    import does_not_exist_xyz  # collection-time ERROR on minus-b3 only\n"
+                "def test():\n    assert a() == 10\n")
+        r = self.caught(body)
+        self.assertEqual(r["caught"], {"b1"})       # b1 still credited (RED on minus-b1)
+        self.assertNotIn("b3", r["caught"])         # b3 lost to the ERROR cell
+        self.assertEqual(r["errored_minus_discards"], 1)
+        self.assertEqual(r["errored_discards"], 0)  # all-fixed anchor collected fine
+        self.assertEqual(r["flaky_discards"], 0)    # the ERROR is stable, not flaky
+
 
 class SourceEditsIgnored(OracleTestBase):
     def test_source_edits_ignored(self):

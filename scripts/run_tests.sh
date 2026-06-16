@@ -90,6 +90,8 @@ run python3 scripts/check_fixture_independence.py --selftest
 run python3 scripts/check_fixture_independence.py
 run python3 scripts/check_fixture_gt_provenance.py --selftest
 run python3 scripts/check_fixture_gt_provenance.py
+run python3 scripts/check_fixture_producer_blind.py --selftest
+run python3 scripts/check_fixture_producer_blind.py
 run python3 scripts/check_inquisitor_phase1b_invariants.py --selftest
 run python3 scripts/check_inquisitor_phase1b_invariants.py
 

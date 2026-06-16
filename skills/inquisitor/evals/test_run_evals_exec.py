@@ -85,10 +85,22 @@ class StageExecTest(unittest.TestCase):
         self.assertEqual(len(cells[("without", 1)]["producers"]), 1)
         total_producers = sum(len(c["producers"]) for c in m["cells"])
         self.assertEqual(total_producers, 12)
-        # each producer has a materialized repo copy under the dispatch dir
+        # each producer has a BLIND materialized repo copy under the dispatch dir:
+        # src/ present, but NO answer-key paths (F2) and NO leak tokens (F1).
+        import re as _re
+        leak = _re.compile(r"\b(?:BUG)\b|(?:nt|rb|pg)-b[0-9]")
         for c in m["cells"]:
             for p in c["producers"]:
-                self.assertTrue((dd / p["repo_copy"] / "manifest.json").exists())
+                copy = dd / p["repo_copy"]
+                self.assertTrue((copy / "src").is_dir())
+                self.assertTrue((copy / "tests" / "conftest.py").exists())
+                for forbidden in ("manifest.json", "exemplars", "fixes",
+                                  "ground-truth-bugs.json"):
+                    self.assertFalse((copy / forbidden).exists(),
+                                     f"answer-key {forbidden} leaked into {copy}")
+                for py in (copy / "src").rglob("*.py"):
+                    self.assertIsNone(leak.search(py.read_text()),
+                                      f"leak token in producer copy {py}")
         # §9 hash relationships
         ph = m["prompt_shas"]
         self.assertEqual(ph["pool"], ph["without"])          # POOL parity
@@ -146,12 +158,21 @@ class ScoreExecTest(unittest.TestCase):
         return ("from toy.calc import a, b, c\n"
                 f"def test():\n    assert {conds}\n")
 
-    def make_run(self, run_id, mode, trials, cell_caught, *, collect=True):
+    def make_run(self, run_id, mode, trials, cell_caught, *, collect=True,
+                 repos=None):
         """cell_caught: {(arm,repo,trial): [list of test bodies]}."""
         dd = run_evals.resolve_dispatch_dir(run_id)
         dd.mkdir(parents=True, exist_ok=True)
         arms = (run_evals._PILOT_ARMS if mode == "pilot" else run_evals._EXEC_ARMS)
-        repos = ["toy"]
+        repos = repos if repos is not None else ["toy"]
+        # build any extra named fixtures (beyond the default `toy`) on demand
+        for r in repos:
+            if not (self.fixtures / r / "manifest.json").exists():
+                _build_toy_fixture(self.fixtures / r)
+                # rename repo_id in the materialized manifest to r
+                mp = self.fixtures / r / "manifest.json"
+                mj = json.loads(mp.read_text()); mj["repo_id"] = r
+                mp.write_text(json.dumps(mj))
         cells = []
         for (arm, repo, trial), bodies in cell_caught.items():
             rf = f"{repo}-t{trial}-{arm}-tests.json"
@@ -193,7 +214,9 @@ class ScoreExecTest(unittest.TestCase):
         self.assertAlmostEqual(lr["deltas"]["with_without"]["paired"], 2 / 3)
 
     def test_without_ceiling_and_keep_statistic(self):
-        # WITHOUT catches 1/3 = 33% <= 70% on the (only) repo -> ceiling broken.
+        # Single (toy) repo: WITHOUT catches 1/3 = 33% <= 70% (below ceiling) and
+        # WITH > WITHOUT. But with <3 repos the 2-of-3 vote is DEGENERATE (S-2), so
+        # the boolean verdicts are nulled and the raw counts surfaced instead.
         cc = {
             ("with", "toy", 1): [self._catch("b1", "b2", "b3")],
             ("pool", "toy", 1): [self._catch("b1", "b2")],
@@ -202,12 +225,41 @@ class ScoreExecTest(unittest.TestCase):
         }
         run_evals.score(self.make_run("d2", "phase1b-exec", 1, cc) and "d2")
         lr = self.last_run()
-        self.assertTrue(lr["without_ceiling_broken"])
+        # S-2: degenerate single-repo run does NOT present a corroborated verdict
+        self.assertIsNone(lr["without_ceiling_broken"])
+        self.assertTrue(lr["degenerate_repo_count"])
+        self.assertEqual(lr["repos_voting"], 1)
         ks = lr["keep_statistic"]
         self.assertEqual(ks["statistic"], "beyond_spread")
         self.assertIn("trial_spread", ks["_note"])          # explicitly rejected
-        self.assertTrue(ks["sign_holds_2of3"])              # WITH > WITHOUT on the repo
+        self.assertIsNone(ks["sign_holds_2of3"])            # nulled (degenerate vote)
+        self.assertTrue(ks["degenerate_repo_count"])
+        # the raw underlying counts are still surfaced for the operator
+        self.assertEqual(ks["repos_positive_sign_count"], 1)  # WITH > WITHOUT
+        self.assertEqual(ks["repos_below_ceiling_count"], 1)  # WITHOUT below 0.70
         self.assertIn("beyond_spread", ks)
+
+    def test_three_repo_vote_is_corroborated_not_degenerate(self):
+        # S-2: with the full 3-repo grid the 2-of-3 vote is NON-degenerate, so the
+        # boolean verdicts ARE emitted (WITH>WITHOUT on all 3, WITHOUT below ceiling
+        # on all 3).
+        repos = ["r1", "r2", "r3"]
+        cc = {}
+        for r in repos:
+            cc[("with", r, 1)] = [self._catch("b1", "b2", "b3")]
+            cc[("pool", r, 1)] = [self._catch("b1", "b2")]
+            cc[("mid", r, 1)] = [self._catch("b1")]
+            cc[("without", r, 1)] = [self._catch("b1")]
+        run_evals.score(
+            self.make_run("d3r", "phase1b-exec", 1, cc, repos=repos) and "d3r")
+        lr = self.last_run()
+        self.assertFalse(lr["degenerate_repo_count"])
+        self.assertEqual(lr["repos_voting"], 3)
+        self.assertTrue(lr["without_ceiling_broken"])      # 3/3 below 0.70
+        ks = lr["keep_statistic"]
+        self.assertTrue(ks["sign_holds_2of3"])             # 3/3 WITH>WITHOUT
+        self.assertEqual(ks["repos_positive_sign_count"], 3)
+        self.assertEqual(ks["repos_below_ceiling_count"], 3)
 
     def test_off_axis_diagnostic(self):
         # b3 is off_axis; WITH catches it, WITHOUT does not.
@@ -253,11 +305,97 @@ class ScoreExecTest(unittest.TestCase):
         self.make_run("g1", "phase1b-exec", 1, cc, collect=False)
         self.assertEqual(run_evals.score("g1", allow_incomplete=False), 1)
 
+    def test_relative_test_file_path_refused(self):
+        # M-1: a relative test_file path is rejected (the oracle would otherwise
+        # copyfile it from score's unspecified cwd).
+        dd = run_evals.resolve_dispatch_dir("g3")
+        dd.mkdir(parents=True, exist_ok=True)
+        cells = []
+        for a in run_evals._EXEC_ARMS:
+            rf = f"toy-t1-{a}-tests.json"
+            (dd / rf).write_text(json.dumps(
+                {"dispatch_status": "OK", "test_files": ["rel/test_x.py"]}))
+            cells.append({"repo_id": "toy", "trial": 1, "arm": a,
+                          "producers": [{"agent": 1, "dispatch_file": "x",
+                                         "repo_copy": "x"}],
+                          "result_file": rf})
+        (dd / "stage-manifest.json").write_text(json.dumps(
+            {"run_id": "g3", "mode": "phase1b-exec", "arms": list(run_evals._EXEC_ARMS),
+             "trials": 1, "repos": ["toy"], "cells": cells}))
+        (dd / ".collect-status").write_text("complete")
+        self.assertEqual(run_evals.score("g3"), 1)
+
     def test_incomplete_grid_refused(self):
         # only the WITH cell present for a complete run -> refused.
         cc = {("with", "toy", 1): [self._catch("b1")]}
         self.assertEqual(
             run_evals.score(self.make_run("g2", "phase1b-exec", 1, cc) and "g2"), 1)
+
+    def _malformed_result_file_run(self, run_id, raw):
+        """A full 4-arm run where the WITH result_file holds `raw` bytes verbatim
+        (bypassing make_run's well-formed JSON write)."""
+        cc = {(a, "toy", 1): [self._catch("b1")] for a in run_evals._EXEC_ARMS}
+        dd = self.make_run(run_id, "phase1b-exec", 1, cc)
+        # overwrite the WITH cell's result_file with the malformed payload
+        (dd / "toy-t1-with-tests.json").write_text(raw)
+        return dd
+
+    def _assert_clean_fatal(self, run_id, rc=1):
+        import io
+        import contextlib
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            got = run_evals.score(run_id)
+        self.assertEqual(got, rc)
+        # clean [fatal] message, no raw traceback bled to stderr
+        self.assertIn("[fatal]", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+        return err.getvalue()
+
+    def test_empty_result_file_clean_fatal(self):
+        # S-1: an EXISTING but empty result_file -> clean [fatal] rc 1, no traceback.
+        self._malformed_result_file_run("s1empty", "")
+        msg = self._assert_clean_fatal("s1empty")
+        self.assertIn("not valid JSON", msg)
+
+    def test_truncated_result_file_clean_fatal(self):
+        # S-1: a truncated/partial-flush result_file -> clean [fatal], no traceback.
+        self._malformed_result_file_run(
+            "s1trunc", '{"dispatch_status": "OK", "test_fi')
+        msg = self._assert_clean_fatal("s1trunc")
+        self.assertIn("not valid JSON", msg)
+
+    def test_nonjson_result_file_clean_fatal(self):
+        # S-1: non-JSON bytes in the result_file -> clean [fatal], no traceback.
+        self._malformed_result_file_run("s1nonjson", "OK\n")
+        msg = self._assert_clean_fatal("s1nonjson")
+        self.assertIn("not valid JSON", msg)
+
+    def test_stale_absolute_test_file_clean_fatal(self):
+        # S-1: a stale/deleted absolute test_file path -> clean [fatal], not an
+        # uncaught FileNotFoundError out of the oracle's shutil.copyfile.
+        cc = {(a, "toy", 1): [self._catch("b1")] for a in run_evals._EXEC_ARMS}
+        dd = self.make_run("s1stale", "phase1b-exec", 1, cc)
+        gone = pathlib.Path(self._disp.name) / "vanished" / "test_gone.py"
+        (dd / "toy-t1-with-tests.json").write_text(json.dumps(
+            {"dispatch_status": "OK", "test_files": [str(gone)]}))
+        msg = self._assert_clean_fatal("s1stale")
+        self.assertIn("does not exist", msg)
+
+    def test_interacting_set_refused_until_unified(self):
+        # S-2: a repo registering a non-empty interacting_set is refused with a
+        # clean [fatal] (the credit-unit vs tally-unit mismatch is not yet unified),
+        # turning the latent silent mis-score into an explicit unsupported error.
+        cc = {(a, "toy", 1): [self._catch("b1")] for a in run_evals._EXEC_ARMS}
+        dd = self.make_run("s2set", "phase1b-exec", 1, cc)
+        # register an interacting_set on the toy repo's ground truth
+        gtp = self.fixtures / "toy" / "ground-truth-bugs.json"
+        gt = json.loads(gtp.read_text())
+        gt["interacting_sets"] = [["b2", "b3"]]
+        gtp.write_text(json.dumps(gt))
+        msg = self._assert_clean_fatal("s2set")
+        self.assertIn("interacting_set", msg)
+        self.assertIn("not yet unified", msg)
 
 
 if __name__ == "__main__":

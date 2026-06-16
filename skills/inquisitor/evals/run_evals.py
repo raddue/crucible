@@ -16,8 +16,13 @@ There is no `collect` subcommand — collect is the live orchestrator procedure
 documented in README.md. `score` reads the judge verdict files and computes the
 three paired deltas (see the `score` section, added in build-order step 5).
 
-Phase 1 only: identification breadth, execution stubbed. See the gated design
-`docs/plans/2026-06-13-inquisitor-fanout-eval-harness-design.md`.
+Two phases live behind the manifest `mode` field (the Phase-1 path is byte-
+untouched): a manifest with NO `mode` runs the Phase-1 3-arm identification-breadth
+judge `score` (execution stubbed); a `mode:"phase1b-exec"` / `mode:"pilot"` manifest
+runs the Phase-1b 4-arm write-AND-run `score_exec` scored by the deterministic
+leave-one-out oracle (`_oracle.py`, no LLM). See the gated designs
+`docs/plans/2026-06-13-inquisitor-fanout-eval-harness-design.md` (Phase 1) and
+`docs/plans/2026-06-15-inquisitor-phase1b-execution-eval-design.md` (Phase 1b).
 """
 from __future__ import annotations
 import argparse
@@ -33,7 +38,7 @@ from pathlib import Path
 
 from ._dispatch_paths import fixture_sha, resolve_dispatch_dir, template_sha
 from ._runid import validate_run_id
-from . import _oracle
+from . import _fixtures, _oracle
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _EVALS_DIR = Path(__file__).resolve().parent
@@ -99,7 +104,12 @@ tests that expose seam bugs, then leave the test files in the repository.
 5. Leave your final test file(s) in the repository's test directory.
 
 ## Budget
-At most **5 tests** (this per-agent budget is uniform across every arm).
+At most **5 tests** (this per-agent budget is uniform across every arm). Put
+each test in its **own** `test_*.py` file and make it self-contained — import
+only from `src/`, do not import a helper module you wrote. The scorer runs each
+test file in isolation on a pristine repo, so a file that over-asserts or imports
+an unharvested helper is discarded as a whole; one-test-per-file keeps that
+penalty uniform.
 
 ## What You Must NOT Do
 - Do NOT edit the repository source — write tests only.
@@ -1075,8 +1085,12 @@ def stage_exec(run_id: str, *, trials: int, repo: str | None = None,
     (dispatch_dir / "mid.md").write_text(_exec_mid(blocks), encoding="utf-8")
 
     def copy_for(cell_key: str, idx: int, repo_id: str) -> str:
+        # F1/F2: the producer copy is the BLIND substrate — only src/ + tests/,
+        # leak annotations stripped, no exemplars/fixes/GT/manifest. The oracle
+        # scores from _FIXTURES_DIR (not this copy), so narrowing loses nothing.
         dst = copies_root / f"{cell_key}-p{idx}"
-        shutil.copytree(_FIXTURES_DIR / repo_id, dst)
+        _fixtures.copy_repo_for_producer(_FIXTURES_DIR / repo_id, dst)
+        _fixtures._assert_no_leak(dst)
         return str(dst.relative_to(dispatch_dir))
 
     arms = _PILOT_ARMS if pilot else _EXEC_ARMS
@@ -1143,17 +1157,40 @@ def _exec_cell_caught(cell, dispatch_dir, repo_meta, complete):
     rf = dispatch_dir / cell["result_file"]
     if not rf.exists():
         return set(), None, (f"missing result_file {cell['result_file']}" if complete else None)
-    data = json.loads(rf.read_text(encoding="utf-8"))
+    # S-1: an EXISTING but empty/truncated/non-JSON result_file (collect interrupted
+    # mid-write, partial flush, OOM-killed harvester — a normal outcome across a
+    # multi-cell live run) is a broken-collector ingest failure, not a scorer bug.
+    # Handle it as a clean per-cell [fatal] like every sibling guard, never a raw
+    # JSONDecodeError traceback off the load-bearing exec-scoring path.
+    try:
+        data = json.loads(rf.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValueError) as e:
+        return set(), None, (f"cell {cell['result_file']} is not valid JSON: {e}"
+                             if complete else None)
     if data.get("dispatch_status") != "OK":
         return set(), None, (f"cell {cell['result_file']} dispatch_status != OK"
                              if complete else None)
     test_files = [Path(p) for p in data.get("test_files", [])]
+    # M-1: the oracle `shutil.copyfile`s each test_file into a variant from score's
+    # cwd, so a relative path would resolve against an unspecified directory. The
+    # collect contract (C4) writes absolute paths; fail loud if one isn't, rather
+    # than silently copying the wrong file (or nothing).
+    for p in test_files:
+        if not p.is_absolute():
+            return set(), None, (f"cell {cell['result_file']} test_file {str(p)!r} "
+                                 f"is not absolute (collect must write absolute paths)")
+        # S-1: a stale/deleted absolute test_file would reach the oracle's
+        # `shutil.copyfile` and crash with an uncaught FileNotFoundError. Guard
+        # existence here so it fails loud with per-cell attribution instead.
+        if not p.exists():
+            return set(), None, (f"cell {cell['result_file']} test_file {str(p)!r} "
+                                 f"does not exist (stale/deleted collect path)")
     res = _oracle.caught_bugs(test_files, _FIXTURES_DIR / cell["repo_id"],
                               interacting_sets=repo_meta[cell["repo_id"]]["isets"])
     return res["caught"], res, None
 
 
-def _two_of_three(count: int, total: int) -> int:
+def _two_of_three(total: int) -> int:
     """The ≥2/3 threshold count for `total` repos (3 repos → 2; 1 → 1)."""
     return math.ceil(2 * total / 3)
 
@@ -1186,22 +1223,48 @@ def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
             "n": len(bug_ids),
         }
 
+    # S-2: interacting_set scoring is NOT unified across the two views score_exec
+    # takes of `caught`. The oracle credits a registered set once via a single
+    # "+"-joined id (e.g. "nt-b3+nt-b7"); the per-trial rate divides raw len(caught)
+    # — which counts that joined id — by n=len(bug_ids), while majority_caught /
+    # arm_repo_caught / off_pass iterate the INDIVIDUAL bug_ids (which never appear
+    # in `caught`). So a real set-catch is under-counted in the tally yet counted in
+    # the rate, silently desyncing the two arm-rate views and the absolute rate that
+    # feeds the WITHOUT ceiling. The feature is dead for the current decision run
+    # (all repos register empty sets), so rather than ship a half-wired scorer that
+    # mis-reports on first real use, refuse loudly until the rate plumbing is unified.
+    set_repos = sorted(r for r in repos if repo_meta[r]["isets"])
+    if set_repos:
+        print(f"[fatal] interacting_set scoring not yet unified — refusing to score: "
+              f"repos with non-empty interacting_sets={set_repos}. The credit unit "
+              f"(joined '+'-id) and the per-repo tally unit (individual bug_ids) are "
+              f"mismatched in score_exec; unify them before scoring a run that uses "
+              f"interacting_sets.", file=sys.stderr)
+        return 1
+
     cells_by = {(c["arm"], c["repo_id"], c["trial"]): c for c in manifest["cells"]}
     if complete:
         expected = {(a, r, t) for a in arms for r in repos
                     for t in range(1, trials + 1)}
         missing = sorted(expected - set(cells_by))
-        dups = [k for k in cells_by] if len(cells_by) != len(manifest["cells"]) else []
+        seen: dict = {}
+        for c in manifest["cells"]:
+            seen[(c["arm"], c["repo_id"], c["trial"])] = seen.get(
+                (c["arm"], c["repo_id"], c["trial"]), 0) + 1
+        dups = sorted(k for k, n in seen.items() if n > 1)
         if missing or dups:
             print(f"[fatal] exec cell-grid incomplete for {dispatch_dir}: "
-                  f"missing={missing} (arms {list(arms)} × repos {repos} × "
-                  f"trials 1..{trials}); refusing to score", file=sys.stderr)
+                  f"missing={missing} dups={dups} (arms {list(arms)} × repos "
+                  f"{repos} × trials 1..{trials}); refusing to score",
+                  file=sys.stderr)
             return 1
 
     # caught[arm][repo][trial] -> set of caught ids
     caught: dict = {a: {r: {} for r in repos} for a in arms}
     broad_per_arm: dict = {a: [] for a in arms}
     flaky_per_arm: dict = {a: 0 for a in arms}
+    errored_per_arm: dict = {a: 0 for a in arms}
+    errored_minus_per_arm: dict = {a: 0 for a in arms}
     for (arm, r, t), cell in cells_by.items():
         cset, res, fatal = _exec_cell_caught(cell, dispatch_dir, repo_meta, complete)
         if fatal:
@@ -1211,6 +1274,8 @@ def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
         if res is not None:
             broad_per_arm[arm].extend(res["broad_test_catches"].values())
             flaky_per_arm[arm] += res["flaky_discards"]
+            errored_per_arm[arm] += res.get("errored_discards", 0)
+            errored_minus_per_arm[arm] += res.get("errored_minus_discards", 0)
 
     total_bugs = sum(repo_meta[r]["n"] for r in repos)
 
@@ -1229,14 +1294,17 @@ def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
             "repos": repos, "arms": list(arms),
             "pilot_band": {"band": list(_PILOT_BAND), "per_repo": per_repo},
             "flaky_discards": flaky_per_arm,
+            "errored_discards": errored_per_arm,
+            "errored_minus_discards": errored_minus_per_arm,
         }
         (_EVALS_DIR / "last_run.json").write_text(json.dumps(last_run, indent=2),
                                                   encoding="utf-8")
         return 0
 
     # --- decision path: 4-arm deltas + WITHOUT ceiling + KEEP statistic ---
-    per_trial_rate = {a: [sum(len(caught[a][r].get(t, set())) for r in repos)
-                          / total_bugs for t in range(1, trials + 1)]
+    per_trial_rate = {a: [(sum(len(caught[a][r].get(t, set())) for r in repos)
+                           / total_bugs if total_bugs else 0.0)
+                          for t in range(1, trials + 1)]
                       for a in arms}
 
     def majority_caught(a, r, b):
@@ -1246,16 +1314,30 @@ def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
     arm_repo_caught = {a: {r: sum(1 for b in repo_meta[r]["bug_ids"]
                                   if majority_caught(a, r, b)) for r in repos}
                        for a in arms}
-    arm_rate = {a: sum(arm_repo_caught[a][r] for r in repos) / total_bugs
+    arm_rate = {a: (sum(arm_repo_caught[a][r] for r in repos) / total_bugs
+                    if total_bugs else 0.0)
                 for a in arms}
 
     without_means = {r: repo_mean_rate("without", r) for r in repos}
     with_means = {r: repo_mean_rate("with", r) for r in repos}
+    # S-2: the 2-of-3 robustness vote is only a robustness statistic with the full
+    # 3-repo grid. A `--repo X` (or any <3-repo) run collapses `_two_of_three` to a
+    # 1-of-1 (or 2-of-2) vote — NOT cross-repo-corroborated — so we MUST NOT present
+    # `without_ceiling_broken`/`sign_holds_2of3` as if 3-repo-backed. Mirrors the
+    # `trials < 3 -> beyond_spread forced False` degeneracy guard: when the vote is
+    # degenerate we stamp `degenerate_repo_count: true` and null the boolean
+    # verdicts, recording `repos_voting` (the actual repo count behind the vote).
+    repos_voting = len(repos)
+    degenerate_repo_count = repos_voting < 3
     below = sum(1 for r in repos if without_means[r] <= _WITHOUT_CEILING)
-    without_ceiling_broken = below >= _two_of_three(below, len(repos))
     per_repo_sign = {r: with_means[r] - without_means[r] for r in repos}
     positive = sum(1 for r in repos if per_repo_sign[r] > 0)
-    sign_holds = positive >= _two_of_three(positive, len(repos))
+    if degenerate_repo_count:
+        without_ceiling_broken = None
+        sign_holds = None
+    else:
+        without_ceiling_broken = below >= _two_of_three(repos_voting)
+        sign_holds = positive >= _two_of_three(repos_voting)
 
     deltas = {
         "_note": ("paired = mean of per-trial deltas; the KEEP gate reads "
@@ -1283,15 +1365,30 @@ def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
                       for a in arms},
         "deltas": deltas,
         "without_ceiling_broken": without_ceiling_broken,
+        "without_ceiling_broken_note": (
+            "term of art (design §7): 'broken' = WITHOUT is BELOW the "
+            f"{_WITHOUT_CEILING:.2f} ceiling on >=2/3 repos (headroom EXISTS, the "
+            "no-headroom ceiling problem is cleared), NOT that WITHOUT exceeded it. "
+            "True is the GOOD case for a trustworthy CONDEMN."),
         "without_repo_means": without_means,
+        "repos_voting": repos_voting,
+        "degenerate_repo_count": degenerate_repo_count,
         "keep_statistic": {
             "_note": ("KEEP = beyond_spread on with_without AND positive sign on "
                       ">=2/3 repos; trial_spread is explicitly REJECTED as the gate "
                       "(S-B). score surfaces the inputs; the human reads the §7 "
-                      "branches — it emits no keep/condemn verdict."),
+                      "branches — it emits no keep/condemn verdict. S-2: with "
+                      "<3 repos the 2-of-3 vote is degenerate (not cross-repo "
+                      "corroborated) — `sign_holds_2of3`/`without_ceiling_broken` "
+                      "are null and `degenerate_repo_count` is true; read the raw "
+                      "`repos_*_count` / `repos_voting` instead."),
             "statistic": "beyond_spread",
             "beyond_spread": deltas["with_without"]["beyond_spread"],
             "per_repo_sign": per_repo_sign,
+            "repos_voting": repos_voting,
+            "degenerate_repo_count": degenerate_repo_count,
+            "repos_positive_sign_count": positive,
+            "repos_below_ceiling_count": below,
             "sign_holds_2of3": sign_holds,
             "without_ceiling_broken": without_ceiling_broken,
         },
@@ -1300,7 +1397,25 @@ def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
                                 for a in arms},
         "broad_test_catches": {a: (statistics.mean(broad_per_arm[a])
                                    if broad_per_arm[a] else 0.0) for a in arms},
+        # S-3: a single test credited to >=3 bugs is the conjunction-inflation
+        # signal. The no-specificity-gate credit rule (caught(Bᵢ) ⟸ RED on
+        # minus-Bᵢ) is sound under §3 disjointness for the EXEMPLARS (proven by
+        # check_fixture_independence.py); for an ARBITRARY producer test the
+        # transfer is a variant-property argument, not a checked fact, so a broad
+        # test whose single assertion happens to depend on a conjunction would be
+        # credited to each bug — inflating absolute catch rates that feed the
+        # WITHOUT *absolute* ceiling. This per-arm count lets an operator spot that
+        # inflation before trusting the ceiling (see _oracle docstring).
+        "conjunction_inflation": {
+            "_note": ("per-arm count of tests crediting >=3 bugs (S-3 "
+                      "conjunction-inflation signal — inspect before trusting the "
+                      "absolute WITHOUT ceiling; not a gate)."),
+            "tests_crediting_3plus_bugs": {
+                a: sum(1 for n in broad_per_arm[a] if n >= 3) for a in arms},
+        },
         "flaky_discards": flaky_per_arm,
+        "errored_discards": errored_per_arm,
+        "errored_minus_discards": errored_minus_per_arm,
     }
     (_EVALS_DIR / "last_run.json").write_text(json.dumps(last_run, indent=2),
                                               encoding="utf-8")

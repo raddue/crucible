@@ -22,6 +22,7 @@ Stdlib only. Exit 0 clean / 1 on any violation.
 from __future__ import annotations
 import os
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -41,8 +42,13 @@ def framing_removed(without_text: str, neutral_text: str, marker: str) -> bool:
 
 
 def budget_ok(text: str) -> bool:
-    """Carries the uniform 5-test per-agent budget and NO per-arm 25 ceiling."""
-    return "5 tests" in text and "25" not in text
+    """Carries the uniform 5-test per-agent budget and NO per-arm 25 ceiling.
+
+    M-2: match the standalone token ``25`` (a per-arm ceiling) via a word-boundary
+    regex rather than the brittle ``"25" in text`` substring, so an incidental byte
+    sequence like a line number or ``2025`` can't false-fail the guard.
+    """
+    return "5 tests" in text and not re.search(r"\b25\b", text)
 
 
 # --- repo checks ----------------------------------------------------------

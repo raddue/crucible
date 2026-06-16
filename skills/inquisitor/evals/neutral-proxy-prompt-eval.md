@@ -9,7 +9,11 @@ from its `src/` directory and run under `python3 -m pytest`.
 ## Budget
 
 Write at most **5 tests**. Every test must actually execute and either pass or
-fail — do **not** describe tests you do not run.
+fail — do **not** describe tests you do not run. Put each test in its **own**
+`test_*.py` file and keep it self-contained (import only from `src/`, not a
+helper module you wrote): the scorer runs each file in isolation on a pristine
+repo, so a file that over-asserts or imports an unharvested helper is discarded
+whole.
 
 ## What to do
 

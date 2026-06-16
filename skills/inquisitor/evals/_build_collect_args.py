@@ -21,6 +21,11 @@ from pathlib import Path
 def build(dispatch_dir) -> dict:
     disp = Path(dispatch_dir).resolve()
     manifest = json.loads((disp / "stage-manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("mode") not in ("phase1b-exec", "pilot"):
+        raise SystemExit(
+            "build_collect_args is exec/pilot-only "
+            f"(manifest mode={manifest.get('mode')!r}; "
+            "point it at a phase1b-exec or pilot stage-manifest.json)")
     units = []
     for cell in manifest["cells"]:
         for p in cell["producers"]:
