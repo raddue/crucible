@@ -81,6 +81,10 @@ run python3 scripts/check_inquisitor_secondary_count.py
 run python3 skills/inquisitor/evals/test_run_evals_stage.py
 run python3 skills/inquisitor/evals/test_run_evals_score.py
 run python3 skills/inquisitor/evals/test_runid.py
+# --- Phase 1b: seeded-repo fixtures + variant materialization (#424) ---
+run python3 skills/inquisitor/evals/test_fixtures.py
+run python3 scripts/check_fixture_independence.py --selftest
+run python3 scripts/check_fixture_independence.py
 
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
