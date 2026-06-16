@@ -153,3 +153,67 @@ significance test.
 **Deferred (post-merge, not in CI):** the live integration run that produces the
 actual delta (dispatches live Opus agents), recording it in `docs/evals.md`, and the
 Phase-2 go/no-go log on #424.
+
+## Phase 1b — seeded-repo execution measurement (4 arms + a deterministic oracle)
+
+Phase 1 measured *identification breadth* with the run step stubbed and a 100%
+ceiling. Phase 1b is the terminal **detection-axis** measurement: real
+write-AND-run execution against hermetic seeded repos, scored by a deterministic
+differential oracle (no LLM judge). See
+`docs/plans/2026-06-15-inquisitor-phase1b-execution-eval-design.md`.
+
+It is **forked behind the manifest `mode` field** so the Phase-1 path above is
+byte-untouched: a manifest with no `mode` runs the 3-arm judge `score`; a
+`mode:"phase1b-exec"` / `mode:"pilot"` manifest runs `score_exec` (the oracle).
+
+**Arms (4):** WITH (5 lensed agents), POOL (5 bare agents — the pooling-only
+control), MID (1 all-lenses agent), WITHOUT (1 bare agent). `WITH−WITHOUT` is the
+primary; `WITH−POOL` isolates lenses; `POOL−WITHOUT` isolates pooling; `WITH−MID`
+parallel-vs-sequential. Per-**agent** 5-test budget (no per-arm 25 ceiling — the
+per-arm scaling IS the pooling treatment).
+
+**CLI:**
+
+```
+python3 -m skills.inquisitor.evals.run_evals stage <run-id> --exec [--repo ID] [--trials N]
+python3 -m skills.inquisitor.evals.run_evals stage <run-id> --pilot [--repo ID] [--trials N>=3]
+python3 -m skills.inquisitor.evals.run_evals score <run-id> [--allow-incomplete]
+```
+
+`--exec` stages all 4 arms over the seeded repos (one repo copy per producer);
+`--pilot` stages the hash-pinned neutral proxy only (≥3-trial floor) for the §5
+fixture-difficulty calibration band (40–70%).
+
+**Files:**
+
+- `fixtures/<repo>/` — 3 hermetic seeded Python repos (`notify`, `rbac`,
+  `paginate`), ~8 behaviorally-independent cross-component seam bugs each, with
+  per-bug `fixes/<id>.patch` + `exemplars/<id>.py` + blind `ground-truth-bugs.json`
+  (+ provenance). Format spec in `fixtures/README.md`.
+- `_fixtures.py` — variant materialization (`base` / `all-fixed` /
+  `all-fixed-minus-Bᵢ`, zero-fuzz `patch -p1`) + the shared `run_test_in_dir` +
+  `rc_to_verdict` (rc 5 = ERROR).
+- `_oracle.py` — the leave-one-out + mandatory-red-on-base scorer (no specificity
+  gate; broad test credited to EACH independent bug; twice-run flake guard;
+  registered-`interacting_set` escape). Harvests test files only → runs on pristine
+  variants, so agent source edits / self-reported pass-fail are irrelevant.
+- `without-prompt-eval.md` — the bare execution prompt, the **single source**:
+  `pool-prompt-eval.md` is byte-identical; `neutral-proxy-prompt-eval.md` is it with
+  the cross-component framing removed.
+- `_build_collect_args.py` — the no-judge producer dispatch list for collect.
+- `test_fixtures.py`, `test_oracle.py`, `test_run_evals_exec.py`,
+  `test_build_collect_args.py` — gating unit tests.
+
+**CI guards (in `run_tests.sh`):** `check_fixture_independence.py` (the green/red
+leave-one-out matrix + patch disjointness), `check_fixture_gt_provenance.py` (blind
+boundary + post-blind off_axis), `check_inquisitor_phase1b_invariants.py` (POOL/
+scaffold/neutral hashes, 5-test budget, arm sets, KEEP statistic = `beyond_spread`).
+
+**KEEP statistic:** the §7 go/no-go reads `beyond_spread` on `with_without` (NOT
+`trial_spread`) + positive sign on ≥2/3 repos, with a **WITHOUT-keyed** ceiling
+check. `score_exec` surfaces these inputs in `last_run.json`; it emits no
+keep/condemn verdict (the human reads the §7 branches).
+
+**Deferred (explicit opt-in, NOT in this build):** the ~180-agent live decision
+run (and the cheap neutral-proxy pilot before it), recording the result in
+`docs/evals.md` / #424.
