@@ -1,0 +1,11 @@
+--- a/src/notify/db.py
++++ b/src/notify/db.py
+@@ -48,7 +48,7 @@
+         # BUG nt-b6: the status_code is ignored and every delivery is recorded
+         # as sent, so a failed (non-2xx) delivery is indistinguishable from a
+         # successful one. The fix records sent only on a 2xx status.
+-        delivered = True
++        delivered = 200 <= status_code < 300
+         _DELIVERIES.append({"job_id": job_id, "sent": delivered})
+         return delivered
+ 

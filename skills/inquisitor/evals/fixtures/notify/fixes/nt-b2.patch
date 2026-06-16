@@ -1,0 +1,11 @@
+--- a/src/notify/db.py
++++ b/src/notify/db.py
+@@ -24,7 +24,7 @@
+         # BUG nt-b2: jobs are kept in a per-instance dict, so a new Store()
+         # (a process "restart") starts empty and loses everything previously
+         # scheduled. The fix points this at the module-level _PERSISTENT_JOBS.
+-        self._jobs = {}
++        self._jobs = _PERSISTENT_JOBS
+ 
+     def save_job(self, job_id, record):
+         self._jobs[job_id] = record

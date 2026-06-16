@@ -1,0 +1,11 @@
+--- a/src/notify/scheduler.py
++++ b/src/notify/scheduler.py
+@@ -63,7 +63,7 @@
+         # BUG nt-b7: cancel consults a per-instance set of job_ids this exact
+         # instance scheduled, so a cancel cannot reach a job another instance
+         # scheduled into the shared store. The fix cancels through the store.
+-        if job_id in self._locally_scheduled():
++        if self._store.get_job(job_id) is not None:
+             self._store.delete_job(job_id)
+             return True
+         return False

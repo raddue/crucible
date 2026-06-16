@@ -1,0 +1,9 @@
+--- a/src/notify/notifier.py
++++ b/src/notify/notifier.py
+@@ -51,5 +51,6 @@
+         # BUG nt-b4: `prefix` is never defined, so invoking this handler raises
+         # NameError at runtime (the module still imports fine). The fix derives
+         # prefix from the severity.
++        prefix = severity.upper()
+         label = prefix + ":" + str(job_id)
+         return {"label": label, "severity": severity}

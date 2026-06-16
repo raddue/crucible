@@ -1,0 +1,11 @@
+--- a/src/notify/scheduler.py
++++ b/src/notify/scheduler.py
+@@ -50,6 +50,8 @@
+         # BUG nt-b3: a None or negative delay is passed straight through, so a
+         # job's effective delay can be negative (it would fire in the past).
+         # The fix coerces None to 0 and clamps negatives up to 0.
++        if delay is None or delay < 0:
++            return 0
+         return delay
+ 
+     # -- seam nt-b7: cancellation across wired instances --------------------

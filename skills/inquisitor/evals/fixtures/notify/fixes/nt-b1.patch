@@ -1,0 +1,11 @@
+--- a/src/notify/scheduler.py
++++ b/src/notify/scheduler.py
+@@ -35,7 +35,7 @@
+         # BUG nt-b1: scheduled_at is written as a raw epoch int, but the
+         # notifier reads scheduled_at as an ISO-8601 timestamp string. The fix
+         # stores the ISO rendering instead of the bare int.
+-        scheduled_at = fire_at_epoch
++        scheduled_at = _iso_from_epoch(fire_at_epoch)
+         record = {
+             "job_id": job_id,
+             "delay": delay,

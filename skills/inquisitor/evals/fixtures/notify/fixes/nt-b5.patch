@@ -1,0 +1,11 @@
+--- a/src/notify/routes.py
++++ b/src/notify/routes.py
+@@ -28,6 +28,8 @@
+     # BUG nt-b5: the URL is dialed without any scheme/host validation, so a
+     # disallowed (e.g. file:// or attacker-controlled host) URL is sent to.
+     # The fix refuses anything not on the allowlist before calling transport.
++    if not is_allowed(url):
++        raise ValueError(f"refused webhook URL: {url}")
+     return transport(url, payload)
+ 
+ 

@@ -1,0 +1,1 @@
+{"repo_id":"notify","pkg":"notify","test_dir":"tests","runner_cmd":["python3","-m","pytest","-q"],"bug_ids":["nt-b1","nt-b2","nt-b3","nt-b4","nt-b5","nt-b6","nt-b7","nt-b8"],"n":8}

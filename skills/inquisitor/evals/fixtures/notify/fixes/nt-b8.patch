@@ -1,0 +1,11 @@
+--- a/src/notify/notifier.py
++++ b/src/notify/notifier.py
+@@ -11,7 +11,7 @@
+ 
+ # The historically-correct default channel. Existing call sites that omit a
+ # channel rely on "email" being chosen.
+-DEFAULT_CHANNEL = "sms"  # BUG nt-b8: regressed from "email"; the fix restores it.
++DEFAULT_CHANNEL = "email"  # restored historical default.
+ 
+ 
+ class Notifier:
