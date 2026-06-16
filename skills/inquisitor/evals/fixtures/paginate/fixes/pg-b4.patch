@@ -1,0 +1,10 @@
+--- a/src/paginate/store.py
++++ b/src/paginate/store.py
+@@ -47,5 +47,5 @@
+         # an earlier record is deleted between page requests, every later
+         # record shifts down one position, so this offset overshoots and the
+         # first record of the next page is skipped.
+-        offset = boundary_id  # treat the boundary value itself as the offset
+-        return [dict(r) for r in self._records[offset:offset + limit]]
++        out = [r for r in self._records if r["id"] > boundary_id]
++        return [dict(r) for r in out[:limit]]

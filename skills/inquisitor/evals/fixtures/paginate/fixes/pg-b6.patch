@@ -1,0 +1,11 @@
+--- a/src/paginate/paginator.py
++++ b/src/paginate/paginator.py
+@@ -24,7 +24,7 @@
+             # BUG pg-b6: the documented default page size is DEFAULT_PAGE_SIZE
+             # (5); this hardcodes 10, so a caller relying on the default walks
+             # the collection in the wrong-sized pages.
+-            limit = 10
++            limit = DEFAULT_PAGE_SIZE
+         boundary_id = cursor_mod.decode_cursor(token)
+         return self.page_from_boundary(boundary_id, limit)
+ 

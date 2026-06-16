@@ -1,0 +1,8 @@
+--- a/src/paginate/routes.py
++++ b/src/paginate/routes.py
+@@ -30,4 +30,4 @@
+     # ({"items", "next_cursor"}) instead of the documented envelope
+     # ({"data", "paging": {"next_cursor"}}), breaking downstream consumers
+     # that read resp["data"] / resp["paging"]["next_cursor"].
+-    return {"items": items, "next_cursor": next_cursor}
++    return {"data": items, "paging": {"next_cursor": next_cursor}}

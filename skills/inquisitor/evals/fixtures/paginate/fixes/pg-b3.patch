@@ -1,0 +1,9 @@
+--- a/src/paginate/validate.py
++++ b/src/paginate/validate.py
+@@ -20,5 +20,5 @@
+     # instead of being floored to the default page size, producing an empty
+     # page or a reversed-slice page downstream.
+     if limit < 1:
+-        return limit
++        return DEFAULT_PAGE_SIZE
+     return limit

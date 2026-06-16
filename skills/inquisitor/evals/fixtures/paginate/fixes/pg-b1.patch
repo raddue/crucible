@@ -1,0 +1,8 @@
+--- a/src/paginate/cursor.py
++++ b/src/paginate/cursor.py
+@@ -37,4 +37,4 @@
+     # the raw decoded STRING instead of int(text). The store then compares
+     # integer record ids against a string boundary, so the comparison never
+     # advances correctly and the next page does not continue where this ended.
+-    return text
++    return int(text)

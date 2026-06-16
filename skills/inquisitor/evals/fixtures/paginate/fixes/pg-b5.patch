@@ -1,0 +1,11 @@
+--- a/src/paginate/paginator.py
++++ b/src/paginate/paginator.py
+@@ -36,7 +36,7 @@
+         # BUG pg-b5: off-by-one at the page boundary — the trailing record is
+         # dropped from the emitted page (rows[:-1]) even though next_cursor
+         # still advances past it, so that record is lost between pages.
+-        emitted = rows[:-1] if len(rows) > 1 else rows
++        emitted = rows
+         last = rows[-1]
+         next_cursor = cursor_mod.encode_cursor(last["id"])
+         return {"items": emitted, "next_cursor": next_cursor}

@@ -1,0 +1,8 @@
+--- a/src/paginate/app.py
++++ b/src/paginate/app.py
+@@ -18,4 +18,4 @@
+             # BUG pg-b8: a malformed cursor is swallowed and the handler
+             # silently restarts at page 1 instead of surfacing the rejection.
+             # The caller can never tell a bad cursor from a real first page.
+-            return list_records(self.store, token=None, limit=limit)
++            raise

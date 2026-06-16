@@ -1,0 +1,1 @@
+{"repo_id":"paginate","pkg":"paginate","test_dir":"tests","runner_cmd":["python3","-m","pytest","-q"],"bug_ids":["pg-b1","pg-b2","pg-b3","pg-b4","pg-b5","pg-b6","pg-b7","pg-b8"],"n":8}

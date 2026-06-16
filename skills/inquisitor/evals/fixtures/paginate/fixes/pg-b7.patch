@@ -1,0 +1,11 @@
+--- a/src/paginate/routes.py
++++ b/src/paginate/routes.py
+@@ -16,7 +16,7 @@
+     """Cap an already-normalized limit to the server maximum page size."""
+     # BUG pg-b7: no upper bound is enforced — a caller can request an unbounded
+     # page (resource exhaustion). The limit must be capped at MAX_PAGE_SIZE.
+-    return limit
++    return min(limit, MAX_PAGE_SIZE)
+ 
+ 
+ def list_records(store, token=None, limit=None):
