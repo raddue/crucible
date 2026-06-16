@@ -81,8 +81,9 @@ run python3 scripts/check_inquisitor_secondary_count.py
 run python3 skills/inquisitor/evals/test_run_evals_stage.py
 run python3 skills/inquisitor/evals/test_run_evals_score.py
 run python3 skills/inquisitor/evals/test_runid.py
-# --- Phase 1b: seeded-repo fixtures + variant materialization (#424) ---
+# --- Phase 1b: seeded-repo fixtures + variant materialization + oracle (#424) ---
 run python3 skills/inquisitor/evals/test_fixtures.py
+run python3 skills/inquisitor/evals/test_oracle.py
 run python3 scripts/check_fixture_independence.py --selftest
 run python3 scripts/check_fixture_independence.py
 run python3 scripts/check_fixture_gt_provenance.py --selftest
