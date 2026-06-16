@@ -15,6 +15,7 @@ reject — never apply with offset/fuzz, which would silently corrupt attributio
 """
 import contextlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -97,3 +98,54 @@ def variant(repo_dir, *, apply=None, exclude=None):
         yield d
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+# --- Test runner against a materialized variant (shared by the oracle and the
+#     fixture-independence checker) --------------------------------------------
+
+def rc_to_verdict(rc: int) -> str:
+    """Canonical pytest rc -> verdict mapping (design §4 / M2 truth table).
+
+        0 -> GREEN   (all tests pass)
+        1 -> RED     (a test failed = a bug was caught)
+        2,3,4,5,* -> ERROR   (interrupted / internal / usage / NO TESTS COLLECTED)
+
+    rc 5 (no tests collected — an empty/mis-named harvested file) is ERROR, NOT
+    green: an empty test catches nothing, and counting it green would silently
+    credit a WITHOUT failure mode. ERROR is distinct from both GREEN and RED.
+    """
+    if rc == 0:
+        return "GREEN"
+    if rc == 1:
+        return "RED"
+    return "ERROR"
+
+
+def run_test_in_dir(variant_dir, test_file, manifest) -> str:
+    """Run a single pytest `test_file` against an ALREADY-materialized variant.
+
+    Copies the file into the variant's `test_dir` as a probe (the variant's
+    conftest puts `src/` on sys.path), runs `runner_cmd --tb=no <probe>` with
+    cwd=variant, and maps the rc via `rc_to_verdict`. The caller owns the
+    variant lifecycle (materialize once, run many tests, clean up), so the
+    oracle can re-use one `all-fixed` / `minus-Bᵢ` copy across many tests.
+    """
+    variant_dir = Path(variant_dir)
+    test_dir = variant_dir / manifest["test_dir"]
+    test_dir.mkdir(parents=True, exist_ok=True)
+    # Unique probe name per run: reusing one name lets Python load a STALE .pyc
+    # for the next probe (mtime-granularity collision), silently running the
+    # previous test. Unique names + no-bytecode keep each run hermetic.
+    fd, probe_path = tempfile.mkstemp(suffix=".py", prefix="test_probe_", dir=str(test_dir))
+    os.close(fd)
+    probe = Path(probe_path)
+    shutil.copyfile(test_file, probe)
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    try:
+        runner = list(manifest["runner_cmd"])
+        proc = subprocess.run(
+            runner + ["--tb=no", str(probe)],
+            cwd=str(variant_dir), capture_output=True, text=True, env=env)
+        return rc_to_verdict(proc.returncode)
+    finally:
+        probe.unlink(missing_ok=True)
