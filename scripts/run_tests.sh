@@ -85,6 +85,8 @@ run python3 skills/inquisitor/evals/test_runid.py
 run python3 skills/inquisitor/evals/test_fixtures.py
 run python3 scripts/check_fixture_independence.py --selftest
 run python3 scripts/check_fixture_independence.py
+run python3 scripts/check_fixture_gt_provenance.py --selftest
+run python3 scripts/check_fixture_gt_provenance.py
 
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py

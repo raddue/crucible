@@ -1,0 +1,54 @@
+{
+  "_provenance": "see ground-truth-bugs.provenance.md",
+  "bugs": [
+    {
+      "bug_id": "rb-b1",
+      "desc": "A role created with no explicit permissions grants every action instead of starting with none",
+      "off_axis": false,
+      "fix_patch": "fixes/rb-b1.patch"
+    },
+    {
+      "bug_id": "rb-b2",
+      "desc": "A user's assigned role fails to resolve, so a user who holds a permission is refused the action",
+      "off_axis": false,
+      "fix_patch": "fixes/rb-b2.patch"
+    },
+    {
+      "bug_id": "rb-b3",
+      "desc": "The delete handler performs the delete for a request that has no authenticated principal",
+      "off_axis": false,
+      "fix_patch": "fixes/rb-b3.patch"
+    },
+    {
+      "bug_id": "rb-b4",
+      "desc": "After a grant is revoked and the cache is invalidated, the revoked action still succeeds",
+      "off_axis": false,
+      "fix_patch": "fixes/rb-b4.patch"
+    },
+    {
+      "bug_id": "rb-b5",
+      "desc": "A dispatch the guard rules disallowed still runs the protected handler body",
+      "off_axis": false,
+      "fix_patch": "fixes/rb-b5.patch"
+    },
+    {
+      "bug_id": "rb-b6",
+      "desc": "The auditor role no longer grants read, breaking the reports path that relied on it",
+      "off_axis": false,
+      "fix_patch": "fixes/rb-b6.patch"
+    },
+    {
+      "bug_id": "rb-b7",
+      "desc": "A caller obtains a permission it was never granted by listing it as a requested scope",
+      "off_axis": true,
+      "fix_patch": "fixes/rb-b7.patch"
+    },
+    {
+      "bug_id": "rb-b8",
+      "desc": "A request for a user the store never registered is granted protected actions",
+      "off_axis": true,
+      "fix_patch": "fixes/rb-b8.patch"
+    }
+  ],
+  "interacting_sets": []
+}

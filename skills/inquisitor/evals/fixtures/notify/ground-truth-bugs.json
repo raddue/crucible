@@ -1,0 +1,54 @@
+{
+  "_provenance": "see ground-truth-bugs.provenance.md",
+  "bugs": [
+    {
+      "bug_id": "nt-b1",
+      "desc": "A scheduled job's scheduled_at is returned as a raw epoch integer instead of an ISO-8601 timestamp string, so a reader that formats it as a date string breaks",
+      "off_axis": false,
+      "fix_patch": "fixes/nt-b1.patch"
+    },
+    {
+      "bug_id": "nt-b2",
+      "desc": "A job saved through one store handle is gone after a process restart: a freshly constructed store handle sees none of the previously saved jobs",
+      "off_axis": false,
+      "fix_patch": "fixes/nt-b2.patch"
+    },
+    {
+      "bug_id": "nt-b3",
+      "desc": "A job scheduled with a negative delay keeps that negative delay (fire time in the past) instead of being clamped to zero",
+      "off_axis": false,
+      "fix_patch": "fixes/nt-b3.patch"
+    },
+    {
+      "bug_id": "nt-b4",
+      "desc": "Invoking the alert handler crashes at call time instead of returning a severity-prefixed label",
+      "off_axis": false,
+      "fix_patch": "fixes/nt-b4.patch"
+    },
+    {
+      "bug_id": "nt-b5",
+      "desc": "A webhook to a disallowed URL is dialed through the transport instead of being refused before any send",
+      "off_axis": true,
+      "fix_patch": "fixes/nt-b5.patch"
+    },
+    {
+      "bug_id": "nt-b6",
+      "desc": "A delivery the transport reports as failed is still recorded as sent instead of not-sent",
+      "off_axis": true,
+      "fix_patch": "fixes/nt-b6.patch"
+    },
+    {
+      "bug_id": "nt-b7",
+      "desc": "A cancel issued through one scheduler instance cannot remove a job scheduled by a different scheduler instance sharing the same store",
+      "off_axis": false,
+      "fix_patch": "fixes/nt-b7.patch"
+    },
+    {
+      "bug_id": "nt-b8",
+      "desc": "A job that names no channel falls back to 'sms' instead of the historical default 'email'",
+      "off_axis": false,
+      "fix_patch": "fixes/nt-b8.patch"
+    }
+  ],
+  "interacting_sets": []
+}

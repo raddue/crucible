@@ -1,0 +1,54 @@
+{
+  "_provenance": "see ground-truth-bugs.provenance.md",
+  "bugs": [
+    {
+      "bug_id": "pg-b1",
+      "desc": "Following a page's continuation token returns records that do not continue from where the previous page ended",
+      "off_axis": false,
+      "fix_patch": "fixes/pg-b1.patch"
+    },
+    {
+      "bug_id": "pg-b2",
+      "desc": "The list response is returned in a flat layout instead of the documented nested envelope, so a consumer reading the documented keys cannot find the records or the continuation token",
+      "off_axis": false,
+      "fix_patch": "fixes/pg-b2.patch"
+    },
+    {
+      "bug_id": "pg-b3",
+      "desc": "Requesting a page with a zero or non-positive size returns an empty page instead of a sane non-empty page",
+      "off_axis": false,
+      "fix_patch": "fixes/pg-b3.patch"
+    },
+    {
+      "bug_id": "pg-b4",
+      "desc": "When an earlier record is removed between two page requests, the next page skips a record instead of continuing contiguously",
+      "off_axis": false,
+      "fix_patch": "fixes/pg-b4.patch"
+    },
+    {
+      "bug_id": "pg-b5",
+      "desc": "The last record of every page is dropped, so it never appears on any page",
+      "off_axis": false,
+      "fix_patch": "fixes/pg-b5.patch"
+    },
+    {
+      "bug_id": "pg-b6",
+      "desc": "Omitting the page size returns a differently sized page than the documented default",
+      "off_axis": false,
+      "fix_patch": "fixes/pg-b6.patch"
+    },
+    {
+      "bug_id": "pg-b7",
+      "desc": "Requesting an enormous page size returns an unbounded number of records instead of a capped page",
+      "off_axis": true,
+      "fix_patch": "fixes/pg-b7.patch"
+    },
+    {
+      "bug_id": "pg-b8",
+      "desc": "Supplying a garbage continuation token silently returns the first page instead of reporting the token as invalid",
+      "off_axis": true,
+      "fix_patch": "fixes/pg-b8.patch"
+    }
+  ],
+  "interacting_sets": []
+}
