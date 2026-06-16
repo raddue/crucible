@@ -22,6 +22,7 @@ Phase 1 only: identification breadth, execution stubbed. See the gated design
 from __future__ import annotations
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import math
 import re
@@ -32,6 +33,7 @@ from pathlib import Path
 
 from ._dispatch_paths import fixture_sha, resolve_dispatch_dir, template_sha
 from ._runid import validate_run_id
+from . import _oracle
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _EVALS_DIR = Path(__file__).resolve().parent
@@ -53,6 +55,61 @@ DIMENSION_TITLES = ["Wiring", "Integration", "Edge Cases",
                     "State & Lifecycle", "Regression"]
 
 _DEFAULT_TRIALS = 5  # decision-run default (design "Cost envelope")
+
+# --- Phase 1b: seeded-repo EXECUTION mode (4 arms + oracle) ----------------
+# Forked entirely behind `mode` so the Phase-1 stage()/score() bodies (and their
+# 30+ guard tests) are byte-untouched. Phase-1 manifests carry no `mode` →
+# score() falls through to the 3-arm judge path; Phase-1b manifests carry
+# mode:"phase1b-exec" or mode:"pilot" → the oracle path below.
+_FIXTURES_DIR = _EVALS_DIR / "fixtures"
+_WITHOUT_EXEC = _EVALS_DIR / "without-prompt-eval.md"   # the SINGLE SOURCE (§2/C0)
+_POOL_EXEC = _EVALS_DIR / "pool-prompt-eval.md"         # byte-identical to WITHOUT
+_NEUTRAL_PROXY = _EVALS_DIR / "neutral-proxy-prompt-eval.md"  # WITHOUT minus framing
+_EXEC_REPOS = ("notify", "rbac", "paginate")
+_EXEC_ARMS = ("with", "pool", "mid", "without")
+_PILOT_ARMS = ("neutral-proxy",)
+_PILOT_MIN_TRIALS = 3                 # §5/M6 floor for the calibration pilot
+_PILOT_BAND = (0.40, 0.70)            # §5 keep zone (percentage governs — M1)
+_WITHOUT_CEILING = 0.70               # §7 F2: WITHOUT ceiling-broken threshold
+_PER_AGENT_TEST_BUDGET = 5            # §6/S3 uniform per-agent budget (no per-arm 25)
+# Present in WITHOUT/POOL, REMOVED in the neutral proxy (S4 framing check).
+_FRAMING_MARKER = "cross-component"
+
+# The shared WITH/MID procedural EXECUTION scaffold (§9 S1 scaffold parity): WITH's
+# 5 dimension agents and the single MID agent embed this VERBATIM, so their scaffold
+# hashes are equal by construction; they differ only in the lens section (one lens
+# vs all five). The lens text itself is single-sourced from the Dimension Reference
+# in `inquisitor-dimension-prompt-eval.md` (parse_dimension_blocks) — never copied.
+_EXEC_SCAFFOLD = """\
+# Inquisitor execution agent
+
+You are a relentless hunter for cross-component seam bugs. You are given a Python
+repository (its path is provided at dispatch). Your job is to write AND run pytest
+tests that expose seam bugs, then leave the test files in the repository.
+
+## Your Job
+1. Read the repository source under `src/`.
+2. Through the dimension lens(es) below, identify the most likely cross-component
+   seam defects (a producer/consumer mismatch, an unwired component, state lost
+   across a lifecycle, an unhandled edge between layers, a regression).
+3. Write pytest tests that FAIL when such a defect is present and PASS on correct
+   code. Import the package from `src/`; run under `python3 -m pytest`.
+4. RUN them with `python3 -m pytest` and iterate until they execute cleanly (no
+   collection/import errors) — a test you do not run does not count.
+5. Leave your final test file(s) in the repository's test directory.
+
+## Budget
+At most **5 tests** (this per-agent budget is uniform across every arm).
+
+## What You Must NOT Do
+- Do NOT edit the repository source — write tests only.
+- Do NOT describe tests you do not actually run.
+"""
+
+
+def _sha_text(text: str) -> str:
+    """sha256 of a string (for hashing the in-module exec scaffold)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 # S-2 guard: a rendered WITH dispatch must carry NO residual [DIMENSION_*] slot.
 # Scoped to the [DIMENSION_*] slot class ONLY (NOT arbitrary [...] tokens): the
@@ -356,9 +413,16 @@ def _load_fixtures() -> list:
 
 
 def stage(run_id: str, *, trials: int = _DEFAULT_TRIALS,
-          fixture: int | str | None = None, force: bool = False) -> Path:
+          fixture: int | str | None = None, force: bool = False,
+          repo: str | None = None, exec_mode: bool = False,
+          pilot: bool = False) -> Path:
     """Render the three-arm dispatch files + the two shared prompt files; write
-    stage-manifest.json. Returns the dispatch directory path."""
+    stage-manifest.json. Returns the dispatch directory path.
+
+    Phase 1b: when exec_mode / repo / pilot is set, fork to stage_exec() (the
+    seeded-repo 4-arm execution path) — the Phase-1 body below is left untouched."""
+    if exec_mode or repo is not None or pilot:
+        return stage_exec(run_id, trials=trials, repo=repo, pilot=pilot, force=force)
     validate_run_id(run_id)
     if trials < 1:
         raise ValueError(f"--trials must be >= 1 (got {trials})")
@@ -591,6 +655,12 @@ def score(run_id: str, *, allow_incomplete: bool = False) -> int:
         print(f"[fatal] no stage-manifest.json at {manifest_path}", file=sys.stderr)
         return 1
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # Phase 1b fork: an exec/pilot manifest routes to the oracle-driven scorer; a
+    # Phase-1 manifest (no `mode`) falls through to the 3-arm judge path below (S1).
+    if manifest.get("mode") in ("phase1b-exec", "pilot"):
+        return score_exec(run_id, manifest, dispatch_dir,
+                          allow_incomplete=allow_incomplete)
 
     # .collect-status gating (test 5): refuse without it unless --allow-incomplete.
     status_file = dispatch_dir / ".collect-status"
@@ -939,6 +1009,305 @@ def _secondary_graded_label(lr: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 1b: EXECUTION-mode stage_exec() + score_exec() (4 arms + the oracle)
+# ---------------------------------------------------------------------------
+
+
+def _exec_with_dimension(title: str, block: str) -> str:
+    """A WITH dimension exec prompt: shared scaffold + this single lens block."""
+    return (_EXEC_SCAFFOLD + "\n## Your dimension\n\n### " + block.rstrip() + "\n")
+
+
+def _exec_mid(blocks: list) -> str:
+    """The MID exec prompt: the SAME shared scaffold + all five lens blocks."""
+    body = _EXEC_SCAFFOLD + "\n## All five dimensions\n\nApply every one of these "
+    body += "five dimension lenses:\n\n"
+    body += "\n".join("### " + b.rstrip() + "\n" for _t, b in blocks)
+    return body
+
+
+def _select_exec_repos(repo) -> list:
+    if repo is None:
+        repos = list(_EXEC_REPOS)
+    else:
+        if repo not in _EXEC_REPOS:
+            raise ValueError(f"--repo {repo!r} not in {_EXEC_REPOS}")
+        repos = [repo]
+    for r in repos:
+        if not (_FIXTURES_DIR / r / "manifest.json").exists():
+            raise ValueError(f"seeded repo {r!r} missing manifest.json under "
+                             f"{_FIXTURES_DIR}")
+    return repos
+
+
+def stage_exec(run_id: str, *, trials: int, repo: str | None = None,
+               pilot: bool = False, force: bool = False) -> Path:
+    """Render the 4-arm (or pilot neutral-proxy) execution cells over the seeded
+    repos, materialize one repo copy per producer, write a mode-stamped manifest."""
+    validate_run_id(run_id)
+    if trials < 1:
+        raise ValueError(f"--trials must be >= 1 (got {trials})")
+    if pilot and trials < _PILOT_MIN_TRIALS:
+        raise ValueError(
+            f"--pilot enforces a floor of {_PILOT_MIN_TRIALS} trials (got {trials})")
+    repos = _select_exec_repos(repo)
+    blocks = parse_dimension_blocks(_DIM_TEMPLATE.read_text(encoding="utf-8"))
+
+    dispatch_dir = resolve_dispatch_dir(run_id)
+    if dispatch_dir.exists():
+        if not force:
+            raise FileExistsError(f"dispatch dir {dispatch_dir} exists; pass force=True")
+        shutil.rmtree(dispatch_dir)
+    dispatch_dir.mkdir(parents=True)
+    copies_root = dispatch_dir / "copies"
+    copies_root.mkdir()
+
+    # Stage the three bare prompt artifacts verbatim (hashed in the manifest).
+    for src in (_WITHOUT_EXEC, _POOL_EXEC, _NEUTRAL_PROXY):
+        (dispatch_dir / src.name).write_text(src.read_text(encoding="utf-8"),
+                                             encoding="utf-8")
+    # Render the WITH dim + MID exec prompts (shared scaffold + single-source lenses).
+    with_dim_files = {}
+    for n, (title, block) in enumerate(blocks, 1):
+        fn = f"with-dim{n}-{_slug(title)}.md"
+        (dispatch_dir / fn).write_text(_exec_with_dimension(title, block), encoding="utf-8")
+        with_dim_files[title] = fn
+    (dispatch_dir / "mid.md").write_text(_exec_mid(blocks), encoding="utf-8")
+
+    def copy_for(cell_key: str, idx: int, repo_id: str) -> str:
+        dst = copies_root / f"{cell_key}-p{idx}"
+        shutil.copytree(_FIXTURES_DIR / repo_id, dst)
+        return str(dst.relative_to(dispatch_dir))
+
+    arms = _PILOT_ARMS if pilot else _EXEC_ARMS
+    cells: list = []
+    for repo_id in repos:
+        for trial in range(1, trials + 1):
+            if pilot:
+                key = f"{repo_id}-t{trial}-neutral-proxy"
+                cells.append({
+                    "repo_id": repo_id, "trial": trial, "arm": "neutral-proxy",
+                    "producers": [{"agent": 1,
+                                   "dispatch_file": _NEUTRAL_PROXY.name,
+                                   "repo_copy": copy_for(key, 1, repo_id)}],
+                    "result_file": f"{key}-tests.json"})
+                continue
+            specs = [
+                ("with", [(i, with_dim_files[t]) for i, (t, _b) in enumerate(blocks, 1)]),
+                ("pool", [(i, _POOL_EXEC.name) for i in range(1, 6)]),
+                ("mid", [(1, "mid.md")]),
+                ("without", [(1, _WITHOUT_EXEC.name)]),
+            ]
+            for arm, prods in specs:
+                key = f"{repo_id}-t{trial}-{arm}"
+                producers = [{"agent": i, "dispatch_file": df,
+                              "repo_copy": copy_for(key, i, repo_id)}
+                             for (i, df) in prods]
+                cells.append({"repo_id": repo_id, "trial": trial, "arm": arm,
+                              "producers": producers,
+                              "result_file": f"{key}-tests.json"})
+
+    scaffold_sha = _sha_text(_EXEC_SCAFFOLD)
+    manifest = {
+        "run_id": run_id,
+        "stage_timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "mode": "pilot" if pilot else "phase1b-exec",
+        "arms": list(arms),
+        "trials": trials,
+        "repos": repos,
+        "per_agent_test_budget": _PER_AGENT_TEST_BUDGET,
+        "prompt_shas": {
+            "with_scaffold": scaffold_sha,
+            "mid_scaffold": scaffold_sha,                 # == with_scaffold (S1)
+            "without": template_sha(_WITHOUT_EXEC),
+            "pool": template_sha(_POOL_EXEC),             # == without (POOL parity)
+            "neutral_proxy": template_sha(_NEUTRAL_PROXY),
+        },
+        "cells": cells,
+    }
+    (dispatch_dir / "stage-manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8")
+    return dispatch_dir
+
+
+def _pilot_band(mean_rate: float) -> dict:
+    """§5: the neutral-proxy mean vs the 40-70% keep band (percentage governs)."""
+    lo, hi = _PILOT_BAND
+    verdict = "harden" if mean_rate > hi else "soften" if mean_rate < lo else "in-band"
+    return {"mean_rate": mean_rate, "band": [lo, hi], "verdict": verdict}
+
+
+def _exec_cell_caught(cell, dispatch_dir, repo_meta, complete):
+    """Run the oracle over one cell's harvested test files. Returns (caught_set,
+    res_or_None, fatal_msg_or_None)."""
+    rf = dispatch_dir / cell["result_file"]
+    if not rf.exists():
+        return set(), None, (f"missing result_file {cell['result_file']}" if complete else None)
+    data = json.loads(rf.read_text(encoding="utf-8"))
+    if data.get("dispatch_status") != "OK":
+        return set(), None, (f"cell {cell['result_file']} dispatch_status != OK"
+                             if complete else None)
+    test_files = [Path(p) for p in data.get("test_files", [])]
+    res = _oracle.caught_bugs(test_files, _FIXTURES_DIR / cell["repo_id"],
+                              interacting_sets=repo_meta[cell["repo_id"]]["isets"])
+    return res["caught"], res, None
+
+
+def _two_of_three(count: int, total: int) -> int:
+    """The ≥2/3 threshold count for `total` repos (3 repos → 2; 1 → 1)."""
+    return math.ceil(2 * total / 3)
+
+
+def score_exec(run_id: str, manifest: dict, dispatch_dir: Path, *,
+               allow_incomplete: bool) -> int:
+    """Oracle-driven scoring for a Phase-1b exec/pilot run. Mode-forked from
+    score() so the Phase-1 judge path is untouched (S1)."""
+    mode = manifest["mode"]
+    arms = tuple(manifest["arms"])
+    repos = list(manifest["repos"])
+    trials = manifest["trials"]
+
+    status_file = dispatch_dir / ".collect-status"
+    if not status_file.exists() and not allow_incomplete:
+        print(f"[fatal] no .collect-status in {dispatch_dir}; collect is incomplete "
+              f"(pass --allow-incomplete for a smoke/debug score)", file=sys.stderr)
+        return 1
+    complete = not allow_incomplete
+
+    repo_meta: dict = {}
+    for r in repos:
+        gt = json.loads((_FIXTURES_DIR / r / "ground-truth-bugs.json").read_text(
+            encoding="utf-8"))
+        bug_ids = [b["bug_id"] for b in gt["bugs"]]
+        repo_meta[r] = {
+            "bug_ids": bug_ids,
+            "off": {b["bug_id"]: bool(b["off_axis"]) for b in gt["bugs"]},
+            "isets": gt.get("interacting_sets", []),
+            "n": len(bug_ids),
+        }
+
+    cells_by = {(c["arm"], c["repo_id"], c["trial"]): c for c in manifest["cells"]}
+    if complete:
+        expected = {(a, r, t) for a in arms for r in repos
+                    for t in range(1, trials + 1)}
+        missing = sorted(expected - set(cells_by))
+        dups = [k for k in cells_by] if len(cells_by) != len(manifest["cells"]) else []
+        if missing or dups:
+            print(f"[fatal] exec cell-grid incomplete for {dispatch_dir}: "
+                  f"missing={missing} (arms {list(arms)} × repos {repos} × "
+                  f"trials 1..{trials}); refusing to score", file=sys.stderr)
+            return 1
+
+    # caught[arm][repo][trial] -> set of caught ids
+    caught: dict = {a: {r: {} for r in repos} for a in arms}
+    broad_per_arm: dict = {a: [] for a in arms}
+    flaky_per_arm: dict = {a: 0 for a in arms}
+    for (arm, r, t), cell in cells_by.items():
+        cset, res, fatal = _exec_cell_caught(cell, dispatch_dir, repo_meta, complete)
+        if fatal:
+            print(f"[fatal] {fatal}", file=sys.stderr)
+            return 1
+        caught[arm][r][t] = cset
+        if res is not None:
+            broad_per_arm[arm].extend(res["broad_test_catches"].values())
+            flaky_per_arm[arm] += res["flaky_discards"]
+
+    total_bugs = sum(repo_meta[r]["n"] for r in repos)
+
+    def repo_trial_rate(a, r, t):
+        return len(caught[a][r].get(t, set())) / repo_meta[r]["n"] if repo_meta[r]["n"] else 0.0
+
+    def repo_mean_rate(a, r):
+        return statistics.mean([repo_trial_rate(a, r, t)
+                                for t in range(1, trials + 1)])
+
+    # --- pilot path: neutral-proxy band per repo, no 4-arm grid ---
+    if mode == "pilot":
+        per_repo = {r: _pilot_band(repo_mean_rate("neutral-proxy", r)) for r in repos}
+        last_run = {
+            "run_id": run_id, "mode": mode, "complete": complete, "trials": trials,
+            "repos": repos, "arms": list(arms),
+            "pilot_band": {"band": list(_PILOT_BAND), "per_repo": per_repo},
+            "flaky_discards": flaky_per_arm,
+        }
+        (_EVALS_DIR / "last_run.json").write_text(json.dumps(last_run, indent=2),
+                                                  encoding="utf-8")
+        return 0
+
+    # --- decision path: 4-arm deltas + WITHOUT ceiling + KEEP statistic ---
+    per_trial_rate = {a: [sum(len(caught[a][r].get(t, set())) for r in repos)
+                          / total_bugs for t in range(1, trials + 1)]
+                      for a in arms}
+
+    def majority_caught(a, r, b):
+        hits = sum(1 for t in range(1, trials + 1) if b in caught[a][r].get(t, set()))
+        return hits * 2 > trials
+
+    arm_repo_caught = {a: {r: sum(1 for b in repo_meta[r]["bug_ids"]
+                                  if majority_caught(a, r, b)) for r in repos}
+                       for a in arms}
+    arm_rate = {a: sum(arm_repo_caught[a][r] for r in repos) / total_bugs
+                for a in arms}
+
+    without_means = {r: repo_mean_rate("without", r) for r in repos}
+    with_means = {r: repo_mean_rate("with", r) for r in repos}
+    below = sum(1 for r in repos if without_means[r] <= _WITHOUT_CEILING)
+    without_ceiling_broken = below >= _two_of_three(below, len(repos))
+    per_repo_sign = {r: with_means[r] - without_means[r] for r in repos}
+    positive = sum(1 for r in repos if per_repo_sign[r] > 0)
+    sign_holds = positive >= _two_of_three(positive, len(repos))
+
+    deltas = {
+        "_note": ("paired = mean of per-trial deltas; the KEEP gate reads "
+                  "beyond_spread on with_without (NOT trial_spread — S-B)"),
+        "with_without": _delta_block(per_trial_rate["with"],
+                                     per_trial_rate["without"], with_beyond=True),
+        "with_pool": _delta_block(per_trial_rate["with"],
+                                  per_trial_rate["pool"], with_beyond=True),
+        "pool_without": _delta_block(per_trial_rate["pool"],
+                                     per_trial_rate["without"], with_beyond=False),
+        "with_mid": _delta_block(per_trial_rate["with"],
+                                 per_trial_rate["mid"], with_beyond=False),
+    }
+
+    off_bugs = [(r, b) for r in repos for b in repo_meta[r]["bug_ids"]
+                if repo_meta[r]["off"][b]]
+    off_total = len(off_bugs)
+    off_pass = {a: sum(1 for (r, b) in off_bugs if majority_caught(a, r, b))
+                for a in arms}
+
+    last_run = {
+        "run_id": run_id, "mode": mode, "complete": complete, "trials": trials,
+        "repos": repos, "arms": list(arms), "graded_bugs": total_bugs,
+        "arm_rates": {a: {"rate": arm_rate[a], "per_repo": arm_repo_caught[a]}
+                      for a in arms},
+        "deltas": deltas,
+        "without_ceiling_broken": without_ceiling_broken,
+        "without_repo_means": without_means,
+        "keep_statistic": {
+            "_note": ("KEEP = beyond_spread on with_without AND positive sign on "
+                      ">=2/3 repos; trial_spread is explicitly REJECTED as the gate "
+                      "(S-B). score surfaces the inputs; the human reads the §7 "
+                      "branches — it emits no keep/condemn verdict."),
+            "statistic": "beyond_spread",
+            "beyond_spread": deltas["with_without"]["beyond_spread"],
+            "per_repo_sign": per_repo_sign,
+            "sign_holds_2of3": sign_holds,
+            "without_ceiling_broken": without_ceiling_broken,
+        },
+        "off_axis_diagnostic": {a: {"pass": off_pass[a], "total": off_total,
+                                    "rate": _rate(off_pass[a], off_total)}
+                                for a in arms},
+        "broad_test_catches": {a: (statistics.mean(broad_per_arm[a])
+                                   if broad_per_arm[a] else 0.0) for a in arms},
+        "flaky_discards": flaky_per_arm,
+    }
+    (_EVALS_DIR / "last_run.json").write_text(json.dumps(last_run, indent=2),
+                                              encoding="utf-8")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -947,10 +1316,17 @@ def _parse_args(argv: list) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Inquisitor fan-out eval harness.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp_stage = sub.add_parser("stage", help="Render three-arm dispatch files")
+    sp_stage = sub.add_parser("stage", help="Render dispatch files (3-arm judge "
+                              "or, with --exec/--repo/--pilot, 4-arm execution)")
     sp_stage.add_argument("run_id")
-    sp_stage.add_argument("--trials", type=int, default=_DEFAULT_TRIALS)
-    sp_stage.add_argument("--fixture", default=None)
+    # default None so --pilot can floor to 3 while bare stage defaults to 5.
+    sp_stage.add_argument("--trials", type=int, default=None)
+    sp_stage.add_argument("--fixture", default=None)          # Phase-1 selector
+    sp_stage.add_argument("--repo", default=None)             # Phase-1b seeded repo
+    sp_stage.add_argument("--exec", dest="exec_mode", action="store_true",
+                          help="Phase-1b execution mode over all seeded repos")
+    sp_stage.add_argument("--pilot", action="store_true",
+                          help="Phase-1b calibration pilot (neutral-proxy only)")
     sp_stage.add_argument("--force", action="store_true")
 
     sp_score = sub.add_parser("score", help="Aggregate verdicts + write last_run.json")
@@ -963,8 +1339,12 @@ def _parse_args(argv: list) -> argparse.Namespace:
 def main(argv: list | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     if args.cmd == "stage":
-        dispatch_dir = stage(args.run_id, trials=args.trials,
-                             fixture=args.fixture, force=args.force)
+        trials = args.trials
+        if trials is None:                # --pilot floors to 3; bare stage → 5
+            trials = _PILOT_MIN_TRIALS if args.pilot else _DEFAULT_TRIALS
+        dispatch_dir = stage(args.run_id, trials=trials, fixture=args.fixture,
+                             force=args.force, repo=args.repo,
+                             exec_mode=args.exec_mode, pilot=args.pilot)
         print(dispatch_dir)
         return 0
     if args.cmd == "score":
