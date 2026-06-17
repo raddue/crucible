@@ -21,10 +21,10 @@ class Paginator:
         Returns {"items": [...], "next_cursor": <token-or-None>}.
         """
         if limit is None:
-            # BUG pg-b6: the documented default page size is DEFAULT_PAGE_SIZE
-            # (5); this hardcodes 10, so a caller relying on the default walks
-            # the collection in the wrong-sized pages.
-            limit = 10
+            # The standalone-paginator default when no limit is supplied. The
+            # public request path resolves the caller-facing default earlier
+            # (normalize_limit); this internal default must equal that value.
+            limit = DEFAULT_PAGE_SIZE
         boundary_id = cursor_mod.decode_cursor(token)
         return self.page_from_boundary(boundary_id, limit)
 

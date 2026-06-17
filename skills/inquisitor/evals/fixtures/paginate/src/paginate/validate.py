@@ -11,7 +11,10 @@ def normalize_limit(limit):
     floored to the default), never passed through to the slice as-is.
     """
     if limit is None:
-        return DEFAULT_PAGE_SIZE
+        # BUG pg-b6: the caller-facing default page size regressed. Omitting the
+        # limit must yield DEFAULT_PAGE_SIZE (5); this returns 10, so a caller
+        # relying on the default walks the collection in the wrong-sized pages.
+        return 10
     try:
         limit = int(limit)
     except (TypeError, ValueError):

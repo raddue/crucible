@@ -347,7 +347,15 @@ def copy_repo_for_producer(repo_dir, dst) -> None:
         src = repo_dir / name
         if not src.exists():
             continue
-        shutil.copytree(src, dst / name)
+        # S-1: NEVER carry bytecode into the producer sandbox. A stray
+        # `__pycache__/*.pyc` (any in-place import or a pytest run without
+        # PYTHONDONTWRITEBYTECODE generates one) would otherwise be copied
+        # verbatim — and the strip below only touches `*.py`. A `.pyc` retains
+        # every docstring as `co_consts` AND bakes the absolute source path into
+        # `co_filename`, handing the producer the answer key un-strippably.
+        shutil.copytree(
+            src, dst / name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
     # Strip every producer-visible subtree, not just src/: tests/ is equally
     # producer-visible (`_PRODUCER_VISIBLE`), so an annotated test file would
     # otherwise carry the answer key into the sandbox verbatim (S-1).
@@ -386,6 +394,44 @@ def _assert_no_leak(repo_copy) -> None:
                 raise AssertionError(
                     f"producer repo_copy leaks bug-identity token {m.group(0)!r} in "
                     f"{py.relative_to(repo_copy)}: {repo_copy}")
+    # S-1 (defense-in-depth): bytecode must NEVER reach a producer. A `.pyc`/`.pyo`
+    # is un-strippable and carries every docstring (`co_consts`) plus the absolute
+    # source path (`co_filename`) — i.e. the answer key. `copy_repo_for_producer`
+    # now ignores it on copy; this is the loud-failure guard against a regression
+    # (or a copy assembled some other way) that would let one slip through.
+    for sub in _PRODUCER_VISIBLE:
+        sub_root = repo_copy / sub
+        if not sub_root.exists():
+            continue
+        for p in sub_root.rglob("*"):
+            if p.is_dir() and p.name == "__pycache__":
+                raise AssertionError(
+                    f"producer repo_copy carries a __pycache__ dir (un-strippable "
+                    f"bytecode = leaked docstrings + co_filename answer-key path) at "
+                    f"{p.relative_to(repo_copy)}: {repo_copy}")
+            if p.is_file() and p.suffix in (".pyc", ".pyo"):
+                raise AssertionError(
+                    f"producer repo_copy carries a bytecode file {p.suffix!r} "
+                    f"(un-strippable; leaks docstrings + co_filename answer-key path) "
+                    f"at {p.relative_to(repo_copy)}: {repo_copy}")
+    # Defense-in-depth: also catch bytecode sitting at the repo_copy ROOT (not
+    # under any `_PRODUCER_VISIBLE` subtree). No live path places a `.pyc`/`.pyo`
+    # or a bare `__pycache__/` at the root today; this is a purely defensive
+    # tightening so a copy assembled some other way can't sneak un-strippable
+    # bytecode in just outside the subtree scan above.
+    for p in repo_copy.glob("*"):
+        if p.name in _PRODUCER_VISIBLE:
+            continue  # already covered by the subtree scan above
+        if p.is_dir() and p.name == "__pycache__":
+            raise AssertionError(
+                f"producer repo_copy carries a __pycache__ dir (un-strippable "
+                f"bytecode = leaked docstrings + co_filename answer-key path) at "
+                f"{p.relative_to(repo_copy)}: {repo_copy}")
+        if p.is_file() and p.suffix in (".pyc", ".pyo"):
+            raise AssertionError(
+                f"producer repo_copy carries a bytecode file {p.suffix!r} "
+                f"(un-strippable; leaks docstrings + co_filename answer-key path) "
+                f"at {p.relative_to(repo_copy)}: {repo_copy}")
     # Belt-and-suspenders: pin the documented `tests/` invariant ("empty dir +
     # conftest.py; arms/oracle write test files here") as a machine-checked fact.
     # The token/prose guards above already cover any annotated tests/ file; this

@@ -257,6 +257,58 @@ class ProducerCopyTest(unittest.TestCase):
         # tests/ = conftest.py only passes the guard
         _fixtures._assert_no_leak(copy)
 
+    def test_bytecode_never_reaches_producer_copy(self):
+        # S-1: a stray `src/<pkg>/__pycache__/*.pyc` in the committed tree (any
+        # in-place import or a pytest run w/o PYTHONDONTWRITEBYTECODE generates one)
+        # must NOT ride into the producer sandbox. A `.pyc` is un-strippable and
+        # retains every docstring (co_consts) + the absolute source path
+        # (co_filename) = the answer key. copy_repo_for_producer ignores bytecode on
+        # copy, and _assert_no_leak fails loud if any bytecode reaches a copy.
+        import py_compile
+        pkg = self.repo / "src" / "toy"
+        # a real compiled module whose .pyc genuinely embeds a docstring
+        (pkg / "tainted.py").write_text(
+            '"""' + self.DESC + ' (nt-b8). The fix clamps it."""\n'
+            'VALUE = 1\n')
+        py_compile.compile(str(pkg / "tainted.py"), doraise=True)
+        cache = pkg / "__pycache__"
+        self.assertTrue(cache.exists() and any(cache.glob("*.pyc")),
+                        "precondition: a .pyc was generated in the source tree")
+
+        copy = pathlib.Path(self._tmp.name) / "copy_bytecode"
+        _fixtures.copy_repo_for_producer(self.repo, copy)
+
+        # (a) NO bytecode rode into the producer copy
+        self.assertEqual(list(copy.rglob("*.pyc")), [])
+        self.assertEqual(list(copy.rglob("*.pyo")), [])
+        self.assertEqual(list(copy.rglob("__pycache__")), [])
+        # (b) _assert_no_leak passes on the clean copy
+        _fixtures._assert_no_leak(copy)
+        # (c) ... and RAISES if a .pyc is planted into the copy (bytecode guard)
+        planted = copy / "src" / "toy" / "__pycache__"
+        planted.mkdir()
+        (planted / "m.cpython-99.pyc").write_bytes(b"\x00\x01\x02")
+        with self.assertRaises(AssertionError) as cm:
+            _fixtures._assert_no_leak(copy)
+        self.assertIn("bytecode", str(cm.exception).lower())
+        (planted / "m.cpython-99.pyc").unlink()
+        planted.rmdir()
+        # (d) ... and RAISES on a bare __pycache__ dir too
+        bare = copy / "tests" / "__pycache__"
+        bare.mkdir()
+        with self.assertRaises(AssertionError) as cm2:
+            _fixtures._assert_no_leak(copy)
+        self.assertIn("__pycache__", str(cm2.exception))
+        bare.rmdir()
+        # (e) defense-in-depth: a `.pyc` planted at the copy ROOT (outside any
+        # producer-visible subtree) also trips the guard
+        root_pyc = copy / "stray.cpython-99.pyc"
+        root_pyc.write_bytes(b"\x00\x01\x02")
+        with self.assertRaises(AssertionError) as cm3:
+            _fixtures._assert_no_leak(copy)
+        self.assertIn("bytecode", str(cm3.exception).lower())
+        root_pyc.unlink()
+
     def test_missing_patch_cleans_up_tmp(self):
         # M-1: the missing-patch error path rmtrees its temp dir before raising,
         # matching its two sibling error paths (timeout, patch-reject). Manifest

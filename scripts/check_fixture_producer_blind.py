@@ -25,8 +25,17 @@ and strips ALL comments and docstrings from every copied producer-visible `*.py`
 real producer copy for every seeded repo and asserts:
   - (`_fixtures._assert_no_leak`) no answer-key path (`exemplars/`, `fixes/`,
     `manifest.json`, `ground-truth-*`) survives, no bug-identity leak TOKEN survives
-    in any copied producer-visible `*.py` (`src/` AND `tests/`), and the copied
-    `tests/` holds nothing but `conftest.py` (the documented invariant); AND
+    in any copied producer-visible `*.py` (`src/` AND `tests/`), NO bytecode
+    (`*.pyc`/`*.pyo` or a `__pycache__/` dir) survives anywhere under the
+    producer-visible subtrees, and the copied `tests/` holds nothing but
+    `conftest.py` (the documented invariant); AND
+
+The bytecode channel (S-1) is now CLOSED on both sides: `copy_repo_for_producer`
+ignores `__pycache__`/`*.pyc`/`*.pyo` on copy (so a stray compiled module in the
+committed tree can't ride into the sandbox), and `_assert_no_leak` fails loud if
+any bytecode reaches a producer copy — a `.pyc` is un-strippable and embeds every
+docstring (`co_consts`) plus the absolute source path (`co_filename`), i.e. the
+answer key, which the `*.py`-only strip and token/prose scans would all miss.
   - (`_fixtures.assert_no_description_leak`, ADVERSARIAL) no bug-DESCRIPTION prose
     survives — loaded from each repo's `ground-truth-bugs.json`, it asserts no
     >=N-word window of any bug `desc`, and no literal `"The fix"`, appears in any
@@ -95,6 +104,31 @@ def check_repo(repo_dir) -> list:
             _fixtures._assert_no_leak(copy)
         except AssertionError as e:
             violations.append(str(e))
+        # S-1: bytecode channel explicitly re-asserted here (also covered by
+        # _assert_no_leak above). A `.pyc`/`.pyo` or `__pycache__/` reaching a
+        # producer copy is un-strippable and leaks docstrings + the co_filename
+        # answer-key path, so it must never appear under a producer-visible subtree.
+        for sub in _fixtures._PRODUCER_VISIBLE:
+            sub_root = copy / sub
+            if not sub_root.exists():
+                continue
+            for p in sub_root.rglob("*"):
+                if ((p.is_dir() and p.name == "__pycache__")
+                        or (p.is_file() and p.suffix in (".pyc", ".pyo"))):
+                    violations.append(
+                        f"producer copy carries bytecode {p.relative_to(copy)} "
+                        f"(un-strippable; leaks docstrings + co_filename): {repo_dir.name}")
+        # Defense-in-depth: bytecode at the copy ROOT (outside any producer-visible
+        # subtree) is just as un-strippable a leak; catch it too (matches the
+        # root-level scan in `_fixtures._assert_no_leak`).
+        for p in copy.glob("*"):
+            if p.name in _fixtures._PRODUCER_VISIBLE:
+                continue  # covered by the subtree scan above
+            if ((p.is_dir() and p.name == "__pycache__")
+                    or (p.is_file() and p.suffix in (".pyc", ".pyo"))):
+                violations.append(
+                    f"producer copy carries bytecode {p.relative_to(copy)} "
+                    f"(un-strippable; leaks docstrings + co_filename): {repo_dir.name}")
         # ADVERSARIAL (S-1): the bug DESCRIPTIONS — not just the id token — must be
         # absent. Loaded from the source repo's GT (the copy excludes it), checked
         # WITHOUT _LEAK_RE so the guard is independent of the strip mechanism.
@@ -237,6 +271,23 @@ def selftest() -> int:
         except AssertionError:
             pass
         (copy / "src" / "pkg" / "leak.py").unlink()
+
+        # S-1 (bytecode channel): copy_repo_for_producer must NOT carry bytecode,
+        # and _assert_no_leak must fail loud if any reaches the copy. The clean copy
+        # has none; planting a `.pyc` (or a `__pycache__/` dir) trips the guard.
+        if list(copy.rglob("*.pyc")) or list(copy.rglob("__pycache__")):
+            failures.append("copy_repo_for_producer carried bytecode into the copy")
+        (copy / "src" / "pkg" / "__pycache__").mkdir()
+        (copy / "src" / "pkg" / "__pycache__" / "m.cpython-99.pyc").write_bytes(b"\x00\x01")
+        try:
+            _fixtures._assert_no_leak(copy)
+            failures.append("_assert_no_leak missed a planted .pyc / __pycache__ (S-1)")
+        except AssertionError as e:
+            if "bytecode" not in str(e) and "__pycache__" not in str(e):
+                failures.append(
+                    f"_assert_no_leak caught bytecode but not via the bytecode guard: {e}")
+        import shutil as _sh
+        _sh.rmtree(copy / "src" / "pkg" / "__pycache__")
 
         # S-1: the producer-visible tests/ subtree is in scope of BOTH guards. Drop
         # an ANNOTATED test file (leak token + a GT-desc prose window SPLIT across a
