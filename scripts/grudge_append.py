@@ -24,6 +24,13 @@ import os
 import sys
 from typing import List, Optional, Tuple
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from scripts.atomic_write import atomic_write_text  # noqa: E402
+
 SCHEMA_VERSION = 1
 
 
@@ -193,8 +200,10 @@ def append(
     }
     os.makedirs(target_dir, exist_ok=True)
     path = os.path.join(target_dir, f"{h}.md")
-    with open(path, "w", encoding="utf-8") as fh:  # overwrite-on-key (idempotent)
-        fh.write(_render(record))
+    # #400: overwrite-on-key is idempotent (content is deterministic by hash),
+    # so parallel same-key writers race on this path. Atomic replace makes that
+    # safe — last full file wins, no reader ever sees a truncated grudge.
+    atomic_write_text(path, _render(record))
     return path
 
 

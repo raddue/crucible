@@ -9,6 +9,8 @@ Invariants enforced here:
 - L-1 append-only (O_APPEND, never rewrite a line)
 - L-6 kill-switch (CRUCIBLE_CALIBRATION_DISABLED=1 → no-op return BEFORE any lock)
 - L-8 16 KiB line cap + gated_files truncation at 500 + highest_finding cap at 256 chars
+- #402 identity gate: refuse an entry lacking a non-empty string run_id AND skill
+  (the (run_id, skill) join key must never collapse to the shared "unknown" bucket)
 - Crash-window recovery (>60s stale lockdir with branch A live/dead, branch B malformed)
 
 Pure stdlib. No third-party deps.
@@ -86,6 +88,13 @@ def default_repo(start_dir: Optional[str] = None) -> str:
 
 def _warn(msg: str) -> None:
     print(f"[ledger_append WARN] {msg}", file=sys.stderr)
+
+
+def _valid_identity(value) -> bool:
+    """True iff `value` is a non-empty, non-whitespace string — the requirement
+    for either half of the (run_id, skill) ledger join key (#402). A missing,
+    empty, whitespace-only, or non-string value has no stable identity."""
+    return isinstance(value, str) and value.strip() != ""
 
 
 def _truncate_payload(entry: dict, max_gated_files: int,
@@ -251,8 +260,35 @@ def append(
     if _kill_switch_active():
         return False
 
-    run_id = entry.get("run_id", "unknown")
-    skill = entry.get("skill", "unknown")
+    # #402 identity gate. append() serves BOTH central stores, which carry
+    # different join keys:
+    #   - runs.jsonl  → (run_id, skill)        (reconcile_ledger.ledger_entry_hash)
+    #   - falsification log → ledger_entry_hash (the walkback / predicate rows)
+    # An entry carrying NEITHER key collapses to the shared "unknown" bucket —
+    # silently merging unrelated runs across every repo in the machine-local
+    # central store, where caller_dedup drops the second as a "duplicate" and
+    # compute_brier mis-buckets them. Require at least one valid join key.
+    # The OR-rule's soundness depends on ledger_entry_hash appearing ONLY on
+    # falsification-log rows (never on a runs-ledger row); the consumer-side
+    # "unknown" fallback in reconcile_ledger.compute_brier is a known residual
+    # deliberately deferred to the read-path follow-up PR.
+    run_id = entry.get("run_id")
+    skill = entry.get("skill")
+    entry_hash = entry.get("ledger_entry_hash")
+    has_runs_identity = _valid_identity(run_id) and _valid_identity(skill)
+    if not (has_runs_identity or _valid_identity(entry_hash)):
+        _warn(
+            f"identity-less entry rejected (run_id={run_id!r} skill={skill!r} "
+            f"ledger_entry_hash={entry_hash!r}); a non-empty string (run_id AND "
+            "skill) or ledger_entry_hash is required (#402)"
+        )
+        return False
+    # Lock-holder identity + diagnostics prefer (run_id, skill); a falsification
+    # row carries no run_id/skill, so fall back to its ledger_entry_hash key.
+    if not _valid_identity(run_id):
+        run_id = entry_hash
+    if not _valid_identity(skill):
+        skill = "falsification"
 
     if overflow_dir is None:
         overflow_dir = os.path.join(os.path.dirname(ledger_path) or ".", "overflow")

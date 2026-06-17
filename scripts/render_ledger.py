@@ -29,6 +29,7 @@ if REPO_ROOT not in sys.path:
 
 from scripts.ledger_reduce import reduce as _falsification_reduce  # noqa: E402
 from scripts.ledger_append import default_ledger_dir  # noqa: E402
+from scripts.atomic_write import atomic_write_text  # noqa: E402
 from scripts.reconcile_ledger import (  # noqa: E402
     parse_predicate,
     predicate_checkable,
@@ -793,8 +794,7 @@ def main(argv=None) -> int:
             now=now,
         )
         out_path = os.path.join(args.out_dir, f"weekly-{wk}.md")
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(md)
+        atomic_write_text(out_path, md)  # #400: torn-write-safe whole-file write
         written.append(out_path)
 
     for p in written:

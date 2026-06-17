@@ -237,6 +237,51 @@ class AppendTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(d, "overflow",
                                                          "r1.siege.txt")))
 
+    # ----------------------------------------------------------------------- #
+    # #402 identity rejection — an entry lacking a non-empty string run_id OR  #
+    # skill has no join key (ledger_entry_hash collapses to the shared         #
+    # "unknown" bucket, colliding across repos in the central store). append() #
+    # is the chokepoint: refuse + warn rather than write an identity-less row. #
+    # ----------------------------------------------------------------------- #
+
+    def _assert_refused_clean(self, d, p):
+        # A refused append writes NOTHING and leaves NO lock — same contract as
+        # the kill-switch / oversize rejections above.
+        self.assertFalse(os.path.exists(p))
+        self.assertFalse(os.path.exists(os.path.join(d, la.LOCK_DIRNAME)))
+
+    def test_append_refuses_missing_run_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            self.assertFalse(la.append(p, {"skill": "siege"}))
+            self._assert_refused_clean(d, p)
+
+    def test_append_refuses_missing_skill(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            self.assertFalse(la.append(p, {"run_id": "r1"}))
+            self._assert_refused_clean(d, p)
+
+    def test_append_refuses_empty_run_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            self.assertFalse(la.append(p, {"run_id": "", "skill": "siege"}))
+            self._assert_refused_clean(d, p)
+
+    def test_append_refuses_whitespace_only_skill(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            self.assertFalse(la.append(p, {"run_id": "r1", "skill": "   "}))
+            self._assert_refused_clean(d, p)
+
+    def test_append_refuses_nonstring_identity(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            # a non-string run_id (e.g. a dict/int from a malformed emitter) has
+            # no stable join key — refuse rather than coerce.
+            self.assertFalse(la.append(p, {"run_id": 123, "skill": "siege"}))
+            self._assert_refused_clean(d, p)
+
 
 # --------------------------------------------------------------------------- #
 # ledger_reduce.reduce — L-9 latest-wins + tolerant read                      #

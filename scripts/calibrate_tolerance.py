@@ -47,9 +47,17 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import statistics
 import sys
 from pathlib import Path
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from scripts.atomic_write import atomic_write_text  # noqa: E402
 
 _LENS_COLUMNS = ("Surgical", "DRY", "SRP", "OCP")
 _ANALYTIC_FLOOR = 0.447
@@ -179,7 +187,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     artifact = calibrate(args.inputs, args.evals_json)
-    args.out.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
+    # #400: torn-write-safe — a half-written calibration.json would silently
+    # degrade every downstream tolerance lookup.
+    atomic_write_text(str(args.out), json.dumps(artifact, indent=2) + "\n")
     print(f"wrote {args.out} (tolerance={artifact['tolerance']})")
     return 0
 

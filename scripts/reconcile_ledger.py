@@ -44,6 +44,7 @@ from scripts.ledger_append import (  # noqa: E402
     default_ledger_dir,
     default_ledger_path,
 )
+from scripts.atomic_write import atomic_write_text  # noqa: E402
 
 # 30-day grace period: a verdict must be older than this before it can be
 # falsified by a fix (so it has had a chance to be falsified) and before it is
@@ -1083,12 +1084,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     fmap = _falsification_reduce(args.falsification)
     brier = compute_brier(entries, fmap, now=now)
 
-    # Write brier-rolling.json (gitignored).
+    # Write brier-rolling.json (gitignored) — torn-write-safe (#400): every
+    # reader (brier_advisory) degrades a corrupt rolling file silently to {},
+    # so a half-written file would make the advisory vanish without a trace.
     try:
-        os.makedirs(os.path.dirname(args.brier_out) or ".", exist_ok=True)
-        with open(args.brier_out, "w", encoding="utf-8") as f:
-            json.dump(brier, f, indent=2, sort_keys=True)
-            f.write("\n")
+        rolling = json.dumps(brier, indent=2, sort_keys=True) + "\n"
+        atomic_write_text(args.brier_out, rolling)
     except OSError as e:
         print(f"[calibration-reconcile] could not write brier-rolling.json: {e}",
               file=sys.stderr)

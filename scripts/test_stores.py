@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,7 @@ if HERE not in sys.path:
 from scripts import grudge_append as ga  # noqa: E402
 from scripts import grudge_query as gq  # noqa: E402
 from scripts import render_ledger as rl  # noqa: E402
+from scripts import atomic_write as aw  # noqa: E402
 
 # backfill-ledger.py is hyphenated → not importable by name; load it from path.
 _bf_spec = importlib.util.spec_from_file_location(
@@ -501,6 +503,163 @@ class BackfillDocstringTest(unittest.TestCase):
         # the docstring must no longer claim an in-module smoke test exists.
         self.assertNotIn("smoke test exercises the pure core",
                          bf.__doc__ or "")
+
+
+# --------------------------------------------------------------------------- #
+# atomic_write — tmp-in-same-dir + os.replace (#400)                            #
+# The four store writers (grudge / brier-rolling / weekly-md / calibration)    #
+# route through this; a torn write here silently degrades every reader.        #
+# --------------------------------------------------------------------------- #
+
+class AtomicWriteTest(unittest.TestCase):
+    def test_writes_new_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.json")
+            aw.atomic_write_text(p, '{"k": 1}\n')
+            with open(p, encoding="utf-8") as f:
+                self.assertEqual(f.read(), '{"k": 1}\n')
+
+    def test_creates_missing_parent_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "nested", "deep", "f.md")
+            aw.atomic_write_text(p, "hi")
+            self.assertTrue(os.path.exists(p))
+
+    def test_overwrite_replaces_contents(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.txt")
+            aw.atomic_write_text(p, "old contents here")
+            aw.atomic_write_text(p, "new")
+            with open(p, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "new")   # not "newcontents here"
+
+    def test_leaves_no_temp_file_behind(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.txt")
+            aw.atomic_write_text(p, "x")
+            # the only entry in the dir is the destination — no .atomic-* orphan.
+            self.assertEqual(os.listdir(d), ["f.txt"])
+
+    def test_bytes_variant_roundtrips(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.bin")
+            aw.atomic_write_bytes(p, b"\x00\x01\x02")
+            with open(p, "rb") as f:
+                self.assertEqual(f.read(), b"\x00\x01\x02")
+
+    def test_encode_error_never_creates_a_temp_file(self):
+        # An encode failure raises inside atomic_write_text (text.encode) BEFORE
+        # _atomic_write/mkstemp ever run, so no temp is created and the old file
+        # is trivially untouched. This pins the early-raise path — it does NOT
+        # exercise the except→os.unlink cleanup branch (mkstemp never ran). The
+        # post-mkstemp cleanup branch is covered by
+        # test_failure_after_mkstemp_preserves_old_file_and_cleans_temp below.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.txt")
+            aw.atomic_write_text(p, "GOOD")
+            with self.assertRaises(UnicodeEncodeError):
+                aw.atomic_write_text(p, "\ud800")   # lone surrogate → encode error
+            with open(p, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "GOOD")   # old contents intact
+            self.assertEqual(os.listdir(d), ["f.txt"])   # no .atomic-* temp created
+
+    def test_failure_after_mkstemp_preserves_old_file_and_cleans_temp(self):
+        # A failure AFTER mkstemp (here: os.replace raises) is the only way a
+        # .atomic-* temp can leak, and the only path that exercises the
+        # except BaseException → os.unlink(tmp) cleanup branch. Assert (a) the
+        # destination's OLD contents survive intact, (b) no .atomic-* temp
+        # remains, (c) the exception propagates.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.txt")
+            aw.atomic_write_text(p, "GOOD")
+            boom = RuntimeError("replace failed")
+            with mock.patch.object(aw.os, "replace", side_effect=boom):
+                with self.assertRaises(RuntimeError):
+                    aw.atomic_write_text(p, "NEW")
+            with open(p, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "GOOD")   # old contents intact
+            self.assertEqual(os.listdir(d), ["f.txt"])   # temp cleaned, no orphan
+
+    def test_new_file_gets_open_create_mode(self):
+        # A fresh file must land at open()-create perms (0o666 & ~umask), NOT
+        # mkstemp's tight 0600 — otherwise a shared store (e.g. calibration.json)
+        # silently becomes unreadable to a second uid. Compute the expected mode
+        # the same way _atomic_write does (read umask via os.umask(0), restore).
+        umask = os.umask(0)
+        os.umask(umask)
+        expected = 0o666 & ~umask
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.json")
+            aw.atomic_write_text(p, '{"k": 1}\n')
+            self.assertEqual(stat.S_IMODE(os.stat(p).st_mode), expected)
+
+    def test_overwrite_preserves_existing_mode(self):
+        # A rewrite of an EXISTING file keeps the destination's current mode, not
+        # mkstemp's 0600 — the chmod-before-replace reapplies the prior perms.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.txt")
+            aw.atomic_write_text(p, "old")
+            os.chmod(p, 0o640)
+            aw.atomic_write_text(p, "new")
+            self.assertEqual(stat.S_IMODE(os.stat(p).st_mode), 0o640)
+
+    def test_concurrent_same_key_writers_never_tear(self):
+        # grudge's designed-for case: N threads writing the SAME deterministic
+        # content to the SAME path. With atomic replace, every observed read is a
+        # COMPLETE file — never empty, never half. (A bare open(w) truncates
+        # first, so a reader could catch the empty window.)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.txt")
+            payload = "x" * 4096
+            aw.atomic_write_text(p, payload)
+            torn = []
+
+            def writer():
+                for _ in range(40):
+                    aw.atomic_write_text(p, payload)
+
+            def reader():
+                for _ in range(200):
+                    try:
+                        with open(p, encoding="utf-8") as f:
+                            if f.read() != payload:
+                                torn.append(True)
+                    except FileNotFoundError:
+                        torn.append(True)
+
+            threads = [threading.Thread(target=writer) for _ in range(4)] + \
+                      [threading.Thread(target=reader) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(torn, [])   # no reader ever saw a torn/missing file
+
+
+# --------------------------------------------------------------------------- #
+# grudge_append — atomic write integration (#400): a grudge file is replaced   #
+# atomically, leaving no temp orphan in the store dir.                          #
+# --------------------------------------------------------------------------- #
+
+class GrudgeAtomicWriteTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        self.outside = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.repo, ignore_errors=True)
+        shutil.rmtree(self.outside, ignore_errors=True)
+
+    def test_grudge_write_leaves_no_temp_orphan(self):
+        path = ga.append(
+            symptom="auth regression", files_touched=["src/auth/token.py"],
+            anti_pattern_signature="verify_token", repo="myrepo",
+            repo_root=self.repo, base_dir=self.outside)
+        self.assertIsNotNone(path)
+        store_dir = os.path.dirname(path)
+        # the store dir holds only finished *.md grudges — no .atomic-* temp.
+        self.assertTrue(all(n.endswith(".md") for n in os.listdir(store_dir)),
+                        os.listdir(store_dir))
 
 
 if __name__ == "__main__":
