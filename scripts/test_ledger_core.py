@@ -22,7 +22,9 @@ Pure stdlib `unittest`. Machine-local central store is NEVER touched — every
 case writes to a tmp dir (the pure functions take explicit paths; append() is
 pointed at a tmp ledger_path). No git, no subprocess.
 """
+import contextlib
 import hashlib
+import io
 import json
 import os
 import sys
@@ -1135,6 +1137,209 @@ class ParsePredicateTest(unittest.TestCase):
         self.assertIsNone(rl.parse_predicate(None))
         self.assertIsNone(rl.parse_predicate(""))
         self.assertIsNone(rl.parse_predicate(123))
+
+
+# --------------------------------------------------------------------------- #
+# #402 read-side: identity-less rows are SKIPPED + counted, never bucketed     #
+# under the shared sha256("unknown:unknown") join key. The PR-A write gate     #
+# refuses NEW identity-less rows; these tests cover already-on-disk legacy     #
+# rows reaching the consumers (the M-1 residual the PR-A red-team flagged).    #
+# --------------------------------------------------------------------------- #
+
+class IdentitySkipReconcileTest(unittest.TestCase):
+    NOW = "2026-06-01T00:00:00Z"
+    OLD = "2026-01-01T00:00:00Z"
+
+    def _capture(self, fn):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            result = fn()
+        return result, buf.getvalue()
+
+    def test_compute_brier_skips_identityless_row(self):
+        # A code PASS that WOULD score, but with no run_id/skill: must be skipped
+        # (not bucketed under an "unknown" skill) and counted via a warning.
+        e = {"verdict": "PASS", "confidence": 0.9, "timestamp": self.OLD,
+             "artifact_type": "code", "backfilled": False}
+        out, err = self._capture(lambda: rl.compute_brier([e], {}, now=self.NOW))
+        self.assertEqual(out, {})
+        self.assertNotIn("unknown", out)
+        self.assertIn("skipped 1", err)
+
+    def test_compute_brier_partial_identity_skipped(self):
+        # run_id present but skill missing → still identity-less (both halves of
+        # the join key are required).
+        e = {"run_id": "r1", "verdict": "PASS", "confidence": 0.9,
+             "timestamp": self.OLD, "artifact_type": "code", "backfilled": False}
+        out, _ = self._capture(lambda: rl.compute_brier([e], {}, now=self.NOW))
+        self.assertEqual(out, {})
+
+    def test_compute_brier_valid_rows_unaffected(self):
+        good = {"run_id": "r1", "skill": "siege", "verdict": "PASS",
+                "confidence": 0.9, "timestamp": self.OLD,
+                "artifact_type": "code", "backfilled": False}
+        bad = {"verdict": "PASS", "confidence": 0.9, "timestamp": self.OLD,
+               "artifact_type": "code", "backfilled": False}
+        out, err = self._capture(
+            lambda: rl.compute_brier([good, bad], {}, now=self.NOW))
+        self.assertEqual(out["siege"]["n"], 1)
+        self.assertNotIn("unknown", out)
+        self.assertIn("skipped 1", err)
+
+    def test_reconcile_skips_identityless_ledger_row(self):
+        with tempfile.TemporaryDirectory() as d:
+            ledger = os.path.join(d, "runs.jsonl")
+            fals = os.path.join(d, "falsification.jsonl")
+            manual = os.path.join(d, "manual.jsonl")
+            # One identity-less code verdict overlapping the candidate's files.
+            with open(ledger, "w") as f:
+                f.write(json.dumps({
+                    "gated_files": ["a.py"], "artifact_type": "code",
+                    "timestamp": self.OLD, "backfilled": False}) + "\n")
+            cand = [{"commit": "deadbeef", "touched_files": ["a.py"],
+                     "merge_time": self.NOW}]
+            appended, err = self._capture(lambda: rl.reconcile(
+                ledger, fals, manual, cand, cross_cut_threshold=20, now=self.NOW))
+            self.assertEqual(appended, [])  # nothing attributable
+            self.assertIn("skipped 1", err)
+
+    def test_reconcile_predicates_skips_identityless(self):
+        with tempfile.TemporaryDirectory() as d:
+            fals = os.path.join(d, "falsification.jsonl")
+            e = {"predicted_falsifier": "fix touching a.py within 14d",
+                 "artifact_type": "code", "timestamp": self.OLD,
+                 "gated_files": ["a.py"]}
+            cand = [{"commit": "c1", "touched_files": ["a.py"],
+                     "merge_time": "2026-01-05T00:00:00Z"}]
+            (classifications, appended), err = self._capture(
+                lambda: rl.reconcile_predicates([e], cand, fals, now=self.NOW))
+            self.assertEqual(classifications, [])  # identity-less → no classification
+            self.assertEqual(appended, [])
+            self.assertIn("skipped 1", err)
+
+
+# --------------------------------------------------------------------------- #
+# #400 corruption surfacing: tolerant readers count unparseable lines and warn #
+# ONCE per read (a torn central store of thousands of lines → one summary line,#
+# not thousands). The skip behavior itself is unchanged (characterization).    #
+# --------------------------------------------------------------------------- #
+
+class TolerantReaderWarnTest(unittest.TestCase):
+    def _capture_stderr(self, fn):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            result = fn()
+        return result, buf.getvalue()
+
+    def test_reduce_warns_once_with_count(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "falsification.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"ledger_entry_hash": "h1",
+                                    "falsified": True}) + "\n")
+                f.write("{not json\n")
+                f.write("also broken\n")
+            out, err = self._capture_stderr(lambda: lr.reduce(p))
+            self.assertEqual(len(out), 1)             # good line still parsed
+            self.assertEqual(err.count("[ledger_reduce WARN]"), 1)  # warn ONCE
+            self.assertIn("skipped 2", err)           # both bad lines counted
+
+    def test_reduce_clean_file_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "falsification.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"ledger_entry_hash": "h1"}) + "\n")
+            _, err = self._capture_stderr(lambda: lr.reduce(p))
+            self.assertEqual(err, "")
+
+    def test_caller_dedup_warns_on_corrupt_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "w") as f:
+                f.write("{broken\n")
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}) + "\n")
+            found, err = self._capture_stderr(
+                lambda: la.caller_dedup(p, "r1", "siege"))
+            self.assertTrue(found)                    # good line still matched
+            self.assertIn("skipped 1", err)
+
+    def test_load_jsonl_warns_on_corrupt_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"a": 1}) + "\n")
+                f.write("garbage\n")
+            out, err = self._capture_stderr(lambda: rl.load_jsonl(p))
+            self.assertEqual(out, [{"a": 1}])
+            self.assertIn("skipped 1", err)
+
+
+# --------------------------------------------------------------------------- #
+# #400 corruption tolerance — symmetry fix: a valid-JSON-but-NON-OBJECT line   #
+# (`[1,2,3]`, `42`) has no `.get`, so it must be skipped+counted (folded into  #
+# the same `skipped` warn count) by the reconcile-path readers, exactly as     #
+# render_ledger.load_runs already does — NOT kept as an "entry" that then       #
+# AttributeErrors in compute_brier / reconcile / ledger_reduce.reduce.         #
+# --------------------------------------------------------------------------- #
+
+class NonObjectLineToleranceTest(unittest.TestCase):
+    def _capture_stderr(self, fn):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            result = fn()
+        return result, buf.getvalue()
+
+    def test_load_jsonl_skips_and_counts_non_dict_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}) + "\n")
+                f.write("[1, 2, 3]\n")   # valid JSON, not an object
+                f.write("42\n")          # valid JSON, not an object
+            out, err = self._capture_stderr(lambda: rl.load_jsonl(p))
+            self.assertEqual(out, [{"run_id": "r1", "skill": "siege"}])
+            self.assertEqual(err.count("[reconcile_ledger WARN]"), 1)  # once
+            self.assertIn("skipped 2", err)  # both non-dict lines counted
+
+    def test_load_jsonl_non_dict_does_not_crash_compute_brier(self):
+        # The whole point of the fix: load → compute_brier must not raise.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "w") as f:
+                f.write("[1, 2, 3]\n")
+            entries, _ = self._capture_stderr(lambda: rl.load_jsonl(p))
+            # Belt-and-suspenders: even a stray non-dict reaching compute_brier
+            # directly must be tolerated (the guard lives in load_jsonl, but the
+            # contract is no AttributeError on this corruption class).
+            out = rl.compute_brier(entries, {}, now="2026-06-01T00:00:00Z")
+            self.assertEqual(out, {})
+
+    def test_reconcile_tolerates_non_dict_ledger_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            ledger = os.path.join(d, "runs.jsonl")
+            fals = os.path.join(d, "falsification.jsonl")
+            manual = os.path.join(d, "manual.jsonl")
+            with open(ledger, "w") as f:
+                f.write("[1, 2, 3]\n")  # non-dict corruption line
+            cand = [{"commit": "deadbeef", "touched_files": ["a.py"],
+                     "merge_time": "2026-06-01T00:00:00Z"}]
+            appended, _ = self._capture_stderr(lambda: rl.reconcile(
+                ledger, fals, manual, cand, cross_cut_threshold=20,
+                now="2026-06-01T00:00:00Z"))
+            self.assertEqual(appended, [])  # nothing attributable, no crash
+
+    def test_reduce_skips_and_counts_non_dict_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "falsification.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"ledger_entry_hash": "h1",
+                                    "falsified": True}) + "\n")
+                f.write("[1, 2, 3]\n")  # valid JSON, not an object
+            out, err = self._capture_stderr(lambda: lr.reduce(p))
+            self.assertEqual(len(out), 1)   # good line still reduced
+            self.assertIn("h1", out)
+            self.assertEqual(err.count("[ledger_reduce WARN]"), 1)  # once
+            self.assertIn("skipped 1", err)  # non-dict line counted
 
 
 if __name__ == "__main__":

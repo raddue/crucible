@@ -121,15 +121,19 @@ def load_grudges(repo: str, repo_root: str, base_dir: Optional[str] = None) -> L
     out: List[Dict] = []
     if not os.path.isdir(d):
         return out
+    unparseable = 0  # #400: surface corrupt grudge files instead of silent skip
     for name in sorted(os.listdir(d)):
         if not name.endswith(".md"):
             continue
         g = parse_grudge(os.path.join(d, name))
         if g is None:
+            unparseable += 1
             continue
         if os.path.realpath(g.get("repo_root", "")) != os.path.realpath(repo_root):
             continue
         out.append(g)
+    if unparseable:
+        _qwarn(f"skipped {unparseable} unparseable grudge file(s) in {d}")
     return out
 
 

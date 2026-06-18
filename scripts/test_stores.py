@@ -18,7 +18,9 @@ Pure stdlib `unittest`. Every store path is a tmp dir; the machine-local central
 stores (`~/.claude/crucible/{grudge,ledger}`) are never touched. `filter_ignored`
 runs against a throwaway `git init` repo, never the crucible repo.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -41,6 +43,8 @@ from scripts import grudge_append as ga  # noqa: E402
 from scripts import grudge_query as gq  # noqa: E402
 from scripts import render_ledger as rl  # noqa: E402
 from scripts import atomic_write as aw  # noqa: E402
+from scripts import brier_advisory as ba  # noqa: E402
+from scripts import ledger_doctor as ld  # noqa: E402
 
 # backfill-ledger.py is hyphenated → not importable by name; load it from path.
 _bf_spec = importlib.util.spec_from_file_location(
@@ -258,6 +262,25 @@ class LoadGrudgesRepoRootFilterTest(unittest.TestCase):
             loaded = gq.load_grudges("myrepo", repo_root, base)
             self.assertEqual(len(loaded), 1)
             self.assertEqual(loaded[0]["files_touched"], ["a.py"])
+
+    def test_unparseable_grudge_file_is_counted(self):
+        # #400: a corrupt grudge file (no frontmatter) must be counted + warned,
+        # not silently vanish from the DO-NOT-REPEAT preflight.
+        with tempfile.TemporaryDirectory() as base, \
+                tempfile.TemporaryDirectory() as repo_root:
+            gdir = ga.grudges_dir("myrepo", base)
+            os.makedirs(gdir)
+            good = ('---\nrepo_root: %s\nfiles_touched: ["a.py"]\n'
+                    'anti_pattern_signature: ""\n---\nbody\n' % repo_root)
+            with open(os.path.join(gdir, "good.md"), "w") as f:
+                f.write(good)
+            with open(os.path.join(gdir, "broken.md"), "w") as f:
+                f.write("no frontmatter at all\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                loaded = gq.load_grudges("myrepo", repo_root, base)
+            self.assertEqual(len(loaded), 1)
+            self.assertIn("skipped 1", buf.getvalue())
 
 
 class SignatureHitTest(unittest.TestCase):
@@ -660,6 +683,213 @@ class GrudgeAtomicWriteTest(unittest.TestCase):
         # the store dir holds only finished *.md grudges — no .atomic-* temp.
         self.assertTrue(all(n.endswith(".md") for n in os.listdir(store_dir)),
                         os.listdir(store_dir))
+
+
+# --------------------------------------------------------------------------- #
+# render_ledger — #402 identity-skip + #400 tolerant-read warn                 #
+# --------------------------------------------------------------------------- #
+
+def _capture(fn):
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        result = fn()
+    return result, buf.getvalue()
+
+
+class RenderLedgerIdentitySkipTest(unittest.TestCase):
+    OLD = "2026-01-01T00:00:00Z"
+
+    def test_week_summary_skips_identityless_skill(self):
+        good = {"run_id": "r1", "skill": "siege", "timestamp": self.OLD,
+                "backfilled": False, "would_have_shipped_without_gate": True,
+                "severity_histogram": {"fatal": 0, "significant": 1, "minor": 0,
+                                       "nit": 0}}
+        bad = {"run_id": "r2", "timestamp": self.OLD, "backfilled": False,
+               "severity_histogram": {"fatal": 0, "significant": 1, "minor": 0,
+                                      "nit": 0}}
+        summary, err = _capture(lambda: rl.week_summary([good, bad]))
+        self.assertIn("siege", summary["per_skill"])
+        self.assertNotIn("unknown", summary["per_skill"])
+        self.assertIn("skipped 1", err)
+
+    def test_load_runs_warns_on_corrupt_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}) + "\n")
+                f.write("{broken\n")
+            out, err = _capture(lambda: rl.load_runs(p))
+            self.assertEqual(len(out), 1)
+            self.assertIn("skipped 1", err)
+
+
+# --------------------------------------------------------------------------- #
+# brier_advisory — corrupt brier-rolling.json surfaces (was silent {})         #
+# --------------------------------------------------------------------------- #
+
+class BrierLoadWarnTest(unittest.TestCase):
+    def test_missing_file_is_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            out, err = _capture(
+                lambda: ba._load_brier(os.path.join(d, "nope.json")))
+            self.assertEqual(out, {})
+            self.assertEqual(err, "")
+
+    def test_corrupt_json_warns(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "brier-rolling.json")
+            with open(p, "w") as f:
+                f.write("{not valid json")
+            out, err = _capture(lambda: ba._load_brier(p))
+            self.assertEqual(out, {})
+            self.assertIn("[brier_advisory WARN]", err)
+
+    def test_valid_json_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "brier-rolling.json")
+            with open(p, "w") as f:
+                f.write(json.dumps({"siege": {"n": 5, "brier": 0.3}}))
+            out, err = _capture(lambda: ba._load_brier(p))
+            self.assertEqual(out, {"siege": {"n": 5, "brier": 0.3}})
+            self.assertEqual(err, "")
+
+
+# --------------------------------------------------------------------------- #
+# ledger_doctor — on-demand consistency check (#400)                           #
+# --------------------------------------------------------------------------- #
+
+class LedgerDoctorScanTest(unittest.TestCase):
+    def test_scan_jsonl_counts_unparseable_and_identityless(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "w") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}) + "\n")
+                f.write(json.dumps({"run_id": "r2"}) + "\n")   # no skill
+                f.write("{broken\n")                            # unparseable
+            rep = ld.scan_jsonl(p, identity=True)
+            self.assertEqual(rep["total"], 3)
+            self.assertEqual(rep["parseable"], 2)
+            self.assertEqual(rep["unparseable"], 1)
+            self.assertEqual(rep["identityless"], 1)
+
+    def test_scan_jsonl_missing_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = ld.scan_jsonl(os.path.join(d, "nope.jsonl"))
+            self.assertFalse(rep["exists"])
+
+    def test_scan_jsonl_whitespace_only_line_is_unparseable(self):
+        # S-1: a whitespace-only line is fed RAW to json.loads by every reader
+        # (byte mode, no .strip()) -> ValueError -> unparseable. The doctor must
+        # count it identically, not skip it as "blank".
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "wb") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}).encode()
+                        + b"\n")
+                f.write(b"   \n")    # space-only
+                f.write(b"\t\n")     # tab-only
+            rep = ld.scan_jsonl(p, identity=True)
+            self.assertEqual(rep["total"], 3)
+            self.assertEqual(rep["parseable"], 1)
+            self.assertEqual(rep["unparseable"], 2)
+            # Cross-check: the canonical reader skips exactly those 2 chunks.
+            _, err = _capture(lambda: rl.load_runs(p))
+            self.assertIn("skipped 2 unparseable line(s)", err)
+
+    def test_scan_jsonl_drops_unterminated_trailing_line(self):
+        # S-1: a partial trailing line (no final newline — crash mid-append) is
+        # DROPPED by the byte-mode readers; the doctor must drop it too, not count
+        # it as a line.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "wb") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}).encode()
+                        + b"\n")
+                f.write(b'{"run_id": "r2", "ski')   # torn, no newline
+            rep = ld.scan_jsonl(p, identity=True)
+            self.assertEqual(rep["total"], 1)
+            self.assertEqual(rep["parseable"], 1)
+            self.assertEqual(rep["unparseable"], 0)
+            # Reader also keeps only the one complete row (no skip warning).
+            self.assertEqual(len(rl.load_runs(p)), 1)
+
+    def test_scan_jsonl_invalid_utf8_is_unparseable(self):
+        # S-1: invalid UTF-8 raises UnicodeDecodeError in byte-mode readers ->
+        # unparseable. (Text-mode errors="replace" would have masked it.)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            with open(p, "wb") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege"}).encode()
+                        + b"\n")
+                f.write(b'"\xff\xfe bad utf8"\n')
+            rep = ld.scan_jsonl(p)
+            self.assertEqual(rep["total"], 2)
+            self.assertEqual(rep["parseable"], 1)
+            self.assertEqual(rep["unparseable"], 1)
+
+    def test_scan_jsonl_present_but_unreadable_is_unhealthy(self):
+        # M-1: a present-but-unreadable store (here: runs.jsonl is a directory)
+        # must be reported as corruption, not "not present / healthy".
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "runs.jsonl")
+            os.mkdir(p)
+            rep = ld.scan_jsonl(p, identity=True)
+            self.assertTrue(rep["exists"])
+            self.assertEqual(rep["unparseable"], 1)
+
+    def test_doctor_present_but_unreadable_store_exits_1(self):
+        # M-1 end-to-end: doctor() must render it under [FAIL] and return 1.
+        with tempfile.TemporaryDirectory() as d, \
+                tempfile.TemporaryDirectory() as g:
+            os.mkdir(os.path.join(d, "runs.jsonl"))  # present, unreadable
+            rc, _ = _capture(lambda: ld.main(["--ledger-dir", d, "--grudge-dir", g]))
+            self.assertEqual(rc, 1)
+
+    def test_scan_brier_corrupt(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "brier-rolling.json")
+            with open(p, "w") as f:
+                f.write("{nope")
+            rep = ld.scan_brier(p)
+            self.assertTrue(rep["exists"])
+            self.assertFalse(rep["ok"])
+
+    def test_scan_brier_valid(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "brier-rolling.json")
+            with open(p, "w") as f:
+                f.write(json.dumps({"siege": {"n": 5, "brier": 0.3}}))
+            rep = ld.scan_brier(p)
+            self.assertTrue(rep["ok"])
+
+    def test_scan_grudges_counts_unparseable(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "good.md"), "w") as f:
+                f.write('---\nfiles_touched: ["a.py"]\n---\nbody\n')
+            with open(os.path.join(d, "bad.md"), "w") as f:
+                f.write("no frontmatter here\n")
+            rep = ld.scan_grudges(d)
+            self.assertEqual(rep["total"], 2)
+            self.assertEqual(rep["unparseable"], 1)
+
+    def test_doctor_report_clean_is_healthy(self):
+        # Explicit empty --grudge-dir keeps the result independent of the host's
+        # machine-local grudge store.
+        with tempfile.TemporaryDirectory() as d, \
+                tempfile.TemporaryDirectory() as g:
+            with open(os.path.join(d, "runs.jsonl"), "w") as f:
+                f.write(json.dumps({"run_id": "r1", "skill": "siege",
+                                    "timestamp": "2026-01-01T00:00:00Z"}) + "\n")
+            rc, _ = _capture(lambda: ld.main(["--ledger-dir", d, "--grudge-dir", g]))
+            self.assertEqual(rc, 0)
+
+    def test_doctor_report_corrupt_is_unhealthy(self):
+        with tempfile.TemporaryDirectory() as d, \
+                tempfile.TemporaryDirectory() as g:
+            with open(os.path.join(d, "runs.jsonl"), "w") as f:
+                f.write("{broken\n")
+            rc, _ = _capture(lambda: ld.main(["--ledger-dir", d, "--grudge-dir", g]))
+            self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ from scripts.ledger_append import (  # noqa: E402
     append as _ledger_append,
     default_ledger_dir,
     default_ledger_path,
+    _valid_identity,
 )
 from scripts.atomic_write import atomic_write_text  # noqa: E402
 
@@ -94,6 +95,10 @@ def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _warn(msg: str) -> None:
+    print(f"[reconcile_ledger WARN] {msg}", file=sys.stderr)
+
+
 # --------------------------------------------------------------------------- #
 # PURE core                                                                   #
 # --------------------------------------------------------------------------- #
@@ -122,13 +127,24 @@ def load_jsonl(path: str) -> List[dict]:
     if not raw.endswith(b"\n"):
         parts = parts[:-1]  # drop the partial trailing line
     out: List[dict] = []
+    skipped = 0
     for chunk in parts:
         if not chunk:
             continue
         try:
-            out.append(json.loads(chunk))
+            obj = json.loads(chunk)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            skipped += 1  # #400: corruption is counted, not silently dropped
             continue
+        if not isinstance(obj, dict):
+            # #400: a valid-JSON-but-non-object line (e.g. `[1,2,3]`, `42`) has
+            # no `.get` — downstream e.get(...) would AttributeError. Count it
+            # as corruption, same as render_ledger.load_runs.
+            skipped += 1
+            continue
+        out.append(obj)
+    if skipped:
+        _warn(f"load_jsonl: skipped {skipped} unparseable line(s) in {path}")
     return out
 
 
@@ -191,14 +207,24 @@ def reconcile(
     manual = read_manual_attribution(manual_attribution_path)
 
     # Pre-sort ledger entries by timestamp ascending so "earliest match" is the
-    # first qualifying entry we encounter per candidate.
+    # first qualifying entry we encounter per candidate. #402 read-side: drop
+    # rows lacking a valid (run_id, skill) join key HERE (once per entry, not
+    # once per candidate) so the walkback never hashes one into the shared
+    # "unknown:unknown" bucket and mis-attributes a fix to it.
     indexed = []
+    skipped_identityless = 0
     for e in entries:
         ts = _parse_iso(e.get("timestamp"))
         if ts is None:
             continue
+        if not (_valid_identity(e.get("run_id")) and _valid_identity(e.get("skill"))):
+            skipped_identityless += 1
+            continue
         indexed.append((ts, e))
     indexed.sort(key=lambda pair: pair[0])
+    if skipped_identityless:
+        _warn(f"reconcile: skipped {skipped_identityless} ledger row(s) lacking "
+              f"a valid (run_id, skill) identity (#402)")
 
     appended: List[dict] = []
     # Track hashes already attributed in THIS run so one verdict isn't
@@ -270,9 +296,9 @@ def reconcile(
             # (b) entry timestamp < candidate merge_time
             if merge_dt is not None and not (ts < merge_dt):
                 continue
-            run_id = e.get("run_id", "unknown")
-            skill = e.get("skill", "unknown")
-            h = ledger_entry_hash(run_id, skill)
+            # run_id/skill are guaranteed valid: identity-less rows were dropped
+            # when `indexed` was built (#402).
+            h = ledger_entry_hash(e["run_id"], e["skill"])
             # Skip already-attributed verdicts (manual pass or a prior
             # candidate this run); keep scanning for the next-earliest unseen.
             if h in seen_hashes:
@@ -368,12 +394,19 @@ def compute_brier(
 
     # accumulate squared errors per skill
     acc: Dict[str, List[float]] = {}
+    skipped_identityless = 0
 
     for e in ledger_entries:
+        # #402 read-side: a row lacking a valid (run_id, skill) join key would
+        # otherwise hash to the shared "unknown:unknown" bucket and pollute an
+        # "unknown" skill's Brier with unrelated runs. Skip + count it instead.
+        run_id = e.get("run_id")
+        skill = e.get("skill")
+        if not (_valid_identity(run_id) and _valid_identity(skill)):
+            skipped_identityless += 1
+            continue
         # Hoist the falsification lookup ABOVE the artifact_type gate so the
         # #342 non-code admission can consult it.
-        run_id = e.get("run_id", "unknown")
-        skill = e.get("skill", "unknown")
         h = ledger_entry_hash(run_id, skill)
         fals = falsification_map.get(h)
 
@@ -437,6 +470,10 @@ def compute_brier(
 
         sq_err = (float(confidence) - actual) ** 2
         acc.setdefault(skill, []).append(sq_err)
+
+    if skipped_identityless:
+        _warn(f"compute_brier: skipped {skipped_identityless} ledger row(s) "
+              f"lacking a valid (run_id, skill) identity (#402)")
 
     out: Dict[str, dict] = {}
     last = _now_iso() if now_dt is None else now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -696,12 +733,19 @@ def reconcile_predicates(
     reference_candidates = reference_candidates or []
     classifications: List[dict] = []
     appended: List[dict] = []
+    skipped_identityless = 0
     for e in ledger_entries:
         pf = e.get("predicted_falsifier")
         if pf is None:
             continue
-        run_id = e.get("run_id", "unknown")
-        skill = e.get("skill", "unknown")
+        # #402 read-side: an identity-less predicate row has no stable join key
+        # to attribute a fired falsifier to — skip + count rather than hash it
+        # into the shared "unknown:unknown" bucket.
+        run_id = e.get("run_id")
+        skill = e.get("skill")
+        if not (_valid_identity(run_id) and _valid_identity(skill)):
+            skipped_identityless += 1
+            continue
         h = ledger_entry_hash(run_id, skill)
 
         if pf == PREDICATE_SENTINEL:
@@ -776,6 +820,10 @@ def reconcile_predicates(
             }
             _ledger_append(falsification_path, entry)
             appended.append(entry)
+
+    if skipped_identityless:
+        _warn(f"reconcile_predicates: skipped {skipped_identityless} predicate "
+              f"row(s) lacking a valid (run_id, skill) identity (#402)")
 
     return classifications, appended
 

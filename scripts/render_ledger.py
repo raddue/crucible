@@ -28,7 +28,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from scripts.ledger_reduce import reduce as _falsification_reduce  # noqa: E402
-from scripts.ledger_append import default_ledger_dir  # noqa: E402
+from scripts.ledger_append import default_ledger_dir, _valid_identity  # noqa: E402
 from scripts.atomic_write import atomic_write_text  # noqa: E402
 from scripts.reconcile_ledger import (  # noqa: E402
     parse_predicate,
@@ -64,6 +64,10 @@ VAGUENESS_RATE_THRESHOLD = 0.5
 # Loading                                                                     #
 # --------------------------------------------------------------------------- #
 
+def _warn(msg: str) -> None:
+    print(f"[render_ledger WARN] {msg}", file=sys.stderr)
+
+
 def load_runs(path: str) -> list:
     """Tolerant read of runs.jsonl, deduped by (run_id, skill) latest-wins.
 
@@ -89,19 +93,24 @@ def load_runs(path: str) -> list:
 
     by_key = {}  # (run_id, skill) -> entry; later positions overwrite earlier
     order = []   # preserve first-seen order of keys for stable output
+    skipped = 0  # #400: count corrupt lines instead of degrading silently
     for chunk in parts:
         if not chunk:
             continue
         try:
             obj = json.loads(chunk)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            skipped += 1
             continue
         if not isinstance(obj, dict):
+            skipped += 1
             continue
         key = (obj.get("run_id"), obj.get("skill"))
         if key not in by_key:
             order.append(key)
         by_key[key] = obj
+    if skipped:
+        _warn(f"load_runs: skipped {skipped} unparseable line(s) in {path}")
     return [by_key[k] for k in order]
 
 
@@ -170,8 +179,15 @@ def week_summary(entries: list) -> dict:
     """
     per_skill = {}
     backfilled = 0
+    skipped_identityless = 0
     for e in entries:
-        skill = e.get("skill") or "unknown"
+        # #402 read-side: a row lacking a valid (run_id, skill) join key would
+        # merge into a single "unknown" skill bucket, conflating unrelated runs
+        # in the severity table. Skip + count it instead.
+        if not (_valid_identity(e.get("run_id")) and _valid_identity(e.get("skill"))):
+            skipped_identityless += 1
+            continue
+        skill = e["skill"]
         slot = per_skill.setdefault(
             skill,
             {"findings": 0, "fatal": 0, "significant": 0,
@@ -193,6 +209,10 @@ def week_summary(entries: list) -> dict:
         slot["fatal"] += f
         slot["significant"] += s
         slot["forward_entries"] += 1
+
+    if skipped_identityless:
+        _warn(f"week_summary: skipped {skipped_identityless} ledger row(s) "
+              f"lacking a valid (run_id, skill) identity (#402)")
 
     for slot in per_skill.values():
         total = slot["findings"]
@@ -359,6 +379,7 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
     grace_cutoff = (now_dt - _dt.timedelta(days=GRACE_DAYS)) if now_dt else None
 
     per_skill = {}
+    skipped_identityless = 0
     for e in entries:
         pf = e.get("predicted_falsifier")
         if pf is None:
@@ -368,7 +389,12 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
         # predicate data to report).
         if pf == PREDICATE_SENTINEL:
             continue
-        skill = e.get("skill") or "unknown"
+        # #402 read-side: an identity-less row has no stable join key into the
+        # falsification map — skip + count rather than bucket it under "unknown".
+        if not (_valid_identity(e.get("run_id")) and _valid_identity(e.get("skill"))):
+            skipped_identityless += 1
+            continue
+        skill = e["skill"]
         slot = per_skill.setdefault(skill, {
             "total_non_null": 0, "parseable": 0, "uncheckable": 0,
             "unparseable": 0, "hit_count": 0,
@@ -393,12 +419,16 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
         if not outside_grace:
             continue
         slot["parseable"] += 1
-        h = ledger_entry_hash(e.get("run_id", "unknown"), skill)
+        h = ledger_entry_hash(e["run_id"], skill)
         fals = falsification_reduced.get(h)
         if fals is not None:
             via = fals.get("via") or (fals.get("falsified_by") or {}).get("via")
             if bool(fals.get("falsified")) and via == "predicate":
                 slot["hit_count"] += 1
+
+    if skipped_identityless:
+        _warn(f"predicate_rates: skipped {skipped_identityless} predicate row(s) "
+              f"lacking a valid (run_id, skill) identity (#402)")
 
     out = {}
     for skill, s in per_skill.items():

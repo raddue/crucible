@@ -130,6 +130,8 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
     """
     if not os.path.exists(ledger_path):
         return False
+    found = False
+    skipped = 0  # #400: count corrupt lines instead of silently weakening dedup
     try:
         with open(ledger_path, "rb") as f:
             for raw_line in f:
@@ -139,12 +141,16 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
                 try:
                     obj = json.loads(line)
                 except (json.JSONDecodeError, UnicodeDecodeError):
+                    skipped += 1
                     continue
                 if obj.get("run_id") == run_id and obj.get("skill") == skill:
-                    return True
+                    found = True
+                    break
     except OSError:
         return False
-    return False
+    if skipped:
+        _warn(f"caller_dedup: skipped {skipped} unparseable line(s) in {ledger_path}")
+    return found
 
 
 def _try_stale_recovery(lockdir: str) -> bool:

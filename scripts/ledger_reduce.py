@@ -12,6 +12,10 @@ import sys
 from typing import Dict
 
 
+def _warn(msg: str) -> None:
+    print(f"[ledger_reduce WARN] {msg}", file=sys.stderr)
+
+
 def reduce(falsification_path: str) -> Dict[str, dict]:
     """Return dict keyed by ledger_entry_hash with the latest entry per hash.
 
@@ -37,17 +41,27 @@ def reduce(falsification_path: str) -> Dict[str, dict]:
         parts = parts[:-1]
 
     out: Dict[str, dict] = {}
+    skipped = 0  # #400: surface corruption instead of degrading silently
     for chunk in parts:
         if not chunk:
             continue
         try:
             obj = json.loads(chunk)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            skipped += 1
+            continue
+        if not isinstance(obj, dict):
+            # #400: a valid-JSON-but-non-object line (e.g. `[1,2,3]`, `42`) has
+            # no `.get` — the obj.get below would AttributeError. Count it as
+            # corruption, same as render_ledger.load_runs.
+            skipped += 1
             continue
         key = obj.get("ledger_entry_hash")
         if key is None:
             continue
         out[key] = obj  # later positions overwrite earlier ones (L-9)
+    if skipped:
+        _warn(f"reduce: skipped {skipped} unparseable line(s) in {falsification_path}")
     return out
 
 

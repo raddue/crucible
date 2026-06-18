@@ -223,6 +223,10 @@ def _render_advice(skill, brier_line, fals_hits, grudge_hits):
 # IO / CLI layer (central-store resolution + mtime; NOT unit-tested)          #
 # --------------------------------------------------------------------------- #
 
+def _warn(msg: str) -> None:
+    print(f"[brier_advisory WARN] {msg}", file=sys.stderr)
+
+
 def _disabled() -> bool:
     return os.environ.get("CRUCIBLE_CALIBRATION_DISABLED") == "1"
 
@@ -246,13 +250,27 @@ def _staleness_days(path: str, *, now: Optional[float] = None) -> Optional[float
 
 
 def _load_brier(path: str) -> dict:
-    """Load brier-rolling.json; {} on any missing/unreadable/malformed file."""
+    """Load brier-rolling.json; {} on any missing/unreadable/malformed file.
+
+    #400: a MISSING file is the normal pre-bootstrap state (silent), but a file
+    that exists yet is corrupt/non-dict means the reconciler's output was torn —
+    the advisory would otherwise just vanish. Warn once so the corruption is
+    surfaced rather than silently degrading the calibration signal to empty.
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return {}
+    except (OSError, ValueError) as e:
+        _warn(f"brier-rolling.json unreadable/corrupt ({path}): {e}; "
+              f"calibration advisory degraded to silent")
+        return {}
+    if not isinstance(data, dict):
+        _warn(f"brier-rolling.json is not a JSON object ({path}); "
+              f"calibration advisory degraded to silent")
+        return {}
+    return data
 
 
 def _runs_path() -> str:
