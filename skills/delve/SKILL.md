@@ -157,6 +157,17 @@ delve first writes the Step 3 formatted report body to a `findings.md` file, whi
 
 The findings are complete after Step 3 regardless of whether `--comment` succeeds.
 
+## Terminal Verdict Emit
+
+<!-- CANONICAL: shared/ledger-append.md -->
+
+After printing the ranked findings (or `No verified findings`), emit ONE **Tier B STUB** JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'`.
+
+- The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), dedup by `(run_id, skill="delve")` (L-2), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — never block or alter the report.
+- delve is **report-only and emits no merge verdict** (that is temper's — see "What delve never does"). The ledger `verdict` here is an **operational completion record, NOT a quality judgement** — exactly as its sibling `audit` does: a completed run → `PASS`; an early abort / escalation routed to the user → `ESCALATED`.
+- Populate ONLY meaningful values (`repo` is auto-filled by the `emit` CLI): `schema_version: 2`, `run_id` (UUIDv7 via `scripts/uuid7.py`), `skill: "delve"`, `tier: "B"`, `verdict` (`PASS` | `ESCALATED` per above), `timestamp` (ISO-8601 UTC), `gated_files` (the resolved scope's files — `git diff --name-only` for a range, or the path's file set — repo-relative), `artifact_type` (`code` for a code diff/path; map a non-code path to `design` | `plan` | `other`).
+- Set ALL calibration fields EXPLICITLY null per the "Tier-B null semantics" of `shared/ledger-append.md`: `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0` and `comment: null`. Keep `backfilled: false`, `falsified: null`, `falsified_by: null`.
+
 ## Dispatch
 
 delve drives `shared/delve-engine.md` through the harness-adapter **fan-out mechanism** (`shared/harness-adapter.md` §4, §7) — never a harness-specific call inline (I1). Where a harness has no parallel-subagent primitive, the adapter's **sequential fallback** (§5) runs the angles as multiple sequential passes, warning once that recall may drop.

@@ -99,7 +99,7 @@ caller-set, so direct callers like the v1 backfill stay v1.
 {
   "schema_version": 2,
   "run_id": "<UUIDv7 — sortable, millisecond-precision, unique>",
-  "skill": "quality-gate | red-team | siege | inquisitor | audit",
+  "skill": "<emitting skill name; open set — any skill carrying a CANONICAL shared/ledger-append.md emit block (e.g. quality-gate, siege, temper, red-team, audit, inquisitor, delve, review-feedback, test-coverage, verify)>",
   "repo": "<basename of git toplevel; cwd basename fallback; 'unknown' on v1 rows>",
   "tier": "A | B",
   "artifact_type": "code | design | plan | hypothesis | mockup | translation | other",
@@ -129,7 +129,7 @@ Exactly seven values: `['code', 'design', 'plan', 'hypothesis', 'mockup', 'trans
 
 ### Tier-B null semantics
 
-Tier B emitters (`red-team`, `audit`, `inquisitor`) emit the schema-required
+Tier B emitters (e.g. `red-team`, `audit`, `inquisitor`, `delve`) emit the schema-required
 keys **explicitly set to `null`** — not absent — so v1 readers do not have to
 branch on missing keys. The required explicit-nulls on Tier B stubs are:
 
@@ -181,7 +181,7 @@ market: every PASS/FAIL is a dated, falsifiable hypothesis. The reconciler's
 second pass parses it and checks whether it fired; `/ledger` surfaces per-skill
 hit-rate and unparseable-rate.
 
-**When to emit (Tier A only — `quality-gate`, `siege`):**
+**When to emit (Tier A code gates only — e.g. `quality-gate`, `siege`, `temper`):**
 
 - **MANDATORY non-null** whenever `verdict ∈ {PASS, FAIL}` AND `artifact_type ==
   "code"`. In one sentence, describe the future evidence that would prove this
