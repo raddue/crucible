@@ -95,6 +95,12 @@ run python3 scripts/check_fixture_producer_blind.py
 run python3 scripts/check_inquisitor_phase1b_invariants.py --selftest
 run python3 scripts/check_inquisitor_phase1b_invariants.py
 
+# --- Minimalism-ladder eval harness (#425) ---
+# REQUIRES pytest (uses parametrize/fixtures); CI provisions pytest==9.0.3. This
+# is the only -m pytest line in the suite — bare `python3 file.py` would silently
+# skip the pytest-collected tests.
+run python3 -m pytest skills/build/evals/minimalism-ladder/ -q
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 
