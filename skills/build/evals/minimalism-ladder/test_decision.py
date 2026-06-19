@@ -7,6 +7,8 @@ computed with `statistics.quantiles(..., n=4, method="inclusive")`.
 """
 from __future__ import annotations
 
+import pytest
+
 import decision
 import scorer
 
@@ -17,6 +19,15 @@ def _r(loc_val, *, pass_rate=1.0, carve=True):
         assertion_pass_rate=pass_rate,
         carve_out_passed=carve,
     )
+
+
+def test_empty_arm_raises_valueerror():
+    # A truncated/empty arm (e.g. a collect run that lost trials to throttling)
+    # must raise a clear ValueError, not a bare StatisticsError from median().
+    with pytest.raises(ValueError):
+        decision.decide([], [_r(90)])
+    with pytest.raises(ValueError):
+        decision.decide([_r(40)], [])
 
 
 def test_zero_loc_trial_forces_skip_even_when_all_adopt_conditions_hold():

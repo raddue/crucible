@@ -35,6 +35,10 @@ def _load_solution_module(solution_dir: Path):
         unique_name, solution_dir / "solution.py"
     )
     module = importlib.util.module_from_spec(spec)
+    # Intentionally NOT registered in sys.modules: avoids global pollution and
+    # .pyc-staleness across calls (each trial gets a fresh load under a unique
+    # name). The Phase-2 live-codegen seam may need to register it if generated
+    # solutions rely on sys.modules[__name__] (pickling, self-relative imports).
     spec.loader.exec_module(module)
     return module
 

@@ -37,6 +37,8 @@ def _band_bounds(results, band: str):
 
 
 def decide(with_results: List, without_results: List, *, band: str = "iqr") -> str:
+    if not with_results or not without_results:
+        raise ValueError("decide() requires non-empty with/without result lists")
     n = len(with_results)
     with_median = _median_loc(with_results)
     without_median = _median_loc(without_results)
