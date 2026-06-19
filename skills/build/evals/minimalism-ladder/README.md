@@ -35,8 +35,10 @@ as `loc`, `scorer`, `decision`, `tasks`.
 - **`scorer.score_solution(task, solution_dir, *, codegen=None) -> TrialResult`**
   — loads `solution.py` under a unique module name, runs each assertion with cwd
   set to `solution_dir` (restored even on raise), and returns a frozen
-  `TrialResult(non_test_source_loc, assertion_pass_rate, carve_out_passed)`. Any
-  exception escaping a check counts as a fail. **`codegen` is the Phase-2 seam**
+  `TrialResult(non_test_source_loc, assertion_pass_rate, carve_out_passed)`
+  (`assertion_pass_rate` is over the non-carve-out correctness assertions only;
+  carve-outs are graded separately by `carve_out_passed`). Any exception
+  escaping a check counts as a fail. **`codegen` is the Phase-2 seam**
   (a `Callable[[Task], Path]` that would generate and return a solution dir);
   unused in Phase 1 — pass a populated `solution_dir` and leave it `None`.
 - **`decision.decide(with_results, without_results, *, band="iqr") -> str`** in

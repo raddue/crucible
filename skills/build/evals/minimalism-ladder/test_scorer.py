@@ -42,15 +42,41 @@ def test_consecutive_calls_load_correct_solution():
     assert bloated.non_test_source_loc > minimal.non_test_source_loc
 
 
-def test_partial_pass_gives_fractional_rate():
-    # The violating cli passes 2 of 4 assertions (both happy-path; both
-    # carve-outs fail) -> 0.5.
+def test_carveout_failures_do_not_lower_correctness_rate():
+    # assertion_pass_rate is over NON-carve assertions only. The violating cli
+    # passes both happy-path (non-carve) assertions, so its rate stays 1.0 even
+    # though both carve-outs fail -> carve_out_passed False. A carve-out
+    # regression must NOT be able to mask itself in the correctness rate.
     res = scorer.score_solution(
         tasks.load_task("cli_wordcount"),
         FIXTURES / "cli_wordcount" / "carveout_violating",
     )
-    assert res.assertion_pass_rate == 0.5
+    assert res.assertion_pass_rate == 1.0
     assert res.carve_out_passed is False
+
+
+def test_partial_non_carve_pass_gives_fractional_rate():
+    # Two NON-carve assertions, exactly one fails -> 0.5. One check returns None
+    # (pass); the other lets a ValueError escape (fail). carve_out_passed stays
+    # True because neither failing assertion is a carve-out.
+    def passing(m):
+        m.load_fixture('{"id": "ok"}')  # returns a dict, no raise -> pass
+
+    def failing(m):
+        m.load_fixture('{"id": 123}')  # ValueError escapes -> fail
+
+    task = tasks.Task(
+        name="probe",
+        prompt="",
+        entry_module="solution.py",
+        assertions=[
+            tasks.Assertion("pass", passing, carve_out=False),
+            tasks.Assertion("fail", failing, carve_out=False),
+        ],
+    )
+    res = scorer.score_solution(task, FIXTURES / "fixture_loader" / "minimal")
+    assert res.assertion_pass_rate == 0.5
+    assert res.carve_out_passed is True
 
 
 def _result_for(check, *, carve_out):
@@ -79,10 +105,12 @@ def test_carveout_catching_internally_scores_pass():
 
 
 def test_carveout_letting_exception_escape_scores_fail():
-    # S1 guard inverse: a check that lets its expected exception escape is a FAIL.
+    # S1 guard inverse: a check that lets its expected exception escape is a FAIL,
+    # recorded via carve_out_passed. assertion_pass_rate is the non-carve rate,
+    # so with no non-carve assertions it stays at the 1.0 fallback regardless.
     def check(m):
-        m.load_fixture('{"id": 123}')  # ValueError escapes -> miscounted as fail
+        m.load_fixture('{"id": 123}')  # ValueError escapes -> carve-out fail
 
     res = _result_for(check, carve_out=True)
-    assert res.assertion_pass_rate == 0.0
+    assert res.assertion_pass_rate == 1.0
     assert res.carve_out_passed is False

@@ -22,7 +22,9 @@ _MODULE_COUNTER = itertools.count()
 @dataclass(frozen=True)
 class TrialResult:
     non_test_source_loc: int
+    # Pass rate over the NON-carve-out correctness assertions only.
     assertion_pass_rate: float
+    # Whether every carve-out assertion passed (absolute gate, graded separately).
     carve_out_passed: bool
 
 
@@ -45,6 +47,10 @@ def score_solution(
 ) -> TrialResult:
     """Grade a solution dir against `task`.
 
+    `assertion_pass_rate` is the pass rate over the NON-carve-out correctness
+    assertions only; carve-outs are graded separately by `carve_out_passed`
+    (every carve-out must pass).
+
     `codegen` (Phase-2 hook, unused in Phase 1): if provided, it would populate
     and return the solution dir to score; the default None scores the already-
     populated `solution_dir`.
@@ -55,7 +61,12 @@ def score_solution(
 
     module = _load_solution_module(solution_dir)
 
-    passes = 0
+    # `assertion_pass_rate` is the pass rate over the NON-carve-out correctness
+    # assertions only. Carve-outs are graded separately by `carve_out_passed`
+    # (every carve-out must pass) so a non-carve correctness regression cannot
+    # be masked by passing carve-outs (design criterion 1).
+    non_carve_passes = 0
+    non_carve_total = 0
     carve_out_passed = True
     original_cwd = os.getcwd()
     os.chdir(solution_dir)
@@ -66,15 +77,19 @@ def score_solution(
                 passed = True
             except Exception:
                 passed = False
-            if passed:
-                passes += 1
-            elif assertion.carve_out:
-                carve_out_passed = False
+            if assertion.carve_out:
+                if not passed:
+                    carve_out_passed = False
+            else:
+                non_carve_total += 1
+                if passed:
+                    non_carve_passes += 1
     finally:
         os.chdir(original_cwd)
 
-    total = len(task.assertions)
-    assertion_pass_rate = passes / total if total else 1.0
+    assertion_pass_rate = (
+        non_carve_passes / non_carve_total if non_carve_total else 1.0
+    )
     return TrialResult(
         non_test_source_loc=loc.count_non_test_source_loc(solution_dir),
         assertion_pass_rate=assertion_pass_rate,
