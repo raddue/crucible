@@ -107,6 +107,31 @@ Each arm's test files are harvested and re-run by a **leave-one-out differential
 
 **The lift is breadth, not taxonomy.** WITH and POOL tie exactly at the aggregate rate (both 15/24), and their *paired* delta is a small +0.05 that does not clear the re-run band (MDE 0.048, `beyond_spread` false) — so no taxonomy lift is resolvable at this sample size, not a demonstrated zero. Both score above the single-agent arms. The value comes from running **five parallel test-writers**, not from the dimension *labels* that tell each one what to look for — a single agent given the full inquisitor framing (MID, 0.458) beats the bare baseline by only +0.08 (arm-mean). So Phase 1's finding survives in a sharper form: **no dimension-taxonomy lift is resolvable here, but the parallel execution breadth adds a real +29 pp** — exactly the half Phase 1 could not see because it stubbed the test-running and ceilinged the baseline. The verdict binds the **detection axis** only (triage/aggregation and the fix-cycle were out of scope and are not condemned). The breadth-vs-structure result carries forward to the minimalism investigation (#425).
 
+## Minimalism Ladder Phase 2: Live WITH/WITHOUT A/B — Verdict SKIP (#425, Claude Opus 4.8)
+
+The #425 investigation asked whether a ponytail-inspired **"Minimalism Ladder"** — a rung-0 carve-out precondition plus an ordered rungs-1–5 pre-write YAGNI gate — earns a slot in `/build`'s implementer prompt, *measured before adoption*. Phase 1 (PR #435) shipped the harness only: a standalone **live-codegen → execute → count-LOC** scorer (`skills/build/evals/minimalism-ladder/`) with a pluggable `codegen` seam. Phase 2 wired live generation into that seam and ran the real A/B.
+
+**Setup.** Two arms over the two pilot tasks (`cli_wordcount`, `fixture_loader`), **n=5 independent trials per arm** = **20 live Opus 4.8 codegen agents**, each blind and independent (it sees only the task requirement + its arm's minimalism block, never the assertions or test inputs):
+
+- **WITHOUT** — today's implementer minimalism DNA only (`build-implementer-prompt.md` GREEN + self-review YAGNI).
+- **WITH** — the *same* DNA + the Minimalism Ladder (rung 0 + rungs 1–5), differing in **exactly** that block.
+
+Each solution is scored on two axes at once: **non-test source LOC** (the claimed win, lower-is-better) and a **frozen correctness-assertion suite** that includes an **absolute carve-out gate** — every counted WITH trial must pass 100% of its validation/security carve-out assertions (reject missing-arg + path-traversal for the CLI; reject non-string/missing `id` for the loader), so the ladder cannot "win" by deleting a guard. The gated `decision.decide()` rule is applied **per task** (raw-LOC distributions can't be pooled across a 14-line and a 6-line task) and combined conservatively (reject if any task rejects → expand if any borderline → adopt only if all adopt → else skip). Ecological-validity note: `/build` dispatches its implementer on **`model: opus`** (`build-implementer-prompt.md:9`), so Opus is the only model an adoption would actually run on.
+
+**Result (n=5, live Opus codegen):**
+
+| Task | WITHOUT median LOC | WITH median LOC | Reduction | Non-carve correctness | Carve-out gate | Verdict |
+|------|--------------------|-----------------|-----------|-----------------------|----------------|---------|
+| `cli_wordcount` | 14 `[14,14,12,14,14]` | 13 `[12,14,14,13,12]` | **+7.1%** | 100% both arms | ✅ all trials, both arms | SKIP |
+| `fixture_loader` | 6 `[6,6,6,6,6]` | 6 `[6,6,6,6,6]` | **+0.0%** | 100% both arms | ✅ all trials, both arms | SKIP |
+| **Overall** | | | | | | **SKIP** |
+
+**Verdict: SKIP — do not adopt the ladder.** Both tasks miss the 15%-reduction adoption bar outright (+7.1% and +0.0%), so `decide()` routes to skip at the reduction gate **before** the borderline/expand branch — this is a **terminal** skip, **not** a borderline case that the n=5 floor says to re-measure at n=10 (a 0%/7.1% signal does not become ≥15% at higher n). Both arms produced fully correct, carve-out-preserving solutions; the WITH solutions were genuinely different (one folded the missing-path and traversal guards into a single check) but no smaller in aggregate.
+
+**Why this is the expected, honest outcome — not a harness failure.** This is exactly the **inverse-capability** prediction the design called: on Opus 4.8, today's minimalism DNA already produces minimal, carve-out-safe code, so an ordered ladder restating the same goal earns no measurable LOC slot. It dovetails with #424's sharpened finding above — *structure/taxonomy* in a prompt adds little resolvable lift on a strong model; what helps is breadth/execution, which a single pre-write checklist does not provide. The harness did its job: it told us **not** to ship, and nothing was wired into `implementer-common.md` / `build-implementer-prompt.md`.
+
+**Honest scope of the negative result.** (1) **2-task pilot** — a directional adopt/skip signal, not a breadth claim. (2) `fixture_loader` **saturated at 6 LOC across all 10 trials** (a guarded JSON one-liner has essentially one minimal form), so it has no headroom to separate the arms — only `cli_wordcount` carried real variation, and it still missed the bar. (3) **Opus-only** — the design predicts a larger lift on weaker models (Sonnet/Haiku), which is **unmeasured here**; but since there is no model-conditional prompt-injection mechanism and `/build` runs implementers on Opus, a weaker-model win could not drive adoption without separate work. (4) The gate proves **functional parity + the *asserted* carve-outs**, not "no quality cut" in general. The investigation closes on this measured null.
+
 ## Sequence Evals: Ordering Discipline Under Pressure (Claude Opus 4.6)
 
 Execution evals test whether a skill works once invoked. Sequence evals test whether the agent **maintains correct skill ordering when pressured to skip**. Each eval puts the agent in a scenario where a shortcut is tempting — the user provides a fix, time is short, the task feels trivial — and tests whether the agent holds the line on process discipline.

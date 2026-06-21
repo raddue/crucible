@@ -11,10 +11,29 @@ mocks dispatch and checks orchestration behaviour against recorded expectations.
 This subdir instead *runs real code* in a subprocess-free, in-process scorer and
 counts its LOC. It deliberately reuses **none** of those parent modules.
 
-> **Phase 1 scope:** the harness only. There is **no live LLM codegen** here yet
-> — Phase 1 scores pre-generated fixture solution dirs. Wiring a real generator
-> into the `codegen` seam, running the WITH/WITHOUT measurement, and any ladder
-> *adoption* are Phase 2 of `#425`.
+> **Phase 1 scope:** the harness only — Phase 1 scores pre-generated fixture
+> solution dirs. **Phase 2 has now run** (see below): it drove live Opus codegen
+> through the WITH/WITHOUT arms and applied `decision.decide()`.
+>
+> **Phase 2 verdict: SKIP** (`#425`, Opus 4.8) — `cli_wordcount` +7.1% / 0 carve
+> regressions, `fixture_loader` +0.0%; both miss the 15% adoption bar (terminal
+> skip, not borderline → no n=10). Today's minimalism DNA already suffices on the
+> model `/build` runs implementers on, so **nothing was wired into the implementer
+> prompt**. Full write-up: `docs/evals.md` › "Minimalism Ladder Phase 2".
+
+## Phase-2 driver (the live A/B)
+
+- **`phase2_arm_baseline.md`** / **`phase2_arm_ladder.md`** — the two codegen
+  instruction blocks (WITHOUT = today's DNA; WITH = DNA + the ladder, differing in
+  exactly the ladder block). These are the experimental record.
+- **`phase2_driver.py`** — scores already-generated solution dirs under a run root
+  (`<root>/<arm>/<task>/trial<k>/solution.py`) via the **untouched** Phase-1
+  `score_solution(..., codegen=None)` contract, applies `decide()` per task, and
+  combines conservatively. Run: `python3 phase2_driver.py <run_root>`.
+
+> The driver consumes an **ephemeral** run root (the live-generated solution dirs
+> are not committed — public repo, by-design throwaway artifacts), so it is **not**
+> wired into `run_tests.sh`; only the Phase-1 pytest suite gates in CI.
 
 ## Public API (importable as flat top-level names)
 
