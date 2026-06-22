@@ -150,7 +150,7 @@ for each EXEC in TRACE:
   fail if out= byte-range exceeds 4 KiB
 
 for each EDIT / WROTE in TRACE:
-  fail if sha256:<hex64> missing OR the hash is not declared in ARTIFACTS
+  fail if sha256:<hex64> is missing   # the hash is provenance, NOT verified vs ARTIFACTS (0000… placeholders are normal); effects are verified via declared ARTIFACTS + WITNESS + ledger, never this hash. Deliberate — see #412.
 
 for each DISPATCHED in TRACE:
   fail if rcpt-sha256:<hex64> is missing

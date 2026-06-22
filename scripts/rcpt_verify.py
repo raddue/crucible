@@ -245,13 +245,18 @@ def lint_receipt(text):
             if not m:
                 raise LintError(f"{entry['verb']} missing sha256: {entry['args']}")
             if m.group(1) not in {a["hash"] for a in artifacts.values()}:
-                # artifact may be an on-disk path not re-declared; for lint purposes accept
-                # only if the entry's path itself is in ARTIFACTS as key
+                # DELIBERATE NON-GATE (#412 / BS1), NOT a TODO: the EDIT/WROTE hash is
+                # provenance, not a verified claim. It is intentionally NOT required to
+                # appear in ARTIFACTS — 0000…0 placeholders are the norm, and the dominant
+                # legitimate pattern (EDIT src/foo.ts while only patch.diff is declared) is
+                # structurally identical to a fabricated one, so gating here would flip
+                # committed clean-pass fixtures and the canonical example. Effects are
+                # verified via declared ARTIFACTS (disk-verified under --strict), the
+                # WITNESS, and the receipt-ledger — never via this hash. See
+                # return-convention.md "for each EDIT / WROTE in TRACE".
                 path_m = re.match(r"^(\S+)", entry["args"])
                 if path_m and path_m.group(1) not in artifacts:
-                    # Allow it — file may not be re-emitted as an ARTIFACT; a tightening
-                    # is left as future work. For pilot, we don't hard-fail here.
-                    pass
+                    pass  # accept — deliberate non-gate per the note above (#412)
         elif entry["verb"] == "DISPATCHED":
             if not re.search(r"rcpt-sha256:[0-9a-f]{64}", entry["args"]):
                 raise LintError(f"DISPATCHED missing rcpt-sha256: {entry['args']}")

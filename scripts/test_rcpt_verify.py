@@ -738,5 +738,42 @@ class TestWitnessSpanCapActual(unittest.TestCase):
             self.assertIn("4 KiB", str(cm.exception))
 
 
+class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
+    """#412 (BS1): an undeclared EDIT/WROTE hash is provenance, NOT a verified claim.
+    A receipt whose TRACE WROTEs a file that is neither a declared ARTIFACT key nor a
+    declared ARTIFACT hash lints PASS — the deliberate trust-model decision
+    (return-convention.md "for each EDIT / WROTE in TRACE"), not a hole. This locks it:
+    a future "fix" that hard-FAILs undeclared EDIT/WROTE would flip these AND the
+    committed clean-pass fixtures + canonical example, so it must be a conscious
+    trust-model change, never an accidental one. Both shapes are covered — the
+    bare-basename PoC and the path-shaped variant (is_path_shaped True), the case an
+    audit is most likely to re-flag as 'but this one looks resolvable.'"""
+
+    BOGUS = "beadfeed" * 8  # 64 hex; matches no declared artifact hash
+
+    def _inject(self, verb, path):
+        # Insert an effect-bearing verb whose hash is undeclared and whose path is
+        # not an ARTIFACTS key, into the known-good corpus receipt[0]. (Fails LOUD,
+        # not silent, if receipt[0]'s shape ever drops its CLAIMS header.)
+        base = _load("sample-corpus/receipts.jsonl")[0]["receipt"]
+        lines = base.splitlines()
+        lines.insert(lines.index("CLAIMS"), f"  4  {verb}  {path}  sha256:{self.BOGUS}")
+        return "\n".join(lines)
+
+    def test_bare_basename_poc_still_passes(self):
+        rv = _import_rv()
+        self.assertEqual(rv.lint_receipt(self._inject("WROTE", "secrets.env")), "PASS")
+
+    def test_path_shaped_poc_still_passes(self):
+        rv = _import_rv()
+        self.assertEqual(rv.lint_receipt(self._inject("WROTE", "src/secrets.env")), "PASS")
+
+    def test_edit_verb_also_passes(self):
+        # The dead branch serves BOTH EDIT and WROTE (rcpt_verify.py:243) — lock both.
+        rv = _import_rv()
+        self.assertEqual(rv.lint_receipt(self._inject("EDIT", "secrets.env")), "PASS")
+        self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
+
+
 if __name__ == "__main__":
     unittest.main()
