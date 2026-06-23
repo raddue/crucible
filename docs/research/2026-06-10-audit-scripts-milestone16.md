@@ -147,6 +147,17 @@ The `/audit scripts/` run read these in full and grounded findings in them: `led
 > #394–#406 issue. It is tracked by dedicated follow-up issue **#408** (milestone 16) so a later
 > Opus-session pass can complete coverage of the un-audited trust-critical modules.
 
+### #408 update (2026-06-22, focused Opus pass)
+
+Read **in full** and grounded findings: `rcpt_verify.py`, `test_rcpt_verify.py`, `reconcile_ledger.py`, `calibrate_tolerance.py` (+ `test_ledger_core.py`, `test_brier_advise.py` for test-health). Findings filed:
+
+- **#439 (Fatal)** — `reconcile_ledger` falsification/Brier is a no-op in practice: `git show --name-only` without `-m` suppresses merge diffs + squash-merged `fix(...)` commits aren't `--merges` → `falsified += 0` always; `fix_branch_sizes` p90=0 sample-collapse at ≥30 merges.
+- **#440 (Significant)** — `rcpt_verify` unguarded `int(TRACE#…)` at 5 sites → `ValueError` not `LintError`; `--eval` batch catches only `LintError` so one poisoned row aborts the batch.
+- **#441 (Significant)** — untested trust-critical surface: reconcile GIT layer `:835-1067` (where #439 lives, zero coverage), `calibrate_tolerance` body, `parse_witness` grammar.
+- **#442 (Significant + minors)** — `calibrate_tolerance` crash-on-malformed; drifted duplicated logic (forked ISO parsers reconcile/render; 5× `out=#range` regexes; 3× expect-fail); minor sweep. (`_glob_match` drift → already **#401**.)
+
+**Still DEFERRED (remaining #408 boxes):** `render_ledger.py` (WHS honest-count + 3×-rolling-median inflation detector), `test_catalog.py`, `grudge_query.py` full read, `compass.py:180-1182` field caps + `MUTEX_PAIRS`. #408 stays open for these.
+
 ## Provenance
 
 - Lens reports (source): `~/.claude/projects/-home-user-crucible/memory/audit/scratch/2026-06-10T19-29-36/{architecture,blindspots,consistency-a,consistency-b,robustness,testhealth}-findings.md`, `coverage-map.md`, `manifest.md` — machine-local, reclaimable.

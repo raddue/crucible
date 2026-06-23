@@ -847,6 +847,10 @@ def _git(args: List[str], cwd: Optional[str] = None) -> Optional[str]:
 
 
 _FIX_MERGE_RE = re.compile(r"(?:^|[\s/'\"])(?:hot)?fix/", re.I)
+# Conventional-commit subject of a SQUASH-merged fix landing: `fix:`,
+# `fix(scope):`, `fix(scope)!:`, `hotfix:`. Anchored at start so `prefix:`,
+# `fixture:`, `affix:` do NOT match (#439 — squash workflow has no fix/* merge).
+_FIX_COMMIT_RE = re.compile(r"^(?:hot)?fix(?:\([^)]*\))?!?:", re.I)
 
 
 def _is_fix_merge_subject(subject: str) -> bool:
@@ -860,6 +864,17 @@ def _is_fix_merge_subject(subject: str) -> bool:
     return _FIX_MERGE_RE.search(subject) is not None
 
 
+def _is_fix_commit_subject(subject: str) -> bool:
+    """True iff a non-merge commit subject is a conventional-commit fix landing
+    (`fix:` / `fix(scope):` / `fix(scope)!:` / `hotfix:`). This is the squash-
+    merge analog of `_is_fix_merge_subject`: repos that squash-merge (the
+    default here) land a fix as a single non-merge commit, never a fix/* merge,
+    so the merge-only discovery missed every one of them (#439)."""
+    if not subject:
+        return False
+    return _FIX_COMMIT_RE.match(subject) is not None
+
+
 def discover_candidates(lookback_days: int = 30) -> List[dict]:
     """Discover fix/* hotfix/* merges within lookback_days, plus regression
     issues with a referenced commit (best-effort).
@@ -871,25 +886,33 @@ def discover_candidates(lookback_days: int = 30) -> List[dict]:
         _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)
     ).strftime("%Y-%m-%d")
 
-    # Merge commits whose merged branch matches fix/* or hotfix/*. We look at
-    # merge commits in the lookback window and inspect the merge subject for a
-    # fix/hotfix branch name.
-    log = _git([
-        "log", "--merges", f"--since={since}",
-        "--pretty=format:%H%x1f%cI%x1f%s",
-    ])
-    if log:
+    # A fix lands one of two ways, depending on the repo's merge policy. We
+    # discover both on the mainline first-parent chain (so feature-branch internal
+    # commits are never double-counted against their own merge):
+    #   (1) MERGE workflow — a merge commit whose subject names a fix/* branch.
+    #   (2) SQUASH workflow (the default here) — a single non-merge commit with a
+    #       conventional-commit `fix(...)` subject. Missing this class was the #439
+    #       Fatal: merge-only discovery found zero squash-merged fixes.
+    for fp_args, is_fix in (
+        (["--merges"], _is_fix_merge_subject),
+        (["--no-merges"], _is_fix_commit_subject),
+    ):
+        log = _git([
+            "log", "--first-parent", *fp_args, f"--since={since}",
+            "--pretty=format:%H%x1f%cI%x1f%s",
+        ])
+        if not log:
+            continue
         for line in log.splitlines():
             parts = line.split("\x1f")
             if len(parts) < 3:
                 continue
             sha, when, subject = parts[0], parts[1], parts[2]
-            if not _is_fix_merge_subject(subject):
+            if not is_fix(subject):
                 continue
-            touched = _touched_files(sha)
             candidates.append({
                 "commit": sha,
-                "touched_files": touched,
+                "touched_files": _touched_files(sha),
                 "merge_time": when,
             })
 
@@ -908,7 +931,11 @@ def discover_candidates(lookback_days: int = 30) -> List[dict]:
 
 
 def _touched_files(sha: str) -> List[str]:
-    out = _git(["show", "--name-only", "--pretty=format:", sha])
+    # `--first-parent` is load-bearing (#439): plain `git show` emits NO diff for
+    # a merge commit, so every fix/* merge candidate got empty touched_files and
+    # walkback falsification silently never fired. `--first-parent` shows the
+    # merge's net change vs mainline; on a non-merge (squash) commit it is a no-op.
+    out = _git(["show", "--first-parent", "--name-only", "--pretty=format:", sha])
     if not out:
         return []
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
@@ -1034,26 +1061,33 @@ def discover_reference_commits(tokens: List[str], lookback_days: int = 30) -> Li
 
 
 def fix_branch_sizes(days: int = 90) -> List[int]:
-    """Touched-file counts of fix/hotfix merges over the prior `days` (a
-    DISTINCT 90-day window from the 30-day candidate lookback)."""
+    """Touched-file counts of fix/hotfix landings over the prior `days` (a
+    DISTINCT 90-day window from the 30-day candidate lookback). Counts BOTH
+    fix/* merges and squash-merged `fix(...)` commits (#439) — counting only
+    merges left every size at 0 on a squash-merge repo, collapsing the p90
+    cross-cut threshold."""
     since = (
         _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
     ).strftime("%Y-%m-%d")
-    log = _git([
-        "log", "--merges", f"--since={since}",
-        "--pretty=format:%H%x1f%s",
-    ])
     sizes: List[int] = []
-    if not log:
-        return sizes
-    for line in log.splitlines():
-        parts = line.split("\x1f")
-        if len(parts) < 2:
+    for fp_args, is_fix in (
+        (["--merges"], _is_fix_merge_subject),
+        (["--no-merges"], _is_fix_commit_subject),
+    ):
+        log = _git([
+            "log", "--first-parent", *fp_args, f"--since={since}",
+            "--pretty=format:%H%x1f%s",
+        ])
+        if not log:
             continue
-        sha, subject = parts[0], parts[1]
-        if not _is_fix_merge_subject(subject):
-            continue
-        sizes.append(len(_touched_files(sha)))
+        for line in log.splitlines():
+            parts = line.split("\x1f")
+            if len(parts) < 2:
+                continue
+            sha, subject = parts[0], parts[1]
+            if not is_fix(subject):
+                continue
+            sizes.append(len(_touched_files(sha)))
     return sizes
 
 

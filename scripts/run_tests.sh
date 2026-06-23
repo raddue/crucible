@@ -54,6 +54,9 @@ run python3 scripts/test_brier_advise.py
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
 
+# --- Ledger GIT layer: falsification discovery (#439 / #441) ---
+run python3 scripts/test_reconcile_git.py
+
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
