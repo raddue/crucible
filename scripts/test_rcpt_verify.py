@@ -775,5 +775,71 @@ class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
 
 
+class TestTraceRefGuard(unittest.TestCase):
+    """#440: a malformed `TRACE#<non-digits>` reference (attacker-influenced
+    receipt text) must lint-FAIL cleanly (LintError), NOT raise a raw ValueError
+    traceback. Six sites fed `int()` an unvalidated suffix; this locks them, and
+    the --eval batch isolation that the ValueError used to break."""
+
+    def _base(self):
+        return _load("sample-corpus/receipts.jsonl")[0]["receipt"]
+
+    def _sub(self, text, old, new):
+        self.assertIn(old, text, f"fixture drift: {old!r} not in receipt")
+        return text.replace(old, new, 1)
+
+    def test_claim_citation_non_numeric_is_lint_error(self):
+        rv = _import_rv()
+        bad = self._sub(self._base(), "from=TRACE#2", "from=TRACE#2x")
+        with self.assertRaises(rv.LintError):
+            rv.lint_receipt(bad)
+
+    def test_witness_ran_trailing_junk_is_lint_error(self):
+        rv = _import_rv()
+        # WITNESS ran= captured greedily → trailing junk reaches int() (the bug
+        # hit live during the #412 gate). Must be a clean LintError.
+        bad = self._sub(self._base(), "ran=TRACE#3", "ran=TRACE#3 junk")
+        with self.assertRaises(rv.LintError):
+            rv.lint_receipt(bad)
+
+    def test_cli_malformed_citation_exit1_no_traceback(self):
+        bad = self._sub(self._base(), "from=TRACE#2", "from=TRACE#2x")
+        r = run("--tier1", "-", stdin=bad)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertNotIn("ValueError", r.stderr)
+
+    def test_eval_batch_isolates_poisoned_record(self):
+        # A good record followed by one whose citation used to crash the WHOLE
+        # batch (ValueError escaping _eval_record's LintError-only catch).
+        good = self._base()
+        bad = self._sub(good, "from=TRACE#2", "from=TRACE#2x")
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "corpus.jsonl"
+            p.write_text(
+                json.dumps({"dispatch-id": "good", "receipt": good}) + "\n" +
+                json.dumps({"dispatch-id": "poisoned", "receipt": bad}) + "\n"
+            )
+            r = run("--eval", str(p))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("good", r.stdout)
+        self.assertIn("poisoned", r.stdout)
+        self.assertIn("LINT-FAIL", r.stdout)        # the bad one classified, not crashed
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_eval_batch_isolates_malformed_json_line(self):
+        good = self._base()
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "corpus.jsonl"
+            p.write_text(
+                json.dumps({"dispatch-id": "good", "receipt": good}) + "\n" +
+                "{not valid json\n"
+            )
+            r = run("--eval", str(p))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("good", r.stdout)
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

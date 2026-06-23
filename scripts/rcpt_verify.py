@@ -217,6 +217,22 @@ def parse_witness(body):
     return {"kind": kind, "payload": payload.strip(), "expect_fail": expect_fail, "ran": ran.strip()}
 
 
+_TRACE_REF_RE = re.compile(r"^TRACE#([0-9]+)$")
+
+
+def _trace_idx(ref: str) -> int:
+    """Parse N from a `TRACE#N` reference. Raises LintError (NOT a raw ValueError
+    traceback) on a non-numeric / empty / trailing-junk suffix. Receipt text is
+    attacker-influenced, so a malformed citation must lint-FAIL cleanly — and an
+    uncaught ValueError here used to abort the whole `--eval` batch (#440).
+    Anchored on ASCII digits only (`str.isdigit()` would admit e.g. superscripts
+    that `int()` then rejects)."""
+    m = _TRACE_REF_RE.match(ref)
+    if not m:
+        raise LintError(f"malformed TRACE# reference: {ref!r}")
+    return int(m.group(1))
+
+
 def lint_receipt(text):
     sections = parse_receipt(text)
     # VERDICT
@@ -264,7 +280,7 @@ def lint_receipt(text):
     for c in claims:
         cit = c["citation"]
         if cit.startswith("TRACE#"):
-            idx = int(cit[len("TRACE#"):])
+            idx = _trace_idx(cit)
             if not 1 <= idx <= len(trace):
                 raise LintError(f"CLAIM citation TRACE#{idx} does not resolve")
         else:
@@ -282,7 +298,7 @@ def lint_receipt(text):
         if ran.startswith("UNRUNNABLE"):
             raise LintError("WITNESS ran=UNRUNNABLE not permitted on PASS")
     if ran.startswith("TRACE#"):
-        idx = int(ran[len("TRACE#"):])
+        idx = _trace_idx(ran)
         if not 1 <= idx <= len(trace):
             raise LintError(f"WITNESS ran=TRACE#{idx} does not resolve")
         verb = trace[idx - 1]["verb"]
@@ -314,7 +330,7 @@ def lint_receipt(text):
         if not has_skipped:
             for c in claims:
                 if c["key"] in {"tests-ran", "tests-pass"} and c["citation"].startswith("TRACE#"):
-                    idx = int(c["citation"][len("TRACE#"):])
+                    idx = _trace_idx(c["citation"])
                     cited = trace[idx - 1]
                     if cited["verb"] != "EXEC":
                         raise LintError(f"CLAIM {c['key']} cites TRACE#{idx} which is {cited['verb']}, not EXEC")
@@ -662,7 +678,7 @@ def tier2_witness(witness, trace, root, strict, verdict):
     notes; raises LintError on FAIL (incl. verify_witness's byte-identical messages)."""
     if not witness["ran"].startswith("TRACE#"):
         return []
-    idx = int(witness["ran"][len("TRACE#"):])
+    idx = _trace_idx(witness["ran"])
     if not 1 <= idx <= len(trace):
         return []
     cited = trace[idx - 1]
@@ -711,7 +727,7 @@ def _eval_tier2(witness, trace, bodies, verdict):
     Raises LintError (byte-identical message) on FAIL; the caller prints it as LINT-FAIL."""
     if not witness["ran"].startswith("TRACE#"):
         return
-    idx = int(witness["ran"][len("TRACE#"):])
+    idx = _trace_idx(witness["ran"])
     if not 1 <= idx <= len(trace):
         return
     cited = trace[idx - 1]
@@ -748,7 +764,15 @@ def _eval_text(path) -> str:
     for line in _read_path_arg(path).splitlines():
         if not line.strip():
             continue
-        rec = json.loads(line)
+        try:
+            rec = json.loads(line)
+        except ValueError:  # json.JSONDecodeError is a ValueError subclass
+            # Per-record fault isolation (#440): a malformed line is surfaced as a
+            # LINT-FAIL row, never an aborted batch. The contract is "classify each
+            # record, always exit 0"; one corrupt line must not suppress the rest.
+            total += 1
+            out.append(f"{'?':30s}  LINT-FAIL  malformed JSON line")
+            continue
         if not rec.get("receipt"):
             continue
         total += 1
@@ -970,7 +994,7 @@ def _selftest_crosscheck(rec, bodies):
     sections = parse_receipt(text)
     trace = parse_trace(sections["TRACE"])
     witness = parse_witness(sections["WITNESS"])
-    idx = int(witness["ran"][len("TRACE#"):])
+    idx = _trace_idx(witness["ran"])
     cited = trace[idx - 1]
     art = derive_art_name(cited, verdict)
     inline_disp = _eval_record(rec)[0]
