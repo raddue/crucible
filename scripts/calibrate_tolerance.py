@@ -73,9 +73,11 @@ def _per_fixture_pass_rate(fixture_result: dict) -> float:
     expectations = fixture_result.get("expectations", [])
     if not expectations:
         return 0.0
-    # All expectations share trial count; pull from first.
-    per_trial_lists = [er["per_trial_verdicts"] for er in expectations]
-    n_trials = len(per_trial_lists[0]) if per_trial_lists else 0
+    # #442 G5: tolerate malformed input — a missing per_trial_verdicts key and
+    # ragged per-trial lists must degrade gracefully, not traceback. Evaluate
+    # only the common trial prefix (min length across expectations).
+    per_trial_lists = [er.get("per_trial_verdicts", []) for er in expectations]
+    n_trials = min((len(lst) for lst in per_trial_lists), default=0)
     if n_trials == 0:
         return 0.0
     passes = 0

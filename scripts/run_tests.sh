@@ -50,6 +50,7 @@ run bash hooks/tests/test-rcpt-verify-hook.sh
 run python3 scripts/check_calibration_dispatch.py --selftest
 run python3 scripts/check_calibration_dispatch.py
 run python3 scripts/test_brier_advise.py
+run python3 scripts/test_calibrate_tolerance.py
 
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
