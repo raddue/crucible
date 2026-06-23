@@ -14,7 +14,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import json, re, sys, hashlib, pathlib
+import json, re, sys, hashlib, pathlib, typing
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
@@ -132,12 +132,38 @@ def parse_trace(body):
     return out
 
 
+class OutRange(typing.NamedTuple):
+    artifact: str
+    kind: str   # "L" (line) | "B" (byte)
+    start: int
+    end: int
+
+
+# #442 G6b: the ONE canonical out=<artifact>#<KIND><a>-<KIND><b> parser, accepting
+# EXACTLY one well-formed range as a complete token. [^#\s]+ rejects '#' in the
+# artifact; \2 back-ref rejects mixed kind (#L1-B5); (?!#[LB]\d) negative-lookahead
+# rejects a trailing second #<range> (double-#range) WITHOUT over-rejecting other
+# trailing chars (out=a#L1-L5 mode=x / out=a#L1-L5,x still parse). A None parse
+# makes check_exec_range_bound LINT-FAIL at Tier-1 before any Tier-2 site, so all 5
+# (formerly divergent: old greedy/last vs the non-greedy first-range readers) now
+# agree. Replaces 5 divergent regexes.
+_OUT_RANGE_RE = re.compile(r"out=([^#\s]+)#([LB])(\d+)-\2(\d+)(?!#[LB]\d)")
+
+
+def parse_out_range(args_str):
+    """Parse out=<artifact>#<KIND><a>-<KIND><b>. Returns OutRange or None."""
+    m = _OUT_RANGE_RE.search(args_str)
+    if not m:
+        return None
+    return OutRange(m.group(1), m.group(2), int(m.group(3)), int(m.group(4)))
+
+
 def check_exec_range_bound(args_str):
     """out=<artifact>#<range> — check range ≤ 4 KiB."""
-    m = re.search(r"out=\S+#([LB])(\d+)-\1(\d+)", args_str)
-    if not m:
+    r = parse_out_range(args_str)
+    if not r:
         raise LintError(f"EXEC missing out= or bad range: {args_str}")
-    kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+    kind, a, b = r.kind, r.start, r.end
     if b < a:
         raise LintError(f"EXEC range negative: {args_str}")
     # Tier-1 is disk-free, so a line range can only be ESTIMATED (80 bytes/line). This
@@ -253,9 +279,9 @@ def lint_receipt(text):
     for entry in trace:
         if entry["verb"] == "EXEC":
             check_exec_range_bound(entry["args"])
-            m = re.search(r"out=(\S+?)#", entry["args"])
-            if m and m.group(1) not in artifacts:
-                raise LintError(f"EXEC out= artifact not in ARTIFACTS: {m.group(1)}")
+            r = parse_out_range(entry["args"])
+            if r and r.artifact not in artifacts:
+                raise LintError(f"EXEC out= artifact not in ARTIFACTS: {r.artifact}")
         elif entry["verb"] in {"EDIT", "WROTE"}:
             m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
             if not m:
@@ -566,18 +592,29 @@ def derive_art_name(cited, verdict):
     tier2_verify_fail (FAIL: EXEC out= only) do. Returns None when no body lookup
     applies (→ clean). Shared by verify_witness (message/control) and the --eval
     caller (body fetch) so the two Tier-2 paths cannot diverge on art_name."""
-    m = re.search(r"out=(\S+?)#([LB]\d+-[LB]\d+)", cited["args"]) if cited["verb"] == "EXEC" else None
+    r = parse_out_range(cited["args"]) if cited["verb"] == "EXEC" else None
     if verdict == "FAIL":
         # tier2_verify_fail — EXEC-only (lint.py:370-373)
-        if not m:
+        if not r:
             return None
-        return m.group(1)
+        return r.artifact
     # verdict == PASS — tier2_verify (lint.py:315-326)
-    if not m and cited["verb"] in {"READ", "WROTE"}:
+    if not r and cited["verb"] in {"READ", "WROTE"}:
         path_m = re.match(r"^(\S+)", cited["args"])
         return path_m.group(1) if path_m else None
-    if m:
-        return m.group(1)
+    if r:
+        return r.artifact
+    return None
+
+
+def _expect_fail_pattern(expect_fail):
+    """Regex source for a WITNESS expect-fail sig: /regex/ verbatim, "literal"
+    escaped, else None (e.g. an exit= clause). #442 G6c — one source for the
+    two byte-identical derivation blocks in verify_witness."""
+    if expect_fail.startswith("/") and expect_fail.endswith("/"):
+        return expect_fail[1:-1]
+    if expect_fail.startswith('"') and expect_fail.endswith('"'):
+        return re.escape(expect_fail[1:-1])
     return None
 
 
@@ -609,11 +646,7 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
         # tier2_verify_fail (lint.py:377-390)
         exit_m = re.search(r"exit=(-?\d+)", cited["args"])
         exit_success = exit_m and int(exit_m.group(1)) == 0
-        pattern = None
-        if expect_fail.startswith("/") and expect_fail.endswith("/"):
-            pattern = expect_fail[1:-1]
-        elif expect_fail.startswith('"') and expect_fail.endswith('"'):
-            pattern = re.escape(expect_fail[1:-1])
+        pattern = _expect_fail_pattern(expect_fail)
         content_match = bool(pattern and re.search(pattern, body))
         if exit_success and not content_match:
             raise LintError(
@@ -637,11 +670,7 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
                     )
             return True
     # regex / literal expect-fail
-    pattern = None
-    if expect_fail.startswith("/") and expect_fail.endswith("/"):
-        pattern = expect_fail[1:-1]
-    elif expect_fail.startswith('"') and expect_fail.endswith('"'):
-        pattern = re.escape(expect_fail[1:-1])
+    pattern = _expect_fail_pattern(expect_fail)
     if pattern and re.search(pattern, body):
         raise LintError(
             f"Tier-2: WITNESS expect-fail regex /{pattern}/ matches body of {art_name} "
@@ -655,10 +684,10 @@ def _read_cited_range(path: pathlib.Path, cited):
     Deliberate (M2): lint.py's inline tier2_verify reads the WHOLE body, but the disk
     reader reads only the cited range (fixture-4(g)-guarded). READ/WROTE entries carry
     no #range → read whole file (the grep-on-READ/WROTE path; not in natural corpus)."""
-    m = re.search(r"out=\S+?#([LB])(\d+)-[LB](\d+)", cited["args"])
-    if not m:
+    r = parse_out_range(cited["args"])
+    if not r:
         return path.read_text()
-    kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+    kind, a, b = r.kind, r.start, r.end
     # Ranges are 1-based; a<1 is malformed, clamp to 1 so `[a-1:b]` never slices from
     # the END (a=0 → [-1:b], an empty/wrong body that silently bypasses the witness).
     if a < 1:
@@ -703,9 +732,9 @@ def tier2_witness(witness, trace, root, strict, verdict):
     #    false-FAIL.
     # Scoped to ranged out= citations (the EXEC#L/#B read budget per return-convention.md:224);
     # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
-    m = re.search(r"out=\S+?#([LB])(\d+)-\1(\d+)", cited["args"])
-    if m:
-        kind, a, b = m.group(1), int(m.group(2)), int(m.group(3))
+    r = parse_out_range(cited["args"])
+    if r:
+        kind, a, b = r.kind, r.start, r.end
         if a < 1:  # 1-based; clamp matches _read_cited_range
             a = 1
         if kind == "L":

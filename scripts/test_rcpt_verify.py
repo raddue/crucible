@@ -12,6 +12,7 @@ import importlib.util
 import json
 import pathlib
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -839,6 +840,56 @@ class TestTraceRefGuard(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("good", r.stdout)
         self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+
+class TestParseOutRange(unittest.TestCase):
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_basic_line_range(self):
+        r = self.rv.parse_out_range("out=foo.py#L1-L5 mode=x")
+        self.assertEqual((r.artifact, r.kind, r.start, r.end), ("foo.py", "L", 1, 5))
+
+    def test_byte_range(self):
+        r = self.rv.parse_out_range("out=a.bin#B10-B20")
+        self.assertEqual((r.artifact, r.kind, r.start, r.end), ("a.bin", "B", 10, 20))
+
+    def test_mixed_kind_rejected(self):
+        self.assertIsNone(self.rv.parse_out_range("out=foo#L1-B5"))
+
+    def test_no_out_returns_none(self):
+        self.assertIsNone(self.rv.parse_out_range("pattern=foo ran=TRACE#1"))
+
+    def test_double_range_rejected(self):
+        # #442 G6b / F1: the 5 out=#range sites diverge on a double-#range (old L137
+        # greedy/last vs the non-greedy first-range readers), so the grammar rejects
+        # multi-#range outright — None makes check_exec_range_bound LINT-FAIL at Tier-1,
+        # before any Tier-2 site, so all 5 agree.
+        self.assertIsNone(self.rv.parse_out_range("out=a#L1-L5#L9-L1"))  # neg second range
+        self.assertIsNone(self.rv.parse_out_range("out=a#L1-L5#L9-L9"))  # both valid -> still rejected (tightening)
+
+    def test_hash_in_artifact_rejected(self):
+        self.assertIsNone(self.rv.parse_out_range("out=a#b#L1-L5"))
+
+    def test_trailing_nonrange_arg_not_over_rejected(self):
+        # the (?!#[LB]\d) lookahead must reject only a trailing second #<range>, not
+        # ordinary trailing chars after a well-formed range.
+        self.assertEqual(self.rv.parse_out_range("out=a#L1-L5 mode=x")[:4], ("a", "L", 1, 5))
+        self.assertEqual(self.rv.parse_out_range("out=a#L1-L5,x")[:4], ("a", "L", 1, 5))
+
+
+class TestExpectFailPattern(unittest.TestCase):
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_regex_form_returned_verbatim(self):
+        self.assertEqual(self.rv._expect_fail_pattern("/err.*/"), "err.*")
+
+    def test_literal_form_is_escaped(self):
+        self.assertEqual(self.rv._expect_fail_pattern('"a.b"'), re.escape("a.b"))
+
+    def test_exit_clause_returns_none(self):
+        self.assertIsNone(self.rv._expect_fail_pattern("exit!=0"))
 
 
 if __name__ == "__main__":
