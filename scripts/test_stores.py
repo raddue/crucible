@@ -892,5 +892,15 @@ class LedgerDoctorScanTest(unittest.TestCase):
             self.assertEqual(rc, 1)
 
 
+class TestIsoParserUnified(unittest.TestCase):
+    def test_render_ledger_uses_reconcile_iso_parser(self):
+        # #442 G6a: render_ledger must NOT carry a forked ISO parser.
+        import scripts.render_ledger as rl
+        import scripts.reconcile_ledger as rc
+        self.assertFalse(hasattr(rl, "_parse_ts"),
+                         "render_ledger._parse_ts must be deleted (forked parser)")
+        self.assertIs(rl._parse_iso, rc._parse_iso)
+
+
 if __name__ == "__main__":
     unittest.main()

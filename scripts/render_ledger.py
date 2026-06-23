@@ -36,6 +36,7 @@ from scripts.reconcile_ledger import (  # noqa: E402
     ledger_entry_hash,
     PREDICATE_SENTINEL,
     GRACE_DAYS,
+    _parse_iso,
 )
 
 # Defaults point at the central machine-local store (#270): the live ledger
@@ -343,21 +344,6 @@ def _breakdown_from_reduced(reduced: dict) -> dict:
 # Predicate calibration (predicted_falsifier — design §3a, Phase 7)           #
 # --------------------------------------------------------------------------- #
 
-def _parse_ts(ts):
-    """Tolerant ISO-8601 parse -> aware UTC datetime, or None. (Mirrors the
-    reconciler's parser without importing a private helper.)"""
-    if not ts or not isinstance(ts, str):
-        return None
-    s = ts.strip().replace("Z", "+00:00")
-    try:
-        dt = _dt.datetime.fromisoformat(s)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_dt.timezone.utc)
-    return dt.astimezone(_dt.timezone.utc)
-
-
 def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
     """Per-skill predicate hit-rate + unparseable-rate (design §3a).
 
@@ -375,7 +361,7 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
     Returns {skill: {total_non_null, parseable, unparseable, hit_count,
     hit_rate, unparseable_rate}}.
     """
-    now_dt = _parse_ts(now)
+    now_dt = _parse_iso(now)
     grace_cutoff = (now_dt - _dt.timedelta(days=GRACE_DAYS)) if now_dt else None
 
     per_skill = {}
@@ -414,7 +400,7 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
             continue
         # Parseable + auto-checkable: counts toward the hit-rate denominator once
         # it is outside the grace window (it has had a full chance to fire).
-        ts = _parse_ts(e.get("timestamp"))
+        ts = _parse_iso(e.get("timestamp"))
         outside_grace = grace_cutoff is None or (ts is not None and ts < grace_cutoff)
         if not outside_grace:
             continue
