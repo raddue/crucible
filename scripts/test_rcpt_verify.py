@@ -59,10 +59,25 @@ class TestV1CorpusEquivalence(unittest.TestCase):
     Tier-2-only rows (102-inject/105-inject — the ONLY artifact_bodies carriers)
     return cleanly from lint_receipt (their catch fires via the Tier-2 path)."""
 
-    def test_samples_lint_pass(self):
+    def test_samples_lint_exact_verdict(self):
+        # #441 gap-5: tightened from a vacuous assertIn({PASS,FAIL,BLOCKED}) — that
+        # only pinned "didn't raise". lint_receipt returns each receipt's DECLARED
+        # VERDICT when it lints clean, and the sample corpus is MIXED-verdict, so the
+        # exact per-receipt map is the real check. (The no-raise sibling is kept
+        # separately at test_v1_receipt_not_v11_linted — complementary, not redundant.)
+        # Map keyed on dispatch-id (rows carry dispatch-id/skill/receipt, no id).
+        EXPECTED = {
+            "7-implementer": "PASS",
+            "12-judge": "PASS",
+            "8-implementer": "FAIL",
+            "3-attacker": "BLOCKED",
+            "15-reviewer": "FAIL",
+        }
         rv = _import_rv()
         for rec in _load("sample-corpus/receipts.jsonl"):
-            self.assertIn(rv.lint_receipt(rec["receipt"]), {"PASS", "FAIL", "BLOCKED"})
+            self.assertIn(rec["dispatch-id"], EXPECTED,
+                          f"corpus row {rec['dispatch-id']!r} not in EXPECTED map — add it")
+            self.assertEqual(rv.lint_receipt(rec["receipt"]), EXPECTED[rec["dispatch-id"]])
 
     def test_injections_partition_by_artifact_bodies(self):
         rv = _import_rv()
@@ -890,6 +905,98 @@ class TestExpectFailPattern(unittest.TestCase):
 
     def test_exit_clause_returns_none(self):
         self.assertIsNone(self.rv._expect_fail_pattern("exit!=0"))
+
+
+class TestParseWitness(unittest.TestCase):
+    """#441 gap-3: direct coverage of parse_witness's WITNESS grammar — ~11 LintError
+    legs on the security-load-bearing witness line + the happy-path dict shape. None
+    was asserted before. parse_witness takes a body = list of lines; line 0 is parsed.
+    Several legs share one message (raise 9's /.*/, /.+/, /abc/ all emit the shared
+    'wildcard/too-short'), so plain assertRaises(LintError) per leg — not
+    assertRaisesRegex on per-leg messages (matches test_each_inject_shape_raises)."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- raise legs ---
+    def test_empty_body_missing(self):
+        # `[]` is falsy -> the `if not body` leg.
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness([])
+
+    def test_empty_string_line_routes_to_missing_ran(self):
+        # `[""]` is truthy, so it falls through to line-0 "" -> the missing-ran= leg,
+        # NOT the `if not body` "WITNESS missing" leg.
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness([""])
+
+    def test_na_not_permitted(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["(n/a)"])
+
+    def test_missing_ran(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["exec:cmd  expect-fail=exit!=0"])
+
+    def test_missing_expect_fail(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["exec:cmd  ran=2026-06-24"])
+
+    def test_kind_payload_no_colon(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["execcmd  expect-fail=exit!=0  ran=2026-06-24"])
+
+    def test_unknown_kind(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["foo:bar  expect-fail=exit!=0  ran=2026-06-24"])
+
+    def test_lint_rule_unknown(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["lint:bogus-rule  expect-fail=exit!=0  ran=2026-06-24"])
+
+    def test_expect_fail_empty(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["exec:cmd  expect-fail=  ran=2026-06-24"])
+
+    def test_wildcard_or_too_short_regex(self):
+        # All three hit the shared "wildcard/too-short" leg. The wildcard-set arm
+        # ({".*", ".+"}) is observationally unreachable: both members are 2 chars, so
+        # `len(pattern) < 4` short-circuits first. Assert the raise, not which arm.
+        for ef in ("/.*/", "/.+/", "/abc/"):
+            with self.assertRaises(self.rv.LintError, msg=f"expect-fail={ef}"):
+                self.rv.parse_witness([f"exec:cmd  expect-fail={ef}  ran=2026-06-24"])
+
+    def test_literal_too_short(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(['exec:cmd  expect-fail="ab"  ran=2026-06-24'])
+
+    def test_invalid_signature_form(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(["exec:cmd  expect-fail=bogus  ran=2026-06-24"])
+
+    # --- happy paths (assert returned dict fields) ---
+    def test_happy_exec_exit_signature(self):
+        out = self.rv.parse_witness(["exec:cmd  expect-fail=exit!=0  ran=2026-06-24"])
+        self.assertEqual(out["kind"], "exec")
+        self.assertEqual(out["payload"], "cmd")
+        self.assertEqual(out["expect_fail"], "exit!=0")
+        self.assertEqual(out["ran"], "2026-06-24")
+
+    def test_happy_grep_literal(self):
+        out = self.rv.parse_witness(['grep:pattern  expect-fail="literal text"  ran=2026-06-24'])
+        self.assertEqual(out["kind"], "grep")
+        self.assertEqual(out["payload"], "pattern")  # only happy path whose expect-fail has a space — locks space-handling
+        self.assertEqual(out["expect_fail"], '"literal text"')
+
+    def test_happy_lint_regex(self):
+        out = self.rv.parse_witness(["lint:all-claims-cited  expect-fail=/regexp4/  ran=2026-06-24"])
+        self.assertEqual(out["kind"], "lint")
+        self.assertEqual(out["payload"], "all-claims-cited")
+
+    def test_happy_signature_forms(self):
+        for ef in ("exit=-1", "match"):
+            out = self.rv.parse_witness([f"exec:cmd  expect-fail={ef}  ran=2026-06-24"])
+            self.assertEqual(out["expect_fail"], ef)
 
 
 if __name__ == "__main__":

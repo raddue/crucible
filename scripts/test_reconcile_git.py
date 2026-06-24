@@ -127,5 +127,24 @@ class CrossCutThresholdBoundaryTest(unittest.TestCase):
         self.assertEqual(rl.cross_cut_threshold_from(list(range(1, 31))), 27)
 
 
+class FixMergeSubjectTest(unittest.TestCase):
+    """#441 gap-1 residual: pure matcher for MERGE-commit subjects naming a fix/* or
+    hotfix/* branch. The squash analog `_is_fix_commit_subject` has a pure test; the
+    merge matcher's anchor invariant (matches `fix/`/`hotfix/` at a branch boundary but
+    NOT mid-word `prefix/`/`affix/`/`suffix/`, S-4) was only exercised via the
+    integration repo build, never asserted directly — a regex edit could regress the
+    anchor undetectably."""
+
+    def test_matches_fix_and_hotfix_branch_merges(self):
+        for s in ("Merge branch 'fix/foo'", "merge hotfix/x", "fix/bar at start",
+                  "Merge remote-tracking branch \"fix/baz\"", "x /fix/y", "HotFix/Y"):
+            self.assertTrue(rl._is_fix_merge_subject(s), s)
+
+    def test_rejects_midword_and_non_fix_subjects(self):
+        for s in ("prefix/x", "affix/x", "suffix/y", "feat/x",
+                  "Merge branch 'feature'", "", "fix:"):
+            self.assertFalse(rl._is_fix_merge_subject(s), s)
+
+
 if __name__ == "__main__":
     unittest.main()
