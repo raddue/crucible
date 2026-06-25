@@ -1,6 +1,6 @@
 ---
 name: workshop
-description: Tour of the Crucible workshop — the headline orchestrators users invoke directly. Use when the user asks "what skills are available?", "where do I start?", "what should I use for X?", "give me a tour of Crucible", "what are the main commands?", or any onboarding-style question. Also use after onboarding a new user or when someone needs to pick the right tool for a specific task.
+description: Tour of the Crucible workshop — the headline orchestrators users invoke directly. Use when the user asks "what skills are available?", "where do I start?", "what should I use for X?", "give me a tour of Crucible", "what are the main commands?", or any onboarding-style question. Also use after onboarding a new user or when someone needs to pick the right tool for a specific task. This is the on-demand catalog tour; the silent conversation-start activation protocol itself is getting-started.
 ---
 
 # Workshop

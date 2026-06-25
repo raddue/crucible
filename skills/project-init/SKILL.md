@@ -1,6 +1,6 @@
 ---
 name: project-init
-description: Use when onboarding to an unfamiliar codebase and want full structural context before the first real task. Deep-scans the repo and discovers cross-repo topology.
+description: Use when onboarding to an unfamiliar codebase and want full structural context before the first real task. Deep-scans the repo and discovers cross-repo topology — whole-repo first-time bootstrap, not task-scoped investigation (use recon when you already have a specific task; project-init bootstraps the cartographer data recon consults).
 ---
 
 # Project Init

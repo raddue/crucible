@@ -441,6 +441,184 @@
       "context": "Boundary case: refactor + PR. Refactor reads like /simplify but scope + PR makes it build-shaped.",
       "reasoning": "Refactor with explicit PR at the end is still design-through-execution — particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
       "difficulty": "medium"
+    },
+    {
+      "id": "ui-implement-vs-verify-direct-01",
+      "dimension": "direct",
+      "boundary": "ui-implement-vs-verify",
+      "prompt": "I just implemented the settings panel in USS. Does it match the mockup screenshot I gave you?",
+      "expected_skill": "ui-verify",
+      "common_mistakes": [
+        "mock-to-unity"
+      ],
+      "context": "Implementation exists; the ask is to compare it against a mockup and report drift, not to build or change it.",
+      "reasoning": "ui-verify produces a drift/delta report comparing implemented Unity UI against a mockup — exactly 'does it match the screenshot'. mock-to-unity is for turning a mock into USS/C#, i.e. implementing, which is already done here. The signal is verify-against-reference, not implement.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ui-implement-vs-verify-direct-02",
+      "dimension": "direct",
+      "boundary": "ui-implement-vs-verify",
+      "prompt": "Here's the HTML mockup for the inventory grid. Build it in Unity UI Toolkit.",
+      "expected_skill": "mock-to-unity",
+      "common_mistakes": [
+        "ui-verify",
+        "build"
+      ],
+      "context": "A mockup exists and must be turned into Unity UI Toolkit code from scratch. Nothing to verify yet.",
+      "reasoning": "mock-to-unity turns a mockup/HTML reference into USS/C#. ui-verify would be wrong — there is no implementation yet to compare against the mock. build is the full idea→PR pipeline, heavier than this scoped UI translation.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "ui-implement-vs-verify-negative-01",
+      "dimension": "negative",
+      "boundary": "ui-implement-vs-verify",
+      "prompt": "The spacing is off and the layout doesn't look like the design — fix it.",
+      "expected_skill": "mock-to-unity",
+      "common_mistakes": [
+        "ui-verify"
+      ],
+      "context": "Surface phrases ('spacing is off', 'doesn't look like the design') overlap ui-verify's domain, but the imperative is to FIX the UI from the design.",
+      "reasoning": "A fix-imperative on UI-from-a-design routes to mock-to-unity, which owns implementing/fixing UI to match a mock. ui-verify's product is a drift report; the cold fix-imperatives belong to mock-to-unity (this is the A36/A56 disambiguation). The 'fix it' verb is the deciding signal over the drift-observation phrasing.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "ui-implement-vs-verify-context-01",
+      "dimension": "context-dependent",
+      "boundary": "ui-implement-vs-verify",
+      "prompt": "The UI looks wrong compared to the mock. Check what's drifted.",
+      "expected_skill": "ui-verify",
+      "common_mistakes": [
+        "mock-to-unity"
+      ],
+      "context": "Same 'UI looks wrong' surface phrase as a fix request, but the ask is to identify/report what drifted, not to fix it.",
+      "reasoning": "When the request is to CHECK what's drifted (identify and report), it is ui-verify — its delta report names the drift. If the ask were 'fix it', the same surface phrase would route to mock-to-unity. The deciding context is check-and-report vs implement-a-fix.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "onboarding-entry-direct-01",
+      "dimension": "direct",
+      "boundary": "onboarding-entry",
+      "prompt": "I'm new to Crucible. What skills are available and which should I use for what?",
+      "expected_skill": "workshop",
+      "common_mistakes": [
+        "getting-started",
+        "project-init"
+      ],
+      "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",
+      "reasoning": "workshop is the on-demand tour of the Crucible workshop — 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. project-init is codebase onboarding, not skill-suite onboarding.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "onboarding-entry-direct-02",
+      "dimension": "direct",
+      "boundary": "onboarding-entry",
+      "prompt": "I just cloned this repo and have never seen it. Give me full structural context before I start.",
+      "expected_skill": "project-init",
+      "common_mistakes": [
+        "recon",
+        "getting-started"
+      ],
+      "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
+      "reasoning": "project-init deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon is task-scoped investigation (no specific task here). getting-started is conversation bootstrap, not codebase onboarding.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "onboarding-entry-negative-01",
+      "dimension": "negative",
+      "boundary": "onboarding-entry",
+      "prompt": "Where do I start with these tools? Give me a tour.",
+      "expected_skill": "workshop",
+      "common_mistakes": [
+        "getting-started"
+      ],
+      "context": "'Where do I start' overlaps getting-started's bootstrap phrasing, but the explicit ask is a tour of the tools.",
+      "reasoning": "An explicit tour-of-the-tools request is workshop, even though 'where do I start' echoes getting-started's 'starting any conversation'. getting-started is the always-on bootstrap that fires regardless of utterance; the user-facing tour is workshop. The 'give me a tour' signal disambiguates to workshop.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "onboarding-entry-context-01",
+      "dimension": "context-dependent",
+      "boundary": "onboarding-entry",
+      "prompt": "Onboard me to this unfamiliar codebase so I have context before the first real task.",
+      "expected_skill": "project-init",
+      "common_mistakes": [
+        "recon",
+        "workshop"
+      ],
+      "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
+      "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). workshop tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "explore-vs-improve-direct-01",
+      "dimension": "direct",
+      "boundary": "explore-vs-improve",
+      "prompt": "Before I add OAuth, investigate how auth currently works in this repo.",
+      "expected_skill": "recon",
+      "common_mistakes": [
+        "project-init",
+        "prospector"
+      ],
+      "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
+      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches — 'investigate how auth works before I add OAuth' is exactly task-scoped recon. project-init is first-time whole-repo onboarding (not scoped to a task). prospector hunts architectural friction/improvements, not how-it-works investigation.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "explore-vs-improve-direct-02",
+      "dimension": "direct",
+      "boundary": "explore-vs-improve",
+      "prompt": "Where are the structural problems in this codebase? What should I refactor?",
+      "expected_skill": "prospector",
+      "common_mistakes": [
+        "recon",
+        "audit"
+      ],
+      "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
+      "reasoning": "prospector explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "explore-vs-improve-negative-01",
+      "dimension": "negative",
+      "boundary": "explore-vs-improve",
+      "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
+      "expected_skill": "project-init",
+      "common_mistakes": [
+        "recon",
+        "prospector"
+      ],
+      "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for project-init over recon.",
+      "reasoning": "project-init deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). prospector is improvement discovery, not mapping.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "explore-vs-improve-context-01",
+      "dimension": "context-dependent",
+      "boundary": "explore-vs-improve",
+      "prompt": "Explore the payment module so I understand it before I touch the refund flow.",
+      "expected_skill": "recon",
+      "common_mistakes": [
+        "project-init",
+        "prospector"
+      ],
+      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
+      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. project-init would be wrong — this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. prospector hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "adversarial-scope-direct-03",
+      "dimension": "direct",
+      "boundary": "adversarial-scope",
+      "prompt": "I just finished the JWT parser. Write tests that try to break this one function.",
+      "expected_skill": "adversarial-tester",
+      "common_mistakes": [
+        "inquisitor",
+        "test-coverage"
+      ],
+      "context": "A single completed implementation; the ask is to write tests that break that one component.",
+      "reasoning": "adversarial-tester reads one implementation and writes up to 5 tests designed to make it break — per-task, single component. inquisitor is for a fully-assembled multi-component feature hunting cross-component bugs, not one function. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
+      "difficulty": "medium"
     }
   ]
 }

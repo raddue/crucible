@@ -1,6 +1,6 @@
 ---
 name: getting-started
-description: Use when starting any conversation - establishes how to find and use skills, requiring skill activation before ANY response including clarifying questions
+description: Use when starting any conversation - establishes how to find and use skills, requiring skill activation before ANY response including clarifying questions. This is the conversation-start bootstrap protocol, not the user-facing catalog tour (for "what skills exist / which one for X", use workshop).
 ---
 
 # Using Crucible Skills

@@ -1,6 +1,6 @@
 ---
 name: recon
-description: "Standalone codebase investigation. Produces a layered Investigation Brief with core findings (structure, patterns, scope, prior art) plus optional depth modules. Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before any task requiring codebase understanding."
+description: "Standalone codebase investigation. Produces a layered Investigation Brief with core findings (structure, patterns, scope, prior art) plus optional depth modules. Dispatches parallel scouts, synthesizes findings, and feeds cartographer. Use before a specific task requiring codebase understanding — task-scoped to the surface that task touches (for first-time whole-repo onboarding with cross-repo topology, use project-init, which bootstraps the cartographer data recon consults)."
 ---
 
 # Recon

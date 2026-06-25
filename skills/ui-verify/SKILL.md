@@ -1,6 +1,6 @@
 ---
 name: ui-verify
-description: Use when verifying Unity UI matches a mockup, after implementing UI from a visual reference, when a user shares a screenshot showing UI drift, when checking theming compliance, or when UI looks wrong. Triggers on "verify", "compare to mock", "does this match", "check the UI", "screenshot shows wrong", "UI looks wrong", "fix the layout", "spacing is off", "colors are off", "doesn't look like the design", "visual bug", or completing any UI implementation task.
+description: Use when verifying Unity UI matches a mockup, after implementing UI from a visual reference, when a user shares a screenshot showing UI drift, or when checking theming compliance. Produces a drift/delta report; to implement or fix UI from a mockup, use mock-to-unity. Triggers on "verify", "compare to mock", "does this match", "check the UI", "check theming", "colors are off", "screenshot shows wrong", "visual bug", or completing any UI implementation task.
 ---
 
 # UI Verify

@@ -1,6 +1,6 @@
 ---
 name: adversarial-tester
-description: "Use after completing implementation to find unknown failure modes. Reads implementation diff and writes up to 5 tests designed to make it break. Triggers on 'break it', 'adversarial test', 'stress test implementation', 'find weaknesses', or any task seeking to expose unknown failure modes."
+description: "Use after completing an implementation to find unknown failure modes. Reads the implementation diff and writes up to 5 tests designed to make it break — per-task, scoped to that single implementation (for a fully-assembled multi-component feature, use inquisitor to hunt cross-component bugs). Triggers on 'break it', 'adversarial test', 'stress test implementation', 'find weaknesses', or any task seeking to expose unknown failure modes in a single implementation."
 ---
 
 # Adversarial Tester

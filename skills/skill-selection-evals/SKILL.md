@@ -26,6 +26,9 @@ Crucible's 49 execution evals measure quality once a skill is invoked. Selection
 4. **completion-claims** — verify vs finish
 5. **bug-handling** — debugging vs verify vs audit
 6. **build-vs-raw-dispatch** — build (full idea→PR pipeline) vs a single-skill dispatch (planning, test-driven-development, …)
+7. **ui-implement-vs-verify** — mock-to-unity (implement/fix UI from a mock) vs ui-verify (verify / drift-delta report)
+8. **onboarding-entry** — getting-started (silent conversation-start bootstrap) vs workshop (on-demand catalog tour) vs project-init (whole-repo codebase onboarding)
+9. **explore-vs-improve** — recon (task-scoped investigation) vs project-init (whole-repo + cross-repo onboarding) vs prospector (architectural-friction discovery)
 
 ## Difficulty Ratings
 
