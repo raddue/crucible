@@ -241,7 +241,8 @@ Bug reported / test failure / unexpected behavior
 Orchestrator: Parse initial context (error message, failing test, user description)
     |
     v
-Phase 0: Load codebase context (crucible:cartographer-skill)
+Phase 0: Repro & scope coherence gate (pass silently / ask one question / flag-and-proceed)
+    |  then Load codebase context (crucible:cartographer-skill)
     |
     v
 Phase 1: Dispatch 3-6 parallel investigation subagents
@@ -302,6 +303,20 @@ Before any dispatch work, check for a crashed prior debugging session:
 
 ### Phase 0: Load Codebase Context
 
+**Repro & scope coherence gate (runs first, before context load).** Before spending the cartographer load and a 3–6-way parallel Opus investigation, confirm the report carries the minimum signal to aim it. This is a cheap, orchestrator-local check — no subagent — against the bug report / user description for three coherence signals:
+
+1. **Symptom** — a concrete, observable wrong behavior (a specific incorrect output, a crash, a failing assertion), not a bare "it's broken" / "doesn't work".
+2. **Reproduction** — a failing test, an error message / stack trace, or repro steps — OR an explicit statement that the bug is intermittent / not-yet-reproduced.
+3. **Scope** — an identifiable surface: a file, subsystem, feature, or the location named in an error / stack trace.
+
+Decision (best-effort and fast — a well-formed report passes silently with zero added friction):
+
+- **Symptom present AND (reproduction OR scope) present** → proceed to context load — **unless the ONLY reproduction signal is an explicit "intermittent / not-yet-reproduced" statement, in which case skip to the third bullet and apply the Reproduction-lead routing instead**. Otherwise do NOT ask anything; an error/stack trace or failing test already clears the gate with zero friction. Record this outcome as `pass`.
+- **Only a vague symptom (no reproduction AND no scope)** → the report is too thin to aim parallel investigators. **When a human is in the loop, ask the user ONE targeted question before dispatch** — request the error text, repro steps, or the affected area — then re-check; if the answer is still below the bar, fall through to flag-and-proceed (do NOT ask a second question). Either way (cleared or still thin), record this outcome as `asked-then-proceeded`. **When running autonomously** — this debugging run was itself dispatched by a parent orchestrator via a dispatch file (no human typed the bug report), or you are otherwise unsure whether a human is in the loop — do NOT block: proceed and apply the Reproduction-lead routing in the next bullet (defaulting toward proceed here is what keeps an autonomous pipeline from hanging on an unanswered question).
+- **Symptom is concrete but explicitly not-yet-reproduced (intermittent / "can't trigger it reliably"), or the thin-input autonomous case above** → proceed, and ensure the **Reproduction** investigator is among the dispatched Phase 1 agents, naming *establish a reliable repro* as its lead goal in the Phase 0→1 handoff — **without reducing the agent count the Phase 1 dispatch heuristics call for** (a vague multi-system report still gets the full fan-out those heuristics specify). Record this outcome as `repro-lead-proceeded`.
+
+The gate routes toward debugging's own Phase 1 Reproduction investigator from the front door; it never silently blocks — it either passes, asks exactly one clarifying question, or flags-and-proceeds (the recorded `[DEC-N]` outcome line below IS the flag — there is no separate surfaced warning), mirroring the best-effort discipline of the grudge pre-flight below. Record the gate outcome (`pass | asked-then-proceeded | repro-lead-proceeded`) as a `[DEC-N]` line under `## Decisions Carried Forward` in the Phase 0→1 handoff, so Synthesis and later phases see why Reproduction was prioritized.
+
 **Before any investigation dispatch,** use `crucible:cartographer-skill` (load mode) to pull module context for the area being investigated. If module files exist, include them in every investigator's dispatch file so agents start with structural knowledge instead of wasting turns rediscovering the codebase.
 
 **Defect signature loading (for investigators):**
@@ -353,7 +368,7 @@ Before dispatching investigation agents:
 1. Write `handoff-0-to-1.md` with:
    - **Goal:** bug report / user description, verbatim
    - **Inputs for Phase 1:** cartographer module paths, defect signature paths (with match notes), domain context (if any), error messages / stack traces (verbatim), reproduction steps (if any)
-   - **Decisions Carried Forward:** (typically empty at this point)
+   - **Decisions Carried Forward:** (holds the repro-gate outcome line; otherwise typically empty)
    - **Active Constraints:** user-stated constraints
    - **Shed Receipt:** raw cartographer exploration output → module files on disk
 2. Emit shed statement: "Phase 0 context shed. Module files, defect signatures, and error context captured in manifest. Raw exploration output is not carried forward."
