@@ -102,10 +102,18 @@ run python3 scripts/check_inquisitor_phase1b_invariants.py --selftest
 run python3 scripts/check_inquisitor_phase1b_invariants.py
 
 # --- Minimalism-ladder eval harness (#425) ---
-# REQUIRES pytest (uses parametrize/fixtures); CI provisions pytest==9.0.3. This
-# is the only -m pytest line in the suite — bare `python3 file.py` would silently
-# skip the pytest-collected tests.
+# REQUIRES pytest (uses parametrize/fixtures); CI provisions pytest==9.0.3. The
+# suite has two -m pytest lines (this and skills/temper/evals/ below) — bare
+# `python3 file.py` would silently skip the pytest-collected tests.
 run python3 -m pytest skills/build/evals/minimalism-ladder/ -q
+
+# --- Temper eval harness (#290/#297/#424) — pytest-collected ---
+# Gated here (#404): previously UNRUN. The temper/evals tests are pytest-collected
+# (bare `python3 file.py` silently skips them), and no -m pytest line covered them,
+# so CI never exercised temper/evals at all — the 162 tests behind temper's
+# run_evals stage/score, convergence_runner, _dispatch_paths, _runid, legacy modes,
+# global expectations, and the #297 inquisitor-dimension suites.
+run python3 -m pytest skills/temper/evals/ -q
 
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
