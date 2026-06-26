@@ -1,0 +1,6 @@
+{
+  "repo_id": "sample",
+  "scope": "skills/delve/evals/fixtures/sample",
+  "bug_ids": ["sm-b1", "sm-b2", "sm-b3", "sm-b4", "sm-b5", "sm-b6"],
+  "n": 6
+}

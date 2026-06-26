@@ -1,0 +1,29 @@
+{
+  "_provenance": "Bugs were planted by the fixture author, then ground-truth-bugs.provenance.md was written BLIND (the signature tokens + desc strings below are WITHHELD from that provenance input, so the recorded delve run is scored against an unbiased oracle). scripts/check_delve_gt_provenance.py proves the blind boundary held.",
+  "bugs": [
+    {"bug_id": "sm-b1", "file": "inventory.py", "line_lo": 11, "line_hi": 11,
+     "signature": ["off-by-one", "slice", "last element"],
+     "desc": "last_n drops the final element via items[-n:-1]",
+     "off_axis": false, "severity": "Important"},
+    {"bug_id": "sm-b2", "file": "inventory.py", "line_lo": 15, "line_hi": 17,
+     "signature": ["mutable default", "default argument", "discounts=[]"],
+     "desc": "total_price uses a mutable default discounts=[] persisted across calls",
+     "off_axis": false, "severity": "Important"},
+    {"bug_id": "sm-b3", "file": "inventory.py", "line_lo": 24, "line_hi": 24,
+     "signature": ["comparison operator", "wrong operator", ">= 0", "boundary"],
+     "desc": "is_in_stock uses >= 0 so a zero quantity is wrongly in stock",
+     "off_axis": false, "severity": "Important"},
+    {"bug_id": "sm-b4", "file": "inventory.py", "line_lo": 30, "line_hi": 30,
+     "signature": ["keyerror", "missing key", "unknown sku", "not initialized"],
+     "desc": "restock raises KeyError on an unknown sku instead of initializing it",
+     "off_axis": false, "severity": "Important"},
+    {"bug_id": "sm-b5", "file": "report.py", "line_lo": 10, "line_hi": 10,
+     "signature": ["resource leak", "not closed", "file handle", "context manager"],
+     "desc": "write_report never closes the file handle",
+     "off_axis": true, "severity": "Minor"},
+    {"bug_id": "sm-b6", "file": "report.py", "line_lo": 19, "line_hi": 19,
+     "signature": ["division by zero", "zerodivisionerror", "empty", "unguarded division"],
+     "desc": "average divides by len(values) without guarding an empty list",
+     "off_axis": false, "severity": "Important"}
+  ]
+}

@@ -115,6 +115,13 @@ run python3 -m pytest skills/build/evals/minimalism-ladder/ -q
 # global expectations, and the #297 inquisitor-dimension suites.
 run python3 -m pytest skills/temper/evals/ -q
 
+# --- Delve eval harness (#373) ---
+run python3 -m pytest skills/delve/evals/ -q
+run python3 scripts/check_delve_helper_drift.py --selftest
+run python3 scripts/check_delve_helper_drift.py
+run python3 scripts/check_delve_gt_provenance.py --selftest
+run python3 scripts/check_delve_gt_provenance.py
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 
