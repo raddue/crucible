@@ -2,8 +2,7 @@
 """Grudge query — the pre-flight read of the Book of Grudges (#271).
 
 Given the files a skill is about to touch, surface the grudges held against them
-as a "DO NOT REPEAT" block. Read-only (except --cull). Spec:
-docs/plans/2026-06-01-regression-oracle-design.md.
+as a "DO NOT REPEAT" block. Read-only (except --cull).
 
 Pure stdlib. No third-party deps.
 

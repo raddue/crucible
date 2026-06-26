@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`/ledger` weekly renderer — the testable render core (Phase 5).
 
-Reads `.crucible/ledger/runs.jsonl`, groups entries by ISO week, computes
+Reads `~/.claude/crucible/ledger/runs.jsonl` (override `CRUCIBLE_LEDGER_DIR`), groups entries by ISO week, computes
 per-week stats, and renders `docs/ledger/weekly-YYYY-Www.md`. The honest
 "caught N silent bugs" headline counts forward `would_have_shipped_without_gate`
 entries EXCLUDING backfilled ones (design §4 "Honest count" + L-3/L-5).

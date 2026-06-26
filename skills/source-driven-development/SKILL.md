@@ -1,11 +1,6 @@
 ---
 name: source-driven-development
 description: Enforces the Detect → Fetch → Implement → Cite protocol when implementing against external frameworks or libraries. Invoke when a change touches an external API surface and the edit exceeds the triviality threshold, so implementations come from current official docs rather than stale training-data recall.
-triggers:
-  - user prompt or ticket mentions a framework/library by name
-  - files being modified contain imports of an external framework
-  - /build implementer detects external API usage ≥ 5 LOC (non-test, non-generated)
-  - explicit invocation: /source-driven-development
 ---
 
 # Source-Driven Development
@@ -17,7 +12,7 @@ Agents routinely implement against deprecated, renamed, or re-signatured externa
 Cross-links:
 - `skills/source-driven-development/detect-stack.md` — framework → canonical doc URL reference table.
 - `skills/build/SKILL.md` — `/build` orchestrator; lists this skill as a recommended sub-skill (Phase 3 implementer).
-- `skills/recon/SKILL.md` — reuse recon's "external-reference investigation" vocabulary for codebase-side lookups; this skill is the docs-side complement.
+- `skills/recon/SKILL.md` — recon investigates codebase-side prior art; this skill is the docs-side complement.
 
 ## Trigger Heuristics
 

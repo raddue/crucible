@@ -94,7 +94,7 @@ consensus:
   timeout_seconds: 120         # Per-query timeout. Models that haven't responded are marked responded: false. Default: 120.
   models:
     - provider: anthropic      # Provider identifier. Shipped: "anthropic", "google". Planned: "openai", "deepseek".
-      model: claude-sonnet-4-20250514  # Model identifier within the provider.
+      model: claude-sonnet-4-6  # Model identifier within the provider.
       api_key_env: ANTHROPIC_API_KEY   # Environment variable name holding the API key. NEVER a raw key.
       temperature: 0.6         # Sampling temperature for this model. Default: 0.6. Range: 0.0-1.0.
     - provider: google

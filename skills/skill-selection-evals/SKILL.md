@@ -9,7 +9,7 @@ This is not an executable skill. It contains evaluation data for measuring the a
 
 ## Purpose
 
-Crucible's 49 execution evals measure quality once a skill is invoked. Selection evals measure whether the **right skill gets invoked** in the first place.
+Crucible's 52 execution evals measure quality once a skill is invoked. Selection evals measure whether the **right skill gets invoked** in the first place.
 
 ## Eval Types
 

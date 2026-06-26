@@ -443,7 +443,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
    Inspect:
    - The project's `CLAUDE.md` for toolchain / build / framework constraints
    - Any cartographer module map (`memory/cartographer/conventions.md` or similar) for architectural constraints. If the module map is flagged stale (mtime > 30 days or explicit stale marker), include the staleness note rather than the stale claims.
-   - The skill(s) the artifact names as its execution vehicle (e.g., `/audit`, `/build`, `/debug`) — pull their hard caps, budgets, and red flags from the named skill's SKILL.md
+   - The skill(s) the artifact names as its execution vehicle (e.g., `/audit`, `/build`, `/debugging`) — pull their hard caps, budgets, and red flags from the named skill's SKILL.md
    - The tracker conventions from `preferences.md` if present
 
    Bundle these into a `## Operating Environment` block. **Soft cap: 500 lines.** If empty (no relevant constraints found), record `## Operating Environment\n(none detected)` — the lens prompts treat an empty block as a no-op.
@@ -766,7 +766,7 @@ Each analysis template includes:
 - Feed Phase 2 structural inferences to cartographer (Phase 1 manifest only)
 - Skip narration between agent dispatches (Communication Requirement)
 - Dispatch more than ~20 agents without user awareness (chunking approval includes agent count)
-- Offer or dispatch remediation actions in Phase 4. Audit is find-and-report only. If the user requests fixes after reviewing the report, instruct them to invoke `/build` or `/debug` separately — do not propose "would you like me to fix this?" or dispatch fix agents from within the audit run.
+- Offer or dispatch remediation actions in Phase 4. Audit is find-and-report only. If the user requests fixes after reviewing the report, instruct them to invoke `/build` or `/debugging` separately — do not propose "would you like me to fix this?" or dispatch fix agents from within the audit run.
 
 ## Red Flags
 

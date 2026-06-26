@@ -17,7 +17,7 @@ description: >
 
 Stock Claude Code has no memory across sessions, so the same class of bug
 re-ships. The grudgebook closes the loop: **write-on-resolution** +
-**read-on-preflight**. Spec: `docs/plans/2026-06-01-regression-oracle-design.md`.
+**read-on-preflight**.
 
 ## Where grudges live (read this first)
 

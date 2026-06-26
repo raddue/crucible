@@ -15,7 +15,7 @@ class ConfigError(Exception):
 @dataclass
 class ModelConfig:
     provider: str           # "anthropic" or "google"
-    model_id: str           # e.g., "claude-sonnet-4-20250514"
+    model_id: str           # e.g., "claude-sonnet-4-6"
     api_key_env: str        # env var name, e.g., "ANTHROPIC_API_KEY"
     temperature: float = 0.6
     base_url_env: str | None = None

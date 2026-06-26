@@ -7,7 +7,7 @@ file with YAML-ish frontmatter at
 where <base> = $CRUCIBLE_GRUDGE_DIR or ~/.claude/crucible/grudge — NEVER inside a
 git working tree (grudges carry private file paths + repro detail and crucible is
 a PUBLIC repo). This mirrors the calibration-ledger central-store decision (PR
-#326). Spec: docs/plans/2026-06-01-regression-oracle-design.md.
+#326).
 
 Pure stdlib. No third-party deps.
 

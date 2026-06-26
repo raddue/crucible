@@ -61,7 +61,7 @@ git check-ignore -q .worktrees 2>/dev/null || git check-ignore -q worktrees 2>/d
 
 **If NOT ignored:**
 
-Per Jesse's rule "Fix broken things immediately":
+Per the rule "fix broken things immediately":
 1. Add appropriate line to .gitignore
 2. Commit the change
 3. Proceed with worktree creation

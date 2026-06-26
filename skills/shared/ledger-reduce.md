@@ -4,7 +4,7 @@ version: 1
 
 # Ledger Reduce Protocol (L-9 latest-entry-wins)
 
-> Canonical reader-side reduction over `.crucible/ledger/falsification.jsonl`.
+> Canonical reader-side reduction over `~/.claude/crucible/ledger/falsification.jsonl` (override `CRUCIBLE_LEDGER_DIR`).
 > Cited via `<!-- CANONICAL: shared/ledger-reduce.md -->` from
 > `/calibration-reconcile` (Phase 4) and `/ledger` (Phase 5). T-10b (Phase 5)
 > grep-asserts both call-sites carry that citation.

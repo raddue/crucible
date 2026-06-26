@@ -55,7 +55,7 @@ Map every CSS property to USS equivalent. Flag gaps:
 padding: var(--spacing-md)     → padding: var(--spacing-md)        [direct]
 gap: var(--spacing-sm)         → not supported in USS               [use margin on children]
 text-overflow: ellipsis        → needs C# truncation                [inline workaround]
-:hover background change       → PointerEnterEvent callback         [C# layer 4]
+:hover background change       → :hover pseudo-class                [USS direct]
 ```
 
 ### Variables

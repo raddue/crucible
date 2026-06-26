@@ -159,7 +159,7 @@ This skill produces **implementation plans**. When used standalone, invoke `cruc
 - Exact file paths always
 - Complete code in plan (not "add validation")
 - Exact commands with expected output
-- Reference relevant skills with @ syntax
+- Reference relevant skills with `crucible:` syntax
 - DRY, YAGNI, TDD, frequent commits
 
 ## Integration

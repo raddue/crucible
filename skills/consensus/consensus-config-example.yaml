@@ -37,7 +37,7 @@ consensus:
     # --- Anthropic -----------------------------------------------------------
     - provider: anthropic
       # Model identifier as recognized by the Anthropic API.
-      model_id: claude-sonnet-4-20250514
+      model_id: claude-sonnet-4-6
       # Environment variable containing your Anthropic API key.
       # The MCP server reads this at runtime. The key is never stored on disk.
       api_key_env: ANTHROPIC_API_KEY
