@@ -638,68 +638,20 @@ not dispatch the recorder twice.
 
 Return the Investigation Brief as the agent output (inline return to parent skill).
 
-The brief follows the exact template from the design, including the metadata block:
+The brief follows the exact core template assembled in
+[Phase 3 — Assemble the Investigation Brief](#assemble-the-investigation-brief)
+(metadata block + core sections through the Verification Ledger). Do not re-echo
+that template here — it is the single source so the two copies cannot drift.
 
-```markdown
-# Investigation Brief
-**Brief version:** 1
-**Task:** [task description or "Full repository scan"]
-**Scope:** [constrained path or "Full repo"]
-**Depth modules:** [list or "Core only"]
-**Cartographer state:** [consulted / cold start / N/A]
-**Commit:** [HEAD SHA at investigation time]
+When depth modules ran, append their sections after a `---` separator, in this
+order (only the requested modules' sections appear):
 
-## Project Structure
-...
-
-## Existing Patterns
-...
-
-## Scope Boundaries
-### In Scope
-...
-### Out of Scope
-...
-### Contested
-...
-
-## Prior Art
-...
-
-## Conflicts
-...
-
-## Open Questions
-...
-
-## Verification Ledger
-<!-- Records causal claims made by this brief (populated this run). Falsifications flow via handoff-doc entries under docs/handoffs/ per the convention in skills/recon/SKILL.md. -->
-...
-
----
-<!-- Depth modules below, only present if requested -->
-
-## Impact Analysis
-...
-
-## Consumer Registry
-...
-
-## Friction Scan
-...
-
-## Subsystem Manifest
-...
-
-## Diagnostic Context
-...
-
-## Execution Readiness
-**Test command:** ...
-**Lint command:** ...
-**CI checks:** ...
-**Manual verification:** ...
-```
+1. `## Impact Analysis`
+2. `## Consumer Registry`
+3. `## Friction Scan`
+4. `## Subsystem Manifest`
+5. `## Diagnostic Context`
+6. `## Execution Readiness` — **Test command** / **Lint command** / **CI checks** / **Manual verification**
 
 **When invoked as sub-skill:** Include `## Recon Progress` section at the top with all narration lines from the run.
 

@@ -1,12 +1,6 @@
 ---
 name: grudge
-description: >
-  The Book of Grudges — cross-session bug graveyard. Every fixed bug is recorded
-  as a structured "grudge"; before touching code, skills query the grudgebook for
-  the files in scope and surface past regressions as forced "DO NOT REPEAT"
-  context. Read mode (pre-flight) and write mode (on bug resolution / fix(*) PR).
-  Machine-local, per-repo, never committed. Triggers on /grudge, "check grudges",
-  "record a grudge", "any past bugs here", "regression oracle", "bug graveyard".
+description: The Book of Grudges — cross-session bug graveyard. Every fixed bug is recorded as a structured "grudge"; before touching code, skills query the grudgebook for the files in scope and surface past regressions as forced "DO NOT REPEAT" context. Read mode (pre-flight) and write mode (on bug resolution / fix(*) PR). Machine-local, per-repo, never committed. Triggers on /grudge, "check grudges", "record a grudge", "any past bugs here", "regression oracle", "bug graveyard".
 ---
 
 # Grudge — the Book of Grudges (#271)

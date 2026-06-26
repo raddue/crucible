@@ -5,7 +5,7 @@ version: 1
 # Ledger Append Protocol (canonical)
 
 > Canonical write-protocol prompt for the Crucible calibration ledger
-> (`.crucible/ledger/runs.jsonl`). Referenced by every gating skill that emits a
+> (`~/.claude/crucible/ledger/runs.jsonl`). Referenced by every gating skill that emits a
 > calibration entry via `<!-- CANONICAL: shared/ledger-append.md -->`.
 >
 > This file is the **protocol-as-spec**. The importable single source of truth
@@ -255,7 +255,7 @@ backfill script produce the same backfill IDs and skip on re-encounter.
 Hard caps enforced inside `scripts/ledger_append.py`:
 
 - `gated_files`: maximum 500 entries in the ledger line. Overflow goes to a
-  sidecar at `.crucible/ledger/overflow/<run_id>.<skill>.txt` (one path per
+  sidecar at `~/.claude/crucible/ledger/overflow/<run_id>.<skill>.txt` (one path per
   line, complete list including the overflow). The ledger entry sets
   `gated_files_truncated` to the count of dropped paths.
 - `highest_finding`: maximum 256 characters in the ledger line. Truncated
@@ -280,12 +280,12 @@ unreliable on network mounts, and FS-pathway-dependent on macOS. We use a
 portable scheme that does not rely on advisory locking. `mkdir` is atomic
 across all supported filesystems and IS the mutex.
 
-1. **Acquire:** `mkdir .crucible/ledger/.lock-runs-jsonl`
+1. **Acquire:** `mkdir ~/.claude/crucible/ledger/.lock-runs-jsonl`
    - On success: continue to step 2.
    - On EEXIST: spin with 50 ms backoff up to 5 s.
    - If stale recovery applies (step 5), invoke before spinning further.
 
-2. **Write identity:** open `.crucible/ledger/.lock-runs-jsonl/holder`,
+2. **Write identity:** open `~/.claude/crucible/ledger/.lock-runs-jsonl/holder`,
    write `<run_id>:<skill>:<pid>:<acquired_ts_iso>`, close.
 
 3. **Append:** open `runs.jsonl` with `O_APPEND | O_CREAT`; write one JSONL
