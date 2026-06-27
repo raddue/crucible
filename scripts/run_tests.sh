@@ -122,6 +122,13 @@ run python3 scripts/check_delve_helper_drift.py
 run python3 scripts/check_delve_gt_provenance.py --selftest
 run python3 scripts/check_delve_gt_provenance.py
 
+# --- Siege eval harness (#373) ---
+run python3 -m pytest skills/siege/evals/ -q
+run python3 scripts/check_siege_helper_drift.py --selftest
+run python3 scripts/check_siege_helper_drift.py
+run python3 scripts/check_siege_gt_provenance.py --selftest
+run python3 scripts/check_siege_gt_provenance.py
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 

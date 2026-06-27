@@ -1,0 +1,6 @@
+{
+  "repo_id": "webshop",
+  "scope": "skills/siege/evals/fixtures/webshop",
+  "bug_ids": ["ws-v1", "ws-v2", "ws-v3", "ws-v4", "ws-v5", "ws-v6"],
+  "n": 6
+}

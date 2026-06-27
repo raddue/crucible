@@ -1,0 +1,29 @@
+{
+  "_provenance": "Vulnerabilities were planted by the fixture author, then ground-truth-bugs.provenance.md was written BLIND (the signature tokens + desc strings below are WITHHELD from that provenance input, so the recorded /siege run is scored against an unbiased oracle). scripts/check_siege_gt_provenance.py proves the blind boundary held. severity ∈ {Critical, High, Medium}; severity agreement is an ADVISORY column, not part of recall/FP.",
+  "bugs": [
+    {"bug_id": "ws-v1", "file": "db.py", "line_lo": 19, "line_hi": 20,
+     "signature": ["sql injection", "sqli", "string interpolation", "parameterized query"],
+     "desc": "get_user interpolates the username into the SQL string instead of using a parameterized query",
+     "off_axis": false, "severity": "Critical"},
+    {"bug_id": "ws-v2", "file": "db.py", "line_lo": 26, "line_hi": 26,
+     "signature": ["unsafe deserialization", "pickle.loads", "arbitrary code execution", "insecure deserialization"],
+     "desc": "load_session calls pickle.loads on an attacker-controlled blob, enabling RCE",
+     "off_axis": false, "severity": "Critical"},
+    {"bug_id": "ws-v3", "file": "app.py", "line_lo": 14, "line_hi": 17,
+     "signature": ["broken access control", "missing authentication", "auth bypass", "unauthenticated admin"],
+     "desc": "admin_list_users exposes all users with no authentication or role check",
+     "off_axis": false, "severity": "Critical"},
+    {"bug_id": "ws-v4", "file": "app.py", "line_lo": 20, "line_hi": 23,
+     "signature": ["idor", "insecure direct object reference", "missing ownership check", "broken object level authorization"],
+     "desc": "get_order returns an order by id with no ownership check against the caller",
+     "off_axis": false, "severity": "High"},
+    {"bug_id": "ws-v5", "file": "app.py", "line_lo": 27, "line_hi": 30,
+     "signature": ["ssrf", "server-side request forgery", "unvalidated url", "metadata endpoint"],
+     "desc": "fetch_preview fetches an attacker-supplied URL with no allow-list (SSRF to internal metadata)",
+     "off_axis": false, "severity": "High"},
+    {"bug_id": "ws-v6", "file": "app.py", "line_lo": 34, "line_hi": 37,
+     "signature": ["path traversal", "directory traversal", "unsanitized path join", "dot-dot-slash"],
+     "desc": "download joins a user-supplied name onto the root with no normalization (path traversal)",
+     "off_axis": true, "severity": "Medium"}
+  ]
+}
