@@ -14,7 +14,6 @@ Design fixes baked in (from the design adversarial gate):
 - #5 per-path staleness: match against surviving files only; cull iff none survive.
 - #7 signature compiled defensively (re.error -> literal substring); file read size-capped.
 """
-import fnmatch
 import glob as _glob
 import json
 import os
@@ -22,12 +21,18 @@ import re as _re
 import sys
 from typing import Dict, List, Optional, Tuple
 
+# #401: root the package at the repo (`scripts.X`), matching reconcile_ledger /
+# render_ledger / brier_advisory / backfill-ledger — was the lone sibling using
+# `sys.path.insert(0, HERE)` + bare `from grudge_append import …`, which forced
+# every caller to keep BOTH roots on sys.path for the grudge path to resolve.
 HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
-from grudge_append import (  # noqa: E402
+REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+from scripts.grudge_append import (  # noqa: E402
     default_base_dir, grudges_dir, normalize_path, resolve_repo,
 )
+from scripts.pathmatch import glob_match as _glob_match  # noqa: E402
 
 SIG_READ_CAP_BYTES = 256 * 1024  # fix #7: bound signature-match file reads
 SIG_MATCH_TIMEOUT_S = 2.0  # wall-clock guard so a pathological signature regex can never hang a pre-flight
@@ -41,18 +46,6 @@ def _qwarn(msg: str) -> None:
 
 class _SigTimeout(Exception):
     """Raised by the SIGALRM handler when a signature match overruns its budget."""
-
-
-def _glob_match(path: str, pattern: str) -> bool:
-    """Path-aware glob: `*` matches within ONE segment, never crosses `/`
-    (reused discipline from reconcile_ledger._glob_match, PR #340). fnmatchcase
-    keeps it case-sensitive + cross-host deterministic. Glob-free patterns fall
-    out as segment-wise equality."""
-    p_seg = path.split("/")
-    pat_seg = pattern.split("/")
-    if len(p_seg) != len(pat_seg):
-        return False
-    return all(fnmatch.fnmatchcase(a, b) for a, b in zip(p_seg, pat_seg))
 
 
 def _path_match(scope_norm: str, stored: str) -> bool:

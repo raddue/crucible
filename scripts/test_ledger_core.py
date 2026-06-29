@@ -286,6 +286,44 @@ class AppendTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# ledger_append.valid_ledger_identity (#408 F9) + default_repo realpath (#401) #
+# --------------------------------------------------------------------------- #
+
+class ValidLedgerIdentityTest(unittest.TestCase):
+    """The (run_id, skill) join-identity guard, factored out of the ×5 inlined
+    copies in reconcile_ledger / render_ledger (#408 F9)."""
+
+    def test_both_present_is_valid(self):
+        self.assertTrue(la.valid_ledger_identity(
+            {"run_id": "r1", "skill": "siege"}))
+
+    def test_missing_or_empty_or_nonstring_is_invalid(self):
+        for e in (
+            {"skill": "siege"},                       # no run_id
+            {"run_id": "r1"},                         # no skill
+            {"run_id": "", "skill": "siege"},         # empty run_id
+            {"run_id": "r1", "skill": "   "},         # whitespace skill
+            {"run_id": 123, "skill": "siege"},        # non-string run_id
+            {},                                       # neither
+        ):
+            self.assertFalse(la.valid_ledger_identity(e), e)
+
+
+class DefaultRepoRealpathTest(unittest.TestCase):
+    """#401: default_repo realpaths before taking the basename, so a repo reached
+    via a symlink yields the same label the grudge store derives."""
+
+    def test_symlinked_dir_resolves_to_real_basename(self):
+        with tempfile.TemporaryDirectory() as d:
+            real = os.path.join(d, "realrepo")
+            os.mkdir(real)
+            link = os.path.join(d, "linked")
+            os.symlink(real, link)
+            # Not a git repo → falls back to realpath(abspath(base)) basename.
+            self.assertEqual(la.default_repo(start_dir=link), "realrepo")
+
+
+# --------------------------------------------------------------------------- #
 # ledger_reduce.reduce — L-9 latest-wins + tolerant read                      #
 # --------------------------------------------------------------------------- #
 

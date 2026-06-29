@@ -43,9 +43,13 @@ from scripts.ledger_append import (  # noqa: E402
     append as _ledger_append,
     default_ledger_dir,
     default_ledger_path,
-    _valid_identity,
+    valid_ledger_identity,
 )
 from scripts.atomic_write import atomic_write_text  # noqa: E402
+# #401: path-aware glob is the single source of truth (scripts/pathmatch.py);
+# was verbatim-duplicated here and in grudge_query.py. Alias to the prior
+# private name so the calibration call sites are untouched.
+from scripts.pathmatch import glob_match as _glob_match  # noqa: E402
 
 # 30-day grace period: a verdict must be older than this before it can be
 # falsified by a fix (so it has had a chance to be falsified) and before it is
@@ -272,7 +276,7 @@ def reconcile(
         ts = _parse_iso(e.get("timestamp"))
         if ts is None:
             continue
-        if not (_valid_identity(e.get("run_id")) and _valid_identity(e.get("skill"))):
+        if not valid_ledger_identity(e):
             skipped_identityless += 1
             continue
         indexed.append((ts, e))
@@ -465,7 +469,7 @@ def compute_brier(
         # "unknown" skill's Brier with unrelated runs. Skip + count it instead.
         run_id = e.get("run_id")
         skill = e.get("skill")
-        if not (_valid_identity(run_id) and _valid_identity(skill)):
+        if not valid_ledger_identity(e):
             skipped_identityless += 1
             continue
         # Hoist the falsification lookup ABOVE the artifact_type gate so the
@@ -618,28 +622,6 @@ def parse_predicate(text) -> Optional[dict]:
                 "token": m.group(2), "within_days": n}
 
     return None
-
-
-def _glob_match(path: str, pattern: str) -> bool:
-    """Path-aware glob: a `*` matches within ONE path segment and does NOT cross
-    `/` (shell/git non-recursive semantics).
-
-    `fnmatch` alone treats `/` as an ordinary character, so `src/auth/*` would
-    over-match `src/auth/sub/deep/x.ts` and credit a verdict for an unrelated
-    deep-tree fix — silently corrupting calibration (a fired predicate flips a
-    FAIL's Brier `actual` 1->0). We require equal segment counts and fnmatch each
-    segment pairwise, so `src/auth/*` matches `src/auth/token.ts` but not
-    `src/auth/sub/x.ts`. Exact (glob-free) paths fall out as segment-wise equality.
-    """
-    import fnmatch
-    p_seg = path.split("/")
-    pat_seg = pattern.split("/")
-    if len(p_seg) != len(pat_seg):
-        return False
-    # fnmatchcase (NOT fnmatch): case-SENSITIVE regardless of host OS. git paths
-    # are case-sensitive posix; plain fnmatch case-folds on macOS/Windows, which
-    # would make calibration non-reproducible across machines feeding one ledger.
-    return all(fnmatch.fnmatchcase(a, b) for a, b in zip(p_seg, pat_seg))
 
 
 def _predicate_fired(parsed: dict, entry_dt, candidates: List[dict]):
@@ -822,7 +804,7 @@ def reconcile_predicates(
         # into the shared "unknown:unknown" bucket.
         run_id = e.get("run_id")
         skill = e.get("skill")
-        if not (_valid_identity(run_id) and _valid_identity(skill)):
+        if not valid_ledger_identity(e):
             skipped_identityless += 1
             continue
         h = ledger_entry_hash(run_id, skill)

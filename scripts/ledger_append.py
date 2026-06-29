@@ -80,10 +80,19 @@ def default_repo(start_dir: Optional[str] = None) -> str:
         )
         top = proc.stdout.strip()
         if proc.returncode == 0 and top:
-            return os.path.basename(top.rstrip("/")) or top
+            # #401: realpath for parity with grudge_append.resolve_repo. On the
+            # git path this is effectively a no-op — `git rev-parse --show-toplevel`
+            # already returns a canonicalized path — but it keeps the two
+            # resolvers textually aligned. The non-git fallback below is where the
+            # symlink-resolution drift actually mattered.
+            root = os.path.realpath(top)
+            return os.path.basename(root.rstrip("/")) or root
     except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
         pass
-    return os.path.basename(os.path.abspath(base)) or "unknown"
+    # #401: realpath the fallback base so a non-git dir reached via a symlinked
+    # parent yields the SAME basename label the grudge store derives. The return
+    # SHAPE stays a bare basename (callers want a label, not the root tuple).
+    return os.path.basename(os.path.realpath(os.path.abspath(base))) or "unknown"
 
 
 def _warn(msg: str) -> None:
@@ -95,6 +104,14 @@ def _valid_identity(value) -> bool:
     for either half of the (run_id, skill) ledger join key (#402). A missing,
     empty, whitespace-only, or non-string value has no stable identity."""
     return isinstance(value, str) and value.strip() != ""
+
+
+def valid_ledger_identity(entry: dict) -> bool:
+    """True iff a ledger `entry` carries a valid (run_id, skill) join identity
+    (#402). Factors the `_valid_identity(run_id) AND _valid_identity(skill)`
+    guard that was inlined verbatim ×5 across reconcile_ledger / render_ledger
+    (#408 F9) into one source, so the #402 read-side contract cannot drift."""
+    return _valid_identity(entry.get("run_id")) and _valid_identity(entry.get("skill"))
 
 
 def _truncate_payload(entry: dict, max_gated_files: int,

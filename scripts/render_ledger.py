@@ -28,7 +28,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from scripts.ledger_reduce import reduce as _falsification_reduce  # noqa: E402
-from scripts.ledger_append import default_ledger_dir, _valid_identity  # noqa: E402
+from scripts.ledger_append import default_ledger_dir, valid_ledger_identity  # noqa: E402
 from scripts.atomic_write import atomic_write_text  # noqa: E402
 from scripts.reconcile_ledger import (  # noqa: E402
     parse_predicate,
@@ -185,7 +185,7 @@ def week_summary(entries: list) -> dict:
         # #402 read-side: a row lacking a valid (run_id, skill) join key would
         # merge into a single "unknown" skill bucket, conflating unrelated runs
         # in the severity table. Skip + count it instead.
-        if not (_valid_identity(e.get("run_id")) and _valid_identity(e.get("skill"))):
+        if not valid_ledger_identity(e):
             skipped_identityless += 1
             continue
         skill = e["skill"]
@@ -377,7 +377,7 @@ def predicate_rates(entries: list, falsification_reduced: dict, *, now) -> dict:
             continue
         # #402 read-side: an identity-less row has no stable join key into the
         # falsification map — skip + count rather than bucket it under "unknown".
-        if not (_valid_identity(e.get("run_id")) and _valid_identity(e.get("skill"))):
+        if not valid_ledger_identity(e):
             skipped_identityless += 1
             continue
         skill = e["skill"]
