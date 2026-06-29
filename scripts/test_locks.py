@@ -28,8 +28,10 @@ not silently fixed):
     the current derivation rule.
 
 Pure stdlib `unittest`. All locks live under tmp dirs (ledger lock is beside the
-tmp ledger_path; compass lock is `/tmp/.lock-compass-<sha1>` keyed off a tmp
-repo_root we create and clean up). The machine-local central store is never
+tmp ledger_path; the compass lock is `<repo_root>/.lock-compass` beside the data
+in the user-owned repo tree — #408 F12 moved it off the world-writable
+`/tmp/.lock-compass-<sha1>` — keyed off a tmp repo_root we create and clean up).
+The machine-local central store is never
 touched.
 """
 import json
@@ -334,10 +336,24 @@ class CompassStaleRecoveryTest(unittest.TestCase):
 
 class CompassAcquireReleaseTest(unittest.TestCase):
     def setUp(self):
-        # A tmp repo_root → a deterministic /tmp/.lock-compass-<sha1> we clean up.
+        # A tmp repo_root → a deterministic <repo_root>/.lock-compass we clean up
+        # (#408 F12: beside the data, not in shared /tmp).
         self.repo_root = tempfile.mkdtemp()
         self.lockdir = cm._lockdir_for(self.repo_root)
         self._cleanup_lock()
+
+    def test_f12_lock_lives_inside_repo_not_shared_tmp(self):
+        # #408 F12: the lockdir must sit inside the user-owned resolved repo_root
+        # (inheriting its permissions), NOT at the predictable, world-writable
+        # `/tmp/.lock-compass-<sha1>` a co-tenant could pre-create.
+        from pathlib import Path
+        root = str(Path(self.repo_root).resolve())
+        # Pin the exact location: beside the data, inside the resolved repo tree.
+        self.assertEqual(self.lockdir, os.path.join(root, ".lock-compass"))
+        # And it is NOT the old hole: a predictable name directly under the
+        # shared, world-writable /tmp root a co-tenant could pre-create.
+        self.assertFalse(self.lockdir.startswith("/tmp/.lock-compass"),
+                         "lock must not sit in the world-writable /tmp namespace")
 
     def tearDown(self):
         self._cleanup_lock()
@@ -436,10 +452,10 @@ class CompassLockIdentityTest(unittest.TestCase):
 
     def test_sibling_subdir_compasses_do_NOT_share_lock_BUG_406(self):
         # CHARACTERIZATION of deferred #406 (compass.py:689): the lock identity
-        # is dir-scoped (sha1 of the resolved repo_root), NOT keyed off the
-        # compass file's realpath. Two compass files under different sub-dirs of
-        # the same project therefore get DIFFERENT locks — concurrent writers to
-        # them do not serialize against each other. Pin the current behavior;
+        # is dir-scoped (one `.lock-compass` per resolved repo_root), NOT keyed
+        # off the compass file's realpath. Two compass files under different
+        # sub-dirs of the same project therefore get DIFFERENT locks — concurrent
+        # writers to them do not serialize against each other. Pin current behavior;
         # #406 may revisit the lock-identity derivation.
         with tempfile.TemporaryDirectory() as root:
             a_root = os.path.dirname(os.path.abspath(

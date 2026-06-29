@@ -7,7 +7,6 @@ script wins. Stdlib only.
 import argparse
 import datetime as _dt
 import errno
-import hashlib
 import os
 import re
 import sys
@@ -73,8 +72,20 @@ def _test_sleep():
 
 # ── Lock ──────────────────────────────────────────────────────────────────────
 def _lockdir_for(repo_root):
-    h = hashlib.sha1(str(Path(repo_root).resolve()).encode()).hexdigest()[:8]
-    return f"/tmp/.lock-compass-{h}"
+    """Lock dir for a repo's compass.md — BESIDE THE DATA, in the user-owned repo
+    tree (#408 F12).
+
+    The lock used to live at `/tmp/.lock-compass-<sha1(repo_root)>` — a
+    predictable name in a world-writable directory. A hostile co-tenant could
+    pre-create the lockdir (→ `compass update` hangs the full 30s then
+    TimeoutErrors) or plant a `holder` file naming a live foreign PID (→ the
+    stale-recovery path evicts/races on it). Placing the lock inside the
+    resolved repo_root inherits the repo's ownership and permissions — the same
+    lock-beside-data posture `ledger_append` uses under `~/.claude`. `.resolve()`
+    keeps the lock identity dir-scoped, so symlinked / relative spellings of the
+    same root collapse to one lock.
+    """
+    return str(Path(repo_root).resolve() / ".lock-compass")
 
 
 def _holder_alive(pid):
