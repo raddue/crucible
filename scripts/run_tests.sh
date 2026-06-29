@@ -64,6 +64,9 @@ run python3 scripts/test_pathmatch.py
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
 
+# --- ledger weekly render core (#408 F16b) ---
+run python3 scripts/test_render_ledger.py
+
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
