@@ -182,6 +182,61 @@ def _confidence_label(days_delta: float, n_touched: int, cross_cut: bool) -> str
     return "medium"
 
 
+def _valid_repo_path(p) -> bool:
+    """A `touched_files` entry must be a non-empty repo-relative posix path.
+
+    Git `--name-only` only ever emits repo-relative paths; an absolute path or
+    a `..` traversal segment signals corrupted git-layer output (or a `\\x1f`/
+    `\\x1e`-injected commit body that mangled the field split, F1) and must not
+    enter the pure matchers.
+    """
+    if not isinstance(p, str) or not p:
+        return False
+    if p.startswith("/") or os.path.isabs(p):
+        return False
+    return ".." not in p.split("/")
+
+
+def _valid_candidate(cand, *, require_message: bool = False) -> bool:
+    """Schema gate for git-layer candidate dicts at the pure-core boundary (F1).
+
+    The git layer (`discover_*`) is the SOLE producer of the falsification input
+    that flips a Brier `actual`; before this gate its output entered the pure
+    core unvalidated. We reject the LOAD-BEARING corruption modes:
+
+      - `merge_time` that does not parse → dropped (fail-CLOSED, F2). This is
+        the single posture for an unplaceable candidate timestamp across the
+        matchers that consume one — the walkback and the three predicate matchers
+        now agree: a fix we cannot place in time falsifies nothing, rather than
+        the old walkback fail-OPEN that let a garbage `merge_time` falsify an
+        arbitrarily-old verdict it never post-dated. (`compute_brier` never
+        parses a candidate `merge_time`; its own S-1 fail-CLOSED is about an
+        unparseable `now`, an unrelated mechanism.)
+      - `touched_files` present but not a list of repo-relative paths.
+      - `message` missing/non-str when the consumer needs it (`referencing`).
+
+    `commit` is deliberately NOT format-checked: it is decorative provenance
+    (#412), used only in the human-readable `reason`/`falsified_by.commit`
+    string, never in the calibration math — a `\\x1f`-mangled commit field
+    manifests as an unparseable `merge_time` and is dropped on that basis.
+    """
+    if not isinstance(cand, dict):
+        return False
+    if _parse_iso(cand.get("merge_time")) is None:
+        return False
+    tf = cand.get("touched_files")
+    # Whole-dict rejection is intentional: if ANY path element is invalid, the
+    # candidate is partially-corrupt and therefore suspect, so we drop it rather
+    # than salvage the good paths.
+    if tf is not None and (
+        not isinstance(tf, list) or not all(_valid_repo_path(p) for p in tf)
+    ):
+        return False
+    if require_message and not isinstance(cand.get("message"), str):
+        return False
+    return True
+
+
 def reconcile(
     ledger_path: str,
     falsification_path: str,
@@ -270,11 +325,20 @@ def reconcile(
         appended.append(entry)
 
     # --- §3.3/§3.4 algorithm pass ----------------------------------------- #
-    for cand in candidates:
+    # F1: gate git-layer candidates at the boundary; a candidate failing the
+    # schema (unparseable merge_time / non-repo-relative touched_files) is
+    # dropped + counted, not silently fed into the matcher.
+    valid_candidates = [c for c in candidates if _valid_candidate(c)]
+    dropped = len(candidates) - len(valid_candidates)
+    if dropped:
+        _warn(f"reconcile: dropped {dropped} candidate(s) failing schema "
+              f"validation (bad merge_time / touched_files)")
+    for cand in valid_candidates:
         touched = set(cand.get("touched_files") or [])
         if not touched:
             continue
-        merge_dt = _parse_iso(cand.get("merge_time"))
+        # merge_time is validated-parseable for every valid candidate.
+        merge_dt = _parse_iso(cand["merge_time"])
         cross_cut = len(touched) > cross_cut_threshold
 
         # Walkback: earliest UNSEEN ledger entry meeting ALL §3.3 conditions.
@@ -293,8 +357,10 @@ def reconcile(
             gated = set(e.get("gated_files") or [])
             if not (gated & touched):
                 continue
-            # (b) entry timestamp < candidate merge_time
-            if merge_dt is not None and not (ts < merge_dt):
+            # (b) entry timestamp < candidate merge_time (fail-CLOSED: merge_dt
+            # is validated non-None, so an unplaceable fix matches nothing — the
+            # posture now shared with the three predicate matchers).
+            if not (ts < merge_dt):
                 continue
             # run_id/skill are guaranteed valid: identity-less rows were dropped
             # when `indexed` was built (#402).
@@ -312,11 +378,8 @@ def reconcile(
         ts, e, gated, h = match
         seen_hashes.add(h)
 
-        # §3.4 confidence
-        if merge_dt is not None:
-            days_delta = (merge_dt - ts).total_seconds() / 86400.0
-        else:
-            days_delta = float("inf")
+        # §3.4 confidence (merge_dt validated non-None above).
+        days_delta = (merge_dt - ts).total_seconds() / 86400.0
         confidence = _confidence_label(days_delta, len(touched), cross_cut)
         # Phase 7 (design §3a step 3 / plan combination rule): a file-intersection
         # walkback is the COARSER heuristic — it caps at "medium". Only a
@@ -729,8 +792,24 @@ def reconcile_predicates(
     not-`predicate_checkable` predicate is classified `uncheckable` and appends
     nothing.
     """
-    revert_candidates = revert_candidates or []
-    reference_candidates = reference_candidates or []
+    # F1/F3: gate every git-layer candidate population at the boundary BEFORE
+    # the second pass runs over it (this pass escalates a fired predicate to
+    # confidence:"high" and flips a FAIL's Brier actual, so corrupt input here
+    # is maximally costly). Reference candidates additionally require a string
+    # `message` (their matcher scans it); all require a parseable merge_time
+    # (fail-CLOSED — a fix we cannot place in time fires no predicate, F2).
+    raw_total = len(candidates) + len(revert_candidates or []) \
+        + len(reference_candidates or [])
+    candidates = [c for c in candidates if _valid_candidate(c)]
+    revert_candidates = [c for c in (revert_candidates or [])
+                         if _valid_candidate(c)]
+    reference_candidates = [c for c in (reference_candidates or [])
+                            if _valid_candidate(c, require_message=True)]
+    dropped = raw_total - (len(candidates) + len(revert_candidates)
+                           + len(reference_candidates))
+    if dropped:
+        _warn(f"reconcile_predicates: dropped {dropped} candidate(s) failing "
+              f"schema validation (bad merge_time / touched_files / message)")
     classifications: List[dict] = []
     appended: List[dict] = []
     skipped_identityless = 0

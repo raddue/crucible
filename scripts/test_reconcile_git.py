@@ -13,11 +13,13 @@ squash-style `fix(...)` commit) and run the GIT layer with cwd inside it — the
 same integration style as test_brier_advise.py. Pure stdlib unittest; no central
 store is touched.
 """
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -144,6 +146,116 @@ class FixMergeSubjectTest(unittest.TestCase):
         for s in ("prefix/x", "affix/x", "suffix/y", "feat/x",
                   "Merge branch 'feature'", "", "fix:"):
             self.assertFalse(rl._is_fix_merge_subject(s), s)
+
+
+class DiscoverRevertAndReferenceTest(unittest.TestCase):
+    """#343 git-layer discovery (revert + referencing) was untested (#408 F16c)."""
+
+    def _base(self, repo):
+        _git(repo, "init", "-q", "-b", "main")
+        _git(repo, "config", "user.email", "t@t")
+        _git(repo, "config", "user.name", "t")
+        _write(repo, "a.txt", "1\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "base")
+
+    def test_discover_revert_candidates_finds_canonical_revert(self):
+        with tempfile.TemporaryDirectory() as repo:
+            self._base(repo)
+            _write(repo, "a.txt", "2\n")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-qm", "feat: a thing")
+            _git(repo, "revert", "--no-edit", "HEAD")   # subject: Revert "feat: a thing"
+            old = os.getcwd()
+            os.chdir(repo)
+            try:
+                cands = rl.discover_revert_candidates(30)
+            finally:
+                os.chdir(old)
+            self.assertTrue(cands, "expected the canonical revert commit")
+            rc = cands[0]
+            self.assertTrue(rc["message"].startswith("Revert"))
+            self.assertIn("a.txt", rc["touched_files"])
+            self.assertTrue(rc["merge_time"])
+
+    def test_discover_reference_commits_matches_token(self):
+        with tempfile.TemporaryDirectory() as repo:
+            self._base(repo)
+            _write(repo, "b.txt")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-qm", "chore: closes #341 — wrap up")
+            old = os.getcwd()
+            os.chdir(repo)
+            try:
+                cands = rl.discover_reference_commits(["#341"], 30)
+            finally:
+                os.chdir(old)
+            self.assertTrue(cands, "expected the #341-referencing commit")
+            self.assertIn("#341", cands[0]["message"])
+
+    def test_gh_regression_commits_graceful_without_remote(self):
+        # gh absent → FileNotFoundError → graceful [] (not a crash). Patching the
+        # global subprocess.run intercepts the function's `subprocess.run(...)`
+        # call deterministically and offline (no real gh, no network).
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError()):
+            out = rl._git_gh_regression_commits()
+        self.assertEqual(out, [])
+
+
+class MainOrchestrationTest(unittest.TestCase):
+    """End-to-end main() wiring (discover → reconcile → predicate pass → brier
+    write) was untested (#408 F16c). Builds a repo with a squash `fix(...)`
+    commit and a stale ledger PASS whose gated_files intersect it; asserts the
+    walkback falsifies the PASS and brier-rolling.json is written."""
+
+    def test_main_walkback_falsifies_and_writes_brier(self):
+        saved = os.environ.pop("CRUCIBLE_CALIBRATION_DISABLED", None)
+        try:
+            with tempfile.TemporaryDirectory() as repo:
+                _git(repo, "init", "-q", "-b", "main")
+                _git(repo, "config", "user.email", "t@t")
+                _git(repo, "config", "user.name", "t")
+                _write(repo, "auth.py", "1\n")
+                _git(repo, "add", ".")
+                _git(repo, "commit", "-qm", "base")
+                _write(repo, "auth.py", "2\n")
+                _git(repo, "add", ".")
+                _git(repo, "commit", "-qm", "fix(auth): patch hole (#9)")
+
+                ledger = os.path.join(repo, "runs.jsonl")
+                with open(ledger, "w", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "run_id": "r1", "skill": "siege", "verdict": "PASS",
+                        "confidence": 0.9, "artifact_type": "code",
+                        "backfilled": False, "gated_files": ["auth.py"],
+                        "timestamp": "2020-01-01T00:00:00Z",   # >30d old
+                    }) + "\n")
+                fals = os.path.join(repo, "fals.jsonl")
+                brier = os.path.join(repo, "brier.json")
+
+                old = os.getcwd()
+                os.chdir(repo)
+                try:
+                    rc = rl.main([
+                        "--ledger", ledger, "--falsification", fals,
+                        "--manual-attribution", os.path.join(repo, "m.jsonl"),
+                        "--brier-out", brier, "--lookback-days", "3650",
+                    ])
+                finally:
+                    os.chdir(old)
+
+                self.assertEqual(rc, 0)
+                self.assertTrue(os.path.exists(fals), "no falsification written")
+                with open(fals, encoding="utf-8") as f:
+                    rows = [json.loads(ln) for ln in f if ln.strip()]
+                self.assertTrue(any(r["falsified_by"]["via"] == "walkback"
+                                    for r in rows), rows)
+                self.assertTrue(os.path.exists(brier), "no brier-rolling written")
+                with open(brier, encoding="utf-8") as f:
+                    self.assertIn("siege", json.load(f))
+        finally:
+            if saved is not None:
+                os.environ["CRUCIBLE_CALIBRATION_DISABLED"] = saved
 
 
 if __name__ == "__main__":

@@ -485,13 +485,14 @@ class ReconcileTest(unittest.TestCase):
                 cross_cut_threshold=20, now="2026-03-01T00:00:00Z")
             self.assertEqual(out, [])   # (b): entry ts must precede merge
 
-    def test_unparseable_merge_time_short_circuits_b_and_still_matches(self):
-        # reconcile_ledger.py:270 guards (b) as
-        #   `merge_dt is not None and not (ts < merge_dt)`.
-        # When merge_time fails to parse (_parse_iso → None), merge_dt is None,
-        # so the timestamp-precedence check is SKIPPED — the candidate can still
-        # match on file-intersection alone. Verified against production: it emits
-        # a walkback falsification at "low" confidence (days_delta → inf → >30d).
+    def test_unparseable_merge_time_fails_closed_no_match(self):
+        # F2 (#408): a candidate whose merge_time does not parse is now DROPPED
+        # at the schema boundary (_valid_candidate) and falsifies NOTHING.
+        # Previously the walkback failed OPEN — `merge_dt is None` skipped the
+        # (b) timestamp-precedence guard, so a garbage merge_time matched on
+        # file-intersection alone and falsified an arbitrarily-old verdict it
+        # never post-dated. The walkback now shares the fail-CLOSED posture of
+        # the predicate matchers and compute_brier (S-1).
         with tempfile.TemporaryDirectory() as d:
             ledger = self._ledger(d, [
                 self._row("r1", "siege", ["auth.py"], "2026-01-01T00:00:00Z"),
@@ -501,11 +502,23 @@ class ReconcileTest(unittest.TestCase):
                 [{"commit": "abc", "touched_files": ["auth.py"],
                   "merge_time": "not-a-real-date"}],
                 cross_cut_threshold=20, now="2026-02-01T00:00:00Z")
-            self.assertEqual(len(out), 1)   # (b) short-circuits → admit
-            self.assertEqual(out[0]["ledger_entry_hash"],
-                             _entry_hash("r1", "siege"))
-            self.assertEqual(out[0]["falsified_by"]["via"], "walkback")
-            self.assertEqual(out[0]["confidence"], "low")
+            self.assertEqual(out, [])   # fail-CLOSED: unplaceable fix, no match
+
+    def test_absolute_path_candidate_dropped(self):
+        # F1: a touched_files entry that is not repo-relative (absolute path /
+        # `..` traversal) signals corrupted git-layer output and is dropped, so
+        # it cannot intersect a verdict's gated_files and mis-falsify.
+        with tempfile.TemporaryDirectory() as d:
+            ledger = self._ledger(d, [
+                self._row("r1", "siege", ["/etc/auth.py"],
+                          "2026-01-01T00:00:00Z"),
+            ])
+            out = rl.reconcile(
+                ledger, os.path.join(d, "f.jsonl"), os.path.join(d, "m.jsonl"),
+                [{"commit": "abc", "touched_files": ["/etc/auth.py"],
+                  "merge_time": "2026-01-10T00:00:00Z"}],
+                cross_cut_threshold=20, now="2026-02-01T00:00:00Z")
+            self.assertEqual(out, [])
 
     def test_walkback_confidence_capped_at_medium(self):
         # design §3a: a file-intersection walkback caps at "medium" even when
@@ -590,6 +603,60 @@ class ReconcileTest(unittest.TestCase):
             # exactly one entry — the manual one; walkback skipped the reserved hash
             self.assertEqual(len(out), 1)
             self.assertEqual(out[0]["falsified_by"]["manual_override"], True)
+
+
+# --------------------------------------------------------------------------- #
+# reconcile_ledger — _valid_candidate / _valid_repo_path (F1/F2 boundary gate) #
+# --------------------------------------------------------------------------- #
+
+class ValidateCandidateTest(unittest.TestCase):
+    """Pure schema gate for git-layer candidate dicts (#408 F1/F2)."""
+
+    GOOD = {"commit": "abc", "touched_files": ["src/auth/token.ts"],
+            "merge_time": "2026-01-10T00:00:00Z"}
+
+    def test_accepts_well_formed_candidate(self):
+        self.assertTrue(rl._valid_candidate(self.GOOD))
+
+    def test_rejects_non_dict(self):
+        for bad in (None, "x", 42, ["a"]):
+            self.assertFalse(rl._valid_candidate(bad), bad)
+
+    def test_rejects_unparseable_merge_time(self):
+        self.assertFalse(rl._valid_candidate(
+            {**self.GOOD, "merge_time": "not-a-date"}))
+        self.assertFalse(rl._valid_candidate(
+            {k: v for k, v in self.GOOD.items() if k != "merge_time"}))
+
+    def test_rejects_non_list_touched_files(self):
+        self.assertFalse(rl._valid_candidate(
+            {**self.GOOD, "touched_files": "src/auth/token.ts"}))
+
+    def test_rejects_absolute_and_traversal_paths(self):
+        for p in ("/etc/passwd", "../../etc/passwd", "a/../../b"):
+            self.assertFalse(rl._valid_candidate(
+                {**self.GOOD, "touched_files": [p]}), p)
+
+    def test_rejects_non_str_path_element(self):
+        self.assertFalse(rl._valid_candidate(
+            {**self.GOOD, "touched_files": [123]}))
+
+    def test_allows_absent_touched_files_for_referencing(self):
+        # referencing candidates carry message, not touched_files.
+        ref = {"commit": "rc1", "message": "closes #341",
+               "merge_time": "2026-01-10T00:00:00Z"}
+        self.assertTrue(rl._valid_candidate(ref, require_message=True))
+
+    def test_require_message_rejects_missing_or_nonstr_message(self):
+        base = {"commit": "rc1", "merge_time": "2026-01-10T00:00:00Z"}
+        self.assertFalse(rl._valid_candidate(base, require_message=True))
+        self.assertFalse(rl._valid_candidate(
+            {**base, "message": 42}, require_message=True))
+
+    def test_repo_path_helper(self):
+        self.assertTrue(rl._valid_repo_path("a/b/c.py"))
+        for bad in ("", "/abs", "a/../b", None, 7):
+            self.assertFalse(rl._valid_repo_path(bad), bad)
 
 
 # --------------------------------------------------------------------------- #
@@ -814,6 +881,22 @@ class ReconcilePredicatesTest(unittest.TestCase):
             self.assertEqual(appended[0]["confidence"], "high")
             # and it really landed on disk.
             self.assertEqual(len(lr.reduce(fals)), 1)
+
+    def test_corrupt_candidate_dropped_no_fire(self):
+        # F1/F3: a candidate that WOULD fire the predicate on file-intersection
+        # but carries an unparseable merge_time is dropped at the boundary, so
+        # the second pass never escalates it to a confidence:"high" FAIL flip.
+        with tempfile.TemporaryDirectory() as d:
+            fals = os.path.join(d, "fals.jsonl")
+            entry = self._code_entry(
+                "r1", "siege", "fix touching src/auth/*.ts within 14d")
+            cand = {"commit": "abc", "touched_files": ["src/auth/token.ts"],
+                    "merge_time": "garbage"}   # unparseable → dropped
+            classifications, appended = rl.reconcile_predicates(
+                [entry], [cand], fals, now=self.NOW)
+            self.assertFalse(classifications[0]["fired"])
+            self.assertEqual(appended, [])
+            self.assertFalse(os.path.exists(fals))
 
     def test_not_fired_out_of_window_classifies_no_append(self):
         with tempfile.TemporaryDirectory() as d:

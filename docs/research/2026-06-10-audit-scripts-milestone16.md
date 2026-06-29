@@ -158,6 +158,19 @@ Read **in full** and grounded findings: `rcpt_verify.py`, `test_rcpt_verify.py`,
 
 **Still DEFERRED (remaining #408 boxes):** `render_ledger.py` (WHS honest-count + 3×-rolling-median inflation detector), `test_catalog.py`, `grudge_query.py` full read, `compass.py:180-1182` field caps + `MUTEX_PAIRS`. #408 stays open for these.
 
+### #408 update (2026-06-28, completing Opus pass — coverage now FULL)
+
+Read **in full** all six remaining trust-critical modules in one `/audit` run (code, systemic-only): `rcpt_verify.py`, `reconcile_ledger.py`, `render_ledger.py`, `calibrate_tolerance.py`, `grudge_query.py`, `compass.py` (4916L; 5 lenses). The 2026-06-22 deferred boxes — `render_ledger.py`, `grudge_query.py` full read, `compass.py` field-cap surface — are now covered. **27 raw → 16 findings (0F/11S/5M)**, posted as an umbrella checklist on #408 ([issuecomment-4825158506](https://github.com/raddue/crucible/issues/408#issuecomment-4825158506)). Headlines:
+
+- **Trust hole (compounding, untracked):** git-layer output enters the Brier core with zero schema validation (F1); the walkback fails OPEN on an unparseable `merge_time` while the predicate matchers fail CLOSED (F2); the predicate FAIL-flip pass runs over the same unvalidated dicts and escalates to high confidence (F3). The unvalidated/fail-open paths are exactly the untested ones (F16c) — this is the residual of #439/#441 read at the body level.
+- **Silent failure (untracked):** uneven tolerant-read discipline drops corrupt rows with no count outside the 3 central readers (F4); `_git` swallows all errors → a timeout looks like "no fixes merged" (F5).
+- **Duplication (folds into #401):** ISO parsers ×4, JSONL readers ×3-4 with drifted contracts, `_glob_match` verbatim copy (F6/F7/F8).
+- **compass `/tmp` lockdir (untracked security):** predictable world-writable lock path → local DoS/symlink surface (F12).
+- **New test gaps (relate to #441, new functions):** compass parser core, render pipeline, reconcile `main()`+#343 discovery untested (F16a/b/c).
+- **Cleared (no action):** WITNESS grammar, inflation detector, calibrate body — all confirmed adequately tested by the #441/#442 work.
+
+12 single-reproduction instance bugs noted for `/delve` (not cross-checked — run `audit --bugs`). **All #408 boxes now read in full** — #408's read-mandate is satisfied; remaining work is fix-side (the F1-F3+F16c cluster and the #401 fold), maintainer's call on closing the tracker.
+
 ## Provenance
 
 - Lens reports (source): `~/.claude/projects/-home-user-crucible/memory/audit/scratch/2026-06-10T19-29-36/{architecture,blindspots,consistency-a,consistency-b,robustness,testhealth}-findings.md`, `coverage-map.md`, `manifest.md` — machine-local, reclaimable.
