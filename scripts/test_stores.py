@@ -299,6 +299,69 @@ class LoadGrudgesRepoRootFilterTest(unittest.TestCase):
             self.assertIn("skipped 1", buf.getvalue())
 
 
+class CullTest(unittest.TestCase):
+    """#408 F18: cull() DELETES grudge files whose files_touched are all gone —
+    a destructive path that was untested."""
+
+    def _write(self, gdir, name, repo_root, files):
+        body = ('---\nrepo_root: %s\nfiles_touched: %s\n'
+                'anti_pattern_signature: ""\n---\nbody\n'
+                % (repo_root, json.dumps(files)))
+        with open(os.path.join(gdir, name), "w", encoding="utf-8") as f:
+            f.write(body)
+
+    def test_cull_removes_only_all_files_gone_grudges(self):
+        with tempfile.TemporaryDirectory() as base, \
+                tempfile.TemporaryDirectory() as repo_root:
+            gdir = ga.grudges_dir("myrepo", base)
+            os.makedirs(gdir)
+            open(os.path.join(repo_root, "live.py"), "w").close()
+            # survivor: at least one file still exists → kept
+            self._write(gdir, "keep.md", repo_root, ["live.py", "gone.py"])
+            # all files gone → culled
+            self._write(gdir, "dead.md", repo_root, ["gone1.py", "gone2.py"])
+            removed = gq.cull("myrepo", repo_root, base)
+            self.assertEqual([os.path.basename(p) for p in removed], ["dead.md"])
+            self.assertTrue(os.path.exists(os.path.join(gdir, "keep.md")))
+            self.assertFalse(os.path.exists(os.path.join(gdir, "dead.md")))
+
+    def test_cull_empty_when_all_survive(self):
+        with tempfile.TemporaryDirectory() as base, \
+                tempfile.TemporaryDirectory() as repo_root:
+            gdir = ga.grudges_dir("myrepo", base)
+            os.makedirs(gdir)
+            open(os.path.join(repo_root, "a.py"), "w").close()
+            self._write(gdir, "g.md", repo_root, ["a.py"])
+            self.assertEqual(gq.cull("myrepo", repo_root, base), [])
+            self.assertTrue(os.path.exists(os.path.join(gdir, "g.md")))
+
+
+class RenderBlockTest(unittest.TestCase):
+    """#408 F18: the DO-NOT-REPEAT preflight block formatter was untested."""
+
+    def test_empty_match_renders_empty(self):
+        self.assertEqual(gq.render_block([], {}), "")
+
+    def test_renders_symptom_rootcause_files_and_truncation(self):
+        matched = [{
+            "symptom": "double-free", "root_cause": "missing guard",
+            "files_touched": ["a.py", "b.py"], "fixed_in_commit": "abcdef1234",
+            "date_fixed": "2026-06-01",
+        }]
+        out = gq.render_block(matched, {"truncated": 2})
+        self.assertIn("DO NOT REPEAT", out)
+        self.assertIn("☠ double-free", out)
+        self.assertIn("root cause: missing guard", out)
+        self.assertIn("a.py, b.py", out)
+        self.assertIn("abcdef123,", out)         # 9-char prefix + ", <date>" sep
+        self.assertNotIn("abcdef1234", out)       # full 10-char hash must NOT survive
+        self.assertIn("and 2 more", out)         # truncation line
+
+    def test_missing_optional_fields_do_not_crash(self):
+        out = gq.render_block([{"symptom": "x"}], {})
+        self.assertIn("☠ x", out)
+
+
 class SignatureHitTest(unittest.TestCase):
     def _repo_with_file(self, d, relpath, content):
         full = os.path.join(d, relpath)

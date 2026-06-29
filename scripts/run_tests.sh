@@ -61,6 +61,9 @@ run python3 scripts/test_reconcile_git.py
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
 
+# --- compass parser/patch/render core (#408 F16a) ---
+run python3 scripts/test_compass.py
+
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
