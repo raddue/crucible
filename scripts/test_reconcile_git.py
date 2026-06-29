@@ -258,5 +258,45 @@ class MainOrchestrationTest(unittest.TestCase):
                 os.environ["CRUCIBLE_CALIBRATION_DISABLED"] = saved
 
 
+class GitLivenessProbeTest(unittest.TestCase):
+    """#408 F5: a git outage collapses to candidates=0, indistinguishable from
+    'no fixes merged'. main() now probes git liveness and warns when git/the
+    work tree is unreachable, so a falsely-clean reconciliation is visible."""
+
+    def test_main_warns_when_not_in_a_work_tree(self):
+        import contextlib
+        import io
+        saved = os.environ.pop("CRUCIBLE_CALIBRATION_DISABLED", None)
+        try:
+            with tempfile.TemporaryDirectory() as nongit:
+                # A bare temp dir is not a git work tree → rev-parse fails.
+                ledger = os.path.join(nongit, "runs.jsonl")
+                open(ledger, "w").close()
+                brier = os.path.join(nongit, "brier.json")
+                old = os.getcwd()
+                os.chdir(nongit)
+                buf = io.StringIO()
+                try:
+                    # On a host whose TMPDIR resolves inside a checkout,
+                    # rev-parse succeeds and the warn would not fire — skip
+                    # rather than fail spuriously.
+                    if rl._git(["rev-parse", "--is-inside-work-tree"]) is not None:
+                        self.skipTest("temp dir resolves inside a git work tree")
+                    with contextlib.redirect_stderr(buf):
+                        rc = rl.main([
+                            "--ledger", ledger,
+                            "--falsification", os.path.join(nongit, "f.jsonl"),
+                            "--manual-attribution", os.path.join(nongit, "m.jsonl"),
+                            "--brier-out", brier,
+                        ])
+                finally:
+                    os.chdir(old)
+                self.assertEqual(rc, 0)
+                self.assertIn("git is unavailable", buf.getvalue())
+        finally:
+            if saved is not None:
+                os.environ["CRUCIBLE_CALIBRATION_DISABLED"] = saved
+
+
 if __name__ == "__main__":
     unittest.main()

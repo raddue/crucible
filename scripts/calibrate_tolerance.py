@@ -114,6 +114,11 @@ def calibrate(
     # per_column_rates[column] -> list of per-run per-fixture pass rates
     per_column_rates: dict[str, list[float]] = {c: [] for c in _LENS_COLUMNS}
 
+    # #408 F4: a fixture whose lens_column is unknown/missing/wrong-typed is
+    # silently dropped from EVERY column's sample, shrinking the empirical sigma
+    # and tightening the tolerance clamp without a trace. Count and warn so a
+    # mis-keyed evals.json (or a stale fixture id) is visible, not invisible.
+    unmapped = 0
     for p in input_paths:
         data = json.loads(p.read_text(encoding="utf-8"))
         for fr in data.get("fixtures", []):
@@ -122,10 +127,19 @@ def calibrate(
             rate = _per_fixture_pass_rate(fr)
             if isinstance(lc, str) and lc in per_column_rates:
                 per_column_rates[lc].append(rate)
-            elif isinstance(lc, list):
+            elif isinstance(lc, list) and any(e in per_column_rates for e in lc):
                 for entry in lc:
                     if entry in per_column_rates:
                         per_column_rates[entry].append(rate)
+            else:
+                unmapped += 1
+    if unmapped:
+        print(
+            f"[calibrate_tolerance WARN] {unmapped} fixture-result(s) had no "
+            f"known lens_column and were excluded from the sigma sample "
+            f"(check evals.json lens_column mappings)",
+            file=sys.stderr,
+        )
 
     sigma_empirical: dict[str, float] = {}
     for col in _LENS_COLUMNS:

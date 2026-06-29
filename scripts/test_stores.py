@@ -205,6 +205,22 @@ class ParseGrudgeTest(unittest.TestCase):
             p = self._write(d, "g.md", "---\nfiles_touched: [\"a.py\"]\n")
             self.assertIsNone(gq.parse_grudge(p))
 
+    def test_malformed_files_touched_warns_and_empties(self):
+        # #408 F4: a malformed files_touched silently empties the grudge's match
+        # scope (it then matches no path) — surface the corruption, don't hide it.
+        with tempfile.TemporaryDirectory() as d:
+            p = self._write(d, "g.md",
+                            '---\n'
+                            'repo_root: /repo\n'
+                            'files_touched: [not valid json\n'
+                            '---\n'
+                            'body\n')
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                g = gq.parse_grudge(p)
+            self.assertEqual(g["files_touched"], [])
+            self.assertIn("malformed files_touched", buf.getvalue())
+
 
 class PathMatchTest(unittest.TestCase):
     def test_exact_equality(self):
@@ -721,6 +737,15 @@ class RenderLedgerIdentitySkipTest(unittest.TestCase):
             out, err = _capture(lambda: rl.load_runs(p))
             self.assertEqual(len(out), 1)
             self.assertIn("skipped 1", err)
+
+    def test_group_by_week_warns_on_unparseable_timestamp(self):
+        # #408 F4: a bad-timestamp row is dropped from the weekly grouping but
+        # the count is now surfaced, not silently swallowed.
+        good = {"run_id": "r1", "skill": "siege", "timestamp": self.OLD}
+        bad = {"run_id": "r2", "skill": "siege", "timestamp": "not-a-date"}
+        groups, err = _capture(lambda: rl._group_by_week([good, bad]))
+        self.assertEqual(sum(len(v) for v in groups.values()), 1)
+        self.assertIn("skipped 1", err)
 
 
 # --------------------------------------------------------------------------- #

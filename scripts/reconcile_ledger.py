@@ -1205,6 +1205,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     now = _now_iso()
 
     # §3.1 candidate discovery + §3.2 cross-cut threshold (distinct 90d window).
+    # F5 (#408): every git call collapses a timeout / corrupt-repo / git-absent
+    # failure to None, so candidates=0 is indistinguishable from "no fixes
+    # merged" — a falsely-clean reconciliation. Probe git liveness once up front
+    # and warn loudly, so the operator can tell "git couldn't look" from
+    # "git looked and found nothing".
+    if _git(["rev-parse", "--is-inside-work-tree"]) is None:
+        _warn("git is unavailable or this is not a work tree; candidate "
+              "discovery will return 0 with no signal — a reported "
+              "candidates=0 / falsified+=0 is NOT evidence that no fixes merged")
     candidates = discover_candidates(lookback_days=args.lookback_days)
     threshold = cross_cut_threshold_from(fix_branch_sizes(days=90))
 

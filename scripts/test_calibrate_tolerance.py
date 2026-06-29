@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for scripts/calibrate_tolerance.py (#442 G5, #441 calibrate() body)."""
+import contextlib
+import io
 import json
 import os
 import sys
@@ -143,6 +145,40 @@ class TestCalibrate(unittest.TestCase):
         self.assertEqual(sig["DRY"], 0.5)        # ...and here
         self.assertEqual(sig["SRP"], 0.5)        # str routed here
         self.assertEqual(sig["OCP"], 0.0)        # no fixture reached OCP
+
+    def _run_capture(self, runs, lens_map):
+        """Like _run but captures stderr; returns (out, stderr)."""
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            out = self._run(runs, lens_map)
+        return out, buf.getvalue()
+
+    def test_unmapped_fixture_warns_and_excluded(self):
+        # #408 F4: a fixture id absent from evals.json (no lens_column) is dropped
+        # from EVERY column's sample — shrinking sigma and the tolerance clamp.
+        # That exclusion must be counted+warned, not silent.
+        out, err = self._run_capture(
+            [[("f1", ["PASS"]), ("ghost", ["FAIL"])],
+             [("f1", ["FAIL"]), ("ghost", ["PASS"])]],
+            {"f1": "Surgical"},   # "ghost" intentionally unmapped
+        )
+        self.assertIn("no known lens_column", err)
+        self.assertIn("2 fixture-result", err)  # both runs' ghost results excluded
+        # Surgical still got f1's two rates; ghost contributed to nothing.
+        self.assertEqual(out["per_lens_sigma_empirical"]["Surgical"], 0.5)
+
+    def test_unmapped_list_with_no_known_column_warns(self):
+        # A list lens_column whose entries are ALL unknown is also unmapped.
+        out, err = self._run_capture(
+            [[("f1", ["PASS"])], [("f1", ["FAIL"])]],
+            {"f1": ["Bogus", "AlsoBogus"]},
+        )
+        self.assertIn("no known lens_column", err)
+
+    def test_all_mapped_is_silent(self):
+        _, err = self._run_capture(
+            [[("f1", ["PASS"])], [("f1", ["FAIL"])]], {"f1": "Surgical"})
+        self.assertNotIn("no known lens_column", err)
 
     def test_output_shape_invariants(self):
         out = self._run([[("f1", ["PASS"])], [("f1", ["FAIL"])]], {"f1": "Surgical"})

@@ -100,6 +100,11 @@ def parse_grudge(path: str) -> Optional[Dict]:
             try:
                 rec[key] = json.loads(val)
             except (ValueError, TypeError):
+                # #408 F4: a malformed files_touched silently empties the
+                # grudge's match scope (it then matches NO path and is a silent
+                # miss, not a loud parse error). Surface it.
+                _qwarn(f"malformed files_touched in {path}; grudge will match "
+                       f"no files")
                 rec[key] = []
         elif key == "anti_pattern_signature":
             try:

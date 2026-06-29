@@ -699,12 +699,17 @@ def render_week(week: str, entries: list, *, baseline_medians=None,
 
 def _group_by_week(entries: list) -> dict:
     groups = {}
+    skipped = 0  # #408 F4: count dropped bad-timestamp rows, don't degrade silently
     for e in entries:
         try:
             wk = iso_week(e)
         except (ValueError, TypeError):
-            continue  # unparseable timestamp -> skip (tolerant)
+            skipped += 1  # unparseable timestamp -> skip, but surface the count
+            continue
         groups.setdefault(wk, []).append(e)
+    if skipped:
+        _warn(f"_group_by_week: skipped {skipped} entry(ies) with an "
+              f"unparseable timestamp")
     return groups
 
 
