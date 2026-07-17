@@ -40,7 +40,7 @@ This mode exists for the `skills/build/evals/` eval-gate harness. It is enabled 
 
 **Boundary behavior.** `MockNotFound` / `MockUserInputMissing` errors raised by the mock loader halt the build run with a clear stderr message. They do not silently fall through. The eval-gate harness detects these halts via on-disk artifacts (absent phase-handoff manifests, pipeline-active marker still at the original phase) — the harness does NOT catch these exceptions across the build-runtime boundary.
 
-**Pointer reminders.** Sections that reference these env vars (Mode Detection, Phase 1 Step 2 / 2.5 / 3, Phase 2 Step 1 / 2, Phase 3 Step 3) contain short inline pointers back to this section. The substitution rule is defined here only; the pointers exist so a reader scanning a dispatch site doesn't need to re-derive the contract.
+**Pointer reminders.** Sections that reference these env vars (Mode Detection, Phase 1 Step 2 / 3, Phase 2 Step 1 / 2, Phase 3 Step 3) contain short inline pointers back to this section. The substitution rule is defined here only; the pointers exist so a reader scanning a dispatch site doesn't need to re-derive the contract.
 
 **See also:** `skills/build/evals/README.md` for harness usage; `skills/shared/dispatch-convention.md` for the dispatch-file protocol the substitution rule preserves.
 
@@ -631,7 +631,7 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 - Phase ends when user approves the design (says "go", "looks good", "proceed", etc.)
 - **Everything after this point is autonomous** — tell the user: "Design approved. Starting autonomous pipeline — I'll only interrupt for escalations."
 
-> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, innovate, quality-gate, PRD writer, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
+> **Eval-gate pointer (Mock Dispatch Mode):** when `CRUCIBLE_BUILD_EVAL_MOCK_DIR` is set, all `Use crucible:<skill>` and `Dispatch a <kind> subagent` invocations in Phase 1 (design, innovate, quality-gate, acceptance test writer, contract test writer) substitute a disk-read from the mock dir for the Task tool invocation. Each substitution follows the substitution rule in the `## Mock Dispatch Mode (eval-gate)` section. AskUserQuestion calls in Phase 1 use `CRUCIBLE_BUILD_EVAL_USER_INPUT_DIR` per that same section.
 
 ### Step 2: Innovate and Red-Team the Design
 
@@ -645,18 +645,6 @@ After the user approves the design and before starting Phase 2:
 4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 5. **Verify verdict marker and write Phase 1 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 6. Design doc is now finalized — proceed to acceptance tests.
-
-### Step 2.5: Generate PRD
-
-After the design doc is finalized (Step 2 complete), generate a stakeholder-facing PRD:
-
-1. Dispatch a **PRD Writer** subagent (Sonnet) using `./prd-writer-prompt.md`
-   - Input: finalized design doc
-   - Output: PRD in standard format (problem statement, user stories, requirements, scope, out-of-scope, success metrics, technical notes, dependencies)
-2. Save to `docs/prds/YYYY-MM-DD-<topic>-prd.md`
-3. Commit: `docs: add PRD for [feature]`
-
-This step runs by default. The PRD is a reformatting of the design doc for non-technical stakeholders — it does not introduce new decisions or requirements. Skip only in refactor mode (refactoring has no stakeholder-facing PRD).
 
 ### Step 3: Generate Acceptance Tests (RED)
 
@@ -748,11 +736,11 @@ Before dispatching the Plan Writer, verify the gate ledger and write a handoff m
 1. Write `handoff-1-to-2.md` with:
    - **Goal:** original user request, verbatim
    - **Mode:** feature or refactor
-   - **Inputs for Phase 2:** design doc path, acceptance test paths (or contract tests in refactor mode), PRD path (if generated), conventions path (from cartographer, if loaded)
+   - **Inputs for Phase 2:** design doc path, acceptance test paths (or contract tests in refactor mode), conventions path (from cartographer, if loaded)
    - **Decisions Carried Forward:** accumulated decisions from Phase 1
    - **Active Constraints:** constraints affecting planning
    - **Shed Receipt:** design iteration history, innovate proposals, quality gate round details → design doc on disk captures the outcome
-2. Emit shed statement: "Phase 1 context shed. Design doc, acceptance tests, and PRD are on disk. Design iteration history, innovate proposals, and gate round details are not carried forward."
+2. Emit shed statement: "Phase 1 context shed. Design doc and acceptance tests are on disk. Design iteration history, innovate proposals, and gate round details are not carried forward."
 3. Update `## Compression State` in pipeline-status.md with manifest contents.
 4. Do NOT emit a Compression State Block (manifest replaces it at this boundary).
 5. **Session index event:** Emit a `phase_change` event to the outbox: `{"ts":"<now>","seq":0,"type":"phase_change","summary":"Build: Phase 1 -> Phase 2 (Plan)","detail":{"skill":"build","from":"1","to":"2"}}`.
@@ -1376,7 +1364,6 @@ Decision types to capture:
 ## Prompt Templates
 
 - `./acceptance-test-writer-prompt.md` — Phase 1 acceptance test generation
-- `./prd-writer-prompt.md` — Phase 1 PRD generation from design doc
 - `./plan-writer-prompt.md` — Phase 2 plan writer dispatch
 - `./plan-reviewer-prompt.md` — Phase 2 plan reviewer dispatch
 - `./build-implementer-prompt.md` — Phase 3 implementer dispatch

@@ -32,7 +32,6 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | adversarial-tester | Subagent dispatch for test writing | Agent writes tests in-context |
 | skill-creator | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
 | assay | Subagent dispatch for approach evaluation (Opus evaluator) | Evaluates approaches in-context |
-| prd | Subagent dispatch for PRD authoring (Sonnet writer) | Writes the PRD in-context |
 | test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
 | design | Subagent dispatch for parallel investigation + Challenger | Investigation/challenge run in-context |

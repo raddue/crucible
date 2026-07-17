@@ -4,9 +4,8 @@
   "mode": "refactor",
   "expectations": [
     {"type": "manifest_contains_dispatch", "skill": "contract-test-writer", "count_min": 1, "count_max": 3},
-    {"type": "manifest_does_not_contain", "skill": "prd-writer"},
     {"type": "manifest_does_not_contain", "skill": "acceptance-test-writer"},
     {"type": "file_contains", "path": "src/tax.py", "pattern": "discount"}
   ],
-  "_notes": "v0.1 does not assert 'no new files'. `working_tree_unchanged_from` with an except_paths arg is a v0.2 enhancement (filed at /finish). The manifest_does_not_contain assertions on prd-writer + acceptance-test-writer prove build entered refactor mode (not feature mode), which is the targeted regression."
+  "_notes": "v0.1 does not assert 'no new files'. `working_tree_unchanged_from` with an except_paths arg is a v0.2 enhancement (filed at /finish). The manifest_does_not_contain assertion on acceptance-test-writer (paired with contract-test-writer being dispatched) proves build entered refactor mode (not feature mode), which is the targeted regression."
 }
