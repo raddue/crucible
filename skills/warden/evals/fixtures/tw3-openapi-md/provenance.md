@@ -4,7 +4,7 @@ Hand-derived from `skills/warden/SKILL.md` (the *Standalone inquisitor-inclusion
 predicate* subsection); not recorded from a live run.
 
 - **`reviewer_set` includes inquisitor — via block 1.** Block 1 (escalators) is evaluated
-  FIRST: the single changed path `openapi.md` matches `openapi*` in the
+  FIRST: the single changed path `openapi.md` matches `**/openapi*` in the
   INTERFACE/API/SCHEMA glob set → **run inquisitor**. Block 2 (pure-doc) is never reached,
   so the `.md` extension does NOT earn a skip here. This is intended, and stated verbatim
   in SKILL.md's residual-risk note: "for `openapi.md`/`schema.md` the run is intended — an

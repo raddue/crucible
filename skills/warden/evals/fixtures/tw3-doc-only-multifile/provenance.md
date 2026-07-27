@@ -6,7 +6,7 @@ predicate* subsection); not recorded from a live run.
 - **`reviewer_set` = temper, delve, red-team — inquisitor SKIPPED via block 2.** Block 1
   (escalators): none of `README.md`, `guide.md`, `changelog.md` match the
   INTERFACE/API/SCHEMA or DEPENDENCY/lockfile glob sets (the names deliberately avoid the
-  `index.*`/`schema*`/`openapi*`/`api/**` over-match cases), no binary path → miss. Block 2
+  `**/index.*`/`**/schema*`/`**/openapi*`/`**/api/**` over-match cases), no binary path → miss. Block 2
   (pure-doc bounded subtraction): EVERY changed path is a pure-doc `.md` file → **skip
   inquisitor**. This is the token win — an all-docs sweep does not pay for the Opus 5-dim
   fan-out. siege absent (non-security).

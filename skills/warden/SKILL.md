@@ -77,8 +77,10 @@ Evaluated on the entry diff, in order (escalators dominate; strictly additive):
    → **run inquisitor**.
 4. **Else → skip inquisitor.**
 
-**INTERFACE/API/SCHEMA glob set:** `**/api/**`, `*.proto`, `openapi*`,
-`**/schema*`, `**/migrations/**`, `**/index.*`, `**/__init__.py`, `*.graphql`.
+**INTERFACE/API/SCHEMA glob set** (each matched at any depth, gitignore-style —
+every entry is `**/`-anchored, so a nested `internal/rpc/x.proto` matches exactly as
+a root-level `x.proto` does): `**/api/**`, `**/*.proto`, `**/openapi*`,
+`**/schema*`, `**/migrations/**`, `**/index.*`, `**/__init__.py`, `**/*.graphql`.
 
 **DEPENDENCY/lockfile glob set:** `**/package.json`, `**/*.lock`,
 `**/requirements*.txt`, `**/Cargo.toml`, `**/go.mod`, `**/pyproject.toml`.
@@ -99,7 +101,7 @@ inquisitor under the old clause now skips it.
 
 **Residual risk.** (a) *Escalator over-match:* several escalator globs swallow common
 docs paths — `**/api/**` catches `docs/api/x.md`, `**/index.*` catches `index.md`,
-`**/schema*` catches `schema.md`, `openapi*` catches `openapi.md`. Because escalators
+`**/schema*` catches `schema.md`, `**/openapi*` catches `openapi.md`. Because escalators
 are evaluated **first and dominate**, the pure-doc skip fires on a **narrower** slice
 than the headline "all-docs → skip" implies. The direction is **safe**
 (over-inclusive → more inquisitor runs, never fewer); for `openapi.md`/`schema.md`
