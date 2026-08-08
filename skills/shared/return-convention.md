@@ -100,6 +100,9 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 
 - **`exec:<oneliner-cmd>`** — a shell command ≤120 characters that would produce `expect-fail` output in the failing world. Default for code-producing dispatches.
 - **`grep:<artifact>#<range>  pattern=<regex>`** — a byte-range re-read with a pattern check. Default for research/judge dispatches with no shell. Failing world: the pattern matches.
+  - `<artifact>` **must appear in this receipt's own `ARTIFACTS`** — the same rule a `<artifact>#<range>` citation gets under *Citation resolution* above, and a Tier-1 lint failure when broken.
+  - **To witness a file you only `READ`** — the natural verifier/judge shape, where `ARTIFACTS` otherwise holds only what the dispatch *wrote* — declare that file in `ARTIFACTS` too, with its real sha256 and size. `ARTIFACTS` is the set of files this receipt vouches for, **not only the set it created**. The alternative, dropping the `#<range>`, is weaker: a rangeless payload is exempt from the artifact, span and empty-body rules and cannot carry `expect-fail=match` at all.
+  - The `pattern=` clause pairs with `expect-fail=match` and with nothing else. A clause standing beside a `/regex/` or `"literal"` signature is a Tier-1 lint failure rather than a silent preference for one of the two declared predicates.
 - **`lint:<rule-name>`** — a named semantic check re-applied to this very receipt. v1 rule vocabulary (closed): `all-claims-cited`, `trace-consistent`, `skip-declared`. Unknown rule names are a Tier-1 lint failure.
 
 ### `expect-fail` signature forms
@@ -107,7 +110,7 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 - Non-zero exit: `exit!=0` or `exit=<N>` with `N ≠ 0`.
 - Regex: `/…/` whose pattern (excluding delimiters) is ≥ 4 characters and is not wildcard-only (`/.*/` and equivalents rejected).
 - Literal fragment: `"…"` whose content is ≥ 4 characters.
-- The bare token `match` — used with `kind=grep` to mean *"the pattern declared on the grep line matches the body"*. Failing world: the pattern matches. No length constraint because the pattern itself is already on the WITNESS line.
+- The bare token `match` — used with `kind=grep` to mean *"the pattern declared on the grep line matches the body"*. Failing world: the pattern matches. No length constraint because the pattern itself is already on the WITNESS line. It **requires a ranged payload** (`grep:<artifact>#<range>`), which is the form the `Kinds` grammar already defines: a rangeless payload turns off the artifact-membership, span and empty-body rules, so `match` on one would name no file it is checked against.
 
 ### `ran=` disposition
 
@@ -168,14 +171,18 @@ witness structural check (every verdict):
   fail if expect-fail is a /regex/ or "literal" that does not compile (the "literal"
     form is re.escape'd first, so it always compiles — a quoted literal is a LITERAL,
     not a regex)
-  `match` is NOT a self-contained signature — it names the WITNESS line's separate
-    `pattern=` clause as the predicate, so:
-      fail if expect-fail=match and kind is not grep
-      fail if expect-fail=match and no `pattern=` clause is present
+  if a `pattern=` clause is present (kind=grep only — it is stripped nowhere else):
       fail if the clause is not DELIMITED — `/regex/` or `"literal"`; a bare
         undelimited token yields no usable regex source and reads as "no predicate"
       fail if the clause's DERIVED source (inner text for /regex/, re.escape'd inner
         text for "literal") is empty, is < 4 chars, or does not compile
+      fail if expect-fail is not `match` — the clause would be silently ignored, and
+        a receipt that declares two predicates does not say which one it means
+  `match` is NOT a self-contained signature — it names the WITNESS line's separate
+    `pattern=` clause as the predicate, so:
+      fail if expect-fail=match and kind is not grep
+      fail if expect-fail=match and no `pattern=` clause is present
+      fail if expect-fail=match and the payload declares no `#<range>`
     An absent, underivable or empty predicate is not a weaker witness — it is NO
     witness, and it used to read as clean (#474).
   if kind=grep and the payload declares a #<range>:
@@ -229,7 +236,9 @@ if --ledger PATH given:                     # receipt-ledger binding (membership
 
 **`kind=grep` artifact/range resolution (applies to Tier-1 and both Tier-2 branches — PASS and FAIL).** For `kind=grep`, the cited artifact and range are those named on the `grep:<artifact>#<range>` payload's own `#<range>` (the witness line itself), **not** an `out=` field. `out=` resolution is **`kind=exec`-only** — only `EXEC` carries `out=`; `READ`/`WROTE` (the verbs a `grep` witness may cite via `ran=TRACE#N`) carry none. Where the Tier-1 and Tier-2 pseudocode above reads "the cited `out=<artifact>#<range>`", that phrasing is `kind=exec`-specific; for `kind=grep` read the `grep:<artifact>#<range>` payload's own range. No grammar change — the witness range was always named on the WITNESS line.
 
-**Empty resolved body (`kind=grep`, ranged payload, `PASS`).** A declared range that resolves to *no bytes* — past EOF, or paired with the wrong file — is rejected at Tier-2 rather than accepted. An empty body can never fire, so it is indistinguishable from a skipped check: the same fail-open shape as an absent predicate. This is an empty **string** from a successful read; a body that is simply *not present* (no such artifact in the inline `--eval` bodies) keeps its existing "no body ⇒ clean" behaviour. `FAIL` is exempt — that leg reads the un-narrowed `out=` range and an empty body there silences nothing.
+**Empty resolved body (`kind=grep`, ranged payload, `PASS`).** A declared range that resolves to *no bytes* — past EOF, or paired with the wrong file — is rejected at Tier-2 **when the artifact resolves under `--root`** rather than accepted. An empty body can never fire, so it is indistinguishable from a skipped check: the same fail-open shape as an absent predicate. This is an empty **string** from a successful read; a body that is simply *not present* (no such artifact in the inline `--eval` bodies) keeps its existing "no body ⇒ clean" behaviour. `FAIL` is exempt — that leg reads the un-narrowed `out=` range and an empty body there silences nothing.
+
+**Scope of the two Tier-2 paragraphs above (`kind=grep` artifact/range resolution, and empty resolved body) — read this before concluding a witness was verified.** Everything Tier-2 asserts is conditional on the witness artifact *resolving* under the `--root` the linter was given. In the mandated production invocation the root is the dispatch directory and the artifact is typically a bare basename living elsewhere, so it does **not** resolve: the witness reports `UNVERIFIABLE: witness <name> (no file under root)` and verifies nothing. `--strict` does not change this — a bare basename is not path-shaped, so the hard-fail branch is skipped. The Tier-1 rules (predicate required and well-formed, `ARTIFACTS` membership, span bound) are disk-free and therefore live in every configuration; the Tier-2 rules are live only where the artifact resolves. Closing that gap is the Tier-2 artifact-resolution issue, tracked separately.
 
 **Hazard — numeric predicates against command-echo logs (facet (c), documentation only).** A numeric `expect-fail` regex such as `/[1-9]/` matches the `8` in a path like `artifact-8.md`, so a witness pointed at a log that **echoes its own command** (`# cmd: … grep -nE …`) or at a file whose prose quotes prior counts will fire on the echo rather than on the measurement — a false FAIL. Observed live on real receipts. No heuristic echo-stripping is specified: it would have to guess at log format. The workaround is to point the witness at the narrow range carrying the measurement (which the `#<range>` rule above already encourages), or to write the predicate against a sentinel the echo cannot contain.
 

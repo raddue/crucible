@@ -5,8 +5,26 @@ Rounds 2, 3, 4→5 and 6 of the #474 plan's quality gate each corrected a figure
 had been stated without the denominator it was computed over, or carried from an
 earlier round without re-derivation. Prose cannot go red. This script emits every
 figure §0h / §0e / §4 / S12(1) of `docs/plans/2026-08-07-474-witness-match-fail-open.md`
-quote, **asserts** it, and is gated by `scripts/run_tests.sh` — so a figure that rots
-fails CI instead of aging quietly inside a document.
+quotes and is gated by `scripts/run_tests.sh` — so a figure that rots fails CI instead
+of aging quietly inside a document.
+
+**What is GATING and what is ADVISORY** (stated precisely, because it used to be
+overstated — round-1 / MIN-2 and MIN-3). Gating = enters the exit code:
+
+  * rows 1-3 and 5-6 in full, and row 4's `max #L span` + in-band token pair;
+  * every one of those reads only committed files, so they return the same verdict on
+    CI and on any checkout. That is what CLAUDE.md's "single source of truth … so
+    local and CI never drift" requires of anything `run_tests.sh` invokes.
+
+Advisory = printed with its expected value, never gating:
+
+  * row 4's literal / range-shaped / accepted counts — a census of a high-churn test
+    suite, where any new `out=` token moves the figure for reasons unrelated to
+    correctness. The in-band pair is the part that carries meaning (it fires if EXEC's
+    80-B/line calibration leaks into grep's 1-B/line floor), and it stays gating.
+  * row 7 in its entirety — it reads a gitignored, machine-local corpus under `$HOME`.
+    Asserting there would make this same script return different verdicts on CI (where
+    it SKIPs) and on the maintainer's machine (where the corpus exists).
 
 Two disciplines this script exists to enforce, both from the gate:
 
@@ -32,10 +50,11 @@ additions, none to drift** (each named at its row):
     `tier2-fixtures` rows (`m`, `n`).
   * ranged `kind=grep` membership: 8 of 8 → **14 of 14** — S8's five fixture rows plus
     the inject row, all of which declare their witness artifact.
-  * `test_rcpt_verify.py`: 21 literal / 19 range-shaped / 15 accepted / 0 in band, max
-    `#L` span 39 → **25 / 22 / 17 / 1**, max span **99** — S1's RED test 15 pins EXEC's
-    calibration with `out=a.log#L1-L100`, which is deliberately inside the band. An
-    in-band token in the *test* file is the guard, not the exposure.
+  * `test_rcpt_verify.py`: 0 in band, max `#L` span 39 → **1**, max span **99** — S1's
+    RED test 15 pins EXEC's calibration with `out=a.log#L1-L100`, which is deliberately
+    inside the band. An in-band token in the *test* file is the guard, not the exposure.
+    (Its literal / range-shaped / accepted counts were 21/19/15 → 25/22/17 when this
+    row still asserted them; they are advisory as of round-1 / MIN-3.)
 
 Unmoved: `return-convention.md` 4/3, `red-team-prompt.md` 0/0, the 10-block LINT
 partition 5 FAIL / 5 PASS, and every §0e corpus figure.
@@ -173,6 +192,15 @@ class Report:
         if got != want:
             self.errors.append(f"{label}: got {got!r}, expected {want!r}")
 
+    def advise(self, label: str, got, want):
+        """Print-and-compare WITHOUT gating (round-1 / MIN-2). For figures computed
+        over a machine-local corpus: a mismatch is a signal to a human on the machine
+        that has the corpus, never a CI verdict — a row that asserts here and SKIPs on
+        CI makes the same gated script machine-dependent."""
+        mark = "ok " if got == want else "DIFF"
+        print(f"       {mark} {label}: {got!r}"
+              + ("" if got == want else f"  (advisory — expected {want!r})"))
+
 
 def out_tokens(text: str) -> list[str]:
     return re.findall(r"out=\S+", text)
@@ -215,7 +243,7 @@ def row_exec_jsonl(rv, rep: Report):
     rep.check("jsonl in-band", [t for t, _ in band], [])
 
 
-def row_exec_file(rv, rep: Report, relpath, n, want, note=""):
+def row_exec_file(rv, rep: Report, relpath, n, want, note="", assert_counts=True):
     text = (ROOT / relpath).read_text()
     lit, rng, acc, band, max_span = classify(rv, out_tokens(text))
     blocks = rcpt_blocks(text) if relpath.endswith(".md") else []
@@ -234,9 +262,20 @@ def row_exec_file(rv, rep: Report, relpath, n, want, note=""):
         print(f"   note        : {note}")
     for owner, span in attributed:
         print(f"   in-band     : {owner}  (span {span})")
-    rep.check(f"{relpath} literal", lit, want["literal"])
-    rep.check(f"{relpath} range-shaped", rng, want["range_shaped"])
-    rep.check(f"{relpath} accepted", acc, want["accepted"])
+    if assert_counts:
+        rep.check(f"{relpath} literal", lit, want["literal"])
+        rep.check(f"{relpath} range-shaped", rng, want["range_shaped"])
+        rep.check(f"{relpath} accepted", acc, want["accepted"])
+    else:
+        # round-1 / MIN-3 — the three token-count columns are DELIBERATELY advisory for
+        # this file. They are a census of a high-churn test suite: any future
+        # rcpt_verify test that happens to carry an `out=` token moves them and turns
+        # CI red for a reason unrelated to correctness. What is load-bearing here is
+        # the in-band pair below, and only that: an in-band `#L` token is the canary
+        # that fires if EXEC's 80-B/line calibration ever leaks into grep's 1-B/line
+        # floor. Counts are printed so a reviewer can still see the denominator.
+        print(f"   advisory    : literal/range-shaped/accepted are printed, NOT asserted "
+              f"(high-churn file; the in-band pair below is the gate)")
     rep.check(f"{relpath} max #L span", max_span, want["max_l_span"])
     key = "in_band_blocks" if relpath.endswith(".md") else "in_band_tokens"
     got = sorted(attributed) if relpath.endswith(".md") else sorted(band)
@@ -318,9 +357,17 @@ def row_taught_lint(rv, rep: Report):
 
 
 def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
-    """§0e — the 17-receipt as-returned corpus. Machine-local and gitignored, so this
-    row SKIPS rather than fails when the directory is absent; it is evidence for the
-    plan's figures, and the committed regression surface is rows 1-6 plus the fixtures."""
+    """§0e — the 17-receipt as-returned corpus. Machine-local and gitignored.
+
+    ADVISORY, NOT GATING (round-1 / MIN-2). Its figures are printed with the expected
+    value beside them and compared, but a mismatch does NOT enter rep.errors and does
+    not change the exit code. The reason is CLAUDE.md's rule that `scripts/run_tests.sh`
+    is one source of truth "so local and CI never drift": these ten checks read a
+    gitignored corpus under $HOME, so they SKIP on CI and used to ASSERT on the
+    maintainer's machine — the same gated script returning different verdicts on two
+    machines. A figure over a corpus that only one machine can see is evidence for the
+    plan, not a regression gate; the gate is rows 1-6 plus the fixtures, all of which
+    run identically everywhere."""
     print(f"\n── ROW 7  §0e as-returned corpus (machine-local)")
     print(f"   glob        : {corpus}/{CORPUS_GLOB}" if corpus else "   glob        : (none)")
     if corpus is None or not corpus.is_dir():
@@ -362,16 +409,16 @@ def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
           f"(of which on a PASS: {sig_on_pass})")
     print(f"                 red-team/ namespace={rt_ns}, witness targets a findings file="
           f"{rt_findings}, of those in the WRONG form={rt_wrong_form}")
-    rep.check("corpus receipts", len(files), 17)
-    rep.check("corpus kind=grep", grep, 13)
-    rep.check("corpus ranged", ranged, 13)
-    rep.check("corpus membership-ok", memb, 12)
-    rep.check("corpus mandated pattern=+match", mandated, 5)
-    rep.check("corpus expect-fail=/re/", sig_form, 8)
-    rep.check("corpus expect-fail=/re/ on a PASS", sig_on_pass, 6)
-    rep.check("corpus red-team/ receipts", rt_ns, 4)
-    rep.check("corpus red-team/ witnesses on a findings file", rt_findings, 2)
-    rep.check("corpus red-team/ witnesses in the wrong form", rt_wrong_form, 1)
+    rep.advise("corpus receipts", len(files), 17)
+    rep.advise("corpus kind=grep", grep, 13)
+    rep.advise("corpus ranged", ranged, 13)
+    rep.advise("corpus membership-ok", memb, 12)
+    rep.advise("corpus mandated pattern=+match", mandated, 5)
+    rep.advise("corpus expect-fail=/re/", sig_form, 8)
+    rep.advise("corpus expect-fail=/re/ on a PASS", sig_on_pass, 6)
+    rep.advise("corpus red-team/ receipts", rt_ns, 4)
+    rep.advise("corpus red-team/ witnesses on a findings file", rt_findings, 2)
+    rep.advise("corpus red-team/ witnesses in the wrong form", rt_wrong_form, 1)
 
 
 def main(argv=None):
@@ -398,11 +445,12 @@ def main(argv=None):
     row_exec_file(rv, rep, RT_PROMPT, 3, dict(
         literal=1, range_shaped=0, accepted=0, max_l_span=0, in_band_blocks=[]))
     row_exec_file(rv, rep, RCPT_TESTS, 4, dict(
-        literal=25, range_shaped=22, accepted=17, max_l_span=99,
+        literal=None, range_shaped=None, accepted=None, max_l_span=99,
         in_band_tokens=[('out=a.log#L1-L100"', 99)]),
         note="21/19/15 and max span 39 in the plan's §0h; S1's RED test 15 added "
              "out=a.log#L1-L100 — an in-band token HERE is the guard that fails if EXEC's "
-             "calibration leaks, not exposure")
+             "calibration leaks, not exposure. Counts advisory since round-1/MIN-3.",
+        assert_counts=False)
     row_grep_membership(rv, rep)
     row_taught_lint(rv, rep)
     row_corpus(rv, rep, corpus)

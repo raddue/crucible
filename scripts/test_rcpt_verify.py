@@ -1470,5 +1470,228 @@ class TestWitness474Tier2(unittest.TestCase):
             "expect-fail /MARKERX/ (weak positive-evidence check)")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# #474 quality gate, round 1 — the three code findings (SIG-1, SIG-2, SIG-3).
+# Tests 24-26 are RED against the S2-S6 implementation; test 23 pins a divergence
+# that implementation introduced and this round documents rather than removes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRound1RangelessMatch(unittest.TestCase):
+    """SIG-1 — `expect-fail=match` requires a ranged payload. Deleting the `#L1-L1`
+    from the mandated witness turned off ARTIFACTS membership, the span bound, the
+    payload-sourced body and the empty-body rejection all at once, and reproduced
+    #474 verbatim: a clean PASS on a findings file declaring nonzero counts."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 24 — the escape itself
+    def test_24_rangeless_match_payload_raises_at_tier1(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                [f"grep:round-1-findings.md  {MANDATED_CLAUSE}  "
+                 "expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS expect-fail=match requires a ranged grep payload "
+            "(grep:<artifact>#<range>): 'round-1-findings.md'")
+
+    def test_24b_the_reproduction_receipt_no_longer_lints_clean(self):
+        # The full shape SIG-1 executed: undeclared artifact, no range, PASS verdict.
+        # Pre-fix this receipt was accepted at Tier-1 and its predicate was then run
+        # against derive_art_name's file — one the witness never names.
+        text = _receipt(
+            f"grep:round-1-findings.md  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            trace=[f"READ  design.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_24c_ranged_counterpart_is_accepted_so_the_range_is_the_discriminator(self):
+        # Same line plus `#L1-L1` plus the declaration the range now requires: clean.
+        # Without this conjunct test 24 is satisfiable by rejecting every grep witness.
+        text = _receipt(
+            f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-1-findings.md", H64, "2980")],
+            trace=[f"READ  design.md  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+    # --- test 25 — REGRESSION PIN: the committed rangeless shapes are untouched.
+    #     They carry `expect-fail=/…/`, not `match`, which is what makes SIG-1's
+    #     predicate free (measured: 0 of 14 `match` sites are rangeless).
+    def test_25_rangeless_non_match_signatures_still_lint_clean(self):
+        for line in ('grep:boom  expect-fail=/boom/ ran=TRACE#1',
+                     'grep:pattern  expect-fail="literal text"  ran=2026-06-24'):
+            out = self.rv.parse_witness([line])      # must not raise — that IS the pin
+            self.assertIsNone(out["range_kind"], msg=line)
+        # …and the committed fixture carrying the first of them is still there.
+        fx = [json.loads(l) for l in
+              (CORPUS / "tier2-fixtures/manifest.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any("grep:boom" in json.dumps(r) for r in fx),
+                        "fixture drift: rangeless grep fixture h is gone")
+
+
+class TestRound1ClauseBesideNonMatch(unittest.TestCase):
+    """SIG-2 — the clause ladder used to live inside `if expect_fail == "match"`, while
+    the strip that removes the clause from the payload is unconditional for kind=grep.
+    A clause beside a `/regex/` or `"literal"` signature was therefore stripped,
+    validated by nothing, and silently discarded at Tier-2."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 26 — the two shapes D3(a)/(d) exist to reject passed one branch over
+    def test_26_malformed_clause_is_rejected_on_the_non_match_path_too(self):
+        for clause, expected in (
+                ("//", "WITNESS pattern= clause derives an empty regex source: '//'"),
+                ("/[unclosed/", None),                       # message carries re's text
+                ("/0F/", "WITNESS pattern= clause too short: '/0F/'"),
+                ("bare-token",
+                 'WITNESS pattern= clause must be /regex/ or "literal": \'bare-token\''),
+        ):
+            with self.assertRaises(self.rv.LintError, msg=clause) as cm:
+                self.rv.parse_witness(
+                    [f"grep:f.md#L1-L1  pattern={clause}  "
+                     "expect-fail=/zzzz-never/  ran=TRACE#1"])
+            self.assertNotIsInstance(cm.exception, re.error)
+            if expected is not None:
+                self.assertEqual(str(cm.exception), expected)
+            else:
+                self.assertIn("WITNESS pattern= clause is not a valid regex",
+                              str(cm.exception))
+
+    def test_26b_a_wellformed_clause_beside_a_non_match_signature_is_rejected(self):
+        # The realistic error SIG-2 names: a reviewer sharpens the clause and leaves a
+        # stale `expect-fail=/…/` from an earlier draft. Two declared predicates, and
+        # the linter used to evaluate the stale one and report clean.
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/significant=[1-9]/  "
+                 "expect-fail=/zzzz-never/  ran=TRACE#1"])
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS pattern= clause is only meaningful with expect-fail=match "
+            "(got expect-fail='/zzzz-never/'); the clause would be silently ignored")
+
+    def test_26c_the_discarded_predicate_can_no_longer_reach_tier2(self):
+        # End-to-end: the body says fatal=1, the CLAUSE would fire on it, the stale
+        # signature would not. Pre-fix: LINT-PASS. It must now never get that far.
+        text = _receipt(
+            "grep:f.md#L1-L1  pattern=/fatal=[1-9]/  expect-fail=/zzzz-never/  ran=TRACE#1",
+            artifacts=[("f.md", H64, "40")],
+            trace=[f"WROTE  f.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_26d_pins_that_the_clause_and_signature_paths_stay_separable(self):
+        # No-false-BLOCK conjunct: a clause-free `/regex/` signature and a clause-plus-
+        # `match` signature both still lint clean, so 26/26b/26c are not satisfiable by
+        # rejecting anything that carries either token.
+        self.rv.parse_witness(
+            ["grep:f.md#L1-L1  expect-fail=/significant=[1-9]/  ran=TRACE#1"])
+        self.rv.parse_witness(
+            [f"grep:f.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1"])
+
+
+class TestRound1InlineDiskDisposition(unittest.TestCase):
+    """SIG-3 — fixture-(m) shape given INLINE bodies: the witness payload names one
+    artifact, the cited EXEC's `out=` names another, and `artifact_bodies` supplies
+    only the latter. D4 re-pointed the PASS-leg read at the payload artifact, so
+    `bodies.get` misses, `body_text` is None, and the --eval leg returns clean while
+    the same receipt on disk raises.
+
+    These tests PIN that divergence rather than removing it — see verify_witness's
+    "DISK vs --eval DIVERGENCE 2" for why failing the inline leg closed would create a
+    disposition divergence instead of removing one. What they must show is that the
+    mismatch branch is really taken (not merely asserted about) and that the fixture
+    corpus can no longer drift into the shape unnoticed."""
+
+    WITNESS = ("grep:round-4-findings.md#L1-L1  "
+               "pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2")
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _rec(self, bodies):
+        text = _receipt(
+            self.WITNESS,
+            artifacts=[("round-4-findings.md", H64, "81"), ("witness-grep.log", H64, "62")],
+            trace=[f"WROTE  round-4-findings.md  sha256:{H64}",
+                   "EXEC   `grep -nE significant round-4-findings.md`  exit=0  dur=0.1s  "
+                   "out=witness-grep.log#L1-L2"],
+            claims=["severity-max=fatal  from=round-4-findings.md#L1-L1"],
+            skill="red-team/4-devils-advocate")
+        return {"dispatch-id": "4-devils-advocate", "receipt": text,
+                "artifact_bodies": bodies}
+
+    # --- test 23 — the mismatch branch, exercised on both legs of the same receipt
+    def test_23_inline_leg_is_clean_when_bodies_omit_the_payload_artifact(self):
+        rec = self._rec({"witness-grep.log": COUNTS_HIT})
+        disp, info = self.rv._eval_record(rec)
+        self.assertEqual(disp, "LINT-PASS", info)
+        # …and the branch that produced it really is the missing-body one.
+        sections = self.rv.parse_receipt(rec["receipt"])
+        witness = self.rv.parse_witness(sections["WITNESS"])
+        trace = self.rv.parse_trace(sections["TRACE"])
+        art, from_payload = self.rv.witness_art_name(witness, trace[1], "PASS")
+        self.assertTrue(from_payload)
+        self.assertEqual(art, "round-4-findings.md")
+        self.assertNotIn(art, rec["artifact_bodies"])
+        # …and the derivation D4 REPLACED would have hit: without this conjunct the
+        # test passes on an implementation where the re-point was never applied and
+        # `bodies.get` was always going to find the cited artifact.
+        self.assertEqual(self.rv.derive_art_name(trace[1], "PASS"), "witness-grep.log")
+        self.assertIn("witness-grep.log", rec["artifact_bodies"])
+
+    def test_23b_the_same_receipt_on_disk_raises(self):
+        rec = self._rec({"witness-grep.log": COUNTS_HIT})
+        (self.root / "round-4-findings.md").write_text(COUNTS_HIT)
+        (self.root / "witness-grep.log").write_text(COUNTS_HIT)
+        sections = self.rv.parse_receipt(rec["receipt"])
+        witness = self.rv.parse_witness(sections["WITNESS"])
+        trace = self.rv.parse_trace(sections["TRACE"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(witness, trace, self.root, False, "PASS")
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2: WITNESS expect-fail regex /significant=[1-9]|fatal=[1-9]/ matches "
+            "body of round-4-findings.md (witness would have fired → PASS rejected)")
+
+    def test_23c_supplying_the_payload_artifact_inline_makes_the_legs_agree(self):
+        # The control: keyed on the artifact the witness actually verifies, the inline
+        # leg reaches the same LINT-FAIL. So 23/23b are a body-availability divergence,
+        # not a rule disagreement — which is exactly what the docstring claims.
+        rec = self._rec({"round-4-findings.md": COUNTS_HIT})
+        disp, info = self.rv._eval_record(rec)
+        self.assertEqual(disp, "LINT-FAIL")
+        self.assertIn("matches body of round-4-findings.md", info)
+
+    def test_23d_crosscheck_rejects_a_row_that_does_not_supply_what_it_verifies(self):
+        # The guard that keeps the fixture corpus out of this shape: an artifact_bodies
+        # row whose ranged grep witness verifies an artifact it does not supply is
+        # coverage that cannot fail, and selftest step (iv) now says so.
+        rec = self._rec({"witness-grep.log": COUNTS_HIT})
+        problems = self.rv._selftest_crosscheck(rec, rec["artifact_bodies"])
+        self.assertTrue(
+            any("coverage that cannot fail" in p for p in problems), problems)
+        self.assertTrue(any("round-4-findings.md" in p for p in problems), problems)
+
+    def test_23e_the_committed_grep_inline_row_passes_that_guard(self):
+        # No-false-BLOCK conjunct + a pin on the one committed kind=grep
+        # artifact_bodies row: it supplies the artifact it verifies, so the new guard
+        # is silent on it and step (iv) still compares dispositions as before.
+        rows = [json.loads(l) for l in
+                (CORPUS / "inject/shape-e-grep-witness-inline-body.jsonl")
+                .read_text().splitlines() if l.strip()]
+        self.assertTrue(rows, "fixture drift: the kind=grep inline-body inject row is gone")
+        for rec in rows:
+            problems = self.rv._selftest_crosscheck(rec, rec["artifact_bodies"])
+            self.assertEqual(
+                [p for p in problems if "coverage that cannot fail" in p], [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -61,3 +61,6 @@ mcp-servers/**/__pycache__/
 /skills/temper/evals/.opus-ceiling.json
 # #291 lens-health telemetry rolling history log (CI starts from empty/absent)
 /skills/temper/evals/history.jsonl
+# Agent-tool scratch state (opencode). Machine-local session bookkeeping, unrelated
+# to any skill or gate; committed by accident in 840994c and removed in this branch.
+.opencode/

@@ -228,17 +228,66 @@ _WITNESS_RANGE_RE = re.compile(r"^([^#\s]+)#([LB])(\d+)-\2(\d+)(?!#[LB]\d)")
 
 
 def _compile_guard(src, msg_prefix, shown):
-    """re.compile a DERIVED regex source, re-raising re.error as LintError. The
-    clause and the expect-fail signature are freely-authored, attacker-influenced
-    receipt text handed straight to re.search; an escaping re.PatternError aborts a
-    whole --eval batch (#440's fault-isolation class) instead of lint-FAILing one
-    record. Always the DERIVED source — for a quoted literal that is the re.escape'd
-    text, so this guard is provably inert there. Compiling the RAW inner text instead
-    would false-BLOCK the escape hatch D3 prescribes (pattern="**Severity:** Fatal")."""
+    """re.compile a DERIVED regex source, re-raising re.error as LintError — the
+    COMPILE half of #440's fault-isolation class, and only that half. The clause and
+    the expect-fail signature are freely-authored, attacker-influenced receipt text
+    handed straight to re.search; an escaping re.PatternError aborts a whole --eval
+    batch instead of lint-FAILing one record. Always the DERIVED source — for a quoted
+    literal that is the re.escape'd text, so this guard is provably inert there.
+    Compiling the RAW inner text instead would false-BLOCK the escape hatch D3
+    prescribes (pattern="**Severity:** Fatal").
+
+    OPEN, NAMED, NOT CLOSED HERE (round-1 / SIG-5): the SEARCH is unbounded. A clause
+    that compiles fine can still hang re.search catastrophically — measured on this
+    tree, /(a+)+$/ against a 24-byte body takes 2.1 s and against a 40-byte body does
+    not return in 120 s, and the Tier-2 body cap is 4096 bytes. That outcome is worse
+    than the exception this guard replaces: a LintError is recoverable and attributed
+    to one record, a hang takes the process with no receipt and no verdict. The
+    exposure is pre-existing (an `expect-fail=/(a+)+$/` signature has been fed to the
+    same re.search since v1) and this branch widens the surface at the same seam by
+    admitting a second freely-authored source. It is NOT mitigated here: the available
+    stdlib bound, signal.setitimer, raises off the main thread, and this module is
+    imported by a hook — a try/except fallback around it would provide zero protection
+    in exactly the caller that matters while reading as though it provided some.
+    Carried as an open follow-up on the #474 Tier-2 resolution issue."""
     try:
         re.compile(src)
     except re.error as e:
         raise LintError(f"{msg_prefix}: {shown!r} ({e})")
+
+
+def _check_clause_shape(clause):
+    """The D3 (a)-(d) ladder for a WITNESS `pattern=` clause: delimited → derive →
+    non-empty → floor → compiles. Raises LintError; returns nothing.
+
+    Extracted (round-1 / SIG-2) so it can run on EVERY clause-carrying witness rather
+    than only under `expect-fail=match`, which is where it used to live.
+
+    S2(a)3 — the ordered enumeration, and the order is part of the spec:
+    (a) delimited → (b) derive → (c) non-empty, then the floor → (d) compile.
+    (a) must precede (d) because a bare clause COMPILES (re.compile("significant=[1-9]")
+    succeeds) yet derives None, which verify_witness reads as clean — #474 verbatim.
+    (c) must precede (d) for the same reason one delimiter over: re.compile("")
+    succeeds and '' is FALSY, so `if pattern and re.search(...)` short-circuits clean.
+
+    Derivation is via _expect_fail_pattern("match", clause) — the clause branch of the
+    one shared helper — so the shape accepted here and the source evaluated at Tier-2
+    cannot drift, whatever the receipt's own expect-fail signature says."""
+    if not ((clause.startswith("/") and clause.endswith("/")) or
+            (clause.startswith('"') and clause.endswith('"'))):
+        raise LintError(
+            f'WITNESS pattern= clause must be /regex/ or "literal": {clause!r}')
+    src = _expect_fail_pattern("match", clause)
+    if src == "":
+        raise LintError(f"WITNESS pattern= clause derives an empty regex source: {clause!r}")
+    if len(src) < 4:
+        # A style bound inherited from the signature forms, declared for what it is:
+        # under `match` a SHORTER pattern is BROADER and therefore stricter, so this
+        # can only ever false-reject. It is NOT what closes the fail-open — the
+        # non-empty rule above is. Kept because dropping it would be an undeclared
+        # relaxation of the accepted subset (measured cost: 0 of 7 real clauses).
+        raise LintError(f"WITNESS pattern= clause too short: {clause!r}")
+    _compile_guard(src, "WITNESS pattern= clause is not a valid regex", clause)
 
 
 def parse_witness(body):
@@ -304,6 +353,31 @@ def parse_witness(body):
                        "WITNESS expect-fail is not a valid regex", expect_fail)
     elif not re.match(r"^(exit!=0|exit=-?\d+|match)$", expect_fail):
         raise LintError(f"WITNESS expect-fail not a valid signature form: {expect_fail!r}")
+    # #474 round-1 / SIG-2 — the clause rules run on EVERY clause-carrying witness,
+    # not only under `expect-fail=match`. The strip above is unconditional for
+    # kind=grep, so before this a clause standing beside a /regex/ or "literal"
+    # signature was removed from the payload, validated by NOTHING, and then discarded
+    # at Tier-2 (_expect_fail_pattern returns the SIGNATURE source whenever expect_fail
+    # is not "match"). `pattern=//` and `pattern=/[unclosed/` — the exact two shapes
+    # (c) and (d) below exist to reject — passed clean one branch over, and the
+    # reviewer's stated predicate was silently replaced by a possibly-stale signature.
+    # Two rules, in this order so the more specific diagnostic wins:
+    #   (1) a clause must be well-formed WHEREVER it appears; then
+    #   (2) a clause beside a non-`match` signature is REJECTED, not silently resolved
+    #       one way — the receipt declares two predicates and the linter cannot know
+    #       which the author meant. `return-convention.md`'s Kinds bullet presents
+    #       `pattern=` as THE grep predicate, so preferring expect-fail reads as
+    #       "verified something other than what the author declared" — #474's class.
+    # Measured cost: 0 sites pair a clause with a non-`match` signature across the
+    # committed jsonl corpus, return-convention.md, red-team-prompt.md and the
+    # 17-receipt live as-returned corpus. `clause` is None for every non-grep kind
+    # (the strip is grep-scoped), so rule (2) can only ever fire on kind=grep.
+    if clause is not None:
+        _check_clause_shape(clause)
+        if expect_fail != "match":
+            raise LintError(
+                f"WITNESS pattern= clause is only meaningful with expect-fail=match "
+                f"(got expect-fail={expect_fail!r}); the clause would be silently ignored")
     if expect_fail == "match":
         # #474 / D3. Bare `match` carried no predicate at all, so Tier-2 read it as
         # clean — the P0. These are Tier-1, text-only, and therefore live in every
@@ -317,27 +391,6 @@ def parse_witness(body):
                 f"WITNESS expect-fail=match is only valid for kind=grep (got kind={kind})")
         if clause is None:
             raise LintError(f"WITNESS expect-fail=match requires a pattern= clause: {line!r}")
-        # S2(a)3 — the ordered enumeration, and the order is part of the spec:
-        # (a) delimited → (b) derive → (c) non-empty, then the floor → (d) compile.
-        # (a) must precede (d) because a bare clause COMPILES (re.compile("significant=[1-9]")
-        # succeeds) yet derives None, which verify_witness reads as clean — #474 verbatim.
-        # (c) must precede (d) for the same reason one delimiter over: re.compile("")
-        # succeeds and '' is FALSY, so `if pattern and re.search(...)` short-circuits clean.
-        if not ((clause.startswith("/") and clause.endswith("/")) or
-                (clause.startswith('"') and clause.endswith('"'))):
-            raise LintError(
-                f'WITNESS pattern= clause must be /regex/ or "literal": {clause!r}')
-        src = _expect_fail_pattern(expect_fail, clause)
-        if src == "":
-            raise LintError(f"WITNESS pattern= clause derives an empty regex source: {clause!r}")
-        if len(src) < 4:
-            # A style bound inherited from the signature forms, declared for what it is:
-            # under `match` a SHORTER pattern is BROADER and therefore stricter, so this
-            # can only ever false-reject. It is NOT what closes the fail-open — the
-            # non-empty rule above is. Kept because dropping it would be an undeclared
-            # relaxation of the accepted subset (measured cost: 0 of 7 real clauses).
-            raise LintError(f"WITNESS pattern= clause too short: {clause!r}")
-        _compile_guard(src, "WITNESS pattern= clause is not a valid regex", clause)
     # #474 / S2(b) — the payload range is parsed ONCE, here, from the clause-STRIPPED
     # payload (never payload_raw: a string still carrying `pattern=/x#L1-L2/` would
     # select the CLAUSE's range, or fail to match and silently take the rangeless
@@ -352,6 +405,28 @@ def parse_witness(body):
             # the clause-stripped payload, not the predicate beside it.
             check_span_bound(range_kind, range_a, range_b,
                              bytes_per_line=1, label="witness", detail=payload)
+    # #474 round-1 / SIG-1 — `expect-fail=match` REQUIRES a ranged payload. Every guard
+    # this issue adds is scoped to `range_kind is not None`: D6's ARTIFACTS membership,
+    # D6's span bound, D4's payload-sourced artifact, D6's empty-body rejection. A
+    # RANGELESS `match` payload therefore turned all four off and had its predicate
+    # evaluated against whatever derive_art_name returns for the cited TRACE entry —
+    # a file the witness does not name. That is #474's exact consequence, after the
+    # fix, reachable by deleting six characters, and it fails OPEN and SILENT (a clean
+    # PASS, no UNVERIFIABLE note) where every other rule on this branch fails closed.
+    #
+    # This is not a widening of the guards to all rangeless payloads — that would
+    # break the committed `grep:boom  expect-fail=/boom/` shapes RED test 13 pins,
+    # which are `expect-fail=/…/` and stay exempt. It is ONE precondition on the one
+    # signature whose grammar already requires the range: return-convention.md's Kinds
+    # bullet defines the kind as `grep:<artifact>#<range>  pattern=<regex>`, so the
+    # rangeless-`match` shape was never in the spec the linter enforces. Sited here
+    # rather than in the `match` block above because that block runs BEFORE the range
+    # parse. Measured cost: 0 of 14 `expect-fail=match` sites across the committed
+    # jsonl corpus, return-convention.md, red-team-prompt.md and the live corpus.
+    if expect_fail == "match" and range_kind is None:
+        raise LintError(
+            f"WITNESS expect-fail=match requires a ranged grep payload "
+            f"(grep:<artifact>#<range>): {payload!r}")
     return {"kind": kind, "payload": payload.strip(), "payload_raw": payload_raw.strip(),
             "pattern": clause, "art": art, "range_kind": range_kind,
             "range_a": range_a, "range_b": range_b,
@@ -813,11 +888,32 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     BOTH branches, so the FAIL-leg inertness is a convention NON-CONFORMANCE, not merely
     lint.py parity. Reversing it is a convention change — deferred, not fixed here.
 
-    DISK vs --eval DIVERGENCE (deliberate, #474/D4): the disk reader slices the body to
-    the witness/cited range, while _eval_tier2 passes the WHOLE inline artifact_bodies
-    entry. Slicing the inline path would mean re-deriving line offsets against a body
-    that never had them — there is no file. Selftest step (iv) checks the paths do not
-    drift on kind=exec; for kind=grep they diverge BY DESIGN.
+    DISK vs --eval DIVERGENCE 1 — SLICING (deliberate, #474/D4): the disk reader slices
+    the body to the witness/cited range, while _eval_tier2 passes the WHOLE inline
+    artifact_bodies entry. Slicing the inline path would mean re-deriving line offsets
+    against a body that never had them — there is no file. Selftest step (iv) checks
+    the paths do not drift on kind=exec; for kind=grep they diverge BY DESIGN.
+
+    DISK vs --eval DIVERGENCE 2 — DISPOSITION on an unsupplied body (named here after
+    round-1/SIG-3 found it undocumented). D4 changed WHICH artifact the PASS leg reads
+    for a ranged kind=grep witness: the payload's artifact, not derive_art_name's
+    out=/cited path. The two modes then answer differently when those names differ:
+      * disk (tier2_witness) resolves the PAYLOAD artifact under --root. Present ⇒ it
+        is read and the predicate runs, so a contradicting body RAISES.
+      * --eval (_eval_tier2) can only see the bodies the record hands it. If the
+        record is keyed on the CITED artifact — which every pre-existing inline row
+        is — `bodies.get(payload_artifact)` misses, body_text is None, and this
+        function returns clean at the lint.py-parity guard below.
+    The same receipt is therefore LINT-FAIL on disk and LINT-PASS under --eval. This
+    is an INFORMATION asymmetry, not a rule disagreement, and it is deliberately NOT
+    closed by making --eval raise: disk reports an unavailable artifact as a non-fatal
+    UNVERIFIABLE note, --eval has no UNVERIFIABLE channel, so clean IS the parity
+    disposition (`art_name not in artifact_bodies: return`). Failing closed on the
+    inline leg would CREATE a disposition divergence rather than remove one. What is
+    guarded instead: selftest step (iv) now rejects any artifact_bodies row whose
+    ranged grep witness verifies an artifact the row does not supply — the
+    "coverage that cannot fail" shape — so the fixture corpus cannot drift into it.
+    Pinned by test_23* in scripts/test_rcpt_verify.py.
 
     DEFERRED (#474 §3): a witness carrying ran=SKIPPED: is Tier-1-legal on a PASS and
     Tier-2 never evaluates it, so a reviewer can still obtain a PASS whose witness was
@@ -1275,6 +1371,17 @@ def _selftest_crosscheck(rec, bodies):
     # carries no out=, so the old derivation landed at the wrong path and its range
     # assertion was vacuous: coverage that could not fail.
     art, from_payload = witness_art_name(witness, cited, verdict)
+    # #474 round-1 / SIG-3 — a row whose ranged grep witness verifies an artifact the
+    # row does not SUPPLY is coverage that cannot fail: `bodies.get` misses, body_text
+    # is None, and verify_witness returns clean under the lint.py parity rule no matter
+    # what the body would have said. That inline/disk disposition divergence is
+    # documented (verify_witness) and deliberate; what must not happen is a fixture
+    # silently drifting into the shape and reporting green. This is the check that
+    # keeps the one committed kind=grep artifact_bodies row honest.
+    if witness["kind"] == "grep" and from_payload and art not in bodies:
+        problems.append(f"crosscheck {did}: artifact_bodies does not supply {art}, the "
+                        f"artifact this ranged grep witness verifies — the --eval leg "
+                        f"cannot fire (coverage that cannot fail)")
     inline_disp = _eval_record(rec)[0]
     with tempfile.TemporaryDirectory() as td:
         root = pathlib.Path(td)

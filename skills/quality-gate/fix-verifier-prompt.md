@@ -79,3 +79,11 @@ Return exactly this structure:
 ~~~
 
 **Important:** Do not pad, hedge, or add caveats outside the structure. The orchestrator parses the Overall line directly.
+
+## Your own receipt's WITNESS
+
+Your Evidence Receipt follows `shared/return-convention.md` like every other dispatch. One shape is worth naming here because this dispatch runs into it every time: the natural verifier witness is a ranged `grep:` re-read of the *artifact under review* — a file you only `READ`, while your `ARTIFACTS` block holds only what you wrote.
+
+That is legal, but a ranged `grep:<artifact>#<range>` payload must name an artifact **your own `ARTIFACTS` declares**. So declare the file you witnessed in `ARTIFACTS` too — `ARTIFACTS` is what this receipt vouches for, not only what it created. A receipt that witnesses an undeclared artifact is a Tier-1 lint failure and its return is rejected.
+
+Use its **real** sha256 and size, not a `0000…` placeholder. Placeholders are the norm for `EDIT`/`WROTE` hashes in `TRACE` (those are provenance, deliberately not gated), but an `ARTIFACTS` hash is a verified claim: Tier-2 recomputes it whenever the file resolves under the linter's root, so a placeholder there fails.
