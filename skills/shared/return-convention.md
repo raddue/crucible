@@ -164,8 +164,25 @@ witness structural check (every verdict):
   fail if <kind> not in {exec, grep, lint}
   fail if <kind> = lint and <rule-name> not in {all-claims-cited, trace-consistent,
     skip-declared}
-  fail if expect-fail empty, wildcard-only, or < 4 chars (exempt: bare `match` when
-    kind=grep, the exit-clause forms, and bare `match` is only valid for kind=grep)
+  fail if expect-fail empty, wildcard-only, or < 4 chars (exempt: the exit-clause forms)
+  fail if expect-fail is a /regex/ or "literal" that does not compile (the "literal"
+    form is re.escape'd first, so it always compiles — a quoted literal is a LITERAL,
+    not a regex)
+  `match` is NOT a self-contained signature — it names the WITNESS line's separate
+    `pattern=` clause as the predicate, so:
+      fail if expect-fail=match and kind is not grep
+      fail if expect-fail=match and no `pattern=` clause is present
+      fail if the clause is not DELIMITED — `/regex/` or `"literal"`; a bare
+        undelimited token yields no usable regex source and reads as "no predicate"
+      fail if the clause's DERIVED source (inner text for /regex/, re.escape'd inner
+        text for "literal") is empty, is < 4 chars, or does not compile
+    An absent, underivable or empty predicate is not a weaker witness — it is NO
+    witness, and it used to read as clean (#474).
+  if kind=grep and the payload declares a #<range>:
+    fail if <artifact> does not appear in ARTIFACTS (the same rule cited ranges get)
+    fail if the declared span exceeds 4 KiB — b−a for #B, a sound 1-byte-per-line
+      floor for #L. Tier-1 is disk-free, so it asserts only what the receipt's own
+      text proves; the authoritative byte cap is Tier-2's.
   if VERDICT=PASS: ran= must be TRACE#N or SKIPPED:<reason>  (UNRUNNABLE not permitted)
   if VERDICT=FAIL/BLOCKED and ran=UNRUNNABLE:<reason>: <reason> must be in the closed
     vocabulary
@@ -211,6 +228,10 @@ if --ledger PATH given:                     # receipt-ledger binding (membership
 ```
 
 **`kind=grep` artifact/range resolution (applies to Tier-1 and both Tier-2 branches — PASS and FAIL).** For `kind=grep`, the cited artifact and range are those named on the `grep:<artifact>#<range>` payload's own `#<range>` (the witness line itself), **not** an `out=` field. `out=` resolution is **`kind=exec`-only** — only `EXEC` carries `out=`; `READ`/`WROTE` (the verbs a `grep` witness may cite via `ran=TRACE#N`) carry none. Where the Tier-1 and Tier-2 pseudocode above reads "the cited `out=<artifact>#<range>`", that phrasing is `kind=exec`-specific; for `kind=grep` read the `grep:<artifact>#<range>` payload's own range. No grammar change — the witness range was always named on the WITNESS line.
+
+**Empty resolved body (`kind=grep`, ranged payload, `PASS`).** A declared range that resolves to *no bytes* — past EOF, or paired with the wrong file — is rejected at Tier-2 rather than accepted. An empty body can never fire, so it is indistinguishable from a skipped check: the same fail-open shape as an absent predicate. This is an empty **string** from a successful read; a body that is simply *not present* (no such artifact in the inline `--eval` bodies) keeps its existing "no body ⇒ clean" behaviour. `FAIL` is exempt — that leg reads the un-narrowed `out=` range and an empty body there silences nothing.
+
+**Hazard — numeric predicates against command-echo logs (facet (c), documentation only).** A numeric `expect-fail` regex such as `/[1-9]/` matches the `8` in a path like `artifact-8.md`, so a witness pointed at a log that **echoes its own command** (`# cmd: … grep -nE …`) or at a file whose prose quotes prior counts will fire on the echo rather than on the measurement — a false FAIL. Observed live on real receipts. No heuristic echo-stripping is specified: it would have to guess at log format. The workaround is to point the witness at the narrow range carrying the measurement (which the `#<range>` rule above already encourages), or to write the predicate against a sentinel the echo cannot contain.
 
 **Grounds-binding limitation (known, v1).** Tier-2 `FAIL` is *weak positive evidence* — the witness fired, but the linter cannot structurally prove it fired *for the reason the subagent claimed*. Accepted gap. Mitigated by existing fix-dispatch escalation (the fix agent's own receipt carries its own witness) and by Cairn capturing lingering FAIL receipts in `OPEN_OBLIGATIONS`.
 

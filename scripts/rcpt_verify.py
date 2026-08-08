@@ -594,7 +594,7 @@ def parse_v11_sections(text):
     # is `<predicate>[ | …]*` OR `none`/`<prefix>`/`none` — bare `TRIPWIRE:` matches
     # NEITHER, and "" would slip past both the `== "none"` two-leg gate and the
     # `if not body` predicate-loop skip in lint_v11_local (false-PASS). TRIPWIRE-CHILD
-    # only when the line is PRESENT (absence stays `none` per return-convention.md:376).
+    # only when the line is PRESENT (absence stays `none` per return-convention.md:402).
     if tripwire == "":
         raise LintError("v1.1 TRIPWIRE: line has empty body (use a predicate or `none`)")
     if supersedes == "":
@@ -604,7 +604,7 @@ def parse_v11_sections(text):
     if any(t["verb"] == "DISPATCHED" for t in parse_trace(sections["TRACE"])) and trip_child is None:
         raise LintError(
             "v1.1 receipt with DISPATCHED in TRACE must emit TRIPWIRE-CHILD: "
-            "(return-convention.md:456; the :376 'absence is none' parenthetical is "
+            "(return-convention.md:481; the :402 'absence is none' parenthetical is "
             "scoped to the no-DISPATCHED case — tension tracked in #387)"
         )
     return {"sections": sections, "tripwire": tripwire,
@@ -768,7 +768,7 @@ def witness_art_name(witness, cited, verdict):
     """#474 / D4 — which artifact the Tier-2 witness body comes from, and whether it
     came from the WITNESS payload. Returns (art_name, from_payload).
 
-    return-convention.md:213 already settles this: "For kind=grep, the cited artifact
+    return-convention.md:230 already settles this: "For kind=grep, the cited artifact
     AND range are those named on the grep:<artifact>#<range> payload's own #<range>
     (the witness line itself), NOT an out= field." derive_art_name is non-conformant
     for kind=grep — it returns the EXEC out= artifact or the READ/WROTE cited path.
@@ -809,7 +809,7 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     grep-kind READ/WROTE witnesses; the FAIL leg (tier2_verify_fail) body lookup is
     EXEC-only — so the SAME grep:READ/WROTE witness whose body matches expect-fail
     raises under PASS but returns clean under FAIL. derive_art_name keys this on verdict.
-    #474 sharpens this: return-convention.md:213 scopes the grep artifact/range rule to
+    #474 sharpens this: return-convention.md:230 scopes the grep artifact/range rule to
     BOTH branches, so the FAIL-leg inertness is a convention NON-CONFORMANCE, not merely
     lint.py parity. Reversing it is a convention change — deferred, not fixed here.
 
@@ -939,7 +939,7 @@ def tier2_witness(witness, trace, root, strict, verdict):
     #    slice. NOT body_text: a #B range over invalid UTF-8 decodes each bad byte to
     #    U+FFFD (3 bytes), which would inflate an in-budget range past the cap and
     #    false-FAIL.
-    # Scoped to ranged citations (the #L/#B read budget per return-convention.md:224);
+    # Scoped to ranged citations (the #L/#B read budget per return-convention.md:245);
     # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
     # #474 / S6: when the body came from the WITNESS payload, the cap keys on THAT range
     # — the one actually read — not on parse_out_range(cited), which the grep path never
