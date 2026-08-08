@@ -994,9 +994,480 @@ class TestParseWitness(unittest.TestCase):
         self.assertEqual(out["payload"], "all-claims-cited")
 
     def test_happy_signature_forms(self):
-        for ef in ("exit=-1", "match"):
+        # #474 / D3: `match` USED to be admitted here on kind=exec with no pattern=
+        # clause — a bare `match` carries no predicate, so Tier-2 read it as clean
+        # (the P0). D3 makes that shape a Tier-1 error two ways over (clause required;
+        # bare `match` is kind=grep-only per return-convention.md:167), so this loop
+        # keeps only the exit= form and the `match` legs move to the #474 block below.
+        # DECLARED CASUALTY: the plan's D3 blast-radius sweep says test_rcpt_verify.py
+        # "constructs no bare-`match` witness at all" — this line was that witness.
+        for ef in ("exit=-1", "exit!=0"):
             out = self.rv.parse_witness([f"exec:cmd  expect-fail={ef}  ran=2026-06-24"])
             self.assertEqual(out["expect_fail"], ef)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #474 — WITNESS `expect-fail=match` is inert at Tier-2 (P0 fail-open).
+# Plan: docs/plans/2026-08-07-474-witness-match-fail-open.md — S1's 22 tests.
+# 16 are RED on unmodified main (1, 3-7, 9, 10, 11, 14, 16-20, 22); the other 6
+# (2, 8, 12, 13, 15, 21) are regression pins that are GREEN on main and must stay
+# green — a red pin means the change broke something, NOT that the pin is wrong.
+# ─────────────────────────────────────────────────────────────────────────────
+
+H64 = "ab" * 32                   # syntactically valid sha256 field for builder receipts
+COUNTS_HIT = "SEVERITY-COUNTS: fatal=1 significant=3 minor=0\n"
+COUNTS_CLEAN = "SEVERITY-COUNTS: fatal=0 significant=0 minor=3\n"
+MANDATED_CLAUSE = "pattern=/significant=[1-9]|fatal=[1-9]/"
+
+
+def _receipt(witness, *, verdict="PASS", conf="0.90", artifacts=(), trace=(),
+             claims=("(none)",), nxt="(none)", skill="red-team/1-devils-advocate"):
+    """Minimal well-formed v1 receipt wrapped around the WITNESS line under test."""
+    lines = [f"RCPT v1 {skill}", f"VERDICT  {verdict}  conf={conf}", "ARTIFACTS"]
+    lines += [f"  {n}  sha256:{h}  {s}" for n, h, s in artifacts] or ["  (none)"]
+    lines.append("TRACE")
+    lines += [f"  {i}  {t}" for i, t in enumerate(trace, 1)] or ["  (none)"]
+    lines.append("CLAIMS")
+    lines += [f"  {c}" for c in claims]
+    lines += [f"WITNESS    {witness}", "SUSPICION  0.10", f"NEXT       {nxt}"]
+    return "\n".join(lines) + "\n"
+
+
+class TestWitnessPatternClause(unittest.TestCase):
+    """S1 tests 3, 4, 7, 18, 19, 22 — the `pattern=` clause grammar at Tier-1
+    (parse_witness only; zero disk reads)."""
+
+    MANDATED = (f"grep:round-3-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                "expect-fail=match  ran=TRACE#1")
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 3 — the clause is extracted, expect_fail keeps its verbatim "match" (D1/D2)
+    def test_3_mandated_line_yields_pattern_and_keeps_expect_fail(self):
+        out = self.rv.parse_witness([self.MANDATED])
+        self.assertEqual(out.get("pattern"), "/significant=[1-9]|fatal=[1-9]/")
+        self.assertEqual(out["expect_fail"], "match")
+
+    # --- test 4 — bare `match` with NO clause is a Tier-1 error (D3 rule i),
+    #     and bare `match` is kind=grep-only (D3 rule iv)
+    def test_4_bare_match_without_clause_raises(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(
+                ["grep:round-3-findings.md#L1-L1  expect-fail=match  ran=TRACE#1"])
+
+    def test_4b_bare_match_on_non_grep_kind_raises(self):
+        # D3's kind restriction — scope containment for D3's own change: post-D3 an
+        # exec:/lint: witness carrying a clause would newly run the reviewer's regex
+        # against the EXEC out= body, a shape nothing in the repo produces.
+        for kind in ("exec:cmd", "lint:all-claims-cited"):
+            with self.assertRaises(self.rv.LintError, msg=kind):
+                self.rv.parse_witness([f"{kind}  expect-fail=match  ran=TRACE#1"])
+            with self.assertRaises(self.rv.LintError, msg=kind):
+                self.rv.parse_witness(
+                    [f"{kind}  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1"])
+
+    # --- test 7 — a malformed clause LINT-fails; a quoted literal must NOT
+    def test_7_malformed_regex_clause_is_lint_error_not_pattern_error(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/[unclosed/  expect-fail=match  ran=TRACE#1"])
+        self.assertNotIsInstance(cm.exception, re.error)
+
+    def test_7b_quoted_literal_that_is_not_a_regex_must_not_raise(self):
+        # REGRESSION PIN (green on main, must stay green). "**Severity:** Fatal" is
+        # the natural predicate over this repo's own findings format and is exactly
+        # what D3 prescribes when the /…/ alternation cannot express one. re.compile
+        # of the RAW inner text raises `nothing to repeat`; the compile guard runs on
+        # the DERIVED (re.escape'd) source, so it is provably inert here (round 9/SIG-2).
+        with self.assertRaises(re.error):           # the raw text really is not a regex
+            re.compile("**Severity:** Fatal")
+        # must not raise — that IS the pin (asserting the new `pattern` key here
+        # would make a green pin red on main; that assertion lives in test 3).
+        self.rv.parse_witness(
+            ['grep:f.md#L1-L1  pattern="**Severity:** Fatal"  expect-fail=match  ran=TRACE#1'])
+
+    # --- test 18 — the payload is parsed ONCE, and payload vs payload_raw are
+    #     discriminated (trap (a): a range-shaped substring inside the clause)
+    def test_18_payload_parsed_once_and_two_strings_discriminated(self):
+        out = self.rv.parse_witness([self.MANDATED])
+        self.assertEqual(out["art"], "round-3-findings.md")
+        self.assertEqual(out["range_kind"], "L")
+        self.assertEqual((out["range_a"], out["range_b"]), (1, 1))
+        self.assertEqual(out["payload"], "round-3-findings.md#L1-L1")
+        self.assertEqual(out["payload_raw"],
+                         f"round-3-findings.md#L1-L1  {MANDATED_CLAUSE}")
+        self.assertNotIn("pattern=", out["payload"])
+        self.assertIn("pattern=", out["payload_raw"])
+
+    def test_18b_range_shaped_substring_inside_clause_is_not_the_payload_range(self):
+        out = self.rv.parse_witness(
+            ["grep:round-3-findings.md#L1-L1  pattern=/x#L1-L2/  expect-fail=match  ran=TRACE#1"])
+        self.assertEqual((out["range_a"], out["range_b"]), (1, 1))   # NOT 1/2 from the clause
+        self.assertEqual(out["art"], "round-3-findings.md")
+
+    # --- test 19 — the UNDELIMITED clause (round 4 / SIG-1): present, compiles,
+    #     yet derives None → #474 verbatim. Rejected at Tier-1.
+    def test_19_undelimited_clause_raises_at_tier1(self):
+        self.assertIsNotNone(re.compile("significant=[1-9]"))   # it really does compile
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=significant=[1-9]  expect-fail=match  ran=TRACE#1"])
+
+    def test_19b_helper_seam_derivation_is_defined_for_exactly_two_forms(self):
+        self.assertEqual(self.rv._expect_fail_pattern("match", "/significant=[1-9]/"),
+                         "significant=[1-9]")
+        self.assertEqual(self.rv._expect_fail_pattern("match", '"literal"'),
+                         re.escape("literal"))
+        # the documented precondition at the helper seam (D2): the helper is NOT
+        # self-defending — Tier-1 rejects the bare form, the helper keeps returning None.
+        self.assertIsNone(self.rv._expect_fail_pattern("match", "significant=[1-9]"))
+
+    def test_19c_bare_clause_never_reaches_tier2(self):
+        text = _receipt(
+            "grep:round-3-findings.md#L1-L1  pattern=significant=[1-9]  "
+            "expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    # --- test 22 — the EMPTY delimited clause (round 9 / SIG-1): #474's second door
+    def test_22_empty_clause_raises_with_the_empty_derivation_message(self):
+        # The message pin IS the test: len('') = 0 < 4, so an implementation that
+        # ships only the floor still raises here and would look green without it.
+        for clause in ("//", '""'):
+            with self.assertRaises(self.rv.LintError, msg=clause) as cm:
+                self.rv.parse_witness(
+                    [f"grep:f.md#L1-L1  pattern={clause}  expect-fail=match  ran=TRACE#1"])
+            self.assertEqual(
+                str(cm.exception),
+                f"WITNESS pattern= clause derives an empty regex source: {clause!r}")
+            self.assertNotIn("too short", str(cm.exception))   # textually distinct from the floor
+
+    def test_22b_floor_message_is_the_other_one(self):
+        # The floor still fires on a short-but-nonempty derivation, with ITS text —
+        # so the two dispositions cannot be confused (D3(b)).
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/0F/  expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(str(cm.exception),
+                         "WITNESS pattern= clause too short: '/0F/'")
+
+    def test_22c_empty_derivation_is_the_empty_string_not_none(self):
+        # Keeps the two dispositions distinguishable at the helper seam: a "fix"
+        # that maps empty → None silently re-enters the Tier-2 hole.
+        self.assertEqual(self.rv._expect_fail_pattern("match", "//"), "")
+        self.assertEqual(self.rv._expect_fail_pattern("match", '""'), "")
+
+    def test_22d_empty_clause_never_reaches_tier2(self):
+        text = _receipt(
+            "grep:round-3-findings.md#L1-L1  pattern=//  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+
+class TestWitnessTier1Guards(unittest.TestCase):
+    """S1 tests 8, 9, 12, 13, 14, 15 — the receipt-level Tier-1 guards (D3/D6).
+    Every one of these is disk-free."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 9 — the DECLARED payload span bound, and its message names the
+    #     clause-stripped payload (not the predicate beside it)
+    def test_9_declared_span_over_bound_raises_naming_stripped_payload(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:round-3-findings.md#B1-B4098  pattern=/significant=[1-9]/  "
+                 "expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(str(cm.exception),
+                         "witness range exceeds 4 KiB: round-3-findings.md#B1-B4098")
+
+    def test_9b_declared_span_inside_bound_is_clean(self):
+        # #B is 1-based inclusive, so b-a undercounts by one (D6 signal (i)); assert
+        # clear of the boundary rather than on it.
+        out = self.rv.parse_witness(
+            ["grep:round-3-findings.md#B1-B4000  pattern=/significant=[1-9]/  "
+             "expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(out["range_b"], 4000)
+
+    def test_9c_line_range_uses_the_sound_1_byte_per_line_floor(self):
+        # 4096 < span → reject; a 100-line range (which EXEC's 80-B/line estimate
+        # would reject) must NOT be rejected here.
+        self.rv.parse_witness(
+            ["grep:f.md#L1-L4000  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L5000  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
+
+    # --- test 12 — REGRESSION PIN: the committed, CI-gated in-spec shape stays clean
+    def test_12_committed_12_judge_witness_stays_clean(self):
+        line = ("grep:review.md#L1-L80  pattern=/Fatal:\\s*[1-9]/  "
+                "expect-fail=match  ran=TRACE#2")
+        self.rv.parse_witness([line])          # must not raise — that IS the pin
+        rec = [r for r in _load("sample-corpus/receipts.jsonl")
+               if r["dispatch-id"] == "12-judge"][0]
+        self.assertIn(line, rec["receipt"], "fixture drift: 12-judge WITNESS line moved")
+        self.assertEqual(self.rv.lint_receipt(rec["receipt"]), "PASS")
+
+    # --- test 13 — REGRESSION PIN: rangeless grep payloads are a committed shape
+    def test_13_rangeless_grep_payloads_still_lint_clean(self):
+        out = self.rv.parse_witness(
+            ['grep:pattern  expect-fail="literal text"  ran=2026-06-24'])
+        self.assertEqual(out["payload"], "pattern")
+        self.assertIsNone(out.get("range_kind"))   # .get: the key is new in S2(b)
+        h = self.rv.parse_witness(["grep:boom  expect-fail=/boom/ ran=TRACE#1"])
+        self.assertEqual(h["payload"], "boom")
+        self.assertIsNone(h.get("range_kind"))
+        # …and the committed fixture that carries that exact shape is still there.
+        fx = [json.loads(l) for l in
+              (CORPUS / "tier2-fixtures/manifest.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any("grep:boom" in json.dumps(r) for r in fx),
+                        "fixture drift: rangeless grep fixture h is gone")
+
+    # --- test 14 — ARTIFACTS membership, written against lint_receipt (D6/SIG-1);
+    #     parse_witness cannot see ARTIFACTS at all, so a parse-level version of this
+    #     test cannot be written — if one appears, S3(5) was implemented at the wrong site.
+    def test_14_ranged_grep_artifact_absent_from_artifacts_raises(self):
+        text = _receipt(
+            f"grep:round-3-findings.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-2-ledger.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertEqual(str(cm.exception),
+                         "WITNESS grep artifact not in ARTIFACTS: round-3-findings.md")
+
+    def test_14b_same_receipt_with_the_artifact_declared_lints_clean(self):
+        text = _receipt(
+            f"grep:round-3-findings.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+    def test_14c_membership_is_scoped_to_ranged_payloads(self):
+        # A RANGELESS grep payload keeps today's behaviour and is exempt (S3(4)).
+        text = _receipt(
+            'grep:pattern  expect-fail="literal text"  ran=TRACE#1',
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+    # --- test 15 — REGRESSION PIN: EXEC's calibration is unmoved by S3's helper split
+    def test_15_exec_calibration_and_message_unchanged(self):
+        args = "`run`  exit=0  dur=1s  out=a.log#L1-L100"
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.check_exec_range_bound(args)
+        self.assertEqual(str(cm.exception), f"EXEC range exceeds 4 KiB: {args}")
+
+    def test_15b_same_declared_range_on_a_grep_witness_does_not_raise(self):
+        # The conjunct that catches a shared helper carrying the grep calibration
+        # into EXEC (or vice versa): #L1-L100 is over EXEC's 80-B/line estimate and
+        # far under the grep path's 1-B/line floor.
+        self.rv.parse_witness(          # must not raise — that IS the pin
+            ["grep:f.md#L1-L100  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
+
+    def test_15c_exec_negative_range_message_unchanged(self):
+        args = "`run`  exit=0  out=a.log#L9-L1"
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.check_exec_range_bound(args)
+        self.assertEqual(str(cm.exception), f"EXEC range negative: {args}")
+
+    # --- test 8 — REGRESSION PIN: the ran=SKIPPED NEXT-verbatim check still binds
+    #     the FULL payload including the clause (D1 / payload_raw), message pinned
+    def test_8_skipped_next_verbatim_check_binds_the_full_payload(self):
+        payload_raw = f"round-3-findings.md#L1-L1  {MANDATED_CLAUSE}"
+        text = _receipt(
+            f"grep:{payload_raw}  expect-fail=match  ran=SKIPPED:tooling-absent",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"],
+            nxt="file the follow-up")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS ran=SKIPPED requires NEXT to contain witness payload verbatim; "
+            f"payload={payload_raw!r}  NEXT='file the follow-up'")
+
+    def test_8b_skipped_passes_when_next_carries_the_full_payload(self):
+        payload_raw = f"round-3-findings.md#L1-L1  {MANDATED_CLAUSE}"
+        text = _receipt(
+            f"grep:{payload_raw}  expect-fail=match  ran=SKIPPED:tooling-absent",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"],
+            nxt=f"re-run {payload_raw} at merge-time")
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+
+class TestWitness474Tier2(unittest.TestCase):
+    """S1 tests 1, 2, 5, 6, 10, 11, 16, 17, 20, 21 — the Tier-2 predicate and the
+    body it runs against (D2/D4/D6)."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _write(self, name, text):
+        p = self.root / name
+        p.write_text(text)
+        return p
+
+    def _w(self, line):
+        return self.rv.parse_witness([line])
+
+    def _wrote(self, name):
+        return [{"n": 1, "verb": "WROTE", "args": f"{name}  sha256:{H64}"}]
+
+    def _exec(self, out, exit_code=0):
+        return [{"n": 1, "verb": "EXEC",
+                 "args": f"`run`  exit={exit_code}  dur=1s  out={out}"}]
+
+    # --- test 1 — the issue's reproduction, verbatim
+    def test_1_mandated_witness_fires_on_a_contradicting_body(self):
+        self._write("round-1-findings.md", COUNTS_HIT + "…prose…\n")
+        w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                    "expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._wrote("round-1-findings.md"),
+                                  self.root, False, "PASS")
+        self.assertIn("witness would have fired → PASS rejected", str(cm.exception))
+        self.assertIn("round-1-findings.md", str(cm.exception))
+
+    # --- test 2 — REGRESSION PIN: the clean counterpart must not false-BLOCK
+    def test_2_clean_round_body_does_not_fire(self):
+        self._write("round-1-findings.md", COUNTS_CLEAN + "…prose…\n")
+        w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                    "expect-fail=match  ran=TRACE#1")
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._wrote("round-1-findings.md"),
+                                  self.root, False, "PASS"), [])
+
+    # --- test 5 — facet (b), WROTE-cited: the payload's own #range is what is read
+    def test_5_wrote_cited_payload_range_narrows_the_body(self):
+        self._write("f.md", COUNTS_CLEAN + "prose\n" + COUNTS_HIT)
+        w = self._w("grep:f.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
+        # line 3 matches, line 1 does not — a whole-file read false-BLOCKs.
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._wrote("f.md"), self.root, False, "PASS"), [])
+
+    def test_5b_wrote_cited_payload_range_still_fires_inside_the_range(self):
+        self._write("f.md", COUNTS_HIT + "prose\n" + COUNTS_CLEAN)
+        w = self._w(f"grep:f.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(w, self._wrote("f.md"), self.root, False, "PASS")
+
+    # --- test 6 — facet (b), EXEC-cited MISMATCH: payload names X, out= names Y
+    def test_6_exec_cited_mismatch_reads_the_payload_artifact(self):
+        self._write("x.md", COUNTS_HIT)
+        self._write("y.log", "all quiet\n" * 5)
+        w = self._w(f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "PASS")
+        self.assertIn("matches body of x.md", str(cm.exception))
+        self.assertNotIn("y.log", str(cm.exception))
+
+    # --- test 10 — Tier-1-legal declared range whose ACTUAL bytes blow the 4 KiB cap
+    def test_10_actual_bytes_over_cap_raises_at_tier2(self):
+        self._write("big.md", "".join("X" * 199 + "\n" for _ in range(40)))   # ≈8 KiB
+        w = self._w("grep:big.md#L1-L40  pattern=/zzzz-no-match/  "
+                    "expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._wrote("big.md"), self.root, False, "PASS")
+        self.assertIn("4 KiB", str(cm.exception))
+
+    # --- test 11 — an empty resolved body on a ranged grep witness is a LintError,
+    #     while `body_text is None` still returns True (the :640-641 parity contract)
+    def test_11_empty_string_body_raises_on_disk_for_both_forms(self):
+        self._write("x.md", "one line\n")
+        for line in (f"grep:x.md#L50-L60  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+                     "grep:x.md#L50-L60  expect-fail=/fatal=[1-9]/  ran=TRACE#1"):
+            with self.assertRaises(self.rv.LintError, msg=line):
+                self.rv.tier2_witness(self._w(line), self._wrote("x.md"),
+                                      self.root, False, "PASS")
+
+    def test_11b_empty_string_body_raises_on_the_eval_path(self):
+        for line in (f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+                     "grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1"):
+            with self.assertRaises(self.rv.LintError, msg=line):
+                self.rv._eval_tier2(self._w(line), self._wrote("x.md"),
+                                    {"x.md": ""}, "PASS")
+
+    def test_11c_body_none_still_returns_clean(self):
+        # REGRESSION PIN (green on main): `None` is documented lint.py parity
+        # (`art_name not in artifact_bodies`), NOT the empty-string case.
+        line = f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1"
+        w = self._w(line)
+        self.assertTrue(self.rv.verify_witness(None, w, "PASS",
+                                               self._wrote("x.md")[0]))
+        self.rv._eval_tier2(w, self._wrote("x.md"), {}, "PASS")      # no body → clean
+
+    def test_11d_empty_body_on_the_fail_leg_stays_clean(self):
+        # The empty-body guard is PASS-scoped (round 4 / MIN-2): a FAIL + grep +
+        # EXEC-cited witness reads the UN-narrowed out= range and must not newly raise.
+        self._write("y.log", "")
+        w = self._w("grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "FAIL")
+        self.assertIn("no evidence of failure", str(cm.exception))   # not the empty-body guard
+
+    # --- test 16 — kind=grep + expect-fail=/…/, payload range NARROWER than out=
+    def test_16_payload_range_narrower_than_out_range_is_what_is_read(self):
+        self._write("verify-log.txt", "0\n" * 5 + "post-fix lines: 673\n" + "0\n" * 5)
+        w = self._w("grep:verify-log.txt#L1-L1  expect-fail=/[1-9][0-9]/  ran=TRACE#1")
+        # today's linter reads out=#L1-L11 and matches the unrelated `67` at line 6
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._exec("verify-log.txt#L1-L11"),
+                                  self.root, False, "PASS"), [])
+
+    # --- test 17 — FAIL-leg pattern threading (both legs)
+    def test_17_fail_leg_matching_body_supplies_evidence(self):
+        self._write("y.log", COUNTS_HIT)
+        w = self._w(f"grep:y.log#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L1"), self.root, False, "FAIL"), [])
+
+    def test_17b_fail_leg_nonmatching_body_keeps_the_byte_identical_message(self):
+        self._write("y.log", COUNTS_CLEAN)
+        w = self._w(f"grep:y.log#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L1"), self.root, False, "FAIL")
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
+            "expect-fail match (weak positive-evidence check)")
+
+    # --- test 20 — the --strict path-shaped class change (§0e flip class 3)
+    def test_20_strict_pathshaped_hardfail_becomes_unverifiable(self):
+        w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                    "expect-fail=match  ran=TRACE#1")
+        trace = [{"n": 1, "verb": "WROTE",
+                  "args": f"/nonexistent/abs/round-1-findings.md  sha256:{H64}"}]
+        notes = self.rv.tier2_witness(w, trace, self.root, True, "PASS")
+        self.assertEqual(
+            notes, ["UNVERIFIABLE: witness round-1-findings.md (no file under root)"])
+
+    # --- test 21 — REGRESSION PIN: on FAIL, artifact AND range both stay with
+    #     derive_art_name; neither comes from the payload
+    def test_21_fail_leg_keeps_artifact_and_range_together(self):
+        self._write("y.log", "MARKERY here\nMARKERY again\n" + "filler\n" * 8)
+        self._write("x.md", "filler\n" * 4 + "MARKERX here\nMARKERX again\n")
+        trace = self._exec("y.log#L1-L2")
+        # the body is y.log sliced at the out= range → the Y marker supplies evidence
+        w_hit = self._w("grep:x.md#L5-L6  expect-fail=/MARKERY/  ran=TRACE#1")
+        self.assertEqual(self.rv.tier2_witness(w_hit, trace, self.root, False, "FAIL"), [])
+        # …and the X marker (present only in the payload's file+range) does NOT
+        w_miss = self._w("grep:x.md#L5-L6  expect-fail=/MARKERX/  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w_miss, trace, self.root, False, "FAIL")
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
+            "expect-fail /MARKERX/ (weak positive-evidence check)")
 
 
 if __name__ == "__main__":
