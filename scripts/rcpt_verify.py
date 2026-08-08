@@ -158,20 +158,34 @@ def parse_out_range(args_str):
     return OutRange(m.group(1), m.group(2), int(m.group(3)), int(m.group(4)))
 
 
+def check_span_bound(kind, a, b, *, bytes_per_line, label, detail):
+    """The span arithmetic shared by EXEC's out= bound and #474/D6's grep-witness
+    bound. Tier-1 is disk-free, so a #L span can only be reasoned about from the
+    receipt's own text; #B is the byte count to within one (ranges are 1-based
+    INCLUSIVE, so b-a undercounts by one — inherited, and the Tier-2 cap closes it).
+
+    `bytes_per_line` is the per-site CALIBRATION and is deliberately NOT shared:
+    EXEC keeps its 80-B/line ESTIMATE (a gated Tier-1 rule — loosening it is
+    fail-open), while the grep path uses the SOUND 1-B/line floor (a line is at
+    minimum its newline). An estimate that guesses false-rejects provably in-spec
+    receipts: (b-a)*80 rejects the committed, CI-gated `12-judge` witness, whose
+    whole file is 3120 B. `label`/`detail` are required, not decoration — the two
+    sites pin different message text byte-for-byte."""
+    if b < a:
+        raise LintError(f"{label} range negative: {detail}")
+    span_bytes = (b - a) if kind == "B" else (b - a) * bytes_per_line
+    if span_bytes > 4096:
+        raise LintError(f"{label} range exceeds 4 KiB: {detail}")
+
+
 def check_exec_range_bound(args_str):
-    """out=<artifact>#<range> — check range ≤ 4 KiB."""
+    """out=<artifact>#<range> — check range ≤ 4 KiB. The authoritative cap is
+    enforced against the ACTUAL bytes read at Tier-2 (tier2_witness, #397 defect 4)."""
     r = parse_out_range(args_str)
     if not r:
         raise LintError(f"EXEC missing out= or bad range: {args_str}")
-    kind, a, b = r.kind, r.start, r.end
-    if b < a:
-        raise LintError(f"EXEC range negative: {args_str}")
-    # Tier-1 is disk-free, so a line range can only be ESTIMATED (80 bytes/line). This
-    # under-counts long lines, so it is a cheap pre-filter only — the authoritative 4 KiB
-    # cap is enforced against the ACTUAL bytes read at Tier-2 (tier2_witness, #397 defect 4).
-    span_bytes = (b - a) if kind == "B" else (b - a) * 80
-    if span_bytes > 4096:
-        raise LintError(f"EXEC range exceeds 4 KiB: {args_str}")
+    check_span_bound(r.kind, r.start, r.end,
+                     bytes_per_line=80, label="EXEC", detail=args_str)
 
 
 WITNESS_SPAN_CAP = 4096
@@ -194,6 +208,37 @@ def parse_claims(body):
             raise LintError(f"CLAIM malformed: {raw!r}")
         out.append({"key": m.group(1), "value": m.group(2), "citation": m.group(3), "pattern": m.group(4)})
     return out
+
+
+# #474 / S2(a)3 — the pattern= clause grammar. Reuses parse_claims:190's alternation
+# rather than inventing a second one. The bare `\S+` alternative STAYS in the
+# extraction regex: it is what stops an unquoted clause silently becoming part of the
+# artifact name (which would move the ranged/rangeless split). A bare clause is
+# rejected in VALIDATION, not in parsing.
+_WITNESS_CLAUSE_RE = re.compile(r'\s+pattern=("[^"]*"|/[^/]*/|\S+)\s*$')
+
+# #442 G6b sibling — the ONE reader of a WITNESS payload's <artifact>#<KIND><a>-<KIND><b>.
+# Mirrors _OUT_RANGE_RE's three earned properties ([^#\s]+ rejects '#' in the artifact;
+# the \2 back-ref rejects mixed kinds like #L1-B5; the (?!#[LB]\d) lookahead rejects a
+# trailing second #range) because _OUT_RANGE_RE itself cannot be reused — it is anchored
+# on the literal `out=`, which a witness payload never carries. Five sites need these
+# fields; they read them, they do not re-parse (five divergent readers of this exact
+# syntax already diverged once in this file — #442 G6b).
+_WITNESS_RANGE_RE = re.compile(r"^([^#\s]+)#([LB])(\d+)-\2(\d+)(?!#[LB]\d)")
+
+
+def _compile_guard(src, msg_prefix, shown):
+    """re.compile a DERIVED regex source, re-raising re.error as LintError. The
+    clause and the expect-fail signature are freely-authored, attacker-influenced
+    receipt text handed straight to re.search; an escaping re.PatternError aborts a
+    whole --eval batch (#440's fault-isolation class) instead of lint-FAILing one
+    record. Always the DERIVED source — for a quoted literal that is the re.escape'd
+    text, so this guard is provably inert there. Compiling the RAW inner text instead
+    would false-BLOCK the escape hatch D3 prescribes (pattern="**Severity:** Fatal")."""
+    try:
+        re.compile(src)
+    except re.error as e:
+        raise LintError(f"{msg_prefix}: {shown!r} ({e})")
 
 
 def parse_witness(body):
@@ -228,6 +273,19 @@ def parse_witness(body):
         raise LintError(f"WITNESS kind unknown: {kind!r}")
     if kind == "lint" and payload not in LINT_RULES:
         raise LintError(f"WITNESS lint rule unknown: {payload!r}")
+    # #474 / S2(a)2-3 — strip the trailing pattern= clause off the payload. `payload_raw`
+    # keeps it and is the ONLY clause-carrying string: it is what the ran=SKIPPED: check
+    # binds verbatim (D1), so dropping the predicate there would silently loosen the
+    # deferred path. Scoped to kind == "grep" — the clause is only ever READ on the grep
+    # path, and stripping it elsewhere could only mutate payload for no gain (measured
+    # null: 0 non-grep WITNESS lines carry a pattern= token).
+    payload_raw = payload
+    clause = None
+    if kind == "grep":
+        cm = _WITNESS_CLAUSE_RE.search(payload_raw)
+        if cm:
+            clause = cm.group(1)
+            payload = payload_raw[:cm.start()].rstrip()
     # expect-fail validation
     if not expect_fail:
         raise LintError("WITNESS expect-fail empty")
@@ -235,12 +293,69 @@ def parse_witness(body):
         pattern = expect_fail[1:-1]
         if len(pattern) < 4 or pattern in {".*", ".+"}:
             raise LintError(f"WITNESS expect-fail wildcard/too-short: {expect_fail!r}")
+        _compile_guard(_expect_fail_pattern(expect_fail),
+                       "WITNESS expect-fail is not a valid regex", expect_fail)
     elif expect_fail.startswith('"') and expect_fail.endswith('"'):
         if len(expect_fail[1:-1]) < 4:
             raise LintError(f"WITNESS expect-fail literal too short: {expect_fail!r}")
+        # Declared widening (round 9 / SIG-2): provably inert here — re.escape output
+        # always compiles — but applied for uniformity at the same site.
+        _compile_guard(_expect_fail_pattern(expect_fail),
+                       "WITNESS expect-fail is not a valid regex", expect_fail)
     elif not re.match(r"^(exit!=0|exit=-?\d+|match)$", expect_fail):
         raise LintError(f"WITNESS expect-fail not a valid signature form: {expect_fail!r}")
-    return {"kind": kind, "payload": payload.strip(), "expect_fail": expect_fail, "ran": ran.strip()}
+    if expect_fail == "match":
+        # #474 / D3. Bare `match` carried no predicate at all, so Tier-2 read it as
+        # clean — the P0. These are Tier-1, text-only, and therefore live in every
+        # configuration (unlike the Tier-2 half, which cannot fire under the mandated
+        # --root until artifact resolution lands).
+        if kind != "grep":
+            # return-convention.md:167 already said so; the divergence was inert only
+            # while bare `match` carried no predicate. Post-D3 an exec:/lint: witness
+            # would newly run the reviewer's regex against the EXEC out= body.
+            raise LintError(
+                f"WITNESS expect-fail=match is only valid for kind=grep (got kind={kind})")
+        if clause is None:
+            raise LintError(f"WITNESS expect-fail=match requires a pattern= clause: {line!r}")
+        # S2(a)3 — the ordered enumeration, and the order is part of the spec:
+        # (a) delimited → (b) derive → (c) non-empty, then the floor → (d) compile.
+        # (a) must precede (d) because a bare clause COMPILES (re.compile("significant=[1-9]")
+        # succeeds) yet derives None, which verify_witness reads as clean — #474 verbatim.
+        # (c) must precede (d) for the same reason one delimiter over: re.compile("")
+        # succeeds and '' is FALSY, so `if pattern and re.search(...)` short-circuits clean.
+        if not ((clause.startswith("/") and clause.endswith("/")) or
+                (clause.startswith('"') and clause.endswith('"'))):
+            raise LintError(
+                f'WITNESS pattern= clause must be /regex/ or "literal": {clause!r}')
+        src = _expect_fail_pattern(expect_fail, clause)
+        if src == "":
+            raise LintError(f"WITNESS pattern= clause derives an empty regex source: {clause!r}")
+        if len(src) < 4:
+            # A style bound inherited from the signature forms, declared for what it is:
+            # under `match` a SHORTER pattern is BROADER and therefore stricter, so this
+            # can only ever false-reject. It is NOT what closes the fail-open — the
+            # non-empty rule above is. Kept because dropping it would be an undeclared
+            # relaxation of the accepted subset (measured cost: 0 of 7 real clauses).
+            raise LintError(f"WITNESS pattern= clause too short: {clause!r}")
+        _compile_guard(src, "WITNESS pattern= clause is not a valid regex", clause)
+    # #474 / S2(b) — the payload range is parsed ONCE, here, from the clause-STRIPPED
+    # payload (never payload_raw: a string still carrying `pattern=/x#L1-L2/` would
+    # select the CLAUSE's range, or fail to match and silently take the rangeless
+    # branch, disabling both new Tier-1 guards on the exact shape this repairs).
+    art = range_kind = range_a = range_b = None
+    if kind == "grep":
+        rm = _WITNESS_RANGE_RE.match(payload)
+        if rm:
+            art, range_kind = rm.group(1), rm.group(2)
+            range_a, range_b = int(rm.group(3)), int(rm.group(4))
+            # D6 span bound, SOUND calibration (see check_span_bound); the message names
+            # the clause-stripped payload, not the predicate beside it.
+            check_span_bound(range_kind, range_a, range_b,
+                             bytes_per_line=1, label="witness", detail=payload)
+    return {"kind": kind, "payload": payload.strip(), "payload_raw": payload_raw.strip(),
+            "pattern": clause, "art": art, "range_kind": range_kind,
+            "range_a": range_a, "range_b": range_b,
+            "expect_fail": expect_fail, "ran": ran.strip()}
 
 
 _TRACE_REF_RE = re.compile(r"^TRACE#([0-9]+)$")
@@ -275,6 +390,21 @@ def lint_receipt(text):
     trace = parse_trace(sections["TRACE"])
     claims = parse_claims(sections["CLAIMS"])
     witness = parse_witness(sections["WITNESS"])
+    # #474 / D6 — a RANGED kind=grep witness payload must name an artifact the receipt
+    # itself declares. Not a new contract: return-convention.md:92 already says a
+    # <artifact>#<range> citation is valid iff <artifact> appears in ARTIFACTS, and the
+    # structurally identical EXEC out= rule is a few lines below. Sited here, not in
+    # parse_witness, which never sees ARTIFACTS (its signature stays one-argument: an
+    # `artifacts=None` default would make this rule silently inert at all 21 call sites).
+    # Text-only, so LIVE on merge — it is what constrains D4's reviewer-chosen body to a
+    # declared name. The sha256 BINDING that would make the declaration unforgeable stays
+    # latent: tier2_artifacts recomputes only for a name that RESOLVES, and under the
+    # mandated --root <dispatch-root> nothing does. Scoped to ranged payloads (rangeless
+    # grep keeps today's whole-file behaviour) and verdict-independent, unlike D4's
+    # payload rule: this validates a DECLARATION, so it belongs where no read happens.
+    if witness["kind"] == "grep" and witness["range_kind"] is not None:
+        if witness["art"] not in artifacts:
+            raise LintError(f"WITNESS grep artifact not in ARTIFACTS: {witness['art']}")
     # EXEC out= artifact must exist; range bound
     for entry in trace:
         if entry["verb"] == "EXEC":
@@ -334,10 +464,14 @@ def lint_receipt(text):
             raise LintError(f"WITNESS kind=grep requires ran= to point to EXEC/READ/WROTE (got {verb})")
     elif ran.startswith("SKIPPED:"):
         next_body = " ".join(sections["NEXT"])
-        if witness["payload"] not in next_body:
+        # #474 / D1: payload_RAW — the clause-carrying string. This check is what makes a
+        # deferred witness runnable from the Cairn OPEN_OBLIGATIONS tail, so binding the
+        # stripped payload would silently loosen the deferred path (the one nobody
+        # watches) and name a string the check never used.
+        if witness["payload_raw"] not in next_body:
             raise LintError(
                 f"WITNESS ran=SKIPPED requires NEXT to contain witness payload verbatim; "
-                f"payload={witness['payload']!r}  NEXT={next_body!r}"
+                f"payload={witness['payload_raw']!r}  NEXT={next_body!r}"
             )
     elif ran.startswith("UNRUNNABLE:"):
         reason = ran[len("UNRUNNABLE:"):]
@@ -607,15 +741,58 @@ def derive_art_name(cited, verdict):
     return None
 
 
-def _expect_fail_pattern(expect_fail):
+def _expect_fail_pattern(expect_fail, pattern_clause=None):
     """Regex source for a WITNESS expect-fail sig: /regex/ verbatim, "literal"
     escaped, else None (e.g. an exit= clause). #442 G6c — one source for the
-    two byte-identical derivation blocks in verify_witness."""
-    if expect_fail.startswith("/") and expect_fail.endswith("/"):
-        return expect_fail[1:-1]
-    if expect_fail.startswith('"') and expect_fail.endswith('"'):
-        return re.escape(expect_fail[1:-1])
+    two byte-identical derivation blocks in verify_witness.
+
+    #474 / D2: for `expect_fail == "match"` the source comes from the WITNESS line's
+    separate `pattern=` clause instead (expect_fail keeps its verbatim "match", so no
+    message text and no consumer comparing == "match" moves). PRECONDITION: callers
+    must pass a DELIMITED clause whose derived source is NON-EMPTY — Tier-1
+    (parse_witness) rejects the rest. This helper is deliberately not self-defending:
+    it keeps returning None for a bare/undelimited clause and '' for an empty one, and
+    verify_witness reads both as clean. Adding a 'treat a bare token as a regex' branch
+    here would be the fail-OPEN direction on the very form Tier-1 exists to close."""
+    src = pattern_clause if expect_fail == "match" else expect_fail
+    if src is None:
+        return None
+    if src.startswith("/") and src.endswith("/"):
+        return src[1:-1]
+    if src.startswith('"') and src.endswith('"'):
+        return re.escape(src[1:-1])
     return None
+
+
+def witness_art_name(witness, cited, verdict):
+    """#474 / D4 — which artifact the Tier-2 witness body comes from, and whether it
+    came from the WITNESS payload. Returns (art_name, from_payload).
+
+    return-convention.md:213 already settles this: "For kind=grep, the cited artifact
+    AND range are those named on the grep:<artifact>#<range> payload's own #<range>
+    (the witness line itself), NOT an out= field." derive_art_name is non-conformant
+    for kind=grep — it returns the EXEC out= artifact or the READ/WROTE cited path.
+
+    The pair is returned together on purpose: taking the RANGE from the payload while
+    leaving the ARTIFACT from derive_art_name pairs a range with the wrong file (lines
+    112-155 of a 6-line log = the empty string, which re.search never matches — a new
+    categorical fail-open inside a fail-open fix). Callers pass `witness if from_payload
+    else None` to _read_cited_range, so artifact and range are always sourced together.
+
+    Scoped to the PASS leg — the leg that READS the body. The FAIL leg keeps
+    derive_art_name's EXEC-only behaviour for both halves (the asymmetry documented in
+    verify_witness, deferred to the resolution issue).
+
+    WIDENING, stated plainly: today ran=TRACE#N structurally determines which file is
+    read; after this it is still Tier-1-checked to point at an EXEC/READ/WROTE, but no
+    longer determines what is opened — the reviewer gains control of WHICH FILE, not
+    merely which lines. D6's ARTIFACTS-membership rule buys back the DECLARATION half
+    (the name must be one the receipt declares); the sha256 binding does not come back
+    until artifact resolution lands. Recorded on the resolution issue."""
+    if (verdict == "PASS" and witness.get("kind") == "grep"
+            and witness.get("range_kind") is not None):
+        return witness["art"], True
+    return derive_art_name(cited, verdict), False
 
 
 def verify_witness(body_text, witness, verdict, cited) -> bool:
@@ -631,10 +808,24 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     ASYMMETRY (reproduced exactly): the PASS leg (tier2_verify) inspects the body for
     grep-kind READ/WROTE witnesses; the FAIL leg (tier2_verify_fail) body lookup is
     EXEC-only — so the SAME grep:READ/WROTE witness whose body matches expect-fail
-    raises under PASS but returns clean under FAIL. derive_art_name keys this on verdict."""
+    raises under PASS but returns clean under FAIL. derive_art_name keys this on verdict.
+    #474 sharpens this: return-convention.md:213 scopes the grep artifact/range rule to
+    BOTH branches, so the FAIL-leg inertness is a convention NON-CONFORMANCE, not merely
+    lint.py parity. Reversing it is a convention change — deferred, not fixed here.
+
+    DISK vs --eval DIVERGENCE (deliberate, #474/D4): the disk reader slices the body to
+    the witness/cited range, while _eval_tier2 passes the WHOLE inline artifact_bodies
+    entry. Slicing the inline path would mean re-deriving line offsets against a body
+    that never had them — there is no file. Selftest step (iv) checks the paths do not
+    drift on kind=exec; for kind=grep they diverge BY DESIGN.
+
+    DEFERRED (#474 §3): a witness carrying ran=SKIPPED: is Tier-1-legal on a PASS and
+    Tier-2 never evaluates it, so a reviewer can still obtain a PASS whose witness was
+    never tested. That is a designed Cairn-routed deferral, not a fall-through; rejecting
+    it is a receipt-shape contract change. Carried on the resolution issue."""
     if not witness["ran"].startswith("TRACE#"):
         return True
-    art_name = derive_art_name(cited, verdict)
+    art_name, _ = witness_art_name(witness, cited, verdict)
     if art_name is None:
         return True
     if body_text is None:
@@ -646,7 +837,12 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
         # tier2_verify_fail (lint.py:377-390)
         exit_m = re.search(r"exit=(-?\d+)", cited["args"])
         exit_success = exit_m and int(exit_m.group(1)) == 0
-        pattern = _expect_fail_pattern(expect_fail)
+        # #474 / S4: the FAIL site too — a behaviour change, not a no-op. Today
+        # expect_fail == "match" ⇒ pattern is None ⇒ content_match always False, so a
+        # grep + EXEC-cited + match FAIL receipt with exit=0 is rejected by "no evidence
+        # of failure"; after this the predicate runs and that rejection stops firing.
+        # The new behaviour is the conformant one; blast radius measured zero.
+        pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
         content_match = bool(pattern and re.search(pattern, body))
         if exit_success and not content_match:
             raise LintError(
@@ -670,7 +866,7 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
                     )
             return True
     # regex / literal expect-fail
-    pattern = _expect_fail_pattern(expect_fail)
+    pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
     if pattern and re.search(pattern, body):
         raise LintError(
             f"Tier-2: WITNESS expect-fail regex /{pattern}/ matches body of {art_name} "
@@ -679,15 +875,28 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     return True
 
 
-def _read_cited_range(path: pathlib.Path, cited):
+def _read_cited_range(path: pathlib.Path, cited, witness=None):
     """Read ONLY the cited #L<a>-L<b> (line) / #B<a>-B<b> (byte) range from disk.
     Deliberate (M2): lint.py's inline tier2_verify reads the WHOLE body, but the disk
     reader reads only the cited range (fixture-4(g)-guarded). READ/WROTE entries carry
-    no #range → read whole file (the grep-on-READ/WROTE path; not in natural corpus)."""
+    no #range → read whole file (the grep-on-READ/WROTE path; not in natural corpus).
+
+    #474 / D4: `witness` is optional-with-default so the four existing two-argument call
+    sites keep today's cited-only behaviour verbatim. It is passed ONLY when
+    witness_art_name sourced the artifact from the payload (`witness if from_payload
+    else None`), which is what keeps artifact and range inseparable."""
+    if witness is not None and witness.get("range_kind") is not None:
+        kind, a, b = witness["range_kind"], witness["range_a"], witness["range_b"]
+        return _slice(path, kind, a, b)
     r = parse_out_range(cited["args"])
     if not r:
         return path.read_text()
-    kind, a, b = r.kind, r.start, r.end
+    return _slice(path, r.kind, r.start, r.end)
+
+
+def _slice(path: pathlib.Path, kind, a, b):
+    """The 1-based-inclusive range read shared by the cited-range and witness-payload
+    sourcings (#474/D4) — one reader, so the two cannot drift."""
     # Ranges are 1-based; a<1 is malformed, clamp to 1 so `[a-1:b]` never slices from
     # the END (a=0 → [-1:b], an empty/wrong body that silently bypasses the witness).
     if a < 1:
@@ -711,7 +920,7 @@ def tier2_witness(witness, trace, root, strict, verdict):
     if not 1 <= idx <= len(trace):
         return []
     cited = trace[idx - 1]
-    art_name = derive_art_name(cited, verdict)
+    art_name, from_payload = witness_art_name(witness, cited, verdict)
     if art_name is None:
         return []
     resolved = resolve_base(art_name, root)
@@ -719,7 +928,7 @@ def tier2_witness(witness, trace, root, strict, verdict):
         if strict and is_path_shaped(art_name):
             raise LintError(f"Tier-2 --strict: witness artifact {art_name} absent under all bases")
         return [f"UNVERIFIABLE: witness {art_name} (no file under root)"]
-    body_text = _read_cited_range(resolved, cited)
+    body_text = _read_cited_range(resolved, cited, witness if from_payload else None)
     # #397 defect 4 — authoritative 4 KiB cap on the cited range (Tier-1's 80-bytes/line
     # estimate under-counts long lines). The cap measures EXACTLY what the reader read:
     #  - #L: len(body_text.encode("utf-8")) — the reader's own slice. read_text() decodes
@@ -730,11 +939,19 @@ def tier2_witness(witness, trace, root, strict, verdict):
     #    slice. NOT body_text: a #B range over invalid UTF-8 decodes each bad byte to
     #    U+FFFD (3 bytes), which would inflate an in-budget range past the cap and
     #    false-FAIL.
-    # Scoped to ranged out= citations (the EXEC#L/#B read budget per return-convention.md:224);
+    # Scoped to ranged citations (the #L/#B read budget per return-convention.md:224);
     # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
-    r = parse_out_range(cited["args"])
-    if r:
-        kind, a, b = r.kind, r.start, r.end
+    # #474 / S6: when the body came from the WITNESS payload, the cap keys on THAT range
+    # — the one actually read — not on parse_out_range(cited), which the grep path never
+    # had. Tier-1's grep bound is only the sound 1-B/line floor, so this is where a
+    # reviewer-declared range is measured against its real bytes.
+    if from_payload:
+        cap = (witness["range_kind"], witness["range_a"], witness["range_b"])
+    else:
+        r = parse_out_range(cited["args"])
+        cap = (r.kind, r.start, r.end) if r else None
+    if cap:
+        kind, a, b = cap
         if a < 1:  # 1-based; clamp matches _read_cited_range
             a = 1
         if kind == "L":
@@ -746,8 +963,33 @@ def tier2_witness(witness, trace, root, strict, verdict):
                 f"Tier-2: cited witness range exceeds 4 KiB actual bytes "
                 f"({span} > {WITNESS_SPAN_CAP}; Tier-1's line estimate under-counted)"
             )
+    _reject_empty_grep_body(body_text, witness, verdict, art_name)
     verify_witness(body_text, witness, verdict, cited)  # raises on FAIL
     return []
+
+
+def _reject_empty_grep_body(body_text, witness, verdict, art_name):
+    """#474 / D6 — an EMPTY resolved body on a ranged kind=grep witness is a LintError.
+    An empty body can never fire and is indistinguishable from a skipped check — the
+    fail-open shape this whole issue is about — and it backstops D4 if a range is ever
+    paired with the wrong file again.
+
+    Keyed on kind=grep + a ranged payload, NOT on expect-fail=match: a kind=grep +
+    expect-fail=/…/ witness whose range lands past EOF yields "" just as easily, and
+    that form is the majority of the real corpus.
+
+    Gated on verdict == PASS, explicitly: this function's callers are verdict-agnostic,
+    and a FAIL + grep + EXEC-cited witness does read a body (the UN-narrowed out= range),
+    so an unscoped guard would newly raise where today it returns clean.
+
+    An empty STRING from a successful read — never `body_text is None`, which
+    verify_witness returns clean on as documented lint.py parity (`art_name not in
+    artifact_bodies`). A guard written against a falsy body would swallow None too."""
+    if (verdict == "PASS" and witness.get("kind") == "grep"
+            and witness.get("range_kind") is not None and body_text == ""):
+        raise LintError(
+            f"Tier-2: WITNESS grep body empty for {art_name} "
+            f"(declared range resolves to no bytes — witness could not fire)")
 
 
 def _eval_tier2(witness, trace, bodies, verdict):
@@ -760,8 +1002,12 @@ def _eval_tier2(witness, trace, bodies, verdict):
     if not 1 <= idx <= len(trace):
         return
     cited = trace[idx - 1]
-    art_name = derive_art_name(cited, verdict)
+    art_name, _ = witness_art_name(witness, cited, verdict)
     body_text = bodies.get(art_name) if art_name else None
+    # #474 / D6 MIN-4: bodies.get returns "" just as easily as the disk reader does, ""
+    # survives the None-parity guard, and re.search(pattern, "") never matches — the same
+    # fail-open on the --eval path, closed with the same rejection and the same PASS gate.
+    _reject_empty_grep_body(body_text, witness, verdict, art_name)
     verify_witness(body_text, witness, verdict, cited)
 
 
