@@ -52,6 +52,7 @@ run python3 scripts/check_warden_integration.py
 # --- Receipt-verify (rcpt_verify) ---
 run python3 scripts/rcpt_verify.py --selftest
 run python3 scripts/test_rcpt_verify.py
+run python3 scripts/measure_474_denominators.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
 # --- Calibration dispatch / Brier advisory ---
