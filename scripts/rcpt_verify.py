@@ -1271,7 +1271,10 @@ def _selftest_crosscheck(rec, bodies):
     witness = parse_witness(sections["WITNESS"])
     idx = _trace_idx(witness["ran"])
     cited = trace[idx - 1]
-    art = derive_art_name(cited, verdict)
+    # #474 / S8(2): witness_art_name, not derive_art_name — a READ/WROTE-cited grep row
+    # carries no out=, so the old derivation landed at the wrong path and its range
+    # assertion was vacuous: coverage that could not fail.
+    art, from_payload = witness_art_name(witness, cited, verdict)
     inline_disp = _eval_record(rec)[0]
     with tempfile.TemporaryDirectory() as td:
         root = pathlib.Path(td)
@@ -1279,11 +1282,24 @@ def _selftest_crosscheck(rec, bodies):
         if body is not None:
             (root / art).parent.mkdir(parents=True, exist_ok=True)
             (root / art).write_text(body)
-            # corpus invariant: inline body == cited range (disk reads only the range)
-            cited_range = _read_cited_range(root / art, cited)
-            if cited_range != body:
-                problems.append(f"crosscheck {did}: inline body != cited range "
-                                f"(disk path reads only the range — fixture invariant broken)")
+            if witness["kind"] == "grep":
+                # For kind=grep the two paths diverge BY DESIGN (#474/D4): the disk
+                # reader slices to the witness payload's range while --eval passes the
+                # WHOLE inline body — there are no line offsets to slice an inline body
+                # against. So assert what must still hold: the slice is non-empty and is
+                # drawn from that same body. A slice taken from the wrong file, or an
+                # empty one, fails here.
+                sliced = _read_cited_range(root / art, cited,
+                                           witness if from_payload else None)
+                if not sliced or sliced not in body:
+                    problems.append(f"crosscheck {did}: grep slice is empty or not drawn "
+                                    f"from the inline body (wrong artifact or dead range)")
+            else:
+                # corpus invariant: inline body == cited range (disk reads only the range)
+                cited_range = _read_cited_range(root / art, cited)
+                if cited_range != body:
+                    problems.append(f"crosscheck {did}: inline body != cited range "
+                                    f"(disk path reads only the range — fixture invariant broken)")
         try:
             tier2_witness(witness, trace, root, False, verdict)
             disk_disp = "LINT-PASS"
