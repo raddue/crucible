@@ -194,9 +194,16 @@ Task tool (subagent_type: crucible-red-team):
       The cited range covers `#L1` (the `SEVERITY-COUNTS:` line) and is ≤ 4 KiB. `ran=` points
       at the `WROTE <findings-file>` TRACE entry. Keep the witness `pattern=` **leading with `/`**
       (a regex literal). A `WROTE` carries **no `out=` field** (only `EXEC` does); the witness
-      range is named on the WITNESS line itself. **This one line is correct for both verdicts:**
-      Tier-2 fails a `PASS` if the pattern matches (a clean round must have no F/S), and rejects
-      a `FAIL` if the pattern does **not** match (a non-clean round must have ≥1 F/S).
+      range is named on the WITNESS line itself. **This one line is the right line to write on
+      either verdict, but only the `PASS` leg is linter-verified:** Tier-2 fails a `PASS` if the
+      pattern matches (a clean round must have no F/S). On a `FAIL` receipt the witness is **not
+      evaluated at all** — that leg's body lookup goes only through an `EXEC` line's `out` field
+      and the mandated form cites a `WROTE`, so nothing is read even when the file resolves (see
+      `shared/return-convention.md` § *Scope of the two Tier-2 paragraphs above*). A `FAIL`
+      whose counts line secretly reads `0/0` is therefore **not** rejected: the FAIL leg's
+      consistency is reviewer-asserted, not linter-verified. Tracked on the #474 Tier-2
+      resolution issue; write the line correctly regardless, because it is what the PASS leg
+      of the *next* round checks.
     - **`SUSPICION`**, **`NEXT`** — per convention.
     - After `NEXT`: mandatory v1.1 **`TRIPWIRE:`** / **`SUPERSEDES:`** lines. A **FAIL** receipt's
       `TRIPWIRE:` carries `verdict=FAIL` (the self-firing predicate). `TRIPWIRE: none` is
@@ -257,8 +264,9 @@ Task tool (subagent_type: crucible-red-team):
 
     The FAIL example below is a non-clean round (`fatal=1 significant=2`). The **same** WITNESS
     line's pattern MUST match the nonzero counts line, so under `expect-fail=match` the witness
-    fires → Tier-2 accepts the FAIL. (If it did not match — a `0/0` counts line — a FAIL was
-    filed with no witness firing → reject.) Its CLAIMS value-pins are consistent with its own
+    fires → the FAIL is consistent. (Consistency here is *yours to assert*: Tier-2 does not read
+    the body on the FAIL leg, so a `0/0` counts line under a FAIL is accepted, not rejected.)
+    Its CLAIMS value-pins are consistent with its own
     `SEVERITY-COUNTS:` counts line (shown as the leading comment).
 
     <!-- worked-example: FAIL -->
@@ -282,7 +290,7 @@ Task tool (subagent_type: crucible-red-team):
     SUPERSEDES: none
     ```
 
-    ### Why the single shared WITNESS line is correct for both
+    ### Why the single shared WITNESS line is correct on the PASS leg
 
     One witness line serves both verdicts because it checks the **PASS/FAIL boundary**, not the
     magnitude. `expect-fail=match` means "the failing world is when the pattern matches." The
@@ -290,8 +298,17 @@ Task tool (subagent_type: crucible-red-team):
     or Significant is nonzero. So on a clean (PASS) round the pattern does not match → witness
     does not fire → the PASS is consistent; on a non-clean (FAIL) round the pattern matches →
     witness fires → the FAIL is consistent. A PASS that secretly had F/S would make the pattern
-    match and Tier-2 would reject it; a FAIL that secretly had `0/0` would leave the pattern
-    unmatched and Tier-2 would reject it. The witness verifies only the boundary; the exact
+    match and Tier-2 would reject it — **that leg is enforced.**
+
+    **The FAIL leg is not.** Tier-2's `FAIL` path looks the body up from an `EXEC` line's `out`
+    field, and the mandated form cites a `WROTE`, so on a `FAIL` receipt no body is read and the pattern
+    is never run — even when the findings file resolves perfectly under `--root`. A FAIL that
+    secretly had `0/0` is accepted. Writing the same line on both verdicts is still right (it is
+    the line the next round's PASS is checked against, and the asymmetry is a linter gap tracked
+    on the #474 Tier-2 resolution issue, not an intended licence), but on a FAIL the consistency
+    between your verdict and your counts line is **reviewer-asserted, not linter-verified**.
+
+    The witness verifies only the boundary; the exact
     F/S magnitude for scoring is re-derived by the orchestrator from the findings file's
     severity sections, not from this witness.
 ```

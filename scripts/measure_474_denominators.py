@@ -393,13 +393,43 @@ def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
         return
     grep = ranged = memb = mandated = sig_form = sig_on_pass = 0
     rt_ns, rt_findings, rt_wrong_form = 0, 0, 0
+    skipped = []
     for f in files:
         text = pathlib.Path(f).read_text()
-        sections = rv.parse_receipt(text)
-        witness = rv.parse_witness(sections["WITNESS"])
-        artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
-        verdict = re.search(r"^VERDICT\s+(\S+)", text, re.M).group(1)
-        namespace = re.search(r"^RCPT v\S+\s+(\S+)", text, re.M).group(1)
+        # round-3 / S2 — LintError and NOTHING WIDER, for the same reason
+        # row_grep_membership narrows: this row measures the SHIPPED parser, so a
+        # genuine crash inside it must not be reattributed to corpus drift. The
+        # narrowing is sound here on its own terms: parse_receipt raises LintError
+        # (not KeyError) on a missing section, so the sections[...] subscripts cannot
+        # fire on a malformed file, and read_text() yields str. The corpus is written
+        # by live agents, so it will contain receipts that PRE-DATE this branch's new
+        # Tier-1 rules (rangeless expect-fail=match, duplicate/misplaced clauses) —
+        # those must SKIP, not abort a CI-gated script, or the same run_tests.sh goes
+        # red on the maintainer's machine and green on CI (where this row SKIPs
+        # wholesale). Every skip is named below, so a rejected receipt is visible
+        # rather than silently leaving the denominator.
+        try:
+            sections = rv.parse_receipt(text)
+            witness = rv.parse_witness(sections["WITNESS"])
+            artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
+        except rv.LintError as e:
+            skipped.append(f"{pathlib.Path(f).name}: {e}")
+            continue
+        # Same treatment for the two header regexes — but DEFENCE IN DEPTH, not a
+        # reachable bug today: `\s+` spans newlines, so on a receipt whose VERDICT line
+        # carries no value the match runs on and captures the NEXT line's first token
+        # rather than returning None. The guards exist so that narrowing either regex
+        # to `[ \t]+` later, or pointing --corpus at a truncated file, degrades to a
+        # counted skip instead of `AttributeError: 'NoneType' has no attribute group`,
+        # which is the same un-attributable hard abort the LintError guard above fixes.
+        m_verdict = re.search(r"^VERDICT\s+(\S+)", text, re.M)
+        m_ns = re.search(r"^RCPT v\S+\s+(\S+)", text, re.M)
+        if m_verdict is None or m_ns is None:
+            missing = "VERDICT line" if m_verdict is None else "RCPT header namespace"
+            skipped.append(f"{pathlib.Path(f).name}: no {missing}")
+            continue
+        verdict = m_verdict.group(1)
+        namespace = m_ns.group(1)
         is_rt = namespace.startswith("red-team/")
         rt_ns += is_rt
         if witness["kind"] != "grep":
@@ -417,12 +447,15 @@ def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
         elif witness["expect_fail"].startswith("/") and witness["expect_fail"].endswith("/"):
             sig_form += 1
             sig_on_pass += verdict == "PASS"
-    print(f"   figures     : receipts={len(files)} kind=grep={grep} ranged={ranged} "
+    print(f"   figures     : receipts={len(files)} measured={len(files) - len(skipped)} "
+          f"skipped={len(skipped)} kind=grep={grep} ranged={ranged} "
           f"membership-ok={memb}")
     print(f"                 mandated pattern=+match={mandated}  expect-fail=/re/={sig_form} "
           f"(of which on a PASS: {sig_on_pass})")
     print(f"                 red-team/ namespace={rt_ns}, witness targets a findings file="
           f"{rt_findings}, of those in the WRONG form={rt_wrong_form}")
+    for s in skipped:
+        print(f"   SKIPPED     : {s}")
     rep.advise("corpus receipts", len(files), 17)
     rep.advise("corpus kind=grep", grep, 13)
     rep.advise("corpus ranged", ranged, 13)

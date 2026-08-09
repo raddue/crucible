@@ -100,7 +100,7 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 
 - **`exec:<oneliner-cmd>`** — a shell command ≤120 characters that would produce `expect-fail` output in the failing world. Default for code-producing dispatches.
 - **`grep:<artifact>#<range>  pattern=<regex>`** — a byte-range re-read with a pattern check. Default for research/judge dispatches with no shell. Failing world: the pattern matches.
-  - `<artifact>` **must appear in this receipt's own `ARTIFACTS`** — the same rule a `<artifact>#<range>` citation gets under *Citation resolution* above, and a Tier-1 lint failure when broken.
+  - `<artifact>` **must appear in this receipt's own `ARTIFACTS`** — the ARTIFACTS-membership rule a `<artifact>#<range>` citation gets under *Citation resolution* above, and a Tier-1 lint failure when broken. **Not identical to the CLAIMS rule:** a CLAIMS citation whose artifact is a bare 12-hex receipt-hash prefix is exempt from membership (that is the SUPERSEDES justification form, resolved against the manifest instead). The witness rule has no such exemption, so a witness naming a superseded receipt by hash prefix is rejected where the same CLAIMS citation is accepted.
   - **Witness a file this dispatch wrote into the dispatch root** — a bare basename such as its own findings file, verification note, or saved command log. That is the one shape where both rules hold at once: it satisfies `ARTIFACTS` membership, and it resolves under `--root <dispatch-root>`, so the hash and the predicate are both really checked. `ARTIFACTS` is the set of files this receipt vouches for, **not only the set it created**, so declaring a file you merely `READ` is legitimate — but declaring a **repo-relative path** (`scripts/foo.py`) does not resolve under the dispatch root and hard-FAILs under the mandated `--strict` (see *Scope*, below, and the Tier-2 artifact-resolution issue). Dropping the `#<range>` is not a way out: a rangeless payload is exempt from the artifact, span and empty-body rules, cannot carry `expect-fail=match` at all, and still hard-FAILs on an unresolvable path-shaped name.
   - The `pattern=` clause pairs with `expect-fail=match` and with nothing else, and **exactly one clause** may appear on a witness line. A clause standing beside a `/regex/` or `"literal"` signature, or a second clause standing beside the first, is a Tier-1 lint failure rather than a silent preference for one of the two declared predicates — with two clauses on one line the silent preference would go to the *trailing* one, which is the one an appender controls.
 - **`lint:<rule-name>`** — a named semantic check re-applied to this very receipt. v1 rule vocabulary (closed): `all-claims-cited`, `trace-consistent`, `skip-declared`. Unknown rule names are a Tier-1 lint failure.
@@ -150,6 +150,7 @@ for each CLAIM:
 for each EXEC in TRACE:
   fail if exit=, dur=, or out= is missing
   fail if out= artifact is absent from ARTIFACTS
+  fail if out= byte-range is negative (b < a, e.g. `#L5-L1`)
   fail if out= byte-range exceeds 4 KiB
 
 for each EDIT / WROTE in TRACE:
@@ -178,6 +179,9 @@ witness structural check (every verdict):
         text for "literal") is empty, is < 4 chars, or does not compile
       fail if expect-fail is not `match` — the clause would be silently ignored, and
         a receipt that declares two predicates does not say which one it means
+      fail if a SECOND `pattern=` clause is present — exactly one clause per WITNESS
+        line; with two, the silent preference goes to the TRAILING one, which is the
+        one an appender controls
   `match` is NOT a self-contained signature — it names the WITNESS line's separate
     `pattern=` clause as the predicate, so:
       fail if expect-fail=match and kind is not grep
@@ -187,6 +191,7 @@ witness structural check (every verdict):
     witness, and it used to read as clean (#474).
   if kind=grep and the payload declares a #<range>:
     fail if <artifact> does not appear in ARTIFACTS (the same rule cited ranges get)
+    fail if the declared span is negative (b < a, e.g. `#L5-L1`)
     fail if the declared span exceeds 4 KiB — b−a for #B, a sound 1-byte-per-line
       floor for #L. Tier-1 is disk-free, so it asserts only what the receipt's own
       text proves; the authoritative byte cap is Tier-2's.

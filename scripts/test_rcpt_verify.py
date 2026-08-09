@@ -8,15 +8,19 @@ No pytest — matches the stdlib-only discipline of rcpt_verify.py itself, and t
 flat-in-scripts/ layout of scripts/test_catalog.py (a `scripts/tests/` subdir is
 caught by the repo-wide `tests/` .gitignore rule).
 """
+import contextlib
 import importlib.util
+import io
 import json
 import pathlib
 import hashlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "rcpt_verify.py"
@@ -997,7 +1001,8 @@ class TestParseWitness(unittest.TestCase):
         # #474 / D3: `match` USED to be admitted here on kind=exec with no pattern=
         # clause — a bare `match` carries no predicate, so Tier-2 read it as clean
         # (the P0). D3 makes that shape a Tier-1 error two ways over (clause required;
-        # bare `match` is kind=grep-only per return-convention.md:167), so this loop
+        # bare `match` is kind=grep-only per return-convention.md § "witness structural
+        # check"), so this loop
         # keeps only the exit= form and the `match` legs move to the #474 block below.
         # DECLARED CASUALTY: the plan's D3 blast-radius sweep says test_rcpt_verify.py
         # "constructs no bare-`match` witness at all" — this line was that witness.
@@ -1833,6 +1838,119 @@ class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
         with self.assertRaises(self.rv.LintError) as cm:
             self.rv.tier2_witness(witness, trace, self.root, True, "PASS")
         self.assertIn("matches body of round-7-findings.md", str(cm.exception))
+
+
+# --- #474 / round-3 S5 — the CLI bound on witness-predicate evaluation ------------
+#
+# COST DISCIPLINE: none of these tests waits out the real 5-second bound. The handler
+# is exercised by CALLING IT (test_30), and the end-to-end conversion runs with the
+# bound INJECTED down to 50 ms (test_32) — the timer plumbing is identical, only the
+# duration differs, so the test costs ~0.05 s and still proves that a catastrophic
+# predicate returns a LintError instead of hanging. The real 5-second constant is
+# pinned separately, as a value (test_30b), which costs nothing.
+CATASTROPHIC = "/(a+)+$/"
+CATASTROPHIC_BODY = "a" * 34 + "b\n"      # non-matching ⇒ full backtracking blow-up
+
+
+class TestWitnessTimeoutBound(unittest.TestCase):
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _catastrophic_receipt(self):
+        note = self.root / "verify-note.md"
+        note.write_text(CATASTROPHIC_BODY)
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        return _receipt(
+            f"grep:verify-note.md#L1-L1  pattern={CATASTROPHIC}  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+
+    def _benign_receipt(self):
+        note = self.root / "verify-note.md"
+        note.write_text("all fixes verified\n")
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        return _receipt(
+            "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+
+    # --- test 30 — the handler itself, driven directly: no signal, no wall clock
+    def test_30_alarm_handler_raises_LintError(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv._witness_alarm(signal.SIGALRM, None)
+        self.assertEqual(str(cm.exception), self.rv.WITNESS_TIMEOUT_MSG)
+
+    # --- test 30b — the shipped bound and its message, pinned byte-for-byte
+    def test_30b_bound_and_message_are_the_mandated_ones(self):
+        self.assertEqual(self.rv.WITNESS_TIMEOUT_S, 5)
+        self.assertEqual(
+            self.rv.WITNESS_TIMEOUT_MSG,
+            "witness predicate exceeded 5s — possible catastrophic backtracking")
+
+    # --- test 31 — importing the module installs NOTHING. _gen.py, sweep.py and this
+    #     very test module import rcpt_verify; a handler installed at import time would
+    #     silently change SIGALRM for all three.
+    def test_31_import_installs_no_sigalrm_handler(self):
+        before = signal.getsignal(signal.SIGALRM)
+        _import_rv()
+        self.assertIs(signal.getsignal(signal.SIGALRM), before)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    # --- test 32 — end-to-end: a catastrophic predicate under the mandated invocation
+    #     lint-FAILs with the timeout message instead of hanging. Bound injected to 50 ms.
+    def test_32_catastrophic_predicate_becomes_a_LintError_not_a_hang(self):
+        self.rv.WITNESS_TIMEOUT_S = 0.05
+        err = io.StringIO()
+        started = time.monotonic()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._catastrophic_receipt(), "tier2",
+                                        self.root, True)
+        elapsed = time.monotonic() - started
+        self.assertEqual(rc, 1)
+        self.assertEqual(err.getvalue().strip(), self.rv.WITNESS_TIMEOUT_MSG)
+        self.assertLess(elapsed, 2.0)        # it did NOT wait out the real predicate
+        # the finally disarmed the timer even on the raising path
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    # --- test 33 — a NORMAL predicate is unaffected, and the bound leaves no residue
+    def test_33_normal_predicate_unaffected_and_timer_cleared(self):
+        before = signal.getsignal(signal.SIGALRM)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2",
+                                        self.root, True)
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        self.assertIs(signal.getsignal(signal.SIGALRM), before)
+
+    # --- test 33b — the discriminator for 33: the same benign shape with a predicate
+    #     that DOES match still fails on the ordinary expect-fail path, so 33's pass is
+    #     a real clean verdict and not a witness that was never evaluated.
+    def test_33b_benign_shape_still_fires_on_a_matching_predicate(self):
+        note = self.root / "verify-note.md"
+        note.write_text("UNRESOLVED: one finding remains\n")
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        text = _receipt(
+            "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(text, "tier2", self.root, True)
+        self.assertEqual(rc, 1)
+        self.assertIn("matches body of verify-note.md", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import json, re, sys, hashlib, pathlib, typing
+import json, re, signal, sys, hashlib, pathlib, typing
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
@@ -22,6 +22,27 @@ CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
 
 class LintError(Exception):
     pass
+
+
+# ── #474 / round-3 S5 — the CLI-only bound on witness-predicate evaluation.
+#    DEFINED here, INSTALLED only by _verify_single. Defining a handler is inert;
+#    installing one at import time would silently change SIGALRM behaviour for
+#    _gen.py, sweep.py and test_rcpt_verify.py, which import this module and own
+#    their own signal disposition. See _compile_guard for why the bound is here
+#    and not around the re.search itself.
+WITNESS_TIMEOUT_S = 5
+WITNESS_TIMEOUT_MSG = (f"witness predicate exceeded {WITNESS_TIMEOUT_S}s — "
+                       "possible catastrophic backtracking")
+
+
+def _witness_alarm(signum, frame):
+    """SIGALRM → LintError, so a catastrophically-backtracking witness predicate
+    lint-FAILs one receipt (exit 1, message on stderr) instead of hanging the process
+    with no receipt and no verdict. Raising LintError directly is deliberate: it lands
+    in _verify_single's existing `except LintError` with no new failure path, and the
+    timer is armed around the witness evaluation ONLY, so there is nothing else the
+    alarm can be attributed to."""
+    raise LintError(WITNESS_TIMEOUT_MSG)
 
 
 # ── Tier-1 (v1 structural) — ported VERBATIM from the former eval-only lint.py
@@ -237,19 +258,27 @@ def _compile_guard(src, msg_prefix, shown):
     Compiling the RAW inner text instead would false-BLOCK the escape hatch D3
     prescribes (pattern="**Severity:** Fatal").
 
-    OPEN, NAMED, NOT CLOSED HERE (round-1 / SIG-5): the SEARCH is unbounded. A clause
-    that compiles fine can still hang re.search catastrophically — measured on this
-    tree, /(a+)+$/ against a 24-byte body takes 2.1 s and against a 40-byte body does
-    not return in 120 s, and the Tier-2 body cap is 4096 bytes. That outcome is worse
-    than the exception this guard replaces: a LintError is recoverable and attributed
-    to one record, a hang takes the process with no receipt and no verdict. The
-    exposure is pre-existing (an `expect-fail=/(a+)+$/` signature has been fed to the
-    same re.search since v1) and this branch widens the surface at the same seam by
-    admitting a second freely-authored source. It is NOT mitigated here: the available
-    stdlib bound, signal.setitimer, raises off the main thread, and this module is
-    imported by a hook — a try/except fallback around it would provide zero protection
-    in exactly the caller that matters while reading as though it provided some.
-    Carried as an open follow-up on the #474 Tier-2 resolution issue."""
+    THE SEARCH IS NOT BOUNDED HERE — it is bounded by the CALLER, and only one caller
+    does it (round-1 / SIG-5, round-3 / S4+S5). A clause that compiles fine can still
+    hang re.search catastrophically — measured on this tree, /(a+)+$/ against a 24-byte
+    body takes 2.1 s and against a 40-byte body does not return in 120 s, and the Tier-2
+    body cap is 4096 bytes. That outcome is worse than the exception this guard
+    replaces: a LintError is recoverable and attributed to one record, a hang takes the
+    process with no receipt and no verdict. The exposure is pre-existing (an
+    `expect-fail=/(a+)+$/` signature has been fed to the same re.search since v1) and
+    this branch widens the surface at the same seam by admitting a second
+    freely-authored source.
+
+    Where the bound lives, and why not here: _verify_single (the CLI path) wraps the
+    Tier-2 witness evaluation in signal.setitimer(ITIMER_REAL, 5) and converts SIGALRM
+    into a LintError — see _witness_alarm. That is the path that owns its process. This
+    module is NOT imported by any hook (hooks/rcpt-verify-hook.sh runs it as a
+    --tier1 SUBPROCESS, which never reaches this search at all); its only importers are
+    _gen.py, sweep.py and test_rcpt_verify.py, and installing a signal handler at import
+    time on their behalf would be the overreach — a handler is the owning process's
+    business, and setitimer's handler does run on the main thread, so those callers can
+    install one if they want it. --eval and --selftest do not route through
+    _verify_single and stay unbounded; carried on the #474 Tier-2 resolution issue."""
     try:
         re.compile(src)
     except re.error as e:
@@ -403,7 +432,9 @@ def parse_witness(body):
         # configuration (unlike the Tier-2 half, which cannot fire under the mandated
         # --root until artifact resolution lands).
         if kind != "grep":
-            # return-convention.md:167 already said so; the divergence was inert only
+            # return-convention.md § "witness structural check" ("fail if
+            # expect-fail=match and kind is not grep") already said so; the divergence
+            # was inert only
             # while bare `match` carried no predicate. Post-D3 an exec:/lint: witness
             # would newly run the reviewer's regex against the EXEC out= body.
             raise LintError(
@@ -485,7 +516,8 @@ def lint_receipt(text):
     claims = parse_claims(sections["CLAIMS"])
     witness = parse_witness(sections["WITNESS"])
     # #474 / D6 — a RANGED kind=grep witness payload must name an artifact the receipt
-    # itself declares. Not a new contract: return-convention.md:92 already says a
+    # itself declares. Not a new contract: return-convention.md § "Citation resolution"
+    # already says a
     # <artifact>#<range> citation is valid iff <artifact> appears in ARTIFACTS, and the
     # structurally identical EXEC out= rule is a few lines below. Sited here, not in
     # parse_witness, which never sees ARTIFACTS (its signature stays one-argument: an
@@ -688,7 +720,8 @@ def parse_v11_sections(text):
     # is `<predicate>[ | …]*` OR `none`/`<prefix>`/`none` — bare `TRIPWIRE:` matches
     # NEITHER, and "" would slip past both the `== "none"` two-leg gate and the
     # `if not body` predicate-loop skip in lint_v11_local (false-PASS). TRIPWIRE-CHILD
-    # only when the line is PRESENT (absence stays `none` per return-convention.md:402).
+    # only when the line is PRESENT (absence stays `none` per return-convention.md
+    # § "Recursive dispatch — TRIPWIRE-CHILD": "omitted — absence is treated as none").
     if tripwire == "":
         raise LintError("v1.1 TRIPWIRE: line has empty body (use a predicate or `none`)")
     if supersedes == "":
@@ -698,8 +731,9 @@ def parse_v11_sections(text):
     if any(t["verb"] == "DISPATCHED" for t in parse_trace(sections["TRACE"])) and trip_child is None:
         raise LintError(
             "v1.1 receipt with DISPATCHED in TRACE must emit TRIPWIRE-CHILD: "
-            "(return-convention.md:481; the :402 'absence is none' parenthetical is "
-            "scoped to the no-DISPATCHED case — tension tracked in #387)"
+            "(return-convention.md § 'Linter extension (Tier-1 additions for v1.1 "
+            "receipts)'; the § 'Recursive dispatch' 'absence is treated as none' "
+            "parenthetical is scoped to the no-DISPATCHED case — tension tracked in #387)"
         )
     return {"sections": sections, "tripwire": tripwire,
             "supersedes": supersedes, "trip_child": trip_child}
@@ -862,7 +896,8 @@ def witness_art_name(witness, cited, verdict):
     """#474 / D4 — which artifact the Tier-2 witness body comes from, and whether it
     came from the WITNESS payload. Returns (art_name, from_payload).
 
-    return-convention.md:230 already settles this: "For kind=grep, the cited artifact
+    return-convention.md § "kind=grep artifact/range resolution" already settles this:
+    "For kind=grep, the cited artifact
     AND range are those named on the grep:<artifact>#<range> payload's own #<range>
     (the witness line itself), NOT an out= field." derive_art_name is non-conformant
     for kind=grep — it returns the EXEC out= artifact or the READ/WROTE cited path.
@@ -903,7 +938,8 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     grep-kind READ/WROTE witnesses; the FAIL leg (tier2_verify_fail) body lookup is
     EXEC-only — so the SAME grep:READ/WROTE witness whose body matches expect-fail
     raises under PASS but returns clean under FAIL. derive_art_name keys this on verdict.
-    #474 sharpens this: return-convention.md:230 scopes the grep artifact/range rule to
+    #474 sharpens this: return-convention.md § "kind=grep artifact/range resolution"
+    scopes the grep artifact/range rule to
     BOTH branches, so the FAIL-leg inertness is a convention NON-CONFORMANCE, not merely
     lint.py parity. Reversing it is a convention change — deferred, not fixed here.
 
@@ -1054,7 +1090,8 @@ def tier2_witness(witness, trace, root, strict, verdict):
     #    slice. NOT body_text: a #B range over invalid UTF-8 decodes each bad byte to
     #    U+FFFD (3 bytes), which would inflate an in-budget range past the cap and
     #    false-FAIL.
-    # Scoped to ranged citations (the #L/#B read budget per return-convention.md:245);
+    # Scoped to ranged citations (the #L/#B read budget per return-convention.md
+    # § "Cost model": one Read of a byte-range <= 4 KiB per verified verdict);
     # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
     # #474 / S6: when the body came from the WITNESS payload, the cap keys on THAT range
     # — the one actually read — not on parse_out_range(cited), which the grep path never
@@ -1470,7 +1507,20 @@ def _verify_single(text, mode, root, strict, ledger=None) -> int:
             witness = parse_witness(sections["WITNESS"])
             notes = tier2_artifacts(artifacts, trace, root, strict)
             if verdict in {"PASS", "FAIL"}:
-                notes += tier2_witness(witness, trace, root, strict, verdict)
+                # #474 / round-3 S5 — bound ONLY this call. lint_receipt merely
+                # re.compiles and tier2_artifacts runs no predicate, so a wider wrap
+                # would let WITNESS_TIMEOUT_MSG fire on (say) a slow disk read and say
+                # something untrue. Handler + timer are installed and torn down here,
+                # never at import: this function is the CLI entry path and therefore
+                # main-thread by construction. The finally restores BOTH the previous
+                # disposition and a disarmed timer, so nothing survives the call.
+                prev = signal.signal(signal.SIGALRM, _witness_alarm)
+                signal.setitimer(signal.ITIMER_REAL, WITNESS_TIMEOUT_S)
+                try:
+                    notes += tier2_witness(witness, trace, root, strict, verdict)
+                finally:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
+                    signal.signal(signal.SIGALRM, prev)
             # Part-3 receipt-ledger binding: only with an orchestrator-supplied --ledger
             # (no default-path synthesis). A mismatch is a hard FAIL (strict-independent);
             # absent --ledger is advisory UNVERIFIABLE, and only when there IS a DISPATCHED line.
