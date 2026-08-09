@@ -1275,6 +1275,21 @@ class TestWitnessTier1Guards(unittest.TestCase):
         self.rv.parse_witness(          # must not raise — that IS the pin
             ["grep:f.md#L1-L100  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
 
+    # --- test 15d — round-4 / M6: WITNESS_SPAN_CAP is the ONE name for the 4 KiB
+    #     budget. `check_span_bound` used to hard-code 4096 thirteen lines above the
+    #     constant's declaration, so the two spellings could drift silently. Moving the
+    #     cap and re-running both call sites is the discriminator: a hard-coded literal
+    #     would ignore it and neither range would newly raise.
+    def test_15d_span_cap_is_the_single_constant_both_sites_read(self):
+        self.assertEqual(self.rv.WITNESS_SPAN_CAP, 4096)
+        self.rv.WITNESS_SPAN_CAP = 10          # fresh module per test (setUp re-imports)
+        with self.assertRaises(self.rv.LintError):      # EXEC site, 80 B/line estimate
+            self.rv.check_exec_range_bound("`run`  exit=0  out=a.log#B1-B12")
+        with self.assertRaises(self.rv.LintError):      # grep site, 1 B/line floor
+            self.rv.parse_witness(
+                ["grep:f.md#B1-B12  pattern=/significant=[1-9]/  "
+                 "expect-fail=match  ran=TRACE#1"])
+
     def test_15c_exec_negative_range_message_unchanged(self):
         args = "`run`  exit=0  out=a.log#L9-L1"
         with self.assertRaises(self.rv.LintError) as cm:
@@ -1889,12 +1904,18 @@ class TestWitnessTimeoutBound(unittest.TestCase):
             self.rv._witness_alarm(signal.SIGALRM, None)
         self.assertEqual(str(cm.exception), self.rv.WITNESS_TIMEOUT_MSG)
 
-    # --- test 30b — the shipped bound and its message, pinned byte-for-byte
+    # --- test 30b — the shipped bound and its message, pinned byte-for-byte. The
+    #     message changed in round 4 (M3): the bound wraps tier2_witness, which does
+    #     resolve_base + a whole-file read_text() + read_bytes() before re.search, so
+    #     the old wording blamed the predicate for what may be a slow artifact read.
     def test_30b_bound_and_message_are_the_mandated_ones(self):
         self.assertEqual(self.rv.WITNESS_TIMEOUT_S, 5)
         self.assertEqual(
             self.rv.WITNESS_TIMEOUT_MSG,
-            "witness predicate exceeded 5s — possible catastrophic backtracking")
+            "witness evaluation exceeded 5s "
+            "(predicate backtracking or a slow/large artifact read)")
+        # it must not re-narrow to the predicate alone — that is the claim M3 falsified
+        self.assertNotIn("witness predicate exceeded", self.rv.WITNESS_TIMEOUT_MSG)
 
     # --- test 31 — importing the module installs NOTHING. _gen.py, sweep.py and this
     #     very test module import rcpt_verify; a handler installed at import time would
@@ -1946,6 +1967,73 @@ class TestWitnessTimeoutBound(unittest.TestCase):
             artifacts=[("verify-note.md", h, str(note.stat().st_size))],
             trace=[f"WROTE  verify-note.md  sha256:{h}"],
             skill="quality-gate/9-fix-verifier")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(text, "tier2", self.root, True)
+        self.assertEqual(rc, 1)
+        self.assertIn("matches body of verify-note.md", err.getvalue())
+
+    # --- test 34 — round-4 / M4: the bound BORROWS the process-wide ITIMER_REAL, so it
+    #     must hand it back. The old finally called setitimer(ITIMER_REAL, 0)
+    #     unconditionally and discarded setitimer's return value — the previous timer —
+    #     silently cancelling an in-process caller's own alarm. 30 s is far outside the
+    #     test's runtime, so a surviving timer is unambiguous.
+    def test_34_a_callers_pre_armed_itimer_survives_the_bound(self):
+        prev_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, lambda *a: None)
+        signal.setitimer(signal.ITIMER_REAL, 30)
+        self.addCleanup(signal.signal, signal.SIGALRM, prev_handler)
+        self.addCleanup(signal.setitimer, signal.ITIMER_REAL, 0)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        self.assertEqual(rc, 0, err.getvalue())
+        remaining = signal.getitimer(signal.ITIMER_REAL)[0]
+        self.assertGreater(remaining, 0.0)      # was 0.0 before the fix: cancelled
+
+    def test_34b_with_no_caller_timer_the_bound_still_leaves_none_armed(self):
+        # Discriminator for 34: the restore must be conditional on there having BEEN a
+        # timer, not a blanket re-arm. (test_33 pins the same property end-to-end; this
+        # states it as 34's counterpart so the pair reads as one rule.)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    # --- test 35 — round-4 / M7: signal.setitimer/SIGALRM are Unix-only. Simulated by
+    #     removing the attribute rather than by needing a non-Unix machine. Before the
+    #     guard this raised AttributeError, which `except LintError` does not catch, so
+    #     --tier2 aborted with a traceback where it used to emit a verdict.
+    def test_35_tier2_degrades_to_unbounded_where_setitimer_is_absent(self):
+        sentinel = object()
+        saved = getattr(signal, "setitimer", sentinel)
+        del signal.setitimer
+        self.addCleanup(lambda: saved is not sentinel
+                        and setattr(signal, "setitimer", saved))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        self.assertEqual(rc, 0, err.getvalue())
+
+    def test_35b_the_unbounded_fallback_still_evaluates_the_predicate(self):
+        # Discriminator for 35: without this, a fallback that skipped tier2_witness
+        # entirely would also return 0.
+        note = self.root / "verify-note.md"
+        note.write_text("UNRESOLVED: one finding remains\n")
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        text = _receipt(
+            "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+        sentinel = object()
+        saved = getattr(signal, "setitimer", sentinel)
+        del signal.setitimer
+        self.addCleanup(lambda: saved is not sentinel
+                        and setattr(signal, "setitimer", saved))
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             rc = self.rv._verify_single(text, "tier2", self.root, True)

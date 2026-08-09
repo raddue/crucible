@@ -102,7 +102,7 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 - **`grep:<artifact>#<range>  pattern=<regex>`** — a byte-range re-read with a pattern check. Default for research/judge dispatches with no shell. Failing world: the pattern matches.
   - `<artifact>` **must appear in this receipt's own `ARTIFACTS`** — the ARTIFACTS-membership rule a `<artifact>#<range>` citation gets under *Citation resolution* above, and a Tier-1 lint failure when broken. **Not identical to the CLAIMS rule:** a CLAIMS citation whose artifact is a bare 12-hex receipt-hash prefix is exempt from membership (that is the SUPERSEDES justification form, resolved against the manifest instead). The witness rule has no such exemption, so a witness naming a superseded receipt by hash prefix is rejected where the same CLAIMS citation is accepted.
   - **Witness a file this dispatch wrote into the dispatch root** — a bare basename such as its own findings file, verification note, or saved command log. That is the one shape where both rules hold at once: it satisfies `ARTIFACTS` membership, and it resolves under `--root <dispatch-root>`, so the hash and the predicate are both really checked. `ARTIFACTS` is the set of files this receipt vouches for, **not only the set it created**, so declaring a file you merely `READ` is legitimate — but declaring a **repo-relative path** (`scripts/foo.py`) does not resolve under the dispatch root and hard-FAILs under the mandated `--strict` (see *Scope*, below, and the Tier-2 artifact-resolution issue). Dropping the `#<range>` is not a way out: a rangeless payload is exempt from the artifact, span and empty-body rules, cannot carry `expect-fail=match` at all, and still hard-FAILs on an unresolvable path-shaped name.
-  - The `pattern=` clause pairs with `expect-fail=match` and with nothing else, and **exactly one clause** may appear on a witness line. A clause standing beside a `/regex/` or `"literal"` signature, or a second clause standing beside the first, is a Tier-1 lint failure rather than a silent preference for one of the two declared predicates — with two clauses on one line the silent preference would go to the *trailing* one, which is the one an appender controls.
+  - The `pattern=` clause pairs with `expect-fail=match` and with nothing else, and it is read only where the grammar puts it: **at the end of the payload**. A clause standing beside a `/regex/` or `"literal"` signature, or a **second trailing** clause standing beside the first, is a Tier-1 lint failure rather than a silent preference for one of the two declared predicates — with two clauses on one line the silent preference would go to the *trailing* one, which is the one an appender controls. A `pattern=` token that is **not** trailing (some non-clause token follows it) is not a clause at all: it stays part of the search payload and declares no predicate. That shape fails closed under `expect-fail=match` ("requires a `pattern=` clause"), and beside a `/regex/` or `"literal"` signature it is accepted with the signature as the sole predicate — so a witness whose `pattern=` looks ignored is telling you it was never parsed as a clause. Tightening that into a rejection is a live option, not an oversight; it would need its own RED test and a measured false-reject cost against rangeless `grep:` payloads whose search text legitimately contains the token.
 - **`lint:<rule-name>`** — a named semantic check re-applied to this very receipt. v1 rule vocabulary (closed): `all-claims-cited`, `trace-consistent`, `skip-declared`. Unknown rule names are a Tier-1 lint failure.
 
 ### `expect-fail` signature forms
@@ -172,16 +172,19 @@ witness structural check (every verdict):
   fail if expect-fail is a /regex/ or "literal" that does not compile (the "literal"
     form is re.escape'd first, so it always compiles — a quoted literal is a LITERAL,
     not a regex)
-  if a `pattern=` clause is present (kind=grep only — it is stripped nowhere else):
+  if a TRAILING `pattern=` clause is present (kind=grep only — it is stripped nowhere
+    else; a `pattern=` token with a non-clause token after it is payload text, not a
+    clause, and reaches none of the rules below):
       fail if the clause is not DELIMITED — `/regex/` or `"literal"`; a bare
         undelimited token yields no usable regex source and reads as "no predicate"
       fail if the clause's DERIVED source (inner text for /regex/, re.escape'd inner
         text for "literal") is empty, is < 4 chars, or does not compile
       fail if expect-fail is not `match` — the clause would be silently ignored, and
         a receipt that declares two predicates does not say which one it means
-      fail if a SECOND `pattern=` clause is present — exactly one clause per WITNESS
-        line; with two, the silent preference goes to the TRAILING one, which is the
-        one an appender controls
+      fail if a SECOND trailing `pattern=` clause is present — with two, the silent
+        preference goes to the TRAILING one, which is the one an appender controls
+        (the rule re-runs the same trailing-anchored match on the stripped payload,
+        so it reads "more than one", not "exactly two")
   `match` is NOT a self-contained signature — it names the WITNESS line's separate
     `pattern=` clause as the predicate, so:
       fail if expect-fail=match and kind is not grep
@@ -249,7 +252,7 @@ if --ledger PATH given:                     # receipt-ledger binding (membership
 
 *The verdict must be `PASS`.* On a `FAIL` receipt the body lookup is confined to a cited `EXEC`'s `out` range, so the mandated red-team form — a `grep:` payload citing `ran=TRACE#N` where entry *N* is a `WROTE` — derives no artifact at all and **nothing is read, even when the file resolves perfectly**. Round 1 of every red-team dispatch is a `FAIL` by construction, so the Tier-2 witness rules are inert on precisely the receipt later rounds are anchored to. The `kind=grep` rule above is written for both branches deliberately; the implementation covers `PASS` only, and closing that asymmetry is a convention change rather than a bug fix.
 
-The Tier-1 rules (predicate required and well-formed, exactly one `pattern=` clause, `ARTIFACTS` membership, span bound) are disk-free and verdict-independent, and therefore live in every configuration. Both gaps above are the Tier-2 artifact-resolution issue, tracked separately.
+The Tier-1 rules (predicate required and well-formed, no second trailing `pattern=` clause, `ARTIFACTS` membership, span bound) are disk-free and verdict-independent, and therefore live in every configuration. Both gaps above are the Tier-2 artifact-resolution issue, tracked separately.
 
 **Hazard — numeric predicates against command-echo logs (facet (c), documentation only).** A numeric `expect-fail` regex such as `/[1-9]/` matches the `8` in a path like `artifact-8.md`, so a witness pointed at a log that **echoes its own command** (`# cmd: … grep -nE …`) or at a file whose prose quotes prior counts will fire on the echo rather than on the measurement — a false FAIL. Observed live on real receipts. No heuristic echo-stripping is specified: it would have to guess at log format. The workaround is to point the witness at the narrow range carrying the measurement (which the `#<range>` rule above already encourages), or to write the predicate against a sentinel the echo cannot contain.
 

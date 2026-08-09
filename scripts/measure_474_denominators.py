@@ -11,19 +11,20 @@ of aging quietly inside a document.
 **What is GATING and what is ADVISORY** (stated precisely, because it used to be
 overstated — round-1 / MIN-2 and MIN-3). Gating = enters the exit code:
 
-  * rows 1-3 and 5-6 in full, and row 4's `max #L span` + in-band token pair;
+  * rows 1-3 and 5-6 in full, and row 4's calibration-pin PRESENCE check;
   * every one of those reads only committed files, so they return the same verdict on
     CI and on any checkout. That is what CLAUDE.md's "single source of truth … so
     local and CI never drift" requires of anything `run_tests.sh` invokes.
 
 Advisory = printed with its expected value, never gating:
 
-  * row 4's literal / range-shaped / accepted counts — a census of a high-churn test
-    suite, where any new `out=` token moves the figure for reasons unrelated to
-    correctness. The in-band pair is the part that carries meaning — it gates that RED
-    test 15's `out=a.log#L1-L100` calibration pin still EXISTS — and it stays gating.
-    It is not itself a leak detector: row 6 is where a calibration leak fires (round-2 /
-    MIN-3).
+  * every one of row 4's five figures — literal / range-shaped / accepted (round-1 /
+    MIN-3) and `max #L span` / the in-band token list (round-4 / S1). All five are a
+    census of a high-churn test suite: any future `out=` token in it moves one of them
+    for reasons unrelated to correctness. What carries meaning is strictly weaker than
+    an exact census and is gated on its own — that RED test 15's `out=a.log#L1-L100`
+    calibration pin still EXISTS. None of this is a leak detector: row 6 is where a
+    calibration leak fires (round-2 / MIN-3).
   * row 7 in its entirety — it reads a gitignored, machine-local corpus under `$HOME`.
     Asserting there would make this same script return different verdicts on CI (where
     it SKIPs) and on the maintainer's machine (where the corpus exists).
@@ -56,7 +57,8 @@ additions, none to drift** (each named at its row):
     RED test 15 pins EXEC's calibration with `out=a.log#L1-L100`, which is deliberately
     inside the band. An in-band token in the *test* file is the guard, not the exposure.
     (Its literal / range-shaped / accepted counts were 21/19/15 → 25/22/17 when this
-    row still asserted them; they are advisory as of round-1 / MIN-3.)
+    row still asserted them; they are advisory as of round-1 / MIN-3, and `max #L span`
+    / the in-band list joined them as of round-4 / S1 — the pin's PRESENCE is the gate.)
 
 Unmoved: `return-convention.md` 4/3, `red-team-prompt.md` 0/0, the 10-block LINT
 partition 5 FAIL / 5 PASS, and every §0e corpus figure.
@@ -245,7 +247,8 @@ def row_exec_jsonl(rv, rep: Report):
     rep.check("jsonl in-band", [t for t, _ in band], [])
 
 
-def row_exec_file(rv, rep: Report, relpath, n, want, note="", assert_counts=True):
+def row_exec_file(rv, rep: Report, relpath, n, want, note="", assert_counts=True,
+                  pin_token=None):
     text = (ROOT / relpath).read_text()
     lit, rng, acc, band, max_span = classify(rv, out_tokens(text))
     blocks = rcpt_blocks(text) if relpath.endswith(".md") else []
@@ -273,20 +276,41 @@ def row_exec_file(rv, rep: Report, relpath, n, want, note="", assert_counts=True
         # this file. They are a census of a high-churn test suite: any future
         # rcpt_verify test that happens to carry an `out=` token moves them and turns
         # CI red for a reason unrelated to correctness. What is load-bearing here is
-        # the in-band pair below, and only that: it guards that RED test 15's
-        # `out=a.log#L1-L100` calibration pin still exists in the file. It cannot
-        # itself detect a calibration leak — classify() does its own arithmetic against
+        # ONE property, gated below since round-4 / S1: RED test 15's
+        # `out=a.log#L1-L100` calibration pin still exists in the file. Not even that
+        # detects a calibration leak — classify() does its own arithmetic against
         # script-local BAND_LO/BAND_HI and never calls check_span_bound, so row 4
         # returns identical figures under any calibration (round-2 / MIN-3). A LEAK
         # fires at row 6 (lint_receipt → check_exec_range_bound), and test_9c/test_15b
         # cover the reverse direction. Counts are printed so a reviewer can still see
         # the denominator.
         print(f"   advisory    : literal/range-shaped/accepted are printed, NOT asserted "
-              f"(high-churn file; the in-band pair below is the gate)")
-    rep.check(f"{relpath} max #L span", max_span, want["max_l_span"])
+              f"(high-churn file; the calibration pin below is the gate)")
     key = "in_band_blocks" if relpath.endswith(".md") else "in_band_tokens"
     got = sorted(attributed) if relpath.endswith(".md") else sorted(band)
-    rep.check(f"{relpath} {key}", got, sorted(want[key]))
+    if pin_token is None:
+        rep.check(f"{relpath} max #L span", max_span, want["max_l_span"])
+        rep.check(f"{relpath} {key}", got, sorted(want[key]))
+    else:
+        # round-4 / S1 — the SAME rot property the three token columns were demoted for
+        # (round-1 / MIN-3) applies to these two figures, because they are computed from
+        # the same tokens over the same high-churn file. `max #L span` and the exact
+        # in-band LIST both go red when an unrelated future test carries any out= token
+        # with a span over 99, or any span in [52, 4096] — measured: injecting one
+        # `out=b.log#L1-L300` line produced 2 gated failures while leaving the thing they
+        # were protecting fully intact. What is load-bearing is strictly weaker and is
+        # what the rationale above actually describes: RED test 15's calibration pin is
+        # still PRESENT. That is gated below; the two figures stay printed and compared
+        # as advisories. A calibration LEAK was never caught here — it fires at row 6
+        # (lint_receipt → check_exec_range_bound), verified by simulation.
+        rep.advise(f"{relpath} max #L span", max_span, want["max_l_span"])
+        rep.advise(f"{relpath} {key}", got, sorted(want[key]))
+        # The trailing `"` is part of the token BY CONSTRUCTION: TOKENIZATION is
+        # `out=\S+` over raw file text, and the pin lives inside a double-quoted Python
+        # string in the test. Rewriting test 15's quoting is therefore a real edit to the
+        # pin and is meant to be visible here.
+        rep.check(f"{relpath} calibration pin present",
+                  any(t == pin_token for t, _ in band), True)
 
 
 def row_grep_membership(rv, rep: Report):
@@ -395,7 +419,6 @@ def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
     rt_ns, rt_findings, rt_wrong_form = 0, 0, 0
     skipped = []
     for f in files:
-        text = pathlib.Path(f).read_text()
         # round-3 / S2 — LintError and NOTHING WIDER, for the same reason
         # row_grep_membership narrows: this row measures the SHIPPED parser, so a
         # genuine crash inside it must not be reattributed to corpus drift. The
@@ -408,11 +431,23 @@ def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
         # red on the maintainer's machine and green on CI (where this row SKIPs
         # wholesale). Every skip is named below, so a rejected receipt is visible
         # rather than silently leaving the denominator.
+        #
+        # round-4 / M5 — the READ IS INSIDE THE TRY, and the guard is (LintError, OSError,
+        # UnicodeDecodeError). It is not only a malformed *receipt* that can reach this
+        # loop: `--corpus DIR` is documented and glob-driven, so a non-UTF-8 byte
+        # (UnicodeDecodeError, a ValueError — not an OSError), an unreadable file, or a
+        # directory named `rcpt-*-asreturned.txt` (IsADirectoryError) all arrive here.
+        # With the read one line above the try, each of those aborted a run_tests.sh-gated
+        # script with a traceback — red on the maintainer's machine, green on CI, which is
+        # the exact machine-divergence this row was demoted to advisory to prevent. The
+        # narrowing argument is unchanged: still no bare `except Exception`, so a genuine
+        # crash inside the SHIPPED parser is not reattributed to corpus drift.
         try:
+            text = pathlib.Path(f).read_text()
             sections = rv.parse_receipt(text)
             witness = rv.parse_witness(sections["WITNESS"])
             artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
-        except rv.LintError as e:
+        except (rv.LintError, OSError, UnicodeDecodeError) as e:
             skipped.append(f"{pathlib.Path(f).name}: {e}")
             continue
         # Same treatment for the two header regexes — but DEFENCE IN DEPTH, not a
@@ -495,9 +530,10 @@ def main(argv=None):
         literal=None, range_shaped=None, accepted=None, max_l_span=99,
         in_band_tokens=[('out=a.log#L1-L100"', 99)]),
         note="21/19/15 and max span 39 in the plan's §0h; S1's RED test 15 added "
-             "out=a.log#L1-L100 — an in-band token HERE is the guard that fails if EXEC's "
-             "calibration leaks, not exposure. Counts advisory since round-1/MIN-3.",
-        assert_counts=False)
+             "out=a.log#L1-L100 — an in-band token HERE is the guard, not exposure. "
+             "Every column is advisory for this file (round-1/MIN-3, round-4/S1); the "
+             "GATE is that test 15's pin is still present.",
+        assert_counts=False, pin_token='out=a.log#L1-L100"')
     row_grep_membership(rv, rep)
     row_taught_lint(rv, rep)
     row_corpus(rv, rep, corpus)

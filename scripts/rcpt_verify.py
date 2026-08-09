@@ -31,8 +31,14 @@ class LintError(Exception):
 #    their own signal disposition. See _compile_guard for why the bound is here
 #    and not around the re.search itself.
 WITNESS_TIMEOUT_S = 5
-WITNESS_TIMEOUT_MSG = (f"witness predicate exceeded {WITNESS_TIMEOUT_S}s — "
-                       "possible catastrophic backtracking")
+# round-4 / M3 — the message names EVERYTHING inside the bound, not just the regex.
+# The wrapped call is tier2_witness, which does resolve_base (stat + symlink walk), a
+# whole-file read_text() on the rangeless grep path (_read_cited_range) and a
+# read_bytes() for the #B cap BEFORE re.search runs, so "catastrophic backtracking"
+# alone would blame the predicate for a slow or very large artifact read. The narrow
+# wrap is still the right one (see _verify_single) — it is the string that was wrong.
+WITNESS_TIMEOUT_MSG = (f"witness evaluation exceeded {WITNESS_TIMEOUT_S}s "
+                       "(predicate backtracking or a slow/large artifact read)")
 
 
 def _witness_alarm(signum, frame):
@@ -179,6 +185,13 @@ def parse_out_range(args_str):
     return OutRange(m.group(1), m.group(2), int(m.group(3)), int(m.group(4)))
 
 
+# The 4 KiB budget from return-convention.md § Cost model, ONE name (round-4 / M6).
+# Both span sites — EXEC's out= bound and #474/D6's grep-witness bound — go through
+# check_span_bound, and the Tier-2 cap message interpolates this same constant, so a
+# second spelling of 4096 could only ever drift from the text it is supposed to match.
+WITNESS_SPAN_CAP = 4096
+
+
 def check_span_bound(kind, a, b, *, bytes_per_line, label, detail):
     """The span arithmetic shared by EXEC's out= bound and #474/D6's grep-witness
     bound. Tier-1 is disk-free, so a #L span can only be reasoned about from the
@@ -195,7 +208,7 @@ def check_span_bound(kind, a, b, *, bytes_per_line, label, detail):
     if b < a:
         raise LintError(f"{label} range negative: {detail}")
     span_bytes = (b - a) if kind == "B" else (b - a) * bytes_per_line
-    if span_bytes > 4096:
+    if span_bytes > WITNESS_SPAN_CAP:
         raise LintError(f"{label} range exceeds 4 KiB: {detail}")
 
 
@@ -207,9 +220,6 @@ def check_exec_range_bound(args_str):
         raise LintError(f"EXEC missing out= or bad range: {args_str}")
     check_span_bound(r.kind, r.start, r.end,
                      bytes_per_line=80, label="EXEC", detail=args_str)
-
-
-WITNESS_SPAN_CAP = 4096
 
 
 def parse_claims(body):
@@ -271,7 +281,8 @@ def _compile_guard(src, msg_prefix, shown):
 
     Where the bound lives, and why not here: _verify_single (the CLI path) wraps the
     Tier-2 witness evaluation in signal.setitimer(ITIMER_REAL, 5) and converts SIGALRM
-    into a LintError — see _witness_alarm. That is the path that owns its process. This
+    into a LintError — see _witness_alarm. Where setitimer does not exist (non-Unix)
+    that call degrades to unbounded rather than aborting (round-4 / M7). That is the path that owns its process. This
     module is NOT imported by any hook (hooks/rcpt-verify-hook.sh runs it as a
     --tier1 SUBPROCESS, which never reaches this search at all); its only importers are
     _gen.py, sweep.py and test_rcpt_verify.py, and installing a signal handler at import
@@ -315,6 +326,15 @@ def _check_clause_shape(clause):
         # can only ever false-reject. It is NOT what closes the fail-open — the
         # non-empty rule above is. Kept because dropping it would be an undeclared
         # relaxation of the accepted subset (measured cost: 0 of 7 real clauses).
+        #
+        # round-4 / M1 — DELIBERATELY not the same string the expect-fail literal
+        # floor measures, and NOT to be "unified" with it. This floor counts the
+        # DERIVED source; parse_witness's `"literal"` floor counts the RAW inner text.
+        # So pattern="a.b" is accepted (derives `a\.b`, 4 chars) where
+        # expect-fail="a.b" is rejected — an inconsistency in the accepted subset, in
+        # the fail-closed direction, and both are documented as written. Unifying on
+        # the raw text would LOWER this floor for every escaping literal, which is a
+        # relaxation of a clause rule and needs its own argument, not a tidy-up.
         raise LintError(f"WITNESS pattern= clause too short: {clause!r}")
     _compile_guard(src, "WITNESS pattern= clause is not a valid regex", clause)
 
@@ -1509,18 +1529,40 @@ def _verify_single(text, mode, root, strict, ledger=None) -> int:
             if verdict in {"PASS", "FAIL"}:
                 # #474 / round-3 S5 — bound ONLY this call. lint_receipt merely
                 # re.compiles and tier2_artifacts runs no predicate, so a wider wrap
-                # would let WITNESS_TIMEOUT_MSG fire on (say) a slow disk read and say
-                # something untrue. Handler + timer are installed and torn down here,
-                # never at import: this function is the CLI entry path and therefore
-                # main-thread by construction. The finally restores BOTH the previous
-                # disposition and a disarmed timer, so nothing survives the call.
-                prev = signal.signal(signal.SIGALRM, _witness_alarm)
-                signal.setitimer(signal.ITIMER_REAL, WITNESS_TIMEOUT_S)
-                try:
+                # would put still more non-predicate work under one message (the wrap
+                # is already wider than re.search — see WITNESS_TIMEOUT_MSG, round-4/M3).
+                # Handler + timer are installed and torn down here, never at import:
+                # this function is the CLI entry path and therefore main-thread by
+                # construction.
+                #
+                # round-4 / M7 — SIGALRM and setitimer are Unix-only. Without the guard
+                # the attribute access raises AttributeError, which `except LintError`
+                # does not catch, so --tier2 would abort with a traceback on a platform
+                # where it previously produced a verdict. The degraded mode is
+                # "unbounded", which is exactly what this call was before round 3.
+                if hasattr(signal, "setitimer") and hasattr(signal, "SIGALRM"):
+                    # round-4 / M4 — setitimer RETURNS the previous timer, and the old
+                    # code discarded it, so an in-process caller's pre-armed ITIMER_REAL
+                    # was cancelled by a verification. Captured and restored verbatim.
+                    # Two residuals, stated rather than solved: (a) a caller alarm that
+                    # would have fired inside our window is delivered to _witness_alarm
+                    # and becomes this receipt's LintError; (b) the restored delay is the
+                    # remaining delay as of arm-time, so a caller's deadline slips by up
+                    # to WITNESS_TIMEOUT_S. Both are inherent to sharing one process-wide
+                    # timer; the CLI path this function owns arms nothing beforehand.
+                    prev = signal.signal(signal.SIGALRM, _witness_alarm)
+                    prev_delay, prev_interval = signal.setitimer(
+                        signal.ITIMER_REAL, WITNESS_TIMEOUT_S)
+                    try:
+                        notes += tier2_witness(witness, trace, root, strict, verdict)
+                    finally:
+                        if prev_delay:
+                            signal.setitimer(signal.ITIMER_REAL, prev_delay, prev_interval)
+                        else:
+                            signal.setitimer(signal.ITIMER_REAL, 0)
+                        signal.signal(signal.SIGALRM, prev)
+                else:
                     notes += tier2_witness(witness, trace, root, strict, verdict)
-                finally:
-                    signal.setitimer(signal.ITIMER_REAL, 0)
-                    signal.signal(signal.SIGALRM, prev)
             # Part-3 receipt-ledger binding: only with an orchestrator-supplied --ledger
             # (no default-path synthesis). A mismatch is a hard FAIL (strict-independent);
             # absent --ledger is advisory UNVERIFIABLE, and only when there IS a DISPATCHED line.
