@@ -1693,5 +1693,147 @@ class TestRound1InlineDiskDisposition(unittest.TestCase):
                 [p for p in problems if "coverage that cannot fail" in p], [])
 
 
+class TestRound2DuplicateClause(unittest.TestCase):
+    """Round-2 / SIG-1 — `_WITNESS_CLAUSE_RE` is `\\s*$`-anchored, so on a payload
+    carrying TWO `pattern=` tokens `re.search` binds the LAST one and leaves the first
+    sitting inertly inside `payload`. Only the last is shape-checked by
+    `_check_clause_shape` and only the last is evaluated at Tier-2, so APPENDING ONE
+    TOKEN to the mandated red-team witness restored #474 verbatim: a clean PASS over a
+    findings body declaring nonzero counts, with the author's real predicate demoted to
+    dead text. The winning clause is the trailing one — the one an appender controls.
+
+    Two declared predicates ACROSS fields is already a hard reject (test 26b), and
+    `return-convention.md` ships the reason as normative text: the receipt declares two
+    predicates and the linter cannot know which the author meant. Two predicates INSIDE
+    one field is the same ambiguity, so it gets the same answer — rejected, never
+    silently resolved by position."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 27 — the escape itself
+    def test_27_two_pattern_clauses_raise_at_tier1(self):
+        line = (f"grep:round-9-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                "pattern=/zzzz-no-match/  expect-fail=match  ran=TRACE#2")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness([line])
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS carries more than one pattern= clause: "
+            "'round-9-findings.md#L1-L1  pattern=/significant=[1-9]|fatal=[1-9]/  "
+            "pattern=/zzzz-no-match/'")
+
+    def test_27b_the_reproduction_receipt_no_longer_lints_clean(self):
+        # The shape SIG-1 executed end-to-end: the mandated witness with one extra
+        # never-matching clause appended. Pre-fix this was a clean Tier-1 PASS and the
+        # appended clause was the only one Tier-2 ever evaluated.
+        text = _receipt(
+            f"grep:round-9-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+            "pattern=/zzzz-no-match/  expect-fail=match  ran=TRACE#2",
+            artifacts=[("round-9-findings.md", H64, "2980")],
+            trace=[f"READ  design.md  sha256:{H64}",
+                   f"WROTE  round-9-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_27c_a_third_clause_is_rejected_by_the_same_rule(self):
+        # The re-search runs against the STRIPPED payload, so the rule is on "more than
+        # one" and not on "exactly two": N clauses collapse to the same rejection.
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/aaaa/  pattern=/bbbb/  pattern=/cccc/  "
+                 "expect-fail=match  ran=TRACE#1"])
+        self.assertIn("more than one pattern= clause", str(cm.exception))
+
+    def test_27d_the_single_clause_counterpart_is_still_accepted(self):
+        # No-false-BLOCK conjunct: without it, 27/27b/27c are satisfiable by rejecting
+        # every clause-carrying witness — which would take the whole D3 ladder with it.
+        out = self.rv.parse_witness(
+            [f"grep:round-9-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+             "expect-fail=match  ran=TRACE#2"])
+        self.assertEqual(out["pattern"], "/significant=[1-9]|fatal=[1-9]/")
+        self.assertEqual(out["payload"], "round-9-findings.md#L1-L1")
+
+    # --- test 28 — REGRESSION PIN: the rule is scoped to payloads a clause was really
+    #     EXTRACTED from, so a rangeless grep payload whose SEARCH TEXT contains the
+    #     literal `pattern=` is untouched. The token has to be non-trailing to reach
+    #     this branch at all: a trailing `pattern=<bare>` is extracted as a clause and
+    #     already raises via _check_clause_shape (test 26), which would make a pin
+    #     written on that shape pass for an unrelated reason.
+    def test_28_rangeless_payload_carrying_a_nontrailing_pattern_token_is_untouched(self):
+        out = self.rv.parse_witness(
+            ["grep:find pattern= here  expect-fail=/boom/  ran=TRACE#1"])
+        self.assertIsNone(out["pattern"])
+        self.assertEqual(out["payload"], "find pattern= here")
+        self.assertIsNone(out["range_kind"])
+
+    def test_28b_the_committed_rangeless_shapes_are_unmoved(self):
+        for line in ('grep:boom  expect-fail=/boom/ ran=TRACE#1',
+                     'grep:pattern  expect-fail="literal text"  ran=2026-06-24'):
+            out = self.rv.parse_witness([line])   # must not raise — that IS the pin
+            self.assertIsNone(out["pattern"], msg=line)
+        fx = [json.loads(l) for l in
+              (CORPUS / "tier2-fixtures/manifest.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any("grep:boom" in json.dumps(r) for r in fx),
+                        "fixture drift: rangeless grep fixture h is gone")
+
+
+class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
+    """Round-2 / SIG-2 — a PIN ON A DEFERRAL, not on a fix. `witness_art_name` scopes
+    the payload-sourced artifact to `verdict == "PASS"`; on FAIL the body lookup falls
+    back to `derive_art_name`, which is EXEC-`out=`-only on that leg. The mandated
+    red-team witness cites `ran=TRACE#N` → a `WROTE`, so `art_name` is None,
+    `tier2_witness` returns before reading anything, and the Tier-2 witness rules are
+    dead — EVEN WHERE THE ARTIFACT RESOLVES PERFECTLY, which is what makes this
+    distinct from the `--root` condition the Scope paragraph already names.
+
+    Round 1 of every red-team dispatch is a FAIL by construction, and that FAIL receipt
+    is the supersession anchor the fix agent cites. Reversing the asymmetry is a
+    convention change (see verify_witness's ASYMMETRY note) and is deferred to the
+    Tier-2 resolution issue. This test exists so the deferral is load-bearing: if the
+    FAIL leg is ever made to verify, this goes red and the docs get corrected with it."""
+
+    WITNESS = ("grep:round-7-findings.md#L1-L1  "
+               "pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2")
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _parts(self, verdict):
+        text = _receipt(
+            self.WITNESS, verdict=verdict,
+            artifacts=[("round-7-findings.md", H64, str(len(COUNTS_HIT.encode())))],
+            trace=[f"READ  design.md  sha256:{H64}",
+                   f"WROTE  round-7-findings.md  sha256:{H64}"],
+            claims=["severity-max=significant  from=round-7-findings.md#L1-L1"],
+            skill="red-team/7-devils-advocate")
+        sections = self.rv.parse_receipt(text)
+        return (self.rv.parse_witness(sections["WITNESS"]),
+                self.rv.parse_trace(sections["TRACE"]))
+
+    def test_29_fail_leg_with_a_wrote_cited_witness_reads_nothing(self):
+        # The body is on disk, under --root, and the predicate matches it.
+        (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
+        witness, trace = self._parts("FAIL")
+        notes = self.rv.tier2_witness(witness, trace, self.root, True, "FAIL")
+        self.assertEqual(notes, [])          # no raise AND no UNVERIFIABLE note
+        # …and the branch that produced that is the None-art_name one, not a miss.
+        art, from_payload = self.rv.witness_art_name(witness, trace[1], "FAIL")
+        self.assertIsNone(art)
+        self.assertFalse(from_payload)
+
+    def test_29b_the_identical_receipt_on_PASS_does_fire(self):
+        # The discriminator: same witness, same body, same root — only the verdict
+        # differs. Without this conjunct 29 is satisfiable by a resolution failure.
+        (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
+        witness, trace = self._parts("PASS")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(witness, trace, self.root, True, "PASS")
+        self.assertIn("matches body of round-7-findings.md", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

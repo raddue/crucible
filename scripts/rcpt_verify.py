@@ -335,6 +335,25 @@ def parse_witness(body):
         if cm:
             clause = cm.group(1)
             payload = payload_raw[:cm.start()].rstrip()
+            # #474 round-2 / SIG-1 — the regex is `\s*$`-anchored, so on a payload
+            # carrying TWO clauses it binds the LAST and leaves the first inert inside
+            # `payload`: only the last is shape-checked below and only the last is
+            # evaluated at Tier-2. Appending one token to the mandated witness therefore
+            # restored #474 verbatim, and the winning clause is the trailing one — the
+            # one an appender controls. Rejected rather than resolved by position, for
+            # the reason rule (2) below already gives for two predicates across FIELDS
+            # and return-convention.md ships as normative text: the receipt declares two
+            # predicates and the linter cannot know which the author meant. Re-running
+            # the same regex on the STRIPPED payload makes the rule "more than one",
+            # not "exactly two" — the remainder's own last clause is now trailing.
+            # Scoped to `if cm`, so a payload no clause was extracted FROM is untouched:
+            # a rangeless grep whose search text merely contains a non-trailing
+            # `pattern=` token keeps today's behaviour (test 28). Measured cost: 0 sites
+            # carry two clauses across the committed jsonl corpus, return-convention.md,
+            # red-team-prompt.md and the live as-returned corpus.
+            if _WITNESS_CLAUSE_RE.search(payload):
+                raise LintError(
+                    f"WITNESS carries more than one pattern= clause: {payload_raw!r}")
     # expect-fail validation
     if not expect_fail:
         raise LintError("WITNESS expect-fail empty")

@@ -82,8 +82,16 @@ Return exactly this structure:
 
 ## Your own receipt's WITNESS
 
-Your Evidence Receipt follows `shared/return-convention.md` like every other dispatch. One shape is worth naming here because this dispatch runs into it every time: the natural verifier witness is a ranged `grep:` re-read of the *artifact under review* — a file you only `READ`, while your `ARTIFACTS` block holds only what you wrote.
+Your Evidence Receipt follows `shared/return-convention.md` like every other dispatch. One shape is worth naming here because this dispatch runs into it every time.
 
-That is legal, but a ranged `grep:<artifact>#<range>` payload must name an artifact **your own `ARTIFACTS` declares**. So declare the file you witnessed in `ARTIFACTS` too — `ARTIFACTS` is what this receipt vouches for, not only what it created. A receipt that witnesses an undeclared artifact is a Tier-1 lint failure and its return is rejected.
+**Witness a file you wrote into the dispatch root** — your own verification note, or a saved log of the command you ran — and name it by bare basename. Declare that same file in `ARTIFACTS` with its **real** sha256 and size. This is the only shape that satisfies both rules at once: a ranged `grep:<artifact>#<range>` payload must name an artifact your own `ARTIFACTS` declares (Tier-1), and the linter is invoked as `--tier2 --strict --root <dispatch-root>`, under which a bare basename inside that root resolves — so the hash and the pattern are both genuinely checked.
 
-Use its **real** sha256 and size, not a `0000…` placeholder. Placeholders are the norm for `EDIT`/`WROTE` hashes in `TRACE` (those are provenance, deliberately not gated), but an `ARTIFACTS` hash is a verified claim: Tier-2 recomputes it whenever the file resolves under the linter's root, so a placeholder there fails.
+**Do not witness the artifact under review by its repo-relative path.** It looks like the natural verifier witness, and it is the one shape that cannot lint, in all three of its variants — `scripts/foo.py` is path-shaped and does not resolve under the dispatch root, so:
+
+- **declared in `ARTIFACTS`, ranged** — `tier2_artifacts` rejects it first: `Tier-2 --strict: path-shaped artifact scripts/foo.py absent under all bases`.
+- **undeclared, ranged** — Tier-1 membership rejects it: `WITNESS grep artifact not in ARTIFACTS: scripts/foo.py`.
+- **undeclared, rangeless** — dropping the `#<range>` is not an escape hatch: `Tier-2 --strict: witness artifact scripts/foo.py absent under all bases`.
+
+All three are structurally `BLOCKED`. This is the Tier-2 artifact-resolution gap, tracked on its own issue; until it lands, witness something in the root.
+
+On hashes: placeholders are the norm for `EDIT`/`WROTE` in `TRACE` (those are provenance, deliberately not gated), but an `ARTIFACTS` hash is a verified claim — Tier-2 recomputes it whenever the file resolves under the linter's root, so a `0000…` placeholder on a file that *does* resolve fails.

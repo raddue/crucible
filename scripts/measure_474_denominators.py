@@ -20,8 +20,10 @@ Advisory = printed with its expected value, never gating:
 
   * row 4's literal / range-shaped / accepted counts — a census of a high-churn test
     suite, where any new `out=` token moves the figure for reasons unrelated to
-    correctness. The in-band pair is the part that carries meaning (it fires if EXEC's
-    80-B/line calibration leaks into grep's 1-B/line floor), and it stays gating.
+    correctness. The in-band pair is the part that carries meaning — it gates that RED
+    test 15's `out=a.log#L1-L100` calibration pin still EXISTS — and it stays gating.
+    It is not itself a leak detector: row 6 is where a calibration leak fires (round-2 /
+    MIN-3).
   * row 7 in its entirety — it reads a gitignored, machine-local corpus under `$HOME`.
     Asserting there would make this same script return different verdicts on CI (where
     it SKIPs) and on the maintainer's machine (where the corpus exists).
@@ -271,9 +273,14 @@ def row_exec_file(rv, rep: Report, relpath, n, want, note="", assert_counts=True
         # this file. They are a census of a high-churn test suite: any future
         # rcpt_verify test that happens to carry an `out=` token moves them and turns
         # CI red for a reason unrelated to correctness. What is load-bearing here is
-        # the in-band pair below, and only that: an in-band `#L` token is the canary
-        # that fires if EXEC's 80-B/line calibration ever leaks into grep's 1-B/line
-        # floor. Counts are printed so a reviewer can still see the denominator.
+        # the in-band pair below, and only that: it guards that RED test 15's
+        # `out=a.log#L1-L100` calibration pin still exists in the file. It cannot
+        # itself detect a calibration leak — classify() does its own arithmetic against
+        # script-local BAND_LO/BAND_HI and never calls check_span_bound, so row 4
+        # returns identical figures under any calibration (round-2 / MIN-3). A LEAK
+        # fires at row 6 (lint_receipt → check_exec_range_bound), and test_9c/test_15b
+        # cover the reverse direction. Counts are printed so a reviewer can still see
+        # the denominator.
         print(f"   advisory    : literal/range-shaped/accepted are printed, NOT asserted "
               f"(high-churn file; the in-band pair below is the gate)")
     rep.check(f"{relpath} max #L span", max_span, want["max_l_span"])
@@ -298,7 +305,14 @@ def row_grep_membership(rv, rep: Report):
             sections = rv.parse_receipt(text)
             witness = rv.parse_witness(sections["WITNESS"])
             artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
-        except Exception:
+        # round-2 / MIN-2 — LintError and NOTHING WIDER. This row exists to measure the
+        # SHIPPED parser, so a genuine crash inside it must not be reattributed to
+        # fixture drift: under a bare `except Exception` the row would silently drop out
+        # of the denominator and surface only as `ranged grep sites: got 13, expected
+        # 14`. Safe to narrow because parse_receipt raises LintError (not KeyError) on a
+        # missing section, so the sections[...] subscripts above cannot fire on a
+        # non-receipt block, and both corpus iterators yield str.
+        except rv.LintError:
             continue            # non-receipt or deliberately malformed; other rows cover those
         if witness["kind"] != "grep" or witness["range_kind"] is None:
             continue

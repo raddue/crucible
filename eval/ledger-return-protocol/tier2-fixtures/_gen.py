@@ -247,12 +247,14 @@ add("l-rt-wrote-cited-narrow-range",
 # ── (m) EXEC-cited MISMATCH: the witness payload names a DIFFERENT file than out= ──
 #   The facet-(b) case no single-file fixture can see: pre-fix the body came from the
 #   EXEC out= log (which never matches), so the witness was inert on a real contradiction.
-h = write_file("m", "round-4-findings.md", RT_HIT + "## Finding 1\nfatal: still broken\n")
-hlog = write_file("m", "witness-grep.log", "# cmd: grep -nE 'significant' round-4-findings.md\nno hits\n")
+body = RT_HIT + "## Finding 1\nfatal: still broken\n"
+log = "# cmd: grep -nE 'significant' round-4-findings.md\nno hits\n"
+h = write_file("m", "round-4-findings.md", body)
+hlog = write_file("m", "witness-grep.log", log)
 add("m-rt-exec-cited-artifact-mismatch",
     receipt("red-team/4-devils-advocate",
-            [f"  round-4-findings.md  sha256:{h}  {len(RT_HIT.encode()) + 34}",
-             f"  witness-grep.log  sha256:{hlog}  62"],
+            [f"  round-4-findings.md  sha256:{h}  {len(body.encode())}",
+             f"  witness-grep.log  sha256:{hlog}  {len(log.encode())}"],
             ["  1  WROTE  round-4-findings.md  sha256:" + HEXZ,
              "  2  EXEC   `grep -nE significant round-4-findings.md`  exit=0  dur=0.1s  "
              "out=witness-grep.log#L1-L2"],
@@ -264,12 +266,14 @@ add("m-rt-exec-cited-artifact-mismatch",
     "rule) — from the log it would never fire, a fail-open inside the fix.")
 
 # ── (n) the same EXEC-cited-mismatch shape on a clean round → PASS ──
-h = write_file("n", "round-13-findings.md", RT_CLEAN + "## No findings\n")
-hlog = write_file("n", "witness-grep.log", "# cmd: grep -nE 'significant' round-13-findings.md\nno hits\n")
+body = RT_CLEAN + "## No findings\n"
+log = "# cmd: grep -nE 'significant' round-13-findings.md\nno hits\n"
+h = write_file("n", "round-13-findings.md", body)
+hlog = write_file("n", "witness-grep.log", log)
 add("n-rt-exec-cited-mismatch-clean",
     receipt("red-team/13-devils-advocate",
-            [f"  round-13-findings.md  sha256:{h}  {len(RT_CLEAN.encode()) + 15}",
-             f"  witness-grep.log  sha256:{hlog}  63"],
+            [f"  round-13-findings.md  sha256:{h}  {len(body.encode())}",
+             f"  witness-grep.log  sha256:{hlog}  {len(log.encode())}"],
             ["  1  WROTE  round-13-findings.md  sha256:" + HEXZ,
              "  2  EXEC   `grep -nE significant round-13-findings.md`  exit=0  dur=0.1s  "
              "out=witness-grep.log#L1-L2"],
