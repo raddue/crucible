@@ -91,9 +91,15 @@ JSONL_GLOB = "eval/ledger-return-protocol/**/*.jsonl"
 RETURN_CONV = "skills/shared/return-convention.md"
 RT_PROMPT = "skills/red-team/red-team-prompt.md"
 RCPT_TESTS = "scripts/test_rcpt_verify.py"
-DEFAULT_CORPUS = pathlib.Path.home() / (
-    ".claude/projects/-mnt-coding-Coding-crucible/memory/quality-gate/"
-    "evidence-474-tier2-resolution/corpus-2026-08-01"
+# round-5 / MIN-5 — the project slug is DERIVED from this checkout, not pinned to the
+# maintainer's. Claude Code names a project directory after the absolute repo path with
+# every `/` replaced by `-`, so the slug is a function of ROOT. With the slug hard-coded,
+# row 7's SKIP meant "wrong checkout" on any differently-located clone even when an
+# equivalent corpus was present — and `run_tests.sh` passes no `--corpus`, so there was
+# no way to reach it. Derived, the SKIP means "no corpus". Row 7 stays advisory either
+# way (it reads a gitignored, machine-local tree — see row_corpus).
+DEFAULT_CORPUS = pathlib.Path.home() / ".claude/projects" / str(ROOT).replace("/", "-") / (
+    "memory/quality-gate/evidence-474-tier2-resolution/corpus-2026-08-01"
 )
 CORPUS_GLOB = "rcpt-*-asreturned.txt"
 
@@ -241,9 +247,27 @@ def row_exec_jsonl(rv, rep: Report):
           f"accepted={acc} in-band={len(band)} max#Lspan={max_span}")
     print(f"   note        : 33/38 in the plan's §0h; S8 added the inject row (0 tokens) "
           f"and two EXEC-cited tier2-fixtures rows")
-    rep.check("jsonl files", len(files), 34)
-    rep.check("jsonl out= tokens", lit, 40)
-    rep.check("jsonl accepted", acc, 40)
+    # round-5 / MIN-1 — the SAME rot property row 4's columns were demoted for
+    # (round-1/MIN-3, round-4/S1), applied here. `jsonl files` and `jsonl out= tokens`
+    # are an exact census over a directory whose PURPOSE is to grow: this branch alone
+    # moved the file count 33 → 34 by adding one fixture, and dropping any unrelated
+    # JSONL row into tier2-fixtures/ turns run_tests.sh red with `jsonl files: got 35,
+    # expected 34` while every load-bearing figure is intact. Demoted to advisory.
+    #
+    # What stays GATING is the pair that carries the meaning, in a form that does not
+    # rot:
+    #   * in-band == []  — the actual fail-open exposure. It does not move when the
+    #     corpus grows; it moves when a token lands in the calibration band, which is
+    #     exactly the event it exists to catch.
+    #   * accepted == literal — every out= token in the corpus is parsed by
+    #     parse_out_range. This is `accepted` still gating, as a RELATION rather than as
+    #     the count 40. The count would have rotted in lockstep with `jsonl out= tokens`,
+    #     making that demotion cosmetic; the relation is what makes `in-band == []`
+    #     trustworthy, because a token that escapes classification is a token the band
+    #     measurement never saw.
+    rep.advise("jsonl files", len(files), 34)
+    rep.advise("jsonl out= tokens", lit, 40)
+    rep.check("jsonl every out= token is accepted (accepted == literal)", acc, lit)
     rep.check("jsonl in-band", [t for t, _ in band], [])
 
 

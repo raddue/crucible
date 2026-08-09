@@ -284,12 +284,23 @@ def _compile_guard(src, msg_prefix, shown):
     into a LintError — see _witness_alarm. Where setitimer does not exist (non-Unix)
     that call degrades to unbounded rather than aborting (round-4 / M7). That is the path that owns its process. This
     module is NOT imported by any hook (hooks/rcpt-verify-hook.sh runs it as a
-    --tier1 SUBPROCESS, which never reaches this search at all); its only importers are
-    _gen.py, sweep.py and test_rcpt_verify.py, and installing a signal handler at import
-    time on their behalf would be the overreach — a handler is the owning process's
-    business, and setitimer's handler does run on the main thread, so those callers can
-    install one if they want it. --eval and --selftest do not route through
-    _verify_single and stay unbounded; carried on the #474 Tier-2 resolution issue."""
+    --tier1 SUBPROCESS, which never reaches this search at all), and installing a signal
+    handler at import time on its importers' behalf would be the overreach — a handler is
+    the owning process's business, and setitimer's handler does run on the main thread, so
+    those callers can install one if they want it. --eval and --selftest do not route
+    through _verify_single and stay unbounded; carried on the #474 Tier-2 resolution issue.
+
+    The importers, and which of them are UNBOUNDED (round-5 / MIN-2 — this list has now
+    been wrong twice, so it names dispositions, not just names):
+      * _gen.py, sweep.py, test_rcpt_verify.py — pre-existing.
+      * measure_474_denominators.py (CI-gated, run_tests.sh) — reaches this guard only
+        through Tier-1 (lint_receipt / parse_witness / parse_out_range). It COMPILES
+        receipt-authored patterns and never runs one against a body, so it is safe.
+      * measure_474_corpus.py — calls rv.tier2_witness(...) DIRECTLY, outside
+        _verify_single, so it runs receipt-authored regexes against real file bodies with
+        NO setitimer bound, over a corpus of agent-written receipts. Same disposition as
+        the --eval / --selftest residual above: UNBOUNDED, stated not solved. It is not
+        run by run_tests.sh."""
     try:
         re.compile(src)
     except re.error as e:
@@ -1454,6 +1465,18 @@ def _selftest_crosscheck(rec, bodies):
     # documented (verify_witness) and deliberate; what must not happen is a fixture
     # silently drifting into the shape and reporting green. This is the check that
     # keeps the one committed kind=grep artifact_bodies row honest.
+    #
+    # SCOPED TO THE PASS LEG, stated because the guard reads as though it covers the
+    # shape generally (round-5 / MIN-4). The gate is `from_payload`, which
+    # witness_art_name sets only for verdict == "PASS" — so a FAIL + ranged kind=grep +
+    # artifact_bodies row would reintroduce the round-1/SIG-3 vacuity uncaught. That is
+    # not a live hole: measured over eval/ledger-return-protocol/inject/*.jsonl, the one
+    # ranged kind=grep row (shape-e) is a PASS, and no FAIL row is ranged kind=grep.
+    # Widening the gate to the FAIL leg is a BEHAVIOUR change (the FAIL leg's body lookup
+    # is EXEC-only, so `art` would come from derive_art_name and the check would mean
+    # something different) — it needs a RED test and a row to catch, and has neither
+    # today. Carried on the #474 Tier-2 resolution issue with the FAIL-leg asymmetry it
+    # belongs to.
     if witness["kind"] == "grep" and from_payload and art not in bodies:
         problems.append(f"crosscheck {did}: artifact_bodies does not supply {art}, the "
                         f"artifact this ranged grep witness verifies — the --eval leg "
@@ -1556,11 +1579,31 @@ def _verify_single(text, mode, root, strict, ledger=None) -> int:
                     try:
                         notes += tier2_witness(witness, trace, root, strict, verdict)
                     finally:
+                        # round-5 / MIN-3 — TEARDOWN ORDER IS LOAD-BEARING: disarm, then
+                        # restore the handler, then re-arm. This is a defect M4
+                        # INTRODUCED, not a residual of it: round 3's finally disarmed
+                        # unconditionally (`setitimer(ITIMER_REAL, 0)` then
+                        # `signal.signal(prev)`), so no alarm could be generated between
+                        # the two statements. M4's conditional re-arm created a window —
+                        # a caller delay near zero re-armed while _witness_alarm is still
+                        # installed lands in OUR handler and surfaces as this receipt's
+                        # LintError.
+                        #
+                        # Merely SWAPPING the two statements is incomplete: it closes that
+                        # window and opens the mirror image, because OUR timer is still
+                        # armed (tier2_witness returned early) and would then be delivered
+                        # to the caller's freshly-restored handler. The unconditional
+                        # disarm first makes both unreachable — after it, no timer is
+                        # armed, so no SIGALRM can be generated by either party until the
+                        # re-arm, by which point `prev` is installed.
+                        #
+                        # Residual, inherent without sigprocmask: a SIGALRM already
+                        # GENERATED before the disarm is still delivered, and disarming
+                        # does not retract it.
+                        signal.setitimer(signal.ITIMER_REAL, 0)
+                        signal.signal(signal.SIGALRM, prev)
                         if prev_delay:
                             signal.setitimer(signal.ITIMER_REAL, prev_delay, prev_interval)
-                        else:
-                            signal.setitimer(signal.ITIMER_REAL, 0)
-                        signal.signal(signal.SIGALRM, prev)
                 else:
                     notes += tier2_witness(witness, trace, root, strict, verdict)
             # Part-3 receipt-ledger binding: only with an orchestrator-supplied --ledger

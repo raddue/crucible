@@ -11,6 +11,9 @@ committed tree does not contain:
   * row 4's gate is the PRESENCE of RED test 15's calibration pin, not a census of
     `scripts/test_rcpt_verify.py` (round-4 / S1). Both directions are pinned: an
     unrelated `out=` token must not turn the row red, and deleting the pin must.
+  * row 1's gate is the same shape, one round later (round-5 / MIN-1): the JSONL corpus
+    exists to grow, so its file/token census is advisory and what gates is `in-band == []`
+    plus the rot-free relation `accepted == literal`. Both directions again.
 
 Rows 1-3 and 5-6 run over committed files and are self-asserting inside the script.
 
@@ -214,6 +217,74 @@ class TestRow4GatesThePinNotTheCensus(unittest.TestCase):
                                  dict(literal=1, range_shaped=1, accepted=1,
                                       max_l_span=0, in_band_blocks=[]))
         self.assertEqual(len(rep.errors), 2)
+
+
+class TestRow1GatesTheExposureNotTheCensus(unittest.TestCase):
+    """round-5 / MIN-1. Row 1 globs a directory whose purpose is to grow, so the file
+    count and the token count are advisory and two rot-free properties gate."""
+
+    def setUp(self):
+        self.m = _import_m474()
+        self.rv = self.m.load_rcpt_verify()      # BEFORE ROOT is redirected
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.m.ROOT = self.root
+        self.corpus = self.root / "eval/ledger-return-protocol/tier2-fixtures"
+        self.corpus.mkdir(parents=True)
+
+    def _write(self, name, text):
+        (self.corpus / name).write_text(text)
+
+    def _run_row1(self):
+        rep = self.m.Report()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.m.row_exec_jsonl(self.rv, rep)
+        return rep, out.getvalue()
+
+    def test_an_unrelated_out_free_row_does_not_turn_the_row_red(self):
+        # THE regression the demotion exists for, and the reviewer's measured case:
+        # before it, this produced `jsonl files: got 2, expected 34`.
+        self._write("a.jsonl", '{"id": "a", "receipt": "out=x.log#L1-L2"}\n')
+        self._write("unrelated.jsonl", '{"id": "z", "note": "no out= token here"}\n')
+        rep, out = self._run_row1()
+        self.assertEqual(rep.errors, [])
+        self.assertIn("DIFF jsonl files", out)
+
+    def test_an_in_band_token_still_fails(self):
+        # Direction (b): the load-bearing exposure figure still goes red when it should.
+        self._write("a.jsonl", '{"id": "a", "receipt": "out=x.log#L1-L200"}\n')
+        rep, _ = self._run_row1()
+        self.assertEqual(len(rep.errors), 1)
+        self.assertIn("jsonl in-band", rep.errors[0])
+
+    def test_a_token_that_is_counted_but_not_accepted_still_fails(self):
+        # Direction (b) for the relation that replaced the `accepted == 40` census:
+        # a token parse_out_range rejects escapes band classification entirely, so
+        # `in-band == []` alone would report clean over a corpus it never measured.
+        self._write("a.jsonl", '{"id": "a", "receipt": "out=x.log#L1-L2 out=garbage"}\n')
+        rep, _ = self._run_row1()
+        self.assertEqual(len(rep.errors), 1)
+        self.assertIn("accepted == literal", rep.errors[0])
+
+    def test_the_two_demoted_figures_are_still_printed_and_compared(self):
+        # Advisory means printed and compared, never dropped (same rule as row 4).
+        self._write("a.jsonl", '{"id": "a", "receipt": "out=x.log#L1-L2"}\n')
+        _, out = self._run_row1()
+        self.assertIn("DIFF jsonl files", out)
+        self.assertIn("DIFF jsonl out= tokens", out)
+        self.assertIn("advisory — expected", out)
+
+    def test_the_committed_corpus_is_clean_on_both_gates(self):
+        # Discriminator for the three above: the demotion must not have turned row 1
+        # into "assert nothing" — over a corpus with no in-band and no unparsed token,
+        # both gates are evaluated and both pass.
+        self._write("a.jsonl", '{"id": "a", "receipt": "out=x.log#L1-L2"}\n')
+        rep, out = self._run_row1()
+        self.assertEqual(rep.errors, [])
+        self.assertIn("ok  jsonl every out= token is accepted", out)
+        self.assertIn("ok  jsonl in-band", out)
 
 
 if __name__ == "__main__":

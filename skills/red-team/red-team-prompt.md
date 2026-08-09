@@ -204,6 +204,18 @@ Task tool (subagent_type: crucible-red-team):
       consistency is reviewer-asserted, not linter-verified. Tracked on the #474 Tier-2
       resolution issue; write the line correctly regardless, because it is what the PASS leg
       of the *next* round checks.
+      **And even the `PASS` leg is only *reached* when `[FINDINGS_OUTPUT_PATH]` is inside
+      the dispatch root.** The linter is invoked as `--tier2 --strict --root <dispatch-root>`,
+      so a findings file the orchestrator placed anywhere else — today
+      `quality-gate/SKILL.md` puts it in the quality-gate scratch directory — does not resolve
+      under that root, and the `PASS` leg degrades to
+      `UNVERIFIABLE: witness <findings-file> (no file under root)`, exit 0. So today the
+      witness verifies nothing on **either** verdict, for two different reasons and with two
+      different signatures: on `FAIL` the leg exits before resolution and is **silent**, and
+      on `PASS` resolution misses and the miss is **annotated**. Measured: 0 of 14 resolutions
+      over the #474 §0g corpus. Nothing here is yours to change — you do not choose
+      `[FINDINGS_OUTPUT_PATH]`; it is stated so the next reader of a red-team Tier-2 `PASS`
+      does not over-trust it, and is tracked on the same #474 resolution issue.
     - **`SUSPICION`**, **`NEXT`** — per convention.
     - After `NEXT`: mandatory v1.1 **`TRIPWIRE:`** / **`SUPERSEDES:`** lines. A **FAIL** receipt's
       `TRIPWIRE:` carries `verdict=FAIL` (the self-firing predicate). `TRIPWIRE: none` is

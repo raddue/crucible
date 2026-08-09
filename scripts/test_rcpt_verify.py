@@ -12,6 +12,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import hashlib
 import re
@@ -2039,6 +2040,79 @@ class TestWitnessTimeoutBound(unittest.TestCase):
             rc = self.rv._verify_single(text, "tier2", self.root, True)
         self.assertEqual(rc, 1)
         self.assertIn("matches body of verify-note.md", err.getvalue())
+
+    # --- test 36 — round-5 / MIN-3: the teardown order in _verify_single's `finally`.
+    #     M4's conditional re-arm restored the caller's ITIMER_REAL BEFORE reinstalling
+    #     the caller's SIGALRM handler, so a caller delay near zero landed in
+    #     _witness_alarm and became this receipt's LintError. The window is a few machine
+    #     instructions wide and cannot be hit by racing a real timer, so it is SIMULATED
+    #     the way round-4/M7 simulated a non-Unix platform: signal.setitimer is wrapped so
+    #     that the RE-ARM call synchronously delivers SIGALRM to whichever handler is
+    #     installed at that instant. The wrapper keys on `delay not in (0, WITNESS_TIMEOUT_S)`
+    #     so it fires ONLY on the re-arm — firing on the arming call or on the disarm would
+    #     make the test red on both sides and prove nothing.
+    CALLER_DELAY = 30.0        # distinct from WITNESS_TIMEOUT_S, so the key cannot collide
+
+    def _instrument_teardown(self):
+        """Arm a caller timer + handler, and wrap setitimer/signal to record order.
+        Returns (delivered_to, order) — both lists, filled during _verify_single."""
+        delivered_to, order = [], []
+
+        def caller_handler(*_a):
+            delivered_to.append("caller")
+
+        prev_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, caller_handler)
+        real_setitimer, real_getitimer = signal.setitimer, signal.getitimer
+        real_signal = signal.signal
+        signal.setitimer(signal.ITIMER_REAL, self.CALLER_DELAY)
+        self.addCleanup(setattr, signal, "setitimer", real_setitimer)
+        self.addCleanup(setattr, signal, "signal", real_signal)
+        self.addCleanup(real_signal, signal.SIGALRM, prev_handler)
+        self.addCleanup(real_setitimer, signal.ITIMER_REAL, 0)
+
+        def patched_setitimer(which, delay, interval=0.0):
+            r = real_setitimer(which, delay, interval)
+            if delay == 0:
+                order.append("disarm")
+            elif delay == self.rv.WITNESS_TIMEOUT_S:
+                order.append("arm")
+            else:
+                order.append("rearm")
+                # the caller's alarm lands the instant its timer is re-armed
+                os.kill(os.getpid(), signal.SIGALRM)
+            return r
+
+        def patched_signal(sig, handler):
+            if sig == signal.SIGALRM:
+                order.append(f"handler:{'armed' if real_getitimer(signal.ITIMER_REAL)[0] else 'idle'}")
+            return real_signal(sig, handler)
+
+        signal.setitimer, signal.signal = patched_setitimer, patched_signal
+        return delivered_to, order
+
+    def test_36_a_caller_alarm_at_re_arm_time_reaches_the_callers_handler(self):
+        delivered_to, order = self._instrument_teardown()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        # Before the fix the re-arm ran while _witness_alarm was still installed, so this
+        # simulated delivery raised WITNESS_TIMEOUT_MSG out of the finally: rc == 1 and
+        # `delivered_to` stayed empty.
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertEqual(delivered_to, ["caller"], f"order={order}")
+
+    def test_36b_the_handler_is_restored_while_no_timer_is_armed(self):
+        # Discriminator for 36, and the reason a bare SWAP of the two statements is not
+        # the fix: the mirror window (our own timer delivered to the caller's freshly
+        # restored handler) is closed only if the disarm happens FIRST. Pins the whole
+        # order — arm, disarm, restore-with-nothing-armed, re-arm. On HEAD this reads
+        # [arm, rearm, handler:armed].
+        _, order = self._instrument_teardown()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        # the leading handler-install is the arming one, recorded before our timer exists
+        self.assertEqual(order, ["handler:armed", "arm", "disarm", "handler:idle", "rearm"])
 
 
 if __name__ == "__main__":
