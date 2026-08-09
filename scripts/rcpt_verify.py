@@ -259,14 +259,30 @@ _WITNESS_RANGE_RE = re.compile(r"^([^#\s]+)#([LB])(\d+)-\2(\d+)(?!#[LB]\d)")
 
 
 def _compile_guard(src, msg_prefix, shown):
-    """re.compile a DERIVED regex source, re-raising re.error as LintError — the
+    """re.compile a DERIVED regex source, re-raising every exception re.compile
+    raises — re.error, OverflowError and RecursionError — as LintError, which is the
     COMPILE half of #440's fault-isolation class, and only that half. The clause and
     the expect-fail signature are freely-authored, attacker-influenced receipt text
-    handed straight to re.search; an escaping re.PatternError aborts a whole --eval
+    handed straight to re.search; an escaping compile exception aborts a whole --eval
     batch instead of lint-FAILing one record. Always the DERIVED source — for a quoted
     literal that is the re.escape'd text, so this guard is provably inert there.
     Compiling the RAW inner text instead would false-BLOCK the escape hatch D3
     prescribes (pattern="**Severity:** Fatal").
+
+    round-6 / S1 — the caught set was re.error ALONE, and the two escapees are not
+    exotic: `pattern=/a{4294967295}/` (13 characters, an ordinary repetition
+    quantifier at 2**32-1) raises OverflowError, and a deeply-nested group raises
+    RecursionError. Both reached __main__ as a traceback where the protocol specifies
+    a one-line lint bullet, and both aborted an --eval batch mid-file against
+    the contract _eval_text's malformed-JSON branch states in those words —
+    "one corrupt line must not suppress the rest" (phrase-anchored, not line-anchored:
+    round-3 / S4 retired the line cites in this file). Only the OverflowError leg is
+    pinned by a test, and only at the clause site plus the /regex/ expect-fail
+    signature site; the "literal" site stays inert. The RecursionError
+    threshold moves with the interpreter's recursion limit AND with the stack depth
+    already consumed at the call site (measured on this tree: 495 nested groups
+    compile clean from a shallow frame and raise from a deeper one), so a test
+    asserting on it would pin the interpreter, not this guard.
 
     THE SEARCH IS NOT BOUNDED HERE — it is bounded by the CALLER, and only one caller
     does it (round-1 / SIG-5, round-3 / S4+S5). A clause that compiles fine can still
@@ -303,7 +319,7 @@ def _compile_guard(src, msg_prefix, shown):
         run by run_tests.sh."""
     try:
         re.compile(src)
-    except re.error as e:
+    except (re.error, OverflowError, RecursionError) as e:
         raise LintError(f"{msg_prefix}: {shown!r} ({e})")
 
 

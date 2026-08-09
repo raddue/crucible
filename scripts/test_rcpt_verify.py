@@ -1080,6 +1080,42 @@ class TestWitnessPatternClause(unittest.TestCase):
                 ["grep:f.md#L1-L1  pattern=/[unclosed/  expect-fail=match  ran=TRACE#1"])
         self.assertNotIsInstance(cm.exception, re.error)
 
+    def test_7c_oversized_quantifier_is_lint_error_not_overflow_error(self):
+        # round-6 / S1 — re.compile raises more than re.error. An ordinary repetition
+        # quantifier at 2**32-1 raises OverflowError, which the guard used to let
+        # escape: a traceback out of __main__ where the protocol specifies a lint
+        # bullet, and an aborted --eval batch. Both _compile_guard call sites that
+        # can reach a non-re.error are exercised here — the clause (:350) and the
+        # `/regex/` expect-fail signature (:424); the `"literal"` site is inert
+        # (re.escape brace-escapes, pinned by test_7d).
+        #
+        # Asserted on the TYPE, never on CPython's message text, which is not a
+        # stable interface. The sibling RecursionError leg is caught but deliberately
+        # NOT pinned: its threshold depends on the interpreter's recursion limit and
+        # on the stack already consumed at the call site, so a test over it would go
+        # red for reasons that have nothing to do with this guard.
+        for line in (
+            "grep:f.md#L1-L1  pattern=/a{4294967295}/  expect-fail=match  ran=TRACE#1",
+            "grep:f.md#L1-L1  expect-fail=/a{4294967295}/  ran=TRACE#1",
+        ):
+            with self.subTest(line=line):
+                with self.assertRaises(self.rv.LintError) as cm:
+                    self.rv.parse_witness([line])
+                self.assertNotIsInstance(cm.exception, OverflowError)
+                self.assertIn("is not a valid regex", str(cm.exception))
+
+    def test_7d_escaped_literal_stays_inert_under_the_widened_guard(self):
+        # The docstring's "provably inert for a quoted literal" claim, re-checked
+        # against the WIDENED caught set (round-6 / S1): re.escape brace-escapes, so
+        # the derived source of an oversized-quantifier LITERAL is not a quantifier
+        # at all and compiles. Widening the except must not turn D3's escape hatch
+        # into a rejection.
+        self.assertIsNotNone(re.compile(re.escape("a{4294967296}")))
+        self.rv.parse_witness(
+            ['grep:f.md#L1-L1  pattern="a{4294967296}"  expect-fail=match  ran=TRACE#1'])
+        self.rv.parse_witness(
+            ['grep:f.md#L1-L1  expect-fail="a{4294967296}"  ran=TRACE#1'])
+
     def test_7b_quoted_literal_that_is_not_a_regex_must_not_raise(self):
         # REGRESSION PIN (green on main, must stay green). "**Severity:** Fatal" is
         # the natural predicate over this repo's own findings format and is exactly

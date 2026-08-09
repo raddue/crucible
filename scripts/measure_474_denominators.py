@@ -133,6 +133,15 @@ def rcpt_blocks(text: str):
     Identity is the header text; where a file's headers are not unique (both of
     `red-team-prompt.md`'s blocks are `red-team/N-devils-advocate`) the nearest
     preceding worked-example marker disambiguates. Both keys are stable under S7.
+
+    DECLARED ASSUMPTION, in the same register as the module docstring's rot list
+    (round-6 / M3): no taught receipt contains an INTERNAL blank line. One that did
+    would be silently truncated here, fail `lint_receipt` on a *parse* error, and turn
+    row 6's gated `taught LINT-FAIL identities` red with a message blaming the receipt
+    rather than this extractor. Latent — no committed block has one today, and the
+    protocol's own grammar is line-contiguous — so it is declared, not hardened; the
+    hardening (blank-line-tolerant termination) would need its own RED test and would
+    change what row 6 counts.
     """
     lines = text.splitlines()
     marks = [(m.start(), m.group(1)) for m in _MARKER.finditer(text)]
