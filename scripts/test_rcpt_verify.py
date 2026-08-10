@@ -8,15 +8,20 @@ No pytest — matches the stdlib-only discipline of rcpt_verify.py itself, and t
 flat-in-scripts/ layout of scripts/test_catalog.py (a `scripts/tests/` subdir is
 caught by the repo-wide `tests/` .gitignore rule).
 """
+import contextlib
 import importlib.util
+import io
 import json
+import os
 import pathlib
 import hashlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "rcpt_verify.py"
@@ -994,9 +999,1156 @@ class TestParseWitness(unittest.TestCase):
         self.assertEqual(out["payload"], "all-claims-cited")
 
     def test_happy_signature_forms(self):
-        for ef in ("exit=-1", "match"):
+        # #474 / D3: `match` USED to be admitted here on kind=exec with no pattern=
+        # clause — a bare `match` carries no predicate, so Tier-2 read it as clean
+        # (the P0). D3 makes that shape a Tier-1 error two ways over (clause required;
+        # bare `match` is kind=grep-only per return-convention.md § "witness structural
+        # check"), so this loop
+        # keeps only the exit= form and the `match` legs move to the #474 block below.
+        # DECLARED CASUALTY: the plan's D3 blast-radius sweep says test_rcpt_verify.py
+        # "constructs no bare-`match` witness at all" — this line was that witness.
+        for ef in ("exit=-1", "exit!=0"):
             out = self.rv.parse_witness([f"exec:cmd  expect-fail={ef}  ran=2026-06-24"])
             self.assertEqual(out["expect_fail"], ef)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #474 — WITNESS `expect-fail=match` is inert at Tier-2 (P0 fail-open).
+# Plan: docs/plans/2026-08-07-474-witness-match-fail-open.md — S1's 22 tests.
+# 16 are RED on unmodified main (1, 3-7, 9, 10, 11, 14, 16-20, 22); the other 6
+# (2, 8, 12, 13, 15, 21) are regression pins that are GREEN on main and must stay
+# green — a red pin means the change broke something, NOT that the pin is wrong.
+# ─────────────────────────────────────────────────────────────────────────────
+
+H64 = "ab" * 32                   # syntactically valid sha256 field for builder receipts
+COUNTS_HIT = "SEVERITY-COUNTS: fatal=1 significant=3 minor=0\n"
+COUNTS_CLEAN = "SEVERITY-COUNTS: fatal=0 significant=0 minor=3\n"
+MANDATED_CLAUSE = "pattern=/significant=[1-9]|fatal=[1-9]/"
+
+
+def _receipt(witness, *, verdict="PASS", conf="0.90", artifacts=(), trace=(),
+             claims=("(none)",), nxt="(none)", skill="red-team/1-devils-advocate"):
+    """Minimal well-formed v1 receipt wrapped around the WITNESS line under test."""
+    lines = [f"RCPT v1 {skill}", f"VERDICT  {verdict}  conf={conf}", "ARTIFACTS"]
+    lines += [f"  {n}  sha256:{h}  {s}" for n, h, s in artifacts] or ["  (none)"]
+    lines.append("TRACE")
+    lines += [f"  {i}  {t}" for i, t in enumerate(trace, 1)] or ["  (none)"]
+    lines.append("CLAIMS")
+    lines += [f"  {c}" for c in claims]
+    lines += [f"WITNESS    {witness}", "SUSPICION  0.10", f"NEXT       {nxt}"]
+    return "\n".join(lines) + "\n"
+
+
+class TestWitnessPatternClause(unittest.TestCase):
+    """S1 tests 3, 4, 7, 18, 19, 22 — the `pattern=` clause grammar at Tier-1
+    (parse_witness only; zero disk reads)."""
+
+    MANDATED = (f"grep:round-3-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                "expect-fail=match  ran=TRACE#1")
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 3 — the clause is extracted, expect_fail keeps its verbatim "match" (D1/D2)
+    def test_3_mandated_line_yields_pattern_and_keeps_expect_fail(self):
+        out = self.rv.parse_witness([self.MANDATED])
+        self.assertEqual(out.get("pattern"), "/significant=[1-9]|fatal=[1-9]/")
+        self.assertEqual(out["expect_fail"], "match")
+
+    # --- test 4 — bare `match` with NO clause is a Tier-1 error (D3 rule i),
+    #     and bare `match` is kind=grep-only (D3 rule iv)
+    def test_4_bare_match_without_clause_raises(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(
+                ["grep:round-3-findings.md#L1-L1  expect-fail=match  ran=TRACE#1"])
+
+    def test_4b_bare_match_on_non_grep_kind_raises(self):
+        # D3's kind restriction — scope containment for D3's own change: post-D3 an
+        # exec:/lint: witness carrying a clause would newly run the reviewer's regex
+        # against the EXEC out= body, a shape nothing in the repo produces.
+        for kind in ("exec:cmd", "lint:all-claims-cited"):
+            with self.assertRaises(self.rv.LintError, msg=kind):
+                self.rv.parse_witness([f"{kind}  expect-fail=match  ran=TRACE#1"])
+            with self.assertRaises(self.rv.LintError, msg=kind):
+                self.rv.parse_witness(
+                    [f"{kind}  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1"])
+
+    # --- test 7 — a malformed clause LINT-fails; a quoted literal must NOT
+    def test_7_malformed_regex_clause_is_lint_error_not_pattern_error(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/[unclosed/  expect-fail=match  ran=TRACE#1"])
+        self.assertNotIsInstance(cm.exception, re.error)
+
+    def test_7c_oversized_quantifier_is_lint_error_not_overflow_error(self):
+        # round-6 / S1 — re.compile raises more than re.error. An ordinary repetition
+        # quantifier at 2**32-1 raises OverflowError, which the guard used to let
+        # escape: a traceback out of __main__ where the protocol specifies a lint
+        # bullet, and an aborted --eval batch. Both _compile_guard call sites that
+        # can reach a non-re.error are exercised here — the clause (:350) and the
+        # `/regex/` expect-fail signature (:424); the `"literal"` site is inert
+        # (re.escape brace-escapes, pinned by test_7d).
+        #
+        # Asserted on the TYPE, never on CPython's message text, which is not a
+        # stable interface. The sibling RecursionError leg is caught but deliberately
+        # NOT pinned: its threshold depends on the interpreter's recursion limit and
+        # on the stack already consumed at the call site, so a test over it would go
+        # red for reasons that have nothing to do with this guard.
+        for line in (
+            "grep:f.md#L1-L1  pattern=/a{4294967295}/  expect-fail=match  ran=TRACE#1",
+            "grep:f.md#L1-L1  expect-fail=/a{4294967295}/  ran=TRACE#1",
+        ):
+            with self.subTest(line=line):
+                with self.assertRaises(self.rv.LintError) as cm:
+                    self.rv.parse_witness([line])
+                self.assertNotIsInstance(cm.exception, OverflowError)
+                self.assertIn("is not a valid regex", str(cm.exception))
+
+    def test_7d_escaped_literal_stays_inert_under_the_widened_guard(self):
+        # The docstring's "provably inert for a quoted literal" claim, re-checked
+        # against the WIDENED caught set (round-6 / S1): re.escape brace-escapes, so
+        # the derived source of an oversized-quantifier LITERAL is not a quantifier
+        # at all and compiles. Widening the except must not turn D3's escape hatch
+        # into a rejection.
+        self.assertIsNotNone(re.compile(re.escape("a{4294967296}")))
+        self.rv.parse_witness(
+            ['grep:f.md#L1-L1  pattern="a{4294967296}"  expect-fail=match  ran=TRACE#1'])
+        self.rv.parse_witness(
+            ['grep:f.md#L1-L1  expect-fail="a{4294967296}"  ran=TRACE#1'])
+
+    def test_7b_quoted_literal_that_is_not_a_regex_must_not_raise(self):
+        # REGRESSION PIN (green on main, must stay green). "**Severity:** Fatal" is
+        # the natural predicate over this repo's own findings format and is exactly
+        # what D3 prescribes when the /…/ alternation cannot express one. re.compile
+        # of the RAW inner text raises `nothing to repeat`; the compile guard runs on
+        # the DERIVED (re.escape'd) source, so it is provably inert here (round 9/SIG-2).
+        with self.assertRaises(re.error):           # the raw text really is not a regex
+            re.compile("**Severity:** Fatal")
+        # must not raise — that IS the pin (asserting the new `pattern` key here
+        # would make a green pin red on main; that assertion lives in test 3).
+        self.rv.parse_witness(
+            ['grep:f.md#L1-L1  pattern="**Severity:** Fatal"  expect-fail=match  ran=TRACE#1'])
+
+    # --- test 18 — the payload is parsed ONCE, and payload vs payload_raw are
+    #     discriminated (trap (a): a range-shaped substring inside the clause)
+    def test_18_payload_parsed_once_and_two_strings_discriminated(self):
+        out = self.rv.parse_witness([self.MANDATED])
+        self.assertEqual(out["art"], "round-3-findings.md")
+        self.assertEqual(out["range_kind"], "L")
+        self.assertEqual((out["range_a"], out["range_b"]), (1, 1))
+        self.assertEqual(out["payload"], "round-3-findings.md#L1-L1")
+        self.assertEqual(out["payload_raw"],
+                         f"round-3-findings.md#L1-L1  {MANDATED_CLAUSE}")
+        self.assertNotIn("pattern=", out["payload"])
+        self.assertIn("pattern=", out["payload_raw"])
+
+    def test_18b_range_shaped_substring_inside_clause_is_not_the_payload_range(self):
+        out = self.rv.parse_witness(
+            ["grep:round-3-findings.md#L1-L1  pattern=/x#L1-L2/  expect-fail=match  ran=TRACE#1"])
+        self.assertEqual((out["range_a"], out["range_b"]), (1, 1))   # NOT 1/2 from the clause
+        self.assertEqual(out["art"], "round-3-findings.md")
+
+    # --- test 19 — the UNDELIMITED clause (round 4 / SIG-1): present, compiles,
+    #     yet derives None → #474 verbatim. Rejected at Tier-1.
+    def test_19_undelimited_clause_raises_at_tier1(self):
+        self.assertIsNotNone(re.compile("significant=[1-9]"))   # it really does compile
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=significant=[1-9]  expect-fail=match  ran=TRACE#1"])
+
+    def test_19b_helper_seam_derivation_is_defined_for_exactly_two_forms(self):
+        self.assertEqual(self.rv._expect_fail_pattern("match", "/significant=[1-9]/"),
+                         "significant=[1-9]")
+        self.assertEqual(self.rv._expect_fail_pattern("match", '"literal"'),
+                         re.escape("literal"))
+        # the documented precondition at the helper seam (D2): the helper is NOT
+        # self-defending — Tier-1 rejects the bare form, the helper keeps returning None.
+        self.assertIsNone(self.rv._expect_fail_pattern("match", "significant=[1-9]"))
+
+    def test_19c_bare_clause_never_reaches_tier2(self):
+        text = _receipt(
+            "grep:round-3-findings.md#L1-L1  pattern=significant=[1-9]  "
+            "expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    # --- test 22 — the EMPTY delimited clause (round 9 / SIG-1): #474's second door
+    def test_22_empty_clause_raises_with_the_empty_derivation_message(self):
+        # The message pin IS the test: len('') = 0 < 4, so an implementation that
+        # ships only the floor still raises here and would look green without it.
+        for clause in ("//", '""'):
+            with self.assertRaises(self.rv.LintError, msg=clause) as cm:
+                self.rv.parse_witness(
+                    [f"grep:f.md#L1-L1  pattern={clause}  expect-fail=match  ran=TRACE#1"])
+            self.assertEqual(
+                str(cm.exception),
+                f"WITNESS pattern= clause derives an empty regex source: {clause!r}")
+            self.assertNotIn("too short", str(cm.exception))   # textually distinct from the floor
+
+    def test_22b_floor_message_is_the_other_one(self):
+        # The floor still fires on a short-but-nonempty derivation, with ITS text —
+        # so the two dispositions cannot be confused (D3(b)).
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/0F/  expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(str(cm.exception),
+                         "WITNESS pattern= clause too short: '/0F/'")
+
+    def test_22c_empty_derivation_is_the_empty_string_not_none(self):
+        # Keeps the two dispositions distinguishable at the helper seam: a "fix"
+        # that maps empty → None silently re-enters the Tier-2 hole.
+        self.assertEqual(self.rv._expect_fail_pattern("match", "//"), "")
+        self.assertEqual(self.rv._expect_fail_pattern("match", '""'), "")
+
+    def test_22d_empty_clause_never_reaches_tier2(self):
+        text = _receipt(
+            "grep:round-3-findings.md#L1-L1  pattern=//  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+
+class TestWitnessTier1Guards(unittest.TestCase):
+    """S1 tests 8, 9, 12, 13, 14, 15 — the receipt-level Tier-1 guards (D3/D6).
+    Every one of these is disk-free."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 9 — the DECLARED payload span bound, and its message names the
+    #     clause-stripped payload (not the predicate beside it)
+    def test_9_declared_span_over_bound_raises_naming_stripped_payload(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:round-3-findings.md#B1-B4098  pattern=/significant=[1-9]/  "
+                 "expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(str(cm.exception),
+                         "witness range exceeds 4 KiB: round-3-findings.md#B1-B4098")
+
+    def test_9b_declared_span_inside_bound_is_clean(self):
+        # #B is 1-based inclusive, so b-a undercounts by one (D6 signal (i)); assert
+        # clear of the boundary rather than on it.
+        out = self.rv.parse_witness(
+            ["grep:round-3-findings.md#B1-B4000  pattern=/significant=[1-9]/  "
+             "expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(out["range_b"], 4000)
+
+    def test_9c_line_range_uses_the_sound_1_byte_per_line_floor(self):
+        # 4096 < span → reject; a 100-line range (which EXEC's 80-B/line estimate
+        # would reject) must NOT be rejected here.
+        self.rv.parse_witness(
+            ["grep:f.md#L1-L4000  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L5000  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
+
+    # --- test 12 — REGRESSION PIN: the committed, CI-gated in-spec shape stays clean
+    def test_12_committed_12_judge_witness_stays_clean(self):
+        line = ("grep:review.md#L1-L80  pattern=/Fatal:\\s*[1-9]/  "
+                "expect-fail=match  ran=TRACE#2")
+        self.rv.parse_witness([line])          # must not raise — that IS the pin
+        rec = [r for r in _load("sample-corpus/receipts.jsonl")
+               if r["dispatch-id"] == "12-judge"][0]
+        self.assertIn(line, rec["receipt"], "fixture drift: 12-judge WITNESS line moved")
+        self.assertEqual(self.rv.lint_receipt(rec["receipt"]), "PASS")
+
+    # --- test 13 — REGRESSION PIN: rangeless grep payloads are a committed shape
+    def test_13_rangeless_grep_payloads_still_lint_clean(self):
+        out = self.rv.parse_witness(
+            ['grep:pattern  expect-fail="literal text"  ran=2026-06-24'])
+        self.assertEqual(out["payload"], "pattern")
+        self.assertIsNone(out.get("range_kind"))   # .get: the key is new in S2(b)
+        h = self.rv.parse_witness(["grep:boom  expect-fail=/boom/ ran=TRACE#1"])
+        self.assertEqual(h["payload"], "boom")
+        self.assertIsNone(h.get("range_kind"))
+        # …and the committed fixture that carries that exact shape is still there.
+        fx = [json.loads(l) for l in
+              (CORPUS / "tier2-fixtures/manifest.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any("grep:boom" in json.dumps(r) for r in fx),
+                        "fixture drift: rangeless grep fixture h is gone")
+
+    # --- test 14 — ARTIFACTS membership, written against lint_receipt (D6/SIG-1);
+    #     parse_witness cannot see ARTIFACTS at all, so a parse-level version of this
+    #     test cannot be written — if one appears, S3(5) was implemented at the wrong site.
+    def test_14_ranged_grep_artifact_absent_from_artifacts_raises(self):
+        text = _receipt(
+            f"grep:round-3-findings.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-2-ledger.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertEqual(str(cm.exception),
+                         "WITNESS grep artifact not in ARTIFACTS: round-3-findings.md")
+
+    def test_14b_same_receipt_with_the_artifact_declared_lints_clean(self):
+        text = _receipt(
+            f"grep:round-3-findings.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+    def test_14c_membership_is_scoped_to_ranged_payloads(self):
+        # A RANGELESS grep payload keeps today's behaviour and is exempt (S3(4)).
+        text = _receipt(
+            'grep:pattern  expect-fail="literal text"  ran=TRACE#1',
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+    # --- test 15 — REGRESSION PIN: EXEC's calibration is unmoved by S3's helper split
+    def test_15_exec_calibration_and_message_unchanged(self):
+        args = "`run`  exit=0  dur=1s  out=a.log#L1-L100"
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.check_exec_range_bound(args)
+        self.assertEqual(str(cm.exception), f"EXEC range exceeds 4 KiB: {args}")
+
+    def test_15b_same_declared_range_on_a_grep_witness_does_not_raise(self):
+        # The conjunct that catches a shared helper carrying the grep calibration
+        # into EXEC (or vice versa): #L1-L100 is over EXEC's 80-B/line estimate and
+        # far under the grep path's 1-B/line floor.
+        self.rv.parse_witness(          # must not raise — that IS the pin
+            ["grep:f.md#L1-L100  pattern=/significant=[1-9]/  expect-fail=match  ran=TRACE#1"])
+
+    # --- test 15d — round-4 / M6: WITNESS_SPAN_CAP is the ONE name for the 4 KiB
+    #     budget. `check_span_bound` used to hard-code 4096 thirteen lines above the
+    #     constant's declaration, so the two spellings could drift silently. Moving the
+    #     cap and re-running both call sites is the discriminator: a hard-coded literal
+    #     would ignore it and neither range would newly raise.
+    def test_15d_span_cap_is_the_single_constant_both_sites_read(self):
+        self.assertEqual(self.rv.WITNESS_SPAN_CAP, 4096)
+        self.rv.WITNESS_SPAN_CAP = 10          # fresh module per test (setUp re-imports)
+        with self.assertRaises(self.rv.LintError):      # EXEC site, 80 B/line estimate
+            self.rv.check_exec_range_bound("`run`  exit=0  out=a.log#B1-B12")
+        with self.assertRaises(self.rv.LintError):      # grep site, 1 B/line floor
+            self.rv.parse_witness(
+                ["grep:f.md#B1-B12  pattern=/significant=[1-9]/  "
+                 "expect-fail=match  ran=TRACE#1"])
+
+    def test_15c_exec_negative_range_message_unchanged(self):
+        args = "`run`  exit=0  out=a.log#L9-L1"
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.check_exec_range_bound(args)
+        self.assertEqual(str(cm.exception), f"EXEC range negative: {args}")
+
+    # --- test 8 — REGRESSION PIN: the ran=SKIPPED NEXT-verbatim check still binds
+    #     the FULL payload including the clause (D1 / payload_raw), message pinned
+    def test_8_skipped_next_verbatim_check_binds_the_full_payload(self):
+        payload_raw = f"round-3-findings.md#L1-L1  {MANDATED_CLAUSE}"
+        text = _receipt(
+            f"grep:{payload_raw}  expect-fail=match  ran=SKIPPED:tooling-absent",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"],
+            nxt="file the follow-up")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS ran=SKIPPED requires NEXT to contain witness payload verbatim; "
+            f"payload={payload_raw!r}  NEXT='file the follow-up'")
+
+    def test_8b_skipped_passes_when_next_carries_the_full_payload(self):
+        payload_raw = f"round-3-findings.md#L1-L1  {MANDATED_CLAUSE}"
+        text = _receipt(
+            f"grep:{payload_raw}  expect-fail=match  ran=SKIPPED:tooling-absent",
+            artifacts=[("round-3-findings.md", H64, "2980")],
+            trace=[f"WROTE  round-3-findings.md  sha256:{H64}"],
+            nxt=f"re-run {payload_raw} at merge-time")
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+
+class TestWitness474Tier2(unittest.TestCase):
+    """S1 tests 1, 2, 5, 6, 10, 11, 16, 17, 20, 21 — the Tier-2 predicate and the
+    body it runs against (D2/D4/D6)."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _write(self, name, text):
+        p = self.root / name
+        p.write_text(text)
+        return p
+
+    def _w(self, line):
+        return self.rv.parse_witness([line])
+
+    def _wrote(self, name):
+        return [{"n": 1, "verb": "WROTE", "args": f"{name}  sha256:{H64}"}]
+
+    def _exec(self, out, exit_code=0):
+        return [{"n": 1, "verb": "EXEC",
+                 "args": f"`run`  exit={exit_code}  dur=1s  out={out}"}]
+
+    # --- test 1 — the issue's reproduction, verbatim
+    def test_1_mandated_witness_fires_on_a_contradicting_body(self):
+        self._write("round-1-findings.md", COUNTS_HIT + "…prose…\n")
+        w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                    "expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._wrote("round-1-findings.md"),
+                                  self.root, False, "PASS")
+        self.assertIn("witness would have fired → PASS rejected", str(cm.exception))
+        self.assertIn("round-1-findings.md", str(cm.exception))
+
+    # --- test 2 — REGRESSION PIN: the clean counterpart must not false-BLOCK
+    def test_2_clean_round_body_does_not_fire(self):
+        self._write("round-1-findings.md", COUNTS_CLEAN + "…prose…\n")
+        w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                    "expect-fail=match  ran=TRACE#1")
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._wrote("round-1-findings.md"),
+                                  self.root, False, "PASS"), [])
+
+    # --- test 5 — facet (b), WROTE-cited: the payload's own #range is what is read
+    def test_5_wrote_cited_payload_range_narrows_the_body(self):
+        self._write("f.md", COUNTS_CLEAN + "prose\n" + COUNTS_HIT)
+        w = self._w("grep:f.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
+        # line 3 matches, line 1 does not — a whole-file read false-BLOCKs.
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._wrote("f.md"), self.root, False, "PASS"), [])
+
+    def test_5b_wrote_cited_payload_range_still_fires_inside_the_range(self):
+        self._write("f.md", COUNTS_HIT + "prose\n" + COUNTS_CLEAN)
+        w = self._w(f"grep:f.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(w, self._wrote("f.md"), self.root, False, "PASS")
+
+    # --- test 6 — facet (b), EXEC-cited MISMATCH: payload names X, out= names Y
+    def test_6_exec_cited_mismatch_reads_the_payload_artifact(self):
+        self._write("x.md", COUNTS_HIT)
+        self._write("y.log", "all quiet\n" * 5)
+        w = self._w(f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "PASS")
+        self.assertIn("matches body of x.md", str(cm.exception))
+        self.assertNotIn("y.log", str(cm.exception))
+
+    # --- test 10 — Tier-1-legal declared range whose ACTUAL bytes blow the 4 KiB cap
+    def test_10_actual_bytes_over_cap_raises_at_tier2(self):
+        self._write("big.md", "".join("X" * 199 + "\n" for _ in range(40)))   # ≈8 KiB
+        w = self._w("grep:big.md#L1-L40  pattern=/zzzz-no-match/  "
+                    "expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._wrote("big.md"), self.root, False, "PASS")
+        self.assertIn("4 KiB", str(cm.exception))
+
+    # --- test 11 — an empty resolved body on a ranged grep witness is a LintError,
+    #     while `body_text is None` still returns True (the :640-641 parity contract)
+    def test_11_empty_string_body_raises_on_disk_for_both_forms(self):
+        self._write("x.md", "one line\n")
+        for line in (f"grep:x.md#L50-L60  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+                     "grep:x.md#L50-L60  expect-fail=/fatal=[1-9]/  ran=TRACE#1"):
+            with self.assertRaises(self.rv.LintError, msg=line):
+                self.rv.tier2_witness(self._w(line), self._wrote("x.md"),
+                                      self.root, False, "PASS")
+
+    def test_11b_empty_string_body_raises_on_the_eval_path(self):
+        for line in (f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+                     "grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1"):
+            with self.assertRaises(self.rv.LintError, msg=line):
+                self.rv._eval_tier2(self._w(line), self._wrote("x.md"),
+                                    {"x.md": ""}, "PASS")
+
+    def test_11c_body_none_still_returns_clean(self):
+        # REGRESSION PIN (green on main): `None` is documented lint.py parity
+        # (`art_name not in artifact_bodies`), NOT the empty-string case.
+        line = f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1"
+        w = self._w(line)
+        self.assertTrue(self.rv.verify_witness(None, w, "PASS",
+                                               self._wrote("x.md")[0]))
+        self.rv._eval_tier2(w, self._wrote("x.md"), {}, "PASS")      # no body → clean
+
+    def test_11d_empty_body_on_the_fail_leg_stays_clean(self):
+        # The empty-body guard is PASS-scoped (round 4 / MIN-2): a FAIL + grep +
+        # EXEC-cited witness reads the UN-narrowed out= range and must not newly raise.
+        self._write("y.log", "")
+        w = self._w("grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "FAIL")
+        self.assertIn("no evidence of failure", str(cm.exception))   # not the empty-body guard
+
+    # --- test 16 — kind=grep + expect-fail=/…/, payload range NARROWER than out=
+    def test_16_payload_range_narrower_than_out_range_is_what_is_read(self):
+        self._write("verify-log.txt", "0\n" * 5 + "post-fix lines: 673\n" + "0\n" * 5)
+        w = self._w("grep:verify-log.txt#L1-L1  expect-fail=/[1-9][0-9]/  ran=TRACE#1")
+        # today's linter reads out=#L1-L11 and matches the unrelated `67` at line 6
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._exec("verify-log.txt#L1-L11"),
+                                  self.root, False, "PASS"), [])
+
+    # --- test 17 — FAIL-leg pattern threading (both legs)
+    def test_17_fail_leg_matching_body_supplies_evidence(self):
+        self._write("y.log", COUNTS_HIT)
+        w = self._w(f"grep:y.log#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L1"), self.root, False, "FAIL"), [])
+
+    def test_17b_fail_leg_nonmatching_body_keeps_the_byte_identical_message(self):
+        self._write("y.log", COUNTS_CLEAN)
+        w = self._w(f"grep:y.log#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L1"), self.root, False, "FAIL")
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
+            "expect-fail match (weak positive-evidence check)")
+
+    # --- test 20 — the --strict path-shaped class change (§0e flip class 3)
+    def test_20_strict_pathshaped_hardfail_becomes_unverifiable(self):
+        w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                    "expect-fail=match  ran=TRACE#1")
+        trace = [{"n": 1, "verb": "WROTE",
+                  "args": f"/nonexistent/abs/round-1-findings.md  sha256:{H64}"}]
+        notes = self.rv.tier2_witness(w, trace, self.root, True, "PASS")
+        self.assertEqual(
+            notes, ["UNVERIFIABLE: witness round-1-findings.md (no file under root)"])
+
+    # --- test 21 — REGRESSION PIN: on FAIL, artifact AND range both stay with
+    #     derive_art_name; neither comes from the payload
+    def test_21_fail_leg_keeps_artifact_and_range_together(self):
+        self._write("y.log", "MARKERY here\nMARKERY again\n" + "filler\n" * 8)
+        self._write("x.md", "filler\n" * 4 + "MARKERX here\nMARKERX again\n")
+        trace = self._exec("y.log#L1-L2")
+        # the body is y.log sliced at the out= range → the Y marker supplies evidence
+        w_hit = self._w("grep:x.md#L5-L6  expect-fail=/MARKERY/  ran=TRACE#1")
+        self.assertEqual(self.rv.tier2_witness(w_hit, trace, self.root, False, "FAIL"), [])
+        # …and the X marker (present only in the payload's file+range) does NOT
+        w_miss = self._w("grep:x.md#L5-L6  expect-fail=/MARKERX/  ran=TRACE#1")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w_miss, trace, self.root, False, "FAIL")
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
+            "expect-fail /MARKERX/ (weak positive-evidence check)")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #474 quality gate, round 1 — the three code findings (SIG-1, SIG-2, SIG-3).
+# Tests 24-26 are RED against the S2-S6 implementation; test 23 pins a divergence
+# that implementation introduced and this round documents rather than removes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRound1RangelessMatch(unittest.TestCase):
+    """SIG-1 — `expect-fail=match` requires a ranged payload. Deleting the `#L1-L1`
+    from the mandated witness turned off ARTIFACTS membership, the span bound, the
+    payload-sourced body and the empty-body rejection all at once, and reproduced
+    #474 verbatim: a clean PASS on a findings file declaring nonzero counts."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 24 — the escape itself
+    def test_24_rangeless_match_payload_raises_at_tier1(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                [f"grep:round-1-findings.md  {MANDATED_CLAUSE}  "
+                 "expect-fail=match  ran=TRACE#1"])
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS expect-fail=match requires a ranged grep payload "
+            "(grep:<artifact>#<range>): 'round-1-findings.md'")
+
+    def test_24b_the_reproduction_receipt_no_longer_lints_clean(self):
+        # The full shape SIG-1 executed: undeclared artifact, no range, PASS verdict.
+        # Pre-fix this receipt was accepted at Tier-1 and its predicate was then run
+        # against derive_art_name's file — one the witness never names.
+        text = _receipt(
+            f"grep:round-1-findings.md  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            trace=[f"READ  design.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_24c_ranged_counterpart_is_accepted_so_the_range_is_the_discriminator(self):
+        # Same line plus `#L1-L1` plus the declaration the range now requires: clean.
+        # Without this conjunct test 24 is satisfiable by rejecting every grep witness.
+        text = _receipt(
+            f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
+            artifacts=[("round-1-findings.md", H64, "2980")],
+            trace=[f"READ  design.md  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+    # --- test 25 — REGRESSION PIN: the committed rangeless shapes are untouched.
+    #     They carry `expect-fail=/…/`, not `match`, which is what makes SIG-1's
+    #     predicate free (measured: 0 of 14 `match` sites are rangeless).
+    def test_25_rangeless_non_match_signatures_still_lint_clean(self):
+        for line in ('grep:boom  expect-fail=/boom/ ran=TRACE#1',
+                     'grep:pattern  expect-fail="literal text"  ran=2026-06-24'):
+            out = self.rv.parse_witness([line])      # must not raise — that IS the pin
+            self.assertIsNone(out["range_kind"], msg=line)
+        # …and the committed fixture carrying the first of them is still there.
+        fx = [json.loads(l) for l in
+              (CORPUS / "tier2-fixtures/manifest.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any("grep:boom" in json.dumps(r) for r in fx),
+                        "fixture drift: rangeless grep fixture h is gone")
+
+
+class TestRound1ClauseBesideNonMatch(unittest.TestCase):
+    """SIG-2 — the clause ladder used to live inside `if expect_fail == "match"`, while
+    the strip that removes the clause from the payload is unconditional for kind=grep.
+    A clause beside a `/regex/` or `"literal"` signature was therefore stripped,
+    validated by nothing, and silently discarded at Tier-2."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 26 — the two shapes D3(a)/(d) exist to reject passed one branch over
+    def test_26_malformed_clause_is_rejected_on_the_non_match_path_too(self):
+        for clause, expected in (
+                ("//", "WITNESS pattern= clause derives an empty regex source: '//'"),
+                ("/[unclosed/", None),                       # message carries re's text
+                ("/0F/", "WITNESS pattern= clause too short: '/0F/'"),
+                ("bare-token",
+                 'WITNESS pattern= clause must be /regex/ or "literal": \'bare-token\''),
+        ):
+            with self.assertRaises(self.rv.LintError, msg=clause) as cm:
+                self.rv.parse_witness(
+                    [f"grep:f.md#L1-L1  pattern={clause}  "
+                     "expect-fail=/zzzz-never/  ran=TRACE#1"])
+            self.assertNotIsInstance(cm.exception, re.error)
+            if expected is not None:
+                self.assertEqual(str(cm.exception), expected)
+            else:
+                self.assertIn("WITNESS pattern= clause is not a valid regex",
+                              str(cm.exception))
+
+    def test_26b_a_wellformed_clause_beside_a_non_match_signature_is_rejected(self):
+        # The realistic error SIG-2 names: a reviewer sharpens the clause and leaves a
+        # stale `expect-fail=/…/` from an earlier draft. Two declared predicates, and
+        # the linter used to evaluate the stale one and report clean.
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/significant=[1-9]/  "
+                 "expect-fail=/zzzz-never/  ran=TRACE#1"])
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS pattern= clause is only meaningful with expect-fail=match "
+            "(got expect-fail='/zzzz-never/'); the clause would be silently ignored")
+
+    def test_26c_the_discarded_predicate_can_no_longer_reach_tier2(self):
+        # End-to-end: the body says fatal=1, the CLAUSE would fire on it, the stale
+        # signature would not. Pre-fix: LINT-PASS. It must now never get that far.
+        text = _receipt(
+            "grep:f.md#L1-L1  pattern=/fatal=[1-9]/  expect-fail=/zzzz-never/  ran=TRACE#1",
+            artifacts=[("f.md", H64, "40")],
+            trace=[f"WROTE  f.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_26d_pins_that_the_clause_and_signature_paths_stay_separable(self):
+        # No-false-BLOCK conjunct: a clause-free `/regex/` signature and a clause-plus-
+        # `match` signature both still lint clean, so 26/26b/26c are not satisfiable by
+        # rejecting anything that carries either token.
+        self.rv.parse_witness(
+            ["grep:f.md#L1-L1  expect-fail=/significant=[1-9]/  ran=TRACE#1"])
+        self.rv.parse_witness(
+            [f"grep:f.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1"])
+
+
+class TestRound1InlineDiskDisposition(unittest.TestCase):
+    """SIG-3 — fixture-(m) shape given INLINE bodies: the witness payload names one
+    artifact, the cited EXEC's `out=` names another, and `artifact_bodies` supplies
+    only the latter. D4 re-pointed the PASS-leg read at the payload artifact, so
+    `bodies.get` misses, `body_text` is None, and the --eval leg returns clean while
+    the same receipt on disk raises.
+
+    These tests PIN that divergence rather than removing it — see verify_witness's
+    "DISK vs --eval DIVERGENCE 2" for why failing the inline leg closed would create a
+    disposition divergence instead of removing one. What they must show is that the
+    mismatch branch is really taken (not merely asserted about) and that the fixture
+    corpus can no longer drift into the shape unnoticed."""
+
+    WITNESS = ("grep:round-4-findings.md#L1-L1  "
+               "pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2")
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _rec(self, bodies):
+        text = _receipt(
+            self.WITNESS,
+            artifacts=[("round-4-findings.md", H64, "81"), ("witness-grep.log", H64, "62")],
+            trace=[f"WROTE  round-4-findings.md  sha256:{H64}",
+                   "EXEC   `grep -nE significant round-4-findings.md`  exit=0  dur=0.1s  "
+                   "out=witness-grep.log#L1-L2"],
+            claims=["severity-max=fatal  from=round-4-findings.md#L1-L1"],
+            skill="red-team/4-devils-advocate")
+        return {"dispatch-id": "4-devils-advocate", "receipt": text,
+                "artifact_bodies": bodies}
+
+    # --- test 23 — the mismatch branch, exercised on both legs of the same receipt
+    def test_23_inline_leg_is_clean_when_bodies_omit_the_payload_artifact(self):
+        rec = self._rec({"witness-grep.log": COUNTS_HIT})
+        disp, info = self.rv._eval_record(rec)
+        self.assertEqual(disp, "LINT-PASS", info)
+        # …and the branch that produced it really is the missing-body one.
+        sections = self.rv.parse_receipt(rec["receipt"])
+        witness = self.rv.parse_witness(sections["WITNESS"])
+        trace = self.rv.parse_trace(sections["TRACE"])
+        art, from_payload = self.rv.witness_art_name(witness, trace[1], "PASS")
+        self.assertTrue(from_payload)
+        self.assertEqual(art, "round-4-findings.md")
+        self.assertNotIn(art, rec["artifact_bodies"])
+        # …and the derivation D4 REPLACED would have hit: without this conjunct the
+        # test passes on an implementation where the re-point was never applied and
+        # `bodies.get` was always going to find the cited artifact.
+        self.assertEqual(self.rv.derive_art_name(trace[1], "PASS"), "witness-grep.log")
+        self.assertIn("witness-grep.log", rec["artifact_bodies"])
+
+    def test_23b_the_same_receipt_on_disk_raises(self):
+        rec = self._rec({"witness-grep.log": COUNTS_HIT})
+        (self.root / "round-4-findings.md").write_text(COUNTS_HIT)
+        (self.root / "witness-grep.log").write_text(COUNTS_HIT)
+        sections = self.rv.parse_receipt(rec["receipt"])
+        witness = self.rv.parse_witness(sections["WITNESS"])
+        trace = self.rv.parse_trace(sections["TRACE"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(witness, trace, self.root, False, "PASS")
+        self.assertEqual(
+            str(cm.exception),
+            "Tier-2: WITNESS expect-fail regex /significant=[1-9]|fatal=[1-9]/ matches "
+            "body of round-4-findings.md (witness would have fired → PASS rejected)")
+
+    def test_23c_supplying_the_payload_artifact_inline_makes_the_legs_agree(self):
+        # The control: keyed on the artifact the witness actually verifies, the inline
+        # leg reaches the same LINT-FAIL. So 23/23b are a body-availability divergence,
+        # not a rule disagreement — which is exactly what the docstring claims.
+        rec = self._rec({"round-4-findings.md": COUNTS_HIT})
+        disp, info = self.rv._eval_record(rec)
+        self.assertEqual(disp, "LINT-FAIL")
+        self.assertIn("matches body of round-4-findings.md", info)
+
+    def test_23d_crosscheck_rejects_a_row_that_does_not_supply_what_it_verifies(self):
+        # The guard that keeps the fixture corpus out of this shape: an artifact_bodies
+        # row whose ranged grep witness verifies an artifact it does not supply is
+        # coverage that cannot fail, and selftest step (iv) now says so.
+        rec = self._rec({"witness-grep.log": COUNTS_HIT})
+        problems = self.rv._selftest_crosscheck(rec, rec["artifact_bodies"])
+        self.assertTrue(
+            any("coverage that cannot fail" in p for p in problems), problems)
+        self.assertTrue(any("round-4-findings.md" in p for p in problems), problems)
+
+    def test_23e_the_committed_grep_inline_row_passes_that_guard(self):
+        # No-false-BLOCK conjunct + a pin on the one committed kind=grep
+        # artifact_bodies row: it supplies the artifact it verifies, so the new guard
+        # is silent on it and step (iv) still compares dispositions as before.
+        rows = [json.loads(l) for l in
+                (CORPUS / "inject/shape-e-grep-witness-inline-body.jsonl")
+                .read_text().splitlines() if l.strip()]
+        self.assertTrue(rows, "fixture drift: the kind=grep inline-body inject row is gone")
+        for rec in rows:
+            problems = self.rv._selftest_crosscheck(rec, rec["artifact_bodies"])
+            self.assertEqual(
+                [p for p in problems if "coverage that cannot fail" in p], [])
+
+
+class TestRound2DuplicateClause(unittest.TestCase):
+    """Round-2 / SIG-1 — `_WITNESS_CLAUSE_RE` is `\\s*$`-anchored, so on a payload
+    carrying TWO `pattern=` tokens `re.search` binds the LAST one and leaves the first
+    sitting inertly inside `payload`. Only the last is shape-checked by
+    `_check_clause_shape` and only the last is evaluated at Tier-2, so APPENDING ONE
+    TOKEN to the mandated red-team witness restored #474 verbatim: a clean PASS over a
+    findings body declaring nonzero counts, with the author's real predicate demoted to
+    dead text. The winning clause is the trailing one — the one an appender controls.
+
+    Two declared predicates ACROSS fields is already a hard reject (test 26b), and
+    `return-convention.md` ships the reason as normative text: the receipt declares two
+    predicates and the linter cannot know which the author meant. Two predicates INSIDE
+    one field is the same ambiguity, so it gets the same answer — rejected, never
+    silently resolved by position."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    # --- test 27 — the escape itself
+    def test_27_two_pattern_clauses_raise_at_tier1(self):
+        line = (f"grep:round-9-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+                "pattern=/zzzz-no-match/  expect-fail=match  ran=TRACE#2")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness([line])
+        self.assertEqual(
+            str(cm.exception),
+            "WITNESS carries more than one pattern= clause: "
+            "'round-9-findings.md#L1-L1  pattern=/significant=[1-9]|fatal=[1-9]/  "
+            "pattern=/zzzz-no-match/'")
+
+    def test_27b_the_reproduction_receipt_no_longer_lints_clean(self):
+        # The shape SIG-1 executed end-to-end: the mandated witness with one extra
+        # never-matching clause appended. Pre-fix this was a clean Tier-1 PASS and the
+        # appended clause was the only one Tier-2 ever evaluated.
+        text = _receipt(
+            f"grep:round-9-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+            "pattern=/zzzz-no-match/  expect-fail=match  ran=TRACE#2",
+            artifacts=[("round-9-findings.md", H64, "2980")],
+            trace=[f"READ  design.md  sha256:{H64}",
+                   f"WROTE  round-9-findings.md  sha256:{H64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_27c_a_third_clause_is_rejected_by_the_same_rule(self):
+        # The re-search runs against the STRIPPED payload, so the rule is on "more than
+        # one" and not on "exactly two": N clauses collapse to the same rejection.
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.parse_witness(
+                ["grep:f.md#L1-L1  pattern=/aaaa/  pattern=/bbbb/  pattern=/cccc/  "
+                 "expect-fail=match  ran=TRACE#1"])
+        self.assertIn("more than one pattern= clause", str(cm.exception))
+
+    def test_27d_the_single_clause_counterpart_is_still_accepted(self):
+        # No-false-BLOCK conjunct: without it, 27/27b/27c are satisfiable by rejecting
+        # every clause-carrying witness — which would take the whole D3 ladder with it.
+        out = self.rv.parse_witness(
+            [f"grep:round-9-findings.md#L1-L1  {MANDATED_CLAUSE}  "
+             "expect-fail=match  ran=TRACE#2"])
+        self.assertEqual(out["pattern"], "/significant=[1-9]|fatal=[1-9]/")
+        self.assertEqual(out["payload"], "round-9-findings.md#L1-L1")
+
+    # --- test 28 — REGRESSION PIN: the rule is scoped to payloads a clause was really
+    #     EXTRACTED from, so a rangeless grep payload whose SEARCH TEXT contains the
+    #     literal `pattern=` is untouched. The token has to be non-trailing to reach
+    #     this branch at all: a trailing `pattern=<bare>` is extracted as a clause and
+    #     already raises via _check_clause_shape (test 26), which would make a pin
+    #     written on that shape pass for an unrelated reason.
+    def test_28_rangeless_payload_carrying_a_nontrailing_pattern_token_is_untouched(self):
+        out = self.rv.parse_witness(
+            ["grep:find pattern= here  expect-fail=/boom/  ran=TRACE#1"])
+        self.assertIsNone(out["pattern"])
+        self.assertEqual(out["payload"], "find pattern= here")
+        self.assertIsNone(out["range_kind"])
+
+    def test_28b_the_committed_rangeless_shapes_are_unmoved(self):
+        for line in ('grep:boom  expect-fail=/boom/ ran=TRACE#1',
+                     'grep:pattern  expect-fail="literal text"  ran=2026-06-24'):
+            out = self.rv.parse_witness([line])   # must not raise — that IS the pin
+            self.assertIsNone(out["pattern"], msg=line)
+        fx = [json.loads(l) for l in
+              (CORPUS / "tier2-fixtures/manifest.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any("grep:boom" in json.dumps(r) for r in fx),
+                        "fixture drift: rangeless grep fixture h is gone")
+
+
+class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
+    """Round-2 / SIG-2 — a PIN ON A DEFERRAL, not on a fix. `witness_art_name` scopes
+    the payload-sourced artifact to `verdict == "PASS"`; on FAIL the body lookup falls
+    back to `derive_art_name`, which is EXEC-`out=`-only on that leg. The mandated
+    red-team witness cites `ran=TRACE#N` → a `WROTE`, so `art_name` is None,
+    `tier2_witness` returns before reading anything, and the Tier-2 witness rules are
+    dead — EVEN WHERE THE ARTIFACT RESOLVES PERFECTLY, which is what makes this
+    distinct from the `--root` condition the Scope paragraph already names.
+
+    Round 1 of every red-team dispatch is a FAIL by construction, and that FAIL receipt
+    is the supersession anchor the fix agent cites. Reversing the asymmetry is a
+    convention change (see verify_witness's ASYMMETRY note) and is deferred to the
+    Tier-2 resolution issue. This test exists so the deferral is load-bearing: if the
+    FAIL leg is ever made to verify, this goes red and the docs get corrected with it."""
+
+    WITNESS = ("grep:round-7-findings.md#L1-L1  "
+               "pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2")
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _parts(self, verdict):
+        text = _receipt(
+            self.WITNESS, verdict=verdict,
+            artifacts=[("round-7-findings.md", H64, str(len(COUNTS_HIT.encode())))],
+            trace=[f"READ  design.md  sha256:{H64}",
+                   f"WROTE  round-7-findings.md  sha256:{H64}"],
+            claims=["severity-max=significant  from=round-7-findings.md#L1-L1"],
+            skill="red-team/7-devils-advocate")
+        sections = self.rv.parse_receipt(text)
+        return (self.rv.parse_witness(sections["WITNESS"]),
+                self.rv.parse_trace(sections["TRACE"]))
+
+    def test_29_fail_leg_with_a_wrote_cited_witness_reads_nothing(self):
+        # The body is on disk, under --root, and the predicate matches it.
+        (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
+        witness, trace = self._parts("FAIL")
+        notes = self.rv.tier2_witness(witness, trace, self.root, True, "FAIL")
+        self.assertEqual(notes, [])          # no raise AND no UNVERIFIABLE note
+        # …and the branch that produced that is the None-art_name one, not a miss.
+        art, from_payload = self.rv.witness_art_name(witness, trace[1], "FAIL")
+        self.assertIsNone(art)
+        self.assertFalse(from_payload)
+
+    def test_29b_the_identical_receipt_on_PASS_does_fire(self):
+        # The discriminator: same witness, same body, same root — only the verdict
+        # differs. Without this conjunct 29 is satisfiable by a resolution failure.
+        (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
+        witness, trace = self._parts("PASS")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(witness, trace, self.root, True, "PASS")
+        self.assertIn("matches body of round-7-findings.md", str(cm.exception))
+
+
+# --- #474 / round-3 S5 — the CLI bound on witness-predicate evaluation ------------
+#
+# COST DISCIPLINE: none of these tests waits out the real 5-second bound. The handler
+# is exercised by CALLING IT (test_30), and the end-to-end conversion runs with the
+# bound INJECTED down to 50 ms (test_32) — the timer plumbing is identical, only the
+# duration differs, so the test costs ~0.05 s and still proves that a catastrophic
+# predicate returns a LintError instead of hanging. The real 5-second constant is
+# pinned separately, as a value (test_30b), which costs nothing.
+CATASTROPHIC = "/(a+)+$/"
+CATASTROPHIC_BODY = "a" * 34 + "b\n"      # non-matching ⇒ full backtracking blow-up
+
+
+class TestWitnessTimeoutBound(unittest.TestCase):
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _catastrophic_receipt(self):
+        note = self.root / "verify-note.md"
+        note.write_text(CATASTROPHIC_BODY)
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        return _receipt(
+            f"grep:verify-note.md#L1-L1  pattern={CATASTROPHIC}  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+
+    def _benign_receipt(self):
+        note = self.root / "verify-note.md"
+        note.write_text("all fixes verified\n")
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        return _receipt(
+            "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+
+    # --- test 30 — the handler itself, driven directly: no signal, no wall clock
+    def test_30_alarm_handler_raises_LintError(self):
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv._witness_alarm(signal.SIGALRM, None)
+        self.assertEqual(str(cm.exception), self.rv.WITNESS_TIMEOUT_MSG)
+
+    # --- test 30b — the shipped bound and its message, pinned byte-for-byte. The
+    #     message changed in round 4 (M3): the bound wraps tier2_witness, which does
+    #     resolve_base + a whole-file read_text() + read_bytes() before re.search, so
+    #     the old wording blamed the predicate for what may be a slow artifact read.
+    def test_30b_bound_and_message_are_the_mandated_ones(self):
+        self.assertEqual(self.rv.WITNESS_TIMEOUT_S, 5)
+        self.assertEqual(
+            self.rv.WITNESS_TIMEOUT_MSG,
+            "witness evaluation exceeded 5s "
+            "(predicate backtracking or a slow/large artifact read)")
+        # it must not re-narrow to the predicate alone — that is the claim M3 falsified
+        self.assertNotIn("witness predicate exceeded", self.rv.WITNESS_TIMEOUT_MSG)
+
+    # --- test 31 — importing the module installs NOTHING. _gen.py, sweep.py and this
+    #     very test module import rcpt_verify; a handler installed at import time would
+    #     silently change SIGALRM for all three.
+    def test_31_import_installs_no_sigalrm_handler(self):
+        before = signal.getsignal(signal.SIGALRM)
+        _import_rv()
+        self.assertIs(signal.getsignal(signal.SIGALRM), before)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    # --- test 32 — end-to-end: a catastrophic predicate under the mandated invocation
+    #     lint-FAILs with the timeout message instead of hanging. Bound injected to 50 ms.
+    def test_32_catastrophic_predicate_becomes_a_LintError_not_a_hang(self):
+        self.rv.WITNESS_TIMEOUT_S = 0.05
+        err = io.StringIO()
+        started = time.monotonic()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._catastrophic_receipt(), "tier2",
+                                        self.root, True)
+        elapsed = time.monotonic() - started
+        self.assertEqual(rc, 1)
+        self.assertEqual(err.getvalue().strip(), self.rv.WITNESS_TIMEOUT_MSG)
+        self.assertLess(elapsed, 2.0)        # it did NOT wait out the real predicate
+        # the finally disarmed the timer even on the raising path
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    # --- test 33 — a NORMAL predicate is unaffected, and the bound leaves no residue
+    def test_33_normal_predicate_unaffected_and_timer_cleared(self):
+        before = signal.getsignal(signal.SIGALRM)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2",
+                                        self.root, True)
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        self.assertIs(signal.getsignal(signal.SIGALRM), before)
+
+    # --- test 33b — the discriminator for 33: the same benign shape with a predicate
+    #     that DOES match still fails on the ordinary expect-fail path, so 33's pass is
+    #     a real clean verdict and not a witness that was never evaluated.
+    def test_33b_benign_shape_still_fires_on_a_matching_predicate(self):
+        note = self.root / "verify-note.md"
+        note.write_text("UNRESOLVED: one finding remains\n")
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        text = _receipt(
+            "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(text, "tier2", self.root, True)
+        self.assertEqual(rc, 1)
+        self.assertIn("matches body of verify-note.md", err.getvalue())
+
+    # --- test 34 — round-4 / M4: the bound BORROWS the process-wide ITIMER_REAL, so it
+    #     must hand it back. The old finally called setitimer(ITIMER_REAL, 0)
+    #     unconditionally and discarded setitimer's return value — the previous timer —
+    #     silently cancelling an in-process caller's own alarm. 30 s is far outside the
+    #     test's runtime, so a surviving timer is unambiguous.
+    def test_34_a_callers_pre_armed_itimer_survives_the_bound(self):
+        prev_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, lambda *a: None)
+        signal.setitimer(signal.ITIMER_REAL, 30)
+        self.addCleanup(signal.signal, signal.SIGALRM, prev_handler)
+        self.addCleanup(signal.setitimer, signal.ITIMER_REAL, 0)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        self.assertEqual(rc, 0, err.getvalue())
+        remaining = signal.getitimer(signal.ITIMER_REAL)[0]
+        self.assertGreater(remaining, 0.0)      # was 0.0 before the fix: cancelled
+
+    def test_34b_with_no_caller_timer_the_bound_still_leaves_none_armed(self):
+        # Discriminator for 34: the restore must be conditional on there having BEEN a
+        # timer, not a blanket re-arm. (test_33 pins the same property end-to-end; this
+        # states it as 34's counterpart so the pair reads as one rule.)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    # --- test 35 — round-4 / M7: signal.setitimer/SIGALRM are Unix-only. Simulated by
+    #     removing the attribute rather than by needing a non-Unix machine. Before the
+    #     guard this raised AttributeError, which `except LintError` does not catch, so
+    #     --tier2 aborted with a traceback where it used to emit a verdict.
+    def test_35_tier2_degrades_to_unbounded_where_setitimer_is_absent(self):
+        sentinel = object()
+        saved = getattr(signal, "setitimer", sentinel)
+        del signal.setitimer
+        self.addCleanup(lambda: saved is not sentinel
+                        and setattr(signal, "setitimer", saved))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        self.assertEqual(rc, 0, err.getvalue())
+
+    def test_35b_the_unbounded_fallback_still_evaluates_the_predicate(self):
+        # Discriminator for 35: without this, a fallback that skipped tier2_witness
+        # entirely would also return 0.
+        note = self.root / "verify-note.md"
+        note.write_text("UNRESOLVED: one finding remains\n")
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        text = _receipt(
+            "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+            trace=[f"WROTE  verify-note.md  sha256:{h}"],
+            skill="quality-gate/9-fix-verifier")
+        sentinel = object()
+        saved = getattr(signal, "setitimer", sentinel)
+        del signal.setitimer
+        self.addCleanup(lambda: saved is not sentinel
+                        and setattr(signal, "setitimer", saved))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(text, "tier2", self.root, True)
+        self.assertEqual(rc, 1)
+        self.assertIn("matches body of verify-note.md", err.getvalue())
+
+    # --- test 36 — round-5 / MIN-3: the teardown order in _verify_single's `finally`.
+    #     M4's conditional re-arm restored the caller's ITIMER_REAL BEFORE reinstalling
+    #     the caller's SIGALRM handler, so a caller delay near zero landed in
+    #     _witness_alarm and became this receipt's LintError. The window is a few machine
+    #     instructions wide and cannot be hit by racing a real timer, so it is SIMULATED
+    #     the way round-4/M7 simulated a non-Unix platform: signal.setitimer is wrapped so
+    #     that the RE-ARM call synchronously delivers SIGALRM to whichever handler is
+    #     installed at that instant. The wrapper keys on `delay not in (0, WITNESS_TIMEOUT_S)`
+    #     so it fires ONLY on the re-arm — firing on the arming call or on the disarm would
+    #     make the test red on both sides and prove nothing.
+    CALLER_DELAY = 30.0        # distinct from WITNESS_TIMEOUT_S, so the key cannot collide
+
+    def _instrument_teardown(self):
+        """Arm a caller timer + handler, and wrap setitimer/signal to record order.
+        Returns (delivered_to, order) — both lists, filled during _verify_single."""
+        delivered_to, order = [], []
+
+        def caller_handler(*_a):
+            delivered_to.append("caller")
+
+        prev_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, caller_handler)
+        real_setitimer, real_getitimer = signal.setitimer, signal.getitimer
+        real_signal = signal.signal
+        signal.setitimer(signal.ITIMER_REAL, self.CALLER_DELAY)
+        self.addCleanup(setattr, signal, "setitimer", real_setitimer)
+        self.addCleanup(setattr, signal, "signal", real_signal)
+        self.addCleanup(real_signal, signal.SIGALRM, prev_handler)
+        self.addCleanup(real_setitimer, signal.ITIMER_REAL, 0)
+
+        def patched_setitimer(which, delay, interval=0.0):
+            r = real_setitimer(which, delay, interval)
+            if delay == 0:
+                order.append("disarm")
+            elif delay == self.rv.WITNESS_TIMEOUT_S:
+                order.append("arm")
+            else:
+                order.append("rearm")
+                # the caller's alarm lands the instant its timer is re-armed
+                os.kill(os.getpid(), signal.SIGALRM)
+            return r
+
+        def patched_signal(sig, handler):
+            if sig == signal.SIGALRM:
+                order.append(f"handler:{'armed' if real_getitimer(signal.ITIMER_REAL)[0] else 'idle'}")
+            return real_signal(sig, handler)
+
+        signal.setitimer, signal.signal = patched_setitimer, patched_signal
+        return delivered_to, order
+
+    def test_36_a_caller_alarm_at_re_arm_time_reaches_the_callers_handler(self):
+        delivered_to, order = self._instrument_teardown()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        # Before the fix the re-arm ran while _witness_alarm was still installed, so this
+        # simulated delivery raised WITNESS_TIMEOUT_MSG out of the finally: rc == 1 and
+        # `delivered_to` stayed empty.
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertEqual(delivered_to, ["caller"], f"order={order}")
+
+    def test_36b_the_handler_is_restored_while_no_timer_is_armed(self):
+        # Discriminator for 36, and the reason a bare SWAP of the two statements is not
+        # the fix: the mirror window (our own timer delivered to the caller's freshly
+        # restored handler) is closed only if the disarm happens FIRST. Pins the whole
+        # order — arm, disarm, restore-with-nothing-armed, re-arm. On HEAD this reads
+        # [arm, rearm, handler:armed].
+        _, order = self._instrument_teardown()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
+        # the leading handler-install is the arming one, recorded before our timer exists
+        self.assertEqual(order, ["handler:armed", "arm", "disarm", "handler:idle", "rearm"])
 
 
 if __name__ == "__main__":

@@ -183,6 +183,107 @@ add("h-synthetic-witness-absent-strict-fail",
     "not an ARTIFACT) → Tier-2 part-2 --strict FAIL. No natural corpus row produces it.")
 
 
+# ══ #474 — the red-team-mandated `pattern=/…/  expect-fail=match` form ══════════════
+# Until these landed, NO fixture paired kind=grep + expect-fail=match with a resolvable
+# body, so the shape that carries every red-team verdict had zero fixture coverage while
+# rcpt_verify.py:30 names --selftest "the permanent CI guard". All five are REDACTED
+# SYNTHETICS: synthetic paths and bodies preserving the real shape (the SEVERITY-COUNTS
+# line, the EXEC-vs-witness artifact split). They give #474's evidence a durable home —
+# the recovered dispatch-dir corpus it was measured on is ephemeral and machine-local.
+#
+# Each declares its witness artifact in its OWN ARTIFACTS: D6's Tier-1 membership rule
+# would otherwise reject the receipt before it reaches the path the fixture exists to
+# cover — coverage that cannot fail is the defect class these rows exist to remove.
+
+RT_HIT = "SEVERITY-COUNTS: fatal=1 significant=3 minor=2\n"
+RT_CLEAN = "SEVERITY-COUNTS: fatal=0 significant=0 minor=3\n"
+RT_PRED = "pattern=/significant=[1-9]|fatal=[1-9]/"
+
+# ── (j) the mandated form FIRES: a declared PASS over a non-clean findings body ──
+body = RT_HIT + "## Finding 1\nsignificant: the guard is inert\n"
+h = write_file("j", "round-3-findings.md", body)
+add("j-rt-mandated-witness-fires",
+    receipt("red-team/3-devils-advocate",
+            [f"  round-3-findings.md  sha256:{h}  {len(body.encode())}"],
+            ["  1  READ   design.md  sha256:" + HEXZ,
+             "  2  WROTE  round-3-findings.md  sha256:" + HEXZ],
+            ["  severity-max=significant  from=round-3-findings.md#L1-L1"],
+            f"grep:round-3-findings.md#L1-L1  {RT_PRED}  expect-fail=match  ran=TRACE#2"),
+    "j", "fail", False,
+    "THE #474 REPRODUCTION: mandated red-team witness on a PASS whose findings body "
+    "declares nonzero counts. Pre-fix the clause was never read → returned clean.")
+
+# ── (k) the mandated form does NOT fire on a genuinely clean round ──
+body = RT_CLEAN + "## No findings\nall prior rounds closed\n"
+h = write_file("k", "round-11-findings.md", body)
+add("k-rt-mandated-clean-round",
+    receipt("red-team/11-devils-advocate",
+            [f"  round-11-findings.md  sha256:{h}  {len(body.encode())}"],
+            ["  1  READ   design.md  sha256:" + HEXZ,
+             "  2  WROTE  round-11-findings.md  sha256:" + HEXZ],
+            ["  severity-max=none  from=round-11-findings.md#L1-L1"],
+            f"grep:round-11-findings.md#L1-L1  {RT_PRED}  expect-fail=match  ran=TRACE#2"),
+    "k", "pass", False,
+    "The no-false-BLOCK counterpart: a clean round must still PASS. Without this row the "
+    "fires-fixture is satisfiable by a guard that rejects every red-team receipt.")
+
+# ── (l) WROTE-cited, narrow payload range: the whole-file false-positive class ──
+#   Line 1 is clean; a LATER line quotes a PRIOR round's nonzero counts in prose. A
+#   whole-file read matches that prose and false-BLOCKs the clean round; the payload's
+#   own #L1-L1 (which return-convention mandates) does not.
+body = RT_CLEAN + "## Note\nround-8-findings.md filed fatal=0 significant=2 at the time\n"
+h = write_file("l", "round-12-findings.md", body)
+add("l-rt-wrote-cited-narrow-range",
+    receipt("red-team/12-devils-advocate",
+            [f"  round-12-findings.md  sha256:{h}  {len(body.encode())}"],
+            ["  1  READ   design.md  sha256:" + HEXZ,
+             "  2  WROTE  round-12-findings.md  sha256:" + HEXZ],
+            ["  severity-max=none  from=round-12-findings.md#L1-L1"],
+            f"grep:round-12-findings.md#L1-L1  {RT_PRED}  expect-fail=match  ran=TRACE#2"),
+    "l", "pass", False,
+    "Prose quoting a prior round's counts sits OUTSIDE the cited #L1-L1. The narrowed "
+    "read is what keeps this clean round clean — a whole-file read would false-BLOCK it.")
+
+# ── (m) EXEC-cited MISMATCH: the witness payload names a DIFFERENT file than out= ──
+#   The facet-(b) case no single-file fixture can see: pre-fix the body came from the
+#   EXEC out= log (which never matches), so the witness was inert on a real contradiction.
+body = RT_HIT + "## Finding 1\nfatal: still broken\n"
+log = "# cmd: grep -nE 'significant' round-4-findings.md\nno hits\n"
+h = write_file("m", "round-4-findings.md", body)
+hlog = write_file("m", "witness-grep.log", log)
+add("m-rt-exec-cited-artifact-mismatch",
+    receipt("red-team/4-devils-advocate",
+            [f"  round-4-findings.md  sha256:{h}  {len(body.encode())}",
+             f"  witness-grep.log  sha256:{hlog}  {len(log.encode())}"],
+            ["  1  WROTE  round-4-findings.md  sha256:" + HEXZ,
+             "  2  EXEC   `grep -nE significant round-4-findings.md`  exit=0  dur=0.1s  "
+             "out=witness-grep.log#L1-L2"],
+            ["  severity-max=fatal  from=round-4-findings.md#L1-L1"],
+            f"grep:round-4-findings.md#L1-L1  {RT_PRED}  expect-fail=match  ran=TRACE#2"),
+    "m", "fail", False,
+    "Witness payload names round-4-findings.md; the cited EXEC's out= names witness-grep.log. "
+    "The verified body must come from the PAYLOAD's file (return-convention.md kind=grep "
+    "rule) — from the log it would never fire, a fail-open inside the fix.")
+
+# ── (n) the same EXEC-cited-mismatch shape on a clean round → PASS ──
+body = RT_CLEAN + "## No findings\n"
+log = "# cmd: grep -nE 'significant' round-13-findings.md\nno hits\n"
+h = write_file("n", "round-13-findings.md", body)
+hlog = write_file("n", "witness-grep.log", log)
+add("n-rt-exec-cited-mismatch-clean",
+    receipt("red-team/13-devils-advocate",
+            [f"  round-13-findings.md  sha256:{h}  {len(body.encode())}",
+             f"  witness-grep.log  sha256:{hlog}  {len(log.encode())}"],
+            ["  1  WROTE  round-13-findings.md  sha256:" + HEXZ,
+             "  2  EXEC   `grep -nE significant round-13-findings.md`  exit=0  dur=0.1s  "
+             "out=witness-grep.log#L1-L2"],
+            ["  severity-max=none  from=round-13-findings.md#L1-L1"],
+            f"grep:round-13-findings.md#L1-L1  {RT_PRED}  expect-fail=match  ran=TRACE#2"),
+    "n", "pass", False,
+    "Mismatch shape, clean body — pins that re-pointing the body at the payload artifact "
+    "does not itself reject; only a contradicting body does.")
+
+
 def verify_fixture(fx):
     """Run the committed fixture through rcpt_verify's Tier-2 exactly as --selftest will."""
     text = fx["receipt"]

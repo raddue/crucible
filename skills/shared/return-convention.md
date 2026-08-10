@@ -100,6 +100,9 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 
 - **`exec:<oneliner-cmd>`** — a shell command ≤120 characters that would produce `expect-fail` output in the failing world. Default for code-producing dispatches.
 - **`grep:<artifact>#<range>  pattern=<regex>`** — a byte-range re-read with a pattern check. Default for research/judge dispatches with no shell. Failing world: the pattern matches.
+  - `<artifact>` **must appear in this receipt's own `ARTIFACTS`** — the ARTIFACTS-membership rule a `<artifact>#<range>` citation gets under *Citation resolution* above, and a Tier-1 lint failure when broken. **Not identical to the CLAIMS rule:** a CLAIMS citation whose artifact is a bare 12-hex receipt-hash prefix is exempt from membership (that is the SUPERSEDES justification form, resolved against the manifest instead). The witness rule has no such exemption, so a witness naming a superseded receipt by hash prefix is rejected where the same CLAIMS citation is accepted.
+  - **Witness a file this dispatch wrote into the dispatch root** — a bare basename such as its own findings file, verification note, or saved command log. That is the one shape where both rules hold at once: it satisfies `ARTIFACTS` membership, and it resolves under `--root <dispatch-root>`, so the hash and the predicate are both really checked. `ARTIFACTS` is the set of files this receipt vouches for, **not only the set it created**, so declaring a file you merely `READ` is legitimate — but declaring a **repo-relative path** (`scripts/foo.py`) does not resolve under the dispatch root and hard-FAILs under the mandated `--strict` (see *Scope*, below, and the Tier-2 artifact-resolution issue). Dropping the `#<range>` does not buy you a verified witness, but it is not blocked either: a rangeless payload is exempt from the artifact, span and empty-body rules, cannot carry `expect-fail=match` at all, and **the name you write there is not read as an artifact at all** — for a rangeless payload the body, the `--strict` path-shape test and the resolution attempt all key on the **cited `TRACE` entry**, not on the payload. A rangeless witness can therefore look like it names one file and silently be checked against another (or against nothing at all). Tracked on the #474 Tier-2 artifact-resolution issue.
+  - The `pattern=` clause pairs with `expect-fail=match` and with nothing else, and it is read only where the grammar puts it: **at the end of the payload**. A clause standing beside a `/regex/` or `"literal"` signature, or a **second trailing** clause standing beside the first, is a Tier-1 lint failure rather than a silent preference for one of the two declared predicates — with two clauses on one line the silent preference would go to the *trailing* one, which is the one an appender controls. A `pattern=` token that is **not** trailing (some non-clause token follows it) is not a clause at all: it stays part of the search payload and declares no predicate. That shape fails closed under `expect-fail=match` ("requires a `pattern=` clause"), and beside a `/regex/` or `"literal"` signature it is accepted with the signature as the sole predicate — so a witness whose `pattern=` looks ignored is telling you it was never parsed as a clause. Tightening that into a rejection is a live option, not an oversight; it would need its own RED test and a measured false-reject cost against rangeless `grep:` payloads whose search text legitimately contains the token.
 - **`lint:<rule-name>`** — a named semantic check re-applied to this very receipt. v1 rule vocabulary (closed): `all-claims-cited`, `trace-consistent`, `skip-declared`. Unknown rule names are a Tier-1 lint failure.
 
 ### `expect-fail` signature forms
@@ -107,7 +110,7 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 - Non-zero exit: `exit!=0` or `exit=<N>` with `N ≠ 0`.
 - Regex: `/…/` whose pattern (excluding delimiters) is ≥ 4 characters and is not wildcard-only (`/.*/` and equivalents rejected).
 - Literal fragment: `"…"` whose content is ≥ 4 characters.
-- The bare token `match` — used with `kind=grep` to mean *"the pattern declared on the grep line matches the body"*. Failing world: the pattern matches. No length constraint because the pattern itself is already on the WITNESS line.
+- The bare token `match` — used with `kind=grep` to mean *"the pattern declared on the grep line matches the body"*. Failing world: the pattern matches. No length constraint because the pattern itself is already on the WITNESS line. It **requires a ranged payload** (`grep:<artifact>#<range>`), which is the form the `Kinds` grammar already defines: a rangeless payload turns off the artifact-membership, span and empty-body rules, so `match` on one would name no file it is checked against.
 
 ### `ran=` disposition
 
@@ -147,6 +150,7 @@ for each CLAIM:
 for each EXEC in TRACE:
   fail if exit=, dur=, or out= is missing
   fail if out= artifact is absent from ARTIFACTS
+  fail if out= byte-range is negative (b < a, e.g. `#L5-L1`)
   fail if out= byte-range exceeds 4 KiB
 
 for each EDIT / WROTE in TRACE:
@@ -164,8 +168,41 @@ witness structural check (every verdict):
   fail if <kind> not in {exec, grep, lint}
   fail if <kind> = lint and <rule-name> not in {all-claims-cited, trace-consistent,
     skip-declared}
-  fail if expect-fail empty, wildcard-only, or < 4 chars (exempt: bare `match` when
-    kind=grep, the exit-clause forms, and bare `match` is only valid for kind=grep)
+  fail if expect-fail empty, wildcard-only, or < 4 chars (exempt: the exit-clause forms)
+  fail if expect-fail is a /regex/ or "literal" that does not compile (the "literal"
+    form is re.escape'd first, so it always compiles — a quoted literal is a LITERAL,
+    not a regex)
+  if a TRAILING `pattern=` clause is present (kind=grep only — it is stripped nowhere
+    else; a `pattern=` token with a non-clause token after it is payload text, not a
+    clause, and reaches none of the rules below):
+      fail if the clause is not DELIMITED — `/regex/` or `"literal"`; a bare
+        undelimited token yields no usable regex source and reads as "no predicate"
+      fail if the clause's DERIVED source (inner text for /regex/, re.escape'd inner
+        text for "literal") is empty, is < 4 chars, or does not compile
+      fail if expect-fail is not `match` — the clause would be silently ignored, and
+        a receipt that declares two predicates does not say which one it means
+      fail if a SECOND trailing `pattern=` clause is present — with two, the silent
+        preference goes to the TRAILING one, which is the one an appender controls
+        (the rule re-runs the same trailing-anchored match on the stripped payload,
+        so it reads "more than one", not "exactly two").
+        LISTED LAST, CHECKED FIRST: this rule runs inside the strip, ahead of the
+        four above it, so `pattern=/valid/  pattern=//` reports the duplicate and
+        never the empty-derivation. The four above are an ordered ladder among
+        THEMSELVES (delimited must precede compile — a bare clause compiles yet
+        derives nothing); this one is not part of that ladder.
+  `match` is NOT a self-contained signature — it names the WITNESS line's separate
+    `pattern=` clause as the predicate, so:
+      fail if expect-fail=match and kind is not grep
+      fail if expect-fail=match and no `pattern=` clause is present
+      fail if expect-fail=match and the payload declares no `#<range>`
+    An absent, underivable or empty predicate is not a weaker witness — it is NO
+    witness, and it used to read as clean (#474).
+  if kind=grep and the payload declares a #<range>:
+    fail if <artifact> does not appear in ARTIFACTS (the same rule cited ranges get)
+    fail if the declared span is negative (b < a, e.g. `#L5-L1`)
+    fail if the declared span exceeds 4 KiB — b−a for #B, a sound 1-byte-per-line
+      floor for #L. Tier-1 is disk-free, so it asserts only what the receipt's own
+      text proves; the authoritative byte cap is Tier-2's.
   if VERDICT=PASS: ran= must be TRACE#N or SKIPPED:<reason>  (UNRUNNABLE not permitted)
   if VERDICT=FAIL/BLOCKED and ran=UNRUNNABLE:<reason>: <reason> must be in the closed
     vocabulary
@@ -211,6 +248,18 @@ if --ledger PATH given:                     # receipt-ledger binding (membership
 ```
 
 **`kind=grep` artifact/range resolution (applies to Tier-1 and both Tier-2 branches — PASS and FAIL).** For `kind=grep`, the cited artifact and range are those named on the `grep:<artifact>#<range>` payload's own `#<range>` (the witness line itself), **not** an `out=` field. `out=` resolution is **`kind=exec`-only** — only `EXEC` carries `out=`; `READ`/`WROTE` (the verbs a `grep` witness may cite via `ran=TRACE#N`) carry none. Where the Tier-1 and Tier-2 pseudocode above reads "the cited `out=<artifact>#<range>`", that phrasing is `kind=exec`-specific; for `kind=grep` read the `grep:<artifact>#<range>` payload's own range. No grammar change — the witness range was always named on the WITNESS line.
+
+**Empty resolved body (`kind=grep`, ranged payload, `PASS`).** A declared range that resolves to *no bytes* — past EOF, or paired with the wrong file — is rejected at Tier-2 **when the artifact resolves under `--root`** rather than accepted. An empty body can never fire, so it is indistinguishable from a skipped check: the same fail-open shape as an absent predicate. This is an empty **string** from a successful read; a body that is simply *not present* (no such artifact in the inline `--eval` bodies) keeps its existing "no body ⇒ clean" behaviour. `FAIL` is exempt — that leg reads the un-narrowed `out=` range and an empty body there silences nothing.
+
+**Scope of the two Tier-2 paragraphs above (`kind=grep` artifact/range resolution, and empty resolved body) — read this before concluding a witness was verified.** Two conditions have to hold, and each is easy to miss in a different direction.
+
+*The artifact must resolve under `--root`.* In the mandated production invocation the root is the dispatch directory, so what resolves is a **file this dispatch wrote into that directory**, named by bare basename — the shape the linter's own fixtures use, which a dispatch can adopt by writing its findings file into the dispatch root, and where a Tier-2 result is real. The red-team dispatch does **not** do that today: `quality-gate/SKILL.md` supplies `[FINDINGS_OUTPUT_PATH]` inside the quality-gate scratch directory, so the mandated red-team witness does not resolve under the mandated root and verifies nothing (measured: 0 of 14 resolutions over the #474 §0g as-returned corpus). Two shapes do not resolve. A **repo-relative, path-shaped** name (`scripts/foo.py`) is not found under the dispatch root — whose git top-level is `None` — and being path-shaped it takes a hard-fail branch under the mandated `--strict`, i.e. structurally `BLOCKED`, not a soft note. *Which* hard-fail message depends on the shape, because the `ARTIFACTS` sweep runs before the witness resolution: a **ranged** payload must name a declared artifact, so it fails first as `Tier-2 --strict: path-shaped artifact <name> absent under all bases`; a rangeless one, which carries no membership rule, reaches `Tier-2 --strict: witness artifact <name> absent under all bases`. Same disposition, two messages. A bare basename that lives *elsewhere* is not path-shaped, so `--strict` skips that branch and the witness reports `UNVERIFIABLE: witness <name> (no file under root)` and verifies nothing. Do not read a Tier-2 `PASS` as meaningless on the strength of this paragraph alone: for the write-into-the-root shape it means exactly what it says.
+
+*The verdict must be `PASS`.* On a `FAIL` receipt the body lookup is confined to a cited `EXEC`'s `out` range, so the mandated red-team form — a `grep:` payload citing `ran=TRACE#N` where entry *N* is a `WROTE` — derives no artifact at all and **nothing is read, even when the file resolves perfectly**. Round 1 of a red-team dispatch is a `FAIL` in the common case — *not* by construction: a round finding `fatal=0 significant=0` returns `PASS`, the shape the `k-rt-mandated-clean-round` fixture exists to model, and nothing in the linter treats a round number as special. So the Tier-2 witness rules are inert on precisely the receipt later rounds are usually anchored to — usually, not always. The `kind=grep` rule above is written for both branches deliberately; the implementation covers `PASS` only, and closing that asymmetry is a convention change rather than a bug fix.
+
+The Tier-1 rules (predicate required and well-formed, no second trailing `pattern=` clause, `ARTIFACTS` membership, span bound) are disk-free and verdict-independent, and therefore live in every configuration. Both gaps above are the Tier-2 artifact-resolution issue, tracked separately.
+
+**Hazard — numeric predicates against command-echo logs (facet (c), documentation only).** A numeric `expect-fail` regex such as `/[1-9]/` matches the `8` in a path like `artifact-8.md`, so a witness pointed at a log that **echoes its own command** (`# cmd: … grep -nE …`) or at a file whose prose quotes prior counts will fire on the echo rather than on the measurement — a false FAIL. Observed live on real receipts. No heuristic echo-stripping is specified: it would have to guess at log format. The workaround is to point the witness at the narrow range carrying the measurement (which the `#<range>` rule above already encourages), or to write the predicate against a sentinel the echo cannot contain.
 
 **Grounds-binding limitation (known, v1).** Tier-2 `FAIL` is *weak positive evidence* — the witness fired, but the linter cannot structurally prove it fired *for the reason the subagent claimed*. Accepted gap. Mitigated by existing fix-dispatch escalation (the fix agent's own receipt carries its own witness) and by Cairn capturing lingering FAIL receipts in `OPEN_OBLIGATIONS`.
 
