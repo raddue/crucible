@@ -5,7 +5,7 @@ Tier-2 parts 1-2 (disk sha256 + witness byte-range). stdlib-only, argparse-free.
 Exit 0=pass, 1=fail; bullets on stderr.
 
 Usage:
-  rcpt_verify.py [--tier1|--tier2] [--root DIR] [--strict] [--ledger PATH] [FILE|-]
+  rcpt_verify.py [--tier1|--tier2] [--root DIR]... [--strict] [--ledger PATH] [FILE|-]
   rcpt_verify.py --selftest
   rcpt_verify.py --eval FILE.jsonl
 
@@ -14,7 +14,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import json, re, signal, sys, hashlib, pathlib, typing
+import contextlib, json, re, signal, sys, hashlib, pathlib, typing
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
@@ -41,14 +41,87 @@ WITNESS_TIMEOUT_MSG = (f"witness evaluation exceeded {WITNESS_TIMEOUT_S}s "
                        "(predicate backtracking or a slow/large artifact read)")
 
 
+class WitnessTimeout(LintError):
+    """#486 / Q8 — a WALL-CLOCK witness timeout, distinguishable from a lint failure.
+
+    A SUBCLASS deliberately: every existing `except LintError` and
+    `assertRaises(LintError)` still catches it, so #485's contract and its round-5
+    teardown ordering are untouched and this is not a type widening at the CLI
+    boundary. What the subclass buys is distinguishability at the sites that would
+    otherwise SWALLOW it. The complete set of `except LintError` handlers wrapping a
+    tier2_witness() call, and each one's disposition after this commit:
+      * _selftest_run_fixture  -- FIXED here, (f). 'fail' is a PASSING fixture for
+        every expect:fail row.
+      * _selftest_crosscheck   -- FIXED here, (g). 'LINT-FAIL' AGREES with an inline
+        LINT-FAIL, so it reports no problem.
+      * tier2-fixtures/_gen.py:301 -- FIXED here, (h). Same shape as
+        _selftest_run_fixture, one directory away.
+      * scripts/measure_474_corpus.py:58 -- NOT FIXED. Bounded now (the arm is inside
+        tier2_witness), but its `except rv.LintError` still renders a timeout as a
+        BLOCKED disposition. Stated, not solved; #486 does not republish its figures.
+      * any test that wants to assert the subclass may -- an affordance, not a swallow.
+    ITIMER_REAL is wall-clock, so a loaded CI box qualifies, not only catastrophic
+    backtracking; without the subclass D7 would introduce "coverage that cannot fail"
+    across ~35 sites in this linter's only regression net.
+    """
+
+
 def _witness_alarm(signum, frame):
-    """SIGALRM → LintError, so a catastrophically-backtracking witness predicate
+    """SIGALRM → WitnessTimeout, so a catastrophically-backtracking witness predicate
     lint-FAILs one receipt (exit 1, message on stderr) instead of hanging the process
-    with no receipt and no verdict. Raising LintError directly is deliberate: it lands
-    in _verify_single's existing `except LintError` with no new failure path, and the
-    timer is armed around the witness evaluation ONLY, so there is nothing else the
-    alarm can be attributed to."""
-    raise LintError(WITNESS_TIMEOUT_MSG)
+    with no receipt and no verdict.
+
+    #486 / D7 — the raise no longer lands in _verify_single's `except LintError` by
+    construction: after the bound moved into tier2_witness it lands wherever THAT
+    function's caller catches, which is why the exception is WitnessTimeout(LintError)
+    rather than a bare LintError (Q8). Every existing handler still catches it; the
+    three that would silently swallow it classify it instead."""
+    raise WitnessTimeout(WITNESS_TIMEOUT_MSG)
+
+
+@contextlib.contextmanager
+def _witness_bound():
+    """#486 / D7 — the CLI-only bound, re-sited so a direct tier2_witness() importer is
+    bounded too. EXACTLY ONE ARM on the path through tier2_witness: _verify_single no
+    longer arms, because nesting would make the inner arm capture the outer's REMAINING
+    delay and restore it on exit, pushing the CLI deadline out by the inner's elapsed
+    time (an effective bound of up to ~2x WITNESS_TIMEOUT_S, falsifying #485's measured
+    5.09 s).
+
+    The platform guard is #485's, carried VERBATIM, both conjuncts — round-4/M7 records
+    why the second is not redundant: the attribute access itself raises AttributeError,
+    which `except LintError` does not catch. PLUS a try/except ValueError around
+    signal.signal, because tier2_witness has no main-thread guarantee the way
+    _verify_single did (":1573-1575": "the CLI entry path and therefore main-thread by
+    construction") and signal.signal raises ValueError off the main thread. Degradation
+    is to UNBOUNDED evaluation — the pre-round-3 behaviour — never a raise.
+
+    The `prev` capture is INSIDE the same guard as the arm: capturing outside it would
+    restore a timer that was never replaced.
+
+    Teardown order is round-5/MIN-3's, carried verbatim: disarm, restore the handler,
+    re-arm. See _verify_single at 5d1fb15 for why merely swapping two statements is
+    incomplete.
+    """
+    armed = False
+    prev = prev_delay = prev_interval = None
+    if hasattr(signal, "setitimer") and hasattr(signal, "SIGALRM"):
+        try:
+            prev = signal.signal(signal.SIGALRM, _witness_alarm)
+        except ValueError:
+            pass                      # off the main thread — unbounded, never a raise
+        else:
+            prev_delay, prev_interval = signal.setitimer(
+                signal.ITIMER_REAL, WITNESS_TIMEOUT_S)
+            armed = True
+    try:
+        yield
+    finally:
+        if armed:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, prev)
+            if prev_delay:
+                signal.setitimer(signal.ITIMER_REAL, prev_delay, prev_interval)
 
 
 # ── Tier-1 (v1 structural) — ported VERBATIM from the former eval-only lint.py
@@ -295,28 +368,58 @@ def _compile_guard(src, msg_prefix, shown):
     this branch widens the surface at the same seam by admitting a second
     freely-authored source.
 
-    Where the bound lives, and why not here: _verify_single (the CLI path) wraps the
-    Tier-2 witness evaluation in signal.setitimer(ITIMER_REAL, 5) and converts SIGALRM
-    into a LintError — see _witness_alarm. Where setitimer does not exist (non-Unix)
-    that call degrades to unbounded rather than aborting (round-4 / M7). That is the path that owns its process. This
+    Where the bound lives, and why not here: tier2_witness wraps its whole body in
+    _witness_bound(), which arms signal.setitimer(ITIMER_REAL, WITNESS_TIMEOUT_S) and
+    converts SIGALRM into a WitnessTimeout — see _witness_alarm. #486 / D7 re-sited it
+    there from _verify_single precisely so a DIRECT tier2_witness() importer is bounded
+    too, not only the CLI; _verify_single now arms nothing. Where setitimer does not
+    exist (non-Unix), or the call is off the main thread (signal.signal raises
+    ValueError), that degrades to unbounded rather than aborting (round-4 / M7). This
     module is NOT imported by any hook (hooks/rcpt-verify-hook.sh runs it as a
     --tier1 SUBPROCESS, which never reaches this search at all), and installing a signal
     handler at import time on its importers' behalf would be the overreach — a handler is
     the owning process's business, and setitimer's handler does run on the main thread, so
-    those callers can install one if they want it. --eval and --selftest do not route
-    through _verify_single and stay unbounded; carried on the #474 Tier-2 resolution issue.
+    those callers can install one if they want it. --eval stays unbounded and is now the
+    ONLY unbounded path: _eval_tier2 reaches verify_witness directly, without going
+    through tier2_witness. --selftest DOES route through tier2_witness (twice) and is
+    therefore bounded after D7. Carried on #488.
 
-    The importers, and which of them are UNBOUNDED (round-5 / MIN-2 — this list has now
-    been wrong twice, so it names dispositions, not just names):
-      * _gen.py, sweep.py, test_rcpt_verify.py — pre-existing.
+    The importers, and which of them are UNBOUNDED (round-5 / MIN-2 — this list had been
+    wrong twice when that was written and was wrong a third time until #486/T20, so it
+    names dispositions, not just names):
+      * _gen.py, sweep.py, test_rcpt_verify.py — pre-existing, and now with three
+        DIFFERENT dispositions. Re-derived at #486/T20: grepping every .py outside this
+        file and its test module for tier2_witness|verify_witness|_eval_tier2 returns
+        exactly THREE call sites (_gen.py, measure_474_corpus.py and
+        measure_486_corpus.py), and inside this file verify_witness( has exactly two
+        (tier2_witness and _eval_tier2) — which is what makes --eval the only remaining
+        unbounded path.
+          - sweep.py has NO hit: it reaches this guard through Tier-1 ONLY
+            (lint_receipt / parse_witness), i.e. it compiles receipt-authored patterns
+            and never runs one against a body — same disposition as
+            measure_474_denominators.py below.
+          - _gen.py calls tier2_witness (:413) and is therefore BOUNDED after D7, with
+            its timeout swallow fixed in the same commit.
+          - test_rcpt_verify.py is likewise BOUNDED at its tier2_witness( call sites, and
+            carries criterion 8's ACCEPTED residual: at the overlap with its
+            assertRaises(self.rv.LintError) blocks a wall-clock timeout is still a
+            passing test. Narrowing those is a separate declared flip, not done here.
       * measure_474_denominators.py (CI-gated, run_tests.sh) — reaches this guard only
         through Tier-1 (lint_receipt / parse_witness / parse_out_range). It COMPILES
         receipt-authored patterns and never runs one against a body, so it is safe.
-      * measure_474_corpus.py — calls rv.tier2_witness(...) DIRECTLY, outside
-        _verify_single, so it runs receipt-authored regexes against real file bodies with
-        NO setitimer bound, over a corpus of agent-written receipts. Same disposition as
-        the --eval / --selftest residual above: UNBOUNDED, stated not solved. It is not
-        run by run_tests.sh."""
+      * measure_474_corpus.py — calls rv.tier2_witness(...) DIRECTLY at :58, which is now
+        where the arm lives, so it is BOUNDED after D7 (this is the "a direct importer is
+        bounded too" property D7 is sold on). Its RESIDUAL is distinguishability, not
+        liveness: :58's `except rv.LintError` still renders a timeout as a BLOCKED
+        disposition. Stated, not solved — #486 does not republish its figures. It is not
+        run by run_tests.sh.
+      * measure_486_corpus.py — added by this branch (#486 task 18); calls
+        rv.tier2_witness(...) DIRECTLY at :303, so it is BOUNDED after D7 for the same
+        reason measure_474_corpus.py is. It does NOT carry that module's
+        distinguishability residual: its `except rv.WitnessTimeout` arm is ordered
+        BEFORE `except rv.LintError`, so a timeout surfaces as a skip rather than as a
+        BLOCKED disposition. Not run by run_tests.sh directly; it is CI-gated through
+        scripts/test_measure_486.py, which imports and drives it."""
     try:
         re.compile(src)
     except (re.error, OverflowError, RecursionError) as e:
@@ -825,7 +928,59 @@ def lint_v11_local(parsed):
 
 
 # ── Tier-2 shared base resolution ───────────────────────────────────────────
-def resolve_base(name: str, root: pathlib.Path):
+def _as_roots(root) -> list:
+    """#486 / D1 — normalise the `root` parameter to a de-duplicated list of roots.
+
+    Accepts a bare str/Path (which is what every one of the ~50 existing call sites
+    passes, positionally) or a sequence of them, so NO existing caller moves. This is
+    the parameter-side half of D8.2's "no direct caller moves" promise.
+
+    De-duplication is D2's and is by Path.resolve(), not by set(): `/tmp/x`, `/tmp/x/`
+    and a symlinked equivalent are three tokens for one directory, and left un-collapsed
+    every name would resolve "under two roots" -> LintError -> per
+    quality-gate/SKILL.md:32 every receipt of such a run BLOCKS on invocation one.
+    Order is DECLARATION order (D3), so the de-duplication preserves position rather
+    than going through a set. The UNRESOLVED Path is what is kept: resolve_base already
+    resolves it for the containment set, and keeping it verbatim is what makes a single
+    root behave exactly as today.
+    """
+    if isinstance(root, (str, pathlib.Path)):
+        root = [root]
+    out, seen = [], set()
+    for r in root:
+        p = pathlib.Path(r)
+        key = p.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
+def _allowed_bases(roots) -> list:
+    """#486 / D2 — the #397/C1 containment set: the UNION of every de-duplicated root
+    and that root's git toplevel.
+
+    Design :211-213 and :290-295 pin the union DELIBERATELY, so a `..`-traversal from
+    root A may legitimately land under root B. Computed ONCE here rather than per root,
+    because a per-root set makes resolution depend on which root's probe produced the
+    candidate — the implicitness O5 was rejected for — and silently narrows `found`,
+    which is D2's ambiguity detector.
+
+    For ONE root this is byte-identical to what :839-840 computed at 5d1fb15, which is
+    why TestRootContainment (:599-679) is unflipped.
+    """
+    allowed = []
+    for r in roots:
+        p = pathlib.Path(r)
+        allowed.append(p.resolve())
+        repo = _git_toplevel(p)
+        if repo:
+            allowed.append(repo.resolve())
+    return allowed
+
+
+def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     """Probe {root, repo-root-of-root, absolute-as-is} in fixed order; return the
     FIRST base where the file exists, else None. repo-root = git toplevel of `root`
     (NOT this script's checkout). Used by part-1 hash, part-2 witness read, and --strict.
@@ -836,8 +991,8 @@ def resolve_base(name: str, root: pathlib.Path):
     tree resolves to None — never an out-of-tree disk read while linting an
     attacker-influenced receipt. (None then becomes UNVERIFIABLE, or path-shaped +
     --strict FAIL, in the callers — the same shape as a genuinely-absent file.)"""
-    repo = _git_toplevel(root)
-    allowed = [root.resolve()] + ([repo.resolve()] if repo else [])
+    repo = _git_toplevel(root)      # still needed: it is a CANDIDATE base (:847-848)
+    # `allowed` is now the caller's UNION over ALL roots (#486 / D2, design :290).
     cands = []
     p = pathlib.Path(name)
     if p.is_absolute():
@@ -853,6 +1008,47 @@ def resolve_base(name: str, root: pathlib.Path):
         if real.is_file():
             return real
     return None
+
+
+def resolve_base(name: str, root, found=None):
+    """Resolve `name` against one or more roots; return the FIRST hit, else None.
+
+    #486 / D1 — `root` is a single root (as today) or a sequence probed in DECLARATION
+    ORDER. The first hit is the file that is READ (D3); this is NOT an early exit,
+    because D2 needs the distinct realpaths from EVERY de-duplicated root.
+
+    #486 / D2 — when a caller passes a mutable `found` list it is filled with the
+    DISTINCT realpaths the per-root probes returned, in probe order. The RETURN TYPE
+    does not move: `Path | None`, exactly as before. That is deliberate and is what
+    keeps all nine direct call sites in scripts/test_rcpt_verify.py unflipped
+    (a (first_hit, [realpaths]) tuple would break every assertIsNone). The callers —
+    tier2_artifacts and tier2_witness — own the LintError-vs-AMBIGUOUS-note
+    disposition, because `notes` is theirs to build.
+
+    #486 / Q7 — WITHIN one root the existing root-then-repo precedence is UNTOUCHED and
+    silently first-hit-wins (test_resolve_base_binds_root_first still holds), so that
+    probe contributes at most one realpath. ACROSS roots the repo bases participate for
+    free: root A's probe may return repoA/name and root B's B/name, and those are two
+    distinct realpaths.
+
+    Containment (#397 / C1) is the UNION of all roots and their git toplevels, not a
+    per-root test — see D2 and _allowed_bases. The reachable FILE set is identical
+    either way; what grows is the set of name forms that reach a given file. Per-root
+    containment was rejected because it would make resolution depend on which root's
+    probe produced the candidate, which is the implicitness O5 was rejected for.
+    """
+    roots = _as_roots(root)
+    allowed = _allowed_bases(roots)
+    first = None
+    for r in roots:
+        hit = _resolve_base_one(name, r, allowed)
+        if hit is None:
+            continue
+        if first is None:
+            first = hit
+        if found is not None and hit not in found:
+            found.append(hit)
+    return first
 
 
 def _contained(child: pathlib.Path, base: pathlib.Path) -> bool:
@@ -876,20 +1072,98 @@ def is_path_shaped(name: str) -> bool:
     return ("/" in name) or pathlib.Path(name).is_absolute()
 
 
-def tier2_artifacts(artifacts, trace, root, strict):
+def tier2_artifacts(artifacts, trace, root, strict, cov=None):
     """Part 1. For each ARTIFACTS <name>: resolve_base; if found, recompute sha256
     and compare (mismatch -> FAIL). If absent: path-shaped + strict -> FAIL;
-    else UNVERIFIABLE (non-fatal). Returns list of UNVERIFIABLE notes; raises LintError on FAIL."""
+    else UNVERIFIABLE (non-fatal). Returns list of UNVERIFIABLE notes; raises LintError on FAIL.
+
+    #486 / D8 — `cov` is an optional _Coverage collector. OPTIONAL WITH A DEFAULT is
+    deliberate: the ~50 direct call sites pass positionally, so a required parameter
+    would change arity everywhere and falsify D8.2's "no existing caller moves"."""
     notes = []
     for name, meta in artifacts.items():
-        resolved = resolve_base(name, root)
+        found = []
+        resolved = resolve_base(name, root, found)
+        if resolved is None and re.fullmatch(r"[0-9a-f]{12}", name):
+            # D8.3 — a bare 12-hex receipt-hash prefix (the SUPERSEDES-justification
+            # form, exempted from CLAIMS membership at :620). When nothing of that name
+            # exists under any probed root it is not a file and never will be; counting
+            # it UNREACHED would be false.
+            #
+            # RULING (round-2/S2) — the test is `re.fullmatch(...) AND unresolved`, and
+            # the branch is decided AFTER resolution, not before. A pre-resolution
+            # `continue` would skip the sha256 recomputation below for an entry that DOES
+            # resolve, turning a shipped hard FAIL on mismatch into exit 0 plus an
+            # advisory note that tells the reader the opposite of the truth — a silent
+            # narrowing of a shipped check, in the function whose last regression (#474)
+            # was a silent fail-open. Every census effect is IDENTICAL either way (same
+            # bucket, and art_applicable is not incremented either way), so the ordering
+            # buys the hash check back at zero cost to D8.3's purpose.
+            #
+            # `resolved is None` implies `found == []` (resolve_base returns the first
+            # hit, so a non-empty `found` always yields a `resolved`), which is why this
+            # branch may sit above the `len(found) > 1` test without hiding an ambiguity:
+            # a 12-hex name present under two roots is a real file in two homes and takes
+            # the ambiguity branch exactly as any other name does.
+            if cov is not None:
+                cov.bump("not-applicable", "receipt-hash-prefix")
+            # #486 / S6 — NOT SILENT. `continue` skips the --strict path-shape branch AND
+            # the UNVERIFIABLE note, so without this line a declared ARTIFACTS entry
+            # would be neither verified nor mentioned anywhere on stderr — on a predicate
+            # the RECEIPT controls. D8.3 pins the census BUCKET; it does not pin silence.
+            notes.append(f"NOT-APPLICABLE: {name} (12-hex receipt-hash prefix, not a file)")
+            continue
+        if cov is not None:
+            cov.art_applicable += 1
+        if len(found) > 1:
+            # #486 / D2 — two or more DISTINCT realpaths. Fail closed under --strict:
+            # first-hit-wins here would verify against a plausible but WRONG file, a
+            # silent-wrong-answer class strictly worse than the loud UNVERIFIABLE it
+            # replaces. Byte-identical copies count too (Q7): collapsing them would make
+            # the disposition depend on the content of a file the receipt may control.
+            # The parenthetical lists EVERY distinct realpath, sorted lexicographically;
+            # with N roots the candidate space is up to 2N, so it is not a two-item bound.
+            if cov is not None:
+                # Bumped BEFORE the --strict raise, so the item is recorded on exactly
+                # the run the raise truncates.
+                cov.bump("ambiguous")
+            homes = ", ".join(sorted(str(p) for p in found))
+            msg = f"artifact {name} is ambiguous across roots ({homes})"
+            if strict:
+                if cov is not None:
+                    cov.partial = True     # remaining entries + witness leg uncounted
+                raise LintError(f"Tier-2 --strict: {msg}")   # BEFORE any read
+            notes.append(f"AMBIGUOUS: {msg}")
         if resolved is not None:
             actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+            if cov is not None:
+                # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash
+                # evaluated == VERIFIED, including the entry that then mismatches, so
+                # the increment sits between the recomputation and the comparison —
+                # never after it. The natural placement ("count it once we know it's
+                # good") renders `artifacts 0/N` on exactly the mismatch runs the
+                # census exists to explain.
+                cov.art_verified += 1
             if actual != meta["hash"]:
+                if cov is not None:
+                    cov.partial = True     # remaining entries + witness leg uncounted
                 raise LintError(f"Tier-2: ARTIFACTS {name} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
             # <size> is parsed-but-not-validated, matching lint.py
         else:
+            if cov is not None:
+                # D8.3's SYNTACTIC approximation, no new disk surface: no "/" means the
+                # CLI cannot tell a mis-pointed root from a nested-repo basename, so it
+                # over-attributes to the harder-to-fix class. The split is ADVISORY and
+                # conservative; the SUM is exact, which is all Q5 and #488's criterion 4
+                # read. Any future rule reading the two SEPARATELY breaks that invariance
+                # and may not be added without revisiting D8.3.
+                if is_path_shaped(name):
+                    cov.bump("unreached")
+                else:
+                    cov.bump("not-reachable", "unresolvable-basename")
             if strict and is_path_shaped(name):
+                if cov is not None:
+                    cov.partial = True     # remaining entries + witness leg uncounted
                 raise LintError(f"Tier-2 --strict: path-shaped artifact {name} absent under all bases")
             notes.append(f"UNVERIFIABLE: {name} (no file under root)")
     return notes
@@ -1107,64 +1381,176 @@ def _slice(path: pathlib.Path, kind, a, b):
     return path.read_bytes()[a - 1:b].decode("utf-8", errors="replace")  # 1-based inclusive
 
 
-def tier2_witness(witness, trace, root, strict, verdict):
+def tier2_witness(witness, trace, root, strict, verdict, cov=None):
     """Part 2. Resolve the cited TRACE artifact via resolve_base, read ONLY the cited
     #L/#B range from disk, then call the shared verify_witness. Absent witness file:
     path-shaped + --strict -> FAIL; else UNVERIFIABLE (non-fatal). Returns UNVERIFIABLE
-    notes; raises LintError on FAIL (incl. verify_witness's byte-identical messages)."""
-    if not witness["ran"].startswith("TRACE#"):
-        return []
-    idx = _trace_idx(witness["ran"])
-    if not 1 <= idx <= len(trace):
-        return []
-    cited = trace[idx - 1]
-    art_name, from_payload = witness_art_name(witness, cited, verdict)
-    if art_name is None:
-        return []
-    resolved = resolve_base(art_name, root)
-    if resolved is None:
-        if strict and is_path_shaped(art_name):
-            raise LintError(f"Tier-2 --strict: witness artifact {art_name} absent under all bases")
-        return [f"UNVERIFIABLE: witness {art_name} (no file under root)"]
-    body_text = _read_cited_range(resolved, cited, witness if from_payload else None)
-    # #397 defect 4 — authoritative 4 KiB cap on the cited range (Tier-1's 80-bytes/line
-    # estimate under-counts long lines). The cap measures EXACTLY what the reader read:
-    #  - #L: len(body_text.encode("utf-8")) — the reader's own slice. read_text() decodes
-    #    losslessly (no errors=), so there is NO U+FFFD inflation on this path; this also
-    #    makes the cap byte-count equal the reader's str.splitlines() slice exactly (vs.
-    #    bytes.splitlines(), which diverges on exotic separators U+2028/NEL/VT/FF).
-    #  - #B: len(raw[a-1:b]) on the RAW on-disk bytes — matches the reader's read_bytes()
-    #    slice. NOT body_text: a #B range over invalid UTF-8 decodes each bad byte to
-    #    U+FFFD (3 bytes), which would inflate an in-budget range past the cap and
-    #    false-FAIL.
-    # Scoped to ranged citations (the #L/#B read budget per return-convention.md
-    # § "Cost model": one Read of a byte-range <= 4 KiB per verified verdict);
-    # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
-    # #474 / S6: when the body came from the WITNESS payload, the cap keys on THAT range
-    # — the one actually read — not on parse_out_range(cited), which the grep path never
-    # had. Tier-1's grep bound is only the sound 1-B/line floor, so this is where a
-    # reviewer-declared range is measured against its real bytes.
-    if from_payload:
-        cap = (witness["range_kind"], witness["range_a"], witness["range_b"])
-    else:
-        r = parse_out_range(cited["args"])
-        cap = (r.kind, r.start, r.end) if r else None
-    if cap:
-        kind, a, b = cap
-        if a < 1:  # 1-based; clamp matches _read_cited_range
-            a = 1
-        if kind == "L":
-            span = len(body_text.encode("utf-8"))
-        else:
-            span = len(resolved.read_bytes()[a - 1:b])
-        if span > WITNESS_SPAN_CAP:
-            raise LintError(
-                f"Tier-2: cited witness range exceeds 4 KiB actual bytes "
-                f"({span} > {WITNESS_SPAN_CAP}; Tier-1's line estimate under-counted)"
-            )
-    _reject_empty_grep_body(body_text, witness, verdict, art_name)
-    verify_witness(body_text, witness, verdict, cited)  # raises on FAIL
-    return []
+    notes; raises LintError on FAIL (incl. verify_witness's byte-identical messages).
+
+    #486 / D8 — `cov` is an optional _Coverage collector, optional with a default for
+    the same reason tier2_artifacts' is. Round-2/S1: the four counters are BOTH-LEGS
+    counters, so this leg wires all four and not only `wrong-name` — a `witness 0/1`
+    line with every sub-count at 0 puts an item in the applicable set that belongs to
+    none of design :1175's disjoint sub-counts, and this is the leg #486's headline
+    figure (0 of 14 witness resolutions) is about."""
+    with _witness_bound():
+        try:
+            if not witness["ran"].startswith("TRACE#"):
+                if cov is not None:
+                    cov.bump("not-applicable", "ran-not-trace")
+                return []
+            idx = _trace_idx(witness["ran"])
+            if not 1 <= idx <= len(trace):
+                # D8.2 — deliberately NO census code. Unreachable from the CLI: lint_receipt
+                # raises "WITNESS ran=TRACE#N does not resolve" first, landing on the
+                # not-reached (tier1-reject) shape. The census is complete AS SCOPED TO THE
+                # CLI PATH and is not complete for a direct in-process call that skips
+                # lint_receipt — a caller shape no criterion covers today, named so a future
+                # consumer does not inherit the gap silently.
+                return []
+            cited = trace[idx - 1]
+            art_name, from_payload = witness_art_name(witness, cited, verdict)
+            if art_name is None:
+                # D8.5 — D4's single "NOT-EVALUATED" string folds onto TWO codes, because
+                # this branch has two arms: the FAIL leg with no EXEC out= range, and a PASS
+                # leg whose cited entry yields no name at all. Mapping both onto
+                # fail-leg-no-range would mislabel the PASS-leg cases.
+                if cov is not None:
+                    cov.bump("not-applicable",
+                             "fail-leg-no-range" if verdict == "FAIL" else "no-art-name")
+                return []
+            if cov is not None:
+                # S2 — applicability is a MEASURED fact from here on, so d becomes 1 only now.
+                cov.wit_applicable = 1
+            found = []
+            resolved = resolve_base(art_name, root, found)
+            if len(found) > 1:
+                # #486 / D2 — same rule as the artifacts leg, its OWN wording. The two messages
+                # differ because :893 and :1127 already differ ("path-shaped artifact …" vs
+                # "witness artifact …") and message fidelity is load-bearing for the --eval
+                # byte-diff (see verify_witness's docstring).
+                if cov is not None:
+                    # Round-2/S1 — the SAME counter and entry semantics as the ARTIFACTS
+                    # leg's bump. Bumped BEFORE the --strict raise, so the item is recorded
+                    # on exactly the run the raise truncates.
+                    cov.bump("ambiguous")
+                homes = ", ".join(sorted(str(p) for p in found))
+                msg = f"witness artifact {art_name} is ambiguous across roots ({homes})"
+                if strict:
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(f"Tier-2 --strict: {msg}")
+                notes_ambiguous = [f"AMBIGUOUS: {msg}"]
+            else:
+                notes_ambiguous = []
+            if resolved is None:
+                if cov is not None:
+                    # D8.3's SYNTACTIC split, identical to the ARTIFACTS leg's. This is the
+                    # branch #486's headline figure is about: a witness artifact that
+                    # resolves under NO root. Before this, such a run rendered `witness 0/1`
+                    # with all four sub-counts at 0.
+                    if is_path_shaped(art_name):
+                        cov.bump("unreached")
+                    else:
+                        cov.bump("not-reachable", "unresolvable-basename")
+                if strict and is_path_shaped(art_name):
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(f"Tier-2 --strict: witness artifact {art_name} absent under all bases")
+                return notes_ambiguous + [f"UNVERIFIABLE: witness {art_name} (no file under root)"]
+            body_text = _read_cited_range(resolved, cited, witness if from_payload else None)
+            # #397 defect 4 — authoritative 4 KiB cap on the cited range (Tier-1's 80-bytes/line
+            # estimate under-counts long lines). The cap measures EXACTLY what the reader read:
+            #  - #L: len(body_text.encode("utf-8")) — the reader's own slice. read_text() decodes
+            #    losslessly (no errors=), so there is NO U+FFFD inflation on this path; this also
+            #    makes the cap byte-count equal the reader's str.splitlines() slice exactly (vs.
+            #    bytes.splitlines(), which diverges on exotic separators U+2028/NEL/VT/FF).
+            #  - #B: len(raw[a-1:b]) on the RAW on-disk bytes — matches the reader's read_bytes()
+            #    slice. NOT body_text: a #B range over invalid UTF-8 decodes each bad byte to
+            #    U+FFFD (3 bytes), which would inflate an in-budget range past the cap and
+            #    false-FAIL.
+            # Scoped to ranged citations (the #L/#B read budget per return-convention.md
+            # § "Cost model": one Read of a byte-range <= 4 KiB per verified verdict);
+            # rangeless READ/WROTE grep reads carry no #range and keep their whole-file behavior.
+            # #474 / S6: when the body came from the WITNESS payload, the cap keys on THAT range
+            # — the one actually read — not on parse_out_range(cited), which the grep path never
+            # had. Tier-1's grep bound is only the sound 1-B/line floor, so this is where a
+            # reviewer-declared range is measured against its real bytes.
+            if from_payload:
+                cap = (witness["range_kind"], witness["range_a"], witness["range_b"])
+            else:
+                r = parse_out_range(cited["args"])
+                cap = (r.kind, r.start, r.end) if r else None
+            if cap:
+                kind, a, b = cap
+                if a < 1:  # 1-based; clamp matches _read_cited_range
+                    a = 1
+                if kind == "L":
+                    span = len(body_text.encode("utf-8"))
+                else:
+                    span = len(resolved.read_bytes()[a - 1:b])
+                if span > WITNESS_SPAN_CAP:
+                    if cov is not None:
+                        cov.partial = True   # bytes read, predicate never ran — leg unfinished
+                    raise LintError(
+                        f"Tier-2: cited witness range exceeds 4 KiB actual bytes "
+                        f"({span} > {WITNESS_SPAN_CAP}; Tier-1's line estimate under-counted)"
+                    )
+            try:
+                _reject_empty_grep_body(body_text, witness, verdict, art_name)
+            except LintError:
+                # State (c): bytes read, predicate never ran. This arm needs NO WitnessTimeout
+                # arm and that is deliberate — a timeout landing here is caught by this broad
+                # `except LintError` (WitnessTimeout is a subclass), which sets partial and
+                # re-raises: the same treatment state (d) gets, and it sets no wit_verified.
+                # The subclass-ordering hazard only bites where an arm would ASSERT something
+                # a timeout falsifies, which is the verify_witness wrapper below.
+                if cov is not None:
+                    cov.partial = True
+                raise
+            try:
+                verify_witness(body_text, witness, verdict, cited)  # raises on FAIL
+            except WitnessTimeout:
+                # State (d). WitnessTimeout IS a LintError subclass, so this arm MUST precede
+                # the broader one below — deleting it as a "pointless re-raise" would silently
+                # route a timeout into the arm that sets wit_verified = 1, which is
+                # round-4/SIG-2 exactly: `witness 1/1 ... partial`, a verification that
+                # provably did not happen. The predicate was ENTERED and never finished, so it
+                # is NOT verified. `partial` is set by the wrapper below; nothing to do here.
+                raise
+            except LintError:
+                # State (b). Design :1188-1190's ARTIFACTS-leg analogue: bytes off disk +
+                # predicate evaluated TO A RESULT == VERIFIED, including the run where that
+                # result is a FAIL.
+                if cov is not None:
+                    cov.wit_verified = 1
+                raise
+            else:
+                # State (a). Same definition, clean result.
+                if cov is not None:
+                    cov.wit_verified = 1
+            if cov is not None:
+                if (witness.get("kind") == "grep" and witness.get("range_kind") is None
+                        and not notes_ambiguous):
+                    # `and not notes_ambiguous` — design :1178-1180: under non-strict an item
+                    # can satisfy both descriptions, and the ruling is that it counts
+                    # `ambiguous` and not `wrong-name` (the ambiguity is the earlier and the
+                    # recoverable fact). Under --strict the ambiguity raises before this line,
+                    # so the guard is live only on the non-strict path — where, without it,
+                    # :1175's disjointness fails on exactly one shape.
+                    # D8.3 — the rangeless payload is NOT "no check exists": the predicate
+                    # really ran, against the CITED TRACE entry rather than the payload token,
+                    # i.e. against a file the witness never names. VERIFIED and counted
+                    # wrong-name, so the one class where a predicate provably runs against an
+                    # undeclared file is not filed under "not applicable" and erased from
+                    # every counter a floor can act on. (Retired in commit 2 if corrected D5
+                    # lands — S3.)
+                    cov.bump("wrong-name", "rangeless-grep-payload")
+            return notes_ambiguous
+        except WitnessTimeout:
+            if cov is not None:
+                cov.partial = True
+            raise
 
 
 def _reject_empty_grep_body(body_text, witness, verdict, art_name):
@@ -1375,7 +1761,7 @@ def run_selftest() -> int:
     # (iii) Tier-2 disk fixtures — each fixture's expect realized against REAL files.
     fx_dir = CORPUS_DIR / "tier2-fixtures"
     for fx in _read_jsonl(fx_dir / "manifest.jsonl"):
-        got = _selftest_run_fixture(fx, fx_dir / fx["root"])
+        got = _selftest_run_fixture(fx, _fx_roots(fx_dir, fx["root"]))
         if got != fx["expect"]:
             problems.append(f"fixture {fx['id']} expected {fx['expect']}, got {got}")
 
@@ -1415,8 +1801,24 @@ def run_selftest() -> int:
     return 0
 
 
+def _fx_roots(fx_dir, spec):
+    """#486 — manifest `root` accepts a string OR a list of strings; a bare string
+    normalises to a one-element list, so all 14 committed rows keep their meaning
+    verbatim (criterion 10(c)). The corpus needs this because run_selftest is the
+    design's own named anti-drift instrument (D8.4 rejects a built-in canary on the
+    grounds that CI already runs these fixtures through the REAL functions), and
+    criteria 5 and 6 are the two safety properties multi-root introduces — left as
+    test_rcpt_verify.py-only they would sit outside that corpus."""
+    if isinstance(spec, str):
+        spec = [spec]
+    return [fx_dir / s for s in spec]
+
+
 def _selftest_run_fixture(fx, root) -> str:
-    """Run one committed Tier-2 fixture through Tier-1 + Tier-2; return 'pass'|'fail'."""
+    """Run one committed Tier-2 fixture through Tier-1 + Tier-2; return 'pass'|'fail'.
+
+    `root` is a LIST of roots (see _fx_roots); it forwards to tier2_artifacts /
+    tier2_witness, which normalise via _as_roots, so the parameter itself is unchanged."""
     try:
         text = fx["receipt"]
         verdict = lint_receipt(text)
@@ -1428,6 +1830,8 @@ def _selftest_run_fixture(fx, root) -> str:
         if verdict in {"PASS", "FAIL"}:
             tier2_witness(witness, trace, root, fx["strict"], verdict)
         return "pass"
+    except WitnessTimeout:
+        return "error"        # #486/Q8 — a timeout is NOT a passing expect:fail fixture
     except LintError:
         return "fail"
 
@@ -1525,6 +1929,11 @@ def _selftest_crosscheck(rec, bodies):
         try:
             tier2_witness(witness, trace, root, False, verdict)
             disk_disp = "LINT-PASS"
+        except WitnessTimeout as e:
+            # #486/Q8 — recording "LINT-FAIL" here AGREES with an inline LINT-FAIL and
+            # so reports no problem: the swallow this crosscheck exists to prevent.
+            disk_disp = "TIMEOUT"
+            problems.append(f"crosscheck {did}: witness evaluation timed out ({e})")
         except LintError:
             disk_disp = "LINT-FAIL"
     if disk_disp != inline_disp:
@@ -1554,90 +1963,121 @@ class _PathReadError(Exception):
         self.path = path
 
 
+# ── #486 / D8 — the coverage census ──────────────────────────────────────────
+# Counts and reason codes ONLY: no paths, no roots, no timings, so goldens stay
+# machine-independent. The line NEVER appears in _eval_text (:1231) — that path routes
+# through _eval_tier2, which takes inline bodies and no root, so `unreached` has no
+# meaning there — and never alters run_selftest's fixture comparison.
+_COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "not-applicable")
+
+
+class _Coverage:
+    """One receipt's Tier-2 coverage, rendered as exactly one TIER2-COVERAGE: line.
+
+    Initialised in the `tier1-reject` state (D8.2 sub-decision 3): an all-zeros line
+    would be byte-indistinguishable from a legitimate no-op census over a receipt with
+    no artifacts and a not-applicable witness. tier1_ok() leaves that state once
+    lint_receipt has returned.
+    """
+
+    def __init__(self):
+        self.tier1_reject = True
+        self.partial = False
+        self.art_verified = 0
+        self.art_applicable = 0
+        self.wit_verified = 0
+        self.wit_applicable = 0
+        self.counts = {k: 0 for k in _COV_COUNTERS}
+        self.codes = {k: set() for k in _COV_COUNTERS}
+
+    def tier1_ok(self):
+        self.tier1_reject = False
+
+    def bump(self, counter, code=None):
+        self.counts[counter] += 1
+        if code is not None:
+            self.codes[counter].add(code)
+
+    def render(self) -> str:
+        if self.tier1_reject:
+            return "TIER2-COVERAGE: not-reached (tier1-reject)"
+        parts = [f"artifacts {self.art_verified}/{self.art_applicable}",
+                 f"witness {self.wit_verified}/{self.wit_applicable}"]
+        for k in _COV_COUNTERS:
+            # D8.3 — the parenthetical is attached to EACH counter whose code set is
+            # non-empty, in that counter's printed position; sorted lexicographically
+            # and de-duplicated, with NO parenthetical at all when the set is empty.
+            codes = self.codes[k]
+            suffix = f" ({','.join(sorted(codes))})" if codes else ""
+            parts.append(f"{k} {self.counts[k]}{suffix}")
+        if self.partial:
+            parts.append("partial")
+        return "TIER2-COVERAGE: " + " ".join(parts)
+
+
 def _verify_single(text, mode, root, strict, ledger=None) -> int:
     """Single-receipt mode: Tier-1 (always) + Tier-2 (if --tier2). Exit 0 on pass,
-    1 on any LintError (bullet on stderr). UNVERIFIABLE notes are advisory (stderr, non-fatal)."""
+    1 on any LintError (bullet on stderr). UNVERIFIABLE notes are advisory (stderr, non-fatal).
+
+    #486 / D8 — emits exactly one TIER2-COVERAGE: line per --tier2 run, from a finally:
+    so it survives every LintError path, AFTER the bullet and after the notes. It is
+    NOT emitted from the notes loop below: that loop is inside the try, and every
+    LintError (lint_receipt, tier2_artifacts, tier2_witness, tier2_ledger) jumps past
+    it — and the failing run is exactly where the census earns its keep, because
+    tier2_artifacts raises on the FIRST failing entry and the bullet then tells you
+    about one name and nothing about the rest.
+
+    `partial` is set at the raise sites, never inferred here: this handler cannot tell
+    WHICH leg truncated, and guessing is how a silently-wrong number gets into the one
+    instrument built to expose silently-wrong numbers.
+    """
+    cov = _Coverage()
     try:
-        verdict = lint_receipt(text)
-        if mode == "tier2":
-            sections = parse_receipt(text)
-            artifacts = parse_artifacts(sections["ARTIFACTS"])
-            trace = parse_trace(sections["TRACE"])
-            witness = parse_witness(sections["WITNESS"])
-            notes = tier2_artifacts(artifacts, trace, root, strict)
-            if verdict in {"PASS", "FAIL"}:
-                # #474 / round-3 S5 — bound ONLY this call. lint_receipt merely
-                # re.compiles and tier2_artifacts runs no predicate, so a wider wrap
-                # would put still more non-predicate work under one message (the wrap
-                # is already wider than re.search — see WITNESS_TIMEOUT_MSG, round-4/M3).
-                # Handler + timer are installed and torn down here, never at import:
-                # this function is the CLI entry path and therefore main-thread by
-                # construction.
-                #
-                # round-4 / M7 — SIGALRM and setitimer are Unix-only. Without the guard
-                # the attribute access raises AttributeError, which `except LintError`
-                # does not catch, so --tier2 would abort with a traceback on a platform
-                # where it previously produced a verdict. The degraded mode is
-                # "unbounded", which is exactly what this call was before round 3.
-                if hasattr(signal, "setitimer") and hasattr(signal, "SIGALRM"):
-                    # round-4 / M4 — setitimer RETURNS the previous timer, and the old
-                    # code discarded it, so an in-process caller's pre-armed ITIMER_REAL
-                    # was cancelled by a verification. Captured and restored verbatim.
-                    # Two residuals, stated rather than solved: (a) a caller alarm that
-                    # would have fired inside our window is delivered to _witness_alarm
-                    # and becomes this receipt's LintError; (b) the restored delay is the
-                    # remaining delay as of arm-time, so a caller's deadline slips by up
-                    # to WITNESS_TIMEOUT_S. Both are inherent to sharing one process-wide
-                    # timer; the CLI path this function owns arms nothing beforehand.
-                    prev = signal.signal(signal.SIGALRM, _witness_alarm)
-                    prev_delay, prev_interval = signal.setitimer(
-                        signal.ITIMER_REAL, WITNESS_TIMEOUT_S)
-                    try:
-                        notes += tier2_witness(witness, trace, root, strict, verdict)
-                    finally:
-                        # round-5 / MIN-3 — TEARDOWN ORDER IS LOAD-BEARING: disarm, then
-                        # restore the handler, then re-arm. This is a defect M4
-                        # INTRODUCED, not a residual of it: round 3's finally disarmed
-                        # unconditionally (`setitimer(ITIMER_REAL, 0)` then
-                        # `signal.signal(prev)`), so no alarm could be generated between
-                        # the two statements. M4's conditional re-arm created a window —
-                        # a caller delay near zero re-armed while _witness_alarm is still
-                        # installed lands in OUR handler and surfaces as this receipt's
-                        # LintError.
-                        #
-                        # Merely SWAPPING the two statements is incomplete: it closes that
-                        # window and opens the mirror image, because OUR timer is still
-                        # armed (tier2_witness returned early) and would then be delivered
-                        # to the caller's freshly-restored handler. The unconditional
-                        # disarm first makes both unreachable — after it, no timer is
-                        # armed, so no SIGALRM can be generated by either party until the
-                        # re-arm, by which point `prev` is installed.
-                        #
-                        # Residual, inherent without sigprocmask: a SIGALRM already
-                        # GENERATED before the disarm is still delivered, and disarming
-                        # does not retract it.
-                        signal.setitimer(signal.ITIMER_REAL, 0)
-                        signal.signal(signal.SIGALRM, prev)
-                        if prev_delay:
-                            signal.setitimer(signal.ITIMER_REAL, prev_delay, prev_interval)
+        try:
+            verdict = lint_receipt(text)
+            cov.tier1_ok()
+            if mode == "tier2":
+                sections = parse_receipt(text)
+                artifacts = parse_artifacts(sections["ARTIFACTS"])
+                trace = parse_trace(sections["TRACE"])
+                witness = parse_witness(sections["WITNESS"])
+                notes = tier2_artifacts(artifacts, trace, root, strict, cov)
+                if verdict in {"PASS", "FAIL"}:
+                    # #486 / D7 — the bound now lives in tier2_witness, so a direct
+                    # importer is bounded too and there is exactly ONE arm on this path.
+                    notes += tier2_witness(witness, trace, root, strict, verdict, cov)
                 else:
-                    notes += tier2_witness(witness, trace, root, strict, verdict)
-            # Part-3 receipt-ledger binding: only with an orchestrator-supplied --ledger
-            # (no default-path synthesis). A mismatch is a hard FAIL (strict-independent);
-            # absent --ledger is advisory UNVERIFIABLE, and only when there IS a DISPATCHED line.
-            if ledger is not None:
-                tier2_ledger(trace, ledger)
-            elif any(t["verb"] == "DISPATCHED" for t in trace):
-                notes.append("UNVERIFIABLE: ledger binding (no --ledger)")
-            for n in notes:
-                sys.stderr.write(n + "\n")
-        elif ledger is not None:
-            sys.stderr.write("UNVERIFIABLE: --ledger ignored under --tier1 "
-                             "(binding is a Tier-2 check; re-run with --tier2)\n")
-    except LintError as e:
-        sys.stderr.write(f"{e}\n")
-        return 1
-    return 0
+                    # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
+                    # leg, so the collector would hear nothing from it and the line would
+                    # read a bare `witness 0/0`. Every receipt carries a mandatory WITNESS
+                    # line (return-convention.md:121), so a witness check ALWAYS exists
+                    # and an unannotated 0/0 says one did not — indistinguishable from a
+                    # PASS receipt with a structurally-absent witness.
+                    cov.bump("not-applicable", "verdict-not-pass-fail")
+                # Part-3 receipt-ledger binding: only with an orchestrator-supplied
+                # --ledger (no default-path synthesis). A mismatch is a hard FAIL
+                # (strict-independent); absent --ledger is advisory UNVERIFIABLE, and
+                # only when there IS a DISPATCHED line.
+                if ledger is not None:
+                    tier2_ledger(trace, ledger)
+                elif any(t["verb"] == "DISPATCHED" for t in trace):
+                    notes.append("UNVERIFIABLE: ledger binding (no --ledger)")
+                for n in notes:
+                    sys.stderr.write(n + "\n")
+            elif ledger is not None:
+                sys.stderr.write("UNVERIFIABLE: --ledger ignored under --tier1 "
+                                 "(binding is a Tier-2 check; re-run with --tier2)\n")
+        except LintError as e:
+            sys.stderr.write(f"{e}\n")
+            return 1
+        return 0
+    finally:
+        # sub-decision 4 — NOTHING on --tier1. _verify_single serves both modes and main
+        # defaults to tier1, so an unguarded finally would print an all-zeros line on the
+        # default mode: exactly the shape sub-decision 3 forbids, on the path
+        # hooks/rcpt-verify-hook.sh:76 runs.
+        if mode == "tier2":
+            sys.stderr.write(cov.render() + "\n")
 
 
 def main(argv=None) -> int:
@@ -1652,7 +2092,7 @@ def main(argv=None) -> int:
         return run_eval(argv[1])
     # single-receipt mode — hand-parse flags (mirror check_*.py simplicity)
     mode = "tier1"
-    root = None
+    roots = []            # #486 / D1 — --root is REPEATABLE; declaration order is D3's
     strict = False
     ledger = None
     path = None
@@ -1669,7 +2109,7 @@ def main(argv=None) -> int:
             i += 1
             if i >= len(argv):
                 return _usage_exit()
-            root = pathlib.Path(argv[i])
+            roots.append(pathlib.Path(argv[i]))
         elif a == "--ledger":
             i += 1
             if i >= len(argv):
@@ -1680,10 +2120,12 @@ def main(argv=None) -> int:
         else:
             return _usage_exit()
         i += 1
-    if root is None:
-        root = pathlib.Path.cwd()
+    if not roots:
+        # Preserved VERBATIM as a one-element list: an invocation with no --root behaves
+        # exactly as today (main:1683-1684 at 5d1fb15 did `root = pathlib.Path.cwd()`).
+        roots = [pathlib.Path.cwd()]
     text = sys.stdin.read() if path in (None, "-") else _read_path_arg(path)
-    return _verify_single(text, mode, root, strict, ledger)
+    return _verify_single(text, mode, roots, strict, ledger)
 
 
 if __name__ == "__main__":

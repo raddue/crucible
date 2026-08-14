@@ -21,8 +21,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "rcpt_verify.py"
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -1974,7 +1976,11 @@ class TestWitnessTimeoutBound(unittest.TestCase):
                                         self.root, True)
         elapsed = time.monotonic() - started
         self.assertEqual(rc, 1)
-        self.assertEqual(err.getvalue().strip(), self.rv.WITNESS_TIMEOUT_MSG)
+        # #486 / D8.5 — DECLARED C3 FLIP. Direction: byte-exact whole-stream assertEqual
+        # -> an assertion scoped to the timeout line. Disposition (exit 1, timeout
+        # message present) is UNCHANGED. _verify_single's stderr now also carries the
+        # TIER2-COVERAGE: line, by design.
+        self.assertIn(self.rv.WITNESS_TIMEOUT_MSG, err.getvalue())
         self.assertLess(elapsed, 2.0)        # it did NOT wait out the real predicate
         # the finally disarmed the timer even on the raising path
         self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
@@ -2149,6 +2155,1015 @@ class TestWitnessTimeoutBound(unittest.TestCase):
             self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
         # the leading handler-install is the arming one, recorded before our timer exists
         self.assertEqual(order, ["handler:armed", "arm", "disarm", "handler:idle", "rearm"])
+
+
+class TestMultiRootResolution(unittest.TestCase):
+    """#486 / D1+D2+D3 — repeatable --root."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.td = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.td.name)
+        self.a = self.base / "a"; self.a.mkdir()
+        self.b = self.base / "b"; self.b.mkdir()
+        self.addCleanup(self.td.cleanup)
+
+    def test_single_root_is_unchanged(self):
+        (self.a / "f.txt").write_text("x")
+        self.assertEqual(self.rv.resolve_base("f.txt", self.a), (self.a / "f.txt").resolve())
+        self.assertIsNone(self.rv.resolve_base("nope.txt", self.a))
+
+    def test_second_root_resolves_what_the_first_cannot(self):
+        (self.b / "f.txt").write_text("x")
+        self.assertEqual(self.rv.resolve_base("f.txt", [self.a, self.b]),
+                         (self.b / "f.txt").resolve())
+
+    def test_first_hit_is_declaration_order(self):
+        (self.a / "f.txt").write_text("a"); (self.b / "f.txt").write_text("b")
+        self.assertEqual(self.rv.resolve_base("f.txt", [self.a, self.b]),
+                         (self.a / "f.txt").resolve())
+        self.assertEqual(self.rv.resolve_base("f.txt", [self.b, self.a]),
+                         (self.b / "f.txt").resolve())
+
+    def test_found_collects_distinct_realpaths(self):
+        (self.a / "f.txt").write_text("a"); (self.b / "f.txt").write_text("b")
+        found = []
+        self.rv.resolve_base("f.txt", [self.a, self.b], found)
+        self.assertEqual(found, [(self.a / "f.txt").resolve(), (self.b / "f.txt").resolve()])
+
+    def test_duplicate_roots_are_one_root(self):
+        """D2 — --root X --root X, trailing slash, and a symlink are all ONE root."""
+        (self.a / "f.txt").write_text("a")
+        link = self.base / "alink"; link.symlink_to(self.a)
+        for roots in ([self.a, self.a],
+                      [self.a, pathlib.Path(str(self.a) + "/")],
+                      [self.a, link]):
+            found = []
+            self.rv.resolve_base("f.txt", roots, found)
+            self.assertEqual(len(found), 1, f"roots={roots} de-duplicated to {found}")
+
+    def test_return_type_does_not_move(self):
+        """D2's ruling: Path | None, so the nine direct call sites stay unflipped."""
+        self.assertIsNone(self.rv.resolve_base("nope.txt", [self.a, self.b], []))
+
+    def test_containment_is_the_union_of_all_roots(self):
+        """D2 / design :290 — `allowed` is the UNION of all roots and their git
+        toplevels, not a per-root test, so a `..`-traversal from root A may legitimately
+        land under root B.
+
+        This is the ONLY test in the class that distinguishes union from per-root
+        containment: every other case uses in-root names, and the six existing
+        TestRootContainment tests (:599-679) are single-root by construction, where the
+        two semantics coincide. Constructed so the difference shows in the RETURN VALUE,
+        not only in `found`: root B's own probe misses, because `<b>/../deep/b/f.txt`
+        normalises to `<base>/deep/deep/b/f.txt`, which does not exist.
+        """
+        if self.rv._git_toplevel(self.base) is not None:
+            self.skipTest("a git toplevel above the tempdir joins BOTH allowed sets and "
+                          "collapses the union/per-root distinction")
+        deep = self.base / "deep"; deep.mkdir()
+        b2 = deep / "b"; b2.mkdir()
+        (b2 / "f.txt").write_text("x")
+        name = "../deep/b/f.txt"
+        self.assertIsNone(self.rv.resolve_base(name, self.a))   # single root: no union
+        self.assertIsNone(self.rv.resolve_base(name, b2))       # B's own probe misses
+        self.assertEqual(self.rv.resolve_base(name, [self.a, b2]),
+                         (b2 / "f.txt").resolve())              # union admits A's hit
+
+
+class TestCrossRootAmbiguity(unittest.TestCase):
+    """#486 / D2 + criterion 5."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.td = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.td.name)
+        self.a = self.base / "a"; self.a.mkdir()
+        self.b = self.base / "b"; self.b.mkdir()
+        self.addCleanup(self.td.cleanup)
+
+    def _plant(self, content_a, content_b, declared=None):
+        """Same basename under two roots; the receipt declares root A's hash by default.
+
+        `declared` overrides the declared bytes so a receipt can name a hash matching
+        NEITHER copy (test_strict_raises_before_reading_bytes).
+        """
+        (self.a / "f.txt").write_bytes(content_a)
+        (self.b / "f.txt").write_bytes(content_b)
+        d = content_a if declared is None else declared
+        return {"f.txt": {"hash": hashlib.sha256(d).hexdigest(), "size": str(len(d))}}
+
+    def test_strict_raises_on_two_distinct_realpaths(self):
+        arts = self._plant(b"aaa", b"bbb")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_artifacts(arts, [], [self.a, self.b], True)
+        self.assertIn("is ambiguous across roots", str(cm.exception))
+        self.assertTrue(str(cm.exception).startswith("Tier-2 --strict: artifact f.txt"))
+
+    def test_byte_identical_copies_are_still_ambiguous(self):
+        """Q7 — two distinct realpaths are ambiguous regardless of content. Collapsing
+        same-content copies would make the disposition depend on a file the receipt
+        may control."""
+        arts = self._plant(b"same", b"same")
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_artifacts(arts, [], [self.a, self.b], True)
+
+    def test_non_strict_notes_and_first_hit_wins(self):
+        arts = self._plant(b"aaa", b"bbb")
+        notes = self.rv.tier2_artifacts(arts, [], [self.a, self.b], False)
+        self.assertTrue(any(n.startswith("AMBIGUOUS: artifact f.txt") for n in notes))
+
+    def test_strict_raises_before_reading_bytes(self):
+        """The ambiguity raise precedes the hash comparison: a receipt declaring a
+        WRONG hash still reports ambiguity, not a mismatch."""
+        arts = self._plant(b"aaa", b"bbb", declared=b"neither")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_artifacts(arts, [], [self.a, self.b], True)
+        self.assertIn("ambiguous across roots", str(cm.exception))
+        self.assertNotIn("sha256 mismatch", str(cm.exception))
+
+    def test_one_root_is_never_ambiguous(self):
+        arts = self._plant(b"aaa", b"bbb")
+        self.assertEqual(self.rv.tier2_artifacts(arts, [], self.a, True), [])
+
+    # --- Task 7: the same rule on the witness leg, with its OWN wording ---
+
+    def _witness_case(self):
+        """A ranged EXEC citation whose out= artifact exists under BOTH roots.
+
+        Content is chosen so the predicate would NOT fire (no BOOM), isolating the
+        ambiguity branch: without it the non-strict leg would raise on the witness
+        predicate instead of returning the AMBIGUOUS note.
+        """
+        (self.a / "out.log").write_text("quiet\n")
+        (self.b / "out.log").write_text("quiet\n")
+        cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#L1-L1"}
+        trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+        w = {"kind": "exec", "payload": "x", "expect_fail": "/BOOM/", "ran": "TRACE#2"}
+        return w, trace
+
+    def test_witness_leg_strict_ambiguity(self):
+        w, trace = self._witness_case()
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(w, trace, [self.a, self.b], True, "PASS")
+        self.assertTrue(str(cm.exception).startswith(
+            "Tier-2 --strict: witness artifact "))
+        self.assertIn("is ambiguous across roots", str(cm.exception))
+
+    def test_witness_leg_non_strict_note(self):
+        w, trace = self._witness_case()
+        notes = self.rv.tier2_witness(w, trace, [self.a, self.b], False, "PASS")
+        self.assertTrue(any(n.startswith("AMBIGUOUS: witness artifact") for n in notes))
+
+
+class TestRepeatableRootFlag(unittest.TestCase):
+    """#486 / criterion 6 — de-duplication is a no-op, byte-for-byte."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.td.name)
+        self.a = self.base / "a"; self.a.mkdir()
+        self.b = self.base / "b"; self.b.mkdir()
+        self.addCleanup(self.td.cleanup)
+        # f.txt lives under b ONLY — that asymmetry is what makes the order matter.
+        data = b"findings\n"
+        (self.b / "f.txt").write_bytes(data)
+        h = hashlib.sha256(data).hexdigest()
+        self.rcpt = self.base / "rcpt.txt"
+        self.rcpt.write_text(_receipt(
+            "exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+            verdict="PASS",
+            artifacts=[("f.txt", h, str(len(data)))],
+            trace=["EXEC  `x`  exit=0  out=f.txt#L1-L1"]))
+
+    def _run(self, *args):
+        return subprocess.run([sys.executable, str(SCRIPT), *args],
+                              capture_output=True, text=True)
+
+    def test_repeated_identical_root_is_byte_identical(self):
+        one = self._run("--tier2", "--strict", "--root", str(self.a), str(self.rcpt))
+        two = self._run("--tier2", "--strict", "--root", str(self.a),
+                        "--root", str(self.a), str(self.rcpt))
+        self.assertEqual(one.returncode, two.returncode)
+        self.assertEqual(one.stderr, two.stderr)
+        self.assertEqual(one.stdout, two.stdout)
+
+    def test_trailing_slash_and_symlink_are_the_same_root(self):
+        """D2 — `X`, `X/` and a symlink to X are three tokens for ONE root, so none of
+        them may introduce an ambiguity against X itself."""
+        link = self.base / "blink"; link.symlink_to(self.b)
+        one = self._run("--tier2", "--strict", "--root", str(self.b), str(self.rcpt))
+        for second in (str(self.b) + "/", str(link)):
+            two = self._run("--tier2", "--strict", "--root", str(self.b),
+                            "--root", second, str(self.rcpt))
+            self.assertEqual(one.returncode, two.returncode, f"second={second}")
+            self.assertEqual(one.stderr, two.stderr, f"second={second}")
+            self.assertNotIn("ambiguous across roots", two.stderr)
+
+    def test_usage_string_shows_root_as_repeatable(self):
+        out = self._run("--bogus-flag")
+        self.assertIn("[--root DIR]...", out.stderr + out.stdout)
+
+    def test_two_distinct_roots_are_both_probed(self):
+        """RED at 5d1fb15. main()'s flag loop assigns unconditionally (:1672), so the
+        surviving root is the LAST one: with (b, a) that is `a`, which does NOT hold
+        f.txt -> the UNVERIFIABLE note appears -> assertNotIn FAILS. After #486 both
+        roots are probed, b resolves f.txt, and the note is gone."""
+        out = self._run("--tier2", "--root", str(self.b), "--root", str(self.a), str(self.rcpt))
+        self.assertNotIn("UNVERIFIABLE: f.txt", out.stderr)   # only b holds it
+
+    def test_two_distinct_roots_are_both_probed_reverse_order(self):
+        """The mirror. GREEN at 5d1fb15 by construction — the surviving last root IS b,
+        which holds f.txt — so this pins declaration-order symmetry after the change and
+        is NOT the RED case. Stated so it is not mistaken for one."""
+        out = self._run("--tier2", "--root", str(self.a), "--root", str(self.b), str(self.rcpt))
+        self.assertNotIn("UNVERIFIABLE: f.txt", out.stderr)
+
+
+class TestWitnessBoundIsInTier2Witness(unittest.TestCase):
+    """#486 / D7 + Q8 + criterion 8."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self._td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _case(self, body, pattern):
+        """A ranged grep witness over `body`, with the receipt's own declared hash."""
+        note = self.root / "verify-note.md"
+        note.write_text(body)
+        cited = {"n": 1, "verb": "WROTE", "args": f"verify-note.md  sha256:{'0' * 64}"}
+        trace = [cited]
+        w = self.rv.parse_witness([
+            f"grep:verify-note.md#L1-L1  pattern={pattern}  "
+            "expect-fail=match  ran=TRACE#1"])
+        return w, trace
+
+    def _pathological(self):
+        return self._case(CATASTROPHIC_BODY, CATASTROPHIC)
+
+    def _benign(self):
+        return self._case("all fixes verified\n", "/UNRESOLVED/")
+
+    def test_direct_importer_is_bounded(self):
+        """The bound holds for a tier2_witness() caller, not only at the CLI."""
+        w, trace = self._pathological()
+        with mock.patch.object(self.rv, "WITNESS_TIMEOUT_S", 1):
+            with self.assertRaises(self.rv.WitnessTimeout):
+                self.rv.tier2_witness(w, trace, self.root, False, "PASS")
+
+    def test_witness_timeout_is_a_lint_error_subclass(self):
+        """#485's contract is untouched: every existing handler still catches it."""
+        self.assertTrue(issubclass(self.rv.WitnessTimeout, self.rv.LintError))
+
+    def test_exactly_one_arm_on_the_cli_path(self):
+        """No nesting: _verify_single must no longer arm ITIMER_REAL itself."""
+        src = pathlib.Path(self.rv.__file__).read_text()
+        body = src.split("def _verify_single")[1].split("\ndef ")[0]
+        self.assertNotIn("setitimer", body)
+
+    def test_selftest_reports_a_timeout_as_error_not_fail(self):
+        """A wall-clock timeout must NOT be a passing fixture."""
+        note = self.root / "verify-note.md"
+        note.write_text(CATASTROPHIC_BODY)
+        h = hashlib.sha256(note.read_bytes()).hexdigest()
+        fx = {"receipt": _receipt(
+                  f"grep:verify-note.md#L1-L1  pattern={CATASTROPHIC}  "
+                  "expect-fail=match  ran=TRACE#1",
+                  verdict="PASS",
+                  artifacts=[("verify-note.md", h, str(note.stat().st_size))],
+                  trace=[f"WROTE  verify-note.md  sha256:{h}"],
+                  skill="quality-gate/9-fix-verifier"),
+              "strict": False}
+        with mock.patch.object(self.rv, "WITNESS_TIMEOUT_S", 0.001):
+            got = self.rv._selftest_run_fixture(fx, self.root)
+        self.assertEqual(got, "error")
+
+    def test_crosscheck_reports_a_problem_not_agreement(self):
+        """(g) — a timeout must not be recorded as `disk_disp = "LINT-FAIL"`, which
+        AGREES with an inline LINT-FAIL and so reports no problem at all.
+
+        Driven by patching tier2_witness to raise, NOT by a catastrophic pattern: the
+        crosscheck computes `inline_disp = _eval_record(rec)[0]` BEFORE the disk leg,
+        and --eval reaches verify_witness without going through tier2_witness, so it is
+        the one path D7 leaves unbounded. A real pathological pattern hangs there
+        regardless of this change.
+
+        The receipt is chosen to inline-LINT-FAIL (the witness fires: `expect-fail=match`
+        on a PASS leg whose body matches), so at baseline the swallowed timeout AGREES
+        and `problems` is empty. That is what makes this discriminating rather than a
+        test of disposition disagreement.
+        """
+        note_body = "UNRESOLVED items remain\n"
+        rec = {"dispatch-id": "xcheck-1",
+               "receipt": _receipt(
+                   "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
+                   "expect-fail=match  ran=TRACE#1",
+                   verdict="PASS",
+                   artifacts=[("verify-note.md",
+                               hashlib.sha256(note_body.encode()).hexdigest(),
+                               str(len(note_body)))],
+                   trace=[f"WROTE  verify-note.md  sha256:{'0' * 64}"],
+                   skill="quality-gate/9-fix-verifier")}
+        bodies = {"verify-note.md": note_body}
+
+        def _boom(*a, **k):
+            raise self.rv.WitnessTimeout(self.rv.WITNESS_TIMEOUT_MSG)
+
+        with mock.patch.object(self.rv, "tier2_witness", _boom):
+            problems = self.rv._selftest_crosscheck(rec, bodies)
+        self.assertTrue(problems)
+
+    def test_off_main_thread_degrades_to_unbounded_never_raises(self):
+        """signal.signal raises ValueError off the main thread; tier2_witness has no
+        main-thread guarantee the way _verify_single did. Degradation is UNBOUNDED
+        evaluation, never a raise."""
+        w, trace = self._benign()
+        out = []
+        t = threading.Thread(target=lambda: out.append(
+            self.rv.tier2_witness(w, trace, self.root, False, "PASS")))
+        t.start(); t.join()
+        self.assertEqual(out, [[]])       # clean, not a ValueError
+
+
+class TestCoverageRendering(unittest.TestCase):
+    """#486 / D8.3 — the line is the format spec, so it is pinned here."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_tier1_reject_shape(self):
+        c = self.rv._Coverage()
+        self.assertEqual(c.render(), "TIER2-COVERAGE: not-reached (tier1-reject)")
+
+    def test_clean_shape_with_a_not_reachable_code(self):
+        c = self.rv._Coverage(); c.tier1_ok()
+        c.art_verified = 3; c.art_applicable = 4
+        c.bump("not-reachable", "unresolvable-basename")
+        c.bump("not-applicable", "fail-leg-no-range")
+        self.assertEqual(c.render(),
+            "TIER2-COVERAGE: artifacts 3/4 witness 0/0 unreached 0 "
+            "not-reachable 1 (unresolvable-basename) ambiguous 0 wrong-name 0 "
+            "not-applicable 1 (fail-leg-no-range)")
+
+    def test_partial_shape_renders_witness_0_0(self):
+        """S2 — d is what the census MEASURED. A run truncated before the witness leg
+        cannot know whether that leg was applicable, so it prints 0/0 + partial."""
+        c = self.rv._Coverage(); c.tier1_ok()
+        c.art_verified = 1; c.art_applicable = 4
+        c.bump("ambiguous"); c.partial = True
+        self.assertEqual(c.render(),
+            "TIER2-COVERAGE: artifacts 1/4 witness 0/0 unreached 0 not-reachable 0 "
+            "ambiguous 1 wrong-name 0 not-applicable 0 partial")
+
+    def test_codes_are_sorted_and_deduplicated(self):
+        """CPython randomises str hashing per process (PYTHONHASHSEED); an unsorted
+        join makes 10(d)'s RED tests flake intermittently."""
+        c = self.rv._Coverage(); c.tier1_ok()
+        c.bump("not-applicable", "receipt-hash-prefix")
+        c.bump("not-applicable", "fail-leg-no-range")
+        c.bump("not-applicable", "receipt-hash-prefix")
+        self.assertIn("not-applicable 3 (fail-leg-no-range,receipt-hash-prefix)", c.render())
+
+    def test_empty_code_set_omits_the_parenthetical(self):
+        c = self.rv._Coverage(); c.tier1_ok(); c.bump("unreached")
+        self.assertIn("unreached 1 ", c.render())
+        self.assertNotIn("unreached 1 (", c.render())
+
+    def test_line_carries_no_paths_no_roots_no_timings(self):
+        """Goldens must stay machine-independent. `/` is legal on this line in exactly
+        two places — the two fractions D8.3 pins — so the check is over the line with
+        those removed. Round-2/S4: a bare separator check over the whole rendered line
+        cannot pass against the pinned format, and two of its three obvious repairs lose
+        the property (deleting the assertion drops the guard; narrowing it to
+        `assertNotIn(str(self.root), …)` on a collector that was never handed a path is
+        coverage that cannot fail)."""
+        c = self.rv._Coverage(); c.tier1_ok()
+        c.art_verified = 3; c.art_applicable = 4          # non-zero: the strip is by
+        c.wit_verified = 1; c.wit_applicable = 1          # SHAPE, not by literal "0/0"
+        line = c.render()
+        body = re.sub(r"\b(?:artifacts|witness) \d+/\d+\b", "", line)
+        self.assertNotIn("/", body)                       # no paths, no roots
+        self.assertNotRegex(line, r"\d+\.\d+s|\d{4}-\d{2}-\d{2}")   # no timings, no dates
+
+
+class TestCoverageArtifactsLeg(unittest.TestCase):
+    """#486 / D8.2 + D8.3 — one test per ARTIFACTS-leg census bucket."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.td = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.td.name)
+        self.root = self.base / "a"; self.root.mkdir()
+        self.b = self.base / "b"; self.b.mkdir()
+        self.addCleanup(self.td.cleanup)
+
+    def _cov(self):
+        c = self.rv._Coverage(); c.tier1_ok()
+        return c
+
+    @staticmethod
+    def _entry(body):
+        return {"hash": hashlib.sha256(body).hexdigest(), "size": str(len(body))}
+
+    def _plant_both(self):
+        """Same basename under two roots — the D2 ambiguity shape."""
+        (self.root / "f.txt").write_bytes(b"aaa")
+        (self.b / "f.txt").write_bytes(b"bbb")
+        return {"f.txt": self._entry(b"aaa")}
+
+    def test_a_resolved_and_hashed_entry_is_1_of_1(self):
+        (self.root / "a.txt").write_bytes(b"hi\n")
+        cov = self._cov()
+        notes = self.rv.tier2_artifacts({"a.txt": self._entry(b"hi\n")},
+                                        [], self.root, True, cov)
+        self.assertEqual(notes, [])
+        self.assertEqual((cov.art_verified, cov.art_applicable), (1, 1))
+        self.assertFalse(cov.partial)
+        self.assertEqual(sum(cov.counts.values()), 0)
+
+    def test_receipt_hash_prefix_is_counted_AND_mentioned(self):
+        """S6 — the entry is skipped, not silenced. A receipt-controlled predicate that
+        produces neither a check nor a word on stderr is the #474 shape."""
+        cov = self._cov()
+        notes = self.rv.tier2_artifacts({"35558ca1ee6c": {"hash": "0" * 64, "size": 0}},
+                                        [], self.root, True, cov)
+        self.assertEqual(cov.counts["not-applicable"], 1)
+        self.assertEqual(cov.art_applicable, 0)
+        self.assertTrue(any(n.startswith("NOT-APPLICABLE: 35558ca1ee6c") for n in notes))
+
+    def test_a_receipt_hash_prefix_is_never_counted_UNREACHED(self):
+        """It is not a file and never will be; counting it UNREACHED would be false."""
+        cov = self._cov()
+        self.rv.tier2_artifacts({"35558ca1ee6c": {"hash": "0" * 64, "size": 0}},
+                                [], self.root, True, cov)
+        self.assertEqual(cov.counts["unreached"], 0)
+        self.assertEqual(cov.counts["not-reachable"], 0)
+        self.assertIn("receipt-hash-prefix", cov.codes["not-applicable"])
+
+    def test_a_REAL_file_named_like_a_hash_prefix_is_still_hashed(self):
+        """Round-2/S2 — the 12-hex test is `re.fullmatch(...) AND unresolved`. A file
+        actually named 35558ca1ee6c under a probed root keeps tier2_artifacts'
+        sha256 recomputation and its hard FAIL; deciding the branch BEFORE resolution
+        would silently convert that FAIL into exit 0 plus an advisory note, which is
+        #474's regression class in #474's own function."""
+        (self.root / "35558ca1ee6c").write_bytes(b"real bytes\n")
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_artifacts({"35558ca1ee6c": {"hash": "0" * 64, "size": 11}},
+                                    [], self.root, True, cov)
+        self.assertIn("sha256 mismatch", str(cm.exception))
+        self.assertEqual(cov.counts["not-applicable"], 0)
+        self.assertEqual(cov.art_applicable, 1)
+
+    def test_a_hash_MISMATCH_is_still_counted_VERIFIED(self):
+        """Design :1188-1190 — bytes read off disk AND a hash evaluated == VERIFIED,
+        including the entry that then mismatches. This is the SOURCE of the analogue
+        Task 12's state (b) is derived from; without it the derived leg is pinned and
+        the source leg is not. RED against the natural placement (increment after the
+        comparison), which renders `artifacts 0/1` on every mismatch run."""
+        (self.root / "a.txt").write_bytes(b"real\n")
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_artifacts({"a.txt": {"hash": "0" * 64, "size": 5}},
+                                    [], self.root, True, cov)
+        self.assertEqual((cov.art_verified, cov.art_applicable), (1, 1))
+        self.assertTrue(cov.partial)          # remaining entries + witness leg uncounted
+
+    def test_unresolved_path_shaped_entry_is_UNREACHED(self):
+        cov = self._cov()
+        notes = self.rv.tier2_artifacts({"sub/x.txt": {"hash": "0" * 64, "size": 1}},
+                                        [], self.root, False, cov)
+        self.assertEqual(cov.counts["unreached"], 1)
+        self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
+        self.assertTrue(any(n.startswith("UNVERIFIABLE: sub/x.txt") for n in notes))
+
+    def test_unresolved_bare_basename_is_NOT_REACHABLE(self):
+        cov = self._cov()
+        self.rv.tier2_artifacts({"nope.txt": {"hash": "0" * 64, "size": 1}},
+                                [], self.root, False, cov)
+        self.assertEqual(cov.counts["not-reachable"], 1)
+        self.assertEqual(cov.counts["unreached"], 0)
+        self.assertIn("unresolvable-basename", cov.codes["not-reachable"])
+        self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
+
+    def test_strict_path_shaped_absent_raise_sets_partial(self):
+        """Task 13 — the remaining entries and the whole witness leg go uncounted, so
+        this raise site sets `partial` exactly as the mismatch one does."""
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_artifacts({"sub/x.txt": {"hash": "0" * 64, "size": 1}},
+                                    [], self.root, True, cov)
+        self.assertEqual(cov.counts["unreached"], 1)
+        self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
+        self.assertTrue(cov.partial)
+
+    def test_ambiguous_non_strict_is_INSIDE_the_numerator(self):
+        """First hit is read and hashed, so the item is verified as well as ambiguous."""
+        cov = self._cov()
+        notes = self.rv.tier2_artifacts(self._plant_both(), [],
+                                        [self.root, self.b], False, cov)
+        self.assertEqual(cov.counts["ambiguous"], 1)
+        self.assertEqual((cov.art_verified, cov.art_applicable), (1, 1))
+        self.assertFalse(cov.partial)
+        self.assertTrue(any(n.startswith("AMBIGUOUS: artifact f.txt") for n in notes))
+
+    def test_ambiguous_strict_is_OUTSIDE_the_numerator(self):
+        """The raise precedes any read, so nothing was verified — and it truncates the
+        census, so `partial` is set (Task 13)."""
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_artifacts(self._plant_both(), [],
+                                    [self.root, self.b], True, cov)
+        self.assertEqual(cov.counts["ambiguous"], 1)
+        self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
+        self.assertTrue(cov.partial)
+
+    def test_cov_is_optional_so_no_existing_caller_moves(self):
+        """D8.2's 'no direct caller moves' — the ~50 positional call sites pass five
+        arguments and must keep working."""
+        (self.root / "a.txt").write_bytes(b"hi\n")
+        self.assertEqual(
+            self.rv.tier2_artifacts({"a.txt": self._entry(b"hi\n")}, [], self.root, True),
+            [])
+
+
+class TestCoverageWitnessLeg(unittest.TestCase):
+    """#486 / D8 — round-2/S1: the four counters are BOTH-LEGS counters, so the witness
+    leg wires all four, not only `wrong-name`. Plus the four-state
+    (wit_verified, wit_applicable) ruling of round-3/SIG-1 as corrected at round-4/SIG-2."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.td = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.td.name)
+        self.a = self.base / "a"; self.a.mkdir()
+        self.b = self.base / "b"; self.b.mkdir()
+        self.addCleanup(self.td.cleanup)
+
+    def _cov(self):
+        c = self.rv._Coverage(); c.tier1_ok()
+        return c
+
+    def _exec_case(self, name="out.log", body="quiet\n", rng="#L1-L1",
+                   expect_fail="/BOOM/", where=("a",)):
+        """A ranged EXEC citation whose out= artifact exists under the named roots."""
+        for w in where:
+            (getattr(self, w) / name).write_text(body)
+        cited = {"n": 2, "verb": "EXEC", "args": f"`x`  exit=0  out={name}{rng}"}
+        trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
+        wit = {"kind": "exec", "payload": "x", "expect_fail": expect_fail,
+               "ran": "TRACE#2", "range_kind": None, "range_a": None,
+               "range_b": None, "art": None, "pattern": None}
+        return wit, trace
+
+    def _grep_rangeless_case(self, where=("a",), body="quiet\n"):
+        """kind=grep with NO payload range: witness_art_name falls back to the CITED
+        entry, so the predicate runs against a file the witness never names."""
+        for w in where:
+            (getattr(self, w) / "f.txt").write_text(body)
+        cited = {"n": 1, "verb": "WROTE", "args": f"f.txt  sha256:{'0' * 64}"}
+        trace = [cited]
+        wit = {"kind": "grep", "payload": "f.txt", "expect_fail": "/BOOM/",
+               "ran": "TRACE#1", "range_kind": None, "range_a": None,
+               "range_b": None, "art": "f.txt", "pattern": None}
+        return wit, trace
+
+    # --- the applicability buckets: nothing was measured, so d stays 0 ---------
+
+    def test_ran_not_trace_is_not_applicable(self):
+        wit, trace = self._exec_case()
+        wit["ran"] = "EXEC#2"
+        cov = self._cov()
+        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov), [])
+        self.assertIn("ran-not-trace", cov.codes["not-applicable"])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 0))
+
+    def test_fail_leg_with_no_exec_range_is_not_applicable(self):
+        """Criterion 7 — this leg exits 0, it does not raise."""
+        wit, trace = self._exec_case()
+        trace[1]["args"] = "`x`  exit=1"          # no out= range
+        cov = self._cov()
+        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "FAIL", cov), [])
+        self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 0))
+
+    def test_pass_leg_yielding_no_name_is_no_art_name(self):
+        """D8.5 — D4's single NOT-EVALUATED string folds onto TWO codes; mapping the
+        PASS-leg arm onto fail-leg-no-range would mislabel it."""
+        wit, trace = self._exec_case()
+        trace[1]["args"] = "`x`  exit=0"          # EXEC, no out= → derive returns None
+        cov = self._cov()
+        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov), [])
+        self.assertIn("no-art-name", cov.codes["not-applicable"])
+        self.assertNotIn("fail-leg-no-range", cov.codes["not-applicable"])
+
+    # --- the resolution buckets (round-2/S1) ---------------------------------
+
+    def test_unresolved_path_shaped_witness_is_UNREACHED_not_uncounted(self):
+        """Round-2/S1 — non-strict so the raise does not mask it. `witness 0/1` with
+        every counter at 0 is an applicable item in none of :1175's disjoint sub-counts."""
+        wit, trace = self._exec_case(name="sub/out.log", where=())
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertEqual(cov.counts["unreached"], 1)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+
+    def test_unresolved_bare_basename_witness_is_NOT_REACHABLE(self):
+        wit, trace = self._exec_case(name="gone.log", where=())
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertEqual(cov.counts["not-reachable"], 1)
+        self.assertIn("unresolvable-basename", cov.codes["not-reachable"])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+
+    def test_strict_absent_witness_raise_sets_partial(self):
+        wit, trace = self._exec_case(name="sub/out.log", where=())
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov)
+        self.assertEqual(cov.counts["unreached"], 1)
+        self.assertTrue(cov.partial)
+
+    def test_witness_cross_root_ambiguity_bumps_ambiguous(self):
+        """The hazard D2 introduces, counted on the leg that has the predicate
+        (design :1201-1206). Non-strict: first hit is read, so it is INSIDE c/d."""
+        wit, trace = self._exec_case(where=("a", "b"))
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, [self.a, self.b], False, "PASS", cov)
+        self.assertEqual(cov.counts["ambiguous"], 1)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
+
+    def test_strict_witness_ambiguity_is_counted_OUTSIDE_the_numerator(self):
+        wit, trace = self._exec_case(where=("a", "b"))
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(wit, trace, [self.a, self.b], True, "PASS", cov)
+        self.assertEqual(cov.counts["ambiguous"], 1)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertTrue(cov.partial)
+
+    def test_an_ambiguous_rangeless_payload_counts_ambiguous_NOT_wrong_name(self):
+        """Design :1178-1180 — under non-strict the two can both describe one item, and
+        the ruling is that it counts `ambiguous` and not `wrong-name`. Without the guard
+        in Step 3 the disjointness at :1175 fails on this one shape."""
+        wit, trace = self._grep_rangeless_case(where=("a", "b"))
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, [self.a, self.b], False, "PASS", cov)
+        self.assertEqual(cov.counts["ambiguous"], 1)
+        self.assertEqual(cov.counts["wrong-name"], 0)
+
+    def test_rangeless_grep_payload_is_VERIFIED_and_counted_wrong_name(self):
+        """D8.3 — the predicate really ran, against the CITED entry rather than the
+        payload token, i.e. against a file the witness never names. Not 'no check
+        exists': VERIFIED and counted wrong-name."""
+        wit, trace = self._grep_rangeless_case()
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertEqual(cov.counts["wrong-name"], 1)
+        self.assertIn("rangeless-grep-payload", cov.codes["wrong-name"])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
+
+    # --- the four post-applicability states (round-3/SIG-1, corrected round-4/SIG-2) --
+
+    def test_state_a_clean_predicate_is_1_of_1_and_not_partial(self):
+        wit, trace = self._exec_case()
+        cov = self._cov()
+        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov), [])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
+        self.assertFalse(cov.partial)
+        self.assertEqual(sum(cov.counts.values()), 0)
+
+    def test_a_fired_predicate_is_VERIFIED_and_is_NOT_partial(self):
+        """Round-3/SIG-1 — the ARTIFACTS hash-mismatch analogue (design :1188-1190):
+        bytes were read AND the predicate was evaluated, which is D8.2's definition of
+        VERIFIED. The leg is complete, so no `partial`."""
+        wit, trace = self._exec_case(body="BOOM\n")
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
+        self.assertFalse(cov.partial)
+
+    def test_a_fired_span_cap_is_NOT_verified_and_IS_partial(self):
+        """Bytes were read; the predicate never ran. GH #490 records this cap firing in
+        production (10737 > 4096) on a fix-verifier receipt citing a markdown table."""
+        wit, trace = self._exec_case(body="x" * 60 + "\n" * 1, rng="#L1-L200")
+        (self.a / "out.log").write_text(("y" * 60 + "\n") * 200)   # ~12 KiB
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertIn("exceeds 4 KiB actual bytes", str(cm.exception))
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertTrue(cov.partial)
+
+    def test_an_empty_resolved_body_is_NOT_verified_and_IS_partial(self):
+        """return-convention.md:252's own reason — an empty body `can never fire, so it
+        is indistinguishable from a skipped check`. Counting it VERIFIED would assert
+        the opposite of the rule that rejects it."""
+        (self.a / "f.txt").write_text("one line\n")
+        cited = {"n": 1, "verb": "WROTE", "args": f"f.txt  sha256:{'0' * 64}"}
+        wit = {"kind": "grep", "payload": "f.txt", "expect_fail": "match",
+               "ran": "TRACE#1", "range_kind": "L", "range_a": 90, "range_b": 99,
+               "art": "f.txt", "pattern": "/BOOM/"}          # range past EOF → ""
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(wit, [cited], self.a, False, "PASS", cov)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertTrue(cov.partial)
+
+    def test_a_witness_timeout_sets_partial_and_is_NEVER_verified(self):
+        """Task 13's own definition of `partial` — `a Tier-2 leg did not evaluate every
+        item it had` — taken literally. A timeout is the clearest instance of it.
+
+        Asserts only the TIMING-INDEPENDENT half of the pair. At 0.001 s the alarm may
+        land before `wit_applicable = 1` (state (d) degenerating to `(0, 0)`), so
+        `wit_applicable` is not asserted here; `wit_verified == 0` holds wherever in the
+        bounded body the alarm lands, and it is the half round-4/SIG-2 is about."""
+        (self.a / "f.txt").write_text(CATASTROPHIC_BODY)
+        cited = {"n": 1, "verb": "WROTE", "args": f"f.txt  sha256:{'0' * 64}"}
+        wit = {"kind": "grep", "payload": "f.txt", "expect_fail": "match",
+               "ran": "TRACE#1", "range_kind": "L", "range_a": 1, "range_b": 1,
+               "art": "f.txt", "pattern": CATASTROPHIC}
+        cov = self._cov()
+        with mock.patch.object(self.rv, "WITNESS_TIMEOUT_S", 0.001):
+            with self.assertRaises(self.rv.WitnessTimeout):
+                self.rv.tier2_witness(wit, [cited], self.a, False, "PASS", cov)
+        self.assertTrue(cov.partial)
+        self.assertEqual(cov.wit_verified, 0)
+
+    def test_a_timeout_AT_THE_PREDICATE_is_NOT_verified(self):
+        """Round-4/SIG-2, state (d), pinned DETERMINISTICALLY. Raising the timeout from
+        inside `verify_witness` places it exactly where `re.search` runs, with no
+        wall-clock race: the pair is `(0, 1)` and `partial` is set. This is the RED test
+        for the placement — with `cov.wit_verified = 1` set BEFORE the call (round 3's
+        form) it reads `(1, 1)`, which is the census rendering `witness 1/1 ... partial`."""
+        wit, trace = self._exec_case()
+        cov = self._cov()
+        with mock.patch.object(self.rv, "verify_witness",
+                               side_effect=self.rv.WitnessTimeout(
+                                   self.rv.WITNESS_TIMEOUT_MSG)):
+            with self.assertRaises(self.rv.WitnessTimeout):
+                self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertTrue(cov.partial)
+
+    def test_cov_is_optional_so_no_existing_caller_moves(self):
+        wit, trace = self._exec_case()
+        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS"), [])
+
+
+class TestCoverageEmission(unittest.TestCase):
+    """#486 / D8.2 sub-decisions 1-4 + criterion 10(a)-(f). Subprocess, because stderr
+    of the real CLI is the thing under test."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.td.name)
+        self.addCleanup(self.td.cleanup)
+        self.rcpt = self._clean()
+        self.mismatch_rcpt = self._mismatch()
+
+    def _run(self, *args):
+        return run(*args)
+
+    def _write(self, name, text):
+        p = self.root / name
+        p.write_text(text)
+        return p
+
+    def _artifact(self, body="quiet\n"):
+        (self.root / "out.log").write_text(body)
+        return hashlib.sha256(body.encode()).hexdigest(), str(len(body))
+
+    def _clean(self):
+        h, size = self._artifact()
+        return self._write("clean.rcpt", _receipt(
+            "exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+            artifacts=[("out.log", h, size)],
+            trace=["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"]))
+
+    def _mismatch(self):
+        _, size = self._artifact()
+        return self._write("mismatch.rcpt", _receipt(
+            "exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+            artifacts=[("out.log", "0" * 64, size)],       # declared hash is wrong
+            trace=["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"]))
+
+    @staticmethod
+    def _line(stderr):
+        return next(l for l in stderr.splitlines() if l.startswith("TIER2-COVERAGE:"))
+
+    # --- the four line shapes -------------------------------------------------
+
+    def test_tier1_reject_shape(self):
+        """A Tier-1 rejection never reaches either leg, and an all-zeros line would be
+        byte-indistinguishable from a legitimate no-op census (sub-decision 3)."""
+        h, size = self._artifact()
+        bad = self._write("bad.rcpt", _receipt(
+            "exec:`x`  expect-fail=/BOOM/  ran=TRACE#9",      # does not resolve
+            artifacts=[("out.log", h, size)],
+            trace=["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"]))
+        out = self._run("--tier2", "--strict", "--root", str(self.root), str(bad))
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(self._line(out.stderr),
+                         "TIER2-COVERAGE: not-reached (tier1-reject)")
+
+    def test_clean_shape(self):
+        out = self._run("--tier2", "--strict", "--root", str(self.root), str(self.rcpt))
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(self._line(out.stderr),
+                         "TIER2-COVERAGE: artifacts 1/1 witness 1/1 unreached 0 "
+                         "not-reachable 0 ambiguous 0 wrong-name 0 not-applicable 0")
+
+    def test_partial_shape_on_a_truncated_census(self):
+        out = self._run("--tier2", "--strict", "--root", str(self.root),
+                        str(self.mismatch_rcpt))
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(self._line(out.stderr),
+                         "TIER2-COVERAGE: artifacts 1/1 witness 0/0 unreached 0 "
+                         "not-reachable 0 ambiguous 0 wrong-name 0 not-applicable 0 partial")
+
+    def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
+        """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
+        (return-convention.md:121), so a witness check ALWAYS exists and an unannotated
+        `witness 0/0` says one did not. BLOCKED is not hypothetical: SKILL.md:32 lints
+        them, red-team-prompt.md:227 instructs one, sample-corpus carries one."""
+        h, size = self._artifact()
+        blocked = self._write("blocked.rcpt", _receipt(
+            "exec:`x`  expect-fail=/BOOM/  ran=UNRUNNABLE:tooling-absent",
+            verdict="BLOCKED",
+            artifacts=[("out.log", h, size)],
+            trace=["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"]))
+        out = self._run("--tier2", "--strict", "--root", str(self.root), str(blocked))
+        line = self._line(out.stderr)
+        self.assertIn("not-applicable 1 (verdict-not-pass-fail)", line)
+        self.assertIn("witness 0/0", line)
+
+    # --- the emission-point properties ---------------------------------------
+
+    def test_exactly_one_line_on_a_failing_run(self):
+        """(d)+(e) — the notes loop is INSIDE the try and is never reached on a failing
+        run, so a line emitted there could not satisfy 'one line on every run'."""
+        out = self._run("--tier2", "--strict", "--root", str(self.root),
+                        str(self.mismatch_rcpt))
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(out.stderr.count("TIER2-COVERAGE:"), 1)
+        self.assertIn("partial", out.stderr)
+        self.assertIn("witness 0/0", out.stderr)                 # S2
+        self.assertLess(out.stderr.index("sha256 mismatch"),
+                        out.stderr.index("TIER2-COVERAGE:"))     # bullet first
+
+    def test_exactly_one_line_on_a_clean_run_after_the_notes(self):
+        """(a) — one line per --tier2 run, and it comes AFTER the advisory notes."""
+        h, size = self._artifact()
+        noted = self._write("noted.rcpt", _receipt(
+            "exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+            artifacts=[("out.log", h, size), ("gone.txt", "0" * 64, "1")],
+            trace=["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"]))
+        out = self._run("--tier2", "--root", str(self.root), str(noted))
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stderr.count("TIER2-COVERAGE:"), 1)
+        self.assertLess(out.stderr.index("UNVERIFIABLE: gone.txt"),
+                        out.stderr.index("TIER2-COVERAGE:"))
+        self.assertIn("not-reachable 1 (unresolvable-basename)", out.stderr)
+
+    def test_tier1_stderr_is_byte_unchanged(self):
+        """(f) — the consumer is hooks/rcpt-verify-hook.sh:76, documented as a
+        '2-line ADVISORY on stderr' (hooks/README.md:326)."""
+        out = self._run("--tier1", str(self.rcpt))
+        self.assertNotIn("TIER2-COVERAGE", out.stderr)
+
+    def test_no_line_before_verify_single_is_entered(self):
+        """main returns _usage_exit() on a malformed flag and _PathReadError -> exit 2
+        on an unreadable receipt, both BEFORE _verify_single. Neither emits."""
+        self.assertNotIn("TIER2-COVERAGE", self._run("--bogus").stderr)
+        self.assertNotIn("TIER2-COVERAGE",
+                         self._run("--tier2", "/nonexistent/receipt.txt").stderr)
+
+    def test_eval_stdout_is_byte_unchanged(self):
+        """(b) — the census must not appear in _eval_text."""
+        out = self._run("--eval", str(CORPUS / "sample-corpus/receipts.jsonl"))
+        self.assertNotIn("TIER2-COVERAGE", out.stdout)
+        self.assertNotIn("TIER2-COVERAGE", out.stderr)
+
+
+class TestWitnessNegativeControl(unittest.TestCase):
+    """#486 / criterion 4 — re-pins the pair recorded in the gate's fix-1-d4-live.log
+    (baseline 5d1fb15, 2026-08-09) as a test. That log's dispatch root was machine-local
+    and is gone, so the SHAPE is reconstructed here rather than the files cited: a
+    red-team receipt whose witness pattern really does match its findings body, run on
+    both legs, where ONLY the VERDICT token differs between the two receipts.
+
+    ⚠ Reachability is the condition the control turns on: a witness planted where
+    nothing resolves exits 0 and proves nothing — that is #486's own defect wearing a
+    test's clothes. `_findings()` writes the file INTO the dispatch root for that reason.
+    """
+
+    PATTERN = "/significant=[1-9]|fatal=[1-9]/"
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.dispatch_root = pathlib.Path(self.td.name)
+        self.addCleanup(self.td.cleanup)
+        h, size = self._findings()
+        self.passleg = self._rcpt("passleg.txt", "PASS", h, size)
+        self.failleg = self._rcpt("failleg.txt", "FAIL", h, size)
+
+    def _run(self, *args):
+        return run(*args)
+
+    def _findings(self):
+        body = "# Round 1 findings\n\nfatal=0\nsignificant=2\nminor=1\n"
+        p = self.dispatch_root / "round-1-findings.md"
+        p.write_text(body)
+        return hashlib.sha256(body.encode()).hexdigest(), str(len(body))
+
+    def _rcpt(self, name, verdict, h, size):
+        text = _receipt(
+            f"grep:round-1-findings.md#L1-L5  pattern={self.PATTERN}  "
+            "expect-fail=match  ran=TRACE#1",
+            verdict=verdict, conf="0.88",
+            artifacts=[("round-1-findings.md", h, size)],
+            trace=[f"WROTE  round-1-findings.md  sha256:{h}"],
+            skill="red-team/1-devils-advocate")
+        p = self.dispatch_root / name
+        p.write_text(text)
+        return p
+
+    def test_the_two_receipts_differ_only_in_the_verdict_token(self):
+        """The property that makes this a control rather than two unrelated cases —
+        `diff rcpt-1.txt rcpt-1-passleg.txt` in the live log showed exactly line 2."""
+        a = self.passleg.read_text().splitlines()
+        b = self.failleg.read_text().splitlines()
+        diff = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+        self.assertEqual(len(a), len(b))
+        self.assertEqual(len(diff), 1)
+        self.assertTrue(a[diff[0]].startswith("VERDICT  PASS"))
+        self.assertTrue(b[diff[0]].startswith("VERDICT  FAIL"))
+
+    def test_witness_negative_control_pass_leg_rejects(self):
+        """Criterion 4: flipping ONLY the VERDICT token FAIL->PASS makes the linter read
+        the real bytes and reject at exit 1."""
+        out = self._run("--tier2", "--strict", "--root", str(self.dispatch_root),
+                        str(self.passleg))
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("expect-fail regex", out.stderr)
+        self.assertIn("matches body of", out.stderr)
+
+    def test_witness_negative_control_fail_leg_is_annotated_not_silent(self):
+        """Criterion 7 — the FAIL leg still exits 0, but no longer says NOTHING. A
+        FAIL-leg EXIT 0 with no output is the D4 silent miss, not proof of anything."""
+        out = self._run("--tier2", "--strict", "--root", str(self.dispatch_root),
+                        str(self.failleg))
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("not-applicable 1 (fail-leg-no-range)", out.stderr)
+
+
+FX_DIR = CORPUS / "tier2-fixtures"
+
+
+class TestFixtureRootSchema(unittest.TestCase):
+    """#486 / criterion 10(c) — the manifest `root` field accepts a string OR a list."""
+
+    # criterion 10(c) — the 14 committed single-string `root` rows, by id and expect.
+    # Written over the string-`root` SUBSET, not over len(rows), so Task 16's five
+    # list-`root` rows cannot falsify it: this assertion has to survive that task, or the
+    # mechanical repair that greens it (14 -> 19, drop the isinstance conjunct) deletes
+    # the only executable expression of the criterion. Round-2/S3.
+    LEGACY_EXPECT = {
+        "a-clean-pass": "pass",
+        "b-pass-range-match": "fail",
+        "c-tampered-hash": "fail",
+        "e-absent-basename-unverifiable": "pass",
+        "e-pathshaped-absent-strict-fail": "fail",
+        "f-multi-root-strict-pass": "pass",
+        "g-range-extraction-outside": "pass",
+        "i-byte-range-inclusive-match": "fail",
+        "h-synthetic-witness-absent-strict-fail": "fail",
+        "j-rt-mandated-witness-fires": "fail",
+        "k-rt-mandated-clean-round": "pass",
+        "l-rt-wrote-cited-narrow-range": "pass",
+        "m-rt-exec-cited-artifact-mismatch": "fail",
+        "n-rt-exec-cited-mismatch-clean": "pass",
+    }
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_a_bare_string_root_normalises_to_one_element(self):
+        self.assertEqual(self.rv._fx_roots(FX_DIR, "a"), [FX_DIR / "a"])
+
+    def test_manifest_root_accepts_a_list(self):
+        self.assertEqual(self.rv._fx_roots(FX_DIR, ["p", "q"]),
+                         [FX_DIR / "p", FX_DIR / "q"])
+
+    def test_the_14_committed_string_root_rows_keep_their_expect(self):
+        rows = list(self.rv._read_jsonl(FX_DIR / "manifest.jsonl"))
+        legacy = [r for r in rows if isinstance(r["root"], str)]
+        self.assertEqual(len(legacy), 14)                       # none of the 14 moves
+        self.assertEqual({r["id"]: r["expect"] for r in legacy}, self.LEGACY_EXPECT)
 
 
 if __name__ == "__main__":
