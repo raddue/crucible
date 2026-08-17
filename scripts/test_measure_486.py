@@ -234,10 +234,11 @@ class TestWitnessTimeoutIsANamedStopNotADisposition(_SyntheticCorpus):
 
     def _timeout_receipt(self):
         """VERDICT is **PASS**, deliberately. On a FAIL leg this witness — a ranged
-        `kind=grep` payload — is never sourced at all, so the predicate never evaluates
-        and the census bills it `witness 0/1 … unreached 1 (fail-leg-payload-not-sourced)`
-        (C1-R3-F1; an earlier version of this docstring named the retired
-        `not-applicable (fail-leg-no-range)` bucket, which this shape no longer reaches).
+        `kind=grep` payload — IS sourced and read since GH #501, but the leg discards the
+        predicate's result (no `exit=` on the cited entry), so the census bills it
+        `witness 0/1 … discarded 1 (fail-leg-no-exit-evidence)`. Two earlier codes named
+        this state and both retired: `not-applicable (fail-leg-no-range)` (C1-R3-F1) and
+        then `unreached (fail-leg-payload-not-sourced)` (#501).
         What matters for the PASS choice is unchanged and is the *evaluation*, not the
         bucket: a FAIL receipt times out on the PASS-SYNTHETIC pass only — and the as-returned
         pass, which is the one every counter row is stated over, publishes a full set of

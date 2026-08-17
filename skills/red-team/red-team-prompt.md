@@ -213,18 +213,24 @@ Task tool (subagent_type: crucible-red-team):
       pattern really runs against its bytes. Before #486 it did not: only the dispatch root
       was supplied, a findings file placed anywhere else did not resolve under it, and the
       `PASS` leg degraded to `UNVERIFIABLE: witness <findings-file> (no file under root)`,
-      exit 0 — measured at 0 of 14 resolutions over the #474 §0g corpus. What survives is the
-      **asymmetry**, not the inertness: the `FAIL` leg is still not evaluated — it exits
-      before resolution and emits no witness note, showing up only on the run's
+      exit 0 — measured at 0 of 14 resolutions over the #474 §0g corpus. What survives is a
+      **weaker asymmetry than it used to be**, and since GH #501 it is no longer about
+      reading. Your `FAIL`-leg witness now resolves under `--root` and its pattern really
+      runs against your findings file's bytes, exactly as on the `PASS` leg. What differs
+      is whether the result can *bite*: the `FAIL` leg rejects only under `exit=0 and the
+      body does not match`, and the `WROTE` you cite carries no `exit=` at all, so the
+      predicate's answer is computed and thrown away. It shows up on the run's
       `TIER2-COVERAGE:` line as `witness 0/1` with
-      `unreached 1 (fail-leg-payload-not-sourced)` — while the
-      `PASS` leg is live. Read that pair as "a check exists here and did not run": Tier-1
-      forced you to declare a ranged `grep` payload over a declared artifact, so the check
-      is structurally present, and the `FAIL` leg's PASS-scoped artifact sourcing is the
-      linter declining to read it. It is **not** `not-applicable` — that bucket means the
-      item left the applicable set, which would be false of a check Tier-1 just mandated.
-      (Before this, it was reported as `not-applicable 1 (fail-leg-no-range)`, a code that
-      named a property of the *receipt* — "no range" — that is the inverse of the truth.)
+      `discarded 1 (fail-leg-no-exit-evidence)`. Read that pair as "a check exists here,
+      it ran, and nothing consulted the answer": Tier-1 forced you to declare a ranged
+      `grep` payload over a declared artifact, so the check is structurally present, and
+      the `FAIL` leg's evidence rule is what declines to act on it. It is **not**
+      `not-applicable` — that bucket means the item left the applicable set, which would be
+      false of a check Tier-1 just mandated. (Two earlier codes named this state and both
+      misdescribed it: `not-applicable 1 (fail-leg-no-range)` named a property of the
+      *receipt* — "no range" — that is the inverse of the truth, and `unreached 1
+      (fail-leg-payload-not-sourced)` described a linter that declined to source, which it
+      no longer does.)
       So re-run your own counts-line grep
       **before** you write `expect-fail=match`: a `PASS` whose findings file carries a nonzero
       Fatal or Significant count now makes the pattern fire, which is a `LintError` →

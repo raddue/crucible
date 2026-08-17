@@ -550,8 +550,14 @@ def main(argv=None):
     print("Every assertion keys on block identity or token text; none keys on a line number.")
 
     row_exec_jsonl(rv, rep)
+    # #501 — `literal` re-derived 12 → 11. Cause: the FAIL-leg paragraph in
+    # return-convention.md carried a prose `out=` mention ("that leg reads the
+    # un-narrowed `out=` range") that #501 falsifies — the FAIL leg now sources the
+    # payload's own range — so the sentence was rewritten and the token went with it.
+    # Nothing this row protects moved: range-shaped, accepted, in-band and max #L span
+    # are all unchanged, because the dropped token was prose, never a citation.
     row_exec_file(rv, rep, RETURN_CONV, 2, dict(
-        literal=12, range_shaped=4, accepted=4, max_l_span=219,
+        literal=11, range_shaped=4, accepted=4, max_l_span=219,
         in_band_blocks=[("RCPT v1 build/7-implementer", 219),
                         ("RCPT v1 build/8-implementer", 179),
                         ("RCPT v1.1 build/42-implementer", 60)]),

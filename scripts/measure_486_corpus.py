@@ -621,13 +621,21 @@ def main(argv):
         str(a_sum), leg="artifacts", roots=len(roots),
         note="the SUM is exact; the unreached/not-reachable SPLIT is advisory "
              "(syntactic instrument vs the design's tree-walk one)")
-    w_sum = cen.wit["unreached"] + cen.wit["not-reachable"]
+    # GH #501 — `discarded` joins the witness sum. Without it this figure would have
+    # silently DROPPED by the size of the fail-leg population the fix re-bucketed
+    # (9 receipts over the frozen corpora): those items moved out of `unreached` and
+    # into `discarded`, and they are non-verifications either way, so leaving them out
+    # would report the corpus as having got better by exactly the number of receipts
+    # whose disposition was only re-described. `not-applicable` is still omitted here —
+    # that is GH #507's subject and is deliberately not changed under this fix.
+    w_sum = cen.wit["unreached"] + cen.wit["not-reachable"] + cen.wit["discarded"]
     fig(corpus, "as-returned", "unresolved across BOTH legs",
         f"{a_sum} + {w_sum} = {a_sum + w_sum}",
         leg="both", roots=len(roots),
         note="artifacts-leg unresolved (incl. not-applicable) + witness-leg "
-             "(unreached+not-reachable). SUMS ONLY — no per-counter total is pinned, "
-             "because the two legs' design-side references are different instruments")
+             "(unreached+not-reachable+discarded). SUMS ONLY — no per-counter total is "
+             "pinned, because the two legs' design-side references are different "
+             "instruments")
 
     # ── witness-leg dispositions, the shape the design publishes.
     disp = {}

@@ -2008,20 +2008,34 @@ def witness_art_name(witness, cited, verdict):
     categorical fail-open inside a fail-open fix). Callers pass `witness if from_payload
     else None` to _read_cited_range, so artifact and range are always sourced together.
 
-    Scoped to the PASS leg — the leg that READS the body. The FAIL leg keeps
-    derive_art_name's EXEC-only behaviour for both halves (the asymmetry documented in
-    verify_witness, deferred to the resolution issue — which is GH #501, NOT #486. C1-R3-F1
-    established that #486 closed with the asymmetry intact while three call sites, this one
-    included, still routed it to "the resolution issue"; naming the live issue is what stops
-    a fourth deferral to a closed destination).
+    GH #501 — BOTH LEGS, which is what the convention said all along. The rule quoted
+    above is not scoped to a verdict, so the PASS-only conjunct that used to stand here
+    was a non-conformance, not lint.py parity. Its cost was total: on the FAIL leg
+    derive_art_name is EXEC-only, every red-team receipt cites a WROTE (that is what
+    TRACE looks like when the work product is a findings file), so art_name came back
+    None and tier2_witness returned before resolve_base was EVER called. #486's whole
+    resolution machinery was unreachable on the verdict of every gate round that finds
+    anything. Measured over the frozen corpora: 30 of 141 receipts carry this shape.
 
-    WIDENING, stated plainly: today ran=TRACE#N structurally determines which file is
-    read; after this it is still Tier-1-checked to point at an EXEC/READ/WROTE, but no
-    longer determines what is opened — the reviewer gains control of WHICH FILE, not
-    merely which lines. D6's ARTIFACTS-membership rule buys back the DECLARATION half
-    (the name must be one the receipt declares); the sha256 binding does not come back
-    until artifact resolution lands. Recorded on the resolution issue, GH #501."""
-    if (verdict == "PASS" and witness.get("kind") == "grep"
+    ⚠ The conjunct could NOT be dropped on its own, and the reason is the half that
+    makes this a convention change rather than a one-liner. verify_witness's FAIL branch
+    computes `content_match` and then discards it unless `exit_success`, and a
+    WROTE-cited entry carries no `exit=` — so sourcing alone makes the predicate run,
+    resolve, read real bytes and still be structurally unable to reject, while
+    `_bill_witness_evaluation` bills it `witness 1/1`. Measured: the conjunct drop ALONE
+    moved 9 of 141 frozen-corpus receipts from an honest `witness 0/1 unreached 1
+    (fail-leg-payload-not-sourced)` to `witness 1/1` with every sub-count at 0 — trading
+    a false `not-applicable` for a false `verified`, which is strictly worse. The
+    companion withholding (`probe["result_discarded"]` → the `discarded` sub-count) is
+    what makes this safe, and the two must never be separated.
+
+    WIDENING, stated plainly: ran=TRACE#N no longer determines which file is read (it is
+    still Tier-1-checked to point at an EXEC/READ/WROTE) — the reviewer gains control of
+    WHICH FILE, not merely which lines. D6's ARTIFACTS-membership rule buys back the
+    DECLARATION half (the name must be one the receipt declares) and, since #486, the
+    payload artifact resolves under the supplied roots like any other, so the widening
+    now lands inside artifact resolution instead of ahead of it."""
+    if (witness.get("kind") == "grep"
             and witness.get("range_kind") is not None):
         return witness["art"], True
     return derive_art_name(cited, verdict), False
@@ -2037,14 +2051,21 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
     (None ⇒ no body ⇒ clean, reproducing lint.py's `art_name not in artifact_bodies: return`).
     Shared by the disk reader (cited #L/#B range) and the --eval inline-body path.
 
-    ASYMMETRY (reproduced exactly): the PASS leg (tier2_verify) inspects the body for
-    grep-kind READ/WROTE witnesses; the FAIL leg (tier2_verify_fail) body lookup is
-    EXEC-only — so the SAME grep:READ/WROTE witness whose body matches expect-fail
-    raises under PASS but returns clean under FAIL. derive_art_name keys this on verdict.
-    #474 sharpens this: return-convention.md § "kind=grep artifact/range resolution"
-    scopes the grep artifact/range rule to
-    BOTH branches, so the FAIL-leg inertness is a convention NON-CONFORMANCE, not merely
-    lint.py parity. Reversing it is a convention change — deferred, not fixed here.
+    ASYMMETRY — WHAT #501 CLOSED AND WHAT IT DID NOT. lint.py's FAIL-leg body lookup is
+    EXEC-only, so the SAME grep:READ/WROTE witness whose body matches expect-fail raised
+    under PASS and returned clean under FAIL. #474 sharpened that into a
+    NON-CONFORMANCE rather than parity: return-convention.md § "kind=grep artifact/range
+    resolution" scopes the grep artifact/range rule to BOTH branches. #501 reversed it —
+    witness_art_name now sources a ranged payload on either verdict, so the body IS read
+    here on FAIL and derive_art_name no longer keys the lookup on the verdict.
+
+    What survives is NOT a lookup asymmetry but an EVIDENTIAL one, visible a few lines
+    down: this leg raises only under `exit_success and not content_match`, so on a cited
+    entry carrying no `exit=` the predicate runs and its result is discarded. That is
+    reported (`probe["result_discarded"]` → the `discarded` sub-count, never
+    `witness 1/1`) rather than closed, because closing it means deciding what a witness
+    on a SHELL-LESS dispatch can prove at all — a convention question no --root
+    configuration answers, and the honest successor to #501 rather than a deferral of it.
 
     DISK vs --eval DIVERGENCE 1 — SLICING (deliberate, #474/D4): the disk reader slices
     the body to the witness/cited range, while _eval_tier2 passes the WHOLE inline
@@ -2112,7 +2133,10 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
     DEFERRED (#474 §3): a witness carrying ran=SKIPPED: is Tier-1-legal on a PASS and
     Tier-2 never evaluates it, so a reviewer can still obtain a PASS whose witness was
     never tested. That is a designed Cairn-routed deferral, not a fall-through; rejecting
-    it is a receipt-shape contract change. Carried on the resolution issue, GH #501."""
+    it is a receipt-shape contract change. Carried on GH #510 — split out of "the
+    resolution issue" when #501 closed, because it is a DIFFERENT subject and leaving it
+    pointed at a closing issue would have been the third repetition of the deferral chain
+    that produced #501's own defect."""
     if not witness["ran"].startswith("TRACE#"):
         return True
     art_name, _ = witness_art_name(witness, cited, verdict)
@@ -2145,8 +2169,31 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
         # The new behaviour is the conformant one; blast radius measured zero.
         pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
         content_match = bool(pattern and re.search(pattern, body))
-        if probe is not None and (exit_m or pattern):
-            probe["evaluated"] = True      # siege S-7 — see the `evaluated` note above
+        if probe is not None and exit_m:
+            # GH #501 — siege S-7's `evaluated`, narrowed to what this leg's outcome can
+            # actually depend on. The FAIL leg raises only under `exit_success and not
+            # content_match`, so with NO exit clause at all the branch is inert: the
+            # predicate's result is discarded and the witness demonstrated nothing. It
+            # used to be set on `exit_m or pattern`, which said "a predicate evaluated"
+            # for exactly the shape that cannot reject — and the SUPERSEDES
+            # witness-evidence consequent consumes this, so the loose form let a
+            # supersession survive on a witness that proved nothing. Fail-CLOSED
+            # direction: a withheld `evaluated` can only over-BLOCK.
+            # Measured free: 0 of 116 real frozen-corpus receipts carry a non-`none`
+            # SUPERSEDES at all, so arming this blocks nothing that exists today —
+            # which is also the live confirmation of the 0-site claim at the consequent.
+            probe["evaluated"] = True
+        if probe is not None and pattern and not exit_success:
+            # GH #501 — the companion withholding witness_art_name's docstring names.
+            # The predicate ran against real bytes and its RESULT WAS THROWN AWAY, so no
+            # verification happened however healthy the read was. Keyed on whether the
+            # result could affect the outcome — NOT on the verdict and NOT on the witness
+            # kind (DEC-29: both of those are shapes, and narrowing a guard by shape is
+            # what reopened this class three times this session). Two ways to reach one
+            # counter, so the counter name is not the whole reason and the code carries
+            # the rest — the same idiom `empty-range` uses for past-eof/empty-file.
+            probe["result_discarded"] = ("fail-leg-exit-nonzero" if exit_m
+                                         else "fail-leg-no-exit-evidence")
         if exit_success and not content_match:
             raise LintError(
                 f"Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
@@ -2315,9 +2362,12 @@ def _slice(path: pathlib.Path, kind, a, b, meter=None, raw=None):
 
 def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
     """SIEGE-C3 — the ONE place `wit_verified` is set, so states (a) and (b) cannot
-    disagree about what "verified" means. Returns True when the claim was WITHHELD for
-    DEC-26's zero-bytes reason, which is the caller's signal to bucket the item (DEC-28);
-    False on every other path, including the `no_predicate` arm, which buckets its own.
+    disagree about what "verified" means. Returns the WITHHOLDING REASON — `"empty"` for
+    DEC-26's zero-bytes case, `"discarded"` for GH #501's thrown-away FAIL-leg result —
+    which is the caller's signal to bucket the item (DEC-28); None on every other path,
+    including the `no_predicate` arm, which buckets its own. It became a reason rather
+    than a bool when #501 added the second way to reach "read fine, verified nothing":
+    the two land in DIFFERENT sub-counts, so a bare True could no longer say which.
 
     `wit_verified = 1` asserts that a predicate ran against the bytes read from disk —
     design :1188-1190's ARTIFACTS-leg analogue, "bytes off disk + predicate evaluated TO A
@@ -2417,9 +2467,16 @@ def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
     code = probe.get("no_predicate")
     if code is None:
         if body_text == "":
-            return True          # DEC-28 — withheld; _bill_witness_billing buckets it
+            return "empty"       # DEC-28 — withheld; _bill_witness_billing buckets it
+        if probe.get("result_discarded"):
+            # GH #501 — the OTHER way a call reaches here having verified nothing: bytes
+            # came off disk and a predicate ran, but the FAIL leg discarded the result
+            # (see verify_witness). Ordered AFTER the zero-bytes test on DEC-28's
+            # tie-break — when two descriptions fit, count the EARLIER and more
+            # recoverable fact, and a citation that delivered no bytes is both.
+            return "discarded"
         cov.wit_verified = 1
-        return False
+        return None
     if ambiguous:
         # C1-R1-S1 — THE SAME GUARD `empty-range` ALREADY HAS, carried to the sibling arm
         # the author who wrote it did not reach. `ambiguous` is bumped at RESOLUTION time,
@@ -2438,10 +2495,10 @@ def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
         # Under --strict the ambiguity raises before any of this, so this arm is live
         # only on the non-strict diagnostic path — which is the path the handoff
         # prescribes for READING the census.
-        return False
+        return None
     cov.wit_applicable = 0
     cov.bump("not-applicable", code)
-    return False
+    return None
 
 
 def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguous,
@@ -2532,8 +2589,18 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
         # differs (a lint rule name where a grep payload would be) and an operator reading
         # the census has to be able to tell which one they are looking at.
         cov.bump("wrong-name", "unbound-trace-name")
-    elif withheld and not ambiguous:
+    elif withheld == "empty" and not ambiguous:
         cov.bump("empty-range", "past-eof" if ranged else "empty-file")
+    elif withheld == "discarded" and not ambiguous:
+        # GH #501 — the SEVENTH sub-count, and the last member of the same ordered
+        # sequence for the same reason the sixth was: an item that already earns
+        # `wrong-name`, `ambiguous` or `empty-range` is reported only there (design
+        # :1178-1180's tie-break), so this is the bucket for a withheld item that earns
+        # no earlier one. Without it the 9 frozen-corpus receipts measured at
+        # witness_art_name land in NONE of the disjoint sub-counts on a `witness 0/1`
+        # line — the state tier2_witness's docstring declares forbidden, which is exactly
+        # the C01 break DEC-28 closed one counter earlier.
+        cov.bump("discarded", probe["result_discarded"])
 
 
 def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
@@ -2647,6 +2714,13 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 # produce a false BLOCK, never a fail-open. It reads derive_art_name's own
                 # documented PASS/FAIL asymmetry, which is the thing that decides whether a
                 # remedy exists. Do not widen it back to bare `art_name is None`.
+                # GH #501 NARROWED THIS, and the narrowing is the point: the FAIL leg now
+                # SOURCES a ranged grep payload, so the shape that used to dominate this
+                # branch (the mandated red-team witness) no longer reaches it at all. What
+                # is left on the FAIL leg is a witness with no range for the leg to source
+                # AND no EXEC out= to fall back to — still genuinely unsatisfiable, still
+                # exempt. Widening it back to bare `art_name is None` re-exempts the PASS
+                # leg's remediable case; narrowing it further would over-BLOCK only.
                 if probe_out is not None and verdict == "FAIL":
                     probe_out["unsourced"] = True
                 # D8.5 — D4's single "NOT-EVALUATED" string folds onto TWO codes, because
@@ -2654,33 +2728,24 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 # leg whose cited entry yields no name at all. Mapping both onto
                 # fail-leg-no-range would mislabel the PASS-leg cases.
                 if cov is not None:
-                    if (verdict == "FAIL" and witness.get("kind") == "grep"
-                            and witness.get("range_kind") is not None):
-                        # C1-R3-F1 — Tier-1 MANDATED this shape: parse_witness forces
-                        # expect-fail=match ⇒ kind=grep ⇒ a ranged payload, and lint_receipt
-                        # forces that payload's artifact into
-                        # ARTIFACTS. So a witness check provably EXISTS; witness_art_name's
-                        # PASS-only sourcing is the linter declining to read it. Billing that
-                        # `not-applicable` asserts the item LEFT the applicable set
-                        # (return-convention.md:270) — false — and the code string
-                        # `fail-leg-no-range` asserts a property of the RECEIPT that is the
-                        # opposite of the truth. `witness 0/1 … unreached 1` is the honest
-                        # rendering, and it is the shape _bill_witness_evaluation's docstring
-                        # above already pins for "a check that could have run and did not".
-                        #
-                        # This moves the CENSUS only: no exit code changes, and the FAIL
-                        # leg still evaluates nothing. Sourcing the payload on both legs is a
-                        # convention change that needs a companion wit_verified withholding
-                        # (verify_witness's FAIL branch discards content_match unless
-                        # exit_success, and a WROTE-cited entry carries no exit=), which is
-                        # deferred to GH #501 — the destination of the three "resolution
-                        # issue" deferrals in verify_witness, witness_art_name and
-                        # _selftest_crosscheck. This arm retires when that lands.
-                        cov.wit_applicable = 1
-                        cov.bump("unreached", "fail-leg-payload-not-sourced")
-                    else:
-                        cov.bump("not-applicable",
-                                 "fail-leg-no-range" if verdict == "FAIL" else "no-art-name")
+                    # GH #501 RETIRED the `unreached (fail-leg-payload-not-sourced)` arm
+                    # that used to stand here. C1-R3-F1 added it to stop the census
+                    # calling a Tier-1-MANDATED check `not-applicable` while the FAIL leg
+                    # declined to source it; now the leg sources it, so the shape the arm
+                    # described cannot arrive — witness_art_name returns a name for every
+                    # ranged grep payload on either verdict, and this branch is not
+                    # entered. The honest rendering of the same receipts moved with the
+                    # behaviour: they now report whatever their payload artifact really
+                    # does (`not-reachable` when the bare basename resolves nowhere,
+                    # `discarded` when it resolves and the FAIL leg throws the predicate
+                    # result away). Measured over the frozen corpora, that is 18 and 9
+                    # receipts respectively, and no exit code moved.
+                    #
+                    # D8.5 — D4's single "NOT-EVALUATED" string still folds onto TWO
+                    # codes: a FAIL leg with no range AND no EXEC out= range, and a PASS
+                    # leg whose cited entry yields no name at all.
+                    cov.bump("not-applicable",
+                             "fail-leg-no-range" if verdict == "FAIL" else "no-art-name")
                 return []
             if cov is not None:
                 # S2 — applicability is a MEASURED fact from here on, so d becomes 1 only now.
@@ -3323,17 +3388,17 @@ def _selftest_crosscheck(rec, bodies):
     # silently drifting into the shape and reporting green. This is the check that
     # keeps the one committed kind=grep artifact_bodies row honest.
     #
-    # SCOPED TO THE PASS LEG, stated because the guard reads as though it covers the
-    # shape generally (round-5 / MIN-4). The gate is `from_payload`, which
-    # witness_art_name sets only for verdict == "PASS" — so a FAIL + ranged kind=grep +
-    # artifact_bodies row would reintroduce the round-1/SIG-3 vacuity uncaught. That is
-    # not a live hole: measured over eval/ledger-return-protocol/inject/*.jsonl, the one
-    # ranged kind=grep row (shape-e) is a PASS, and no FAIL row is ranged kind=grep.
-    # Widening the gate to the FAIL leg is a BEHAVIOUR change (the FAIL leg's body lookup
-    # is EXEC-only, so `art` would come from derive_art_name and the check would mean
-    # something different) — it needs a RED test and a row to catch, and has neither
-    # today. Carried on GH #501 with the FAIL-leg asymmetry it belongs to (that asymmetry
-    # outlived #474 and #486; #501 is where it is now tracked).
+    # NO LONGER SCOPED TO THE PASS LEG — GH #501 widened it, and did so by fixing the
+    # thing the old scoping was a symptom of rather than by touching this line. The gate
+    # is `from_payload`, which witness_art_name used to set only for verdict == "PASS",
+    # so a FAIL + ranged kind=grep + artifact_bodies row would have reintroduced the
+    # round-1/SIG-3 vacuity uncaught (round-5 / MIN-4 named the gap; it was never live —
+    # measured over eval/ledger-return-protocol/inject/*.jsonl, the one ranged kind=grep
+    # row (shape-e) is a PASS and no FAIL row is ranged kind=grep). Sourcing the payload
+    # on both legs means `art` is now the PAYLOAD artifact on either verdict, so the
+    # check means the same thing on both and the shape it could not cover is covered.
+    # The corpus still holds no FAIL row of that shape, so this widening is latent
+    # coverage, not a behaviour change anything today can observe.
     if witness["kind"] == "grep" and from_payload and art not in bodies:
         problems.append(f"crosscheck {did}: artifact_bodies does not supply {art}, the "
                         f"artifact this ranged grep witness verifies — the --eval leg "
@@ -3467,7 +3532,7 @@ class _PathReadError(Exception):
 # because every counter ahead of it describes an item that is still IN the applicable set,
 # and `not-applicable` — the one bucket for items that left it — reads last.
 _COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "empty-range",
-                 "not-applicable")
+                 "discarded", "not-applicable")
 
 # SIEGE-C4 — the census state for a --tier2 exit that happens BEFORE _verify_single is
 # entered, where no _Coverage exists and the finally: documented to "survive every
@@ -3737,9 +3802,22 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                         # fail-open; the only safe key is whether the cited range addressed
                         # bytes. Do not re-narrow this on `verdict` or on `kind`.
                         #
-                        # The exemption RETIRES when the FAIL leg sources its payload — i.e.
-                        # when GH #501 lands, after which `unsourced` stops being set for the
-                        # mandated shape and the gate is armed on both legs again.
+                        # GH #501 LANDED, and it retired the exemption for the shape this
+                        # note was about: the FAIL leg now sources a ranged payload, so
+                        # `unsourced` is no longer set for the MANDATED form and the gate is
+                        # armed on both legs again. What still reaches here is the residue —
+                        # a FAIL witness with no range to source AND no EXEC `out=` to fall
+                        # back to, which remains genuinely unsatisfiable.
+                        #
+                        # ⚠ Arming it is only real because `evaluated` was narrowed with it
+                        # (verify_witness): the FAIL leg cannot raise without an `exit=`
+                        # clause, so the old `exit_m or pattern` form asserted "a predicate
+                        # evaluated" for precisely the shape that cannot reject — and this
+                        # consequent consumes that flag. Widening `evaluated` back re-opens
+                        # siege S-7(a) here with the exemption gone, i.e. silently, and
+                        # test_501_fail_leg_ranged_witness_with_no_exit_evidence_cannot_retire
+                        # is the only thing that catches it (it was MISSING at first and was
+                        # found by reverting each half against a deliberately-broken copy).
                         #
                         # siege S-7(a) — the Tier-2 half of the witness-evidence rule.
                         # Tier-1 checks the witness's SHAPE (`kind ∈ {exec, grep}`,

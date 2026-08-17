@@ -1480,13 +1480,40 @@ class TestWitness474Tier2(unittest.TestCase):
         self.rv._eval_tier2(w, self._wrote("x.md"), {}, "PASS")      # no body → clean
 
     def test_11d_empty_body_on_the_fail_leg_stays_clean(self):
-        # The empty-body guard is PASS-scoped (round 4 / MIN-2): a FAIL + grep +
-        # EXEC-cited witness reads the UN-narrowed out= range and must not newly raise.
-        self._write("y.log", "")
+        """The empty-body guard is PASS-scoped (round 4 / MIN-2) and STAYS so: widening
+        it to FAIL is a new gate that moves the exit code, and `empty-range` already
+        reports the state on the census. GH #501 retired this test's stated PREMISE, not
+        its subject — the FAIL leg no longer reads the un-narrowed `out=` range, it reads
+        the payload's own artifact and range, so the empty body under test is now
+        x.md#L1-L1 rather than y.log#L1-L5. What is asserted is unchanged: whatever the
+        FAIL leg does about an empty body, it is never `_reject_empty_grep_body`."""
+        self._write("y.log", "irrelevant\n")
+        self._write("x.md", "")
         w = self._w("grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
+        # exit=0 → the ordinary FAIL-leg rejection fires. The MESSAGE is the assertion:
+        # it is the weak positive-evidence check, not the empty-body guard.
         with self.assertRaises(self.rv.LintError) as cm:
             self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "FAIL")
-        self.assertIn("no evidence of failure", str(cm.exception))   # not the empty-body guard
+        self.assertIn("no evidence of failure", str(cm.exception))
+        self.assertNotIn("witness could not fire", str(cm.exception))
+
+    def test_11e_empty_fail_leg_body_with_no_exit_evidence_is_census_only(self):
+        """The case that ISOLATES the guard, which exit=0 cannot: with a non-zero exit
+        the FAIL branch cannot raise at all, so if `_reject_empty_grep_body` were ever
+        widened to this leg THIS is where it would newly fire. It must stay clean, and
+        the zero-byte read must be reported as `empty-range` — the EARLIER and more
+        recoverable fact, which is why it wins over `discarded` (GH #501)."""
+        self._write("y.log", "irrelevant\n")
+        self._write("x.md", "")
+        w = self._w("grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
+        cov = self.rv._Coverage(); cov.tier1_ok()
+        self.assertEqual(
+            self.rv.tier2_witness(w, self._exec("y.log#L1-L5", exit_code=1),
+                                  self.root, False, "FAIL", cov),
+            [])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertEqual(cov.counts["empty-range"], 1)
+        self.assertEqual(cov.counts["discarded"], 0)
 
     # --- test 16 — kind=grep + expect-fail=/…/, payload range NARROWER than out=
     def test_16_payload_range_narrower_than_out_range_is_what_is_read(self):
@@ -1527,20 +1554,31 @@ class TestWitness474Tier2(unittest.TestCase):
     # --- test 21 — REGRESSION PIN: on FAIL, artifact AND range both stay with
     #     derive_art_name; neither comes from the payload
     def test_21_fail_leg_keeps_artifact_and_range_together(self):
+        """D4's pairing property, on the leg GH #501 brought under it. The pair is still
+        never split — but on the FAIL leg it is now the PAYLOAD's artifact+range, not
+        derive_art_name's `out=`, which is what return-convention.md § "kind=grep
+        artifact/range resolution" says without scoping to a verdict.
+
+        ⚠ THIS TEST'S ASSERTIONS ARE THE EXACT INVERSE OF WHAT THEY WERE, and that
+        inversion IS #501: it previously pinned "the body is y.log sliced at the out=
+        range → the Y marker supplies evidence", i.e. the non-conformance. The X marker
+        lives only in the payload's file+range and the Y marker only in the out= range,
+        so the two cannot both be read and the swap is unambiguous evidence of which
+        one the leg opened."""
         self._write("y.log", "MARKERY here\nMARKERY again\n" + "filler\n" * 8)
         self._write("x.md", "filler\n" * 4 + "MARKERX here\nMARKERX again\n")
         trace = self._exec("y.log#L1-L2")
-        # the body is y.log sliced at the out= range → the Y marker supplies evidence
-        w_hit = self._w("grep:x.md#L5-L6  expect-fail=/MARKERY/  ran=TRACE#1")
+        # the body is x.md sliced at the PAYLOAD range → the X marker supplies evidence
+        w_hit = self._w("grep:x.md#L5-L6  expect-fail=/MARKERX/  ran=TRACE#1")
         self.assertEqual(self.rv.tier2_witness(w_hit, trace, self.root, False, "FAIL"), [])
-        # …and the X marker (present only in the payload's file+range) does NOT
-        w_miss = self._w("grep:x.md#L5-L6  expect-fail=/MARKERX/  ran=TRACE#1")
+        # …and the Y marker (present only in the cited out= file+range) does NOT
+        w_miss = self._w("grep:x.md#L5-L6  expect-fail=/MARKERY/  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError) as cm:
             self.rv.tier2_witness(w_miss, trace, self.root, False, "FAIL")
         self.assertEqual(
             str(cm.exception),
             "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
-            "expect-fail /MARKERX/ (weak positive-evidence check)")
+            "expect-fail /MARKERY/ (weak positive-evidence check)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1852,19 +1890,21 @@ class TestRound2DuplicateClause(unittest.TestCase):
 
 
 class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
-    """Round-2 / SIG-2 — a PIN ON A DEFERRAL, not on a fix. `witness_art_name` scopes
-    the payload-sourced artifact to `verdict == "PASS"`; on FAIL the body lookup falls
-    back to `derive_art_name`, which is EXEC-`out=`-only on that leg. The mandated
-    red-team witness cites `ran=TRACE#N` → a `WROTE`, so `art_name` is None,
-    `tier2_witness` returns before reading anything, and the Tier-2 witness rules are
-    dead — EVEN WHERE THE ARTIFACT RESOLVES PERFECTLY, which is what makes this
-    distinct from the `--root` condition the Scope paragraph already names.
+    """Round-2 / SIG-2 — WAS a pin on a deferral; GH #501 collected on it.
 
-    Round 1 of every red-team dispatch is a FAIL by construction, and that FAIL receipt
-    is the supersession anchor the fix agent cites. Reversing the asymmetry is a
-    convention change (see verify_witness's ASYMMETRY note) and is deferred to the
-    Tier-2 resolution issue. This test exists so the deferral is load-bearing: if the
-    FAIL leg is ever made to verify, this goes red and the docs get corrected with it."""
+    The original pinned the asymmetry: `witness_art_name` scoped payload sourcing to
+    `verdict == "PASS"`, so on FAIL the lookup fell back to `derive_art_name` (EXEC-
+    `out=`-only), the mandated red-team witness cites `ran=TRACE#N` → a `WROTE`,
+    `art_name` came back None, and `tier2_witness` returned before reading anything —
+    the Tier-2 witness rules dead EVEN WHERE THE ARTIFACT RESOLVES PERFECTLY. Round 1 of
+    every red-team dispatch is a FAIL by construction, so that was the majority verdict.
+
+    Its docstring said: "if the FAIL leg is ever made to verify, this goes red and the
+    docs get corrected with it." It went red exactly as designed. What the class pins
+    now is the other side of the same fact — the FAIL leg reads, and what it reads is
+    the payload — plus the half that makes reading safe, since a WROTE-cited FAIL still
+    cannot reject and must not be billed as a verification. Kept under its original name
+    so the trail from the deferral to its collection stays greppable."""
 
     WITNESS = ("grep:round-7-findings.md#L1-L1  "
                "pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#2")
@@ -1887,16 +1927,27 @@ class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
         return (self.rv.parse_witness(sections["WITNESS"]),
                 self.rv.parse_trace(sections["TRACE"]))
 
-    def test_29_fail_leg_with_a_wrote_cited_witness_reads_nothing(self):
-        # The body is on disk, under --root, and the predicate matches it.
+    def test_29_fail_leg_with_a_wrote_cited_witness_now_reads_the_payload(self):
+        """GH #501 — the inversion of the original test_29. Same receipt, same root,
+        same body; the leg now sources the payload instead of returning on a None name."""
         (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
         witness, trace = self._parts("FAIL")
-        notes = self.rv.tier2_witness(witness, trace, self.root, True, "FAIL")
-        self.assertEqual(notes, [])          # no raise AND no UNVERIFIABLE note
-        # …and the branch that produced that is the None-art_name one, not a miss.
         art, from_payload = self.rv.witness_art_name(witness, trace[1], "FAIL")
-        self.assertIsNone(art)
-        self.assertFalse(from_payload)
+        self.assertEqual(art, "round-7-findings.md")
+        self.assertTrue(from_payload)
+
+    def test_29c_but_a_wrote_cited_FAIL_is_still_not_billed_a_verification(self):
+        """The half that makes 29 safe. The read is healthy and the predicate runs, but
+        with no `exit=` on the cited WROTE the FAIL branch discards the result, so the
+        witness remains structurally unable to reject. `witness 0/1` + `discarded`, never
+        `1/1` — the 9-receipt regression measured over the frozen corpora."""
+        (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
+        witness, trace = self._parts("FAIL")
+        cov = self.rv._Coverage(); cov.tier1_ok()
+        notes = self.rv.tier2_witness(witness, trace, self.root, True, "FAIL", cov)
+        self.assertEqual(notes, [])          # no raise AND no UNVERIFIABLE note
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertIn("fail-leg-no-exit-evidence", cov.codes["discarded"])
 
     def test_29b_the_identical_receipt_on_PASS_does_fire(self):
         # The discriminator: same witness, same body, same root — only the verdict
@@ -2536,7 +2587,7 @@ class TestCoverageRendering(unittest.TestCase):
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 3/4 witness 0/0 unreached 0 "
             "not-reachable 1 (unresolvable-basename) ambiguous 0 wrong-name 0 "
-            "empty-range 0 not-applicable 1 (fail-leg-no-range)")
+            "empty-range 0 discarded 0 not-applicable 1 (fail-leg-no-range)")
 
     def test_partial_shape_renders_witness_0_0(self):
         """S2 — d is what the census MEASURED. A run truncated before the witness leg
@@ -2546,7 +2597,7 @@ class TestCoverageRendering(unittest.TestCase):
         c.bump("ambiguous"); c.partial = True
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 1/4 witness 0/0 unreached 0 not-reachable 0 "
-            "ambiguous 1 wrong-name 0 empty-range 0 not-applicable 0 partial")
+            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 not-applicable 0 partial")
 
     def test_codes_are_sorted_and_deduplicated(self):
         """CPython randomises str hashing per process (PYTHONHASHSEED); an unsorted
@@ -2793,18 +2844,21 @@ class TestCoverageWitnessLeg(unittest.TestCase):
                "range_b": 1, "art": "f.txt", "pattern": None}
         return wit, trace
 
-    def test_fail_leg_ranged_grep_payload_is_unreached_and_applicable(self):
-        """C1-R3-F1 — witness_art_name sources a ranged grep payload on the PASS leg
-        ONLY, so the FAIL leg discards a check Tier-1 just forced the receipt to declare.
-        The check EXISTS and did not run: that is `witness 0/1` plus a sub-count, NOT
-        `not-applicable` (which asserts the item left the applicable set) and NOT a code
-        claiming the receipt carried no range."""
+    def test_fail_leg_ranged_grep_payload_is_discarded_and_applicable(self):
+        """C1-R3-F1 as SUPERSEDED by GH #501. C1-R3-F1's ruling was that a
+        Tier-1-MANDATED check the linter declined to source is `witness 0/1` plus a
+        sub-count, never `not-applicable` and never a code claiming the receipt carried
+        no range. That ruling survives; only the sub-count moved, because the linter no
+        longer declines — it sources, resolves and reads, and what it cannot do is let
+        the result matter. `unreached (fail-leg-payload-not-sourced)` retired with the
+        decline it described."""
         wit, trace = self._grep_ranged_case()
         cov = self._cov()
         self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "FAIL", cov), [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
-        self.assertIn("fail-leg-payload-not-sourced", cov.codes["unreached"])
-        self.assertEqual(cov.counts["unreached"], 1)
+        self.assertIn("fail-leg-no-exit-evidence", cov.codes["discarded"])
+        self.assertEqual(cov.counts["discarded"], 1)
+        self.assertEqual(cov.counts["unreached"], 0)
         self.assertEqual(cov.counts["not-applicable"], 0)
         self.assertNotIn("fail-leg-no-range", cov.codes["not-applicable"])
 
@@ -2829,12 +2883,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         remedy, so the consequent must stay armed. Revision 1 set the flag unconditionally
         and silently exempted the PASS case, which was gated before this whole change.
 
-        ⚠ The PASS arm MUST pass `range_kind=None`. With a range, witness_art_name takes
-        its payload-sourcing branch on the PASS leg and returns a name, so the
-        `art_name is None` block under test is never entered and the assertion holds
-        whether or not the conjunct is there. Verified against a copy with the conjunct
-        deleted: ranged → None either way (vacuous); rangeless → None with the conjunct
-        and True without it (discriminates).
+        ⚠ EVERY arm MUST pass `range_kind=None`. With a range, witness_art_name takes
+        its payload-sourcing branch — since GH #501 on BOTH legs — and returns a name, so
+        the `art_name is None` block under test is never entered and any assertion about
+        it is vacuous. That is why the ranged FAIL arm moved from `assertTrue` to
+        `assertIsNone` rather than being deleted: it is now the pin that the FAIL leg
+        SOURCES a ranged payload, read from this block's own perspective.
         """
         def unsourced(verdict, verb, range_kind):
             args = ("f.txt  sha256:" + "0" * 64) if verb != "DISPATCHED" else \
@@ -2850,7 +2904,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
                                   {}, probe, [])
             return probe.get("unsourced")
 
-        self.assertTrue(unsourced("FAIL", "WROTE", "L"))     # no remedy -> exempt
+        # GH #501 — a RANGED payload is now sourced on the FAIL leg, so this shape never
+        # reaches the block and is no longer exempt from the SUPERSEDES consequent. That
+        # retirement is the whole point of the fix: the gate is armed on both legs again.
+        self.assertIsNone(unsourced("FAIL", "WROTE", "L"))
         self.assertTrue(unsourced("FAIL", "WROTE", None))    # no remedy -> exempt
         # remedy exists -> stay armed. Rangeless, so the block under test IS entered.
         self.assertIsNone(unsourced("PASS", "DISPATCHED", None))
@@ -3082,7 +3139,7 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 1/1 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "not-applicable 0")
+                         "discarded 0 not-applicable 0")
 
     def test_partial_shape_on_a_truncated_census(self):
         out = self._run("--tier2", "--strict", "--root", str(self.root),
@@ -3091,7 +3148,7 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 0/0 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "not-applicable 0 partial")
+                         "discarded 0 not-applicable 0 partial")
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
@@ -3249,13 +3306,22 @@ class TestWitnessNegativeControl(unittest.TestCase):
         inverse of the truth, since Tier-1 forced the range. The honest rendering keeps
         the item applicable and reports it in a sub-count the shipped consumer rule
         (quality-gate/SKILL.md § Coverage-line capture's UNVERIFIED rule) already reads on
-        BOTH clauses. Exit code deliberately unmoved: the FAIL leg still evaluates
-        nothing — that is the deferred full fix, not this one."""
+        BOTH clauses.
+
+        GH #501 — the annotation moved ONCE MORE, for the reason C1-R3-F1 named as
+        deferred: the FAIL leg no longer "evaluates nothing". It sources the payload,
+        resolves it and runs the predicate; what it cannot do is let the result matter,
+        because the cited WROTE carries no `exit=`. So `unreached
+        (fail-leg-payload-not-sourced)` — which described a decline that no longer
+        happens — gives way to `discarded (fail-leg-no-exit-evidence)`. Everything this
+        test was written to hold still holds: `witness 0/1`, applicable, annotated, in a
+        sub-count both clauses of the consumer rule read, exit code unmoved."""
         out = self._run("--tier2", "--strict", "--root", str(self.dispatch_root),
                         str(self.failleg))
         self.assertEqual(out.returncode, 0)
         self.assertIn("witness 0/1", out.stderr)
-        self.assertIn("unreached 1 (fail-leg-payload-not-sourced)", out.stderr)
+        self.assertIn("discarded 1 (fail-leg-no-exit-evidence)", out.stderr)
+        self.assertNotIn("fail-leg-payload-not-sourced", out.stderr)
         self.assertNotIn("fail-leg-no-range", out.stderr)
 
 
@@ -4076,7 +4142,7 @@ class TestHostilePathCannotForgeACensusLine(_InqBase):
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
     EVIL = "ev\nTIER2-COVERAGE: " + FORGED + "\nil"
 
     def census_lines(self, stderr):
@@ -4145,7 +4211,7 @@ class TestSplitlinesSeparatorsCannotForgeACensusLine(_InqBase):
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
     # Written as chr()/escape rather than as literals: a raw U+2028 in this file would
     # itself be invisible, and the point of the finding is that it is not inert.
     SEPARATORS = (("NEL", "\x85", r"\x85"),
@@ -5001,11 +5067,16 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
     """
 
     TAIL_EMPTY_RANGE = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                        "empty-range 1 (past-eof) not-applicable 0")
+                        "empty-range 1 (past-eof) discarded 0 not-applicable 0")
     TAIL_EMPTY_FILE = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                       "empty-range 1 (empty-file) not-applicable 0")
+                       "empty-range 1 (empty-file) discarded 0 not-applicable 0")
     TAIL_ALL_ZERO = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                     "empty-range 0 not-applicable 0")
+                     "empty-range 0 discarded 0 not-applicable 0")
+    # GH #501 — the seventh sub-count, for a read that delivered bytes to a predicate
+    # whose result the FAIL leg then threw away.
+    TAIL_DISCARDED_EXIT = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
+                           "empty-range 0 discarded 1 (fail-leg-exit-nonzero) "
+                           "not-applicable 0")
 
     def tail(self, stderr, ratios):
         """The whole sub-count tail after `ratios`, so a test cannot pass on a substring."""
@@ -5065,8 +5136,19 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
 
     def test_a_ranged_grep_witness_past_eof_is_withheld_and_bucketed(self):
         """A RANGED grep, costed separately. `_reject_empty_grep_body` is gated on
-        `verdict == PASS`, so the FAIL leg — which reads the un-narrowed `out=` range —
-        reaches the census instead of raising, and it is the third shape DEC-28 covers."""
+        `verdict == PASS`, so the FAIL leg reaches the census instead of raising, and it
+        is the third shape DEC-28 covers.
+
+        ⚠ GH #501 MOVED THE BUCKET, and the move is the fix showing its work. The
+        receipt's `out=` range is past EOF while its PAYLOAD range `#L1-L2` is not, and
+        the leg used to read the former — so `empty-range (past-eof)` was true only of a
+        range the convention never told it to open. Reading the payload delivers two real
+        lines, `/BOOM/` does not match them, and `exit=1` means the FAIL branch discards
+        that result: the honest bucket is `discarded (fail-leg-exit-nonzero)`. Still
+        withheld, still `witness 0/1`, still exit 0 — a better-founded zero.
+
+        Kept past-EOF on the `out=` range ON PURPOSE: it is the discriminator proving
+        WHICH range was opened, and flattening it would make the test pass either way."""
         body = b"line one\nline two\n"
         h, size = self.plant(self.base, "f.md", body)
         p = self.base / "r-grep.rcpt"
@@ -5076,7 +5158,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
             trace=["EXEC  `x`  exit=1  dur=1.0s  out=f.md#L900-L910"]))
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(self.tail(out.stderr, "witness 0/1"), self.TAIL_EMPTY_RANGE)
+        self.assertEqual(self.tail(out.stderr, "witness 0/1"), self.TAIL_DISCARDED_EXIT)
 
     # --- half 2: the discriminator is the RESOLUTION, not the content --------
 
@@ -5131,7 +5213,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
         self.assertEqual(self.tail(out.stderr, "witness 0/1"),
                          "unreached 0 not-reachable 0 ambiguous 0 "
                          "wrong-name 1 (rangeless-grep-payload) empty-range 0 "
-                         "not-applicable 0")
+                         "discarded 0 not-applicable 0")
 
     def test_a_withheld_ambiguous_item_is_billed_ambiguous_ONLY(self):
         """Disjointness, arm 2, and the reason `_bill_witness_billing` takes an explicit
@@ -5166,7 +5248,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.tail(out.stderr, "witness 0/0"),
                          "unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                         "empty-range 0 not-applicable 1 (lint-kind-unimplemented)")
+                         "empty-range 0 discarded 0 not-applicable 1 (lint-kind-unimplemented)")
 
 
 class TestNotApplicableAndWrongNameAreDisjoint(_InqBase):
@@ -5530,7 +5612,7 @@ class TestTheCensusTokenCannotBeForgedBySubstring(_InqBase):
     supposed to close."""
 
     FORGED = ("artifacts 1/1 witness 1/1 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
 
     def _run(self):
         a = self.base / "A"; a.mkdir()
@@ -5540,7 +5622,7 @@ class TestTheCensusTokenCannotBeForgedBySubstring(_InqBase):
         evil = a / "TIER2-COVERAGE: artifacts 1" / "1 witness 1"
         evil.mkdir(parents=True)
         target = evil / ("1 unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                         "empty-range 0 not-applicable 0")
+                         "empty-range 0 discarded 0 not-applicable 0")
         target.write_bytes(b"decoy\n")
         (a / "ev.log").symlink_to(target)
         self.plant(b, "ev.log", b"other\n")     # makes the name ambiguous -> paths render
@@ -6082,6 +6164,60 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("EVALUATED at Tier-2", out.stderr)
 
+    def test_501_fail_leg_ranged_witness_with_no_exit_evidence_cannot_retire(self):
+        """GH #501 — the pin the deliberately-broken-copy check found MISSING, on the
+        half that most needed it.
+
+        #501 narrowed `evaluated` from `exit_m or pattern` to `exit_m`, because the FAIL
+        branch raises only under `exit_success and not content_match`: with NO exit clause
+        the branch is inert, the predicate's result is discarded, and the witness
+        demonstrated nothing. The loose form set `evaluated` for exactly that shape, so a
+        supersession survived on a witness that proved nothing — siege S-7(a) again, one
+        leg over.
+
+        Before #501 this receipt was exempt via `unsourced` (the FAIL leg sourced no
+        artifact at all). Sourcing the payload retires that exemption — `:3796` says the
+        gate is armed on both legs again — and this is what "armed" has to mean, or the
+        arming is cosmetic.
+
+        Measured free: 0 of 116 real frozen-corpus receipts carry a non-`none` SUPERSEDES
+        at all, so this blocks nothing that exists today. It is also the fail-CLOSED
+        direction — a withheld `evaluated` can only ever over-BLOCK."""
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "grep:evidence.log#L1-L1  expect-fail=/zzz-absent/  ran=TRACE#1",
+            verdict="FAIL", skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "fail-ranged-no-exit.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_501_fail_leg_witness_WITH_exit_evidence_still_retires(self):
+        """Non-vacuity control for the pin above, and the reason the narrowing is
+        `exit_m` and not `exit_success`. A non-zero `exit=` IS the FAIL leg's evidence of
+        failure — the comparison ran and decided — so the consequent must stay
+        satisfiable. Without this, `evaluated` could be narrowed all the way to False and
+        the test above would still pass."""
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "exec:`run`  expect-fail=/BOOM/  ran=TRACE#2",
+            verdict="FAIL", skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  a",
+                   "EXEC  `run`  exit=1  dur=1.0s  out=evidence.log#L1-L1"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "fail-ranged-with-exit.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+
     def test_the_scoping_is_not_a_blanket_disable(self):
         """Non-vacuity control: ONE receipt shape, body absent so no witness can evaluate,
         run under each verdict. PASS still hard-BLOCKs — its rangeless grep witness falls
@@ -6278,7 +6414,7 @@ class TestTheCensusTokenCannotBeForgedOnTheBulletChannel(_InqBase):
     census earns its keep"."""
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
 
     def _run(self, args):
         p = self.base / "r.rcpt"
@@ -6466,6 +6602,203 @@ class TestANonUtf8ReceiptStatesTheCensus(_InqBase):
         self.assertNotIn("Traceback (most recent call last)", stderr)
         self.assertEqual(stderr.count("TIER2-COVERAGE:"), 1, stderr)
         self.assertEqual(out.returncode, 1, stderr)
+
+
+class TestFailLegPayloadSourcing(unittest.TestCase):
+    """GH #501 — the FAIL leg sources its witness payload, and the census does not
+    claim a verification the FAIL branch throws away.
+
+    Two halves that MUST land together. Sourcing alone (dropping witness_art_name's
+    `verdict == "PASS"` conjunct) makes tier2_witness resolve and read on the FAIL leg,
+    but verify_witness's FAIL branch discards `content_match` unless `exit_success`,
+    and the mandated red-team witness cites a WROTE, which carries no `exit=`. Measured
+    over the frozen #486 corpora, the conjunct drop ALONE moved 9 of 141 receipts from
+    `witness 0/1 unreached 1 (fail-leg-payload-not-sourced)` to `witness 1/1` with every
+    sub-count at 0 — trading a false `not-applicable` for a false `verified`, which is
+    strictly worse. The withholding is what makes the sourcing safe.
+
+    ⚠ DEC-29 — the withholding keys on whether the predicate's RESULT COULD AFFECT THE
+    OUTCOME (`pattern and not exit_success`), never on the verdict and never on the
+    witness kind. Keying it on `verdict == "FAIL"` would withhold from the exit=0 FAIL
+    receipts whose predicate genuinely IS consulted (test_501_5), which is the same
+    shape of mistake as the two over-exemptions the freeze-guard caught.
+    """
+
+    MANDATED_PATTERN = "/significant=[1-9]|fatal=[1-9]/"
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.td = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.td.name)
+        self.a = self.base / "a"; self.a.mkdir()
+        self.b = self.base / "b"; self.b.mkdir()
+        self.addCleanup(self.td.cleanup)
+
+    def _cov(self):
+        c = self.rv._Coverage(); c.tier1_ok()
+        return c
+
+    def _ranged_grep(self, *, cited_args=None, verb="WROTE", body="quiet\n",
+                     where=("a",), name="f.txt", rng=("L", 1, 1),
+                     expect_fail="/BOOM/", pattern=None):
+        """The Tier-1-MANDATED red-team shape: kind=grep with a RANGED payload, cited
+        against a WROTE (what TRACE looks like when the work product is a findings
+        file). parse_witness forces this whenever expect-fail=match."""
+        for w in where:
+            (getattr(self, w) / name).write_text(body)
+        if cited_args is None:
+            cited_args = f"{name}  sha256:{'0' * 64}"
+        cited = {"n": 1, "verb": verb, "args": cited_args}
+        wit = {"kind": "grep", "payload": f"{name}#L{rng[1]}-L{rng[2]}",
+               "expect_fail": expect_fail, "ran": "TRACE#1",
+               "range_kind": rng[0], "range_a": rng[1], "range_b": rng[2],
+               "art": name, "pattern": pattern}
+        return wit, [cited]
+
+    # --- half 1: the FAIL leg sources the payload -----------------------------
+
+    def test_501_1_fail_leg_sources_the_ranged_payload(self):
+        """RED without the fix: witness_art_name returns (None, False) on FAIL, so
+        tier2_witness returns before resolve_base is ever called and #486's whole
+        resolution machinery is unreachable on the majority verdict."""
+        wit, trace = self._ranged_grep()
+        art, from_payload = self.rv.witness_art_name(wit, trace[0], "FAIL")
+        self.assertEqual(art, "f.txt")
+        self.assertTrue(from_payload)
+
+    def test_501_2_the_fail_leg_reaches_resolve_base(self):
+        """The behavioural half of test_501_1 — `found` is populated only if
+        resolve_base actually ran, which is the thing #486 built and the FAIL leg
+        never used."""
+        wit, trace = self._ranged_grep()
+        seen = []
+        real = self.rv.resolve_base
+
+        def spy(name, root, found=None, refused=None):
+            seen.append(name)
+            return real(name, root, found, refused)
+
+        self.rv.resolve_base = spy
+        self.addCleanup(setattr, self.rv, "resolve_base", real)
+        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+        self.assertEqual(seen, ["f.txt"])
+
+    def test_501_3_the_old_unreached_arm_is_retired(self):
+        """`fail-leg-payload-not-sourced` described the linter declining to source. It
+        cannot survive the leg that sources. Its retirement is named at the arm."""
+        wit, trace = self._ranged_grep()
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov)
+        self.assertNotIn("fail-leg-payload-not-sourced", cov.codes["unreached"])
+        self.assertEqual(cov.counts["unreached"], 0)
+
+    # --- half 2: the withholding ---------------------------------------------
+
+    def test_501_4_wrote_cited_fail_is_NOT_billed_verified(self):
+        """THE ONE THIS WHOLE ISSUE TURNS ON. A WROTE-cited FAIL carries no `exit=`, so
+        `exit_success` is falsy and the FAIL branch discards `content_match` — the
+        witness is structurally unable to reject. It must not be billed `witness 1/1`.
+
+        Without the withholding this reads (1, 1) — the 9-receipt regression measured
+        over the frozen corpora."""
+        wit, trace = self._ranged_grep(body="BOOM\n")
+        cov = self._cov()
+        self.assertEqual(
+            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov), [])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertEqual(cov.counts["discarded"], 1)
+        self.assertIn("fail-leg-no-exit-evidence", cov.codes["discarded"])
+
+    def test_501_5_exit_zero_fail_IS_billed_verified(self):
+        """The DEC-29 trap, pinned. On an EXEC-cited FAIL with exit=0 the predicate
+        result IS consulted (`if exit_success and not content_match: raise`), so a
+        withholding keyed on `verdict == "FAIL"` would silently under-bill it. The key
+        is whether the RESULT COULD AFFECT THE OUTCOME, not the verdict."""
+        wit, trace = self._ranged_grep(
+            verb="EXEC", cited_args="`x`  exit=0  out=f.txt#L1-L1", body="BOOM\n")
+        cov = self._cov()
+        # body matches expect-fail, so exit=0 + content_match -> no raise, and the
+        # predicate demonstrably decided the outcome.
+        self.assertEqual(
+            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov), [])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
+        self.assertEqual(cov.counts["discarded"], 0)
+
+    def test_501_6_exit_zero_fail_still_raises_on_a_non_matching_body(self):
+        """Sourcing the payload must not disarm the FAIL leg's one live rejection."""
+        wit, trace = self._ranged_grep(
+            verb="EXEC", cited_args="`x`  exit=0  out=f.txt#L1-L1", body="quiet\n")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+        self.assertIn("no evidence of failure", str(cm.exception))
+
+    def test_501_7_exit_nonzero_fail_is_withheld_with_its_own_code(self):
+        """A non-zero `exit=` IS evidence of failure, so the body predicate's result is
+        discarded — legitimately, but it still verified nothing. Two ways to reach one
+        counter, so the counter name is not the whole reason and the code carries the
+        rest (the `empty-range` past-eof/empty-file idiom)."""
+        wit, trace = self._ranged_grep(
+            verb="EXEC", cited_args="`x`  exit=3  out=f.txt#L1-L1", body="BOOM\n")
+        cov = self._cov()
+        self.assertEqual(
+            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov), [])
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertIn("fail-leg-exit-nonzero", cov.codes["discarded"])
+
+    def test_501_8_the_pass_leg_is_untouched(self):
+        """The control. Same witness, same body, same root — only the verdict differs.
+        The PASS leg already sourced the payload and already fires."""
+        wit, trace = self._ranged_grep(body="BOOM\n")
+        cov = self._cov()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.assertEqual(cov.counts["discarded"], 0)
+
+    # --- disjointness of the new sub-count ------------------------------------
+
+    def test_501_9_empty_range_wins_over_discarded(self):
+        """DEC-28's tie-break — when two descriptions fit, count the EARLIER and more
+        recoverable fact. A citation that delivered no bytes is `empty-range`; it does
+        not ALSO earn `discarded`, or :1175's sub-counts stop being disjoint."""
+        wit, trace = self._ranged_grep(body="one\n", rng=("L", 9, 9))
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov)
+        self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
+        self.assertEqual(cov.counts["empty-range"], 1)
+        self.assertEqual(cov.counts["discarded"], 0)
+
+    def test_501_10_ambiguous_wins_over_discarded(self):
+        """The same tie-break against the counter bumped at RESOLUTION time, before
+        applicability is finally known."""
+        wit, trace = self._ranged_grep(where=("a", "b"), body="BOOM\n")
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, [self.a, self.b], False, "FAIL", cov)
+        self.assertEqual(cov.counts["ambiguous"], 1)
+        self.assertEqual(cov.counts["discarded"], 0)
+
+    def test_501_11_strict_ambiguity_now_reaches_the_fail_leg(self):
+        """NEW COVERAGE, not a regression pin: cross-root `--strict` ambiguity could
+        never fire on the FAIL leg before, because the leg returned before resolving.
+        This is one of the #486 behaviours the fix actually switches on."""
+        wit, trace = self._ranged_grep(where=("a", "b"), body="BOOM\n")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(wit, trace, [self.a, self.b], True, "FAIL",
+                                  self._cov())
+        self.assertIn("ambiguous", str(cm.exception).lower())
+
+    # --- the rangeless control (must NOT move) --------------------------------
+
+    def test_501_12_rangeless_grep_payload_keeps_the_old_bucket(self):
+        """The discriminator is the declared RANGE, never the witness kind (DEC-29). A
+        rangeless payload has no range for the FAIL leg to source, so it keeps
+        `not-applicable (fail-leg-no-range)` — a code that is true of THAT receipt.
+        Guards against the fix widening into corrected D5's territory (GH #495)."""
+        wit, trace = self._ranged_grep()
+        wit.update(payload="f.txt", range_kind=None, range_a=None, range_b=None)
+        cov = self._cov()
+        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov)
+        self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
+        self.assertEqual(cov.counts["discarded"], 0)
 
 
 if __name__ == "__main__":
