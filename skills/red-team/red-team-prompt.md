@@ -205,18 +205,27 @@ Task tool (subagent_type: crucible-red-team):
       resolution issue; write the line correctly regardless, because it is what the PASS leg
       of the *next* round checks.
       **And the `PASS` leg is now *reached*.** The linter is invoked with a repeatable
-      `--root` — `--tier2 --strict --root <dispatch-root> --root <findings-root>` (the gate's
-      scratch directory) — and the orchestrator is obliged to supply, as that second root, the
-      directory whose top level holds `[FINDINGS_OUTPUT_PATH]`; resolution does not descend
-      into subdirectories. When it does, your findings file resolves and the `PASS` leg's
+      `--root` — `--tier2 --strict --root <dispatch-root> --root <findings-root>`
+      (`quality-gate/SKILL.md` › Receipt Linter defines `<findings-root>`; it is **not**
+      always the scratch directory itself) — and the orchestrator is obliged to supply, as that second root, the
+      directory whose top level holds `[FINDINGS_OUTPUT_PATH]`; resolution is a literal join
+      with no search, so the bare basename you cite is probed only at that root's top level. When it does, your findings file resolves and the `PASS` leg's
       pattern really runs against its bytes. Before #486 it did not: only the dispatch root
       was supplied, a findings file placed anywhere else did not resolve under it, and the
       `PASS` leg degraded to `UNVERIFIABLE: witness <findings-file> (no file under root)`,
       exit 0 — measured at 0 of 14 resolutions over the #474 §0g corpus. What survives is the
       **asymmetry**, not the inertness: the `FAIL` leg is still not evaluated — it exits
-      before resolution and emits no witness note, showing up only as
-      `not-applicable 1 (fail-leg-no-range)` on the run's `TIER2-COVERAGE:` line — while the
-      `PASS` leg is live. So re-run your own counts-line grep
+      before resolution and emits no witness note, showing up only on the run's
+      `TIER2-COVERAGE:` line as `witness 0/1` with
+      `unreached 1 (fail-leg-payload-not-sourced)` — while the
+      `PASS` leg is live. Read that pair as "a check exists here and did not run": Tier-1
+      forced you to declare a ranged `grep` payload over a declared artifact, so the check
+      is structurally present, and the `FAIL` leg's PASS-scoped artifact sourcing is the
+      linter declining to read it. It is **not** `not-applicable` — that bucket means the
+      item left the applicable set, which would be false of a check Tier-1 just mandated.
+      (Before this, it was reported as `not-applicable 1 (fail-leg-no-range)`, a code that
+      named a property of the *receipt* — "no range" — that is the inverse of the truth.)
+      So re-run your own counts-line grep
       **before** you write `expect-fail=match`: a `PASS` whose findings file carries a nonzero
       Fatal or Significant count now makes the pattern fire, which is a `LintError` →
       structurally `BLOCKED` → a re-dispatch or an escalation. Nothing here is yours to change — you do

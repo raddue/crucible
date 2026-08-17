@@ -211,7 +211,7 @@ Note: If the session is recovering via INFERRED reconstruction (new PipelineID g
 
 - **Timestamps:** Obtained via Bash `date -u +%Y-%m-%dT%H:%M:%S` (Bash is allowed for `date` commands that don't reference `.claude/` paths)
 - **Ledger archival (rename):** Uses Bash `mv` since Write/Read/Edit/Glob have no rename capability
-- **All other ledger operations** (create, read, update): MUST use Write and Read tools, NOT Bash. This is a hard constraint due to `.claude/` path restrictions.
+- **All other ledger operations** (create, read, update): MUST use Write and Read tools, NOT Bash. This is a **tooling-discipline convention, not an enforced hook** — see `quality-gate/SKILL.md` › Round History and Compaction Recovery › *Stated cause, corrected (#486)*, which retracts the "safety hooks block Bash commands referencing `.claude/` paths" justification this line used to carry. Follow it regardless (a deployment may add such a hook), but do not cite the hook as the reason.
 
 ### Enforcement Rules
 

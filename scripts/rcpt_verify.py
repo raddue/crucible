@@ -2,7 +2,12 @@
 """Runtime receipt linter (Ledger Return Protocol). Tier-1 (v1 structural, a verbatim
 port of the former eval-only eval/ledger-return-protocol/lint.py, removed in #369) +
 Tier-2 parts 1-2 (disk sha256 + witness byte-range). stdlib-only, argparse-free.
-Exit 0=pass, 1=fail; bullets on stderr.
+Exit 0=pass, 1=fail, 2=usage. A supplied `--root` is NEVER degraded to cwd (that is a
+silent fail-open), but the two ways it can be wrong part company: `--root ""` and a
+`--root` naming an existing non-directory are argv errors (exit 2), while a root that
+does not exist is a lint failure (exit 1) — Tier-1 still runs, Tier-2 does not. Two
+different `--root` tokens naming ONE directory is likewise a lint failure. Bullets on
+stderr.
 
 Usage:
   rcpt_verify.py [--tier1|--tier2] [--root DIR]... [--strict] [--ledger PATH] [FILE|-]
@@ -14,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, json, re, signal, sys, hashlib, pathlib, typing
+import contextlib, io, json, re, signal, sys, hashlib, pathlib, typing
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
@@ -140,12 +145,49 @@ LINT_RULES = {"all-claims-cited", "trace-consistent", "skip-declared"}
 #    return-convention.md §"Linter extension (Tier-1 additions for v1.1 receipts)".
 #    Ported from eval/ledger-return-protocol/tripwire/sweep.py (which now delegates
 #    its receipt-local checks here — single source). Manifest-relative SUPERSEDES
-#    rules (uniqueness / no-double-supersede / witness-evidence trigger) are NOT
+#    rules (uniqueness / no-double-supersede / the witness-evidence TRIGGER) are NOT
 #    here: a single receipt has no manifest to resolve them against.
+#
+#    SIEGE-R2CH-2 — the witness-evidence rule's CONSEQUENT is receipt-local and IS here,
+#    even though its trigger is not. See lint_v11_local for the fail-closed reading and
+#    what it costs.
 GLOB_ENTRIES_CAP = 8
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 CONF = re.compile(r"^(0\.\d{2}|1\.00)$")
+
+
+def _receipt_int(digits: str, label: str) -> int:
+    """SIEGE-R2BA-3 — int() on a RECEIPT-AUTHORED digit string, guarded. The same
+    fault-isolation class as _trace_idx and _compile_guard, and the same remedy: a
+    malformed field is a one-line lint bullet, never an escaping ValueError.
+
+    CPython caps int() string conversion at sys.get_int_max_str_digits() (4300 by
+    default), so a 5000-digit run of ASCII digits raises ValueError — which is NOT a
+    LintError. Every anchor in this file admits it: `str.isdigit()` (parse_trace),
+    `[0-9]+` (_TRACE_REF_RE), `\\d+` (_OUT_RANGE_RE, _WITNESS_RANGE_RE) and `-?\\d+`
+    (the exit= clauses) all match arbitrarily long runs. Measured on this tree, both
+    contracts this file states were falsified:
+      * CLI — line 1 was the census, line 2 onward a Traceback: the precise shape the
+        `except BaseException` arm and the F3 read guards exist to eliminate.
+      * --eval — a good/poison/good batch printed NO stdout at all and exited 1,
+        against run_eval's "ALWAYS exits 0 for a readable file (F1)" and _eval_text's
+        "one corrupt line must not suppress the rest". The good record BEFORE the
+        poison one was lost too.
+
+    Raising the interpreter's digit limit would be treating the symptom: the receipt is
+    untrusted input and an over-long index is malformed whatever the limit is.
+
+    The guard is `except ValueError` and not a length pre-test, so it also covers the
+    NON-length legs the anchors admit — `str.isdigit()` is true for e.g. superscripts
+    ('\\xb2'), which int() then rejects, and `\\d` matches every Unicode decimal digit.
+    The bullet shows a TRUNCATED value: interpolating 5000 digits into a message on a
+    channel an orchestrator records verbatim just moves the problem."""
+    try:
+        return int(digits)
+    except ValueError as e:
+        shown = digits if len(digits) <= 40 else digits[:40] + "…"
+        raise LintError(f"{label} is not a usable integer: {shown!r} ({e})")
 
 
 def parse_receipt(text):
@@ -225,7 +267,9 @@ def parse_trace(body):
             raise LintError(f"TRACE index not integer: {raw!r}")
         if verb not in {"READ", "EDIT", "WROTE", "EXEC", "DISPATCHED", "CONSULTED", "SKIPPED"}:
             raise LintError(f"TRACE unknown verb: {verb!r}")
-        out.append({"n": int(n_str), "verb": verb, "args": args})
+        # SIEGE-R2BA-3 — `str.isdigit()` above admits both a 5000-digit run (over
+        # CPython's int() cap) and non-ASCII digit forms int() rejects.
+        out.append({"n": _receipt_int(n_str, "TRACE index"), "verb": verb, "args": args})
     for i, entry in enumerate(out, start=1):
         if entry["n"] != i:
             raise LintError(f"TRACE indices not 1-based contiguous: expected {i} got {entry['n']}")
@@ -255,7 +299,11 @@ def parse_out_range(args_str):
     m = _OUT_RANGE_RE.search(args_str)
     if not m:
         return None
-    return OutRange(m.group(1), m.group(2), int(m.group(3)), int(m.group(4)))
+    # SIEGE-R2BA-3 — `\d+` matches an arbitrarily long run; guarded like every other
+    # receipt-authored integer in this file.
+    return OutRange(m.group(1), m.group(2),
+                    _receipt_int(m.group(3), "EXEC out= range start"),
+                    _receipt_int(m.group(4), "EXEC out= range end"))
 
 
 # The 4 KiB budget from return-convention.md § Cost model, ONE name (round-4 / M6).
@@ -426,6 +474,151 @@ def _compile_guard(src, msg_prefix, shown):
         raise LintError(f"{msg_prefix}: {shown!r} ({e})")
 
 
+# ── siege S-4 — the OTHER direction of the expect-fail shape guard.
+#
+# `parse_witness`'s existing guard is `len(pattern) < 4 or pattern in {".*", ".+"}`: a
+# two-element blacklist aimed exclusively at the ALWAYS-FIRES direction (a predicate so
+# broad it false-BLOCKs). Nothing rejected the mirror image — a predicate that PROVABLY
+# CANNOT fire. `/(?!)/`, `/(?!x)x/` and `/[^\s\S]/` were accepted, billed `witness 1/1`
+# ("a predicate ran against the bytes read from disk" — satisfied to the letter) and
+# rendered a census BYTE-IDENTICAL to the honest run that exits 1. That is
+# "coverage that cannot fail", which this codebase forbids by name elsewhere.
+#
+# A DECISION PROCEDURE for regex emptiness is not on offer here and this is not one: it
+# is a shape blacklist, deliberately the same instrument and the same size as the
+# always-fires blacklist one branch over, covering the three published constructions and
+# their immediate twins. Measured cost: 0 of the 11 distinct expect-fail sources across
+# the committed jsonl corpora, return-convention.md and red-team-prompt.md. A sound
+# decision procedure would mean walking `re._parser`'s private AST, which pins the
+# interpreter rather than this guard.
+#
+# C1-R2-S3 — WHAT THIS GUARD CLAIMS, CORRECTED. It claimed it "can only ever FALSE-ACCEPT
+# …, never false-reject a satisfiable pattern". That claim was FALSE, and it was
+# load-bearing: it is the entire safety argument for shipping a heuristic into a Tier-1
+# gate that HARD-FAILS, and a hard Tier-1 FAIL is a structural BLOCK on the one linter
+# build:14, siege:21, quality-gate:30 and return-convention.md run on EVERY receipt, whose
+# only documented remedy is a re-dispatch loop. Three separate causes, all now closed:
+#   (1) LOOKBEHIND ≠ LOOKAHEAD. `\(\?<?!…\)` admitted `(?<!X)X`, which is "an X not
+#       preceded by X" — satisfiable for every X — and the emitted reason string then
+#       MISDESCRIBED it as "the lookahead". `(?<!=)=fatal` was rejected while matching
+#       'x=fatal'. A wrong rule, not a narrow one. The `<?` is gone.
+#   (2) NO ALTERNATION AWARENESS. A source is empty only if EVERY alternative is;
+#       `(?!)|significant=[1-9]` was rejected while matching 'significant=7'. A `|` at
+#       top level now declines to judge at all — the fail-ACCEPT direction this blacklist
+#       already declares it prefers.
+#   (3) NO CONTEXT AWARENESS. `tok in src` / `.search()` are substring tests, so `[(?!)]`
+#       (a class matching one of `(`, `?`, `!`, `)`) and `\[^\s\S]` (a literal `[`) both
+#       tripped an arm, and `((?!a)a)?b` — where the empty element is quantified away —
+#       would have too. Every arm now requires its match to start at a JUDGEABLE position
+#       (see _regex_judgeable) and to carry no `?`/`*`/`{` quantifier of its own.
+# The corrected claim, which each arm meets by construction rather than by heuristic: for
+# a source with no top-level `|`, an UNQUANTIFIED top-level `(?!)` / `(?<!)` / `[^\C\c]` /
+# `(?!TEXT)TEXT` makes the whole source empty for every input, because at depth 0 the
+# source is a pure sequence and every element of it must match. Sources carrying
+# alternation are not judged; nor is any construction nested inside a group, where a
+# quantifier could make it optional. Both of those are refusals to judge, i.e. the
+# false-ACCEPT direction, which is the only direction this guard is allowed to be wrong in.
+_UNSAT_LOOKAROUND = ("(?!)", "(?<!)")
+# A NEGATED class holding a category AND its complement (\s\S, \w\W, \d\D) is the empty
+# set, so nothing can match one character of it.
+_UNSAT_EMPTY_CLASS_RE = re.compile(r"\[\^\\([sSwWdD])\\([sSwWdD])\]")
+# `(?!TEXT)TEXT` — a negative lookahead forbidding exactly the literal that follows it.
+# The captured run is restricted to plain literal characters so a quantified or grouped
+# body (where the two need not be the same language) is not claimed to be provable.
+# NO `<?`: see cause (1) above.
+_UNSAT_SELF_NEGATED_RE = re.compile(r"\(\?!([^()\[\]\\|?*+{}]+)\)")
+# A quantifier that admits ZERO repetitions, which makes the element it applies to
+# optional and therefore makes an empty element harmless. `+` is deliberately absent (it
+# requires one repetition), but excluding it too would only cost accepts.
+# A TUPLE, not a string: `src[end:end+1]` is `""` at end-of-source and `"" in "?*{"` is
+# True, which would silently make every construction at the END of a source unjudgeable —
+# i.e. the guard would accept the three published constructions themselves.
+_UNSAT_ZERO_QUANTIFIERS = ("?", "*", "{")
+
+
+def _regex_judgeable(src):
+    """C1-R2-S3 — per-index flags: True where a top-level regex TOKEN starts, i.e. the
+    index is outside every `[...]` character class, is not the operand of a `\\` escape,
+    and is at group depth 0.
+
+    This is what makes each arm of `_unsatisfiable_reason` a statement about the SOURCE
+    rather than about an arbitrary substring of it. `[(?!)]` is a character class, not a
+    lookahead; `\\[^\\s\\S]` is a literal `[`, not a negated class; and at depth > 0 an
+    empty element can be quantified away by the group that holds it (`((?!a)a)?b` matches
+    'b'). Every one of those was reported as "can never match".
+
+    Deliberately NOT a parser: group depth counts unescaped top-level parens without
+    distinguishing capturing, non-capturing or lookaround groups, and an unbalanced `)`
+    drives the depth negative so that nothing after it is judgeable. Both errors are in
+    the refuse-to-judge direction."""
+    flags = [False] * len(src)
+    i, n, depth, in_class = 0, len(src), 0, False
+    while i < n:
+        c = src[i]
+        if c == "\\":
+            i += 2                       # the escape and its operand: never judgeable
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        flags[i] = depth == 0
+        if c == "[":
+            in_class = True
+            # `]` as the FIRST member of a class is a literal `]`, not the terminator.
+            j = i + 2 if src[i + 1:i + 2] == "^" else i + 1
+            if src[j:j + 1] == "]":
+                i = j + 1
+                continue
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        i += 1
+    return flags
+
+
+def _unsatisfiable_reason(src):
+    """Return a one-clause reason when `src` is a PROVABLY empty regex source, else None.
+    See _UNSAT_LOOKAROUND for the scope of "provably", why this is a blacklist, and — the
+    part that is load-bearing — the exact sense in which it does not false-reject."""
+    if src is None:
+        return None
+    judgeable = _regex_judgeable(src)
+
+    def unquantified(end):
+        return src[end:end + 1] not in _UNSAT_ZERO_QUANTIFIERS
+
+    # Cause (2) — alternation at top level: every branch would have to be empty, and this
+    # guard reasons about one. Refuse to judge rather than reject.
+    if any(c == "|" and judgeable[i] for i, c in enumerate(src)):
+        return None
+    for tok in _UNSAT_LOOKAROUND:
+        i = src.find(tok)
+        while i != -1:
+            if judgeable[i] and unquantified(i + len(tok)):
+                return f"the empty negative lookaround {tok} can never match"
+            i = src.find(tok, i + 1)
+    for m in _UNSAT_EMPTY_CLASS_RE.finditer(src):
+        if (judgeable[m.start()] and unquantified(m.end())
+                and m.group(1) != m.group(2)
+                and m.group(1).lower() == m.group(2).lower()):
+            return f"the negated class {m.group(0)} excludes every character"
+    for m in _UNSAT_SELF_NEGATED_RE.finditer(src):
+        lit = m.group(1)
+        if (judgeable[m.start()] and src[m.end():].startswith(lit)
+                and unquantified(m.end() + len(lit))):
+            return (f"the lookahead {m.group(0)} forbids the very text that follows it")
+    return None
+
+
+def _reject_unsatisfiable(src, msg_prefix, shown):
+    reason = _unsatisfiable_reason(src)
+    if reason is not None:
+        raise LintError(f"{msg_prefix}: {shown!r} ({reason})")
+
+
 def _check_clause_shape(clause):
     """The D3 (a)-(d) ladder for a WITNESS `pattern=` clause: delimited → derive →
     non-empty → floor → compiles. Raises LintError; returns nothing.
@@ -467,6 +660,9 @@ def _check_clause_shape(clause):
         # relaxation of a clause rule and needs its own argument, not a tidy-up.
         raise LintError(f"WITNESS pattern= clause too short: {clause!r}")
     _compile_guard(src, "WITNESS pattern= clause is not a valid regex", clause)
+    # siege S-4 — the clause is the `expect-fail=match` predicate, so it is the SAME
+    # "cannot fire" hazard the signature site carries and takes the same guard.
+    _reject_unsatisfiable(src, "WITNESS pattern= clause can never match", clause)
 
 
 def parse_witness(body):
@@ -542,6 +738,13 @@ def parse_witness(body):
             raise LintError(f"WITNESS expect-fail wildcard/too-short: {expect_fail!r}")
         _compile_guard(_expect_fail_pattern(expect_fail),
                        "WITNESS expect-fail is not a valid regex", expect_fail)
+        # siege S-4 — the mirror of the wildcard test above. That one blocks a predicate
+        # that always fires; this one blocks a predicate that can never fire, which is
+        # the direction that buys a clean exit 0 with a census identical to the honest
+        # run's. A `"literal"` signature needs no such guard: re.escape's output always
+        # matches its own source text.
+        _reject_unsatisfiable(_expect_fail_pattern(expect_fail),
+                              "WITNESS expect-fail can never match", expect_fail)
     elif expect_fail.startswith('"') and expect_fail.endswith('"'):
         if len(expect_fail[1:-1]) < 4:
             raise LintError(f"WITNESS expect-fail literal too short: {expect_fail!r}")
@@ -600,7 +803,9 @@ def parse_witness(body):
         rm = _WITNESS_RANGE_RE.match(payload)
         if rm:
             art, range_kind = rm.group(1), rm.group(2)
-            range_a, range_b = int(rm.group(3)), int(rm.group(4))
+            # SIEGE-R2BA-3 — the payload range bounds are receipt-authored.
+            range_a = _receipt_int(rm.group(3), "WITNESS payload range start")
+            range_b = _receipt_int(rm.group(4), "WITNESS payload range end")
             # D6 span bound, SOUND calibration (see check_span_bound); the message names
             # the clause-stripped payload, not the predicate beside it.
             check_span_bound(range_kind, range_a, range_b,
@@ -646,7 +851,10 @@ def _trace_idx(ref: str) -> int:
     m = _TRACE_REF_RE.match(ref)
     if not m:
         raise LintError(f"malformed TRACE# reference: {ref!r}")
-    return int(m.group(1))
+    # SIEGE-R2BA-3 — the ASCII-digit anchor closed the NON-NUMERIC leg this docstring
+    # describes; it does not close the OVER-LONG one, which raises the same uncaught
+    # ValueError from the same call and aborts the same --eval batch.
+    return _receipt_int(m.group(1), "TRACE# reference")
 
 
 def lint_receipt(text):
@@ -680,14 +888,18 @@ def lint_receipt(text):
     # payload rule: this validates a DECLARATION, so it belongs where no read happens.
     if witness["kind"] == "grep" and witness["range_kind"] is not None:
         if witness["art"] not in artifacts:
-            raise LintError(f"WITNESS grep artifact not in ARTIFACTS: {witness['art']}")
+            # SIEGE-R2BA-4 — a Tier-1 bullet lands on the same parsed channel as a Tier-2
+            # one, and this is a bare NAME (not an args string), so it takes the renderer.
+            raise LintError(
+                f"WITNESS grep artifact not in ARTIFACTS: {_show_path(witness['art'])}")
     # EXEC out= artifact must exist; range bound
     for entry in trace:
         if entry["verb"] == "EXEC":
             check_exec_range_bound(entry["args"])
             r = parse_out_range(entry["args"])
             if r and r.artifact not in artifacts:
-                raise LintError(f"EXEC out= artifact not in ARTIFACTS: {r.artifact}")
+                raise LintError(
+                    f"EXEC out= artifact not in ARTIFACTS: {_show_path(r.artifact)}")
         elif entry["verb"] in {"EDIT", "WROTE"}:
             m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
             if not m:
@@ -723,7 +935,8 @@ def lint_receipt(text):
             if re.match(r"^[0-9a-f]{12}$", art_name):
                 continue
             if art_name not in artifacts:
-                raise LintError(f"CLAIM citation artifact not listed: {art_name}")
+                raise LintError(
+                    f"CLAIM citation artifact not listed: {_show_path(art_name)}")
     # WITNESS ran resolution + rules
     ran = witness["ran"]
     if verdict == "PASS":
@@ -773,7 +986,8 @@ def lint_receipt(text):
                     # Consistency: tests-pass=true must not cite a non-zero-exit EXEC
                     if c["key"] == "tests-pass" and c["value"] == "true":
                         em = re.search(r"exit=(-?\d+)", cited["args"])
-                        if em and int(em.group(1)) != 0:
+                        # SIEGE-R2BA-3 — the cited EXEC's own `exit=` is receipt text.
+                        if em and _receipt_int(em.group(1), "TRACE exit=") != 0:
                             raise LintError(
                                 f"CLAIM tests-pass=true cites TRACE#{idx} with exit={em.group(1)} "
                                 f"(structural contradiction)"
@@ -892,7 +1106,56 @@ def parse_v11_sections(text):
 def lint_v11_local(parsed):
     """Receipt-local v1.1 value checks: TRIPWIRE: none two-leg rule; predicate
     vocabulary + glob-subset cap (TRIPWIRE and TRIPWIRE-CHILD); SUPERSEDES
-    justification-by-CLAIMS. No manifest access."""
+    justification-by-CLAIMS and SUPERSEDES witness-evidence. No manifest access.
+
+    SIEGE-R2CH-2 — the witness-evidence rule, and why it is here despite its trigger
+    being manifest-relative.
+
+    return-convention.md § "The Sweep" step 3 tells the orchestrator that "Tier-1 has
+    already verified: uniqueness, CLAIMS justification, no-already-superseded,
+    witness-evidence (if applicable)" and to mark SUPERSEDED_BY with NO check of its own.
+    Of those four, this linter implemented exactly ONE (the CLAIMS `from=<prefix>#…`
+    substring test below). Uniqueness and no-already-superseded are genuinely
+    manifest-relative and are correctly out of scope — the v1.1 header comment above says
+    so, and that is honest. The witness-evidence rule is different: its CONSEQUENT —
+    "`N`'s WITNESS MUST have `kind ∈ {exec, grep}` (not `lint`) AND `ran=TRACE#N` (not
+    `SKIPPED:` / `UNRUNNABLE:`)" (§ SUPERSEDES, and the Linter-extension pseudocode says
+    the same) — reads only this receipt. Unenforced, a receipt with
+    `SUPERSEDES: <prefix>` whose witness is `lint:… ran=SKIPPED:` exited 0, i.e. a fix
+    agent retired a red-team's FAIL finding, its tripwires and its cairn invariant with a
+    receipt that demonstrably ran nothing.
+
+    FAIL-CLOSED OVER-APPROXIMATION, declared as one. The convention conditions the rule
+    on the PREDECESSOR ("if any cited predecessor had VERDICT=FAIL OR SUSPICION ≥ 0.30"),
+    which a single receipt cannot evaluate — the predecessor is a manifest row. The
+    choice is therefore between enforcing nothing and enforcing the consequent on EVERY
+    non-`none` SUPERSEDES, and the second is the fail-closed one. What it costs: a
+    receipt superseding a PASS, low-suspicion predecessor with a `lint:` witness or a
+    deferred `ran=` is convention-legal and is now rejected. Measured cost: 0 sites —
+    across every committed corpus (`eval/ledger-return-protocol/**/*.jsonl`, the v1.1
+    corpus, the v11-inject shapes, the tier2 fixtures) there are exactly four receipts
+    with a non-`none` SUPERSEDES, and the only one this rule newly rejects is
+    `tripwire/scenario-supersession-negative.jsonl`, which already declares
+    `expect-lint-fail` with `reason_contains: "WITNESS kind in {exec, grep}"` — so the
+    message below keeps that substring verbatim. return-convention.md's own worked
+    example (:556-575), `scenario-supersession.jsonl` and
+    `v11-inject/shape-supersedes-justification.jsonl` all satisfy it already, and both
+    consuming skills mandate the strict form unconditionally in their own words
+    (quality-gate/SKILL.md:70, siege/SKILL.md:52 — "`exec`/`grep` witness with
+    `ran=TRACE#N`", no predecessor condition).
+
+    The precedent for taking the fail-closed reading of a conditionally-worded convention
+    clause here, rather than deferring it, is parse_v11_sections' DISPATCHED ⇒
+    TRIPWIRE-CHILD rule, whose own tension with the "absence is treated as none"
+    parenthetical is recorded on #387. This one belongs in the same place: the linter is
+    STRICTER than the convention's letter, in the fail-closed direction, and the gap is
+    the maintainer's to close by making the convention unconditional or by giving the
+    linter the manifest.
+
+    sweep.py keeps its manifest-GATED copy of the same two checks (:124-136). It is now
+    unreachable through `lint_v11` — this runs first and is strictly broader — but it is
+    pre-existing and is left in place; it is the only site that can ever narrow the rule
+    back to the convention's exact trigger, because it is the only one with a manifest."""
     sections = parsed["sections"]
     susp_body = sections["SUSPICION"]
     susp_tok = susp_body[0].split() if susp_body else []
@@ -918,13 +1181,52 @@ def lint_v11_local(parsed):
                expand_glob_entries(p) > GLOB_ENTRIES_CAP:
                 raise LintError(f"v1.1 glob entries exceed cap ({GLOB_ENTRIES_CAP}): {p}")
     if parsed["supersedes"] != "none":
-        claims_body = "\n".join(sections["CLAIMS"])
+        # siege S-7(b) — the test was `f"from={prefix}#" not in "\n".join(CLAIMS)`, a RAW
+        # SUBSTRING scan over the section text. `pattern=` is free, unvalidated receipt
+        # text on the same lines, so `verified=true from=TRACE#1 pattern="from=<prefix>#"`
+        # satisfied the justification rule with no justifying citation present at all —
+        # the rule was vacuously satisfiable by the party it constrains. The PARSED
+        # citation field is the thing the rule is about: parse_claims already splits
+        # `from=<citation>` out of each line and is already run over this same section by
+        # lint_receipt, so this reads the receipt's structure instead of its bytes.
+        #
+        # NOT a tightening of the rule's TRIGGER (that is #500's subject and is left
+        # exactly as it was): the same predecessors are required to be justified by the
+        # same citation form. What moves is only that the citation now has to BE one.
+        citations = [c["citation"] for c in parse_claims(sections["CLAIMS"])]
         for prefix in (s.strip() for s in parsed["supersedes"].split(",")):
-            if f"from={prefix}#" not in claims_body:
+            if not any(cit.startswith(f"{prefix}#") for cit in citations):
                 raise LintError(
                     f"SUPERSEDES prefix {prefix} lacks CLAIMS justification "
                     f"(expected a from={prefix}#… citation)"
                 )
+        # SIEGE-R2CH-2 — the witness-evidence consequent. Sited AFTER the justification
+        # loop so that rule's diagnostic keeps winning where both apply (it is the
+        # pre-existing one and v11-inject/shape-supersedes-justification pins it).
+        # parse_witness cannot raise anything new here: every caller reaches
+        # lint_v11_local through a path that has already parsed the same section.
+        w = parse_witness(sections["WITNESS"])
+        if w["kind"] == "lint":
+            raise LintError(
+                "SUPERSEDES requires WITNESS kind in {exec, grep}, got lint "
+                "(witness-evidence requirement: supersession must demonstrate the "
+                "original concern no longer reproduces)")
+        if w["ran"].startswith(("SKIPPED:", "UNRUNNABLE:")):
+            raise LintError(
+                # SIEGE-R2BA-4 — `ran` after `SKIPPED:`/`UNRUNNABLE:` is free receipt
+                # text, so it takes a renderer. NOT because the channel is uniformly
+                # rendered — it is not: several Tier-1 diagnostics still interpolate
+                # receipt-controlled text raw, and closing those is a separate sweep — but
+                # because this value is unbounded free text on the one diagnostic a
+                # SUPERSEDES receipt controls. `!r` and not _show_path, matching
+                # parse_witness's
+                # `WITNESS ran= form unknown: {ran!r}`: _show_path is deliberately not
+                # applied to whole payload/args strings (a backslash is ordinary there),
+                # and `!r` additionally quotes the value so it cannot render as a line of
+                # its own on the channel quality-gate captures verbatim.
+                f"SUPERSEDES requires witness ran=TRACE#N, got ran={w['ran']!r} "
+                f"(witness-evidence requirement: a deferred witness demonstrates "
+                f"nothing about the predecessor it retires)")
 
 
 # ── Tier-2 shared base resolution ───────────────────────────────────────────
@@ -936,28 +1238,47 @@ def _as_roots(root) -> list:
     the parameter-side half of D8.2's "no direct caller moves" promise.
 
     De-duplication is D2's and is by Path.resolve(), not by set(): `/tmp/x`, `/tmp/x/`
-    and a symlinked equivalent are three tokens for one directory, and left un-collapsed
-    every name would resolve "under two roots" -> LintError -> per
-    quality-gate/SKILL.md:32 every receipt of such a run BLOCKS on invocation one.
-    Order is DECLARATION order (D3), so the de-duplication preserves position rather
-    than going through a set. The UNRESOLVED Path is what is kept: resolve_base already
-    resolves it for the containment set, and keeping it verbatim is what makes a single
-    root behave exactly as today.
+    and a symlinked equivalent are three tokens for one directory. Order is DECLARATION
+    order (D3), so the de-duplication preserves position rather than going through a set.
+
+    SIEGE-C14 — what this de-duplication does NOT do, corrected because the original
+    claim here was false and a maintainer acting on it would look for a bug in the wrong
+    place: it is NOT what stops two spellings of one root from being reported as an
+    ambiguity. Deleting the `seen`/`continue` block leaves the whole suite and
+    `--selftest` green, and `--root $D --root $D/` produces byte-identical output either
+    way. The real de-duplicator of the AMBIGUITY signal is `resolve_base`'s
+    `hit not in found`, which admits each distinct realpath once however many roots'
+    probes land on it. This block is kept because it is cheap, because it keeps
+    `_allowed_bases` free of duplicate entries, and because it stops one directory being
+    probed twice — not because removing it would BLOCK every receipt of such a run.
+
+    #486 fixer / F2 — the RESOLVED path is what is kept, i.e. the same value the
+    de-duplication keys on. The original justification for keeping the unresolved token
+    ("resolve_base already resolves it for the containment set") was wrong, because
+    _git_toplevel is NOT on the containment-set path: _allowed_bases and
+    _resolve_base_one both call `_git_toplevel(p)` on whatever this function returns, and
+    `pathlib.Path(".").parents` is EMPTY — so a relative root's ancestor walk stopped at
+    the cwd and that root's SECOND probed base silently vanished. Two spellings of one
+    directory then behaved differently, and because de-duplication keys on the resolved
+    path while keeping the unresolved one, WHICH spelling survived depended on
+    declaration order — so `--root . --root <abs>` and `--root <abs> --root .` could
+    disagree, falsifying criterion 6's "de-duplication is a no-op" (the
+    `two-root-dedup-noop` fixture) and quality-gate/SKILL.md:30's "probed bases being
+    each supplied root plus that root's git toplevel".
     """
     if isinstance(root, (str, pathlib.Path)):
         root = [root]
     out, seen = [], set()
     for r in root:
-        p = pathlib.Path(r)
-        key = p.resolve()
+        key = pathlib.Path(r).resolve()
         if key in seen:
             continue
         seen.add(key)
-        out.append(p)
+        out.append(key)
     return out
 
 
-def _allowed_bases(roots) -> list:
+def _allowed_bases(roots, refused=None) -> list:
     """#486 / D2 — the #397/C1 containment set: the UNION of every de-duplicated root
     and that root's git toplevel.
 
@@ -967,14 +1288,30 @@ def _allowed_bases(roots) -> list:
     candidate — the implicitness O5 was rejected for — and silently narrows `found`,
     which is D2's ambiguity detector.
 
-    For ONE root this is byte-identical to what :839-840 computed at 5d1fb15, which is
-    why TestRootContainment (:599-679) is unflipped.
+    SIEGE-C14 — this used to claim it was "byte-identical to what :839-840 computed at
+    5d1fb15" for ONE root. That is FALSE, and falsely reassuring: 5d1fb15 computed
+    `repo = _git_toplevel(root)` on the RAW root the caller passed, while this computes it
+    on the RESOLVED root `_as_roots` now returns. For an absolute root the two agree; for
+    a RELATIVE one they do not, and the difference is exactly the F2 bug the `_as_roots`
+    docstring above describes (`pathlib.Path(".").parents` is empty, so the ancestor walk
+    stopped at the cwd and the root's second probed base silently vanished). The resolved
+    input is the CORRECT one; what is wrong is the equivalence claim. TestRootContainment
+    is unflipped because its roots are absolute tempdir paths, for which the two forms do
+    coincide — not because the computation did not move.
     """
     allowed = []
     for r in roots:
         p = pathlib.Path(r)
         allowed.append(p.resolve())
-        repo = _git_toplevel(p)
+        # SIEGE-C1 — refusals are recorded HERE, and here only, because this is the site
+        # that reaches BOTH cited-name shapes. A refused toplevel is missing from the
+        # containment union, and containment is tested for EVERY candidate: a relative
+        # name loses `repo / name` as a candidate, and an absolute name inside that repo
+        # keeps its candidate but fails `_contained` against a union the repo is no longer
+        # in. Recording only from _resolve_base_one's relative branch was tried and is
+        # WRONG — it left the absolute shape hard-FAILing with exactly the silent "absent
+        # under all bases" the clause exists to replace.
+        repo = _git_toplevel(p, refused)
         if repo:
             allowed.append(repo.resolve())
     return allowed
@@ -991,7 +1328,10 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     tree resolves to None — never an out-of-tree disk read while linting an
     attacker-influenced receipt. (None then becomes UNVERIFIABLE, or path-shaped +
     --strict FAIL, in the callers — the same shape as a genuinely-absent file.)"""
-    repo = _git_toplevel(root)      # still needed: it is a CANDIDATE base (:847-848)
+    repo = _git_toplevel(root)   # still needed: it is a CANDIDATE base (:847-848).
+    # Refusals are NOT recorded from here — _allowed_bases owns that, because it is the
+    # site that reaches both name shapes (see its comment). Recording here as well would
+    # only duplicate; recording here INSTEAD misses the absolute shape entirely.
     # `allowed` is now the caller's UNION over ALL roots (#486 / D2, design :290).
     cands = []
     p = pathlib.Path(name)
@@ -1002,7 +1342,18 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
         if repo:
             cands.append(repo / name)
     for c in cands:
-        real = c.resolve()  # normalizes `..` and follows symlinks
+        try:
+            real = c.resolve()  # normalizes `..` and follows symlinks
+        except (ValueError, OSError):
+            # #486 fixer / F3 — the cited NAME is receipt-controlled, i.e. attacker-
+            # controlled, and a receipt is an untrusted subagent return. Path.is_file()
+            # swallows OSError/ValueError; Path.resolve() does NOT, so an embedded NUL
+            # ("ValueError: embedded null character") or an ELOOP/ENAMETOOLONG name
+            # escaped the CLI as a traceback printed AFTER the TIER2-COVERAGE: line, on
+            # the stream orchestrators parse. A malformed name is simply a candidate that
+            # does not exist: skip it, so it degrades to UNVERIFIABLE like any absent
+            # file rather than crashing the lint.
+            continue
         if not any(_contained(real, base) for base in allowed):
             continue  # containment violation — never read
         if real.is_file():
@@ -1010,7 +1361,7 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     return None
 
 
-def resolve_base(name: str, root, found=None):
+def resolve_base(name: str, root, found=None, refused=None):
     """Resolve `name` against one or more roots; return the FIRST hit, else None.
 
     #486 / D1 — `root` is a single root (as today) or a sequence probed in DECLARATION
@@ -1038,7 +1389,7 @@ def resolve_base(name: str, root, found=None):
     probe produced the candidate, which is the implicitness O5 was rejected for.
     """
     roots = _as_roots(root)
-    allowed = _allowed_bases(roots)
+    allowed = _allowed_bases(roots, refused)
     first = None
     for r in roots:
         hit = _resolve_base_one(name, r, allowed)
@@ -1057,12 +1408,230 @@ def _contained(child: pathlib.Path, base: pathlib.Path) -> bool:
     return child == base or base in child.parents
 
 
-def _git_toplevel(start: pathlib.Path):
+def _is_git_marker(g: pathlib.Path) -> bool:
+    """SIEGE-C1 — is `g` a REAL `.git` marker, or an entry that merely bears the name?
+
+    The predicate here used to be a bare `.exists()`. That was DELIBERATE and its
+    rationale is retained in full: a git WORKTREE (and a submodule) has `.git` as a
+    *FILE* — a gitlink — not a directory, so `.is_dir()` would break those and is still
+    the wrong tightening. What `.exists()` also accepted was ANY entry named `.git`,
+    including a zero-byte file, and `_git_toplevel` walks EVERY ancestor of every
+    supplied root: `: > /tmp/.git` (mode 1777, the parent of every live
+    `<dispatch-root>`) therefore made `/tmp` both a probed base AND a member of the
+    `_allowed_bases` containment union for every root, so a decoy planted there was
+    hashed, predicate-checked and rendered `artifacts 1/1`, exit 0.
+
+    Validating the SHAPE costs one read and closes the accidental/zero-byte plant in
+    both forms: a `.git` DIRECTORY must hold the three entries every git dir has
+    (`HEAD`, `objects/`, `refs/` — `git init` creates all three, and so does every
+    worktree's real gitdir), and a `.git` FILE has the fixed gitlink form
+    `gitdir: <path>`. Symlinks are followed, as before.
+    """
+    try:
+        if g.is_dir():
+            return ((g / "HEAD").is_file() and (g / "objects").is_dir()
+                    and (g / "refs").is_dir())
+        if g.is_file():
+            with g.open("rb") as fh:
+                return fh.read(8) == b"gitdir: "
+    except OSError:
+        return False              # unreadable is not a marker — fail closed
+    return False
+
+
+def _git_toplevel(start: pathlib.Path, refused=None):
     d = start if start.is_dir() else start.parent
     for cur in [d, *d.parents]:
-        if (cur / ".git").exists():   # .exists() is DELIBERATE — handles the git-worktree
-            return cur                # `.git`-*file* gitlink (not a dir); do NOT "tighten"
+        # SIEGE-C1 — shape-valid AND not world-writable. The shape check alone does not
+        # close the /tmp plant: `mkdir -p /tmp/.git/{objects,refs} && : > /tmp/.git/HEAD`
+        # is as cheap for any local uid as the zero-byte file was. What closes it is
+        # refusing a toplevel ANY uid can plant into; the cost is that a repository
+        # checked out into a world-writable directory stops contributing its toplevel as
+        # a probed base — a shape that is itself insecure and absent from this repo and
+        # from CI (both 0755). STATE THAT COST HONESTLY: it degrades to UNVERIFIABLE only
+        # for a bare basename, or with --strict off. For a repo-relative PATH-SHAPED name
+        # under the MANDATED --strict it is a hard FAIL, i.e. a structural BLOCK on every
+        # receipt of the run — fail-closed and correct, but it must be diagnosable, which
+        # is what `refused` and _refused_clause are for. Skipped rather than aborted, so
+        # a legitimate repo further up still
+        # wins (siege S-3: it no longer does — see the refusal arm below).
+        #
+        # It does NOT close a same-uid plant such as `~/.git` (mode 0700), and the
+        # reason this comment used to give for tolerating it was FALSE — corrected here
+        # rather than left for the next maintainer to act on: "a subagent that can write
+        # there can equally write the decoy into a root it already owns, so that plant
+        # buys an attacker nothing this linter can withhold". It buys two things. An
+        # in-root SYMLINK to an out-of-tree target is refused by `_contained`; the plant
+        # is not, because it WIDENS the containment union itself, so a decoy under $HOME
+        # that neither supplied root holds becomes verifiable as the cited artifact. And
+        # the widened union reaches other runs' scratch directories, i.e. sibling
+        # dispatches this subagent is not party to. RESIDUAL, stated and not closed: the
+        # remedy is a rule about WHICH ancestors may contribute a toplevel at all, which
+        # is a design change to the probe set (quality-gate/SKILL.md:30 defines it as
+        # "each supplied root plus that root's git toplevel") and not a linter-local fix.
+        if _is_git_marker(cur / ".git"):
+            if not _is_world_writable(cur):
+                return cur
+            # `refused` is an optional out-param (the same idiom as found/cov/probe/
+            # meter/bodies): the refusal must be REPORTABLE, not merely silent. Dropping
+            # this base is what makes a repo-relative name resolve nowhere, and under the
+            # MANDATED --strict a path-shaped name that resolves nowhere is a hard FAIL —
+            # so in a world-writable checkout the refusal blocks every receipt of the run
+            # while stderr says only "absent under all bases", of a file that is present
+            # and readable. The disposition appends the real reason instead.
+            if refused is not None and cur not in refused:
+                refused.append(cur)
+            # siege S-3 — and STOP. This used to KEEP WALKING, on the reasoning that "a
+            # legitimate repo further up still wins". Measured, that reasoning INVERTED
+            # the containment guarantee: the ancestor toplevel a continued walk finds is
+            # strictly BROADER than the refused one, so the same receipt against the same
+            # roots resolved a `../../credentials` traversal at `artifacts 1/1 witness 1/1`
+            # exit 0 with the checkout at 0777, and hard-FAILed at exit 1 with it at 0755.
+            # Making a directory LESS secure made the linter reach MORE files, which is
+            # the opposite of what SIEGE-C1 was written to do — and SIEGE-C1's own
+            # docstring claimed the cost was "stops contributing its toplevel" when the
+            # measured cost was "contributes its GRANDPARENT's".
+            #
+            # Refusing terminally is monotone: a refusal can now only ever SHRINK the
+            # probe set and the containment union, never grow it. The cost is the one
+            # SIEGE-C1 already declared and priced (a checkout under a world-writable
+            # directory stops contributing a toplevel) — no longer silently swapped for a
+            # wider one. `refused` still records what was dropped, so the disposition and
+            # the standalone REFUSED: note can name it.
+            return None
     return None   # stdlib-only: walk for .git rather than shelling out to git
+
+
+def _is_world_writable(d: pathlib.Path) -> bool:
+    """SIEGE-C1 — writable by someone other than its owner, on the directory that HOLDS
+    the `.git` marker, i.e. "a uid that is not this one could have created this marker".
+    Raw mode bits rather than an `import stat` for two bits; the sticky bit is irrelevant
+    here (it restrains deletion, not creation). An unstattable directory is treated as
+    writable — fail closed.
+
+    siege S-3 — the mask was `0o002` (other) ALONE while this function's callers, and
+    `quality-gate/SKILL.md` § "Dispatch-root and findings-root layout (#486)" pin (b)
+    ("Single home"), both claim the property "any local uid could have planted a marker
+    there". (C1-R2-S8 — cited by SECTION, not by line: this branch's own edits moved the
+    line these comments named, and a stale number points at unrelated prose.) 0775 and 0770 are exactly that claim's case and were ACCEPTED. The
+    mask is now `0o022`, so group-writable is refused too and the name matches what is
+    tested. Group membership is narrower than "any local uid", which is why this is
+    fail-CLOSED rather than an equivalence.
+
+    NOT covered, stated so the next reader does not assume it is: POSIX ACLs and
+    filesystem-specific permission models. `stat().st_mode` cannot see them, the stdlib
+    has no portable reader, and this module is stdlib-only — so an ACL-writable directory
+    with owner-only mode bits still contributes its toplevel."""
+    try:
+        return bool(d.stat().st_mode & 0o022)
+    except OSError:
+        return True
+
+
+# SIEGE-C2 — the ONE renderer for a filesystem path interpolated into stderr.
+# stderr is a PARSED channel (return-convention.md § "TIER2-COVERAGE:"; the documented
+# consumer greps it line-wise, and `grep -m1` takes the FIRST match), and unlike an
+# ARTIFACTS/witness name — which is whitespace-split out of the receipt and therefore
+# cannot hold a newline — a RESOLVED path can hold one: the reviewed subagent creates
+# directories under a root it owns, so `mkdir "$ROOT/$(printf 'ev\nTIER2-COVERAGE: …')"`
+# plus a cited symlink put a forged census line on the channel ahead of the real one.
+# Escaping is line-integrity only: `\` and every escaped control character become a
+# literal two-character escape, so an ordinary path renders BYTE-IDENTICALLY to what it
+# did before and only a hostile one changes. Deliberately NOT applied to the census line
+# itself, which carries no paths at all — that machine-independence is pinned by
+# return-convention.md:270.
+#
+# SIEGE-R2BA-4 — the class was `[\\\x00-\x1f\x7f]`, which is the class for a `grep`
+# consumer and NOT the class for the consumers this channel actually has:
+# quality-gate/SKILL.md § "Coverage-line capture (#486)" (under How It Works step 6)
+# records "the `TIER2-COVERAGE:` line verbatim" into a durable
+# file read by an LLM, and every Python consumer splits with str.splitlines(). THAT
+# splits on more separators than \n/\r — \x0b \x0c \x1c \x1d \x1e \x85 U+2028 U+2029 —
+# and the last three were OUTSIDE the class, so a directory tree whose components spell a
+# census line and which is bracketed by U+2028 (the `/` in `artifacts 9/9` supplied by
+# real path separators) put a byte-identical forged census line on the channel AHEAD of
+# the real one, reachable with one `mkdir` plus a cited symlink to a non-UTF-8 file. The
+# class is now every str.splitlines() separator plus the whole C1 range (\x80-\x9f, which
+# contains \x85 and whose neighbours are terminal control introducers in their own right).
+#
+# C1-R1-S2 \u2014 escaping the separators is line-integrity only, and line integrity is NOT
+# the property the DOCUMENTED consumer keys on. The consumer this channel is specified
+# against is `grep -m1 'TIER2-COVERAGE:'` (the comment above says so in those words), and
+# `grep` matches a SUBSTRING, not a line: a forged census sitting INSIDE an earlier
+# bullet is taken as the first match while every separator in the path is faithfully
+# escaped. Path components may hold spaces (a receipt-supplied NAME may not \u2014 it is
+# whitespace-split \u2014 but a RESOLVED path reached through a cited symlink may) and the
+# `/` of `artifacts 1/1` is supplied by real path separators, so one `mkdir` plus a cited
+# symlink put a byte-identical forged census AHEAD of the real one at exit 0.
+# Neutralising the TOKEN (rather than escaping the space, which would change how every
+# ordinary path with a space in it renders) makes the forged text unreachable by
+# substring while leaving every path that does not spell the census marker byte-identical.
+# The replacement is in the SAME escape vocabulary the renderer already uses, so a reader
+# still sees what the path said.
+_CENSUS_TOKEN = "TIER2-COVERAGE:"
+_CENSUS_TOKEN_NEUTERED = "TIER2\\x2dCOVERAGE:"
+_PATH_ESCAPES = {"\\": r"\\", "\n": r"\n", "\r": r"\r", "\t": r"\t"}
+_PATH_UNSAFE_RE = re.compile("[\\\\\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def _show_path(p) -> str:
+    """Render `p` for the stderr channel with line-breaking and non-printable characters
+    escaped. See _PATH_ESCAPES above for why.
+
+    SIEGE-R2BA-4 — `p` is a resolved PATH or a receipt-supplied NAME. The name half was
+    left out at 5a215f7 on the reasoning that a name is whitespace-split out of the
+    receipt and so cannot break a line. That reasoning is sound FOR LINE-BREAKING —
+    str.split()'s whitespace class covers every str.splitlines() separator — and it is
+    the wrong bound for the threat: a name can still carry a NUL (`UNVERIFIABLE:
+    f\\x00.txt (no file under root)` put a raw NUL on the channel) and an ANSI escape
+    sequence (`\\x1b[…` renders as terminal control in the durable file a human reads).
+    Applied to interpolated NAMES, i.e. bare artifact/witness names. Deliberately NOT
+    applied to whole `args`/payload/predicate strings (`{entry['args']}`,
+    `{args_str}`, a `pattern=` source): a backslash is ORDINARY there, so doubling it
+    would change the rendering of in-spec receipts, which is the one thing this renderer
+    promises not to do. Those are a distinct escaping problem, not this one.
+
+    Ordinals above U+00FF render `\\uXXXX`, not `\\xXX` — `"\\x%02x" % 0x2028` is `\\x2028`,
+    which reads as `\\x20` followed by `28` and would be a second forgery primitive.
+
+    C1-R1-S2 — the census TOKEN is neutered AFTER the escape pass (never before: escaping
+    the replacement's own backslash would undo it). See _CENSUS_TOKEN for why the
+    substring, and not only the line, is the thing that has to be unforgeable."""
+    return (_PATH_UNSAFE_RE.sub(_escape_unsafe, str(p))
+            .replace(_CENSUS_TOKEN, _CENSUS_TOKEN_NEUTERED))
+
+
+def _escape_unsafe(m) -> str:
+    ch = m.group(0)
+    if ch in _PATH_ESCAPES:
+        return _PATH_ESCAPES[ch]
+    o = ord(ch)
+    return "\\x%02x" % o if o < 0x100 else "\\u%04x" % o
+
+
+def _show_diag(text) -> str:
+    """C1-R2-S2 — neuter the census token on the DIAGNOSTIC channel (LintError bullets and
+    UNVERIFIABLE/REFUSED notes), which is the OTHER half of the substring contract
+    `TestTheCensusTokenCannotBeForgedBySubstring` asserts by name.
+
+    C1-R1-S2 closed the forgery inside a rendered PATH. `_show_path` is deliberately not
+    applied to whole `args`/payload/predicate strings (a backslash is ordinary there), and
+    several Tier-1 diagnostics interpolate receipt-authored text RAW — `f"{entry['verb']}
+    missing sha256: {entry['args']}"`, the DISPATCHED sibling, check_exec_range_bound,
+    check_span_bound. A TRACE line's `args` is unrestricted single-line receipt text, which
+    is all a substring consumer needs: a receipt rejected at Tier-1, having verified
+    NOTHING, handed `grep -m1 'TIER2-COVERAGE:'` a fully attacker-authored
+    `artifacts 9/9 witness 9/9` with all six sub-counts at zero, ahead of the real
+    `not-reached (tier1-reject)` line. The verdict was safe (exit 1 ⇒ structurally
+    BLOCKED); the RECORD was not, and quality-gate/SKILL.md captures this line verbatim
+    into a durable per-dispatch file that #486's own headline figure is measured from.
+
+    Applied at the WRITE SITES rather than to 40 f-strings: this covers every current and
+    future raw interpolation into a bullet or a note at one place. It cannot change the
+    rendering of any in-spec run — no legitimate diagnostic contains the census token, and
+    a token that arrived via `_show_path` is already neutered, so this is a no-op on it.
+    Deliberately NOT applied to the census line itself, nor to the usage banner."""
+    return str(text).replace(_CENSUS_TOKEN, _CENSUS_TOKEN_NEUTERED)
 
 
 def is_path_shaped(name: str) -> bool:
@@ -1072,47 +1641,215 @@ def is_path_shaped(name: str) -> bool:
     return ("/" in name) or pathlib.Path(name).is_absolute()
 
 
-def tier2_artifacts(artifacts, trace, root, strict, cov=None):
+def _unresolved_disposition(name, strict, cov, witness_leg=False, refused=None):
+    """#486 fixer / F4 — the ONE disposition for a cited name that `resolve_base`
+    returned None for. Returns the note to append; raises LintError on the --strict
+    path-shaped FAIL.
+
+    resolve_base deliberately returns `Path | None` and hands the disposition to its two
+    consumers "because `notes` is theirs to build" — and owning it twice is exactly what
+    produced the divergence this helper closes: tier2_artifacts had the D8.3 arm ruling a
+    bare 12-hex receipt-hash prefix "not a file", tier2_witness had none, so ONE name in
+    ONE run was billed `not-applicable (receipt-hash-prefix)` by the artifacts leg and
+    `not-reachable (unresolvable-basename)` by the witness leg, with two contradictory
+    stderr notes. It is reachable in practice: a RANGELESS grep payload carries no
+    ARTIFACTS-membership rule, so the witness leg's art_name comes from the cited TRACE
+    entry, and a `READ <12-hex>` of a superseded receipt is the SUPERSEDES justification
+    form the convention describes. It matters because `not-reachable` is the bucket an
+    operator reads as "a root is mis-pointed" and the counter #488's proposed --strict
+    floor consumes — inflated by a name the linter itself has ruled is not a file.
+
+    D8.3's ORDERING RULING is preserved by the call sites, not by this helper: both call
+    it only AFTER resolve_base returned None, never as a pre-resolution shortcut (a
+    pre-resolution `continue` would skip the sha256 recomputation for a 12-hex entry that
+    DOES resolve, turning a shipped hard FAIL on mismatch into exit 0 plus an advisory
+    note saying the opposite of the truth).
+
+    Applicability bookkeeping lives HERE so the two legs cannot drift again: a 12-hex
+    prefix is kept OUT of the applicable set on BOTH legs (the artifacts leg never
+    increments art_applicable for it; the witness leg clears the wit_applicable it
+    optimistically set before resolution), and every other unresolved name IS applicable
+    on both. The unreached/not-reachable split is D8.3's SYNTACTIC approximation — no new
+    disk surface; the split is ADVISORY and conservative, the SUM is exact, and any future
+    rule reading the two SEPARATELY breaks that invariance.
+    """
+    # SIEGE-R2BA-4 — the NAME is receipt-supplied and lands on the parsed channel, so it
+    # takes the same renderer a resolved path does. Only the RENDERING is escaped: every
+    # predicate below (the 12-hex test, is_path_shaped) still reads the raw name.
+    label = f"witness {_show_path(name)}" if witness_leg else _show_path(name)
+    if re.fullmatch(r"[0-9a-f]{12}", name):
+        if cov is not None:
+            if witness_leg:
+                cov.wit_applicable = 0
+            cov.bump("not-applicable", "receipt-hash-prefix")
+        # #486 / S6 — NOT SILENT. D8.3 pins the census BUCKET; it does not pin silence,
+        # and a declared entry that is neither verified nor mentioned anywhere on stderr
+        # is the fail-open shape, on a predicate the RECEIPT controls.
+        return f"NOT-APPLICABLE: {label} (12-hex receipt-hash prefix, not a file)"
+    if cov is not None:
+        if not witness_leg:
+            cov.art_applicable += 1
+        if is_path_shaped(name):
+            cov.bump("unreached")
+        else:
+            cov.bump("not-reachable", "unresolvable-basename")
+    if strict and is_path_shaped(name):
+        if cov is not None:
+            cov.partial = True     # remaining entries + the other leg uncounted
+        # The two messages differ verbatim ("path-shaped artifact …" vs "witness artifact
+        # …") because they already did, and message fidelity is load-bearing for the
+        # --eval byte-diff.
+        noun = "witness artifact" if witness_leg else "path-shaped artifact"
+        raise LintError(
+            f"Tier-2 --strict: {noun} {_show_path(name)} absent under all bases"
+            f"{_refused_clause(refused)}")
+    return f"UNVERIFIABLE: {label} (no file under root){_refused_clause(refused)}"
+
+
+def _refused_clause(refused):
+    """SIEGE-C1 — the suffix naming a probe base that was DROPPED rather than absent.
+
+    A world-writable git toplevel is refused as a probe base, so a repo-relative name
+    resolves nowhere and (path-shaped, under the mandated --strict) hard-FAILs. Without
+    this the operator is told the artifact is "absent under all bases" for a file that is
+    present and readable, with nothing on stderr mentioning permissions — so a checkout in
+    a 0777 directory (routine for WSL drvfs mounts, `chmod -R 777` devcontainers, and
+    umask-000 container clones) blocks every receipt citing such a name, with a false
+    diagnosis. Blocks, precisely: a PATH-SHAPED name hard-FAILs under --strict; a bare
+    basename stays UNVERIFIABLE at exit 0. The clause is appended on both dispositions,
+    since the operator needs the reason either way.
+
+    It reaches BOTH cited-name shapes because the refusal is recorded in `_allowed_bases`:
+    a relative name loses `repo / name` as a candidate, and an absolute name inside the
+    refused repo keeps its candidate but fails `_contained` against a union the repo is no
+    longer in. Recording from `_resolve_base_one`'s relative branch alone left the
+    absolute shape silent.
+
+    A SUFFIX, and empty when nothing was refused: the existing message prefixes are
+    byte-identical on every run that refuses no base, which is what keeps --eval's
+    byte-diff and the message-fidelity contract above intact.
+
+    The refusal itself is NOT relaxed and the exit code does NOT move. Degrading these to
+    UNVERIFIABLE instead would let anyone able to chmod a checkout's parent silently
+    disable path-shaped verification — strictly worse than a loud, diagnosable block.
+    What was wrong was the silence, not the refusal."""
+    if not refused:
+        return ""
+    homes = ", ".join(sorted(_show_path(d) for d in refused))
+    return (f" [refused as probe base: world-writable git toplevel {homes} — "
+            f"any local uid can plant a marker there; make it non-world-writable]")
+
+
+# SIEGE-R2BA-2 — the ceiling on how many bytes ONE Tier-2 leg will materialise from
+# receipt-NAMED files. Chosen deliberately, and the two halves of the choice are separate:
+#
+# WHY A CEILING AT ALL. Every read on this path is of a file whose name the receipt
+# supplies and whose contents live under a root the reviewed subagent owns, and the
+# ARTIFACTS leg runs OUTSIDE _witness_bound() — it has no timeout of any kind. A 4 GiB
+# SPARSE file (`truncate -s 4G`, zero bytes on disk, instant to create) drove
+# `Maximum resident set size` to 4,225,380 kB in 2.32 s through the old bare
+# `resolved.read_bytes()`; a 12 GiB one completed in 1.87 s, so even the WITNESS leg's
+# 5 s bound admits tens of GiB. Under `ulimit -v` the resulting MemoryError is NOT an
+# OSError, escaped the `except OSError` guard, and printed a Traceback AFTER the
+# TIER2-COVERAGE: line — the exact shape the F3 read guards exist to eliminate. The
+# declared `<size>` field is parsed and explicitly NOT validated, so it is no defence.
+# Denying the linter is a security outcome and not merely a robustness one: the skills'
+# only documented remedy for a linter that does not work is the in-context pseudocode
+# fallback, which performs ZERO disk verification.
+#
+# WHY 64 MiB. It must not false-reject a legitimate artifact — findings files, build
+# logs, diffs. Measured on this corpus: the largest artifact under
+# eval/ledger-return-protocol/ is 24 KB (_gen.py) and the largest file tracked anywhere
+# in this repo is 223 KB (scripts/test_rcpt_verify.py), so 64 MiB is ~290x the biggest
+# file this repo contains and ~2,800x the biggest thing the receipt corpus ever cites.
+# Reading and hashing 64 MiB costs ~0.2 s and 64 MiB of transient RSS, which is a bound
+# a linter can afford; 4 GiB is not. An over-cap artifact fails CLOSED with a classified
+# bullet (never a silent skip) — see tier2_artifacts.
+#
+# The budget is CUMULATIVE across the ARTIFACTS leg, not per entry: the number of
+# declared entries is receipt-controlled and unbounded, so a per-entry cap still admits
+# N x 64 MiB of unbounded-time reads on the leg that has no timeout. It is also what
+# bounds the SIEGE-R2BA-1 carry (`bodies`), whose peak is this same budget however many
+# entries the receipt declares.
+ARTIFACT_READ_CAP = 64 * 1024 * 1024
+
+
+def _strerror(e: BaseException) -> str:
+    """SIEGE-R2BA-2 — the human half of a failed read, for OSError AND its new
+    non-OSError sibling. `e.strerror or e` was fine while the caught set was OSError
+    alone; a bare `MemoryError()` has no `strerror` (AttributeError) and stringifies to
+    the EMPTY string, which would render the bullet as `unreadable ()` — a diagnostic
+    that names nothing on the one channel an orchestrator records verbatim."""
+    return getattr(e, "strerror", None) or str(e) or type(e).__name__
+
+
+def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
+    """SIEGE-R2BA-2 — read `path` whole, with a HARD ceiling, race-free.
+
+    Reads at most `budget`+1 bytes and raises when it got them all, so the ceiling holds
+    however the file GROWS between the check and the read. An `st_size` pre-test — the
+    obvious primitive — does not: the file lives in a directory the reviewed subagent
+    owns, so stat-then-read is a window it can drive, and this way there is no window at
+    all. `budget` is what REMAINS of ARTIFACT_READ_CAP, so the message names both.
+
+    OSError propagates unchanged: every caller already classifies it (and MemoryError
+    beside it), and their bullets differ verbatim."""
+    with path.open("rb") as fh:
+        raw = fh.read(budget + 1)
+    if len(raw) > budget:
+        raise LintError(
+            f"Tier-2: {label} exceeds the Tier-2 read budget "
+            f"({budget} B remaining of {ARTIFACT_READ_CAP} B; not read)")
+    return raw
+
+
+def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None):
     """Part 1. For each ARTIFACTS <name>: resolve_base; if found, recompute sha256
     and compare (mismatch -> FAIL). If absent: path-shaped + strict -> FAIL;
     else UNVERIFIABLE (non-fatal). Returns list of UNVERIFIABLE notes; raises LintError on FAIL.
 
     #486 / D8 — `cov` is an optional _Coverage collector. OPTIONAL WITH A DEFAULT is
     deliberate: the ~50 direct call sites pass positionally, so a required parameter
-    would change arity everywhere and falsify D8.2's "no existing caller moves"."""
+    would change arity everywhere and falsify D8.2's "no existing caller moves".
+
+    SIEGE-R2BA-1 — `bodies` is an optional out-parameter (a dict, same idiom and same
+    reason as `cov`/`found`/`probe`/`meter`). When passed, each entry whose sha256
+    MATCHED is recorded under BOTH keys — `{declared-name: raw}` AND
+    `{resolved-realpath: raw}` — and tier2_witness evaluates ITS predicate against that
+    buffer instead of re-resolving the name and re-reading the file. Two keys because
+    each covers a miss the other does not; see the write site. Only
+    matched entries are carried, because the whole point of the carry is that the
+    verified hash is a statement about the bytes the predicate ran against."""
     notes = []
+    # SIEGE-R2BA-2 — what is LEFT of ARTIFACT_READ_CAP for this leg. Cumulative, because
+    # the entry count is receipt-controlled; see the constant for why.
+    budget = ARTIFACT_READ_CAP
     for name, meta in artifacts.items():
         found = []
-        resolved = resolve_base(name, root, found)
-        if resolved is None and re.fullmatch(r"[0-9a-f]{12}", name):
-            # D8.3 — a bare 12-hex receipt-hash prefix (the SUPERSEDES-justification
-            # form, exempted from CLAIMS membership at :620). When nothing of that name
-            # exists under any probed root it is not a file and never will be; counting
-            # it UNREACHED would be false.
-            #
-            # RULING (round-2/S2) — the test is `re.fullmatch(...) AND unresolved`, and
-            # the branch is decided AFTER resolution, not before. A pre-resolution
-            # `continue` would skip the sha256 recomputation below for an entry that DOES
-            # resolve, turning a shipped hard FAIL on mismatch into exit 0 plus an
-            # advisory note that tells the reader the opposite of the truth — a silent
-            # narrowing of a shipped check, in the function whose last regression (#474)
-            # was a silent fail-open. Every census effect is IDENTICAL either way (same
-            # bucket, and art_applicable is not incremented either way), so the ordering
-            # buys the hash check back at zero cost to D8.3's purpose.
+        refused = []
+        resolved = resolve_base(name, root, found, refused)
+        if resolved is None:
+            # D8.3's arm, and the --strict/UNVERIFIABLE arms, now live in the shared
+            # _unresolved_disposition so the witness leg cannot classify the same name
+            # differently (F4). Decided AFTER resolution — that ordering ruling
+            # (round-2/S2) is the call site's to keep, and it is kept here.
             #
             # `resolved is None` implies `found == []` (resolve_base returns the first
             # hit, so a non-empty `found` always yields a `resolved`), which is why this
             # branch may sit above the `len(found) > 1` test without hiding an ambiguity:
             # a 12-hex name present under two roots is a real file in two homes and takes
             # the ambiguity branch exactly as any other name does.
-            if cov is not None:
-                cov.bump("not-applicable", "receipt-hash-prefix")
-            # #486 / S6 — NOT SILENT. `continue` skips the --strict path-shape branch AND
-            # the UNVERIFIABLE note, so without this line a declared ARTIFACTS entry
-            # would be neither verified nor mentioned anywhere on stderr — on a predicate
-            # the RECEIPT controls. D8.3 pins the census BUCKET; it does not pin silence.
-            notes.append(f"NOT-APPLICABLE: {name} (12-hex receipt-hash prefix, not a file)")
+            notes.append(_unresolved_disposition(name, strict, cov,
+                                                 refused=refused))
             continue
+        if refused:
+            # siege S-3(b) — `_refused_clause` was consumed ONLY by
+            # _unresolved_disposition, so a refusal that the FALLBACK then papered over
+            # was never printed at all: the operator saw a clean run and no mention that
+            # the probe set had been narrowed under them. The refusal is a property of
+            # the RUN, not of the failure, so it is reported whenever it happens.
+            notes.append(f"REFUSED: probe base dropped while resolving "
+                         f"{_show_path(name)}{_refused_clause(refused)}")
         if cov is not None:
             cov.art_applicable += 1
         if len(found) > 1:
@@ -1127,45 +1864,87 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None):
                 # Bumped BEFORE the --strict raise, so the item is recorded on exactly
                 # the run the raise truncates.
                 cov.bump("ambiguous")
-            homes = ", ".join(sorted(str(p) for p in found))
-            msg = f"artifact {name} is ambiguous across roots ({homes})"
+            # SIEGE-C2 — _show_path, not str(): `found` holds RESOLVED paths under roots
+            # the reviewed subagent owns, and an unescaped newline in one forges a second
+            # TIER2-COVERAGE: line on the channel callers parse.
+            homes = ", ".join(sorted(_show_path(p) for p in found))
+            # SIEGE-R2BA-4 — the NAME too, not only the homes.
+            msg = f"artifact {_show_path(name)} is ambiguous across roots ({homes})"
             if strict:
                 if cov is not None:
                     cov.partial = True     # remaining entries + witness leg uncounted
                 raise LintError(f"Tier-2 --strict: {msg}")   # BEFORE any read
             notes.append(f"AMBIGUOUS: {msg}")
-        if resolved is not None:
-            actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        try:
+            # SIEGE-R2BA-2 — bounded, so an attacker-named 4 GiB sparse file is refused
+            # instead of materialised. The raise is a LintError and lands on the arm
+            # below it, which sets `partial` exactly as the unreadable arm does.
+            raw = _read_capped(resolved, budget, f"ARTIFACTS {_show_path(name)}")
+        except LintError:
+            # Over-cap: bytes NOT read, hash NOT recomputed, remaining entries and the
+            # witness leg uncounted. Fails CLOSED — never a silent skip.
             if cov is not None:
-                # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash
-                # evaluated == VERIFIED, including the entry that then mismatches, so
-                # the increment sits between the recomputation and the comparison —
-                # never after it. The natural placement ("count it once we know it's
-                # good") renders `artifacts 0/N` on exactly the mismatch runs the
-                # census exists to explain.
-                cov.art_verified += 1
-            if actual != meta["hash"]:
-                if cov is not None:
-                    cov.partial = True     # remaining entries + witness leg uncounted
-                raise LintError(f"Tier-2: ARTIFACTS {name} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
-            # <size> is parsed-but-not-validated, matching lint.py
-        else:
+                cov.partial = True
+            raise
+        except (OSError, MemoryError) as e:
+            # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an OSError, so under
+            # `ulimit -v` it escaped this guard and printed a Traceback AFTER the census.
+            # `strerror` via getattr because only the OSError leg has one.
+            #
+            # #486 fixer / F3 — a name that RESOLVES but cannot be READ. #486's whole
+            # purpose is to make these names resolve, under a second, orchestrator-
+            # supplied findings root whose contents this process does not own, so a
+            # mode-000 / EISDIR / ENOENT-since-probe file is now ordinary. _verify_single
+            # catches only LintError and the module guard only _PathReadError, so the
+            # bare read_bytes() escaped as a traceback printed AFTER the
+            # TIER2-COVERAGE: line. A clean classified bullet instead; partial because
+            # the remaining entries and the witness leg go uncounted.
             if cov is not None:
-                # D8.3's SYNTACTIC approximation, no new disk surface: no "/" means the
-                # CLI cannot tell a mis-pointed root from a nested-repo basename, so it
-                # over-attributes to the harder-to-fix class. The split is ADVISORY and
-                # conservative; the SUM is exact, which is all Q5 and #488's criterion 4
-                # read. Any future rule reading the two SEPARATELY breaks that invariance
-                # and may not be added without revisiting D8.3.
-                if is_path_shaped(name):
-                    cov.bump("unreached")
-                else:
-                    cov.bump("not-reachable", "unresolvable-basename")
-            if strict and is_path_shaped(name):
-                if cov is not None:
-                    cov.partial = True     # remaining entries + witness leg uncounted
-                raise LintError(f"Tier-2 --strict: path-shaped artifact {name} absent under all bases")
-            notes.append(f"UNVERIFIABLE: {name} (no file under root)")
+                cov.partial = True
+            raise LintError(
+                f"Tier-2: ARTIFACTS {_show_path(name)} unreadable "
+                f"({_strerror(e)})")
+        budget -= len(raw)
+        actual = hashlib.sha256(raw).hexdigest()
+        if cov is not None:
+            # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash
+            # evaluated == VERIFIED, including the entry that then mismatches, so
+            # the increment sits between the recomputation and the comparison —
+            # never after it. The natural placement ("count it once we know it's
+            # good") renders `artifacts 0/N` on exactly the mismatch runs the
+            # census exists to explain.
+            cov.art_verified += 1
+        if actual != meta["hash"]:
+            if cov is not None:
+                cov.partial = True     # remaining entries + witness leg uncounted
+            raise LintError(f"Tier-2: ARTIFACTS {_show_path(name)} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
+        if bodies is not None:
+            # SIEGE-R2BA-1 — carried AFTER the comparison, so the buffer the witness leg
+            # evaluates is exactly the buffer this leg hashed AND matched.
+            #
+            # Carried under BOTH keys — the declared NAME and the RESOLVED realpath — and
+            # both are load-bearing in opposite directions. Keying on only one loses a
+            # case the other covers, which is why this is not a single-key choice:
+            #   * NAME alone (the original) missed whenever the two legs SPELLED the same
+            #     file differently. The witness leg's `art_name` for a rangeless grep
+            #     payload is the first token of the cited TRACE entry's args verbatim,
+            #     written independently of the ARTIFACTS line, so a `./f.md` in TRACE
+            #     against an `f.md` in ARTIFACTS silently reinstated the second
+            #     independent read this carry exists to remove — on a name that HAD been
+            #     hashed. Realpath closes `./`, `a/../f.md` and absolute-vs-relative.
+            #   * REALPATH alone missed whenever the same declared name RESOLVES
+            #     differently between the legs — precisely the mid-lint symlink swap this
+            #     carry was written against. Replacing the hashed regular file with a
+            #     symlink to a sanitised sibling moves the realpath, so a realpath-only
+            #     lookup misses and the predicate runs on the sanitised bytes: a receipt
+            #     the carry used to REJECT would be accepted. That is a fail-open, so
+            #     realpath is an ADDITION here, never a replacement.
+            # Two keys for one buffer, so a hit under either binds the predicate to the
+            # bytes this leg hashed AND matched. `name` is a str and `resolved` a Path, so
+            # the two key spaces cannot collide.
+            bodies[name] = raw
+            bodies[resolved] = raw
+        # <size> is parsed-but-not-validated, matching lint.py
     return notes
 
 
@@ -1231,21 +2010,24 @@ def witness_art_name(witness, cited, verdict):
 
     Scoped to the PASS leg — the leg that READS the body. The FAIL leg keeps
     derive_art_name's EXEC-only behaviour for both halves (the asymmetry documented in
-    verify_witness, deferred to the resolution issue).
+    verify_witness, deferred to the resolution issue — which is GH #501, NOT #486. C1-R3-F1
+    established that #486 closed with the asymmetry intact while three call sites, this one
+    included, still routed it to "the resolution issue"; naming the live issue is what stops
+    a fourth deferral to a closed destination).
 
     WIDENING, stated plainly: today ran=TRACE#N structurally determines which file is
     read; after this it is still Tier-1-checked to point at an EXEC/READ/WROTE, but no
     longer determines what is opened — the reviewer gains control of WHICH FILE, not
     merely which lines. D6's ARTIFACTS-membership rule buys back the DECLARATION half
     (the name must be one the receipt declares); the sha256 binding does not come back
-    until artifact resolution lands. Recorded on the resolution issue."""
+    until artifact resolution lands. Recorded on the resolution issue, GH #501."""
     if (verdict == "PASS" and witness.get("kind") == "grep"
             and witness.get("range_kind") is not None):
         return witness["art"], True
     return derive_art_name(cited, verdict), False
 
 
-def verify_witness(body_text, witness, verdict, cited) -> bool:
+def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
     """Pure expect-fail decision core — the ONE shared, deliberately-non-verbatim
     factor of lint.py's tier2_verify (verdict=PASS) and tier2_verify_fail (verdict=FAIL).
     Returns True if the witness is clean; RAISES LintError with the BYTE-IDENTICAL
@@ -1291,10 +2073,46 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     "coverage that cannot fail" shape — so the fixture corpus cannot drift into it.
     Pinned by test_23* in scripts/test_rcpt_verify.py.
 
+    SIEGE-C3 — `probe` is an optional out-parameter (a dict; optional-with-a-default for
+    the same reason `cov` is, so none of the ~50 existing call sites moves). When passed,
+    it records under "no_predicate" the reason NO predicate was evaluated against `body`
+    on this call — the census consumes it and must NOT bill such a call as a verification.
+    Write-only: nothing this function DECIDES depends on it, so no exit code moves.
+    The ONE shape that reaches here and consults zero disk bytes is an expect-fail from
+    which no body pattern derives — i.e. `_expect_fail_pattern(...) is None`. That is the
+    single test, and `kind` only selects which reason code names it:
+      * kind=lint — there is no `lint:` branch below AT ALL. return-convention.md's
+        `ran=` bullet says Tier-2 "re-applies the named rule"; it does not, and
+        `LINT_RULES` is used only for NAME validation in parse_witness. Implementing the
+        rules is a feature and is NOT done here; what is corrected is the census's false
+        assertion that a verification happened.
+        NOT a kind-wide exemption, deliberately: a lint witness carrying a /regex/ or
+        "literal" expect-fail falls through to the shared regex tail below and IS
+        evaluated against the disk body (and can raise from it) — the body is read and
+        discarded only when the expect-fail is an exit clause. Billing such a call
+        `no_predicate` made the census contradict its own run's stderr, and it is the
+        form the one lint witness in the committed corpus uses.
+      * an exit-clause expect-fail (`exit!=0` / `exit=<N>`) — the PASS-leg kind=exec
+        branch compares the RECEIPT's own expect-fail against the RECEIPT's own
+        `TRACE exit=`, and for any other kind `_expect_fail_pattern` returns None so
+        `if pattern and re.search(...)` short-circuits clean. Either way the bytes on
+        disk are never consulted. `_expect_fail_pattern(...) is None` is the exact test
+        — it is None for the exit forms and for nothing else Tier-1 admits — so the two
+        legs cannot drift from the derivation they actually use.
+
+    siege S-7 — `probe["evaluated"]` is the POSITIVE twin of `no_predicate`, and it is a
+    deliberately DIFFERENT question from `cov.wit_verified`. `wit_verified` asserts "bytes
+    off DISK + a predicate evaluated", which is false for a kind=exec exit-clause witness —
+    the shape return-convention.md's own worked example and every mandated fix-agent
+    receipt use — even though a comparison really did run. The SUPERSEDES witness-evidence
+    rule needs "did a predicate evaluate to a result AT ALL", so it consults this instead;
+    keying it on `wit_verified` would have made the convention's own example unsupersedable.
+    Write-only here, exactly like `no_predicate`: nothing this function decides reads it.
+
     DEFERRED (#474 §3): a witness carrying ran=SKIPPED: is Tier-1-legal on a PASS and
     Tier-2 never evaluates it, so a reviewer can still obtain a PASS whose witness was
     never tested. That is a designed Cairn-routed deferral, not a fall-through; rejecting
-    it is a receipt-shape contract change. Carried on the resolution issue."""
+    it is a receipt-shape contract change. Carried on the resolution issue, GH #501."""
     if not witness["ran"].startswith("TRACE#"):
         return True
     art_name, _ = witness_art_name(witness, cited, verdict)
@@ -1305,10 +2123,21 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     kind = witness["kind"]
     expect_fail = witness["expect_fail"]
     body = body_text
+    if probe is not None:      # SIEGE-C3 — see the docstring. Write-only.
+        # The DERIVATION is the discriminator; `kind` only picks the reason code. An
+        # `if kind == "lint" … elif <derivation>` shape (the original) short-circuits the
+        # derivation for EVERY lint witness, including one carrying a /regex/ or
+        # "literal" expect-fail — which falls through to the shared body predicate below
+        # and really does run against the disk bytes. That mis-billed the only lint
+        # witness in the committed corpus.
+        if _expect_fail_pattern(expect_fail, witness.get("pattern")) is None:
+            probe["no_predicate"] = ("lint-kind-unimplemented" if kind == "lint"
+                                     else "exit-clause-not-a-body-predicate")
     if verdict == "FAIL":
         # tier2_verify_fail (lint.py:377-390)
         exit_m = re.search(r"exit=(-?\d+)", cited["args"])
-        exit_success = exit_m and int(exit_m.group(1)) == 0
+        # SIEGE-R2BA-3 — receipt-authored exit code.
+        exit_success = exit_m and _receipt_int(exit_m.group(1), "TRACE exit=") == 0
         # #474 / S4: the FAIL site too — a behaviour change, not a no-op. Today
         # expect_fail == "match" ⇒ pattern is None ⇒ content_match always False, so a
         # grep + EXEC-cited + match FAIL receipt with exit=0 is rejected by "no evidence
@@ -1316,6 +2145,8 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
         # The new behaviour is the conformant one; blast radius measured zero.
         pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
         content_match = bool(pattern and re.search(pattern, body))
+        if probe is not None and (exit_m or pattern):
+            probe["evaluated"] = True      # siege S-7 — see the `evaluated` note above
         if exit_success and not content_match:
             raise LintError(
                 f"Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
@@ -1326,10 +2157,14 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
     if kind == "exec":
         em = re.match(r"exit(!?=)(-?\d+)", expect_fail)
         if em:
-            op, n = em.group(1), int(em.group(2))
+            # SIEGE-R2BA-3 — both the receipt's expect-fail operand and the cited
+            # entry's own exit= are receipt-authored integers.
+            op, n = em.group(1), _receipt_int(em.group(2), "WITNESS expect-fail exit")
             exit_m = re.search(r"exit=(-?\d+)", cited["args"])
             if exit_m:
-                actual = int(exit_m.group(1))
+                if probe is not None:
+                    probe["evaluated"] = True   # siege S-7 — a comparison really ran
+                actual = _receipt_int(exit_m.group(1), "TRACE exit=")
                 failed = (actual != 0) if op == "!=" else (actual == n)
                 if failed:
                     raise LintError(
@@ -1339,15 +2174,20 @@ def verify_witness(body_text, witness, verdict, cited) -> bool:
             return True
     # regex / literal expect-fail
     pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
+    if probe is not None and pattern:
+        probe["evaluated"] = True          # siege S-7 — see the `evaluated` note above
     if pattern and re.search(pattern, body):
         raise LintError(
-            f"Tier-2: WITNESS expect-fail regex /{pattern}/ matches body of {art_name} "
-            f"(witness would have fired → PASS rejected)"
+            # SIEGE-R2BA-4 — the NAME is escaped; the PATTERN deliberately is not (a
+            # backslash is ordinary in a regex source, so escaping it would change how
+            # in-spec receipts render — see _show_path).
+            f"Tier-2: WITNESS expect-fail regex /{pattern}/ matches body of "
+            f"{_show_path(art_name)} (witness would have fired → PASS rejected)"
         )
     return True
 
 
-def _read_cited_range(path: pathlib.Path, cited, witness=None):
+def _read_cited_range(path: pathlib.Path, cited, witness=None, meter=None, raw=None):
     """Read ONLY the cited #L<a>-L<b> (line) / #B<a>-B<b> (byte) range from disk.
     Deliberate (M2): lint.py's inline tier2_verify reads the WHOLE body, but the disk
     reader reads only the cited range (fixture-4(g)-guarded). READ/WROTE entries carry
@@ -1356,19 +2196,90 @@ def _read_cited_range(path: pathlib.Path, cited, witness=None):
     #474 / D4: `witness` is optional-with-default so the four existing two-argument call
     sites keep today's cited-only behaviour verbatim. It is passed ONLY when
     witness_art_name sourced the artifact from the payload (`witness if from_payload
-    else None`), which is what keeps artifact and range inseparable."""
+    else None`), which is what keeps artifact and range inseparable.
+
+    SIEGE-R2BA-2: `meter` is an optional out-parameter (a dict — the `found`/`cov`/`probe`
+    idiom, optional-with-a-default so none of the existing call sites moves). On the #B
+    branch it records `raw_bytes`, the length of the RAW slice actually read, which is
+    what tier2_witness's 4 KiB cap must measure. Before this, that caller re-derived the
+    number with its OWN `resolved.read_bytes()[a-1:b]` — a THIRD independent read of an
+    attacker-named file, materialising whole what the seek below never materialises.
+
+    SIEGE-R2BA-1: `raw` is the ARTIFACTS leg's already-hashed buffer for this same name,
+    or None. When it is present, `path` is used only for MESSAGES — every branch below
+    slices the CARRIED bytes, so the predicate runs against exactly what was hashed
+    rather than against whatever the name resolves to on a second, later read."""
     if witness is not None and witness.get("range_kind") is not None:
         kind, a, b = witness["range_kind"], witness["range_a"], witness["range_b"]
-        return _slice(path, kind, a, b)
+        return _slice(path, kind, a, b, meter, raw)
     r = parse_out_range(cited["args"])
     if not r:
-        return path.read_text()
-    return _slice(path, r.kind, r.start, r.end)
+        return _read_text_lossless(path, raw)
+    return _slice(path, r.kind, r.start, r.end, meter, raw)
 
 
-def _slice(path: pathlib.Path, kind, a, b):
+def _read_text_lossless(path: pathlib.Path, raw=None) -> str:
+    """#486 fixer / F3 — THE text reader for a cited artifact body, guarded.
+
+    Both text-decoding sites (this module's rangeless whole-file read and _slice's #L
+    branch) go through here, so the guard cannot be added to one call site and missed at
+    the other. One non-UTF-8 byte in a cited artifact — ordinary mojibake in a build log
+    or a findings file — raised UnicodeDecodeError straight through tier2_witness (whose
+    only handler is `except WitnessTimeout`) and out of the CLI as a traceback.
+
+    The decode stays LOSSLESS on purpose: `errors="replace"` here would silently break
+    the 4 KiB cap's byte-count equality, which explicitly depends on this read having no
+    `errors=` ("so there is NO U+FFFD inflation on this path"). The #B sibling keeps its
+    errors="replace" because its cap measures the RAW bytes, not the decoded string.
+
+    SIEGE-R2BA-2 — bounded. `Path.read_text()` is exactly `self.open(mode="r")` followed
+    by an UNBOUNDED `.read()`, so a 4 GiB cited artifact was materialised whole on this
+    leg too. `fh.read(n)` on the SAME handle keeps the decoding and the universal-newline
+    translation byte-identical for every file at or under the ceiling — which is the
+    property that matters, because the #L slice and the 4 KiB cap's byte count are both
+    computed from this string. Counted in DECODED CHARACTERS here and in bytes on the
+    ARTIFACTS leg: both are ceilings on materialised data, not an accounting identity.
+
+    SIEGE-R2BA-1 — when `raw` is the ARTIFACTS leg's carried buffer, it is decoded HERE
+    instead of the file being read again. `io.TextIOWrapper(io.BytesIO(raw))` and not
+    `raw.decode()`: `Path.open("r")` applies the locale encoding AND universal-newline
+    translation, so a plain decode would silently change the #L slice (and therefore the
+    4 KiB cap's byte count) for every CRLF artifact. The wrapper is the same object
+    `open()` returns, over bytes instead of a file descriptor. Already inside the
+    ceiling — the buffer was read through _read_capped — so no second cap test."""
+    try:
+        if raw is not None:
+            return io.TextIOWrapper(io.BytesIO(raw)).read()
+        with path.open("r") as fh:
+            text = fh.read(ARTIFACT_READ_CAP + 1)
+    except UnicodeDecodeError:
+        raise LintError(
+            # SIEGE-C2 — `path` is a RESOLVED path under a root the reviewed subagent
+            # owns, and this bullet is the one an attacker can reach with a cited
+            # symlink to a non-UTF-8 file: escaped, so it cannot forge a census line.
+            f"Tier-2: cited artifact {_show_path(path)} is not valid UTF-8 "
+            f"(the #L range reader decodes losslessly; range not read)")
+    except (OSError, MemoryError) as e:
+        # SIEGE-R2BA-2 — this reader had NO read guard at all: tier2_witness catches only
+        # LintError, so an unreadable/vanished cited artifact escaped the CLI as a
+        # Traceback printed after the census, the same shape F3 closed one leg over.
+        # Ordered AFTER UnicodeDecodeError, which is a ValueError and not caught here —
+        # the ordering is documentation, not disambiguation.
+        raise LintError(
+            f"Tier-2: cited artifact {_show_path(path)} unreadable ({_strerror(e)})")
+    if len(text) > ARTIFACT_READ_CAP:
+        raise LintError(
+            f"Tier-2: cited artifact {_show_path(path)} exceeds the Tier-2 read budget "
+            f"({ARTIFACT_READ_CAP} B; range not read)")
+    return text
+
+
+def _slice(path: pathlib.Path, kind, a, b, meter=None, raw=None):
     """The 1-based-inclusive range read shared by the cited-range and witness-payload
-    sourcings (#474/D4) — one reader, so the two cannot drift."""
+    sourcings (#474/D4) — one reader, so the two cannot drift.
+
+    SIEGE-R2BA-1: `raw`, when present, is the ARTIFACTS leg's already-hashed buffer and
+    is sliced INSTEAD of opening `path`."""
     # Ranges are 1-based; a<1 is malformed, clamp to 1 so `[a-1:b]` never slices from
     # the END (a=0 → [-1:b], an empty/wrong body that silently bypasses the witness).
     if a < 1:
@@ -1376,23 +2287,326 @@ def _slice(path: pathlib.Path, kind, a, b):
     # Both #L (line) and #B (byte) ranges are 1-based INCLUSIVE: #L1-L5 = 5 lines,
     # #B1-B5 = bytes 1..5 = 5 bytes (parallel symmetric forms per return-convention).
     if kind == "L":
-        lines = path.read_text().splitlines(keepends=True)
+        lines = _read_text_lossless(path, raw).splitlines(keepends=True)
         return "".join(lines[a - 1:b])  # 1-based inclusive
-    return path.read_bytes()[a - 1:b].decode("utf-8", errors="replace")  # 1-based inclusive
+    # SIEGE-R2BA-2 — SEEK, do not slurp. `path.read_bytes()[a-1:b]` materialised the
+    # WHOLE attacker-named file to hand back at most a few KiB of it; the seek reads
+    # exactly the range. Bytes returned are byte-identical to the old slice for every
+    # file (including a past-EOF start, which yields b"" either way).
+    #
+    # The read length is bounded a SECOND time, at WITNESS_SPAN_CAP + 1, so this reader
+    # is safe on its own terms rather than only because Tier-1 happens to have bounded
+    # `b - a` already (check_span_bound, both span sites). The +1 is what keeps the
+    # AUTHORITATIVE cap in tier2_witness able to see an over-budget range and reject it:
+    # it compares `> WITNESS_SPAN_CAP`, so it must be able to observe CAP+1.
+    if raw is not None:
+        # SIEGE-R2BA-1 — slice the carried, already-hashed buffer. Truncated at the same
+        # CAP+1 as the seek below so the two branches hand tier2_witness's authoritative
+        # cap the same number for the same range.
+        sliced = raw[a - 1:b][:WITNESS_SPAN_CAP + 1]
+    else:
+        with path.open("rb") as fh:
+            fh.seek(a - 1)
+            sliced = fh.read(max(0, min(b - a + 1, WITNESS_SPAN_CAP + 1)))
+    if meter is not None:
+        meter["raw_bytes"] = len(sliced)
+    return sliced.decode("utf-8", errors="replace")  # 1-based inclusive
 
 
-def tier2_witness(witness, trace, root, strict, verdict, cov=None):
+def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
+    """SIEGE-C3 — the ONE place `wit_verified` is set, so states (a) and (b) cannot
+    disagree about what "verified" means. Returns True when the claim was WITHHELD for
+    DEC-26's zero-bytes reason, which is the caller's signal to bucket the item (DEC-28);
+    False on every other path, including the `no_predicate` arm, which buckets its own.
+
+    `wit_verified = 1` asserts that a predicate ran against the bytes read from disk —
+    design :1188-1190's ARTIFACTS-leg analogue, "bytes off disk + predicate evaluated TO A
+    RESULT", which INCLUDES the run whose result is a FAIL. A call that reached a clean
+    return without evaluating anything (verify_witness's `probe` says which shape) is not
+    that: before this, `lint:<rule> expect-fail=exit!=0 ran=TRACE#1` over a body an
+    equivalent grep witness correctly rejects rendered `artifacts 1/1 witness 1/1 …`,
+    BYTE-IDENTICAL to a genuine verification.
+
+    The item leaves the applicable set and is billed `not-applicable` with a literal code
+    — the same idiom as D8.2 sub-decision 5's `verdict-not-pass-fail` (`witness 0/0` plus
+    a code), rather than `witness 0/1`, which would read as "a check that could have run
+    and did not" when the truth is that this linter implements no such check.
+
+    TELEMETRY ONLY, deliberately: the EXIT CODE for these receipts does not move. Making
+    an unimplemented `lint:` rule a hard FAIL is a new gate — it would flip committed
+    fixtures and the mandated red-team witness shapes — and is a separate decision.
+
+    DEC-26 — a cited range that delivered NO BYTES withholds the claim for the OTHER way a
+    call reaches here having consulted zero disk bytes: a predicate that exists and ran,
+    against nothing. A cited range PAST EOF resolves to no bytes, `re.search` over `""`
+    cannot match, and the run rendered `artifacts 1/1 witness 1/1 … wrong-name 1
+    (rangeless-grep-payload)`, exit 0 — while the byte-identical receipt citing an
+    IN-RANGE span of the same file fires the predicate and exits 1. Same file, same
+    predicate, opposite census. `_reject_empty_grep_body` does not cover it (that guard is
+    keyed on a RANGED payload, and its rangeless blind spot PRE-DATES this branch —
+    corrected D5, GH #495). Closing the guard would move the exit code; this moves only
+    the claim.
+
+    DEC-28 half 2, CORRECTED — C1-R2-S1. THE BUCKET KEYS ON THE RESOLUTION; THE RATIO
+    DOES NOT. `a2968a0` read the ruling as also moving the RATIO and made the guard
+    `ranged and body_text == ""`, so a RANGELESS citation over a genuinely 0-byte file was
+    billed `wit_verified = 1` — the argument being that the whole file WAS delivered and
+    the predicate examined exactly the bytes the citation named. That argument is about
+    CITATION FIDELITY. `wit_verified`'s contract, three paragraphs above, is "bytes off
+    disk + predicate evaluated TO A RESULT": zero bytes came off disk, `re.search(p, "")`
+    cannot match for ANY p, so the witness structurally could not fire and the census
+    asserted a verification that did not happen. Measured: the rangeless-payload receipt
+    over an EMPTY findings file and the same receipt over a 900-line one rendered a
+    BYTE-IDENTICAL census, and `6b234b5` — six commits earlier — read `witness 0/1` for
+    the first. That is `43e5a50`'s subject verbatim ("a witness that consults zero disk
+    bytes is no longer billed `witness 1/1`") and the #474 grudge class by name: a
+    predicate that could not fire, reported clean. So the guard is `body_text == ""`,
+    ranged or not — and this function is not GIVEN `ranged`, so the ratio cannot start
+    reading it again without the caller being changed too.
+
+    What DEC-28 half 2's argument does buy is kept, and kept where it belongs — in the
+    BUCKET rather than the ratio. `_bill_witness_billing` bumps `empty-range` with a
+    reason code: `past-eof` for a ranged citation (a range that addressed no bytes lies
+    beyond the file's content — a 0-byte file has no line 1 either) and `empty-file` for a
+    rangeless one. A genuinely-empty file is therefore no longer described as a citation
+    defect, while the census still says no verification happened. (`return-convention.md`'s
+    one-line gloss of `empty-range` reads "a range past EOF" and wants widening to "a
+    citation that delivered no bytes" — a chunk-2 edit, flagged not made.)
+
+    NOT keyed on the witness KIND, and that is still the whole point. Narrowing by SHAPE
+    (e.g. "only a rangeless grep payload") was tried and REVERTED: it silently restored
+    `witness 1/1` for a RANGED kind=exec citation past EOF — the shape the build pipeline's
+    own mandated witness uses — which is the exact fail-open DEC-26 closed. Zero delivered
+    bytes is a property of the READ, so kind=exec, kind=lint, a ranged grep and a rangeless
+    read are all withheld alike.
+
+    DEC-28 half 1 — WHERE A WITHHELD ITEM IS REPORTED. A withheld item stays in the
+    applicable denominator and renders `witness 0/1`; before DEC-28, for every shape except
+    the rangeless grep payload it landed in NONE of the disjoint sub-counts, because none
+    described "resolved, applicable, predicate ran against zero delivered bytes" — the
+    shape tier2_witness's docstring below declares forbidden. The maintainer ruling adds the
+    sixth sub-count `empty-range` for exactly that state, bumped by `_bill_witness_billing`
+    (not here) so it can be ordered behind the sub-counts an item may ALSO earn: `wrong-name`
+    for the rangeless grep payload, `ambiguous` for a cross-root name. This function returns
+    the withheld flag rather than bumping, which is what keeps the sub-counts disjoint.
+
+    The affected population GREW when verify_witness's probe stopped billing every
+    kind=lint witness `no_predicate`: a lint witness carrying a body regex over an empty
+    body used to land in `not-applicable` and now lands in `empty-range`. That is the
+    correct trade (the old billing asserted no predicate ran on runs where one did).
+
+    UNLIKE the `no_predicate` arm this one stays IN the applicable set, rendering
+    `witness 0/1`: a check DOES structurally exist here, so 0/1's reading — "a check that
+    could have run and did not" — is the true one, and design :1239-1240 already pins
+    `0/1` as the normal shape for a leg that determined applicability and did not verify.
+    The item keeps whatever disjoint sub-count its shape earns (`wrong-name` for the
+    rangeless payload above), which is where it is reported — and for THAT shape the
+    partition now holds on both exits, because `_bill_witness_billing` runs both bumps
+    together on the clean-return AND the raise path. Calling this function alone, or
+    bumping `wrong-name` after a `raise`, re-opens it. Every OTHER withheld shape earns
+    `empty-range` there, so the partition holds for all of them. `partial` is not set by
+    this decision: a withheld claim is not a truncated walk (the raise path's caller sets
+    it where it belongs).
+
+    `== ""` and not falsiness: `body_text is None` means "no body was supplied at all",
+    which verify_witness returns clean on as documented lint.py parity, and that
+    disposition is not this decision's to change (it is billed VERIFIED here, as before —
+    `None == ""` is False, so the withholding arm cannot swallow it). It is unreachable
+    from tier2_witness, whose reader always returns a str.
+    """
+    code = probe.get("no_predicate")
+    if code is None:
+        if body_text == "":
+            return True          # DEC-28 — withheld; _bill_witness_billing buckets it
+        cov.wit_verified = 1
+        return False
+    if ambiguous:
+        # C1-R1-S1 — THE SAME GUARD `empty-range` ALREADY HAS, carried to the sibling arm
+        # the author who wrote it did not reach. `ambiguous` is bumped at RESOLUTION time,
+        # before applicability is finally known; this arm then cleared `wit_applicable`
+        # and bumped `not-applicable`, so ONE item landed in two of the sub-counts
+        # `return-convention.md:270` ships as normative disjoint ("An item that already
+        # earns `ambiguous` or `wrong-name` is reported only there") — on a line whose
+        # `witness 0/0` says the item is not in the applicable set at all, while
+        # `ambiguous` is defined as a sub-count OF that denominator.
+        #
+        # The resolution is design :1178-1180's tie-break, the same one `wrong-name` and
+        # `empty-range` already take: when two descriptions fit, count the EARLIER and
+        # more recoverable fact. So the item stays applicable and renders
+        # `witness 0/1 … ambiguous 1` — `0/1` reads "a check that could have run and did
+        # not", which is true here, and the reason it did not is on its own stderr note.
+        # Under --strict the ambiguity raises before any of this, so this arm is live
+        # only on the non-strict diagnostic path — which is the path the handoff
+        # prescribes for READING the census.
+        return False
+    cov.wit_applicable = 0
+    cov.bump("not-applicable", code)
+    return False
+
+
+def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguous,
+                          derived_name=False, bound=True):
+    """The witness leg's WHOLE census contribution for one evaluated item, so states (a)
+    and (b) — clean return and LintError raise — cannot bill differently.
+
+    The two bumps are ORDER-DEPENDENT and must stay together: `_bill_witness_evaluation`
+    decides applicability, and the `wrong-name` bump is legal only for an item that is
+    still IN the applicable set. Splitting them is what produced both halves of the
+    disjointness break this pair closes:
+      * The `wrong-name` bump used to run unguarded, so an item _bill_witness_evaluation
+        had just REMOVED from the applicable set (rangeless grep + an exit-clause
+        expect-fail, which derives no body predicate) landed in `not-applicable` AND
+        `wrong-name` — two of the sub-counts design :1175 declares disjoint, on a line
+        whose `witness 0/0` says the item is not in the applicable set at all. Design
+        :1212: a NOT-APPLICABLE item is reported ONLY in `not-applicable`.
+      * The `wrong-name` bump used to sit AFTER the try/except, so the `raise` in state
+        (b) skipped it. A rangeless grep witness over 0 bytes whose predicate RAISED was
+        billed with every sub-count at 0 — the shape tier2_witness's docstring declares
+        forbidden, on a run where the predicate provably ran. Recording it on the raise
+        path is the same rule the `ambiguous` bump already follows ("bumped BEFORE the
+        --strict raise, so the item is recorded on exactly the run the raise truncates").
+        C1-R2-S1: a rangeless citation delivering zero bytes is withheld like every other
+        zero-byte read, so that shape reads `witness 0/1` and earns `wrong-name` here.
+        The raise-path bump is what this bullet is about and it is unchanged.
+
+    DEC-28 half 1 — the `empty-range` bump is the THIRD member of the same ordered
+    sequence, and its position is what keeps :1175's sub-counts disjoint. A withheld item
+    can ALSO be a rangeless grep payload (a rangeless payload citing an EXEC `out=` range
+    past EOF is exactly DEC-26's own repro) or cross-root `ambiguous` (bumped at
+    resolution, before the read). Both of those already describe the item, and design
+    :1178-1180's rule — when two descriptions fit, count the earlier and more recoverable
+    fact — makes them win: `empty-range` is the bucket for a withheld item that earns NO
+    other sub-count, which before DEC-28 was every shape but the rangeless payload. Hence
+    `elif`, and hence the explicit `ambiguous` argument: `rangeless_grep` already folds in
+    `not notes_ambiguous`, so without a second signal an ambiguous past-EOF item would be
+    double-bumped.
+
+    C1-R2-S1 — `ranged` reaches THIS function and no longer reaches the ratio one function
+    down, because it is a fact about the CITATION while the ratio is a fact about the READ.
+    It survives here as the `empty-range` REASON CODE, which is where DEC-28 half 2's
+    argument belongs: `past-eof` when the citation named a range that addressed no bytes,
+    `empty-file` when the whole file was delivered and the whole file is 0 bytes. Two ways
+    to reach one counter, so — unlike `ambiguous` — the counter name is not the whole
+    reason and the code carries the rest.
+    """
+    withheld = _bill_witness_evaluation(cov, probe, body_text, ambiguous)
+    # `and not notes_ambiguous` is folded into `rangeless_grep` by the caller — design
+    # :1178-1180: under non-strict an item can satisfy both descriptions, and the ruling
+    # is that it counts `ambiguous` and not `wrong-name` (the ambiguity is the earlier and
+    # the recoverable fact). Under --strict the ambiguity raises before this point, so the
+    # guard is live only on the non-strict path — where, without it, :1175's disjointness
+    # fails on exactly one shape.
+    # D8.3 — the rangeless payload is NOT "no check exists": the predicate really ran,
+    # against the CITED TRACE entry rather than the payload token, i.e. against a file the
+    # witness never names. VERIFIED and counted wrong-name, so the one class where a
+    # predicate provably runs against an undeclared file is not filed under "not
+    # applicable" and erased from every counter a floor can act on. (Retired in commit 2
+    # if corrected D5 lands — S3.)
+    if rangeless_grep and cov.wit_applicable:
+        # siege S-2 — `derived_name` is the SAME class one kind over, and it was billed
+        # `witness 1/1` with all six sub-counts at 0. The `wrong-name` bump was gated on
+        # `kind == "grep"`, but `kind=lint` is the kind under NO membership rule at all:
+        # `ran=` verb binding constrains only exec/grep (lint_receipt), the D6
+        # ARTIFACTS-membership rule is scoped to a ranged grep payload, and
+        # `_reject_empty_grep_body` is grep-only. So swapping `grep:` for `lint:` moved a
+        # predicate onto an undeclared, never-hashed file AND produced a CLEANER census
+        # than the honest grep run it replaced. The counter's meaning — "the predicate
+        # ran against a file the witness never names" — was always kind-independent; only
+        # the gate was not.
+        cov.bump("wrong-name", "rangeless-grep-payload")
+        if not bound:
+            # siege S-5 — the counter used to fire on SHAPE alone: it read `1` identically
+            # whether the read was bound to the artifacts leg's hashed-AND-MATCHED buffer
+            # or not, so a floor built on it (#488's proposal) would fire on clean
+            # receipts and pass dirty ones. `unhashed-body` is the DISAGREEMENT half, and
+            # it is a code rather than a second increment because it describes the same
+            # item — splitting it into its own counter would re-open the disjointness
+            # this pair exists to keep. A note on stderr carries the same fact for a
+            # reader (tier2_witness), because a census with no consumer (#499) is not a
+            # channel on its own.
+            cov.note_code("wrong-name", "unhashed-body")
+    elif derived_name and cov.wit_applicable:
+        # siege S-2 — the same counter for the same fact, one kind over. The caller folds
+        # `not bound` into `derived_name`, so reaching here means the predicate really did
+        # run against a file no ARTIFACTS line hashed. Its own code, because the SHAPE
+        # differs (a lint rule name where a grep payload would be) and an operator reading
+        # the census has to be able to tell which one they are looking at.
+        cov.bump("wrong-name", "unbound-trace-name")
+    elif withheld and not ambiguous:
+        cov.bump("empty-range", "past-eof" if ranged else "empty-file")
+
+
+def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
+                  probe_out=None, notes_out=None):
     """Part 2. Resolve the cited TRACE artifact via resolve_base, read ONLY the cited
     #L/#B range from disk, then call the shared verify_witness. Absent witness file:
     path-shaped + --strict -> FAIL; else UNVERIFIABLE (non-fatal). Returns UNVERIFIABLE
     notes; raises LintError on FAIL (incl. verify_witness's byte-identical messages).
 
     #486 / D8 — `cov` is an optional _Coverage collector, optional with a default for
-    the same reason tier2_artifacts' is. Round-2/S1: the four counters are BOTH-LEGS
-    counters, so this leg wires all four and not only `wrong-name` — a `witness 0/1`
-    line with every sub-count at 0 puts an item in the applicable set that belongs to
-    none of design :1175's disjoint sub-counts, and this is the leg #486's headline
-    figure (0 of 14 witness resolutions) is about."""
+    the same reason tier2_artifacts' is. Round-2/S1: four of the counters (`unreached`,
+    `not-reachable`, `ambiguous`, `not-applicable`) are BOTH-LEGS counters, so this leg
+    wires all four and not only the two it alone can bump (`wrong-name`, and DEC-28's
+    `empty-range`) — a `witness 0/1` line with every sub-count at 0 puts an item in the
+    applicable set that belongs to none of design :1175's disjoint sub-counts, and this is
+    the leg #486's headline figure (0 of 14 witness resolutions) is about.
+
+    SIEGE-R2BA-1 — `bodies` is tier2_artifacts' carry: the buffers that leg HASHED AND
+    MATCHED, keyed under BOTH the declared NAME and the RESOLVED REALPATH. When the cited
+    artifact matches either key, the predicate below is evaluated against that buffer and
+    the file is NOT read again. Both keys are load-bearing and neither is redundant: the
+    two legs derive their names from different receipt lines (ARTIFACTS vs. the cited
+    TRACE entry's args), so a NAME-only key missed on `./f.md` vs `f.md`; and a
+    REALPATH-only key missed whenever the same declared name RESOLVES differently between
+    the legs — the mid-lint symlink swap this carry was written against, where missing is
+    a fail-open. See the write site.
+
+    Why that is a security fix and not a micro-optimisation: this leg used to do its OWN
+    resolve_base and its OWN read of the same name, and the #B cap check did a third, so
+    nothing tied the sha256 that was verified to the body the expect-fail predicate ran
+    against. Measured on this tree with a background process alternating a symlink
+    between the real findings file and a sanitised copy, 60 of 300 runs of the MANDATED
+    `--tier2 --strict --root <dispatch-root>` line returned exit 0 with
+    `TIER2-COVERAGE: artifacts 1/1 witness 1/1 …` — a census byte-identical to a genuine
+    verification — on a receipt whose real findings file fires the predicate. The
+    reviewed subagent owns the dispatch root and can leave such a process behind; an
+    inotify-triggered flipper raises the 20% to near-certainty.
+
+    WHAT IS NOT CLOSED, precisely:
+      * The RANGELESS grep path has no ARTIFACTS-membership rule (its name comes from
+        the cited READ/WROTE entry, which #412 deliberately does not gate), so such a
+        name need never have been declared at all. It is bound whenever it RESOLVES to a
+        file the artifacts leg hashed and matched (the realpath key above is what makes
+        that work regardless of how the two lines spell it), and unbound — keeping its
+        single independent read — when it resolves anywhere else. Every RANGED read is of
+        a declared name: Tier-1 requires both the payload artifact and the EXEC out=
+        artifact to be in ARTIFACTS.
+        So the carry covers every read of a name that RESOLVED AND MATCHED on the
+        artifacts leg — NOT "every read a sha256 was ever claimed about". A declared name
+        the artifacts leg could not resolve is recorded in no carry (the write sits after
+        the comparison, and the unresolved arm `continue`s before it), so if that name
+        starts resolving here it gets an independent, never-hashed read.
+      * RESOLUTION is still independent. This leg re-runs resolve_base, so the census
+        classification (resolved / unresolved / ambiguous) and the path rendered into
+        messages still come from a second stat walk and may disagree with the artifacts
+        leg's. That residual is FAIL-CLOSED IN THE STOPS-RESOLVING DIRECTION ONLY: a name
+        that stops resolving between the legs becomes UNVERIFIABLE (or, for a path-shaped
+        name under --strict, a FAIL), never a silent pass. The converse is NOT closed —
+        a name that resolves HERE but not on the artifacts leg is read independently and
+        still billed `witness 1/1`, visible only as that leg's `artifacts N-1/N` plus its
+        `unreached`/`not-reachable` sub-count. Refusing to read such a name would move the
+        exit code on a receipt-controlled predicate; that is a new gate and a separate
+        decision (the natural companion to #488's proposed --strict floor).
+        What can no longer diverge is the BYTES, for the names the carry holds.
+      * A caller that does not pass `bodies` — every direct in-process importer
+        (_gen.py, the measure_*_corpus.py scripts, the direct-call tests) — is unbound
+        exactly as before. _verify_single and --selftest wire it.
+
+    siege S-7 — `probe_out` is verify_witness's `probe` dict, surfaced to the caller (the
+    same optional out-param idiom as cov/bodies/found/meter, so no existing call site
+    moves). `_verify_single` reads `evaluated` from it to enforce the SUPERSEDES
+    witness-evidence rule's Tier-2 half — "Tier-2 then verifies the witness normally"
+    (return-convention.md § SUPERSEDES), which was the half nothing checked."""
     with _witness_bound():
         try:
             if not witness["ran"].startswith("TRACE#"):
@@ -1411,19 +2625,69 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None):
             cited = trace[idx - 1]
             art_name, from_payload = witness_art_name(witness, cited, verdict)
             if art_name is None:
+                # C1-R3-S1 (freeze-guard revision 2) — "the linter sourced nothing AND the
+                # receipt has no way to make it source something". Both halves are needed,
+                # and the second is why this is not simply `art_name is None`:
+                #
+                #   * On the FAIL leg derive_art_name is EXEC-only (see its docstring), so
+                #     a witness citing a READ or a WROTE can never yield a name however it
+                #     is written. The only "remedy" is to cite an EXEC, which the
+                #     research/judge dispatches this shape is the DEFAULT for cannot
+                #     produce — they have no shell. Genuinely unsatisfiable ⇒ exempt.
+                #   * On the PASS leg the same None means the receipt cited something that
+                #     yields no name (e.g. a DISPATCHED entry) while READ, WROTE and an
+                #     EXEC with out= all DO yield one. That is an ordinary in-receipt
+                #     remedy, so the consequent must stay armed. Revision 1 set the flag
+                #     unconditionally and silently exempted this case, which was gated
+                #     before the whole C1-R3-S1 change.
+                #
+                # ⚠ The `verdict` test here is NOT the verdict standing in for a shape —
+                # that is the mistake revision 1 was reverted for, and DEC-29 forbids it in
+                # a GUARD. This is an EXEMPTION, and narrowing an exemption can only ever
+                # produce a false BLOCK, never a fail-open. It reads derive_art_name's own
+                # documented PASS/FAIL asymmetry, which is the thing that decides whether a
+                # remedy exists. Do not widen it back to bare `art_name is None`.
+                if probe_out is not None and verdict == "FAIL":
+                    probe_out["unsourced"] = True
                 # D8.5 — D4's single "NOT-EVALUATED" string folds onto TWO codes, because
                 # this branch has two arms: the FAIL leg with no EXEC out= range, and a PASS
                 # leg whose cited entry yields no name at all. Mapping both onto
                 # fail-leg-no-range would mislabel the PASS-leg cases.
                 if cov is not None:
-                    cov.bump("not-applicable",
-                             "fail-leg-no-range" if verdict == "FAIL" else "no-art-name")
+                    if (verdict == "FAIL" and witness.get("kind") == "grep"
+                            and witness.get("range_kind") is not None):
+                        # C1-R3-F1 — Tier-1 MANDATED this shape: parse_witness forces
+                        # expect-fail=match ⇒ kind=grep ⇒ a ranged payload, and lint_receipt
+                        # forces that payload's artifact into
+                        # ARTIFACTS. So a witness check provably EXISTS; witness_art_name's
+                        # PASS-only sourcing is the linter declining to read it. Billing that
+                        # `not-applicable` asserts the item LEFT the applicable set
+                        # (return-convention.md:270) — false — and the code string
+                        # `fail-leg-no-range` asserts a property of the RECEIPT that is the
+                        # opposite of the truth. `witness 0/1 … unreached 1` is the honest
+                        # rendering, and it is the shape _bill_witness_evaluation's docstring
+                        # above already pins for "a check that could have run and did not".
+                        #
+                        # This moves the CENSUS only: no exit code changes, and the FAIL
+                        # leg still evaluates nothing. Sourcing the payload on both legs is a
+                        # convention change that needs a companion wit_verified withholding
+                        # (verify_witness's FAIL branch discards content_match unless
+                        # exit_success, and a WROTE-cited entry carries no exit=), which is
+                        # deferred to GH #501 — the destination of the three "resolution
+                        # issue" deferrals in verify_witness, witness_art_name and
+                        # _selftest_crosscheck. This arm retires when that lands.
+                        cov.wit_applicable = 1
+                        cov.bump("unreached", "fail-leg-payload-not-sourced")
+                    else:
+                        cov.bump("not-applicable",
+                                 "fail-leg-no-range" if verdict == "FAIL" else "no-art-name")
                 return []
             if cov is not None:
                 # S2 — applicability is a MEASURED fact from here on, so d becomes 1 only now.
                 cov.wit_applicable = 1
             found = []
-            resolved = resolve_base(art_name, root, found)
+            refused = []
+            resolved = resolve_base(art_name, root, found, refused)
             if len(found) > 1:
                 # #486 / D2 — same rule as the artifacts leg, its OWN wording. The two messages
                 # differ because :893 and :1127 already differ ("path-shaped artifact …" vs
@@ -1434,8 +2698,11 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None):
                     # leg's bump. Bumped BEFORE the --strict raise, so the item is recorded
                     # on exactly the run the raise truncates.
                     cov.bump("ambiguous")
-                homes = ", ".join(sorted(str(p) for p in found))
-                msg = f"witness artifact {art_name} is ambiguous across roots ({homes})"
+                # SIEGE-C2 — _show_path, as on the artifacts leg and for the same reason.
+                homes = ", ".join(sorted(_show_path(p) for p in found))
+                # SIEGE-R2BA-4 — the NAME too, as on the artifacts leg.
+                msg = (f"witness artifact {_show_path(art_name)} is ambiguous "
+                       f"across roots ({homes})")
                 if strict:
                     if cov is not None:
                         cov.partial = True
@@ -1444,21 +2711,69 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None):
             else:
                 notes_ambiguous = []
             if resolved is None:
+                # #486 fixer / F4 — the SHARED disposition, not this leg's own. This is
+                # the branch #486's headline figure is about (a witness artifact that
+                # resolves under NO root; before this, such a run rendered `witness 0/1`
+                # with every sub-count at 0) — and it is also where this leg used to
+                # miss the artifacts leg's D8.3 12-hex arm, so one name got two
+                # contradictory dispositions in one run. `notes_ambiguous` is always []
+                # on this path (len(found) > 1 implies a resolved first hit); it is kept
+                # in the expression for parity with the reached path.
+                early = notes_ambiguous + [
+                    _unresolved_disposition(art_name, strict, cov, witness_leg=True,
+                                            refused=refused)]
+                # C1-R3-S2 — mirrored here too, so `notes_out` is a COMPLETE record of
+                # this leg's notes on every exit. _verify_single reads only the
+                # out-param, so a site that returns without mirroring would go silent.
+                if notes_out is not None:
+                    notes_out.extend(early)
+                return early
+            # siege S-3(b) — reported whenever a probe base was dropped, not only when the
+            # drop made the name unresolvable. Same reason as the artifacts leg's: a
+            # refusal the fallback papers over was invisible on every channel. Its OWN
+            # list, never appended to `notes_ambiguous`: that list is also read as the
+            # BOOLEAN `ambiguous` by the billing below, so growing it would mis-bill.
+            notes_refused = [
+                f"REFUSED: probe base dropped while resolving witness "
+                f"{_show_path(art_name)}{_refused_clause(refused)}"] if refused else []
+            # C1-R3-S2 (freeze-guard revision) — mirrored into `notes_out` AT THE MOMENT
+            # IT IS PRODUCED, because the only place the lists below are returned is the
+            # clean path: every `raise` between here and that return drops them inside
+            # this frame, so _verify_single's handler drain never saw them. That is
+            # precisely the failing run siege S-3(b) says the refusal must survive ("a
+            # property of the RUN, not of the failure"), and REFUSED has no census
+            # counter, so stderr is its only channel.
+            if notes_out is not None:
+                notes_out.extend(notes_ambiguous)
+                notes_out.extend(notes_refused)
+            meter = {}     # SIEGE-R2BA-2 — filled on the #B branch, read by the cap below
+            # SIEGE-R2BA-1 — the artifacts leg's hashed-AND-matched buffer for THIS FILE,
+            # or None when there is none (no carry supplied; the name never resolved on
+            # that leg; or a rangeless grep name that is not an ARTIFACTS entry at all).
+            # NAME first, then realpath — the order matters. The name key is authoritative
+            # for identity across a mid-lint resolution change (a symlink swap moves the
+            # realpath but not the declared name), and the realpath key catches the two
+            # legs spelling the same file differently. Consulting both is what makes the
+            # carry hit in either failure mode; see the write site for why neither key
+            # alone is sufficient.
+            carried = None
+            if bodies:
+                carried = bodies.get(art_name)
+                if carried is None:
+                    carried = bodies.get(resolved)
+            try:
+                body_text = _read_cited_range(resolved, cited,
+                                              witness if from_payload else None, meter,
+                                              carried)
+            except LintError:
+                # #486 fixer / F3 — state (c)'s sibling: the body was never decoded, so
+                # the predicate provably never ran and this leg did not finish. Without
+                # this arm a guarded read failure renders `witness 0/1` with every
+                # sub-count at 0 and no `partial` — byte-for-byte the shape this
+                # function's own docstring above declares forbidden.
                 if cov is not None:
-                    # D8.3's SYNTACTIC split, identical to the ARTIFACTS leg's. This is the
-                    # branch #486's headline figure is about: a witness artifact that
-                    # resolves under NO root. Before this, such a run rendered `witness 0/1`
-                    # with all four sub-counts at 0.
-                    if is_path_shaped(art_name):
-                        cov.bump("unreached")
-                    else:
-                        cov.bump("not-reachable", "unresolvable-basename")
-                if strict and is_path_shaped(art_name):
-                    if cov is not None:
-                        cov.partial = True
-                    raise LintError(f"Tier-2 --strict: witness artifact {art_name} absent under all bases")
-                return notes_ambiguous + [f"UNVERIFIABLE: witness {art_name} (no file under root)"]
-            body_text = _read_cited_range(resolved, cited, witness if from_payload else None)
+                    cov.partial = True
+                raise
             # #397 defect 4 — authoritative 4 KiB cap on the cited range (Tier-1's 80-bytes/line
             # estimate under-counts long lines). The cap measures EXACTLY what the reader read:
             #  - #L: len(body_text.encode("utf-8")) — the reader's own slice. read_text() decodes
@@ -1488,7 +2803,14 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None):
                 if kind == "L":
                     span = len(body_text.encode("utf-8"))
                 else:
-                    span = len(resolved.read_bytes()[a - 1:b])
+                    # SIEGE-R2BA-2 — the METER, not a third read. `resolved.read_bytes()`
+                    # here re-materialised the whole attacker-named file to re-derive a
+                    # number the reader already knew, and it re-derived it from a fresh
+                    # read of a path that may no longer hold the bytes the slice came
+                    # from. `raw_bytes` is the length of the slice actually returned, so
+                    # the cap measures EXACTLY what the reader read — which is what this
+                    # block's own comment above has always claimed it does.
+                    span = meter["raw_bytes"]
                 if span > WITNESS_SPAN_CAP:
                     if cov is not None:
                         cov.partial = True   # bytes read, predicate never ran — leg unfinished
@@ -1508,8 +2830,59 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None):
                 if cov is not None:
                     cov.partial = True
                 raise
+            # SIEGE-C3 — filled by verify_witness, read below. siege S-7 — and handed
+            # back to the caller when it asked for it, so the SUPERSEDES rule can read
+            # `evaluated` without a second evaluation.
+            probe = probe_out if probe_out is not None else {}
+            # The shape whose item earns the `wrong-name` sub-count in
+            # _bill_witness_billing. Hoisted above the try because BOTH the except and the
+            # else arm need it. It does NOT scope DEC-26's zero-bytes withholding:
+            # narrowing that guard by witness SHAPE was tried and REVERTED, because it
+            # silently restores `witness 1/1` for a ranged kind=exec citation past EOF —
+            # see _bill_witness_evaluation's DEC-28 note before reaching for it again.
+            rangeless_grep = bool(witness.get("kind") == "grep"
+                                  and witness.get("range_kind") is None
+                                  and not notes_ambiguous)
+            # siege S-2 — the same "the predicate ran against a file the witness never
+            # names" shape for the kinds `rangeless_grep` does not cover. `cap is None`
+            # with `from_payload` false means the body came from derive_art_name's
+            # READ/WROTE branch, i.e. the cited TRACE entry's first token, which #412
+            # deliberately does not gate — no ARTIFACTS membership, no hash binding.
+            # kind=exec cannot reach it (Tier-1 forces its ran= onto an EXEC and every
+            # EXEC carries an out= range, so `cap` is never None), so in practice this is
+            # the `kind=lint` escape and only that.
+            #
+            # `and not bound` is what keeps this a DISAGREEMENT test rather than a shape
+            # test: when the body came from the ARTIFACTS leg's hashed-AND-MATCHED buffer
+            # the name IS a declared artifact and there is nothing wrong about it, however
+            # it was spelled. Only the never-hashed read earns the counter.
+            # siege S-5 — did the predicate run against the bytes the ARTIFACTS leg
+            # hashed AND matched, or against an independent read? This is the DISAGREEMENT
+            # the `wrong-name` counter was supposed to report and did not.
+            bound = carried is not None
+            derived_name = bool(witness.get("kind") != "grep" and not from_payload
+                                and cap is None and not notes_ambiguous and not bound)
+            notes_unbound = []
+            if (rangeless_grep or derived_name) and not bound:
+                notes_unbound = [
+                    f"UNVERIFIABLE: witness {_show_path(art_name)} (predicate evaluated "
+                    f"against an independent read — the name is not a hash-matched "
+                    f"ARTIFACTS entry)"]
+                # C1-R3-S2 — mirrored as produced; the predicate below raises on a
+                # matching expect-fail and this note would be dropped with the frame.
+                if notes_out is not None:
+                    notes_out.extend(notes_unbound)
+            # DEC-28 half 2 — the BUCKET's reason code, keyed on the RESOLUTION. `cap` is
+            # the range the read was actually made against (payload range when
+            # from_payload, else the cited entry's out= range; None ⇒ the whole file was
+            # delivered), so this is "the citation named a range" and nothing about kind.
+            # C1-R2-S1 — it reaches _bill_witness_billing and stops there: the RATIO is a
+            # fact about the bytes that reached the predicate, and `a2968a0` billing a
+            # rangeless 0-byte read `witness 1/1` on the strength of this flag re-opened
+            # the zero-disk-bytes shape `43e5a50` closed.
+            ranged = cap is not None
             try:
-                verify_witness(body_text, witness, verdict, cited)  # raises on FAIL
+                verify_witness(body_text, witness, verdict, cited, probe)  # raises on FAIL
             except WitnessTimeout:
                 # State (d). WitnessTimeout IS a LintError subclass, so this arm MUST precede
                 # the broader one below — deleting it as a "pointless re-raise" would silently
@@ -1521,32 +2894,20 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None):
             except LintError:
                 # State (b). Design :1188-1190's ARTIFACTS-leg analogue: bytes off disk +
                 # predicate evaluated TO A RESULT == VERIFIED, including the run where that
-                # result is a FAIL.
+                # result is a FAIL. SIEGE-C3 — routed through _bill_witness_evaluation,
+                # which withholds the claim when `probe` says no predicate ran at all.
                 if cov is not None:
-                    cov.wit_verified = 1
+                    _bill_witness_billing(cov, probe, body_text, rangeless_grep,
+                                          ranged, bool(notes_ambiguous),
+                                          derived_name, bound)
                 raise
             else:
                 # State (a). Same definition, clean result.
                 if cov is not None:
-                    cov.wit_verified = 1
-            if cov is not None:
-                if (witness.get("kind") == "grep" and witness.get("range_kind") is None
-                        and not notes_ambiguous):
-                    # `and not notes_ambiguous` — design :1178-1180: under non-strict an item
-                    # can satisfy both descriptions, and the ruling is that it counts
-                    # `ambiguous` and not `wrong-name` (the ambiguity is the earlier and the
-                    # recoverable fact). Under --strict the ambiguity raises before this line,
-                    # so the guard is live only on the non-strict path — where, without it,
-                    # :1175's disjointness fails on exactly one shape.
-                    # D8.3 — the rangeless payload is NOT "no check exists": the predicate
-                    # really ran, against the CITED TRACE entry rather than the payload token,
-                    # i.e. against a file the witness never names. VERIFIED and counted
-                    # wrong-name, so the one class where a predicate provably runs against an
-                    # undeclared file is not filed under "not applicable" and erased from
-                    # every counter a floor can act on. (Retired in commit 2 if corrected D5
-                    # lands — S3.)
-                    cov.bump("wrong-name", "rangeless-grep-payload")
-            return notes_ambiguous
+                    _bill_witness_billing(cov, probe, body_text, rangeless_grep,
+                                          ranged, bool(notes_ambiguous),
+                                          derived_name, bound)
+            return notes_ambiguous + notes_refused + notes_unbound
         except WitnessTimeout:
             if cov is not None:
                 cov.partial = True
@@ -1573,7 +2934,7 @@ def _reject_empty_grep_body(body_text, witness, verdict, art_name):
     if (verdict == "PASS" and witness.get("kind") == "grep"
             and witness.get("range_kind") is not None and body_text == ""):
         raise LintError(
-            f"Tier-2: WITNESS grep body empty for {art_name} "
+            f"Tier-2: WITNESS grep body empty for {_show_path(art_name)} "
             f"(declared range resolves to no bytes — witness could not fire)")
 
 
@@ -1683,8 +3044,17 @@ def tier2_ledger(trace, ledger_path):
         return []
     try:
         ledger = [e for e in _read_jsonl(ledger_path) if isinstance(e, dict)]
-    except (OSError, ValueError) as ex:
-        raise LintError(f"Tier-2 --ledger: cannot parse receipt-ledger {ledger_path}: {ex}")
+    except (OSError, ValueError, MemoryError, RecursionError) as ex:
+        # siege S-1 — MemoryError and RecursionError are NEITHER OSError nor ValueError,
+        # so a sparse ledger under `ulimit -v` and a deeply-nested JSON row each escaped
+        # this guard and printed a Traceback AFTER the census, on the parsed channel.
+        # `_read_jsonl`'s own ceiling makes the first unreachable from a plausible plant
+        # and the recursion limit still owns the second; both are caught here regardless,
+        # because "the ledger could not be read" is one disposition however it failed.
+        # SIEGE-C2 — argv-supplied rather than subagent-supplied, but it lands on the
+        # same parsed channel, so it takes the same renderer.
+        raise LintError(
+            f"Tier-2 --ledger: cannot parse receipt-ledger {_show_path(ledger_path)}: {ex}")
     for t in dispatched:
         token = t["args"].split()[0] if t["args"].split() else ""
         vm = re.search(r"verdict=(\S+)", t["args"])
@@ -1703,7 +3073,53 @@ def tier2_ledger(trace, ledger_path):
 
 
 def _read_jsonl(path):
-    return [json.loads(l) for l in pathlib.Path(path).read_text().splitlines() if l.strip()]
+    """siege S-1 — the ONE Tier-2 read the SIEGE-R2BA-2 bounding sweep missed.
+
+    This was a bare `pathlib.Path(path).read_text()`: no regular-file gate, no ceiling,
+    and outside `_witness_bound()`. `quality-gate/SKILL.md:30` mandates
+    `--ledger <dispatch-root>/receipt-ledger.jsonl`, i.e. a path INSIDE the directory the
+    reviewed subagent owns, and the receipt itself decides whether the read happens at all
+    (a `DISPATCHED` TRACE line is the only trigger). Measured on the mandated command
+    line: `mkfifo` at that path hung to EXIT=124 with ZERO bytes on stdout AND stderr —
+    no bullet, no `TIER2-COVERAGE:` line, nothing an orchestrator can classify — and the
+    only documented remedy for a linter that does not work is the in-context pseudocode
+    fallback, which performs zero disk verification. A 4 GiB sparse ledger drove 8.4 GB
+    RSS on the same path.
+
+    `is_file()` FIRST and it is what closes the hang: it stats, it does not open, so a
+    FIFO/device/directory is classified without blocking. Then `_read_capped` — the same
+    race-free ceiling every other reader on this leg already took, and for the same
+    reason (the file lives where the reviewed party can grow it between the check and the
+    read). A LintError, so `tier2_ledger`'s caller renders one bullet plus the census and
+    exits 1.
+
+    The corpus callers in `run_selftest` read committed, in-repo files well under the
+    ceiling, so they are unaffected — but they are covered by the same guard rather than
+    routed around it, because a second reader is how this one got missed."""
+    p = pathlib.Path(path)
+    if not p.is_file():
+        raise LintError(
+            f"Tier-2: {_show_path(p)} is not a regular file (not read)")
+    raw = _read_capped(p, ARTIFACT_READ_CAP, f"JSONL {_show_path(p)}")
+    try:
+        text = raw.decode()
+    except UnicodeDecodeError as e:
+        raise LintError(f"Tier-2: {_show_path(p)} is not valid UTF-8 ({e})")
+    return [json.loads(l) for l in text.splitlines() if l.strip()]
+
+
+# SIEGE-C12 — the six multi-root rows of tier2-fixtures/manifest.jsonl by id. They are
+# the corpus-level coverage of criteria 5 and 6 (cross-root ambiguity, and de-duplication
+# being a no-op), i.e. the two safety properties multi-root introduces; a prune that left
+# the 14 legacy rows in place would otherwise still print `selftest OK`.
+_MULTI_ROOT_FIXTURE_IDS = frozenset({
+    "two-root-second-root-resolves",
+    "two-root-declaration-order-first-hit",
+    "two-root-ambiguous-strict-fail",
+    "two-root-ambiguous-identical-bytes-strict-fail",
+    "two-root-dedup-noop",
+    "two-root-tampered-hash-second-root",
+})
 
 
 def run_selftest() -> int:
@@ -1759,8 +3175,26 @@ def run_selftest() -> int:
                                 f"expected LINT-FAIL, got {disp} ({info})")
 
     # (iii) Tier-2 disk fixtures — each fixture's expect realized against REAL files.
+    #       SIEGE-C12: this was the ONE corpus leg with no presence guard. Truncating
+    #       manifest.jsonl to zero bytes deleted EVERY Tier-2 disk fixture — including
+    #       all six multi-root rows, which are the corpus-level coverage of the two
+    #       safety properties multi-root introduces — and --selftest still printed
+    #       `selftest OK` and returned 0. Legs (i), (ii) and (vi) all append a hard
+    #       problem when their corpus is missing; this one now does too, plus an
+    #       id-presence assertion so a silent PRUNE of exactly those rows shows up
+    #       (the `LEGACY_EXPECT` idiom in scripts/test_rcpt_verify.py, kept
+    #       proportionate: only the subset a bare presence guard cannot cover, never
+    #       the whole corpus re-stated here).
     fx_dir = CORPUS_DIR / "tier2-fixtures"
-    for fx in _read_jsonl(fx_dir / "manifest.jsonl"):
+    fx_manifest = fx_dir / "manifest.jsonl"
+    fx_rows = _read_jsonl(fx_manifest) if fx_manifest.is_file() else []
+    if not fx_rows:
+        problems.append(f"tier2 fixture manifest missing or empty at {fx_manifest}")
+    pruned = _MULTI_ROOT_FIXTURE_IDS - {fx.get("id") for fx in fx_rows}
+    if pruned:
+        problems.append("tier2 fixture manifest is missing multi-root rows: "
+                        f"{sorted(pruned)}")
+    for fx in fx_rows:
         got = _selftest_run_fixture(fx, _fx_roots(fx_dir, fx["root"]))
         if got != fx["expect"]:
             problems.append(f"fixture {fx['id']} expected {fx['expect']}, got {got}")
@@ -1826,9 +3260,12 @@ def _selftest_run_fixture(fx, root) -> str:
         artifacts = parse_artifacts(sections["ARTIFACTS"])
         trace = parse_trace(sections["TRACE"])
         witness = parse_witness(sections["WITNESS"])
-        tier2_artifacts(artifacts, trace, root, fx["strict"])
+        # SIEGE-R2BA-1 — the fixture leg wires the carry too, so the committed corpus is
+        # exercised through the BOUND path the CLI takes, not a second unbound one.
+        bodies = {}
+        tier2_artifacts(artifacts, trace, root, fx["strict"], None, bodies)
         if verdict in {"PASS", "FAIL"}:
-            tier2_witness(witness, trace, root, fx["strict"], verdict)
+            tier2_witness(witness, trace, root, fx["strict"], verdict, None, bodies)
         return "pass"
     except WitnessTimeout:
         return "error"        # #486/Q8 — a timeout is NOT a passing expect:fail fixture
@@ -1895,8 +3332,8 @@ def _selftest_crosscheck(rec, bodies):
     # Widening the gate to the FAIL leg is a BEHAVIOUR change (the FAIL leg's body lookup
     # is EXEC-only, so `art` would come from derive_art_name and the check would mean
     # something different) — it needs a RED test and a row to catch, and has neither
-    # today. Carried on the #474 Tier-2 resolution issue with the FAIL-leg asymmetry it
-    # belongs to.
+    # today. Carried on GH #501 with the FAIL-leg asymmetry it belongs to (that asymmetry
+    # outlived #474 and #486; #501 is where it is now tracked).
     if witness["kind"] == "grep" and from_payload and art not in bodies:
         problems.append(f"crosscheck {did}: artifact_bodies does not supply {art}, the "
                         f"artifact this ranged grep witness verifies — the --eval leg "
@@ -1941,8 +3378,14 @@ def _selftest_crosscheck(rec, bodies):
     return problems
 
 
-def _usage_exit():
+def _usage_exit(argv=None, code=None):
+    """SIEGE-R2BA-5 — `argv`/`code` are optional so the two callers that CANNOT be a
+    `--tier2` run (an empty argv; `--eval` at the wrong arity) keep today's behaviour
+    verbatim. Every caller inside main's flag loop passes both: those are the exit-2
+    terminal states the mandated `--tier2` command line can actually land on."""
     sys.stderr.write(__doc__)
+    if code is not None:
+        _state_not_reached(code, argv)
     return 2
 
 
@@ -1950,11 +3393,62 @@ def _read_path_arg(path):
     """Read the top-level path argument, returning its text. Raises _PathReadError
     (clean one-line stderr + usage exit 2) on a missing/unreadable file — instead of
     leaking a FileNotFoundError/OSError traceback. Only guards the path read itself;
-    malformed JSON *content* inside a readable file is out of scope (left to json.loads)."""
+    malformed JSON *content* inside a readable file is out of scope (left to json.loads).
+
+    siege S-1 — the receipt path is the OTHER unguarded `read_text()`, and the mandated
+    invocation names a file under the dispatch root the reviewed subagent owns, so it is
+    the same FIFO/huge-file surface `_read_jsonl` was: `is_file()` (stat, never open) is
+    what stops the hang, and the ceiling is `ARTIFACT_READ_CAP`. Both failures map onto
+    the EXISTING `_PathReadError` disposition — one clean stderr line plus the
+    `not-reached (receipt-unreadable)` census and exit 2 — rather than a new terminal
+    state: "this path did not yield a receipt" is one outcome however it failed.
+
+    C1-R2-S4 — `encoding`/`errors` are NOT decoration. `p.open("r")` decodes with the
+    LOCALE codec and `UnicodeDecodeError` is a `ValueError`, not an `OSError`: it escaped
+    this guard, escaped `main`, and escaped the module guard (`except _PathReadError`),
+    so a `--tier2` run terminated with a raw traceback and NEITHER a bullet NOR a census —
+    the eighth terminal state, on a channel `SIEGE-R2BA-5` swept for exactly this ("every
+    exit-2 terminal state is a state in which verification did not happen", applied
+    "uniformly, through ONE formatter"). `siege S-1` added `UnicodeDecodeError` arms to
+    `_read_jsonl` and `_read_text_lossless` in the same commit series and did not reach the
+    reader that reads the RECEIPT. Reachability is not theoretical: under `LC_ALL=C`, which
+    is routine in CI containers and cron, *any* non-ASCII byte took that branch — an
+    em-dash or a `→`, both of which appear in the receipts this repo ships.
+
+    `errors="replace"` rather than a `UnicodeDecodeError` arm, deliberately: a receipt is
+    TEXT, and a mojibake byte should reach Tier-1 and earn a real grammar bullet, not be
+    reported as a failure to READ the path. Pinning `encoding="utf-8"` removes the locale
+    dependence at the same time. Note the asymmetry with `_read_text_lossless`, which must
+    stay lossless because its byte count feeds the 4 KiB witness cap; nothing here does."""
+    p = pathlib.Path(path)
     try:
-        return pathlib.Path(path).read_text()
+        if not p.is_file():
+            raise _PathReadError(path)
+        with p.open("r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read(ARTIFACT_READ_CAP + 1)
     except OSError:
         raise _PathReadError(path)
+    if len(text) > ARTIFACT_READ_CAP:
+        raise _PathReadError(path)
+    return text
+
+
+def _read_stdin_arg():
+    """C1-R2-S4, the sibling branch. `sys.stdin.read()` decodes with the locale codec too,
+    and `hooks/rcpt-verify-hook.sh:76` pipes a receipt block into it — so the same
+    non-UTF-8 (or merely non-ASCII-under-`LC_ALL=C`) byte produced the same traceback with
+    no bullet and no census. Same disposition as the path branch: replace the byte, let
+    Tier-1 speak.
+
+    Guarded rather than assumed: `reconfigure` exists only on `io.TextIOWrapper`, and
+    `sys.stdin` is a `StringIO` under the in-process tests and can be detached or already
+    partly consumed, all of which raise instead of failing to decode. A stream that cannot
+    be reconfigured is read exactly as it was before this fix."""
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
+    return sys.stdin.read()
 
 
 class _PathReadError(Exception):
@@ -1965,10 +3459,61 @@ class _PathReadError(Exception):
 
 # ── #486 / D8 — the coverage census ──────────────────────────────────────────
 # Counts and reason codes ONLY: no paths, no roots, no timings, so goldens stay
-# machine-independent. The line NEVER appears in _eval_text (:1231) — that path routes
+# machine-independent. The line NEVER appears in _eval_text (:2259) — that path routes
 # through _eval_tier2, which takes inline bodies and no root, so `unreached` has no
 # meaning there — and never alters run_selftest's fixture comparison.
-_COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "not-applicable")
+# DEC-28 — `empty-range` is the SIXTH sub-count, and it is witness-leg-only (the artifacts
+# leg reads no cited range and evaluates no predicate). It sits before `not-applicable`
+# because every counter ahead of it describes an item that is still IN the applicable set,
+# and `not-applicable` — the one bucket for items that left it — reads last.
+_COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "empty-range",
+                 "not-applicable")
+
+# SIEGE-C4 — the census state for a --tier2 exit that happens BEFORE _verify_single is
+# entered, where no _Coverage exists and the finally: documented to "survive every
+# LintError path" never runs. Same `not-reached (<code>)` idiom as tier1-reject, and for
+# the same reason: "verification did not happen" must be STATED on the channel. Without
+# it, a reviewed subagent that deletes the findings root it owns makes the mandated
+# invocation exit 2 in silence — no orchestrator in skills/ has a rule for exit 2, and
+# the mandating paragraphs' only remedy for a non-working tool is the in-context
+# pseudocode fallback, which does zero disk verification. Carries no path: the offending
+# root is named on its OWN bullet, because this line's "no paths, no roots"
+# machine-independence is pinned by return-convention.md:270.
+#
+# SIEGE-R2BA-5 — C4 established the rule and applied it to ONE exit-2 path. FIVE others
+# stayed silent, one of them (`two-positionals`) CREATED by SIEGE-C15 one commit after
+# the rule was written, whose own rationale is that a mis-expanded shell substitution
+# "lands exactly on this branch". The rule is not per-branch: every exit-2 terminal state
+# is a state in which verification did not happen, and every one of them is reachable
+# from the mandated four-substitution command line. Now applied uniformly, through ONE
+# formatter so the idiom cannot acquire a second spelling. The `_COV_ROOT_INVALID`
+# constant this replaces is gone rather than left orphaned; the STRING it held is
+# unchanged, and is what the tests pin.
+#
+# The codes, and the shell slip each one names:
+#   root-invalid          — a root that is empty / not a directory (C4)
+#   root-missing-value    — `--root` as the final token (a substitution expanded to
+#                           nothing and ate the root)
+#   ledger-missing-value  — `--ledger` as the final token, same shape
+#   two-positionals       — a second receipt path (C15's branch)
+#   unknown-flag          — an unrecognised `--flag`
+#   receipt-unreadable    — the receipt path itself could not be read (_PathReadError)
+def _cov_not_reached(code) -> str:
+    return f"TIER2-COVERAGE: not-reached ({code})"
+
+
+def _state_not_reached(code, argv) -> None:
+    """SIEGE-R2BA-5 — write the `not-reached (<code>)` census for a terminal exit that
+    happens before (or instead of) _verify_single.
+
+    Gated on `--tier2` being anywhere in argv rather than on `mode`, which is C4's
+    precedent and is required for the same reason: `mode` is not final part-way through
+    main's flag loop (`--root X --tier2` is a legal ordering). `--tier1` therefore emits
+    nothing in any configuration (D8.2 sub-decision 4), and neither does `--eval`, whose
+    argv cannot contain `--tier2` at the arity its own guard admits and which is
+    documented never to carry this line at all."""
+    if "--tier2" in argv:
+        sys.stderr.write(_cov_not_reached(code) + "\n")
 
 
 class _Coverage:
@@ -1982,6 +3527,11 @@ class _Coverage:
 
     def __init__(self):
         self.tier1_reject = True
+        # C1-R1-S3 — which `not-reached` state this is. `tier1-reject` is the default and
+        # the only one _verify_single could reach before; a supplied-but-absent `--root`
+        # now lands here too, AFTER Tier-1 has actually run, so the code has to be able
+        # to say which of the two it was.
+        self.not_reached_code = "tier1-reject"
         self.partial = False
         self.art_verified = 0
         self.art_applicable = 0
@@ -1998,9 +3548,17 @@ class _Coverage:
         if code is not None:
             self.codes[counter].add(code)
 
+    def note_code(self, counter, code):
+        """Attach a reason code to a counter WITHOUT incrementing it — for a second fact
+        about an item that is already counted. Splitting such a fact into its own counter
+        would put one item in two sub-counts, which is exactly the disjointness break
+        C1-R1-S1 closes one function over."""
+        self.codes[counter].add(code)
+
     def render(self) -> str:
         if self.tier1_reject:
-            return "TIER2-COVERAGE: not-reached (tier1-reject)"
+            # SIEGE-R2BA-5 — one formatter. C1-R1-S3 — one formatter, several codes.
+            return _cov_not_reached(self.not_reached_code)
         parts = [f"artifacts {self.art_verified}/{self.art_applicable}",
                  f"witness {self.wit_verified}/{self.wit_applicable}"]
         for k in _COV_COUNTERS:
@@ -2015,37 +3573,193 @@ class _Coverage:
         return "TIER2-COVERAGE: " + " ".join(parts)
 
 
-def _verify_single(text, mode, root, strict, ledger=None) -> int:
+def _drain(notes):
+    """C1-R3-S2 — the ONE note-drain. _verify_single has three exits (clean, LintError,
+    unclassified escape) and every one of them must emit what the completed legs already
+    diagnosed; three hand-copied loops is how the third one came to emit nothing."""
+    for n in notes:
+        sys.stderr.write(_show_diag(n) + "\n")
+
+
+def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> int:
     """Single-receipt mode: Tier-1 (always) + Tier-2 (if --tier2). Exit 0 on pass,
     1 on any LintError (bullet on stderr). UNVERIFIABLE notes are advisory (stderr, non-fatal).
 
     #486 / D8 — emits exactly one TIER2-COVERAGE: line per --tier2 run, from a finally:
     so it survives every LintError path, AFTER the bullet and after the notes. It is
-    NOT emitted from the notes loop below: that loop is inside the try, and every
-    LintError (lint_receipt, tier2_artifacts, tier2_witness, tier2_ledger) jumps past
-    it — and the failing run is exactly where the census earns its keep, because
-    tier2_artifacts raises on the FIRST failing entry and the bullet then tells you
-    about one name and nothing about the rest.
+    NOT emitted from a notes drain: the census is a fact about the whole run, while a
+    note is a fact one leg learned, and the failing run is exactly where the census
+    earns its keep — tier2_artifacts raises on the FIRST failing entry and the bullet
+    then tells you about one name and nothing about the rest.
+
+    C1-R3-S2 — the notes reach stderr on ALL THREE exits, via `_drain`: the clean path,
+    the LintError handler, and the unclassified-escape handler. They did not before —
+    a single drain sat at the end of the try and every LintError (lint_receipt,
+    tier2_artifacts, tier2_witness, tier2_ledger) jumped past it, discarding what the
+    completed legs had learned on exactly the runs the notes exist to diagnose. Stderr
+    ordering is therefore notes, then the bullet, then the census. tier2_witness's own
+    notes arrive through its `notes_out` out-param rather than its return value,
+    because its return is reached only on ITS clean path.
 
     `partial` is set at the raise sites, never inferred here: this handler cannot tell
     WHICH leg truncated, and guessing is how a silently-wrong number gets into the one
-    instrument built to expose silently-wrong numbers.
+    instrument built to expose silently-wrong numbers. That stays true for CLASSIFIED
+    failures — every LintError raise site still owns its own `partial`.
+
+    #486 fixer / F3 — an UNCLASSIFIED unwind is the exception, and the honest fallback is
+    the opposite default. A non-LintError escape (an unguarded OSError/ValueError, a
+    SystemExit, a KeyboardInterrupt) sets nothing at any raise site, so the finally: below
+    rendered a complete-looking census for a run that aborted mid-leg — e.g.
+    `witness 0/1` with every sub-count at 0 and no `partial`, the shape tier2_witness's
+    own docstring declares forbidden. `partial` claims only "this run did not finish",
+    which is exactly what an unclassified escape proves, and it does not guess WHICH leg.
     """
     cov = _Coverage()
+    # C1-R3-S2 — bound HERE, not at the v11 dispatch below, because the LintError handler
+    # now drains it and lint_receipt / parse_receipt / parse_{artifacts,trace,witness} all
+    # raise BEFORE the tier2 branch would assign it. An empty drain is the correct output
+    # on those paths: nothing had been learned yet.
+    notes = []
+    # C1-R3-S2 (freeze-guard revision) — tier2_witness returns its notes ONLY on its clean
+    # path, so a raise inside it drops them in that frame. This is the out-param it mirrors
+    # them into as they are produced, and it is the SOLE channel for that leg here: the
+    # call site discards the return value, because holding the notes in both lists printed
+    # them twice whenever the witness leg succeeded and a later leg raised. Every drain
+    # site therefore emits `notes + wit_notes`.
+    wit_notes = []
     try:
         try:
             verdict = lint_receipt(text)
+            if root_error is not None:
+                # C1-R1-S3 — a DEFERRED lint failure, and the deferral is the whole
+                # point. F1 was right that a supplied root which is not a directory must
+                # never silently degrade to cwd, and wrong about the disposition: it
+                # returned 2 from main's flag loop, BEFORE `_verify_single`, so the
+                # receipt was never parsed at all. `<findings-root>` is
+                # `<scratch-dir>/chunk-N`, which the REVIEWED SUBAGENT creates by writing
+                # its findings file — so "absent" is the NORMAL pre-write state, and it is
+                # also what a crash, a timeout or a wrong output path produces. On every
+                # one of those the mandated command line ran zero verification, including
+                # the Tier-1 checks that are what stop a fabricated `BLOCKED` receipt
+                # with a malformed WITNESS or a `SUPERSEDES:` retiring a prior FAIL. Exit
+                # 2 plus a usage banner is also the canonical shape of "you invoked this
+                # tool wrong / the tool is unavailable", and the ONE documented remedy for
+                # an unavailable linter is the in-context pseudocode fallback, which does
+                # zero disk verification — so the guard opened a new way to DENY the
+                # linter, in a file that argues elsewhere that denying the linter is a
+                # security outcome.
+                #
+                # Tier-1 has therefore already run above and owns its own bullet and its
+                # own `tier1-reject` census. Only then is the root failure raised, as an
+                # ordinary LintError: exit 1, one bullet, one census line stating which
+                # `not-reached` state this is. Every consumer already maps a non-zero,
+                # non-2 exit to structurally BLOCKED. Tier-2 never runs — the probe set is
+                # not silently narrowed, which is the property F1 was defending.
+                #
+                # `--root ""`, a `--root` naming a FILE, and an unknown flag stay exit 2
+                # in main: those are genuine argv errors, not a normal transient.
+                cov.not_reached_code = root_error[0]
+                raise LintError(root_error[1])
             cov.tier1_ok()
             if mode == "tier2":
+                # C1-R1-S4(b) — the EFFECTIVE root set, on a channel. `--root` is
+                # validated as a directory and then silently replaced by
+                # `Path.resolve()`, and neither the resolved set nor a collapse of two
+                # declared roots into one appeared anywhere: the notes carry names and
+                # the census is pinned "no paths, no roots". An operator debugging a
+                # surprising `ambiguous 0` had literally nothing to read. Its OWN line,
+                # deliberately not the census line, whose machine-independence is pinned
+                # by return-convention.md:270.
+                sys.stderr.write(
+                    "ROOTS: " + ", ".join(_show_path(r) for r in _as_roots(root)) + "\n")
                 sections = parse_receipt(text)
                 artifacts = parse_artifacts(sections["ARTIFACTS"])
                 trace = parse_trace(sections["TRACE"])
                 witness = parse_witness(sections["WITNESS"])
-                notes = tier2_artifacts(artifacts, trace, root, strict, cov)
+                # SIEGE-R2BA-1 — the ONE buffer the two legs share, so the sha256 this
+                # run verifies is a statement about the bytes its witness predicate is
+                # evaluated against. See tier2_witness for the measured attack and for
+                # what the carry does NOT close.
+                bodies = {}
+                # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
+                # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
+                # witness-evidence consequent), and nothing said so on any channel.
+                # `return-convention.md:525` makes mixed-version runs legal, so this is
+                # NOT a rejection and there is no `--require-v11` flag to invent here —
+                # what was missing is that the gate could not tell "the v1.1 rules passed"
+                # from "the v1.1 rules never ran", while quality-gate/SKILL.md:34,58 state
+                # that every QG subagent emits v1.1 and treat Layer 2 as enforced.
+                # Advisory, on the notes channel, exit code unmoved.
+                v11 = parse_v11_sections(text)
+                notes += ([] if v11 is not None else
+                          ["UNVERIFIABLE: v1.1 Layer-2 rules not evaluated "
+                           "(receipt declares RCPT v1)"])
+                notes += tier2_artifacts(artifacts, trace, root, strict, cov, bodies)
+                wit_probe = {}
                 if verdict in {"PASS", "FAIL"}:
                     # #486 / D7 — the bound now lives in tier2_witness, so a direct
                     # importer is bounded too and there is exactly ONE arm on this path.
-                    notes += tier2_witness(witness, trace, root, strict, verdict, cov)
+                    # C1-R3-S2 — the RETURN VALUE IS DELIBERATELY DISCARDED. `wit_notes`
+                    # is the single channel for this leg's notes: mirroring into it AND
+                    # adding the return would print every witness note twice on any run
+                    # where tier2_witness succeeds and a LATER leg raises (the handler
+                    # drains `notes + wit_notes`, and both would hold them). Measured on
+                    # exactly that shape — clean witness, then a --ledger mismatch — before
+                    # this line stopped accumulating. tier2_witness mirrors at every one of
+                    # its exits, so nothing is lost by ignoring the return here; other
+                    # callers (--selftest, the direct-call tests) still use it.
+                    tier2_witness(witness, trace, root, strict, verdict, cov,
+                                  bodies, wit_probe, wit_notes)
+                    if v11 is not None and v11["supersedes"] != "none" \
+                            and not wit_probe.get("unsourced") \
+                            and not wit_probe.get("evaluated"):
+                        # C1-R3-S1 — the exemption is keyed on `unsourced`: tier2_witness
+                        # sourced NO artifact, so resolve_base never ran, verify_witness was
+                        # never called, and `evaluated` cannot be set by any witness this
+                        # receipt could have written. On the FAIL leg that is every kind=grep
+                        # witness, because witness_art_name's payload sourcing is PASS-only —
+                        # not a narrow range, not a well-chosen one. That is a hard structural
+                        # BLOCK with no in-receipt remedy, on the shape return-convention.md
+                        # makes the DEFAULT for research/judge dispatches with no shell — and
+                        # the bullet below would blame "resolved to no evaluated predicate"
+                        # when the witness resolved to nothing at all. lint_v11_local's
+                        # declared over-approximation does not cover it: that one is about the
+                        # TRIGGER, and its 0-site measurement is silent here because no
+                        # committed corpus holds a FAIL + non-`none` SUPERSEDES row.
+                        #
+                        # ⚠ The first attempt keyed on `verdict == "PASS"` and the freeze-guard
+                        # caught it: that exempts the WHOLE FAIL leg, including a witness that
+                        # WAS sourced and merely resolved nowhere — a case whose remedy is
+                        # ordinary (name a file that exists). Measured: such a FAIL receipt
+                        # exited 0 while its byte-identical PASS twin exited 1, reopening
+                        # siege S-7(a) for a whole verdict class. This is DEC-29 exactly:
+                        # narrowing by SHAPE (verdict, or witness kind) silently restores a
+                        # fail-open; the only safe key is whether the cited range addressed
+                        # bytes. Do not re-narrow this on `verdict` or on `kind`.
+                        #
+                        # The exemption RETIRES when the FAIL leg sources its payload — i.e.
+                        # when GH #501 lands, after which `unsourced` stops being set for the
+                        # mandated shape and the gate is armed on both legs again.
+                        #
+                        # siege S-7(a) — the Tier-2 half of the witness-evidence rule.
+                        # Tier-1 checks the witness's SHAPE (`kind ∈ {exec, grep}`,
+                        # `ran=TRACE#N`) and stopped there, so a shape-conformant witness
+                        # whose Tier-2 disposition is `not-applicable` — no artifact name,
+                        # a name that resolves nowhere, an unimplemented kind — retired a
+                        # peer's FAIL finding, its tripwires and its cairn invariant at
+                        # exit 0, having demonstrably evaluated nothing. The convention is
+                        # explicit that the shape check is not the whole rule: "Tier-2
+                        # then verifies the witness normally — supersession only survives
+                        # if the witness demonstrably does NOT match expect-fail".
+                        #
+                        # This does NOT touch the rule's TRIGGER, which is #500's subject:
+                        # the fail-closed over-approximation over EVERY non-`none`
+                        # SUPERSEDES is left exactly as `lint_v11_local` states it.
+                        raise LintError(
+                            "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
+                            "EVALUATED at Tier-2 (witness-evidence requirement: the "
+                            "witness resolved to no evaluated predicate, so it "
+                            "demonstrates nothing about the predecessor it retires)")
                 else:
                     # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
                     # leg, so the collector would hear nothing from it and the line would
@@ -2061,15 +3775,54 @@ def _verify_single(text, mode, root, strict, ledger=None) -> int:
                 if ledger is not None:
                     tier2_ledger(trace, ledger)
                 elif any(t["verb"] == "DISPATCHED" for t in trace):
-                    notes.append("UNVERIFIABLE: ledger binding (no --ledger)")
-                for n in notes:
-                    sys.stderr.write(n + "\n")
+                    # C1-R3-S2 — appended to `wit_notes`, NOT to `notes`, purely to keep
+                    # stderr in PRODUCTION order. Every drain emits `notes + wit_notes`,
+                    # so anything added to `notes` after the witness call would sort ABOVE
+                    # the witness-leg notes even though it was produced after them. This
+                    # leg genuinely runs last, so it belongs at the end of the note band.
+                    wit_notes.append("UNVERIFIABLE: ledger binding (no --ledger)")
+                _drain(notes + wit_notes)
             elif ledger is not None:
                 sys.stderr.write("UNVERIFIABLE: --ledger ignored under --tier1 "
                                  "(binding is a Tier-2 check; re-run with --tier2)\n")
         except LintError as e:
-            sys.stderr.write(f"{e}\n")
+            # C1-R3-S2 — drain whatever the completed legs already learned BEFORE the
+            # bullet. The notes loop lives at the end of the try, so every LintError jumped
+            # past it and discarded the lot — on exactly the failing runs the notes were
+            # added to make diagnosable. Each of the four note classes this branch added was
+            # justified in writing by that argument: siege S-3(b) ("the refusal is a
+            # property of the RUN, not of the failure, so it is reported whenever it
+            # happens"), _refused_clause's docstring, siege S-6's v1.1-not-evaluated note,
+            # and #486/S6's "a declared entry that is neither verified nor mentioned
+            # anywhere on stderr is the fail-open shape". `REFUSED` is the sharp case: it
+            # has NO census counter, so stderr is its only channel, and a refusal SHRINKS
+            # what the linter can reach — the run it hid behind is precisely a run where an
+            # artifact went unverified.
+            #
+            # Order is preserved (notes above the bullet, census last from the finally:),
+            # so no existing reader moves; `notes` is bound above the outer try (see there)
+            # so this cannot NameError on the paths that raise before the tier2 branch.
+            _drain(notes + wit_notes)
+            # C1-R2-S2 — the bullet channel is where receipt-authored text reaches stderr
+            # un-escaped, and it is live on exactly the runs the census was built for
+            # ("the failing run is exactly where the census earns its keep"). See
+            # _show_diag.
+            sys.stderr.write(_show_diag(e) + "\n")
             return 1
+        except BaseException:
+            # C1-R3-S2 (freeze-guard revision) — the third exit drains too. An
+            # unclassified escape truncates the run just as thoroughly as a LintError, and
+            # dropping what the completed legs had already diagnosed is the same
+            # fail-open shape this fix exists to close. Drained BEFORE `cov.partial` so
+            # the notes survive even if the re-raise is not caught anywhere above.
+            _drain(notes + wit_notes)
+            # #486 fixer / F3 — see the docstring. BaseException, not Exception: a
+            # SystemExit or a KeyboardInterrupt truncates the run just as thoroughly as
+            # an OSError, and the census must not claim otherwise. Nothing is swallowed
+            # — the escape is re-raised unchanged, so the module guard and the caller
+            # see exactly what they saw before.
+            cov.partial = True
+            raise
         return 0
     finally:
         # sub-decision 4 — NOTHING on --tier1. _verify_single serves both modes and main
@@ -2093,6 +3846,8 @@ def main(argv=None) -> int:
     # single-receipt mode — hand-parse flags (mirror check_*.py simplicity)
     mode = "tier1"
     roots = []            # #486 / D1 — --root is REPEATABLE; declaration order is D3's
+    root_tokens = []      # C1-R1-S4 — the RAW spellings, for the collapse test below
+    root_error = None     # C1-R1-S3/S4 — (census-code, bullet) deferred to _verify_single
     strict = False
     ledger = None
     path = None
@@ -2108,29 +3863,140 @@ def main(argv=None) -> int:
         elif a == "--root":
             i += 1
             if i >= len(argv):
-                return _usage_exit()
-            roots.append(pathlib.Path(argv[i]))
+                # SIEGE-R2BA-5 — `--root` as the FINAL token: a substitution that expanded
+                # to nothing ate the root and this exit was silent.
+                return _usage_exit(argv, "root-missing-value")
+            # #486 fixer / F1 — an EXPLICITLY SUPPLIED root must be a real directory.
+            # Unvalidated, `--root ""` becomes Path(".") -> the linter's cwd, and since
+            # quality-gate/SKILL.md mandates a TWO-substitution command line run from
+            # Bash (cwd = the repo), one swallowed shell substitution silently grew both
+            # the probe set and the #397/C1 containment union to the whole checkout: a
+            # receipt could declare a repo top-level file it never touched and come back
+            # `artifacts 1/1`, exit 0 — byte-identical to the #486 fail-open this change
+            # exists to close. A FILE passed as `--root` (the `<findings-root>` vs
+            # `[FINDINGS_OUTPUT_PATH]` one-token slip) was a silent no-op for the same
+            # reason. Both now exit 2 and NAME the offending root on stderr.
+            #
+            # The diagnostic deliberately does NOT go on the TIER2-COVERAGE: line — that
+            # line's "no paths, no roots" machine-independence is pinned by
+            # return-convention.md:270 — and the empty-string test is on the RAW token,
+            # because Path("") is already Path(".") and would pass is_dir().
+            #
+            # Scoped to roots the caller actually passed: the no-`--root` default below
+            # is untouched, verbatim.
+            #
+            # C1-R1-S3 — the ARGV-ERROR half and the TRANSIENT half are split, because
+            # they are not the same failure. `--root ""` (a swallowed shell substitution)
+            # and a `--root` naming an existing NON-directory (the `<findings-root>` vs
+            # `[FINDINGS_OUTPUT_PATH]` one-token slip) are genuine invocation errors and
+            # keep exit 2 verbatim. A root that simply does not EXIST is the normal
+            # pre-write state of `<scratch-dir>/chunk-N`, which the reviewed subagent
+            # creates — see _verify_single for why that must not skip Tier-1.
+            tok = argv[i]
+            root_p = pathlib.Path(tok)
+            if tok == "" or (root_p.exists() and not root_p.is_dir()):
+                # Quoted, because the empty-string case is the whole point and an
+                # unquoted "" renders as nothing at all.
+                sys.stderr.write(f"rcpt_verify: --root {argv[i]!r} is not a directory\n")
+                # SIEGE-C4 — and SAY that verification did not happen, on the parsed
+                # channel, in the `not-reached (<code>)` idiom. Gated on `--tier2` being
+                # anywhere in argv rather than on `mode`, which is not final at this
+                # point in the loop (`--root X --tier2` is a legal ordering); --tier1
+                # emits no census line in any configuration (sub-decision 4).
+                # SIEGE-R2BA-5 — that gate is now _state_not_reached's, shared with the
+                # five sibling exit-2 paths. The emitted string is unchanged.
+                _state_not_reached("root-invalid", argv)
+                return 2
+            if not root_p.is_dir() and root_error is None:
+                # Deferred: Tier-1 runs first, then this raises. Never degraded to cwd —
+                # the root is still appended, so the no-`--root` default cannot kick in.
+                root_error = ("root-absent",
+                              f"--root {tok!r} is not a directory (supplied root absent; "
+                              f"Tier-1 ran, Tier-2 did not)")
+            roots.append(root_p)
+            root_tokens.append(tok)
         elif a == "--ledger":
             i += 1
             if i >= len(argv):
-                return _usage_exit()
+                # SIEGE-R2BA-5 — same shape as `--root` with no value.
+                return _usage_exit(argv, "ledger-missing-value")
             ledger = pathlib.Path(argv[i])
         elif a == "-" or not a.startswith("--"):
+            # SIEGE-C15 — a SECOND positional used to overwrite the first with no
+            # diagnostic at all, so `… <receipt-A> <receipt-B>` linted B and silently
+            # ignored A: the same argv set produced OPPOSITE verdicts depending on which
+            # receipt came last. The mandated command line now carries four shell
+            # substitutions into this loop, and one that expands to an extra token (or to
+            # nothing, shifting a later token here) lands exactly on this branch. Rejected
+            # rather than resolved by position, for the same reason parse_witness rejects
+            # a second `pattern=` clause: two receipts are declared and the linter cannot
+            # know which the caller meant.
+            #
+            # SIEGE-R2BA-5 — and this branch, which C15 ADDED one commit after C4
+            # established the state-it-on-the-channel rule, is exactly the branch C15's
+            # own rationale says a mis-expanded substitution lands on. It said nothing.
+            if path is not None:
+                return _usage_exit(argv, "two-positionals")
             path = a
         else:
-            return _usage_exit()
+            # SIEGE-R2BA-5 — an unrecognised `--flag` is the other way a mangled
+            # substitution terminates the run.
+            return _usage_exit(argv, "unknown-flag")
         i += 1
     if not roots:
         # Preserved VERBATIM as a one-element list: an invocation with no --root behaves
         # exactly as today (main:1683-1684 at 5d1fb15 did `root = pathlib.Path.cwd()`).
         roots = [pathlib.Path.cwd()]
-    text = sys.stdin.read() if path in (None, "-") else _read_path_arg(path)
-    return _verify_single(text, mode, roots, strict, ledger)
+    if root_error is None and len(root_tokens) > 1:
+        # C1-R1-S4 — TWO DIFFERENT `--root` TOKENS THAT NAME ONE DIRECTORY.
+        #
+        # `--root` is validated with `is_dir()`, which FOLLOWS SYMLINKS, and `_as_roots`
+        # then stores `Path.resolve()`. So the directory actually probed could differ from
+        # the one the orchestrator named, and two declared roots could silently become
+        # one, on no channel at all. Combined with the verified fact that
+        # `<scratch-dir>/chunk-N` is created by the REVIEWED SUBAGENT's own write, that
+        # handed the reviewed party control of the trust anchor: one `ln -s <dispatch-root>
+        # <scratch>/chunk-1` turned the `--strict` cross-root ambiguity FAIL — one of the
+        # two safety properties #486 introduces — into a clean exit 0 whose census is
+        # byte-identical to a genuine two-root verification. It also achieves, from the
+        # other side, exactly what quality-gate/SKILL.md:30 spends a paragraph forbidding
+        # the orchestrator from doing (passing `<scratch-dir>` itself as a root).
+        #
+        # Scoped to DISTINCT SPELLINGS, which is what keeps criterion 6 intact where the
+        # corpus pins it: the committed `two-root-dedup-noop` fixture declares the SAME
+        # token twice, and repeating one token is still a byte-for-byte no-op. Two
+        # different tokens resolving to one directory is not a no-op — under a mandated
+        # two-root line it is a configuration error, and the honest thing is to say so
+        # rather than to probe half of what was asked for and report nothing. Deferred
+        # like the absent root, so Tier-1 still runs and the disposition is exit 1.
+        seen = {}
+        for tok in root_tokens:
+            key = pathlib.Path(tok).resolve()
+            if key in seen and seen[key] != tok:
+                root_error = ("root-collapse",
+                              f"--root {tok!r} and --root {seen[key]!r} name the same "
+                              f"directory ({_show_path(key)}) — two declared roots "
+                              f"collapsed to one, so the cross-root checks cannot fire")
+                break
+            seen.setdefault(key, tok)
+    text = _read_stdin_arg() if path in (None, "-") else _read_path_arg(path)
+    return _verify_single(text, mode, roots, strict, ledger, root_error)
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
     except _PathReadError as e:
-        sys.stderr.write(f"rcpt_verify: cannot read {e.path}\n")
+        sys.stderr.write(f"rcpt_verify: cannot read {_show_path(e.path)}\n")  # SIEGE-C2
+        # SIEGE-R2BA-5 — the sixth exit-2 terminal state, and the one that does NOT go
+        # through _usage_exit: _read_path_arg raises out of main entirely. The census is
+        # emitted HERE rather than at the raise site because this is the only frame that
+        # is guaranteed to be the CLI — main(argv=…) is called in-process by the tests,
+        # where a raised _PathReadError is the caller's to handle and printing a census
+        # line on its behalf would be this module writing to a channel it does not own.
+        # sys.argv[1:] is the real process argv, which is what the gate must read (a
+        # script path is not a flag). Ordered AFTER the diagnostic, as on the
+        # `root-invalid` path. `--eval FILE` reaches the same raise and correctly emits
+        # nothing: its argv cannot contain `--tier2`.
+        _state_not_reached("receipt-unreadable", sys.argv[1:])
         sys.exit(2)

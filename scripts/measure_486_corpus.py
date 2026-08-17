@@ -34,10 +34,32 @@ every `except rv.LintError` — copied verbatim from `measure_474_corpus.py:60`,
 `except rv.LintError` converts a timeout into a disposition indistinguishable from a
 real lint failure, inside the sole discharge for criteria 1, 12 and 13.
 
-NOT a CI gate: the corpora are machine-local and gitignored, so this script SKIPs or
-stops on any machine that does not hold them. What IS gated by `scripts/run_tests.sh` is
-`scripts/test_measure_486.py`, which supplies its own synthetic corpora in a tempdir —
-the same split `measure_474_denominators.py` / `test_measure_474.py` already runs under.
+⚠ REACHABILITY, STATED HONESTLY (round-1/C3-R1-S4). The watchdog is armed at exactly
+ONE place in the linter — `_witness_bound()`, called only from `tier2_witness` — so
+`WitnessTimeout` is reachable HERE only from the `tier2_witness` arm, and only that arm
+is pinned by `test_measure_486.py`. The arms on `lint_receipt`, on the section parses,
+on `tier2_artifacts` and in `witness_name` are uniform-by-policy, NOT load-bearing
+today: `_compile_guard`/`_reject_unsatisfiable` are static analyses, and the ARTIFACTS
+leg is documented in `rcpt_verify.py` as running OUTSIDE `_witness_bound()` with no
+timeout of any kind. They are kept because the moment a bound IS armed on the ARTIFACTS
+leg they become live, and a missing arm there would swallow a timeout into a
+disposition. Do not read a `# MUST precede` comment as "a test covers this site".
+
+NOT a CI gate, and NOTHING ELSE IN #486 GATES THESE FIGURES EITHER. The corpora are
+machine-local and gitignored, so this script SKIPs or stops on any machine that does not
+hold them; its true #474 analogue is `measure_474_corpus.py`, which is machine-local and
+ungated for the same reason. #474 also ships a SECOND, gated half —
+`scripts/measure_474_denominators.py`, on `run_tests.sh:56` — which re-derives from
+COMMITTED files every figure its plan quotes, "so a figure that rots fails CI instead of
+aging quietly inside a document". **#486 ships no such whole-figure checker**: the
+published corpus figures (`0/14 → 12/14`, `0/89 → 88/89`, `ambiguous == 0`,
+`tier1-rejects 1`, `5/89 in 5/22`, `88/88`) are reproducible on demand by running this
+script, but they are NOT CI-pinned. What IS gated by `scripts/run_tests.sh` is
+`scripts/test_measure_486.py` — this script's behaviour on a corpus that has gone wrong
+(synthetic corpora in a tempdir), plus the committed-file half that CAN be gated: the
+six `two-root-*` fixture rows and `_MULTI_ROOT_FIXTURE_IDS`
+(`TestCommittedFiguresAreGated` there). Read a corpus figure quoted in prose as
+reproducible, never as CI-defended.
 
 Usage:
   measure_486_corpus.py --corpus {corpus17,live29,codegate22} --expect-size N
@@ -48,7 +70,6 @@ reconstruction) · 2 usage.
 """
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import pathlib
 import re
@@ -104,6 +125,11 @@ class Corpus:
         self.definition = definition
         self.build_roots = build_roots
         self.recursive = recursive
+        # round-1/C3-R1-F1 — the count the figures BELOW the current point were actually
+        # computed over. `n=` is the enumeration and is a constant; this one moves when a
+        # receipt is skipped, and `fig` stamps BOTH so a figure lifted into prose cannot
+        # silently carry a denominator it was not computed over.
+        self.computed_over = None
 
 
 def _corpus17_roots():
@@ -253,6 +279,9 @@ def measure_receipt(rv, text, roots, strict):
     try:
         verdict = rv.lint_receipt(text)
     except rv.WitnessTimeout as e:                # MUST precede `except rv.LintError`
+        # UNREACHABLE TODAY, uniform by policy — `lint_receipt` reaches only the static
+        # analyses, never `_witness_bound()`. See the module docstring's reachability
+        # paragraph; the pinned arm is the `tier2_witness` one below (C3-R1-S4).
         raise Skip(f"witness-timeout: {e}", stop=True)
     except rv.LintError as e:
         res.tier1_reject = True
@@ -265,7 +294,8 @@ def measure_receipt(rv, text, roots, strict):
         sections = rv.parse_receipt(text)
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
-    except rv.WitnessTimeout as e:
+    except rv.WitnessTimeout as e:                # MUST precede `except rv.LintError`
+        # UNREACHABLE TODAY, uniform by policy — the section parses are static.
         raise Skip(f"witness-timeout: {e}", stop=True)
     except rv.LintError as e:
         # Reachable only on a Tier-1-rejected receipt whose ARTIFACTS/TRACE are
@@ -287,6 +317,10 @@ def measure_receipt(rv, text, roots, strict):
         try:
             rv.tier2_artifacts({name: meta}, trace, roots, strict, cov)
         except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
+            # UNREACHABLE TODAY, uniform by policy — the ARTIFACTS leg runs OUTSIDE
+            # `_witness_bound()` and has no timeout of any kind. THIS is the arm that
+            # goes live the moment a bound is armed there, and it is the reason the
+            # policy is uniform rather than pinned-only (C3-R1-S4).
             raise Skip(f"witness-timeout: {e}", stop=True)
         except rv.LintError as e:
             blocked = str(e)
@@ -305,6 +339,8 @@ def measure_receipt(rv, text, roots, strict):
                                    if any(n.startswith("UNVERIFIABLE") for n in notes)
                                    else "clean")
         except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
+            # THE ONE REACHABLE ARM, and the one `test_measure_486.py` pins: the watchdog
+            # is armed inside `tier2_witness` only (C3-R1-S4).
             raise Skip(f"witness-timeout: {e}", stop=True)
         except rv.LintError as e:
             res.wit_disposition = f"raise: {e}"
@@ -337,6 +373,15 @@ def witness_name(rv, text):
         if art is None:
             return None, f"no-art (verdict={verdict})"
         return art, ""
+    except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
+        # round-1/C3-R1-S4 — this arm was MISSING while the first try-block of the same
+        # function ordered the two correctly, so a timeout here would be swallowed into
+        # the generic `ERR` note: the name silently drops out of criterion 1's `names`
+        # denominator and `12/14` becomes `12/13` with no stop and exit 0. Unreachable
+        # today for the same reason the other uniform arms are (see the module
+        # docstring's reachability paragraph); it is here so the leg that computes the
+        # denominator is not the one place the rule is not applied.
+        return None, f"ERR witness-timeout: {e}"
     except rv.LintError as e:
         return None, f"ERR {e}"
 
@@ -398,10 +443,19 @@ def run_pass(rv, corpus, files, roots, strict, label):
     return census, results, skips
 
 
-def fig(corpus, pass_, label, value, leg=None, roots=None, note=""):
+def fig(corpus, pass_, label, value, leg=None, roots=None, note="", over=None):
     """Rule (2): the corpus size and definition token, the pass and the leg travel with
-    EVERY figure. A figure without a pass label is not comparable to the plan's table."""
-    bits = [f"corpus={corpus.label}", f"n={len(corpus.names)}", f"pass={pass_}"]
+    EVERY figure. A figure without a pass label is not comparable to the plan's table.
+
+    round-1/C3-R1-F1 — `n=` alone is NOT enough, because it is the ENUMERATION and is a
+    hard-coded constant: a run that lost six receipts to skips still stamped `n=29` on
+    every row. `computed-over=` is the number of corpus members this figure's pass
+    actually measured, so the two disagree loudly exactly when the denominator moved.
+    `over=` overrides it for a figure computed over a different pass than the block it
+    is printed in (criterion 13's one-root baseline)."""
+    n_over = corpus.computed_over if over is None else over
+    bits = [f"corpus={corpus.label}", f"n={len(corpus.names)}",
+            f"computed-over={'?' if n_over is None else n_over}", f"pass={pass_}"]
     if leg:
         bits.append(f"leg={leg}")
     if roots is not None:
@@ -488,6 +542,20 @@ def main(argv):
         print(f"    STOP: {len(extra)} receipt(s) on disk are outside the enumeration — "
               f"the corpus moved: {extra}")
         return 1
+    # round-1/C3-R1-F1 — the SHRINK direction, which `--expect-size` structurally cannot
+    # see: it compares `len(corpus.names)` against a CLI integer, i.e. one hard-coded
+    # constant against another, and never touches the disk. Without this, a member that
+    # has vanished falls through to `path.read_text()`, becomes an ordinary skip, and the
+    # run publishes a full set of figures at `### done` / exit 0 — the paradigm case of
+    # the "silently-changed denominator" rule (4) exists to refuse, and the ONLY drift
+    # class the absent-DIRECTORY guard above (which is loud, and exit 1) does not cover.
+    # `corpus17` in particular has no integrity manifest at all: it deliberately measures
+    # the original unfrozen path, which `SHA256SUMS-frozen.txt` does not cover.
+    missing = sorted(set(corpus.names) - set(on_disk))
+    if missing:
+        print(f"    STOP: {len(missing)} enumerated receipt(s) are absent from disk — "
+              f"the corpus shrank: {missing}")
+        return 1
 
     roots, roots_one, notes = corpus.build_roots()
     for n in notes:
@@ -511,6 +579,7 @@ def main(argv):
     print(f"\n── pass=as-returned  ({len(roots)} roots)")
     cen, results, skips = run_pass(rv, corpus, files, roots, strict, "as-returned")
     measured = len(results)
+    corpus.computed_over = measured        # C3-R1-F1 — every fig below this line
     for rel, reason, is_stop in skips:
         print(f"  SKIPPED  {rel}: {reason}")
         stop = stop or is_stop
@@ -591,6 +660,26 @@ def main(argv):
         f"{len(mis_all)}/{len(ent_all)} in {rc_all}/{measured}  ==  "
         f"{len(mis_ex)}/{len(ent_all) - len(ent_t1)} in {rc_ex}/{measured - cen.tier1_rejects}",
         leg="artifacts", roots=len(roots))
+    # ── criterion 13 is stated as a DELTA (`0/89 → 88/89`), and until round-1/C3-R1-S2
+    #    this script emitted only the right-hand side: `roots_one` was computed on every
+    #    path but used for criterion 1's name leg ONLY, so the sole designated discharge
+    #    for criterion 13 reproduced the `88` and not the `0`. Criterion 1 prints both
+    #    root-count legs on adjacent lines; this is the same shape for the ARTIFACTS leg.
+    #    The two halves ARE measured under different layouts on codegate22 — that is a
+    #    material property of the published delta, and rule (5)'s reason for printing
+    #    both probe sets is exactly that a figure must say which environment produced it.
+    _cen1, res1, sk1 = run_pass(rv, corpus, files, roots_one, strict, "as-returned")
+    for rel, reason, is_stop in sk1:
+        print(f"  SKIPPED (one-root baseline)  {rel}: {reason}")
+        stop = stop or is_stop
+    ent_one = [e for _rel, res in res1 for e in res.entries]
+    fig(corpus, "as-returned", "entry resolution, ONE root (baseline)",
+        f"{sum(1 for e in ent_one if e[1])}/{len(ent_one)}", leg="artifacts",
+        roots=len(roots_one), over=len(res1),
+        note="the left-hand side of criterion 13's delta, measured by THIS instrument. "
+             "The mandated single `--root`; for codegate22 that is the NESTED frozen "
+             "dispatch root, a DIFFERENT LAYOUT from the flat reconstruction the "
+             "two-root rows above are measured under — the delta spans both changes")
     for rel, e in mis_all:
         print(f"    mismatch  {rel}  {e[0]}: {e[3]}")
     for rel, e in ent_all:
@@ -602,6 +691,7 @@ def main(argv):
     #    1's name corpus (rule 3's own stated reason).
     print(f"\n── pass=PASS-synthetic  (reported separately; NEVER summed into as-returned)")
     cen2, results2, skips2 = run_pass(rv, corpus, files, roots, strict, "PASS-synthetic")
+    corpus.computed_over = len(results2)    # C3-R1-F1 — this pass's own denominator
     for rel, reason, is_stop in skips2:
         print(f"  SKIPPED  {rel}: {reason}")
         stop = stop or is_stop
@@ -621,6 +711,7 @@ def main(argv):
     #    passes. That union is what DEFINES this corpus (design :1484).
     print(f"\n── pass=union  (criterion 1: the unique witness artifact-name corpus)")
     names, per_pass = [], {}
+    unread = set()
     for leg in ("as-returned", "PASS-synthetic"):
         rows = []
         for rel, path in files:
@@ -628,6 +719,7 @@ def main(argv):
                 text = path.read_text()
             except (OSError, UnicodeDecodeError, ValueError) as e:
                 rows.append((rel, None, f"unreadable: {type(e).__name__}"))
+                unread.add(rel)
                 continue
             body = text if leg == "as-returned" else pass_leg_synthetic(text)
             if body is None:
@@ -640,6 +732,8 @@ def main(argv):
     for leg, rows in per_pass.items():
         for rel, nm, note in rows:
             print(f"    {leg:15s} {rel:36s} {nm or note}")
+    # C3-R1-F1 — the union leg's own denominator: corpus members whose bytes were read.
+    corpus.computed_over = len(corpus.names) - len(unread)
     res_two = [n for n in names if rv.resolve_base(n, roots) is not None]
     res_one = [n for n in names if rv.resolve_base(n, roots_one) is not None]
     fig(corpus, "union", "unique witness names resolved, ONE root",

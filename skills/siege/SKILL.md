@@ -817,7 +817,7 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 
 **Active run marker:** Write `~/.claude/projects/<project-hash>/memory/security-audit/active-run-<run-id>.md` at start. Delete on completion. After compaction, glob for active-run markers to locate the run.
 
-**Tool constraint:** All scratch directory operations (create, read, list, delete) must use Write, Read, and Glob tools — NOT Bash. Safety hooks block Bash commands referencing `.claude/` paths.
+**Tool constraint:** All scratch directory operations (create, read, list, delete) must use Write, Read, and Glob tools — NOT Bash. This is a tooling-discipline convention, **not** an enforced hook — see `quality-gate/SKILL.md` › Round History and Compaction Recovery › *Stated cause, corrected (#486)*, which retracts the "safety hooks block Bash commands referencing `.claude/` paths" justification this line used to carry.
 
 ### File Inventory
 

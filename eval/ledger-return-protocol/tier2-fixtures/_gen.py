@@ -297,28 +297,48 @@ add("n-rt-exec-cited-mismatch-clean",
 _SPLIT_NOTE = ("stderr-shape half lives in test_rcpt_verify.py's subprocess tests — "
                "--selftest compares only pass/fail")
 
-# p1 exists as a probed root that does NOT hold the row-1 basename; the decoy keeps the
+# p1 exists as a probed root that does NOT hold the row-1 name; the decoy keeps the
 # directory committed (git does not track empty dirs) and makes "absent from root 1" a
 # real, stable fact rather than an artefact of a missing directory.
 write_file("p1", "decoy.txt", "not referenced by any receipt\n")
 
-# (1) D1 — bare basename absent from root 1, present at root 2's top level
-h = write_file("p2", "second-root.log", "all green\n")
+# (1) D1 — a name absent from root 1, present under root 2.
+#
+# ⚠ PATH-SHAPED, NOT A BARE BASENAME, and that is the whole point (round-1/C3-R1-S1).
+# The first version of this row declared a bare `second-root.log`. Under --strict an
+# UNRESOLVED bare basename degrades to UNVERIFIABLE and does NOT raise, so
+# _selftest_run_fixture returned "pass" whether the file resolved at root 2 and hashed
+# clean or resolved NOWHERE AT ALL: measured, the row was green under a first-root-only
+# probe, and green with p2/second-root.log deleted from disk. The one committed fixture
+# named for #486's headline behaviour was satisfied by #486's own defect — exactly the
+# trap row 6 below documents in its own comment, walked into by the row whose stated
+# subject IS resolution.
+#
+# A path-shaped name under --strict hard-FAILs when it resolves nowhere
+# (rcpt_verify `_unresolved_disposition`), so this row now fails in every world where
+# the behaviour it names is absent: root 2 not probed, or the file gone. The bare-
+# basename-at-root-2's-top-level shape is still corpus-covered, by row 6, which flips
+# for the same reason.
+h = write_file("p2", "d1/second-root.log", "all green\n")
 add("two-root-second-root-resolves",
-    receipt("build/two-root", [f"  second-root.log  sha256:{h}  10"],
+    receipt("build/two-root", [f"  d1/second-root.log  sha256:{h}  10"],
             ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
-             "  2  EXEC  `run`  exit=0  dur=1s  out=second-root.log#L1-L1"],
+             "  2  EXEC  `run`  exit=0  dur=1s  out=d1/second-root.log#L1-L1"],
             ["  patch-applied=true  from=TRACE#1"],
             r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
     ["p1", "p2"], "pass", True,
-    "D1 — absent under root 1, resolves at root 2's top level and its sha256 is "
-    "checked; witness reads the same file and does not fire. " + _SPLIT_NOTE)
+    "D1 — `d1/second-root.log` is absent under root 1 and resolves under root 2, where "
+    "its sha256 IS recomputed and compared; the witness reads the same bytes and does "
+    "not fire. The name is PATH-SHAPED under --strict deliberately: unresolved, it "
+    "hard-FAILs, so this row goes red under a first-root-only probe and red with its "
+    "subject file deleted. A bare basename would degrade to UNVERIFIABLE and pass in "
+    "both of those worlds, pinning nothing. " + _SPLIT_NOTE)
 
 # (2) D3 — same basename in both roots, receipt declares ROOT 2's hash; root 1 is read
 h1 = write_file("p1", "dup.log", "root one bytes\n")
 h2 = write_file("p2", "dup.log", "root two bytes\n")
 add("two-root-declaration-order-first-hit",
-    receipt("build/two-root", [f"  dup.log  sha256:{h2}  16"],
+    receipt("build/two-root", [f"  dup.log  sha256:{h2}  15"],
             ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
              "  2  EXEC  `run`  exit=0  dur=1s  out=dup.log#L1-L1"],
             ["  patch-applied=true  from=TRACE#1"],
@@ -408,9 +428,14 @@ def verify_fixture(fx):
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
-        rv.tier2_artifacts(artifacts, trace, root, strict)
+        # SIEGE-R2BA-1 — the carry, exactly as rcpt_verify._selftest_run_fixture wires
+        # it: the generator's self-verify runs the committed corpus through the BOUND
+        # path the CLI takes, not a second unbound one that could green a row the
+        # shipped reader rejects.
+        bodies = {}
+        rv.tier2_artifacts(artifacts, trace, root, strict, None, bodies)
         if verdict in {"PASS", "FAIL"}:
-            rv.tier2_witness(witness, trace, root, strict, verdict)
+            rv.tier2_witness(witness, trace, root, strict, verdict, None, bodies)
     except rv.WitnessTimeout as e:
         # #486/Q8 — a wall-clock timeout is NOT a passing expect:"fail" fixture. Same
         # swallow shape rcpt_verify._selftest_run_fixture fixes, one directory away.
