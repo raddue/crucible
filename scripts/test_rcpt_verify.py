@@ -1940,7 +1940,8 @@ class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
         """The half that makes 29 safe. The read is healthy and the predicate runs, but
         with no `exit=` on the cited WROTE the FAIL branch discards the result, so the
         witness remains structurally unable to reject. `witness 0/1` + `discarded`, never
-        `1/1` — the 9-receipt regression measured over the frozen corpora."""
+        `1/1` — the 8-receipt regression measured over the three enumerated frozen
+        corpora (42/65 shipped vs 50/65 with the withholding reverted)."""
         (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
         witness, trace = self._parts("FAIL")
         cov = self.rv._Coverage(); cov.tier1_ok()
@@ -6168,10 +6169,11 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         """GH #501 — the pin the deliberately-broken-copy check found MISSING, on the
         half that most needed it.
 
-        #501 narrowed `evaluated` from `exit_m or pattern` to `exit_m`, because the FAIL
+        #501 re-keyed `evaluated` off `exit_m or pattern` (and, at QG-r2/S2, off the
+        `exit_m` form that replaced it) onto `pattern and exit_success`, because the FAIL
         branch raises only under `exit_success and not content_match`: with NO exit clause
         the branch is inert, the predicate's result is discarded, and the witness
-        demonstrated nothing. The loose form set `evaluated` for exactly that shape, so a
+        demonstrated nothing. The loose forms set `evaluated` for exactly that shape, so a
         supersession survived on a witness that proved nothing — siege S-7(a) again, one
         leg over.
 
@@ -6180,9 +6182,13 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         gate is armed on both legs again — and this is what "armed" has to mean, or the
         arming is cosmetic.
 
-        Measured free: 0 of 116 real frozen-corpus receipts carry a non-`none` SUPERSEDES
-        at all, so this blocks nothing that exists today. It is also the fail-CLOSED
-        direction — a withheld `evaluated` can only ever over-BLOCK."""
+        ⚠ QG-r2/S3 — the corpus figure here bounds NOTHING about this pin. 0 of the 68
+        receipts in the three enumerated frozen corpora carry a non-`none` SUPERSEDES on
+        a `FAIL` verdict (21 carry one, all on `PASS`), so "this blocks nothing that
+        exists today" cannot distinguish "the arming blocks nothing" from "the corpus
+        contains none of the targeted shape" — it is the latter. What IS load-bearing is
+        the direction: a withheld `evaluated` is fail-CLOSED and can only over-BLOCK.
+        `quality-gate/SKILL.md` declares the resulting surface and its remedy."""
         h, size = self.plant(self.base, "evidence.log", b"clean run\n")
         body = _receipt(
             "grep:evidence.log#L1-L1  expect-fail=/zzz-absent/  ran=TRACE#1",
@@ -6197,12 +6203,25 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("EVALUATED at Tier-2", out.stderr)
 
-    def test_501_fail_leg_witness_WITH_exit_evidence_still_retires(self):
-        """Non-vacuity control for the pin above, and the reason the narrowing is
-        `exit_m` and not `exit_success`. A non-zero `exit=` IS the FAIL leg's evidence of
-        failure — the comparison ran and decided — so the consequent must stay
-        satisfiable. Without this, `evaluated` could be narrowed all the way to False and
-        the test above would still pass."""
+    def test_501_fail_leg_witness_with_a_DISCARDED_result_cannot_retire(self):
+        """QG-r1/S1 — the OTHER half of the same counter, and the inversion of the
+        control this test used to be.
+
+        The old form pinned "a non-zero `exit=` IS the FAIL leg's evidence of failure —
+        the comparison ran and decided", so the supersession survived. It does not: no
+        line of the FAIL branch ever COMPARES `exit_m` (`exit_success` is read only by
+        the `exit_success and not content_match` raise), and the same commit's census
+        bills this exact receipt `witness 0/1 … discarded 1 (fail-leg-exit-nonzero)` —
+        the leg saying, on the same stderr line, that it verified nothing.
+
+        WHAT PINS THIS, restated after QG-r2/S2 re-keyed `evaluated` onto `pattern and
+        exit_success`: it is the KEY that withholds the flag here (this shape has a
+        pattern and a non-zero exit), not the consequent's `or result_discarded`
+        conjunct — that conjunct is now redundant and removing it turns NO test red.
+
+        This is the receipt whose predicate ran against real bytes and was thrown away.
+        It must NOT retire a predecessor. The non-vacuity role moves to
+        test_501_fail_leg_witness_whose_predicate_DECIDED_still_retires."""
         h, size = self.plant(self.base, "evidence.log", b"clean run\n")
         body = _receipt(
             "exec:`run`  expect-fail=/BOOM/  ran=TRACE#2",
@@ -6215,8 +6234,77 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
                      + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
         out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+        # the census and the gate must agree — this is the disagreement S1 was about.
+        self.assertIn("discarded 1 (fail-leg-exit-nonzero)", out.stderr)
+
+    def test_501_fail_leg_exit_clause_expect_fail_cannot_retire(self):
+        """QG-r2/S2 — the arm the deliberately-broken-copy check MISSED, which is why a
+        sentence denying this hole could ship green: the whole 436-test suite passed both
+        with and without the fix.
+
+        `_expect_fail_pattern` returns None for the exit clauses (`exit!=0` / `exit=<N>`),
+        so an exit-clause witness derives NO body predicate at all — `content_match` is
+        unconditionally False and `result_discarded`, which is keyed on `pattern`, is
+        never set. Keying `evaluated` on the mere PRESENCE of an `exit=` token therefore
+        left the consequent open for exactly the witness that evaluated nothing, one
+        `expect-fail` token away from the receipt above: the leg bills it
+        `not-applicable (exit-clause-not-a-body-predicate)` on the same stderr line that
+        retires the predecessor. Re-keying onto `pattern and exit_success` — could the
+        result reach this leg's only raise — closes it.
+
+        Costed against kind (DEC-29): `kind=exec` and ranged `kind=grep` are BOTH pinned,
+        because the key is the derivation, never the witness kind.
+
+        Reverting `pattern and exit_success` to `exit_m` turns this test RED: both shapes
+        exit 0 and retire the predecessor."""
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        for name, wit in (
+                ("exit-clause-exec", "exec:`run`  expect-fail=exit!=0  ran=TRACE#2"),
+                ("exit-clause-grep",
+                 "grep:evidence.log#L1-L1  expect-fail=exit!=0  ran=TRACE#2")):
+            with self.subTest(shape=name):
+                body = _receipt(
+                    wit,
+                    verdict="FAIL", skill="build/21-implementer",
+                    artifacts=[("evidence.log", h, size)],
+                    trace=["READ  a",
+                           "EXEC  `run`  exit=1  dur=1.0s  out=evidence.log#L1-L1"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"fail-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+                # the census agrees with the gate: no body predicate was derived.
+                self.assertIn("not-applicable 1 (exit-clause-not-a-body-predicate)",
+                              out.stderr)
+
+    def test_501_fail_leg_witness_whose_predicate_DECIDED_still_retires(self):
+        """NON-VACUITY CONTROL for the two pins above, on the one FAIL shape whose
+        predicate genuinely decides the outcome: `exit=0` with a body that MATCHES
+        expect-fail (test_501_5's shape, billed `witness 1/1`). `exit_success and not
+        content_match` is the leg's only raise, so here the result was consulted and the
+        witness demonstrably fired — the consequent must stay satisfiable on the FAIL
+        leg. Without this control the consequent could be narrowed to an unconditional
+        raise and both pins above would still pass."""
+        h, size = self.plant(self.base, "evidence.log", b"BOOM\n")
+        body = _receipt(
+            "exec:`run`  expect-fail=/BOOM/  ran=TRACE#2",
+            verdict="FAIL", skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  a",
+                   "EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L1-L1"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "fail-ranged-exit-zero-match.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+        self.assertIn("witness 1/1", out.stderr)
 
     def test_the_scoping_is_not_a_blanket_disable(self):
         """Non-vacuity control: ONE receipt shape, body absent so no witness can evaluate,
@@ -6612,10 +6700,11 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
     `verdict == "PASS"` conjunct) makes tier2_witness resolve and read on the FAIL leg,
     but verify_witness's FAIL branch discards `content_match` unless `exit_success`,
     and the mandated red-team witness cites a WROTE, which carries no `exit=`. Measured
-    over the frozen #486 corpora, the conjunct drop ALONE moved 9 of 141 receipts from
-    `witness 0/1 unreached 1 (fail-leg-payload-not-sourced)` to `witness 1/1` with every
-    sub-count at 0 — trading a false `not-applicable` for a false `verified`, which is
-    strictly worse. The withholding is what makes the sourcing safe.
+    over the three ENUMERATED #486 corpora (`corpus17` + `live29` + `codegate22` = 68
+    receipts), the conjunct drop ALONE moved 8 of those 68 from `witness 0/1 unreached 1
+    (fail-leg-payload-not-sourced)` to `witness 1/1` with every sub-count at 0 (the
+    witness ratio goes 42/65 → 50/65) — trading a false `not-applicable` for a false
+    `verified`, which is strictly worse. The withholding is what makes the sourcing safe.
 
     ⚠ DEC-29 — the withholding keys on whether the predicate's RESULT COULD AFFECT THE
     OUTCOME (`pattern and not exit_success`), never on the verdict and never on the
@@ -6699,8 +6788,8 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         `exit_success` is falsy and the FAIL branch discards `content_match` — the
         witness is structurally unable to reject. It must not be billed `witness 1/1`.
 
-        Without the withholding this reads (1, 1) — the 9-receipt regression measured
-        over the frozen corpora."""
+        Without the withholding this reads (1, 1) — the 8-receipt regression measured
+        over the three enumerated frozen corpora."""
         wit, trace = self._ranged_grep(body="BOOM\n")
         cov = self._cov()
         self.assertEqual(
@@ -6785,6 +6874,61 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
             self.rv.tier2_witness(wit, trace, [self.a, self.b], True, "FAIL",
                                   self._cov())
         self.assertIn("ambiguous", str(cm.exception).lower())
+
+    # --- the `evaluated` narrowing, pinned at its own level -------------------
+
+    def test_501_13_no_exit_clause_sets_no_evaluated_flag(self):
+        """QG-r1/S1 — the direct pin for the `pattern` half of `probe["evaluated"]`'s key,
+        at the level where it is observable without a CLI round-trip: the probe itself.
+
+        This shape has a body predicate and NO exit clause, so the FAIL leg's only raise
+        (`exit_success and not content_match`) is inert and the predicate's result is
+        thrown away. The key must withhold `evaluated` here.
+
+        WHAT IT CATCHES, stated exactly (QG-r2/S2 — the earlier version of this docstring
+        claimed the `exit_m` narrowing, which this test does NOT catch): reverting the key
+        to `exit_m or pattern` turns this test RED. Reverting it to `exit_m` leaves it
+        GREEN — that arm is pinned by
+        test_501_fail_leg_exit_clause_expect_fail_cannot_retire instead. Both were
+        confirmed against a deliberately-broken copy of the tree."""
+        wit, trace = self._ranged_grep(body="BOOM\n")
+        probe = {}
+        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov(),
+                              None, probe)
+        self.assertNotIn("evaluated", probe)
+        self.assertEqual(probe.get("result_discarded"), "fail-leg-no-exit-evidence")
+
+    # --- the two NEW hard-FAIL surfaces the sourcing arms on this leg ---------
+
+    def test_501_14_fail_leg_oversized_range_now_hard_FAILs(self):
+        """QG-r1/S6 — DECLARED, and therefore pinned. Sourcing the payload does not only
+        start a read: it routes the FAIL leg through every guard between resolution and
+        the predicate, and the 4 KiB actual-bytes cap is one of them. Before #501 this
+        receipt exited 0 (the leg returned on a None art_name); now it raises, which
+        `quality-gate/SKILL.md` treats as structurally BLOCKED.
+
+        Kept rather than exempted: the cap is the convention's own Cost-model bound and
+        is already live on the PASS leg, so exempting FAIL would key a guard on the
+        VERDICT — the shape DEC-29 forbids. Declared in `return-convention.md` § *On a
+        `FAIL` receipt…* and in `red-team-prompt.md` beside the ≤ 4 KiB instruction, so
+        it is a stated gate rather than an incidental one. Reverting the sourcing half
+        turns this test RED."""
+        wit, trace = self._ranged_grep(body=("x" * 60 + "\n") * 200,
+                                       rng=("L", 1, 200))
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+        self.assertIn("exceeds 4 KiB actual bytes", str(cm.exception))
+
+    def test_501_15_fail_leg_non_utf8_artifact_now_hard_FAILs(self):
+        """QG-r1/S6, the second surface, same reasoning. The `#L` range reader decodes
+        losslessly (no `errors=`), so a findings file carrying a non-UTF-8 byte raises
+        instead of reading — again exit 0 before #501, hard FAIL after. Reverting the
+        sourcing half turns this test RED."""
+        wit, trace = self._ranged_grep()
+        (self.a / "f.txt").write_bytes(b"quiet \xff\n")
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+        self.assertIn("is not valid UTF-8", str(cm.exception))
 
     # --- the rangeless control (must NOT move) --------------------------------
 

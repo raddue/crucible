@@ -2015,19 +2015,27 @@ def witness_art_name(witness, cited, verdict):
     TRACE looks like when the work product is a findings file), so art_name came back
     None and tier2_witness returned before resolve_base was EVER called. #486's whole
     resolution machinery was unreachable on the verdict of every gate round that finds
-    anything. Measured over the frozen corpora: 30 of 141 receipts carry this shape.
+    anything. Measured with `scripts/measure_486_corpus.py` over the three ENUMERATED
+    frozen corpora (`corpus17` + `live29` + `codegate22` = 68 receipts): 18 of 68 carry
+    this shape — every one of the 19 `FAIL` receipts except the single one citing an
+    `EXEC` with an `out=` range, which `derive_art_name` could still name.
 
     ⚠ The conjunct could NOT be dropped on its own, and the reason is the half that
     makes this a convention change rather than a one-liner. verify_witness's FAIL branch
     computes `content_match` and then discards it unless `exit_success`, and a
     WROTE-cited entry carries no `exit=` — so sourcing alone makes the predicate run,
     resolve, read real bytes and still be structurally unable to reject, while
-    `_bill_witness_evaluation` bills it `witness 1/1`. Measured: the conjunct drop ALONE
-    moved 9 of 141 frozen-corpus receipts from an honest `witness 0/1 unreached 1
-    (fail-leg-payload-not-sourced)` to `witness 1/1` with every sub-count at 0 — trading
-    a false `not-applicable` for a false `verified`, which is strictly worse. The
-    companion withholding (`probe["result_discarded"]` → the `discarded` sub-count) is
-    what makes this safe, and the two must never be separated.
+    `_bill_witness_evaluation` bills it `witness 1/1`. Measured by reverting ONLY the
+    `probe["result_discarded"]` assignment on a copy of this tree and re-running
+    `measure_486_corpus.py`: the conjunct drop ALONE takes the witness ratio from the
+    shipped `9/15 + 18/29 + 15/21 = 42/65` to `11/15 + 18/29 + 21/21 = 50/65`, i.e. it
+    moves 8 of the 68 enumerated frozen-corpus receipts from an honest `witness 0/1
+    unreached 1 (fail-leg-payload-not-sourced)` to `witness 1/1` with every sub-count at
+    0 — trading a false `not-applicable` for a false `verified`, which is strictly
+    worse. (Both figures are reproducible on demand, never CI-defended — see
+    `measure_486_corpus.py`'s docstring.) The companion withholding
+    (`probe["result_discarded"]` → the `discarded` sub-count) is what makes this safe,
+    and the two must never be separated.
 
     WIDENING, stated plainly: ran=TRACE#N no longer determines which file is read (it is
     still Tier-1-checked to point at an EXEC/READ/WROTE) — the reviewer gains control of
@@ -2126,8 +2134,13 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
     off DISK + a predicate evaluated", which is false for a kind=exec exit-clause witness —
     the shape return-convention.md's own worked example and every mandated fix-agent
     receipt use — even though a comparison really did run. The SUPERSEDES witness-evidence
-    rule needs "did a predicate evaluate to a result AT ALL", so it consults this instead;
-    keying it on `wit_verified` would have made the convention's own example unsupersedable.
+    rule consults this instead; keying it on `wit_verified` would have made that exec
+    exit-clause shape unsupersedable on the PASS leg, where the comparison is the whole
+    check. **The two legs ask it differently, and QG-r2/S2 is why.** On the PASS leg the
+    question is "did a predicate evaluate to a result AT ALL", and both PASS sites set the
+    flag where a comparison really runs. On the FAIL leg that question is too weak — that
+    leg raises at exactly one site, so the flag is set only when the result could REACH it
+    (`pattern and exit_success`), which withholds it from the exec exit-clause shape there.
     Write-only here, exactly like `no_predicate`: nothing this function decides reads it.
 
     DEFERRED (#474 §3): a witness carrying ran=SKIPPED: is Tier-1-legal on a PASS and
@@ -2169,19 +2182,33 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
         # The new behaviour is the conformant one; blast radius measured zero.
         pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
         content_match = bool(pattern and re.search(pattern, body))
-        if probe is not None and exit_m:
-            # GH #501 — siege S-7's `evaluated`, narrowed to what this leg's outcome can
-            # actually depend on. The FAIL leg raises only under `exit_success and not
-            # content_match`, so with NO exit clause at all the branch is inert: the
-            # predicate's result is discarded and the witness demonstrated nothing. It
-            # used to be set on `exit_m or pattern`, which said "a predicate evaluated"
-            # for exactly the shape that cannot reject — and the SUPERSEDES
-            # witness-evidence consequent consumes this, so the loose form let a
-            # supersession survive on a witness that proved nothing. Fail-CLOSED
-            # direction: a withheld `evaluated` can only over-BLOCK.
-            # Measured free: 0 of 116 real frozen-corpus receipts carry a non-`none`
-            # SUPERSEDES at all, so arming this blocks nothing that exists today —
-            # which is also the live confirmation of the 0-site claim at the consequent.
+        if probe is not None and pattern and exit_success:
+            # GH #501 / QG-r2/S2 — siege S-7's `evaluated`, keyed on the ONE question
+            # DEC-29 admits: could this witness's result affect this leg's outcome. The
+            # FAIL leg raises at exactly one site, `exit_success and not content_match`,
+            # so the result can reach the outcome only when a body predicate was derived
+            # (`pattern`) AND the cited entry's exit is 0. Everything else evaluated
+            # nothing this leg could act on. Fail-CLOSED direction: a withheld
+            # `evaluated` can only ever over-BLOCK.
+            #
+            # ⚠ DEC-29, twice over. The first form was `exit_m or pattern`; the second was
+            # `exit_m`, the PRESENCE of an `exit=` token — a SHAPE, the forbidden key,
+            # and nothing on this leg COMPARES it (`exit_success` is read only by the
+            # raise below). The `exit_m` form closed only the arms where a pattern
+            # exists: an exit-clause `expect-fail` (`exit!=0` / `exit=<N>`) derives no
+            # pattern from `_expect_fail_pattern` at all, so `result_discarded` — which
+            # is keyed on `pattern` — never fired for it either, and the SUPERSEDES
+            # consequent that consumes this flag opened for a witness the census bills
+            # `not-applicable (exit-clause-not-a-body-predicate)` on the same stderr
+            # line: siege S-7(a), one `expect-fail` token over. The whole suite passed
+            # with and without that hole, which is what an unpinned arm buys.
+            # Pinned by test_501_fail_leg_exit_clause_expect_fail_cannot_retire on BOTH
+            # kind=exec and ranged kind=grep (the key is the derivation, never the kind);
+            # reverting this line to `exit_m` turns it RED.
+            #
+            # Scope: this branch is FAIL-leg-only. The PASS leg sets `evaluated` at its
+            # own two sites, where a comparison really runs, so no PASS receipt's exit
+            # code can move — the false-BLOCK risk this re-key was weighed against.
             probe["evaluated"] = True
         if probe is not None and pattern and not exit_success:
             # GH #501 — the companion withholding witness_art_name's docstring names.
@@ -2596,7 +2623,7 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
         # sequence for the same reason the sixth was: an item that already earns
         # `wrong-name`, `ambiguous` or `empty-range` is reported only there (design
         # :1178-1180's tie-break), so this is the bucket for a withheld item that earns
-        # no earlier one. Without it the 9 frozen-corpus receipts measured at
+        # no earlier one. Without it the 8 frozen-corpus receipts measured at
         # witness_art_name land in NONE of the disjoint sub-counts on a `witness 0/1`
         # line — the state tier2_witness's docstring declares forbidden, which is exactly
         # the C01 break DEC-28 closed one counter earlier.
@@ -2738,8 +2765,12 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                     # behaviour: they now report whatever their payload artifact really
                     # does (`not-reachable` when the bare basename resolves nowhere,
                     # `discarded` when it resolves and the FAIL leg throws the predicate
-                    # result away). Measured over the frozen corpora, that is 18 and 9
-                    # receipts respectively, and no exit code moved.
+                    # result away). Measured pre/post with `measure_486_corpus.py` over
+                    # the three enumerated frozen corpora, that is 10 and 8 receipts
+                    # respectively — the 18 this arm held, redistributed with nothing
+                    # left over (witness-leg `unreached` drops by exactly 18 and the
+                    # code-less `unreached` population is byte-identical either side) —
+                    # and no exit code moved.
                     #
                     # D8.5 — D4's single "NOT-EVALUATED" string still folds onto TWO
                     # codes: a FAIL leg with no range AND no EXEC out= range, and a PASS
@@ -3777,7 +3808,8 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                                   bodies, wit_probe, wit_notes)
                     if v11 is not None and v11["supersedes"] != "none" \
                             and not wit_probe.get("unsourced") \
-                            and not wit_probe.get("evaluated"):
+                            and (not wit_probe.get("evaluated")
+                                 or wit_probe.get("result_discarded")):
                         # C1-R3-S1 — the exemption is keyed on `unsourced`: tier2_witness
                         # sourced NO artifact, so resolve_base never ran, verify_witness was
                         # never called, and `evaluated` cannot be set by any witness this
@@ -3809,15 +3841,63 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                         # a FAIL witness with no range to source AND no EXEC `out=` to fall
                         # back to, which remains genuinely unsatisfiable.
                         #
-                        # ⚠ Arming it is only real because `evaluated` was narrowed with it
-                        # (verify_witness): the FAIL leg cannot raise without an `exit=`
-                        # clause, so the old `exit_m or pattern` form asserted "a predicate
-                        # evaluated" for precisely the shape that cannot reject — and this
-                        # consequent consumes that flag. Widening `evaluated` back re-opens
-                        # siege S-7(a) here with the exemption gone, i.e. silently, and
-                        # test_501_fail_leg_ranged_witness_with_no_exit_evidence_cannot_retire
-                        # is the only thing that catches it (it was MISSING at first and was
-                        # found by reverting each half against a deliberately-broken copy).
+                        # ⚠ Arming it is only real because `evaluated` is keyed on whether
+                        # this leg's outcome can depend on the witness at all (verify_witness):
+                        # `pattern and exit_success`, the exact antecedent of the leg's one
+                        # raise. THREE forms of this key have now been wrong, all in the same
+                        # direction — `exit_m or pattern` (QG-r1/S1: no exit clause at all,
+                        # so the branch is inert), `exit_m` (QG-r2/S2: the PRESENCE of a
+                        # token, DEC-29's forbidden key) — and this consequent consumes the
+                        # flag, so each let a supersession survive on a witness that proved
+                        # nothing.
+                        #
+                        # ⚠ QG-r2/S2 — what the `exit_m` form left open, and why the
+                        # `or result_discarded` conjunct did NOT cover it: an exit-clause
+                        # `expect-fail` (`exit!=0` / `exit=<N>`) derives no pattern from
+                        # `_expect_fail_pattern`, and `result_discarded` is keyed on
+                        # `pattern`, so NEITHER flag fired for it. A FAIL receipt retired a
+                        # peer's finding on the same stderr line that billed its witness
+                        # `witness 0/0 … not-applicable 1 (exit-clause-not-a-body-predicate)`
+                        # — one `expect-fail` token from the shape QG-r1/S1 closed. The whole
+                        # 436-test suite passed with and without the hole, because that arm
+                        # had no pin at all.
+                        #
+                        # WHAT PINS WHAT (each verified by reverting the half on a copy of the
+                        # tree, never by watching a pin go green — DEC-31):
+                        #   * key → `exit_m`: test_501_fail_leg_exit_clause_expect_fail_cannot_
+                        #     retire goes RED on BOTH kind=exec and ranged kind=grep, and
+                        #     NOTHING else does — test_501_13 included.
+                        #   * key → `exit_m or pattern`: that test AND test_501_13 (which pins
+                        #     the `pattern` half at verify_witness's own level).
+                        #   * the `or result_discarded` conjunct removed: NOTHING goes red —
+                        #     437/437 still pass. Stated rather than left to be discovered,
+                        #     because "the pin is green" is not evidence the guard is live.
+                        #     The conjunct is REDUNDANT given the key above: `result_discarded`
+                        #     is `pattern and not exit_success`, whose every case `not
+                        #     evaluated` already covers. It is kept as defence in depth against
+                        #     the two flags drifting apart — NOT as the arming mechanism, and
+                        #     test_501_fail_leg_witness_with_a_DISCARDED_result_cannot_retire
+                        #     now pins the KEY's behaviour on that shape, not the conjunct.
+                        #
+                        # Net on this leg: a predecessor is retired only when a body predicate
+                        # was derived AND the cited entry's exit is 0 — and since
+                        # `exit_success and not content_match` raises separately, only when
+                        # that body also MATCHED (test_501_5's shape). The `unsourced`
+                        # exemption above is the one remaining way past this consequent.
+                        #
+                        # ⚠ THE CORPUS FIGURE BOUNDS THE `PASS` POPULATION ONLY (QG-r2/S3).
+                        # 21 of the 68 receipts in the three enumerated frozen corpora carry a
+                        # non-`none` SUPERSEDES and ALL 21 are `PASS` — re-derived as
+                        # {'n': 68, 'sup': 21, 'supfail': 0, 'fail': 19} — and running all 68
+                        # through the CLI with and without this key gives byte-identical exit
+                        # codes. As evidence ABOUT THIS CONSEQUENT that is VACUOUS: the corpora
+                        # hold ZERO `FAIL` receipts carrying a non-`none` SUPERSEDES of any
+                        # shape, so "0 exit codes move" cannot distinguish "the arming blocks
+                        # nothing" from "the corpus contains none of the targeted shape". What
+                        # it does bound is the `PASS` population, and that bound is real for a
+                        # structural reason rather than a measured one: this key sits inside
+                        # `if verdict == "FAIL"`, and the PASS leg sets `evaluated` at its own
+                        # two sites, so no `PASS` receipt's exit code can move.
                         #
                         # siege S-7(a) — the Tier-2 half of the witness-evidence rule.
                         # Tier-1 checks the witness's SHAPE (`kind ∈ {exec, grep}`,

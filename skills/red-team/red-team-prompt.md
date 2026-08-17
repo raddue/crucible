@@ -191,18 +191,28 @@ Task tool (subagent_type: crucible-red-team):
       are reviewer-declared cross-checks, not the score source** — the orchestrator re-derives
       the weighted score by counting the findings file's severity sections.
     - **`WITNESS`** — `grep:<findings-file>#<range covering L1>  pattern=/significant=[1-9]|fatal=[1-9]/  expect-fail=match  ran=TRACE#<the-WROTE-findings-file-index>`.
-      The cited range covers `#L1` (the `SEVERITY-COUNTS:` line) and is ≤ 4 KiB. `ran=` points
+      The cited range covers `#L1` (the `SEVERITY-COUNTS:` line) and is ≤ 4 KiB. **That bound
+      is enforcing on BOTH verdicts since GH #501** — the `FAIL` leg opens the cited range now,
+      so a range whose real bytes exceed 4 KiB, or a findings file that is not valid UTF-8,
+      hard-FAILs the lint on a `FAIL` receipt exactly as on a `PASS` one. A narrow range over
+      your markdown findings file reaches neither; a wide one can, because the cap measures the
+      range's ACTUAL bytes, not Tier-1's line estimate. `ran=` points
       at the `WROTE <findings-file>` TRACE entry. Keep the witness `pattern=` **leading with `/`**
       (a regex literal). A `WROTE` carries **no `out=` field** (only `EXEC` does); the witness
       range is named on the WITNESS line itself. **This one line is the right line to write on
-      either verdict, but only the `PASS` leg is linter-verified:** Tier-2 fails a `PASS` if the
-      pattern matches (a clean round must have no F/S). On a `FAIL` receipt the witness is **not
-      evaluated at all** — that leg's body lookup goes only through an `EXEC` line's `out` field
-      and the mandated form cites a `WROTE`, so nothing is read even when the file resolves (see
-      `shared/return-convention.md` § *Scope of the two Tier-2 paragraphs above*). A `FAIL`
-      whose counts line secretly reads `0/0` is therefore **not** rejected: the FAIL leg's
-      consistency is reviewer-asserted, not linter-verified. Tracked on the #474 Tier-2
-      resolution issue; write the line correctly regardless, because it is what the PASS leg
+      either verdict, but only the `PASS` leg is linter-*enforced*:** Tier-2 fails a `PASS` if the
+      pattern matches (a clean round must have no F/S). On a `FAIL` receipt the witness **is read
+      and its pattern does run** — since #501 the leg sources the ranged payload from the WITNESS
+      line itself, so your findings file resolves under `--root` and the predicate runs against
+      its real bytes (see `shared/return-convention.md` § *Scope of the two Tier-2 paragraphs
+      above*). What it cannot do is **decide**: that leg rejects only under `exit=0 and the body
+      does not match`, and the `WROTE` you cite carries no `exit=`, so the answer is computed
+      and discarded. A `FAIL`
+      whose counts line secretly reads `0/0` is therefore still **not** rejected: the FAIL leg's
+      consistency is reviewer-asserted, not linter-enforced. The residual evidential gap — this
+      leg computing a result it cannot act on — is tracked on GH #512, whose subject is that
+      gap's sharpest consequence, the SUPERSEDES witness-evidence rule's unenforced directional
+      half; write the line correctly regardless, because it is what the PASS leg
       of the *next* round checks.
       **And the `PASS` leg is now *reached*.** The linter is invoked with a repeatable
       `--root` — `--tier2 --strict --root <dispatch-root> --root <findings-root>`
@@ -236,7 +246,9 @@ Task tool (subagent_type: crucible-red-team):
       Fatal or Significant count now makes the pattern fire, which is a `LintError` →
       structurally `BLOCKED` → a re-dispatch or an escalation. Nothing here is yours to change — you do
       not choose `[FINDINGS_OUTPUT_PATH]`; it is stated so you know which leg checks the line
-      you write. The `FAIL`-leg gap is tracked on the same #474 resolution issue.
+      you write. What remains open on the `FAIL` leg is evidential, not resolutional, and is
+      tracked on GH #512 — #501 closed the resolution half. (Not GH #510: that is the separate
+      `ran=SKIPPED:` deferral.)
     - **`SUSPICION`**, **`NEXT`** — per convention.
     - After `NEXT`: mandatory v1.1 **`TRIPWIRE:`** / **`SUPERSEDES:`** lines. A **FAIL** receipt's
       `TRIPWIRE:` carries `verdict=FAIL` (the self-firing predicate). `TRIPWIRE: none` is
@@ -297,8 +309,12 @@ Task tool (subagent_type: crucible-red-team):
 
     The FAIL example below is a non-clean round (`fatal=1 significant=2`). The **same** WITNESS
     line's pattern MUST match the nonzero counts line, so under `expect-fail=match` the witness
-    fires → the FAIL is consistent. (Consistency here is *yours to assert*: Tier-2 does not read
-    the body on the FAIL leg, so a `0/0` counts line under a FAIL is accepted, not rejected.)
+    fires → the FAIL is consistent. (Consistency here is *yours to assert*: since #501 the `FAIL`
+    leg **does** open your declared range and run the pattern against its real bytes, but it
+    rejects only under `exit=0 and the body does not match`, and the `WROTE` you cite carries no
+    `exit=` — so the answer is computed and discarded, and a `0/0` counts line under a FAIL is
+    still accepted, not rejected. Because the range **is** opened, the ≤ 4 KiB bound and the
+    UTF-8 requirement bite on this leg too — see the WITNESS bullet above.)
     Its CLAIMS value-pins are consistent with its own
     `SEVERITY-COUNTS:` counts line (shown as the leading comment).
 
@@ -333,13 +349,19 @@ Task tool (subagent_type: crucible-red-team):
     witness fires → the FAIL is consistent. A PASS that secretly had F/S would make the pattern
     match and Tier-2 would reject it — **that leg is enforced.**
 
-    **The FAIL leg is not.** Tier-2's `FAIL` path looks the body up from an `EXEC` line's `out`
-    field, and the mandated form cites a `WROTE`, so on a `FAIL` receipt no body is read and the pattern
-    is never run — even when the findings file resolves perfectly under `--root`. A FAIL that
-    secretly had `0/0` is accepted. Writing the same line on both verdicts is still right (it is
-    the line the next round's PASS is checked against, and the asymmetry is a linter gap tracked
-    on the #474 Tier-2 resolution issue, not an intended licence), but on a FAIL the consistency
-    between your verdict and your counts line is **reviewer-asserted, not linter-verified**.
+    **The FAIL leg is read but not enforced.** Since GH #501 Tier-2's `FAIL` path sources the
+    ranged payload from the WITNESS line itself, so on a `FAIL` receipt the findings file
+    resolves under `--root`, the declared range is opened, and the pattern really runs against
+    its bytes. What the leg will not do is act on the answer: it rejects only under `exit=0 and
+    the body does not match`, and the mandated form cites a `WROTE`, which carries no `exit=` —
+    so the result is computed and thrown away, and the run renders `witness 0/1` with
+    `discarded 1 (fail-leg-no-exit-evidence)`. A FAIL that secretly had `0/0` is
+    therefore still accepted. Writing the same line on both verdicts is
+    still right (it is the line the next round's PASS is checked against, and the residual
+    asymmetry is an evidential gap tracked on GH #512, not an intended licence), but on a FAIL
+    the consistency between your verdict and your counts line is **reviewer-asserted, not
+    linter-enforced**. One consequence to act on: because the range IS opened here, the ≤ 4 KiB
+    bound and the UTF-8 requirement on your findings file are enforcing on this leg too.
 
     The witness verifies only the boundary; the exact
     F/S magnitude for scoring is re-derived by the orchestrator from the findings file's

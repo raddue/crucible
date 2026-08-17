@@ -623,7 +623,8 @@ def main(argv):
              "(syntactic instrument vs the design's tree-walk one)")
     # GH #501 — `discarded` joins the witness sum. Without it this figure would have
     # silently DROPPED by the size of the fail-leg population the fix re-bucketed
-    # (9 receipts over the frozen corpora): those items moved out of `unreached` and
+    # (8 receipts over the three enumerated corpora, re-derived by reverting the
+    # withholding on a copy of the tree): those items moved out of `unreached` and
     # into `discarded`, and they are non-verifications either way, so leaving them out
     # would report the corpus as having got better by exactly the number of receipts
     # whose disposition was only re-described. `not-applicable` is still omitted here —
