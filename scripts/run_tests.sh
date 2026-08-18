@@ -15,7 +15,56 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Absolute, resolved BEFORE the cd below. `${BASH_SOURCE[0]}` is relative to the caller's
+# cwd, so re-using it after `cd "$REPO_ROOT"` re-anchors it to the wrong directory: the
+# freeze-guard measured `bash crucible/scripts/run_tests.sh` from the parent giving
+# `flock: cannot open lock file … No such file or directory`, exit 66, ZERO of the suites
+# run. The quieter half is worse — invoked as `bash run_tests.sh` from `scripts/`, flock
+# CREATES the missing lock file (flock(1): "created … if it does not already exist") in
+# the repo root and execs that empty file: zero tests, exit 0, a silent GREEN from the
+# script CLAUDE.md calls the single source of truth. Derived from BASH_SOURCE rather than
+# spelled `$REPO_ROOT/scripts/run_tests.sh` so a rename cannot desynchronise it.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 cd "$REPO_ROOT" || exit 1
+
+# --- One invocation at a time, per checkout (round-1/C3-R1-S5) --------------------
+# Two invocations in flight against the same checkout do NOT produce an independent
+# second reading of the suite; they corrupt each other. Reproduced: three concurrent
+# runs, one of which failed `pytest skills/siege/evals/` with
+# `FileNotFoundError: skills/siege/evals/last_run.json` — that suite save-restores a
+# path INSIDE the checkout (`_EVALS_DIR / "last_run.json"`, mirrored in delve's), so
+# run B's tearDown unlinks the file run A is between writing and reading. Nothing about
+# it is a regression, and per-invocation scratch directories cannot fix it: the shared
+# fixture is a repo path, not a temp one. Serializing here is what makes a concurrent
+# invocation safe, and it is cheap — the second run waits instead of lying.
+#
+# The lock is taken on THIS SCRIPT: no new file, no gitignore question, correct in a
+# git worktree, and per-checkout by construction. A fixed lock path under /tmp was
+# rejected for the reason `scripts/compass.py` records — a co-tenant can pre-create it.
+# `flock` is util-linux; where it is absent the suite runs exactly as before, since the
+# serialization is a safety net and not a correctness precondition for a single run.
+if [ -z "${CRUCIBLE_SUITE_SERIALIZED:-}" ] && command -v flock >/dev/null 2>&1; then
+  export CRUCIBLE_SUITE_SERIALIZED=1
+  # Re-exec through the interpreter, not the path: the file is mode 644 in this repo
+  # (`bash scripts/run_tests.sh` is the documented invocation), so `flock <lock> <path>`
+  # would exec it directly and die with EACCES.
+  exec flock "$SELF" "${BASH:-bash}" "$SELF" "$@"
+fi
+
+# --- Test isolation: one PRIVATE temp namespace per invocation (round-1/C3-R1-S5) ---
+# Every suite below builds its scratch through `tempfile` (Python) or `mktemp` (bash),
+# and both resolve against $TMPDIR — by default the SHARED /tmp. Two invocations in
+# flight at once therefore share one temp namespace. Individual scratch DIRECTORIES are
+# already unique (`TemporaryDirectory()` / `mktemp -d`), but the NAMESPACE is not, so any
+# suite that reasons about the namespace rather than about its own directory — e.g.
+# `skills/inquisitor/evals/test_fixtures.py`, which globs `gettempdir()/variant-*` before
+# and after a call to assert the fixture cleaned up after itself — sees the other run's
+# files and goes red for a reason that is not a regression. A spurious RED is the same
+# class of defect as a spurious GREEN: both make the suite unusable as evidence.
+# Scoping $TMPDIR here removes the class for every suite at once, and costs one mkdir.
+_SUITE_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/crucible-suite-XXXXXXXX")" || exit 1
+export TMPDIR="$_SUITE_TMPDIR"
+trap 'rm -rf -- "$_SUITE_TMPDIR"' EXIT
 
 failed=()
 total=0
@@ -54,6 +103,7 @@ run python3 scripts/rcpt_verify.py --selftest
 run python3 scripts/test_rcpt_verify.py
 run python3 scripts/measure_474_denominators.py
 run python3 scripts/test_measure_474.py
+run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
 # --- Calibration dispatch / Brier advisory ---

@@ -284,24 +284,168 @@ add("n-rt-exec-cited-mismatch-clean",
     "does not itself reject; only a contradicting body does.")
 
 
+# ── #486 two-root rows: D1/D2/D3 and criterion 6 ──────────────────────────────
+# The token is "two-root", NOT "multi-root": f-multi-root-strict-pass above already
+# means root + git toplevel — the pre-existing two-candidate probe within ONE --root.
+# Reusing that token would make the fixture whose subject is the within-root precedence
+# D2 PRESERVES indistinguishable from the fixtures about the across-root rule D2 ADDS.
+#
+# What is NOT here and cannot be: _selftest_run_fixture returns 'pass'|'fail'|'error'
+# and never captures stderr, so criterion 6's BYTE-IDENTITY half and criterion 5's
+# non-strict `AMBIGUOUS:` note half live in the subprocess tests in
+# scripts/test_rcpt_verify.py (TestRepeatableRootFlag, TestCrossRootAmbiguity).
+_SPLIT_NOTE = ("stderr-shape half lives in test_rcpt_verify.py's subprocess tests — "
+               "--selftest compares only pass/fail")
+
+# p1 exists as a probed root that does NOT hold the row-1 name; the decoy keeps the
+# directory committed (git does not track empty dirs) and makes "absent from root 1" a
+# real, stable fact rather than an artefact of a missing directory.
+write_file("p1", "decoy.txt", "not referenced by any receipt\n")
+
+# (1) D1 — a name absent from root 1, present under root 2.
+#
+# ⚠ PATH-SHAPED, NOT A BARE BASENAME, and that is the whole point (round-1/C3-R1-S1).
+# The first version of this row declared a bare `second-root.log`. Under --strict an
+# UNRESOLVED bare basename degrades to UNVERIFIABLE and does NOT raise, so
+# _selftest_run_fixture returned "pass" whether the file resolved at root 2 and hashed
+# clean or resolved NOWHERE AT ALL: measured, the row was green under a first-root-only
+# probe, and green with p2/second-root.log deleted from disk. The one committed fixture
+# named for #486's headline behaviour was satisfied by #486's own defect — exactly the
+# trap row 6 below documents in its own comment, walked into by the row whose stated
+# subject IS resolution.
+#
+# A path-shaped name under --strict hard-FAILs when it resolves nowhere
+# (rcpt_verify `_unresolved_disposition`), so this row now fails in every world where
+# the behaviour it names is absent: root 2 not probed, or the file gone. The bare-
+# basename-at-root-2's-top-level shape is still corpus-covered, by row 6, which flips
+# for the same reason.
+h = write_file("p2", "d1/second-root.log", "all green\n")
+add("two-root-second-root-resolves",
+    receipt("build/two-root", [f"  d1/second-root.log  sha256:{h}  10"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=d1/second-root.log#L1-L1"],
+            ["  patch-applied=true  from=TRACE#1"],
+            r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
+    ["p1", "p2"], "pass", True,
+    "D1 — `d1/second-root.log` is absent under root 1 and resolves under root 2, where "
+    "its sha256 IS recomputed and compared; the witness reads the same bytes and does "
+    "not fire. The name is PATH-SHAPED under --strict deliberately: unresolved, it "
+    "hard-FAILs, so this row goes red under a first-root-only probe and red with its "
+    "subject file deleted. A bare basename would degrade to UNVERIFIABLE and pass in "
+    "both of those worlds, pinning nothing. " + _SPLIT_NOTE)
+
+# (2) D3 — same basename in both roots, receipt declares ROOT 2's hash; root 1 is read
+h1 = write_file("p1", "dup.log", "root one bytes\n")
+h2 = write_file("p2", "dup.log", "root two bytes\n")
+add("two-root-declaration-order-first-hit",
+    receipt("build/two-root", [f"  dup.log  sha256:{h2}  15"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=dup.log#L1-L1"],
+            ["  patch-applied=true  from=TRACE#1"],
+            r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
+    ["p1", "p2"], "fail", False,
+    "D3 — declaration order means root 1 is the file READ, so root 2's declared hash "
+    "mismatches. LIMITATION: --selftest compares only pass/fail, so this row cannot say "
+    "WHICH LintError fired — the intended mismatch, or an ambiguity raise misfiring "
+    "(which under strict=false would itself be a bug). The discriminating assertion for "
+    "declaration order is test_first_hit_is_declaration_order, which asserts the "
+    "resolved path itself. " + _SPLIT_NOTE)
+
+# (3) D2 — two distinct realpaths under --strict → LintError before any read
+add("two-root-ambiguous-strict-fail",
+    receipt("build/two-root", [f"  dup.log  sha256:{h1}  15"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=dup.log#L1-L1"],
+            ["  patch-applied=true  from=TRACE#1"],
+            r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
+    ["p1", "p2"], "fail", True,
+    "D2 — dup.log exists under both roots as two distinct realpaths → --strict "
+    "LintError, raised BEFORE any read (the declared hash here is root 1's and would "
+    "have matched). " + _SPLIT_NOTE)
+
+# (4) Q7 — byte-IDENTICAL copies are still ambiguous
+same = "identical bytes\n"
+hs = write_file("p1", "same.log", same)
+write_file("p3", "same.log", same)
+add("two-root-ambiguous-identical-bytes-strict-fail",
+    receipt("build/two-root", [f"  same.log  sha256:{hs}  16"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=same.log#L1-L1"],
+            ["  patch-applied=true  from=TRACE#1"],
+            r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
+    ["p1", "p3"], "fail", True,
+    "Q7 — two distinct realpaths are ambiguous regardless of content; collapsing "
+    "same-content copies would make the disposition depend on a file the receipt may "
+    "control. " + _SPLIT_NOTE)
+
+# (5) criterion 6's DISPOSITION half — the same root twice de-duplicates to a no-op
+h = write_file("p1", "solo.log", "all green\n")
+add("two-root-dedup-noop",
+    receipt("build/two-root", [f"  solo.log  sha256:{h}  10"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=solo.log#L1-L1"],
+            ["  patch-applied=true  from=TRACE#1"],
+            r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
+    ["p1", "p1"], "pass", True,
+    "criterion 6 — the same root declared twice de-duplicates by resolved path, so it "
+    "is NOT ambiguous and the run stays clean. " + _SPLIT_NOTE)
+
+
+# (6) criterion 3 — the ARTIFACTS sha256 is demonstrably RECOMPUTED, proved through the
+# SECOND root, which is the path #486 creates. c-tampered-hash already models the shape
+# under one root. ⚠ The control must RESOLVE: a perturbed artifact planted where nothing
+# resolves passes at exit 0 — that is #486's own defect wearing a test's clothes. For a
+# bare basename, "resolves" means the top level of a probed base.
+h = write_file("p2", "tampered.log", "real content\n")
+# Exactly one hex digit differs, and it is the FIRST one deliberately: the mismatch
+# bullet prints only hash[:12], so perturbing the last digit produces
+# "disk=b951fe82cd99 receipt=b951fe82cd99" — a real FAIL whose own message shows two
+# identical prefixes and reads like a linter bug to the next person who sees it.
+_perturbed = ("0" if h[0] != "0" else "1") + h[1:]
+add("two-root-tampered-hash-second-root",
+    receipt("build/two-root", [f"  tampered.log  sha256:{_perturbed}  13"],
+            ["  1  EDIT  lib/x.ts  sha256:" + HEXZ,
+             "  2  EXEC  `run`  exit=0  dur=1s  out=tampered.log#L1-L1"],
+            ["  patch-applied=true  from=TRACE#1"],
+            r"exec:`run`  expect-fail=/\d+ fail/  ran=TRACE#2"),
+    ["p1", "p2"], "fail", True,
+    "criterion 3 — tampered.log resolves at root 2's top level (reachability condition "
+    "met) and its declared hash differs from disk by one hex digit, so the FAIL proves "
+    "the sha256 was recomputed through the second root rather than assumed. "
+    + _SPLIT_NOTE)
+
+
 def verify_fixture(fx):
     """Run the committed fixture through rcpt_verify's Tier-2 exactly as --selftest will."""
     text = fx["receipt"]
-    root = HERE / fx["root"]
+    root = rv._fx_roots(HERE, fx["root"])    # #486 — string OR list of roots
     strict = fx["strict"]
     raised = None
+    got = None
     try:
         verdict = rv.lint_receipt(text)
         sections = rv.parse_receipt(text)
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
-        rv.tier2_artifacts(artifacts, trace, root, strict)
+        # SIEGE-R2BA-1 — the carry, exactly as rcpt_verify._selftest_run_fixture wires
+        # it: the generator's self-verify runs the committed corpus through the BOUND
+        # path the CLI takes, not a second unbound one that could green a row the
+        # shipped reader rejects.
+        bodies = {}
+        rv.tier2_artifacts(artifacts, trace, root, strict, None, bodies)
         if verdict in {"PASS", "FAIL"}:
-            rv.tier2_witness(witness, trace, root, strict, verdict)
+            rv.tier2_witness(witness, trace, root, strict, verdict, None, bodies)
+    except rv.WitnessTimeout as e:
+        # #486/Q8 — a wall-clock timeout is NOT a passing expect:"fail" fixture. Same
+        # swallow shape rcpt_verify._selftest_run_fixture fixes, one directory away.
+        raised = f"TIMEOUT: {e}"
+        got = "error"        # never compares equal to expect ('pass'|'fail' only)
     except rv.LintError as e:
         raised = str(e)
-    got = "fail" if raised else "pass"
+    # `got` may already be set by the timeout handler above — do not overwrite it, or
+    # the swallow is reinstated while looking fixed.
+    got = got or ("fail" if raised else "pass")
     ok = got == fx["expect"]
     return ok, got, raised
 
