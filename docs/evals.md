@@ -155,6 +155,43 @@ Overall: **98% with skill vs 67% without, +31% average delta.** Sequence complia
 
 **Different pressure types crack different defenses.** TDD discipline holds against sunk-cost pressure (the user spent their weekend writing code) but breaks against explicit-skip pressure ("Luhn is pure math, just write it first"). Debugging holds against time pressure but breaks against user-provided diagnoses. Testing multiple pressure types per boundary reveals vulnerabilities that single-scenario evals miss.
 
+## #537 Sonnet Pin: Wording-Diff Sanity Check (Not a Full Blind A/B, Claude Sonnet 5)
+
+#537 pins `crucible-qg-fix` from `model: inherit` to `model: sonnet` and touches wording in
+`skills/quality-gate/SKILL.md` and `skills/red-team/SKILL.md` (both carry `evals/evals.json`),
+triggering CLAUDE.md's "eval before you publish" rule. A full blind A/B (14 cases × old/new,
+each a live multi-round gate run) was judged disproportionate for a prose/pin diff — reduced to
+**2 representative cases, old (git HEAD pre-#537) vs. new (working tree post-#537), 4 live agent
+runs**: quality-gate eval #3 ("SQL-injectable utility function") and red-team eval #1
+("WebhookWorkerPool race/throughput/leak").
+
+Because this run's own orchestrator session is on Sonnet 5, `agents/crucible-qg-fix.md`'s old
+`model: inherit` and new `model: sonnet` resolve to the **same effective model** from here —
+this sample cannot show a model-tier behavioral delta, only whether the wording changes broke
+routing or behavior.
+
+**Result (partial — an Opus outage, status.claude.com 2026-08-24 05:06–05:27 UTC "elevated
+errors for multiple models," incl. Opus 5/4.8, blocked completion):**
+
+| Run | Old/New | Status | Result |
+|---|---|---|---|
+| qg3-old | HEAD (pre-#537) | 0 rounds — 7 dispatch retries, all `529` | No comparison data |
+| qg3-new | working tree (post-#537) | Round 1 complete, round 2 blocked | R1: 3 Fatal + 4 Significant found and fixed (SQL injection, unhandled input errors, missing `commit()`); matches eval #3's expectations |
+| rt1-old | HEAD (pre-#537) | Both rounds complete | R1 fatal=3/sig=7 → R2 fatal=4/sig=13, correctly escalated STAGNATION; race condition correctly ruled out both rounds |
+| rt1-new | working tree (post-#537) | Round 1 complete, round 2 blocked (`529` confirmed) | R1 fatal=3/sig=10/minor=5, "Fundamentally flawed" — same core findings as rt1-old R1 (throughput, leak, retry, plus SSRF+more) and the same correct race-condition call, independently re-derived |
+
+**Verdict: accepted as sufficient — no regression signal, eval-before-publish satisfied on a
+partial sample.** The 3 completed round-1 runs (qg3-new alone, and rt1-new vs. rt1-old's own
+round 1) show the new wording catching the same defects, making the same correct calls, and
+producing structurally valid gate runs as the old wording. qg3-old (0 rounds) and both "new"
+runs' round 2 never completed — the Opus outage had no confirmed resolution at decision time, and
+CLAUDE.md's subagent-dispatch guidance is explicit that a confirmed external outage is not to be
+blindly retried. This is a **partial, explicitly-accepted run**, not a completed A/B: it is
+recorded honestly as such rather than silently treated as a full pass. Re-running qg3-old and the
+missing round-2s later (once Opus is confirmed healthy) would strengthen this signal but was not
+judged necessary to unblock #537, given the model-tier dimension was already known to be
+untestable from a Sonnet 5 session regardless of outage.
+
 ## Running Evals
 
 Eval definitions live in `skills/<skill>/evals/evals.json`. Execution evals use the standard `prompt`/`expected_output`/`expectations` schema. Sequence evals extend this with `boundary`, `pressure_type`, `expected_sequence` metadata and categorized expectations (`sequence_compliance`, `pressure_resistance`, `correctness`) for per-axis grading.

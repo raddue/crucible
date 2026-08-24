@@ -51,9 +51,12 @@ nested-paren Minor, accepted for v1)):
 
 Enforcement boundary (see skills/shared/model-tier-policy.md): static pins in
 tracked *.md ONLY. This checker does NOT cover (a) `inherit`/session-model
-roles (crucible-qg-fix, dependency-audit's inline-on-session path), (b)
-consensus membership in untracked .claude/consensus-config.yaml (raw model
-ids, a .yaml — structurally invisible here), (c) other untracked operator
+roles (dependency-audit's inline-on-session path; crucible-qg-fix left this
+residual when #537 pinned it to sonnet; the standalone-or-finish-driven /red-team
+fix-mechanism dispatch is a member by the same "no static pin to catch" test
+— see #538), (b) consensus membership in
+untracked .claude/consensus-config.yaml (raw model ids, a .yaml —
+structurally invisible here), (c) other untracked operator
 config. Those are operator-convention residuals, documented, not enforced.
 
 Fenced-example handling (gate round 3, S2): lines inside ```- or

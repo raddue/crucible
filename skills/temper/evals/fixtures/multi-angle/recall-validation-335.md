@@ -53,7 +53,7 @@ Per `shared/harness-adapter.md` §8 (Claude Code):
 | `crucible-red-team` agent def | `~/.claude/agents/crucible-red-team.md` | resolves, `model: opus` |
 | `crucible-qg-judge` agent def | symlinked | resolves, `model: sonnet` |
 | `crucible-qg-verifier` agent def | symlinked | resolves, `model: sonnet` |
-| `crucible-qg-fix` agent def | symlinked | resolves, `model: inherit` |
+| `crucible-qg-fix` agent def | symlinked | resolves, `model: inherit` (as of #335; now `sonnet` per #537) |
 
 > **Install gap found and closed:** `delve` (authored in #331) had never been symlinked
 > into `~/.claude/skills/`. #335's install step caught and closed it — exactly the
