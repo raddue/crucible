@@ -106,6 +106,9 @@ run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
+# --- #488 c1 receipt name-space acceptance tests ---
+run python3 scripts/test_488_name_space.py
+
 # --- Calibration dispatch / Brier advisory ---
 run python3 scripts/check_calibration_dispatch.py --selftest
 run python3 scripts/check_calibration_dispatch.py
