@@ -56,28 +56,9 @@ It has caught real bugs that would otherwise have shipped; running it always
 costs less than shipping the defect. (This repo *defines* the gate — eat the
 dogfood.)
 
-## Working principles
-
-### 1. Think before coding
-Don't assume. Don't hide confusion. Surface tradeoffs. State assumptions; if
-uncertain, ask. If multiple interpretations exist, present them. If a simpler
-approach exists, say so. If something is unclear, stop and name it.
-
-### 2. Simplicity first
-Minimum code that solves the problem, nothing speculative. No features beyond
-what was asked, no abstractions for single-use code, no error handling for
-impossible scenarios. If 200 lines could be 50, rewrite it.
-
-### 3. Surgical changes
-Touch only what you must. Don't "improve" adjacent code, don't refactor what
-isn't broken, match existing style. Remove orphans your changes created; leave
-pre-existing dead code (mention it, don't delete it). Every changed line should
-trace to the request.
-
-### 4. Goal-driven execution
-Define success criteria, loop until verified. "Fix the bug" → "write a test that
-reproduces it, then make it pass." For multi-step tasks, state a brief plan with
-a verify step for each.
+Baseline coding guidelines (think-before-coding, simplicity, surgical changes,
+goal-driven execution) live in the global `~/.claude/CLAUDE.md` (Karpathy rules)
+and apply here too.
 
 ## Using Crucible
 
