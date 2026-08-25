@@ -121,6 +121,9 @@ run python3 scripts/test_reconcile_git.py
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
 
+# --- crucible-qg-fix model-pin regression (#537) ---
+run python3 scripts/test_qg_fix_pin.py
+
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
 

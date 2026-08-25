@@ -127,6 +127,8 @@ The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signa
 | Documentation | Fix subagent |
 | Standalone invocation | Caller decides |
 
+The fix / Plan-Writer dispatch runs on the inherited session model (no agent-def pin) — unlike quality-gate's `crucible-qg-fix`, which is pinned to Sonnet (#537). Operator convention: do not run red-team's full-loop fix dispatch — standalone or driven by a non-interactive caller such as `finish` — on a Fable session; see `shared/model-tier-policy.md` residual (a) and #538.
+
 ### 2. Dispatch Devil's Advocate
 
 Use the `red-team-prompt.md` template in this directory. Provide:

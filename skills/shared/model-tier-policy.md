@@ -6,9 +6,16 @@ that pin a non-default tier link here — link, never copy (CLAUDE.md).
 
 ## TL;DR
 
-- **Opus 4.8 is the default** for every reasoning role; Sonnet for cheap
-  mechanical checks (`crucible-qg-judge`/`crucible-qg-verifier`). **Fable 5
-  nowhere**, except behind an eval-gated pilot.
+- **Opus 4.8 is the default** for every reasoning role except three roles
+  that are not Opus-pinned — `crucible-qg-fix` (Sonnet, below), the
+  standalone `/red-team` fix dispatch, and dependency-audit's inline path
+  (the latter two unpinned/session, residual (a)); Sonnet for cheap
+  mechanical checks (`crucible-qg-judge` /
+  `crucible-qg-verifier`) and for the fix agent (`crucible-qg-fix` — the
+  main-loop fix output is re-reviewed on single-model rounds that reach a
+  subsequent red-team; **not** bounded on the post-pass quick-fix, the
+  fix-agent terminal exits, or any escalation exit — see the row below;
+  #537). **Fable 5 nowhere**, except behind an eval-gated pilot.
 - **Eval-before-default:** no role flips model tier without its own A/B eval
   showing a lift that justifies Fable's **~2.6× effective cost** (2× sticker
   price × ~1.3× tokenizer overhead — Fable uses the Opus-4.7 tokenizer).
@@ -41,7 +48,8 @@ historically fired on *topic*, not *intent*, so the safe default is:
 | dependency-audit | none (inline on session model) | **HARD-OUT marker (tripwire only)** — CVE/vuln analysis; marker catches only a future explicit pin, not the inline-on-session path |
 | crucible-red-team | opus | **OUT (keep Opus)** — calibration-recall-critical; static pin checker-enforced |
 | crucible-qg-judge / qg-verifier | sonnet | **OUT (keep Sonnet)** — mechanical; a fable flip is waste, not unsafe (unmarked) |
-| crucible-qg-fix | inherit | **Constrained by orchestrator policy** — see Enforcement boundary (a) |
+| crucible-qg-fix | sonnet | **OUT (keep Sonnet)** — fix agent / plan reviser; per-round red-team re-review on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop); see `harness-adapter.md` Mapping 1b for the sites this bound does not cover (post-pass quick-fix, fix-agent terminal exits, any escalation exit) (#537). The `Eval-before-default` rule is **waived** for this downgrade, with the downstream per-round Opus red-team re-review as a partial measurement surrogate — it addresses output quality but not the rule's other named concern (calibration distribution); round-count and calibration-distribution effects remain unmeasured and are tracked in #539. Counter-evidence to weigh: #528 measures a 38% iatrogenic rate under the pre-#537 `inherit` fixer (tier unrecorded in the issue). **(unmarked)** — a future fable pin here is not checker-blocked; mark the file if the re-review bound is ever removed. |
+| red-team fix dispatch (standalone/finish) | none (subagent on inherited/session model) | **Constrained by orchestrator policy** — see residual (a) |
 | build implementer, delve/inquisitor, audit lenses | opus | **ELIGIBLE-PENDING-VERIFICATION** — probe-gated + eval-gated, NOT checker-blocked |
 | plan/spec-writer (`build/plan-writer-prompt.md`, `spec/spec-writer-prompt.md`) | opus | **ELIGIBLE — pilot candidate** (eval-gated; a silent fallback here is harmless: fallback floor = Opus 4.8, no Tier-A verdict) |
 
@@ -70,10 +78,15 @@ the entire enforcement surface.
 **It does NOT enforce (disclosed residuals — operator convention, not
 checker guarantee):**
 
-- **(a) `inherit` / session-model roles.** `crucible-qg-fix` (inherits the
-  session model) and dependency-audit's inline-on-session path have no static
-  pin to catch. **Operator convention: do not run gate/build/siege — or
-  dependency-audit's callers — on a Fable session.** A session-model guard
+- **(a) `inherit` / session-model roles.** Dependency-audit's inline-on-session
+  path has no static pin to catch (`crucible-qg-fix` was the other member of
+  this residual until #537 pinned it to Sonnet). The standalone-or-`finish`-driven `/red-team`
+  fix-mechanism dispatch (`red-team/SKILL.md` fix-mechanism table) is now a
+  member by the same "no static pin to catch" test — it stayed on the
+  inherited/session model when `crucible-qg-fix` pinned away from it (#537;
+  see #538). **Operator convention: do not run gate/build/siege — or
+  red-team's full-loop fix dispatch (standalone or `finish`-driven), or dependency-audit's callers — on a Fable
+  session.** A session-model guard
   hook is a named follow-up, not a v1 deliverable.
 - **(b) Consensus membership.** On consensus-eligible rounds the single-model
   red-team dispatch and siege's offensive Chain Analyst are *replaced* by

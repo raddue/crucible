@@ -47,7 +47,7 @@ fields map onto it. The authored source of truth is the Claude-Code `name` + `de
 |---|---|---|---|---|
 | Skill identifier | `name:` | (file name `<name>.md`; no `name` key) | prompt metadata `name`/title | command/rule name |
 | Trigger + one-line purpose | `description:` (triggers live here) | `description:` | prompt metadata description | rule description |
-| Dispatch agent selection | model-critical roles use named agent types (`agents/<role>.md`, `model:` frontmatter — `crucible-red-team`=opus, `crucible-qg-judge`/`crucible-qg-verifier`=sonnet, `crucible-qg-fix`=inherit; see Mapping 1b); other dispatches stay per-call general-purpose (Task tool picks) | `agent:` (named agent profile) | n/a | n/a |
+| Dispatch agent selection | model-critical roles use named agent types (`agents/<role>.md`, `model:` frontmatter — `crucible-red-team`=opus, `crucible-qg-judge`/`crucible-qg-verifier`/`crucible-qg-fix`=sonnet; see Mapping 1b); other dispatches stay per-call general-purpose (Task tool picks) | `agent:` (named agent profile) | n/a | n/a |
 | "this command spawns a subagent" | n/a (decided in body) | `subtask: true` | n/a (sequential) | n/a (sequential) |
 | Argument substitution | body reads invocation args | `$ARGUMENTS` token | prompt arg convention | command arg convention |
 | File include | body reads paths via tools | `@file` include | prompt include | rule include |
@@ -76,11 +76,11 @@ how each harness expresses (or degrades on) the binding.
 | `crucible-red-team` | **opus** | Recall-critical adversarial review (every **single-model** red-team round, look-harder, Devil's Advocate, depth-calibration second reviewer, re-review). The load-bearing pin. |
 | `crucible-qg-judge` | **sonnet** | Stagnation judge — mechanical cross-round finding comparison; cheap. |
 | `crucible-qg-verifier` | **sonnet** | Fix verifier **+** persistence checker — mechanical structural checks; cheap. One def, reused. |
-| `crucible-qg-fix` | **inherit** | Fix agent / Plan Writer (main loop, re-reviewed each round by the now-Opus red-team) **+** post-pass minor quick-fix. Inheriting keeps it cheap under a Sonnet orchestrator and strong under an Opus one; a weaker fixer costs at most an extra round, never a missed bug. |
+| `crucible-qg-fix` | **sonnet** | Fix agent / Plan Writer (main loop, re-reviewed on single-model rounds by the Opus red-team) **+** post-pass minor quick-fix. Cheap under any orchestrator; the **main-loop** fix output is re-reviewed by the Opus red-team on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop) (#537). **Not covered:** the post-pass quick-fix; the two fix-related terminal exits (agent-declared `ARCHITECTURAL_BLOCK`; orchestrator-detected no-op → `ESCALATED`); and any escalation exit (e.g. stagnation, sustained regression, diminishing returns, the 15-round circuit breaker), where a fix that is reviewed but rejected costs gate termination, not an extra round (#528 measures a 38% iatrogenic rate under the pre-#537 `inherit` fixer (tier unrecorded in the issue)); nor is context-window overflow — #537 measured this role's per-turn `cache_read` at 145 K–196 K, the highest of any subagent class, on a bare `sonnet` pin with no `[1m]` suffix (see `check_model_pins.py`'s bracket-suffix convention), and an overflowing dispatch's disposition is undefined by the current spec — the No-Op Fix Detector (`SKILL.md:511-514`) is defined over a produced artifact and cannot fire on a missing one, and the documented crashed-dispatch handling (`:36`, `:673`) records and continues rather than escalating; this is a real gap, not merely "an extra round"; measuring actual headroom is a #539 follow-up item — on consensus-eligible rounds the reviewer tier is operator-owned (see the Consensus-mode caveat / residual (b)), so the bound holds only for single-model rounds. Round-count and calibration-distribution effects of this flip are unmeasured — #539. |
 
 **Consensus-mode caveat.** Consensus-mode red-team rounds (quality-gate's Multi-Model Red-Team Review) resolve their model membership through the operator's `consensus_query` configuration, NOT the `crucible-red-team` pin — on those rounds the operator owns the consensus member tier. The Opus pin scopes to single-model dispatches.
 
-**Standalone-`/red-team` fix dispatch — deliberate exclusion, not an oversight.** These pins cover the quality-gate fix sites; the standalone-`/red-team` fix-mechanism dispatch (`red-team/SKILL.md` fix-mechanism table — Plan Writer / Fix subagent) is intentionally left on the inherited model (it is caller/artifact-determined — that table routes "Standalone → caller decides") and is inherit-equivalent to `crucible-qg-fix` today. A future editor who moves `crucible-qg-fix` off `inherit` should re-evaluate that standalone red-team fix site too, or it stays a silent escapee on the inherited model.
+**Standalone-`/red-team` fix dispatch — deliberate exclusion, not an oversight.** These pins cover the quality-gate fix sites; the standalone-`/red-team` fix-mechanism dispatch (`red-team/SKILL.md` fix-mechanism table — Plan Writer / Fix subagent) is intentionally left on the inherited model (it is caller/artifact-determined — that table routes "Standalone → caller decides"). As of #537, `crucible-qg-fix` is pinned to Sonnet and this standalone site is **no longer inherit-equivalent to it** — the standalone site now silently tracks the orchestrator's own model while the QG fix loop does not. This divergence is a known, unresolved gap; re-evaluating whether the standalone site should also pin is separate follow-up work, tracked in #538.
 
 **Namespacing (the `crucible-` prefix is deliberate).** Claude Code discovers agent types from
 `<project>/.claude/agents/` AND `~/.claude/agents/`, and on a name collision the **higher-priority
@@ -98,8 +98,9 @@ via claude-code-guide 2026-06-03). Two consequences are load-bearing: (1) the ag
 **does** override the inherited session model — that is what defeats the Sonnet-orchestrator
 degradation; (2) a **call-level `model:`** would override the agent-def, so the rewired dispatches
 **drop the call-level `model:`** entirely — the agent def is the single binding source. `model:
-inherit` is a documented-valid value (omitting the field has the same effect), which is why
-`crucible-qg-fix` may carry it explicitly.
+inherit` is a documented-valid value (omitting the field has the same effect); no current
+`crucible-*` agent def uses it — `crucible-qg-fix` was the last one to, until #537 pinned it to
+Sonnet.
 
 **Global `CLAUDE_CODE_SUBAGENT_MODEL` sits above the pin — keep it off gate machines.** Because it
 tops the precedence chain, exporting it (e.g. to `sonnet`) re-degrades the recall-critical red-team by
@@ -275,12 +276,23 @@ the install checklist — concrete enough to install by (AC6 doc portion).
   ~/.claude/agents/`), so `crucible-red-team` / `crucible-qg-judge` / `crucible-qg-verifier` /
   `crucible-qg-fix` are discoverable in every project. Without this step the named `subagent_type`s
   fail to resolve and the recall guarantee degrades (see Mapping 1b's degradation note / the
-  quality-gate fallback warning). On Claude Code an uninstalled `subagent_type` surfaces as a
+  quality-gate fallback warnings). On Claude Code an uninstalled `subagent_type` surfaces as a
   catchable **Task-tool resolution error** — not a silent substitution of a default agent — and that
   observable error is what fires the non-silent fallback warning (hence the trigger is the
   type-resolution failure, not a transcript read). A harness that silently substitutes a default on an
   unknown type cannot fire that warning, so on such a harness install MUST be verified out-of-band —
-  this manifest is that check. Bare-name `subagent_type` resolution for these four defs is **verified
+  this manifest is that check. A symlink that **resolves to a stale clone** (rather than a
+  missing/broken symlink) is a class of install fault this tripwire cannot see either: the manifest
+  checks *existence* of the four names, not content freshness, so any agent-def *content* change —
+  not just this one — requires an explicit install re-verification (verify by resolving the symlink's
+  target path and diffing full content against the repo source, e.g.:
+  ```
+  readlink -f ~/.claude/agents/<name>.md            # must print <repo>/agents/<name>.md
+  diff -q <repo>/agents/<name>.md ~/.claude/agents/<name>.md
+  ```
+  (macOS/BSD `readlink` lacks `-f`; use `python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" ~/.claude/agents/<name>.md` instead.)
+  — not by inspecting the session roster, which surfaces name/description/tools but not `model:`)
+  rather than trusting the symlink's mere presence. Bare-name `subagent_type` resolution for these four defs is **verified
   for the user-level symlink install** (`~/.claude/agents/`, where agents load by bare `name`). Under a
   **plugin install**, Claude Code namespaces plugin agents (`crucible:crucible-red-team`), and
   bare-name `subagent_type` resolution for plugin-provided agents is **UNCONFIRMED** — the docs specify
