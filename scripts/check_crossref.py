@@ -23,7 +23,10 @@ Scope decisions:
   files only, so gitignored docs are naturally excluded. `docs/plans/`,
   `docs/prds/`, and `docs/handoffs/` are all gitignored (e.g. `docs/plans/`
   carries historical pre-rename names like `crucible:writing-plans`), so NEW
-  files added under those paths are NOT scanned. Tracked surfaces ARE scanned:
+  files added under those paths are NOT scanned — **except**
+  `docs/plans/2026-08-21-488-c1-name-space-reduced.md` (#488 c1's name-space
+  ruling), which `.gitignore` negates (see Task 1 of the #488 c1 implementation
+  plan) and IS scanned like any other tracked file. Tracked surfaces ARE scanned:
   `skills/**`, top-level `docs/*.md`, `docs/research/` (not gitignored),
   `docs/ledger/`, etc. (Edge case: `docs/handoffs/` has one grandfathered
   tracked file committed before the ignore rule existed, which is still scanned.)

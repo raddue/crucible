@@ -4,7 +4,12 @@ node_modules/
 .claude/
 .envrc
 .mcp.json
-docs/plans/
+docs/plans/*
+# #488 c1 — the ONE plans file that is a permanent repo artifact: the name-space
+# ruling scripts/test_488_name_space.py reads (AC-1). A bare `!` exception cannot
+# re-include a file under an excluded DIRECTORY, so the directory pattern is
+# widened to `docs/plans/*` and this one path is negated.
+!docs/plans/2026-08-21-488-c1-name-space-reduced.md
 docs/prds/
 docs/compass.md
 # Transient compass lockdir (#408 F12: lock-beside-data); only present mid-write,
