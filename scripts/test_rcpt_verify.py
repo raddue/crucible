@@ -5532,7 +5532,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         reaches `resolve_base` through `tier2_witness` and hits the same refused-base
         diagnosis through the same containment union."""
         repo, _ = self._repo()
-        h, size = self.plant(repo, "scripts/bar.py")
+        h, _ = self.plant(repo, "scripts/bar.py")
         absname = str((repo / "scripts" / "bar.py").resolve())
         p = repo / "work" / "abs.rcpt"
         p.write_text(_receipt(f"grep:{absname}  expect-fail=/BOOM/  ran=TRACE#1",
