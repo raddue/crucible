@@ -4303,10 +4303,17 @@ class TestHostileReceiptNamesAreEscapedToo(_InqBase):
         return r
 
     def test_a_nul_in_a_receipt_name_never_reaches_the_channel(self):
+        """#488 AC-2 re-authoring: a NUL in an `ARTIFACTS` name is now a Tier-1
+        `LintError` (§3, *Lexical grammar*), so the guarantee this leg exists for — the
+        NUL never reaching the channel — MOVES from the Tier-2 `UNVERIFIABLE` line onto
+        the Tier-1 message, which renders the name through `_show_path` for exactly that
+        reason. The sibling ANSI leg below is untouched by the rule and keeps the Tier-2
+        half of the same guarantee."""
         r = self._one_name_receipt("f\x00.txt")
         out = self.cli("--tier2", "--root", str(self.base), str(r))
+        self.assertEqual(out.returncode, 1, out.stderr)
         self.assertNotIn("\x00", out.stderr)
-        self.assertIn(r"UNVERIFIABLE: f\x00.txt (no file under root)",
+        self.assertIn(r"ARTIFACTS name contains NUL: f\x00.txt",
                       out.stderr.splitlines())
 
     def test_an_ansi_sequence_in_a_receipt_name_is_neutralised(self):
@@ -5515,18 +5522,28 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         the candidate list. An absolute name keeps its own candidate, but the refused
         toplevel is absent from `_allowed_bases`, so `_contained` rejects it and the name
         resolves nowhere. Recording refusals from `_resolve_base_one`'s relative branch
-        alone was tried and left exactly this shape silent."""
+        alone was tried and left exactly this shape silent.
+
+        #488 AC-2 re-authoring: the SUBJECT is unchanged — only the section carrying the
+        absolute name moves. An absolute `ARTIFACTS` name is now a Tier-1 `LintError`
+        (§3, *Lexical grammar*), which would fire before this Tier-2 branch ever ran, so
+        the name moves onto a RANGELESS `kind=grep` witness. A rangeless grep payload is
+        exempt from the #474/D6 ARTIFACTS-membership rule, so the absolute name still
+        reaches `resolve_base` through `tier2_witness` and hits the same refused-base
+        diagnosis through the same containment union."""
         repo, _ = self._repo()
         h, size = self.plant(repo, "scripts/bar.py")
         absname = str((repo / "scripts" / "bar.py").resolve())
         p = repo / "work" / "abs.rcpt"
-        p.write_text(_receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
-                              artifacts=[(absname, h, size)],
-                              trace=[f"EXEC  `x`  exit=0  dur=1.0s  out={absname}#L1-L1"]))
+        p.write_text(_receipt(f"grep:{absname}  expect-fail=/BOOM/  ran=TRACE#1",
+                              artifacts=[],
+                              trace=[f"READ  {absname}  sha256:{h}"]))
         os.chmod(repo, 0o777)
         out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("world-writable git toplevel", out.stderr)
+        # Non-vacuity: the ABSOLUTE name is the one being diagnosed.
+        self.assertIn(absname, out.stderr)
 
     def test_a_non_world_writable_checkout_is_unaffected(self):
         """Non-vacuity: the refusal is driven by the mode bit, not by the layout. The

@@ -243,6 +243,20 @@ def parse_artifacts(body):
         if len(parts) < 3:
             raise LintError(f"ARTIFACTS malformed: {raw!r}")
         name, hash_field, size = parts[0], parts[1], parts[2]
+        # #488 AC-2 / §3 *Lexical grammar* — a legal ARTIFACTS <name> is a POSIX-relative
+        # path. Only TWO of the four clauses land as a Tier-1 raise. `no whitespace` is
+        # already unreachable (line.split() above), and `no ..` is producer-normative
+        # ONLY: landing it would make siege S-3's monotonicity pin structurally
+        # unreachable while leaving its exit code unmoved (1 -> 1), for a traversal
+        # `_contained` already rejects by realpath. Whether `..` ever lands is OQ-10.
+        #
+        # The name is rendered through `_show_path` for the same SIEGE-R2BA-4 reason
+        # every other receipt-supplied name on this channel is — required a fortiori for
+        # the NUL clause, whose whole point is that the byte never reaches the channel.
+        if name.startswith("/"):
+            raise LintError(f"ARTIFACTS name is not relative: {_show_path(name)}")
+        if "\x00" in name:
+            raise LintError(f"ARTIFACTS name contains NUL: {_show_path(name)}")
         if not hash_field.startswith("sha256:") or not HEX64.match(hash_field[len("sha256:"):]):
             raise LintError(f"ARTIFACTS bad hash: {raw!r}")
         out[name] = {"hash": hash_field[len("sha256:"):], "size": size}
