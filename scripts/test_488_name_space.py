@@ -161,6 +161,19 @@ class TestALegalArtifactsNameIsAPosixRelativePath(_RootCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn("tier1-reject", out.stderr)
 
+    def test_the_tier1_absolute_rejection_escapes_the_name_too(self):
+        """§3, `not absolute` clause: this leg renders the name through
+        `_show_path` for the same SIEGE-R2BA-4 reason the NUL leg does — an ANSI
+        escape sequence in a receipt-supplied name renders as terminal control in
+        the durable stderr record. Without this pin the escaping could be dropped
+        from THIS leg alone and every other test would stay green."""
+        out = self.verify(receipt(artifacts=[("/tmp/\x1b[31mx.md", H64, "10")],
+                                  trace=["READ  /elsewhere/x.md"]))
+        self.assertEqual(out.returncode, 1)
+        self.assertNotIn("\x1b", out.stderr)
+        self.assertIn(r"ARTIFACTS name is not relative: /tmp/\x1b[31mx.md",
+                      out.stderr.splitlines())
+
     # --- clause: no NUL (LANDS at Tier-1)
     def test_a_nul_in_an_artifacts_name_is_rejected_at_tier1(self):
         with self.assertRaises(self.rv.LintError):
