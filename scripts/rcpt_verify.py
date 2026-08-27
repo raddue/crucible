@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, io, json, re, signal, sys, hashlib, pathlib, typing
+import contextlib, io, json, posixpath, re, signal, sys, hashlib, pathlib, typing
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
@@ -3477,7 +3477,65 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
         cov.bump("discarded", probe["result_discarded"])
 
 
-def _carry_should_have_bound(art_name, bodies):
+def _carry_spellings(name, roots):
+    """SIEGE-S2 — every DISK-FREE spelling of `name` that this run must treat as ONE
+    identity, as a set of `PurePosixPath`.
+
+    Three forms, and no more:
+      * the name verbatim (what `PurePosixPath` alone gave: `./`, `//` and a trailing
+        `/` already collapse);
+      * its LEXICAL `..` collapse, via `posixpath.normpath` — the form
+        `PurePosixPath` deliberately withholds;
+      * for an ABSOLUTE spelling, its relpath from each supplied root — the §3.2
+        MANDATED form for a tracked file, and the one the detector could not see.
+
+    ONLY THE ROOTS ARE RESOLVED, never the cited name. That distinction is the whole
+    reason this stays sound: the event being detected is that the FILESYSTEM MOVED
+    between the two legs, so any test that resolves the receipt-controlled name is
+    testing the post-swap tree and cannot see it (`_carry_should_have_bound`'s
+    docstring). A ROOT is orchestrator-supplied, is not what the swap moved, and both
+    its raw and its resolved spelling are offered so an absolute citation matches
+    whichever the orchestrator's own `--root` token used.
+
+    THE LEXICAL `..` COLLAPSE IS UNSOUND ACROSS A SYMLINKED PARENT, and is used anyway
+    — deliberately, and only because the direction is safe. `a/../f.md` and `f.md` can
+    genuinely resolve differently when `a` is a symlink, so this can call two distinct
+    files one identity. The only consumer is `_carry_should_have_bound`, whose single
+    caller RAISES on True: a wrong answer here costs a false BLOCK on a receipt whose
+    two carry keys BOTH already missed, never an accepted swap. The inverse — leaving
+    `..` alone, which is what `PurePosixPath` does — is a fail-OPEN, and `f.md/../f.md`
+    was a measured second bypass spelling of SIEGE-S2.
+
+    MUST NOT RAISE: `name` is receipt-controlled and `roots` is caller-supplied."""
+    out = set()
+    try:
+        raw = str(name)
+    except Exception:
+        return out
+    for form in (raw, posixpath.normpath(raw) if raw else raw):
+        try:
+            out.add(pathlib.PurePosixPath(form))
+        except Exception:
+            continue
+    bases = set()
+    for r in roots:
+        for spelling in (r, pathlib.Path(r).resolve()):
+            try:
+                bases.add(pathlib.PurePosixPath(str(spelling)))
+            except Exception:
+                continue
+    for cand in tuple(out):
+        if not cand.is_absolute():
+            continue
+        for b in bases:
+            try:
+                out.add(pathlib.PurePosixPath(cand.relative_to(b)))
+            except Exception:
+                continue
+    return out
+
+
+def _carry_should_have_bound(art_name, bodies, root=None):
     """#488 inquisitor/AV1 (state) — True when the witness's cited name is a SPELLING of
     a name the artifacts leg hash-verified, so a `bodies` miss on BOTH keys is proof the
     resolution changed mid-run rather than evidence that nothing was hashed.
@@ -3494,25 +3552,39 @@ def _carry_should_have_bound(art_name, bodies):
     names, and only hash-MATCHED entries are ever carried (see the write site). The Path
     keys are the realpaths, which the caller has already consulted directly.
 
-    Scope, stated because it bounds what the caller's raise can claim: an ABSOLUTE cited
-    name (§3.2's mandated form) never lexically equals a §3.1-relative declaration, so a
-    swap against a name cited in THAT form is not detected here and still degrades to the
-    independent read the census bills `unhashed-body`. Closing that half needs the cited
-    name relativised against the roots, which reintroduces a cross-root collision this
-    detector has no way to adjudicate; it is left open deliberately rather than guessed.
+    SIEGE-S2 — THE SCOPE PARAGRAPH THAT STOOD HERE WAS THE VULNERABILITY, WRITTEN DOWN.
+    It read: an ABSOLUTE cited name (§3.2's MANDATED form for a tracked file) never
+    lexically equals a §3.1-relative declaration, so a swap against a name cited that way
+    "is left open deliberately rather than guessed". Measured on `ba482e2` with the
+    existing `_run_legs` harness: `./f.md` RAISED, `/<root>/f.md` — the mandated spelling
+    — passed CLEAN with the predicate run against the swapped-in sanitised bytes, and so
+    did `f.md/../f.md`. Every subagent following §3.2 lost the protection the relative
+    form kept.
+
+    The identity check is therefore SPELLING-INVARIANT, not raw-lexical: both sides go
+    through `_carry_spellings` (see it for exactly which forms, and for why resolving the
+    ROOTS keeps this disk-free where it matters — the cited NAME is still never
+    resolved). The cross-root basename collision the old paragraph cited as the reason to
+    guess nothing is not adjudicated here either, and does not need to be: under the
+    MANDATED `--strict` the artifacts leg already refuses such a receipt with "ambiguous
+    across roots" before any body is stored, and on a non-strict run the residue lands on
+    this raise, which is the over-BLOCK direction.
 
     MUST NOT RAISE on any input: `art_name` is receipt-controlled and `bodies` is a
     caller-supplied out-param, and a False here costs the old behaviour while an
     exception costs the verdict."""
     try:
-        want = pathlib.PurePosixPath(art_name)
+        roots = _as_roots(root) if root is not None else ()
+        want = _carry_spellings(art_name, roots)
     except Exception:
+        return False
+    if not want:
         return False
     for k in bodies:
         if not isinstance(k, str):
             continue
         try:
-            if pathlib.PurePosixPath(k) == want:
+            if want & _carry_spellings(k, roots):
                 return True
         except Exception:
             continue
@@ -3802,7 +3874,7 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 carried = bodies.get(art_name)
                 if carried is None:
                     carried = bodies.get(resolved)
-                if carried is None and _carry_should_have_bound(art_name, bodies):
+                if carried is None and _carry_should_have_bound(art_name, bodies, root):
                     # #488 inquisitor/AV1 (state) — the DOUBLE MISS, which the write
                     # site's own conclusion ("a hit under either binds the predicate to
                     # the bytes this leg hashed AND matched") does not cover. Each key

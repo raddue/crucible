@@ -3280,7 +3280,7 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
     receipt was accepted — while the single-spelling twin of the same receipt was
     correctly rejected."""
 
-    def _run_legs(self, trace_spelling, key_type=str):
+    def _run_legs(self, trace_spelling, key_type=str, swap=True):
         """_verify_single's own two-leg sequence, with a mid-run swap between them.
 
         Returns the LintError message the witness leg raised, or None if it passed
@@ -3290,7 +3290,13 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
         `key_type` re-spells the DECLARED ARTIFACTS key in the mapping handed to
         `tier2_artifacts` — `str` for the CLI's own key space, `PurePosixPath` for
         the direct-API one this file already treats as in scope (see the write
-        site's `str(name)` note). The carry must bind under BOTH."""
+        site's `str(name)` note). The carry must bind under BOTH.
+
+        `trace_spelling` may be a callable taking the root, for the ABSOLUTE spelling
+        §3.2 mandates (SIEGE-S2) — the root is a fresh tempdir per call, so an
+        absolute citation cannot be written as a literal. `swap=False` runs the same
+        receipt with the tree left ALONE, which is the non-vacuity control: the
+        witness must then reach its ordinary predicate rather than this detector."""
         rv = _import_rv()
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -3298,6 +3304,8 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
         secret = "line one\nSECRET token\n"
         h, size = self.plant("f.md", secret)
         self.plant("clean.md", "line one\nharmless\n")
+        if callable(trace_spelling):
+            trace_spelling = trace_spelling(self.root)
         text = receipt(
             artifacts=[("f.md", h, size)],
             trace=[f"READ {trace_spelling}"],
@@ -3315,8 +3323,9 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
 
         # The swap the carry exists to defeat: the hashed regular file is replaced
         # by a symlink to a sanitised sibling AFTER it was hashed.
-        (self.root / "f.md").unlink()
-        (self.root / "f.md").symlink_to(self.root / "clean.md")
+        if swap:
+            (self.root / "f.md").unlink()
+            (self.root / "f.md").symlink_to(self.root / "clean.md")
 
         try:
             rv.tier2_witness(witness, trace, self.root, True, "PASS",
@@ -3346,6 +3355,46 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
             "bodies.get(name) missed on the spelling and bodies.get(resolved) "
             "missed on the post-swap realpath, so the carry silently degraded "
             "to a fresh disk read of the sanitised file and the receipt passed")
+
+    def test_siege_s2_the_swap_detector_is_spelling_invariant(self):
+        """SIEGE-S2 — the detector compared `PurePosixPath` values RAW-lexically, so it
+        could only ever fire on a citation spelled the same way as the §3.1-relative
+        ARTIFACTS declaration. §3.2 MANDATES the ABSOLUTE spelling for a tracked file,
+        and an absolute path never lexically equals a relative one: every subagent
+        following the convention lost the swap protection the relative form kept.
+
+        Measured on `ba482e2` with this same harness: `./f.md` RAISED, while
+        `/<root>/f.md` (mandated) and `f.md/../f.md` (second bypass spelling —
+        `PurePosixPath` does not collapse `..`) both passed CLEAN with the predicate run
+        against the swapped-in sanitised bytes. The old code SAID SO, in a scope
+        paragraph that called leaving it open deliberate.
+
+        Each spelling gets its OWN no-swap control, and the controls are what make this
+        non-vacuous: without them the detector could be narrowed to an unconditional
+        raise and every attack arm would still pass. A control must reach the ORDINARY
+        expect-fail predicate — that is the detector staying silent on a tree that never
+        moved."""
+        spellings = {
+            "relative": "./f.md",                       # already detected pre-fix
+            "absolute-mandated": lambda r: str(r / "f.md"),
+            "uncollapsed-dotdot": "f.md/../f.md",
+        }
+        for label, spelling in spellings.items():
+            with self.subTest(spelling=label):
+                attacked = self._run_legs(spelling)
+                self.assertIsNotNone(
+                    attacked,
+                    f"the {label} spelling let a mid-lint symlink swap through: both "
+                    f"carry keys missed and the double-miss detector was silent, so "
+                    f"the predicate ran against bytes NO leg hashed")
+                self.assertIn("resolution CHANGED between the legs", attacked)
+
+                control = self._run_legs(spelling, swap=False)
+                self.assertIsNotNone(
+                    control,
+                    f"control precondition broken for {label}: the unswapped tree "
+                    f"did not reach the expect-fail predicate at all")
+                self.assertIn("expect-fail regex", control)
 
     def test_the_carry_binds_whatever_type_the_declared_key_is_spelled_as(self):
         """#488 warden-r2/F2 — the carry's NAME key was stored under the declared
