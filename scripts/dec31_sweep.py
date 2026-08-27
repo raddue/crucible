@@ -2,7 +2,7 @@
 """#488 c1 / AC-6 — the DEC-31 mutant sweep, as a runner instead of a one-shot.
 
 AC-6 asks that every leg of this ticket's rule be verified against a DELIBERATELY
-BROKEN copy of the build. Four legs need no constructed copy — the shipped build
+BROKEN copy of the build. Five legs need no constructed copy — the shipped build
 *was* the broken copy, and Tasks 3/4/5's own RED->GREEN transitions discharge them
 (T10's three parser legs, T2's silence, T7 leg 2's walk-only shape). The fifteen
 rows below are the copies that are NOT the shipped build.
@@ -80,6 +80,12 @@ def _ids(text):
 def _apply(path, edits):
     """Substring substitution, with EVERY anchor checked for uniqueness FIRST.
 
+    FIRST is literal: one pre-pass over all of a row's anchors against the
+    UNMUTATED text, then a second pass that substitutes. Checking each anchor
+    against the partially-mutated text would make an anchor's verdict depend on
+    the edits ordered before it; a stale anchor also now leaves the copy
+    untouched rather than half-mutated.
+
     Uniqueness is SUBSTRING uniqueness (`str.count`), not line uniqueness, and the
     difference is not academic: `    return notes` is line-unique in
     `rcpt_verify.py` but occurs twice as a substring, inside `        return
@@ -88,10 +94,11 @@ def _apply(path, edits):
     moved under it), not a pin bug — which is why it reads as its own error rather
     than as a confusing failure count."""
     text = path.read_text()
-    for anchor, repl in edits:
+    for anchor, _ in edits:
         n = text.count(anchor)
         if n != 1:
             raise SystemExit(f"stale anchor (occurs {n}x, expected 1):\n{anchor}")
+    for anchor, repl in edits:
         text = text.replace(anchor, repl)
     path.write_text(text)
 
@@ -362,8 +369,16 @@ MUTANTS = [
 
     # The truncation rule has TWO legs on the current build -- the exact-name leg
     # (`unevaluated_names`) and the basename leg (`unevaluated_bases`). Dropping the
-    # RULE means dropping both; dropping only the basename leg leaves the exact-name
-    # leg silencing the same citations and the row goes vacuous.
+    # RULE means dropping BOTH, which is why this row carries two edits where the
+    # plan carried one.
+    #
+    # MEASURED three ways on the tip, because the reason matters more than the
+    # verdict: both legs dropped (the form shipped here) reddens 4 pins; the plan's
+    # literal single anchor -- the basename leg alone -- reddens 2, PTRUNC's pair,
+    # which is exactly the expect set the plan itself recorded; the exact-name leg
+    # alone reddens 1, SLASHTRUNC's never-reached name. So NEITHER single-leg copy is
+    # vacuous. Each is simply a strictly weaker copy that drops half the rule instead
+    # of the rule, and only the two-edit form reddens all four pins the rule owns.
     dict(id=5, criterion="AC-6 T2 leg 6 (build 2)", what="the truncation rule dropped",
          edits=[("                if name in unevaluated_names:\n"
                  "                    continue\n", ""),
@@ -732,11 +747,23 @@ def _build_tree():
 
 
 def _run_row(row):
-    """Returns (tree, actual-failing-id-set, raw-output)."""
+    """Returns (tree, actual-failing-id-set, raw-output).
+
+    Any early abort -- a stale anchor's `SystemExit`, or anything else raised
+    between building the tree and reading the run -- prints this row's tree path
+    before propagating. Without it the abort path orphans a ~13MB tree silently
+    while the ordinary failing-row path prints its own, which is the opposite of
+    the contract: a row that aborted is exactly the one whose copy you want to
+    look at. The failure still propagates, so the exit stays non-zero."""
     tree = _build_tree()
-    _apply(tree / "scripts" / "rcpt_verify.py", row["edits"])
-    proc = subprocess.run([sys.executable, SUITE], cwd=tree,
-                          capture_output=True, text=True)
+    try:
+        _apply(tree / "scripts" / "rcpt_verify.py", row["edits"])
+        proc = subprocess.run([sys.executable, SUITE], cwd=tree,
+                              capture_output=True, text=True)
+    except BaseException:
+        print(f"row {row['id']:>2}  ABORTED before a verdict; "
+              f"tree kept for inspection: {tree}", flush=True)
+        raise
     return tree, _ids(proc.stdout + proc.stderr), proc.stdout + proc.stderr
 
 
