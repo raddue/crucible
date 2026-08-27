@@ -794,6 +794,88 @@ class TestTheEmitterCannotMaskAnInFlightRaise(_RootCase):
                           "(declared in TRACE, not verified)"])
 
 
+class TestANonStringArtifactsKeyCannotMaskAnInFlightRaise(_RootCase):
+    """AC-6 T2, leg 6 again — the SECOND, independently reachable instance of the
+    same finally-block masking hazard the class above pins.
+
+    `_emit_provenance_notes`'s `trace or []` guard (and its `notes_out is None`
+    early return) close the hazard only for what happens INSIDE the helper. The
+    unevaluated-basenames set-comprehension is an ARGUMENT of that call, so Python
+    evaluates it BEFORE the helper is entered and neither guard covers it: it runs
+    naked inside `tier2_artifacts`'s `finally:`.
+
+    Broken copy: `{n.rsplit("/", 1)[-1] for n in artifacts if n not in evaluated}`.
+    Measured on `00bfd2e` (pre-fix), a non-string ARTIFACTS key replaced the
+    in-flight `Tier-2 --strict: ... absent under all bases` LintError with
+    `AttributeError: 'int' object has no attribute 'rsplit'` — for BOTH
+    `notes_out=None` AND `notes_out=[]`, i.e. including the shape the sole
+    production call site passes, which is why the helper-side guards were not
+    enough. `artifacts` is public-API-supplied (~40 direct call sites, no type
+    enforcement) exactly as `trace` is. Driven by a DIRECT call because the CLI
+    cannot reach the hazard — that is the point of pinning it."""
+
+    #  ORDER IS LOAD-BEARING: the path-shaped absent name must come FIRST so the
+    #  --strict raise truncates the loop and leaves the bad key UNEVALUATED, which
+    #  is the only branch of the comprehension that reaches `.rsplit`.
+    ART = {"docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"},
+           42: {"hash": H64, "size": "10"}}
+    TRACE = [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}]
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+
+    def test_it_does_not_mask_on_the_production_notes_requested_shape(self):
+        """The leg the helper's own guards CANNOT cover: `notes_out` is a real
+        list, so the helper runs — and the comprehension ran before it either way.
+        Carries its own non-vacuity control: the emitter demonstrably executed
+        from inside the `finally:` on this very call, so a green result here is
+        about the argument expression, not about the emitter being skipped."""
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
+                                    None, None, notes_out)
+        self.assertIn("absent under all bases", str(caught.exception))
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/x.md "
+                          "(declared in TRACE, not verified)"])
+
+    def test_the_whole_finally_body_is_skipped_when_no_notes_were_asked_for(self):
+        """Pins the `if notes_out is not None:` half directly. The `str()` half
+        alone already makes the two legs above green, so without this leg the
+        guard is an UNPINNED line — and the docstring of the class above records
+        what happens to unpinned guards here (cleanup commit `270c656` deleted
+        one and the whole suite stayed green). Stand-in for "the body ran": an
+        emitter that raises. If the guard is removed, the finally-block still
+        enters the call and that raise masks the LintError."""
+        def _boom(*a, **kw):
+            raise RuntimeError("emitter must not run")
+        real = self.rv._emit_provenance_notes
+        self.rv._emit_provenance_notes = _boom
+        self.addCleanup(setattr, self.rv, "_emit_provenance_notes", real)
+
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
+                                    None, None, None)
+        self.assertIn("absent under all bases", str(caught.exception))
+
+        # Non-vacuity: the identical call that DOES ask for notes reaches the
+        # patched emitter, so the leg above is about the guard, not about a
+        # monkeypatch that never took.
+        with self.assertRaises(RuntimeError):
+            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
+                                    None, None, [])
+
+    def test_it_does_not_mask_when_the_caller_wants_no_notes(self):
+        """`notes_out=None` — the ~40 --eval/--selftest-shaped call sites. The
+        real failure must reach them too, rather than an AttributeError raised by
+        work whose only product they asked not to receive."""
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
+                                    None, None, None)
+        self.assertIn("absent under all bases", str(caught.exception))
+
+
 class TestTheNoteEscapesTheLeastConstrainedNameInTheGrammar(_RootCase):
     """AC-6 T2, leg 7. SIEGE-R2BA-4's escaping guarantee, extended to `TRACE`
     names — required *a fortiori* (§3.4), because a `TRACE` name is the LEAST

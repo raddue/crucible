@@ -2103,10 +2103,34 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     finally:
         # In a `finally:` so the notes survive all five truncating raise sites, which is
         # the whole reason the out-parameter exists (§3.4, T2 leg 6).
-        _emit_provenance_notes(
-            trace, verified_bases,
-            {n.rsplit("/", 1)[-1] for n in artifacts if n not in evaluated},
-            notes_out)
+        #
+        # BOTH defences below exist because this body runs from a `finally:`, where
+        # ANY exception it raises REPLACES the in-flight one — the hazard
+        # _emit_provenance_notes's own `trace or []` guard names. Neither of the
+        # helper's guards can cover this site, because a call's ARGUMENTS are
+        # evaluated BEFORE the callee is entered:
+        #   * `if notes_out is not None` — the helper's own `if notes_out is None:
+        #     return` is reached only after the set-comprehension below has already
+        #     run. Hoisting the same test to the call site makes the whole body a
+        #     no-op for the callers that want no notes (--eval, --selftest) and
+        #     retires the now-redundant double-check.
+        #   * `str(n)` — a non-string ARTIFACTS key made `n.rsplit(...)` raise
+        #     `AttributeError: 'int' object has no attribute 'rsplit'` right here,
+        #     destroying a genuine `Tier-2 --strict: ... absent under all bases`
+        #     LintError and reporting the AttributeError in its place. `artifacts` is
+        #     public-API-supplied (~40 direct call sites, no type enforcement) exactly
+        #     as `trace` is, so the reachability argument is the same one. `str()` is
+        #     identity on the str keys parse_artifacts produces, so production
+        #     behaviour does not move; on a bad key the basename simply matches no
+        #     TRACE basename and the REAL verdict survives. That ordering is the
+        #     point: these notes are an advisory side channel and must never preempt
+        #     the verdict, so coercing beats raising here — fail-loud belongs on the
+        #     verification path, not inside its `finally:`.
+        if notes_out is not None:
+            _emit_provenance_notes(
+                trace, verified_bases,
+                {str(n).rsplit("/", 1)[-1] for n in artifacts if n not in evaluated},
+                notes_out)
     return notes
 
 
