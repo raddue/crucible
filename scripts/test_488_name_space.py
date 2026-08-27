@@ -747,5 +747,242 @@ class TestTheNoteEscapesTheLeastConstrainedNameInTheGrammar(_RootCase):
         self.assertNotIn("\x1b", self.out.stderr)
 
 
+
+# --------------------------------------------------------------------------
+# ADVERSARIAL (Task 3) — five attacks on `_none_sentinel` and its call sites.
+#
+# The unit legs above pin the helper's contract. These five attack the SEAM
+# between the helper and everything that reaches it: the two sections whose
+# CLI leg was never pinned (only ARTIFACTS was), the look-alike sentinels that
+# `.strip()` does and does not normalise, the inline-header body shape, and the
+# entry modes that could route around the raise.
+# --------------------------------------------------------------------------
+class TestATrailingNoneInClaimsCannotLaunderAnUncitedClaim(_RootCase):
+    """ATTACK A-1. The `TestTheNoneSentinelCannotEmptyArtifactsAtTheCli` pin
+    covers ARTIFACTS only. CLAIMS is the sharper channel: `lint_receipt` walks
+    every parsed claim and raises when its citation names an artifact the
+    receipt does not declare, so a `(none)` that empties the list deletes the
+    check along with the evidence. Measured on `157fd54` (pre-fix):
+
+        honest        : CLAIM citation artifact not listed: ghost.md   EXIT=1
+        + "  (none)"  : (clean)                                        EXIT=0
+
+    One appended line turned a hard reject into a clean pass."""
+
+    def setUp(self):
+        super().setUp()
+        self.honest = receipt(
+            claims=["fatal-fixed=2 from=ghost.md#L1-L5"],
+            trace=[f"READ  a.txt  sha256:{H64}"])
+
+    def test_the_honest_receipt_hard_fails_on_the_undeclared_citation(self):
+        out = self.verify(self.honest, name="honest.txt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("CLAIM citation artifact not listed", out.stderr)
+
+    def test_one_injected_none_line_cannot_turn_that_hard_fail_into_exit_zero(self):
+        injected = self.honest.replace("\nWITNESS", "\n  (none)\nWITNESS", 1)
+        out = self.verify(injected, name="injected.txt")
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("CLAIMS (none) is the empty-set sentinel", out.stderr)
+
+    def test_the_laundered_run_never_reports_reaching_tier2(self):
+        """The reject must be a Tier-1 one. A build that raised somewhere later
+        would still exit 1 while having already billed coverage it never had."""
+        injected = self.honest.replace("\nWITNESS", "\n  (none)\nWITNESS", 1)
+        out = self.verify(injected, name="injected.txt")
+        census = [l for l in out.stderr.splitlines() if "TIER2-COVERAGE:" in l]
+        self.assertEqual(census, ["TIER2-COVERAGE: not-reached (tier1-reject)"],
+                         out.stderr)
+
+
+class TestATrailingNoneInTraceCannotDeleteTheExecOutCheck(_RootCase):
+    """ATTACK A-2, the TRACE half of the same unpinned seam. `lint_receipt`
+    derives four membership rules from TRACE entries (`EXEC out=`, EDIT/WROTE
+    `sha256:`, DISPATCHED `rcpt-sha256:`, and every `ran=TRACE#n` resolution).
+    An emptied TRACE deletes all four at once. The witness is `ran=SKIPPED:` on
+    purpose: a `ran=TRACE#1` witness would fail to resolve against the emptied
+    list and mask the fail-open behind an unrelated raise. Measured on
+    `157fd54` (pre-fix):
+
+        honest        : EXEC out= artifact not in ARTIFACTS: ghost.md   EXIT=1
+        + "  (none)"  : (clean)                                         EXIT=0
+    """
+
+    WITNESS = "lint:all-claims-cited  expect-fail=exit!=0  ran=SKIPPED:deferred"
+
+    def setUp(self):
+        super().setUp()
+        self.honest = receipt(trace=["EXEC  pytest out=ghost.md#L1-L5"],
+                              witness=self.WITNESS, nxt="lint:all-claims-cited")
+
+    def test_the_honest_receipt_hard_fails_on_the_undeclared_exec_output(self):
+        out = self.verify(self.honest, name="honest.txt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EXEC out= artifact not in ARTIFACTS", out.stderr)
+
+    def test_one_injected_none_line_cannot_turn_that_hard_fail_into_exit_zero(self):
+        injected = self.honest.replace("CLAIMS\n", "  (none)\nCLAIMS\n", 1)
+        out = self.verify(injected, name="injected.txt")
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("TRACE (none) is the empty-set sentinel", out.stderr)
+
+
+class TestOnlyTheExactSentinelIsEverTreatedAsOne(unittest.TestCase):
+    """ATTACK A-3 — sentinel look-alikes. `_none_sentinel` normalises with
+    `str.strip()`, which strips the whole Unicode whitespace class (`\xa0` NBSP
+    included) but NOT the zero-width characters that merely LOOK like padding.
+    Two opposite hazards fall out and both must land fail-CLOSED:
+
+      * a look-alike that `.strip()` does NOT normalise (`(None)`, `(NONE)`,
+        `\u200b(none)`, `( none )`) must never reach the entry loop as a
+        silently-skipped line — the loop no longer has a `(none)` branch, so it
+        must reject the line as malformed rather than ignore it;
+      * a look-alike that `.strip()` DOES normalise (`\xa0(none)\xa0`) is a real
+        sentinel and must therefore obey the co-occurrence rule, not slip past
+        the membership test on its raw spelling."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    ENTRY = {"parse_artifacts": f"a.md  sha256:{H64}  10",
+             "parse_trace": f"1  READ  a.txt  sha256:{H64}",
+             "parse_claims": "fatal-fixed=2 from=x.md#L1-L5"}
+    LOOKALIKE = ["(None)", "(NONE)", "\u200b(none)", "(none)\u200b", "( none )",
+                 "(none )", "((none))"]
+
+    def test_no_lookalike_is_ever_silently_skipped_by_any_parser(self):
+        for fn, entry in self.ENTRY.items():
+            for fake in self.LOOKALIKE:
+                with self.subTest(parser=fn, lookalike=fake):
+                    with self.assertRaises(self.rv.LintError):
+                        getattr(self.rv, fn)([f"  {fake}", f"  {entry}"])
+
+    def test_no_lookalike_alone_is_accepted_as_an_empty_set(self):
+        for fn, _ in self.ENTRY.items():
+            for fake in self.LOOKALIKE:
+                with self.subTest(parser=fn, lookalike=fake):
+                    with self.assertRaises(self.rv.LintError):
+                        getattr(self.rv, fn)([f"  {fake}"])
+
+    def test_a_nbsp_cloaked_sentinel_is_still_bound_by_the_co_occurrence_rule(self):
+        """`\xa0(none)\xa0` strips to the sentinel, so it wipes exactly as
+        `(none)` does — and must therefore be caught exactly as `(none)` is.
+        A membership test written against the RAW line would miss it."""
+        for fn, entry in self.ENTRY.items():
+            with self.subTest(parser=fn):
+                with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+                    getattr(self.rv, fn)(["  \xa0(none)\xa0", f"  {entry}"])
+
+
+class TestTheSentinelRuleReachesTheInlineHeaderBodyShape(_RootCase):
+    """ATTACK A-4. `parse_receipt` puts a section header's own remainder into
+    the body as `body[0]` UNINDENTED, so `ARTIFACTS  (none)` and `  (none)`
+    produce different strings in the same list. A guard that keyed off the
+    indented spelling — or that started scanning at `body[1]` — would leave the
+    header line as a laundering slot. Both orders are attacked for all three
+    sections: sentinel-on-the-header + indented entry, and entry-on-the-header
+    + indented sentinel."""
+
+    ENTRY = {"ARTIFACTS": f"a.md  sha256:{H64}  10",
+             "TRACE": f"1  READ  a.txt  sha256:{H64}",
+             # a 12-hex receipt-hash citation, NOT a name: `lint_receipt`
+             # requires a named artifact to appear in ARTIFACTS, and ARTIFACTS
+             # is `(none)` in every cell where CLAIMS is the section under test.
+             "CLAIMS": "fatal-fixed=2 from=aaaaaaaaaaaa#L1-L5"}
+    OTHER = {"ARTIFACTS": ["  (none)"], "TRACE": ["  (none)"], "CLAIMS": ["  (none)"]}
+
+    def _receipt(self, section, first, rest):
+        """A v1 receipt whose `section` body is `first` inline on the header
+        line and `rest` indented under it; every other section is `(none)`."""
+        out = ["RCPT v1 red-team/1-devils-advocate", "VERDICT  PASS  conf=0.90"]
+        for name in ("ARTIFACTS", "TRACE", "CLAIMS"):
+            if name == section:
+                out.append(f"{name}  {first}")
+                out += [f"  {l}" for l in rest]
+            else:
+                out += [name] + self.OTHER[name]
+        out += ["WITNESS    lint:all-claims-cited  expect-fail=exit!=0  "
+                "ran=SKIPPED:deferred", "SUSPICION  0.10",
+                "NEXT       lint:all-claims-cited"]
+        return "\n".join(out) + "\n"
+
+    def test_a_sentinel_on_the_header_line_still_binds_the_indented_entry(self):
+        for section, entry in self.ENTRY.items():
+            with self.subTest(section=section, order="sentinel-first"):
+                out = self.verify(self._receipt(section, "(none)", [entry]),
+                                  name=f"{section}-a.txt")
+                self.assertNotEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"{section} (none) is the empty-set sentinel",
+                              out.stderr)
+
+    def test_an_entry_on_the_header_line_still_binds_the_indented_sentinel(self):
+        for section, entry in self.ENTRY.items():
+            with self.subTest(section=section, order="entry-first"):
+                out = self.verify(self._receipt(section, entry, ["(none)"]),
+                                  name=f"{section}-b.txt")
+                self.assertNotEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"{section} (none) is the empty-set sentinel",
+                              out.stderr)
+
+    def test_the_control_inline_receipt_without_a_sentinel_is_accepted(self):
+        """The control for the six legs above: the same inline-header shape
+        with no co-occurring `(none)` must NOT raise, so a red leg is the
+        sentinel rule and not the inline shape itself."""
+        out = self.verify(self._receipt("CLAIMS", self.ENTRY["CLAIMS"], []),
+                          name="control.txt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+
+class TestNoEntryModeRoutesAroundTheSentinelRaise(_RootCase):
+    """ATTACK A-5. The raise is only worth what the narrowest entry path
+    enforces. `rcpt_verify.py` has three verification modes (`--tier1`,
+    `--tier2`, and the default) and two schema versions (`RCPT v1`, `RCPT v1.1`,
+    the latter carrying a second local lint pass in `lint_v11_local`). A guard
+    sited on one branch of that 3x2 grid — or a v1.1 path that re-parsed the
+    body through its own loop — would leave the rest live. All six cells must
+    reject the same co-occurring TRACE `(none)`."""
+
+    def _receipt(self, version):
+        body = [f"RCPT v{version} red-team/1-devils-advocate",
+                "VERDICT  PASS  conf=0.90", "ARTIFACTS", "  (none)", "TRACE",
+                f"  1  READ  a.txt  sha256:{H64}", "  (none)", "CLAIMS",
+                "  (none)",
+                "WITNESS    lint:all-claims-cited  expect-fail=exit!=0  ran=TRACE#1",
+                # SUSPICION 0.00, not 0.10: `TRIPWIRE: none` is legal only on a
+                # PASS at suspicion zero (`lint_v11_local`), and the v1.1 cells
+                # of the grid must reach the sentinel rule, not that one.
+                "SUSPICION  0.00", "NEXT       (none)"]
+        if version == "1.1":
+            body += ["TRIPWIRE: none", "SUPERSEDES: none"]
+        return "\n".join(body) + "\n"
+
+    def test_every_mode_and_schema_version_rejects_the_co_occurring_sentinel(self):
+        for version in ("1", "1.1"):
+            for mode in ("--tier1", "--tier2", None):
+                with self.subTest(version=version, mode=mode or "default"):
+                    p = self.root / f"r-{version}-{mode}.txt"
+                    p.write_text(self._receipt(version))
+                    args = [a for a in (mode, "--root", str(self.root), str(p)) if a]
+                    out = run(*args)
+                    self.assertEqual(out.returncode, 1, out.stderr)
+                    self.assertIn("TRACE (none) is the empty-set sentinel",
+                                  out.stderr)
+
+    def test_the_control_receipt_without_the_injected_line_is_accepted(self):
+        """Control: the same six cells with the `(none)` line removed must all
+        exit 0, so a red leg above is the sentinel and not the fixture."""
+        for version in ("1", "1.1"):
+            for mode in ("--tier1", "--tier2", None):
+                with self.subTest(version=version, mode=mode or "default"):
+                    p = self.root / f"c-{version}-{mode}.txt"
+                    p.write_text(self._receipt(version).replace(
+                        f"  1  READ  a.txt  sha256:{H64}\n  (none)\n",
+                        f"  1  READ  a.txt  sha256:{H64}\n", 1))
+                    args = [a for a in (mode, "--root", str(self.root), str(p)) if a]
+                    out = run(*args)
+                    self.assertEqual(out.returncode, 0, out.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
