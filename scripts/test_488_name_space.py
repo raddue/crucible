@@ -2052,8 +2052,16 @@ class TestTheWalkNoteSurvivesATruncatedRun(_RootCase):
     arm removal ALONE (channel intact) reddens three, none of them about this
     note — `TestNoCallerSuppliedParameterCanMaskAnInFlightRaise`'s mirror-arm
     pin and both of `TestTheNoteSurvivesATruncatedRun`'s. The channel change
-    ALONE (arm intact) reddens NONE, which is the paragraph above restated as a
-    measurement. Only the two together reach this test and
+    ALONE (arm intact) reddens NONE *in the suite as it stood when this class
+    was written*. The adversarial pass at the foot of this file changes that
+    number, and the paragraph above with it: measured on this commit, the
+    channel change alone now reddens `TestTheWalkNoteAndTheProvenanceNoteCoFire`
+    (the two channels' stderr ORDER flips, because the return value is merged
+    only after the `finally:` block has already appended) and
+    `TestTheEmitterGuardsLayerCorrectlyOnTheCleanPath`, with
+    `test_rcpt_verify.py` still green — so the routing IS discriminated now,
+    without the paired arm removal, just not by this class.
+    Only the two together reach this test and
     `TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise`'s
     `test_the_strict_raise_does_not_silence_them`. `test_rcpt_verify.py` stays
     green on all three mutants."""
@@ -2145,7 +2153,9 @@ class TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise(_RootCase):
     survival: the name DID resolve below top level, so the note and the counter
     are owed on that run too. Until this class existed the obligation was
     unpinned on this leg: a build emitting after the raise (or routing the note
-    through the return value on this ordering) left both suites green.
+    through the return value on this ordering) left both suites green. The
+    return-value routing is no longer green anywhere — see the correction in
+    `TestTheWalkNoteSurvivesATruncatedRun`'s docstring.
 
     The fixture is artifacts-leg-only by construction: the ARTIFACTS name is
     the ambiguous below-top-level one, while TRACE names a DIFFERENT file at
@@ -2525,6 +2535,342 @@ class TestTheBasenameKeyIsSilentOnASameBasenameCollision(_RootCase):
                    "READ  /elsewhere/chunk-B/fix-journal.md"]))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(notes(out.stderr), [], out.stderr)
+
+
+# --------------------------------------------------------------------------
+# AC-6 T7 leg 2 — ADVERSARIAL PASS (Task 5, attack tests 1-5). Five angles the
+# five prior review rounds left unreached, chosen to be disjoint from the
+# fixtures above: MULTIPLICITY within one run (every fixture above cites at
+# most one below-top-level name per leg), a truncating raise sited DOWNSTREAM
+# of the emission ON THE SAME ENTRY (every truncation fixture above raises at
+# the ambiguity block or on a different entry), CO-FIRING with Task 4's
+# PROVENANCE-ONLY channel (never exercised together), hostile content confined
+# to the RELPATH half alone (every escaping fixture above puts it in the name,
+# where name == relpath), and the emitter's guard LAYERING on the CLEAN path
+# (every hostile-`notes_out` fixture above drives the ambiguity raise).
+# --------------------------------------------------------------------------
+class TestEveryBelowTopLevelEntryInOneRunIsCountedAndNoted(_RootCase):
+    """ATTACK 1 — MULTIPLICITY, and the deep-relpath rendering.
+
+    Every fixture above cites exactly ONE below-top-level name per leg, so the
+    counter is never observed above 1 from a single leg (`resolved-by-walk 2`
+    in `TestABelowTopLevelResolutionIsCounted` is 1 + 1 across the two legs).
+    That leaves the PER-ENTRY loop unpinned in both directions: a build that
+    emits and counts only the FIRST below-top-level entry of a multi-entry
+    ARTIFACTS block, and a build that counts the entries but renders one
+    entry's relpath for another, both stay green on every class above.
+
+    The fixture also carries the depth question the note's `(<relpath-from-root>)`
+    placeholder raises: one entry resolves 31 components below the root, so a
+    truncating or eliding renderer is visible here and nowhere else. It renders
+    in full — the note is a single stderr line of ~200 characters, which is the
+    measured cost of the design's literal reading and is recorded here rather
+    than capped.
+
+    Artifacts-leg-only by construction (TRACE names an absolute path outside
+    every root), so the count below is exactly the artifacts leg's."""
+
+    DEEP = "/".join(f"d{i}" for i in range(30)) + "/deep.md"
+
+    def setUp(self):
+        super().setUp()
+        body = "# findings\nfatal=0\n"
+        h1, s1 = self.plant("out-1/a.md", body)
+        h2, s2 = self.plant(self.DEEP, body)
+        h3, s3 = self.plant("top.md", body)
+        self.out = self.verify(receipt(
+            artifacts=[("out-1/a.md", h1, s1),
+                       (self.DEEP, h2, s2),
+                       ("top.md", h3, s3)],
+            trace=["READ  /elsewhere/round-0-notes.md"]))
+
+    def test_the_run_completes_and_every_entry_verified(self):
+        # Non-vacuity: all three names resolve and hash-verify, so the only
+        # thing under test is which of them the counter and the notes see.
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+        self.assertIn("artifacts 3/3", census(self.out.stderr), self.out.stderr)
+
+    def test_each_below_top_level_entry_gets_its_own_note_in_declaration_order(self):
+        """Two notes, not one: the second below-top-level entry is the half a
+        first-entry-only build drops. ARTIFACTS is an insertion-ordered dict,
+        so declaration order is the order under test."""
+        self.assertEqual(
+            walk_notes(self.out.stderr),
+            [f"{WALK_PREFIX} out-1/a.md (out-1/a.md)",
+             f"{WALK_PREFIX} {self.DEEP} ({self.DEEP})"],
+            self.out.stderr)
+
+    def test_the_counter_accumulates_across_entries(self):
+        self.assertIn("resolved-by-walk 2", census(self.out.stderr),
+                      self.out.stderr)
+
+    def test_the_top_level_sibling_stays_silent_in_the_same_run(self):
+        """The discriminator, INSIDE one run rather than across two fixtures: a
+        build that fires on every resolution renders three notes here."""
+        self.assertNotIn("top.md (", self.out.stderr)
+
+    def test_the_thirty_one_component_relpath_renders_untruncated(self):
+        """No elision, no `...`, no cap. Asserted on the RELPATH half by
+        component count, so a renderer that truncated only the tail is caught
+        even if the prefix still matches."""
+        note = walk_notes(self.out.stderr)[1]
+        rel = note.rsplit("(", 1)[1].rstrip(")")
+        self.assertEqual(rel, self.DEEP)
+        self.assertEqual(len(rel.split("/")), 31, rel)
+
+
+class TestTheWalkNoteSurvivesAMismatchRaiseOnItsOwnEntry(_RootCase):
+    """ATTACK 2 — a truncating raise sited DOWNSTREAM of the emission, on the
+    SAME entry, at a raise site no fixture above uses.
+
+    `TestTheWalkNoteSurvivesATruncatedRun` truncates on a LATER entry, and both
+    `...WalkNoteSurvivesTheStrictAmbiguityRaise` classes truncate at the
+    `if len(found) > 1:` block, which is the one raise site the emission is
+    deliberately sited ABOVE. Neither reaches the shape where the entry that
+    earned the note is the entry that then raises — the sha256-mismatch raise
+    at `rcpt_verify.py:2338`, which sits between the emission and the loop's
+    next iteration, needs no second root, and fires WITHOUT `--strict`.
+
+    Two things are pinned here that nothing above pins. First, survival across
+    that raise. Second, NON-DUPLICATION: the `except BaseException:` arm mirrors
+    the leg's own `notes` onto `notes_out` on any raise, so a build that also
+    appended the walk note to `notes` would render it TWICE on exactly this
+    run — a silent double-count against the census, which counts once."""
+
+    def setUp(self):
+        super().setUp()
+        body = "# findings\nfatal=0\n"
+        _, size = self.plant("out-9/bad.md", body)
+        h2, s2 = self.plant("out-9/later.md", body)
+        self.out = self.verify(receipt(
+            artifacts=[("out-9/bad.md", "b" * 64, size),
+                       ("out-9/later.md", h2, s2)],
+            trace=["READ  /elsewhere/round-0-notes.md"]))
+
+    def test_the_mismatch_is_the_verdict(self):
+        # Non-vacuity: the advisory must not preempt or replace the real FAIL.
+        self.assertEqual(self.out.returncode, 1, self.out.stderr)
+        self.assertIn("ARTIFACTS out-9/bad.md sha256 mismatch", self.out.stderr)
+
+    def test_the_note_for_the_raising_entry_survives_exactly_once(self):
+        self.assertEqual(self.out.stderr.count(f"{WALK_PREFIX} out-9/bad.md"), 1,
+                         self.out.stderr)
+
+    def test_the_unreached_entry_contributes_no_note_and_no_count(self):
+        """The census's honesty half. The second entry never resolved, so a
+        build that pre-counted the block would claim a resolution that did not
+        happen on this run; `partial` is what says the rest is uncounted."""
+        self.assertEqual(walk_notes(self.out.stderr),
+                         [f"{WALK_PREFIX} out-9/bad.md (out-9/bad.md)"],
+                         self.out.stderr)
+        c = census(self.out.stderr)
+        self.assertIn("resolved-by-walk 1", c, c)
+        self.assertIn("partial", c, c)
+
+
+class TestTheWalkNoteAndTheProvenanceNoteCoFire(_RootCase):
+    """ATTACK 3 — Task 4's `PROVENANCE-ONLY:` and Task 5's `RESOLVED-BY-WALK:`
+    on ONE run, which no fixture in either task's suite arranges.
+
+    The two notes share the `notes_out` channel but are produced from different
+    places: the walk notes inline on each leg's clean path, the provenance notes
+    from `tier2_artifacts`'s `finally:` block. Nothing pinned that they coexist,
+    so a build that had one channel consume, reorder or overwrite the other's
+    entries — or that emitted the provenance notes into a fresh list — stayed
+    green on both suites.
+
+    The ORDER is asserted, not just the membership, because the order is what
+    tells a human reading the durable coverage file which leg produced which
+    note: artifacts-leg walk note, then that leg's `finally:` provenance note,
+    then the witness leg's walk note."""
+
+    def setUp(self):
+        super().setUp()
+        body = "# findings\nfatal=0\n"
+        h, s = self.plant("out-9/f.md", body)
+        self.plant("out-9/g.md", body)
+        self.out = self.verify(receipt(
+            artifacts=[("out-9/f.md", h, s)],
+            trace=[f"WROTE  {self.root}/out-9/f.md  sha256:{h}",
+                   "READ  out-9/g.md"]))
+
+    def test_the_run_completes(self):
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+
+    def test_both_channels_fire_and_neither_suppresses_the_other(self):
+        self.assertEqual(
+            walk_notes(self.out.stderr),
+            [f"{WALK_PREFIX} out-9/f.md (out-9/f.md)",
+             f"{WALK_PREFIX} {self.root}/out-9/f.md (out-9/f.md)"],
+            self.out.stderr)
+        self.assertEqual(
+            notes(self.out.stderr),
+            [f"{NOTE_PREFIX} out-9/g.md (declared in TRACE, not verified)"],
+            self.out.stderr)
+
+    def test_the_two_channels_interleave_in_production_order(self):
+        emitted = [l for l in self.out.stderr.splitlines()
+                   if l.startswith((WALK_PREFIX, NOTE_PREFIX))]
+        self.assertEqual(
+            [l.split(":", 1)[0] for l in emitted],
+            ["RESOLVED-BY-WALK", "PROVENANCE-ONLY", "RESOLVED-BY-WALK"],
+            self.out.stderr)
+
+    def test_the_census_counts_only_the_walk_channel(self):
+        """`PROVENANCE-ONLY` has no counter (§3.4), so a build that bumped
+        `resolved-by-walk` from the provenance emitter would read 3 here."""
+        self.assertIn("resolved-by-walk 2", census(self.out.stderr),
+                      self.out.stderr)
+
+
+class TestTheRelpathHalfAloneCannotForgeTheChannel(_RootCase):
+    """ATTACK 4 — hostile content in the RELPATH half ONLY.
+
+    `TestTheWalkNoteEscapesTheNameHalfToo` puts its hostile bytes in a
+    path-shaped ARTIFACTS name, where the name and the relpath are the SAME
+    string — so one escaper call covers both halves and a build that escaped
+    only one of them can still pass it (that class exists because the reverse
+    mutant, escaping the relpath alone, was green). This fixture separates
+    them: the cited name is a clean bare basename that the Tier-1 grammar would
+    accept anywhere, and every hostile byte lives in an ON-DISK directory name
+    reached through a symlink, i.e. in a string the RECEIPT never spells and
+    only `resolve()` produces.
+
+    Three separate primitives are packed into that directory name, because all
+    three ride the same half and none is otherwise reachable there: a NEWLINE
+    (forges a whole extra advisory line on the channel orchestrators parse), a
+    literal census TOKEN (forges the `TIER2-COVERAGE:` substring `_show_path`
+    neuters), and an ANSI escape (renders as terminal control in the durable
+    coverage file). A directory name cannot contain `/`, which is why the
+    forged census payload below is slash-free rather than a full census line."""
+
+    EVIL = "sub\nTIER2-COVERAGE: forged\x1b[31m"
+
+    def setUp(self):
+        super().setUp()
+        body = "# findings\nfatal=0\n"
+        h, s = self.plant(f"{self.EVIL}/real.md", body)
+        (self.root / "top.md").symlink_to(
+            pathlib.Path(self.EVIL) / "real.md")
+        self.out = self.verify(receipt(
+            artifacts=[("top.md", h, s)],
+            trace=["READ  /elsewhere/round-0-notes.md"]))
+
+    def test_the_run_completes_and_the_note_fires(self):
+        """Non-vacuity in the fail-open direction grudge `e0f0a6b75692` names:
+        a build that emitted nothing would pass every assertion below."""
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+        self.assertEqual(len(walk_notes(self.out.stderr)), 1, self.out.stderr)
+
+    def test_the_hostile_relpath_renders_fully_escaped(self):
+        self.assertEqual(
+            walk_notes(self.out.stderr),
+            [r"RESOLVED-BY-WALK: top.md "
+             r"(sub\nTIER2\x2dCOVERAGE: forged\x1b[31m/real.md)"],
+            self.out.stderr)
+
+    def test_no_forged_line_or_token_reaches_the_channel(self):
+        self.assertNotIn("\x1b", self.out.stderr)
+        self.assertEqual(
+            len([l for l in self.out.stderr.splitlines()
+                 if "TIER2-COVERAGE:" in l]), 1, self.out.stderr)
+
+
+class TestTheEmitterGuardsLayerCorrectlyOnTheCleanPath(_RootCase):
+    """ATTACK 5 — `_emit_walk_note`'s envelope where NO exception is in flight,
+    and the `BaseException` boundary underneath the two layered guards.
+
+    Both hostile-`notes_out` classes above (`TestNoCallerSuppliedParameterCan...`
+    and `TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise`) drive the
+    `--strict` ambiguity RAISE, so what they pin is that the envelope does not
+    MASK a verdict. The complementary obligation — that on a run with no
+    verdict to mask the envelope does not MANUFACTURE one, and does not swallow
+    the WORK either — was unpinned, and so was the `None` shape (the `--eval`
+    and `--selftest` callers' shape, the one where the counter is the only
+    surviving record of the resolution).
+
+    The `BaseException` leg answers the layering question directly: the
+    emission site's envelope (`except Exception`) sits above the leg's
+    `except BaseException:` mirror arm, whose body carries its OWN
+    `except Exception: pass`. Two independent swallowing guards on one path is
+    exactly the shape in which an interrupt goes missing. It does not: a
+    `KeyboardInterrupt` raised by `notes_out.append` propagates out of
+    `tier2_artifacts` unconverted, and the counter — bumped before the emission
+    by round-3/S1's ordering — is already recorded when it does.
+
+    Driven by a DIRECT call, because the CLI cannot supply an out-parameter."""
+
+    WALK = "out-9/round-9-findings.md"
+
+    class _RaisingAppend(list):
+        def append(self, item):
+            raise RuntimeError("notes_out.append exploded")
+
+    class _InterruptingAppend(list):
+        def append(self, item):
+            raise KeyboardInterrupt("interrupted mid-append")
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        self.h, size = self.plant(self.WALK, "# findings\nfatal=0\n")
+        self.artifacts = self.rv.parse_artifacts(
+            [f"  {self.WALK}  sha256:{self.h}  {size}"])
+        # TRACE names the SAME file the ARTIFACTS entry verifies, so its
+        # basename is in `verified_bases` and the `finally:` block's
+        # `_emit_provenance_notes` appends NOTHING. That is load-bearing for
+        # the interrupt leg below: a provenance note would give the run a
+        # SECOND unguarded `notes_out.append`, and the interrupt would reach
+        # the caller from there whatever `_emit_walk_note`'s envelope caught —
+        # measured, a `BaseException` envelope survives the leg without it.
+        self.trace = self.rv.parse_trace(
+            [f"  1  WROTE  {self.root}/{self.WALK}  sha256:{self.h}"])
+
+    def _run(self, notes_out, cov):
+        return self.rv.tier2_artifacts(
+            self.artifacts, self.trace, self.root, True, cov, None, notes_out)
+
+    def test_a_real_list_receives_the_note_and_the_run_is_clean(self):
+        # Non-vacuity for the two shapes below: this is the same call with a
+        # cooperating out-parameter, and it must NOT raise.
+        cov, notes_out = self.rv._Coverage(), []
+        self._run(notes_out, cov)
+        self.assertEqual(notes_out,
+                         [f"{WALK_PREFIX} {self.WALK} ({self.WALK})"])
+        self.assertEqual(cov.counts.get("resolved-by-walk"), 1)
+
+    def test_a_none_out_parameter_still_counts_and_never_raises(self):
+        cov = self.rv._Coverage()
+        self._run(None, cov)
+        self.assertEqual(cov.counts.get("resolved-by-walk"), 1, cov.counts)
+
+    def test_a_raising_append_manufactures_no_verdict_on_the_clean_path(self):
+        """The envelope must swallow the emission failure WITHOUT inventing a
+        LintError and without skipping the rest of the leg."""
+        cov = self.rv._Coverage()
+        self._run(self._RaisingAppend(), cov)
+        self.assertEqual(cov.counts.get("resolved-by-walk"), 1, cov.counts)
+        self.assertEqual(cov.art_verified, 1)
+
+    def test_an_interrupt_is_not_swallowed_by_either_layer(self):
+        """`Exception`, not `BaseException` — asserted on the ONE run where the
+        walk-note append is the only append the leg makes, so the envelope's
+        WIDTH is what decides the outcome and nothing downstream re-raises for
+        it. The counter, bumped ahead of the emission by round-3/S1's ordering,
+        is already recorded when the interrupt leaves."""
+        cov = self.rv._Coverage()
+        with self.assertRaises(KeyboardInterrupt):
+            self._run(self._InterruptingAppend(), cov)
+        self.assertEqual(cov.counts.get("resolved-by-walk"), 1, cov.counts)
+
+    def test_the_fixture_produces_no_provenance_note(self):
+        """Non-vacuity for the leg above: if this ever stops holding, the
+        interrupt leg silently stops discriminating."""
+        notes_out = []
+        self._run(notes_out, self.rv._Coverage())
+        self.assertEqual(notes_out,
+                         [f"{WALK_PREFIX} {self.WALK} ({self.WALK})"])
+
 
 
 if __name__ == "__main__":
