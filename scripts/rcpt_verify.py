@@ -1879,7 +1879,7 @@ def _trace_basename(entry):
 
 
 def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
-                           unverified_names, notes_out):
+                           unevaluated_names, unverified_names, notes_out):
     """§3.4 / T2 — silence is not permitted (grudge e0f0a6b75692).
 
     One note per READ/EDIT/WROTE entry whose BASENAME matches no ARTIFACTS basename
@@ -1936,46 +1936,120 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
     matching an entry EVALUATED — verified or not — before the raise still gets its
     note. The census's existing `partial` flag records that the set is incomplete.
 
+    `unevaluated_names` is that same rule's EXACT-NAME leg, mirroring what
+    `unverified_names` does for the verified set, and it exists because the basename
+    key alone cannot carry the rule for one legal spelling (#488 round-3/Minor-3). F4's
+    read-site guard requires a TRUTHY `base` to match anything, and every name ending in
+    `/` has an empty basename — so a `/`-suffixed ARTIFACTS entry the truncated loop
+    NEVER REACHED could not be excluded via `unevaluated_bases`, and the TRACE entry
+    citing it verbatim emitted a note on a run that had not yet had the chance to verify
+    it. That is the truncation rule inverted for exactly the spelling F4 hardened, so
+    the fix is the same one F3 already uses: carry the FULL NAMES too, and test them
+    before the basename key. Declared-name sets are disjoint by construction
+    (`unverified_names` is `evaluated`-derived, `unevaluated_names` its complement), so
+    the two exact-name tests cannot contradict each other.
+
     `_show_path` is required a fortiori (SIEGE-R2BA-4): `name` here comes out of the
     `args` field, which is exactly the shape `_show_path`'s own docstring says the
     surrounding code interpolates raw, so "the surrounding code already does it" is not
-    available as a defence at this site."""
+    available as a defence at this site.
+
+    THIS FUNCTION MAY NOT RAISE, ON ANY INPUT (#488 round-3/S1). It is called from
+    tier2_artifacts's `finally:`, where ANY exception it raises REPLACES the in-flight
+    one — a genuine `Tier-2 --strict: ... absent under all bases` LintError reported
+    instead as whatever the advisory's own bookkeeping tripped over. Four separate
+    point-patches had already been spent on one instance each of that class (`trace or
+    []` for a `None` container, `str(n)` for a non-string ARTIFACTS key, F1's isinstance
+    for a malformed entry, and the fourth: `entry.get("verb") not in _PROVENANCE_VERBS`
+    HASHES the verb, so an unhashable `verb` — a `list` or a `dict` — raises `TypeError:
+    unhashable type` at the membership test itself). A fifth type-check would have been
+    the fifth instance, so the guarantee is made STRUCTURAL instead: the two `try`s
+    below make it hold for every input, including ones nobody has thought of.
+
+    The guards are at TWO granularities and neither subsumes the other:
+      * PER-ENTRY (`continue`) — one malformed entry loses only its OWN note; the rest
+        of a long TRACE still gets its advisories. A whole-function wrapper would drop
+        them all on the first bad element.
+      * WHOLE-LOOP (`return`) — the `for` statement itself can raise, and no per-entry
+        guard can catch that: a truthy NON-ITERABLE `trace` (`trace=5`, which `trace or
+        []` passes straight through) raises at the `iter()`, and a generator `trace` can
+        raise on any `next()` (#488 round-3/Minor-2).
+    The four point-patches are KEPT alongside them rather than collapsed into them:
+    F2's `str()` coercion is a CORRECTNESS fix (it decides which basename gets
+    recorded, not merely whether a crash happens), and on exception-safety-critical
+    code belt-and-suspenders is the cheaper error. `Exception`, not `BaseException`, so
+    KeyboardInterrupt/SystemExit still propagate."""
     if notes_out is None:
         return
-    # `or []` is NOT the redundant guard the surrounding file's bare iterations are:
-    # this helper runs from tier2_artifacts's `finally:`, so a `None` trace here
-    # raises TypeError INSIDE the finally, which REPLACES any in-flight exception —
-    # a genuine Tier-2 --strict LintError would be destroyed and reported as
-    # "'NoneType' object is not iterable". `trace` is public-API-supplied (~40 call
-    # sites, no type enforcement), so the masking hazard is not hypothetical even
-    # though the sole production call site passes parse_trace's `[]`.
-    for entry in trace or []:
-        # #488 adversarial/F1 — `.get` behind an isinstance, for the reason
-        # _trace_basename's docstring gives: a naked `entry["verb"]` on a malformed
-        # element raises inside the caller's `finally:` and REPLACES the in-flight
-        # exception. A malformed element is "not a match", never a crash.
-        if not isinstance(entry, dict) or entry.get("verb") not in _PROVENANCE_VERBS:
-            continue
-        name, base = _trace_basename(entry)
-        if not name:
-            continue
-        # #488 adversarial/F3 — the exact-name override is tested BEFORE the basename
-        # key, so a colliding sibling cannot silence a name this run itself evaluated
-        # and reported unverified. See the docstring for why it does not (and must not)
-        # close the general collision.
-        if name not in unverified_names:
-            # #488 adversarial/F4 — `base` must be TRUTHY to match. `rsplit("/", 1)[-1]`
-            # maps every name ending in `/` to `""`, and `if not name: continue` above
-            # screens an empty NAME, not an empty BASE. One legally-spelled verified
-            # `ARTIFACTS` entry (`x/`, which resolve_base normalises and hash-verifies)
-            # would otherwise put `""` into `verified_bases` and from then on silence
-            # EVERY TRACE name ending in `/`, however unrelated — a degenerate key that
-            # swallows a whole family of names. Guarded here as well as at the `.add`
-            # site, so an empty base cannot match `unevaluated_bases` either.
-            if base and (base in verified_bases or base in unevaluated_bases):
+    # WHOLE-LOOP guard — see the docstring's structural-invariant paragraph. Covers
+    # everything the per-entry guard structurally cannot: the `iter()` the `for`
+    # statement performs (a truthy non-iterable `trace` such as `5` walks straight
+    # through `trace or []`), and every `next()` after it (a generator `trace` may
+    # raise mid-iteration). `return`, not `continue`: once iteration itself has
+    # failed there is no next element to move on to.
+    try:
+        # `or []` is NOT the redundant guard the surrounding file's bare iterations are:
+        # this helper runs from tier2_artifacts's `finally:`, so a `None` trace here
+        # raises TypeError INSIDE the finally, which REPLACES any in-flight exception —
+        # a genuine Tier-2 --strict LintError would be destroyed and reported as
+        # "'NoneType' object is not iterable". `trace` is public-API-supplied (~40 call
+        # sites, no type enforcement), so the masking hazard is not hypothetical even
+        # though the sole production call site passes parse_trace's `[]`. Kept although
+        # the enclosing `try` would now catch that TypeError too: `None` is the ONE
+        # shape with a right answer better than "abandon the advisory" — an absent
+        # trace has no entries, so it should emit nothing and let the loop finish.
+        for entry in trace or []:
+            # PER-ENTRY guard — a malformed entry loses its OWN note and nothing else.
+            # This is the arm that catches the fourth masking instance: the membership
+            # test below HASHES `entry.get("verb")`, so an unhashable verb (`list`,
+            # `dict`) raises `TypeError: unhashable type` inside the caller's
+            # `finally:`. `set` survived it only because CPython special-cases `set`
+            # in `x in frozenset(...)` — incidental, not a design guarantee, which is
+            # exactly why the guard is structural rather than a fifth type-check.
+            try:
+                # #488 adversarial/F1 — `.get` behind an isinstance, for the reason
+                # _trace_basename's docstring gives: a naked `entry["verb"]` on a
+                # malformed element raises inside the caller's `finally:` and REPLACES
+                # the in-flight exception. Malformed is "not a match", never a crash.
+                if (not isinstance(entry, dict)
+                        or entry.get("verb") not in _PROVENANCE_VERBS):
+                    continue
+                name, base = _trace_basename(entry)
+                if not name:
+                    continue
+                # #488 round-3/Minor-3 — §3.4's truncation rule, exact-name leg. Tested
+                # FIRST because it is the rule the other two tests are exceptions to:
+                # an ARTIFACTS entry this run never reached may yet have matched, so
+                # the citation stays silent. Carries the `/`-suffixed spelling that the
+                # empty basename cannot; see the docstring.
+                if name in unevaluated_names:
+                    continue
+                # #488 adversarial/F3 — the exact-name override is tested BEFORE the
+                # basename key, so a colliding sibling cannot silence a name this run
+                # itself evaluated and reported unverified. See the docstring for why
+                # it does not (and must not) close the general collision.
+                if name not in unverified_names:
+                    # #488 adversarial/F4 — `base` must be TRUTHY to match.
+                    # `rsplit("/", 1)[-1]` maps every name ending in `/` to `""`, and
+                    # `if not name: continue` above screens an empty NAME, not an empty
+                    # BASE. One legally-spelled verified `ARTIFACTS` entry (`x/`, which
+                    # resolve_base normalises and hash-verifies) would otherwise put
+                    # `""` into `verified_bases` and from then on silence EVERY TRACE
+                    # name ending in `/`, however unrelated — a degenerate key that
+                    # swallows a whole family of names. Guarded here as well as at the
+                    # `.add` site, so an empty base cannot match `unevaluated_bases`
+                    # either; `unevaluated_names` above carries that set's own
+                    # `/`-suffixed members instead.
+                    if base and (base in verified_bases
+                                 or base in unevaluated_bases):
+                        continue
+                notes_out.append(
+                    f"PROVENANCE-ONLY: {_show_path(name)} "
+                    f"(declared in TRACE, not verified)")
+            except Exception:
                 continue
-        notes_out.append(
-            f"PROVENANCE-ONLY: {_show_path(name)} (declared in TRACE, not verified)")
+    except Exception:
+        return
 
 
 def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
@@ -2017,11 +2091,20 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     # runs so a raise leaves them PARTIAL rather than absent (§3.4's truncation rule).
     verified_bases = set()
     evaluated = set()
-    # #488 adversarial/F3 — the DECLARED FULL NAMES that hash-verified, accumulated the
-    # same incremental way, so `evaluated - verified_names` in the `finally:` is exactly
-    # "declared, evaluated on this run, and NOT verified" however the run ended. That
-    # set is the exact-name override; see _emit_provenance_notes's docstring.
-    verified_names = set()
+    # #488 adversarial/F3 — the DECLARED ARTIFACTS KEYS that hash-verified, accumulated
+    # the same incremental way, so `evaluated - verified_keys` in the `finally:` is
+    # exactly "declared, evaluated on this run, and NOT verified" however the run ended.
+    # That set is the exact-name override; see _emit_provenance_notes's docstring.
+    #
+    # #488 round-3/Minor-4 — the RAW KEYS, not `str(name)`. Subtracting a set of
+    # SPELLINGS re-merged two DISTINCT ARTIFACTS keys whose `str()` collides (a
+    # `PurePosixPath("a/x.md")` and an `"a/x.md"` are different dict keys but the same
+    # string), so one key verifying deleted the override for the OTHER key that did
+    # not — silence bought by a spelling coincidence, which is the direction grudge
+    # e0f0a6b75692 forbids. Keys are `artifacts` dict keys and therefore hashable by
+    # construction, so a raw-key set is always available; the `str()` is applied once,
+    # at the `finally:`, to the entries that survive the subtraction.
+    verified_keys = set()
     try:
         for name, meta in artifacts.items():
             evaluated.add(name)     # tried, whatever this iteration goes on to do
@@ -2163,7 +2246,7 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             vbase = str(name).rsplit("/", 1)[-1]
             if vbase:
                 verified_bases.add(vbase)
-            verified_names.add(str(name))
+            verified_keys.add(name)
             # <size> is parsed-but-not-validated, matching lint.py
     except BaseException:
         # round-4-of-this-gate S1 — siege S-3(b) parity with tier2_witness's C1-R3-S2
@@ -2187,10 +2270,13 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
         # helper's guards can cover this site, because a call's ARGUMENTS are
         # evaluated BEFORE the callee is entered:
         #   * `if notes_out is not None` — the helper's own `if notes_out is None:
-        #     return` is reached only after the set-comprehension below has already
+        #     return` is reached only after the set-comprehensions below have already
         #     run. Hoisting the same test to the call site makes the whole body a
-        #     no-op for the callers that want no notes (--eval, --selftest) and
-        #     retires the now-redundant double-check.
+        #     no-op for the callers that want no notes (--eval, --selftest). The
+        #     helper KEEPS its own check (#488 round-3/Minor-5 corrects an earlier
+        #     comment here that called it retired): it is a public-module-level
+        #     function, and its no-raise contract has to hold for a caller that did
+        #     not hoist the test.
         #   * `str(n)` — a non-string ARTIFACTS key made `n.rsplit(...)` raise
         #     `AttributeError: 'int' object has no attribute 'rsplit'` right here,
         #     destroying a genuine `Tier-2 --strict: ... absent under all bases`
@@ -2204,11 +2290,24 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
         #     the verdict, so coercing beats raising here — fail-loud belongs on the
         #     verification path, not inside its `finally:`.
         if notes_out is not None:
-            _emit_provenance_notes(
-                trace, verified_bases,
-                {str(n).rsplit("/", 1)[-1] for n in artifacts if n not in evaluated},
-                {str(n) for n in evaluated} - verified_names,
-                notes_out)
+            # #488 round-3/S1 — the OUTER half of the structural no-raise guarantee.
+            # _emit_provenance_notes now guarantees it never raises, but a call's
+            # ARGUMENTS are evaluated BEFORE the callee is entered, so the two set
+            # comprehensions below run OUTSIDE that guarantee, right here in the
+            # `finally:` — `str(n)` on an ARTIFACTS key with a raising `__str__` would
+            # still replace the in-flight LintError. One wrapper closes the whole class
+            # at this site permanently instead of type-checking `artifacts` keys.
+            # `Exception`, not `BaseException`: KeyboardInterrupt/SystemExit propagate.
+            try:
+                unevaluated = [n for n in artifacts if n not in evaluated]
+                _emit_provenance_notes(
+                    trace, verified_bases,
+                    {str(n).rsplit("/", 1)[-1] for n in unevaluated},
+                    {str(n) for n in unevaluated},
+                    {str(n) for n in evaluated if n not in verified_keys},
+                    notes_out)
+            except Exception:
+                pass
     return notes
 
 

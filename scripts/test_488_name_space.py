@@ -849,26 +849,34 @@ class TestANonStringArtifactsKeyCannotMaskAnInFlightRaise(_RootCase):
         alone already makes the two legs above green, so without this leg the
         guard is an UNPINNED line — and the docstring of the class above records
         what happens to unpinned guards here (cleanup commit `270c656` deleted
-        one and the whole suite stayed green). Stand-in for "the body ran": an
-        emitter that raises. If the guard is removed, the finally-block still
-        enters the call and that raise masks the LintError."""
-        def _boom(*a, **kw):
-            raise RuntimeError("emitter must not run")
+        one and the whole suite stayed green).
+
+        Stand-in for "the body ran": an emitter that RECORDS. It used to be one
+        that RAISES, which #488 round-3/S1 retired: the call site is now itself
+        wrapped in `except Exception: pass` (the outer half of the structural
+        no-raise guarantee), so a raising stand-in is swallowed there and can no
+        longer tell "skipped" from "called". A recorder is immune to that and
+        detects the same mutation — delete the guard and the `notes_out=None` leg
+        below records a call."""
+        calls = []
         real = self.rv._emit_provenance_notes
-        self.rv._emit_provenance_notes = _boom
+        self.rv._emit_provenance_notes = lambda *a, **kw: calls.append(a)
         self.addCleanup(setattr, self.rv, "_emit_provenance_notes", real)
 
         with self.assertRaises(self.rv.LintError) as caught:
             self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
                                     None, None, None)
         self.assertIn("absent under all bases", str(caught.exception))
+        self.assertEqual(calls, [], "the emitter ran for a caller that asked "
+                                    "for no notes")
 
         # Non-vacuity: the identical call that DOES ask for notes reaches the
         # patched emitter, so the leg above is about the guard, not about a
         # monkeypatch that never took.
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(self.rv.LintError):
             self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
                                     None, None, [])
+        self.assertEqual(len(calls), 1, "the monkeypatch never took")
 
     def test_it_does_not_mask_when_the_caller_wants_no_notes(self):
         """`notes_out=None` — the ~40 --eval/--selftest-shaped call sites. The
@@ -1174,12 +1182,27 @@ class TestAMalformedTraceEntryCannotMaskAnInFlightRaise(_RootCase):
     #  Each shape is ordinary API misuse, not a contrived object: a hand-built
     #  entry missing a key, a raw TRACE line never run through `parse_trace`, and
     #  a `None` where an entry was expected.
+    #
+    #  The three `verb is ...` shapes are the FOURTH instance of this hazard
+    #  (#488 round-3/S1) and they get in through the guard written for the first
+    #  three: `entry.get("verb") not in _PROVENANCE_VERBS` HASHES the verb,
+    #  because `_PROVENANCE_VERBS` is a frozenset. A `list` or a `dict` verb
+    #  raises `TypeError: unhashable type` at the membership test itself, inside
+    #  the caller's `finally:`. `set` is here as the control that shows the
+    #  survivor was INCIDENTAL, not designed: CPython special-cases `set` on the
+    #  left of `in` against a `frozenset` and silently converts it, so that one
+    #  shape happened to be green while its two siblings were not — a distinction
+    #  no reader of this code could have predicted, and the reason the fix is a
+    #  structural guard rather than a fifth type-check.
     SHAPES = {
         "entry missing the args key": [{"n": 1, "verb": "READ"}],
         "entry missing the verb key": [{"n": 1, "args": "x.md"}],
         "entry is a raw unparsed line": ["1 READ x.md"],
         "args is None": [{"n": 1, "verb": "READ", "args": None}],
         "entry is None": [None],
+        "verb is an unhashable list": [{"n": 1, "verb": [], "args": "x.md"}],
+        "verb is an unhashable dict": [{"n": 1, "verb": {}, "args": "x.md"}],
+        "verb is a set": [{"n": 1, "verb": set(), "args": "x.md"}],
     }
 
     def setUp(self):
@@ -1394,6 +1417,256 @@ class TestTheTruncationPartitionHoldsAtScale(_RootCase):
             [n for n in notes_out if n.startswith(NOTE_PREFIX)],
             [f"{NOTE_PREFIX} boom.md (declared in TRACE, not verified)",
              f"{NOTE_PREFIX} never/heard.md (declared in TRACE, not verified)"])
+
+
+# --------------------------------------------------------------------------
+# ROUND-3 STRUCTURAL — the masking hazard as a CLASS, not as four instances.
+# --------------------------------------------------------------------------
+class TestTheEmitterCannotRaiseOutOfTheFinallyOnAnyShape(_RootCase):
+    """ROUND-3/S1 + Minor-2 — `_emit_provenance_notes` is called from
+    `tier2_artifacts`'s `finally:`, so its no-raise property is a CONTRACT, not a
+    property that happens to hold for the shapes anyone has enumerated so far.
+    Four point-patches had been spent on one shape each (`None` container,
+    non-string ARTIFACTS key, malformed entry, unhashable verb) before the
+    contract was made structural. These legs pin the contract itself: the shapes
+    below are chosen because NO existing type-check anticipates them.
+
+    `ART`'s single path-shaped absent name under `--strict` is the in-flight
+    exception every leg must see survive."""
+
+    ART = {"docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+
+    def _run(self, trace, notes_out=None, art=None):
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART if art is None else art, trace,
+                                    [self.root], True, None, None,
+                                    [] if notes_out is None else notes_out)
+        self.assertIn("absent under all bases", str(caught.exception))
+
+    def test_a_truthy_non_iterable_trace_does_not_replace_the_lint_error(self):
+        """MINOR-2 — `trace or []` hardens the FALSY container only. `5` is
+        truthy, so it walks straight through the `or` and the `for` statement's
+        own `iter()` raises `TypeError: 'int' object is not iterable` inside the
+        `finally:`. No per-entry guard can reach this: there is no entry yet."""
+        for label, trace in (("int", 5), ("object", object()),
+                             ("float", 1.5)):
+            with self.subTest(shape=label):
+                self._run(trace)
+
+    def test_a_generator_that_raises_mid_iteration_loses_only_the_rest(self):
+        """The other half of Minor-2: iteration can fail at ANY `next()`, not
+        only at the first. The notes already collected must survive, and so must
+        the in-flight LintError."""
+        def _gen():
+            yield {"n": 1, "verb": "READ", "args": "/elsewhere/one.md"}
+            raise RuntimeError("iterator exploded mid-TRACE")
+
+        notes_out = []
+        self._run(_gen(), notes_out)
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/one.md "
+                          "(declared in TRACE, not verified)"])
+
+    def test_one_malformed_entry_does_not_cost_the_other_entries_their_notes(self):
+        """The granularity claim. A whole-function wrapper would satisfy the
+        no-raise contract and silently drop every note after the first bad
+        element — silence bought by one malformed entry, which is the direction
+        grudge e0f0a6b75692 forbids. Per-entry is why both guards exist."""
+        notes_out = []
+        self._run([{"n": 1, "verb": "READ", "args": "/elsewhere/one.md"},
+                   {"n": 2, "verb": [], "args": "/elsewhere/boom.md"},
+                   {"n": 3, "verb": "READ", "args": "/elsewhere/two.md"}],
+                  notes_out)
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/one.md "
+                          "(declared in TRACE, not verified)",
+                          f"{NOTE_PREFIX} /elsewhere/two.md "
+                          "(declared in TRACE, not verified)"])
+
+    def test_a_hostile_entry_object_cannot_raise_out_of_the_emitter(self):
+        """The shape no type-check anticipates: `isinstance(entry, dict)` is
+        TRUE for a dict subclass, and `.get` is overridable. This is the leg that
+        distinguishes a structural guard from a fifth point-patch — it is green
+        only because nothing is enumerated."""
+        class _Hostile(dict):
+            def get(self, *a, **kw):
+                raise RuntimeError("entry.get exploded")
+
+        notes_out = []
+        self._run([_Hostile(verb="READ", args="x.md"),
+                   {"n": 2, "verb": "READ", "args": "/elsewhere/after.md"}],
+                  notes_out)
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/after.md "
+                          "(declared in TRACE, not verified)"])
+
+    def test_the_emitter_itself_swallows_a_non_iterable_trace(self):
+        """Pins the emitter's OWN whole-loop guard, called DIRECTLY rather than
+        through `tier2_artifacts`. Necessary because the call site now carries a
+        wrapper of its own, which would keep every leg above green even with the
+        emitter's guard deleted — i.e. the emitter's guard would be an UNPINNED
+        line, and this file's `270c656` precedent records what happens to those.
+        The contract is the module-level function's, not the call site's."""
+        notes_out = []
+        self.assertIsNone(self.rv._emit_provenance_notes(
+            5, set(), set(), set(), set(), notes_out))
+        self.assertEqual(notes_out, [])
+        # Non-vacuity: the same direct call on a well-formed trace does emit.
+        self.rv._emit_provenance_notes(
+            [{"n": 1, "verb": "READ", "args": "q.md"}],
+            set(), set(), set(), set(), notes_out)
+        self.assertEqual(notes_out,
+                         [f"{NOTE_PREFIX} q.md (declared in TRACE, not "
+                          "verified)"])
+
+    def test_an_artifacts_key_whose_str_raises_cannot_mask_the_lint_error(self):
+        """Pins the CALL-SITE wrapper specifically. A call's ARGUMENTS are
+        evaluated before the callee is entered, so the two set comprehensions in
+        the `finally:` run OUTSIDE the emitter's own guarantee — no guard inside
+        the emitter can ever cover them. This is the same structure as the
+        already-pinned non-string-key leg, one level further out: `str()` fixed
+        `.rsplit` on an `int`, and nothing fixed `str()` itself.
+
+        ORDER IS LOAD-BEARING: the absent path-shaped name first, so `--strict`
+        truncates and leaves the hostile key in the UNEVALUATED comprehension."""
+        class _RaisingStr:
+            def __str__(self):
+                raise RuntimeError("__str__ exploded")
+
+        art = dict(self.ART)
+        art[_RaisingStr()] = {"hash": H64, "size": "10"}
+        self._run([{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}], art=art)
+
+    def test_the_control_shows_a_well_formed_trace_still_emits(self):
+        """Non-vacuity for every leg above: the guards did not turn the emitter
+        into a no-op."""
+        notes_out = []
+        self._run([{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
+                  notes_out)
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/x.md "
+                          "(declared in TRACE, not verified)"])
+
+
+class TestTheTruncationRuleHoldsForSlashSuffixedNames(_RootCase):
+    """ROUND-3/Minor-3 — F4's read-site guard (`base` must be TRUTHY to match)
+    and §3.4's truncation rule collided on one legal spelling.
+
+    Every name ending in `/` has an EMPTY basename, and F4 made an empty basename
+    match nothing — which is right for `verified_bases` (that was F4's whole
+    point) and WRONG for `unevaluated_bases`, because there the empty basename was
+    the only carrier of the truncation rule for that spelling. A `/`-suffixed
+    ARTIFACTS entry the truncated loop NEVER REACHED could therefore not be
+    excluded, and the TRACE entry citing it verbatim emitted `PROVENANCE-ONLY` on
+    a run that had not yet had the CHANCE to verify it — the docstring's stated
+    invariant ("emits NOTHING; its match may yet have arrived") violated silently.
+
+    Fixed the way F3 already fixes the mirror-image case: carry the FULL NAMES.
+
+    ORDER IS LOAD-BEARING — the path-shaped absent name comes FIRST so `--strict`
+    truncates the loop and leaves `x/` unevaluated."""
+
+    ART = {"docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"},
+           "x/": {"hash": H64, "size": "5"}}
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        self.plant("x", "body\n")
+
+    def _run(self, trace, art=None):
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART if art is None else art, trace,
+                                    [self.root], True, None, None, notes_out)
+        # Non-vacuity: the run really was truncated, at the entry it was meant
+        # to be truncated at, so `x/` really is UNEVALUATED.
+        self.assertIn("absent under all bases", str(caught.exception))
+        return [n for n in notes_out if n.startswith(NOTE_PREFIX)]
+
+    def test_a_never_reached_slash_suffixed_name_stays_silent(self):
+        self.assertEqual(
+            self._run([{"n": 1, "verb": "READ", "args": "x/"}]), [])
+
+    def test_an_undeclared_slash_suffixed_name_still_speaks(self):
+        """Non-vacuity: the silence above is about THIS declared unevaluated
+        name, not about `/`-suffixed TRACE names as a family — F4's finding was
+        precisely that swallowing the whole family is the failure mode."""
+        self.assertEqual(
+            self._run([{"n": 1, "verb": "READ", "args": "/secret/elsewhere/"}]),
+            [f"{NOTE_PREFIX} /secret/elsewhere/ "
+             "(declared in TRACE, not verified)"])
+
+    def test_the_same_name_speaks_once_the_loop_actually_reaches_it(self):
+        """Non-vacuity in the other direction: `x/` is silent because it was
+        NEVER EVALUATED, not because `/`-suffixed names can never emit. Put it
+        first and it is evaluated, hash-mismatches, and gets its note."""
+        art = {"x/": {"hash": H64, "size": "5"},
+               "docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(art, [{"n": 1, "verb": "READ", "args": "x/"}],
+                                    [self.root], True, None, None, notes_out)
+        self.assertIn("sha256 mismatch", str(caught.exception))
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} x/ (declared in TRACE, not verified)"])
+
+
+class TestTwoArtifactsKeysWithTheSameSpellingDoNotMerge(_RootCase):
+    """ROUND-3/Minor-4 — the exact-name override was computed as
+    `{str(n) for n in evaluated} - {str(n) for n in verified}`, i.e. as a
+    difference of SPELLINGS. Two DISTINCT `ARTIFACTS` dict keys can share a
+    spelling (`PurePosixPath("a.txt")` and `"a.txt"` are different keys, equal
+    strings), so ONE of them verifying deleted the override for the OTHER, which
+    had not — and the basename key then silenced it too. Silence bought by a
+    spelling coincidence is the direction grudge e0f0a6b75692 forbids.
+
+    Fixed by subtracting the raw KEYS (always hashable — they are dict keys) and
+    applying `str()` once, afterwards, to what survives.
+
+    Not receipt-author-reachable (`parse_artifacts` only ever produces `str`
+    keys); reachable through the ~40 direct API call sites, exactly as every
+    other leg in this section is."""
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        body = "hello\n"
+        (self.root / "a.txt").write_text(body)
+        self.good = hashlib.sha256(body.encode()).hexdigest()
+        self.size = str(len(body))
+
+    def test_the_unverified_twin_keeps_its_note(self):
+        art = {pathlib.PurePosixPath("a.txt"): {"hash": self.good,
+                                                "size": self.size},
+               "a.txt": {"hash": "b" * 64, "size": self.size}}
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(
+                art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
+                [self.root], False, None, None, notes_out)
+        # Non-vacuity: the second key really was evaluated and really did fail.
+        self.assertIn("sha256 mismatch", str(caught.exception))
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} a.txt (declared in TRACE, not "
+                          "verified)"])
+
+    def test_the_control_shows_the_verified_twin_alone_is_silent(self):
+        """Non-vacuity: with only the verifying key declared, the same TRACE
+        citation is correctly silent — the leg above is about the collision, not
+        about the fixture always emitting."""
+        art = {pathlib.PurePosixPath("a.txt"): {"hash": self.good,
+                                                "size": self.size}}
+        notes_out = []
+        self.assertEqual(
+            self.rv.tier2_artifacts(
+                art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
+                [self.root], False, None, None, notes_out), [])
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)], [])
 
 
 if __name__ == "__main__":
