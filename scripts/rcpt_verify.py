@@ -1846,7 +1846,78 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
     return raw
 
 
-def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None):
+_PROVENANCE_VERBS = frozenset({"READ", "EDIT", "WROTE"})
+
+
+def _trace_basename(entry):
+    """The name a TRACE entry cites, and its basename. The name is the FIRST token of
+    the entry's `args` — the field is receipt-authored and unconstrained (§3: `TRACE`
+    may name anything, and AC-2's Tier-1 grammar binds `ARTIFACTS` only), so nothing
+    here may assume path shape. `rsplit("/")` rather than `pathlib`: this is a string
+    operation on the LEAST-constrained receipt-controlled string in the grammar, and it
+    must not acquire path semantics (or an exception) on a hostile name."""
+    tokens = entry["args"].split()
+    name = tokens[0] if tokens else ""
+    return name, name.rsplit("/", 1)[-1]
+
+
+def _emit_provenance_notes(trace, verified_bases, unevaluated_bases, notes_out):
+    """§3.4 / T2 — silence is not permitted (grudge e0f0a6b75692).
+
+    One note per READ/EDIT/WROTE entry whose BASENAME matches no ARTIFACTS basename
+    that Tier-2 RESOLVED AND HASH-VERIFIED. All three verbs, because scoping to
+    EDIT/WROTE exempts the one declaration §1.1 quotes as the filed contradiction and
+    turns two measured hard-FAILs (corpus17/rcpt-18, live29/rcpt-22, both READ-only)
+    into silence.
+
+    The key is the VERIFIED basename set. Both obvious alternatives are wrong in
+    opposite directions, and the basename key itself has a THIRD, opposite cost that is
+    the reason those two are not the whole tradeoff (round-1-of-this-gate S2):
+      * the literal `parts[0]` string mislabels 13 verified entries across the three
+        frozen corpora, because §3.2 mandates DIFFERENT name forms by design (absolute
+        in TRACE, bare in ARTIFACTS);
+      * the verified-BLIND basename key suppresses 61 (flat) / 79 (nested) TRUE
+        advisories, which is the grudge re-entering through the clause written to
+        close it;
+      * the basename key ITSELF is silent on a SAME-BASENAME DIFFERENT-FILE collision: a
+        TRACE entry naming a genuinely different file whose basename happens to match a
+        verified ARTIFACTS basename emits nothing, exactly as if the two names had
+        named the same file. `quality-gate/SKILL.md` makes such collisions structural
+        rather than hypothetical — per-chunk `chunk-N/round-N-findings.md` and
+        per-chunk `fix-journal.md` both guarantee sibling chunks share a basename — so
+        this is not a corner case invented for this docstring. It is accepted, not
+        fixed, because keying on anything more specific than basename re-opens the
+        first bullet's mislabeling (§3.2's two legs spell one real file DIFFERENTLY
+        by design, so a more specific key would call verified files unverified); its
+        rate on live corpora is not measured, unlike the first two bullets' figures,
+        so it should be read as unknown rather than as small.
+
+    `unevaluated_bases` carries §3.4's truncation rule: on a run truncated by any of
+    tier2_artifacts's five raise sites, a TRACE entry matching an ARTIFACTS entry the
+    loop never reached emits NOTHING (its match may yet have arrived), while one
+    matching an entry EVALUATED — verified or not — before the raise still gets its
+    note. The census's existing `partial` flag records that the set is incomplete.
+
+    `_show_path` is required a fortiori (SIEGE-R2BA-4): `name` here comes out of the
+    `args` field, which is exactly the shape `_show_path`'s own docstring says the
+    surrounding code interpolates raw, so "the surrounding code already does it" is not
+    available as a defence at this site."""
+    if notes_out is None:
+        return
+    for entry in trace or []:
+        if entry["verb"] not in _PROVENANCE_VERBS:
+            continue
+        name, base = _trace_basename(entry)
+        if not name:
+            continue
+        if base in verified_bases or base in unevaluated_bases:
+            continue
+        notes_out.append(
+            f"PROVENANCE-ONLY: {_show_path(name)} (declared in TRACE, not verified)")
+
+
+def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
+                    notes_out=None):
     """Part 1. For each ARTIFACTS <name>: resolve_base; if found, recompute sha256
     and compare (mismatch -> FAIL). If absent: path-shaped + strict -> FAIL;
     else UNVERIFIABLE (non-fatal). Returns list of UNVERIFIABLE notes; raises LintError on FAIL.
@@ -1862,132 +1933,173 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None):
     buffer instead of re-resolving the name and re-reading the file. Two keys because
     each covers a miss the other does not; see the write site. Only
     matched entries are carried, because the whole point of the carry is that the
-    verified hash is a statement about the bytes the predicate ran against."""
+    verified hash is a statement about the bytes the predicate ran against.
+
+    #488 / T2 — `notes_out` is an optional out-parameter list for the PROVENANCE-ONLY
+    notes, the same idiom tier2_witness already uses for wit_notes/notes_out and the
+    same OPTIONAL-WITH-A-DEFAULT reason as cov/bodies: the ~40 call sites pass
+    positionally, so a required parameter would change arity everywhere. The notes MUST
+    NOT ride the return value: this function raises on five sites that truncate the
+    entry loop, and the sole production call site is `notes += tier2_artifacts(...)`,
+    whose `+=` never executes on a raise — a return-by-value note list is discarded
+    WHOLE, not partially, on every truncated run. Callers that pass None get no notes,
+    which is why --eval and --selftest are unaffected.
+
+    #488 / T7 — the RESOLVED-BY-WALK: notes this function also emits go through the
+    SAME out-parameter, for the same reason. Do not route them through `notes`."""
     notes = []
     # SIEGE-R2BA-2 — what is LEFT of ARTIFACT_READ_CAP for this leg. Cumulative, because
     # the entry count is receipt-controlled; see the constant for why.
     budget = ARTIFACT_READ_CAP
-    for name, meta in artifacts.items():
-        found = []
-        refused = []
-        resolved = resolve_base(name, root, found, refused)
-        if resolved is None:
-            # D8.3's arm, and the --strict/UNVERIFIABLE arms, now live in the shared
-            # _unresolved_disposition so the witness leg cannot classify the same name
-            # differently (F4). Decided AFTER resolution — that ordering ruling
-            # (round-2/S2) is the call site's to keep, and it is kept here.
-            #
-            # `resolved is None` implies `found == []` (resolve_base returns the first
-            # hit, so a non-empty `found` always yields a `resolved`), which is why this
-            # branch may sit above the `len(found) > 1` test without hiding an ambiguity:
-            # a 12-hex name present under two roots is a real file in two homes and takes
-            # the ambiguity branch exactly as any other name does.
-            notes.append(_unresolved_disposition(name, strict, cov,
-                                                 refused=refused))
-            continue
-        if refused:
-            # siege S-3(b) — `_refused_clause` was consumed ONLY by
-            # _unresolved_disposition, so a refusal that the FALLBACK then papered over
-            # was never printed at all: the operator saw a clean run and no mention that
-            # the probe set had been narrowed under them. The refusal is a property of
-            # the RUN, not of the failure, so it is reported whenever it happens.
-            notes.append(f"REFUSED: probe base dropped while resolving "
-                         f"{_show_path(name)}{_refused_clause(refused)}")
-        if cov is not None:
-            cov.art_applicable += 1
-        if len(found) > 1:
-            # #486 / D2 — two or more DISTINCT realpaths. Fail closed under --strict:
-            # first-hit-wins here would verify against a plausible but WRONG file, a
-            # silent-wrong-answer class strictly worse than the loud UNVERIFIABLE it
-            # replaces. Byte-identical copies count too (Q7): collapsing them would make
-            # the disposition depend on the content of a file the receipt may control.
-            # The parenthetical lists EVERY distinct realpath, sorted lexicographically;
-            # with N roots the candidate space is up to 2N, so it is not a two-item bound.
+    # #488 / T2 — the two facts the PROVENANCE-ONLY key needs, accumulated AS the loop
+    # runs so a raise leaves them PARTIAL rather than absent (§3.4's truncation rule).
+    verified_bases = set()
+    evaluated = set()
+    try:
+        for name, meta in artifacts.items():
+            evaluated.add(name)     # tried, whatever this iteration goes on to do
+            found = []
+            refused = []
+            resolved = resolve_base(name, root, found, refused)
+            if resolved is None:
+                # D8.3's arm, and the --strict/UNVERIFIABLE arms, now live in the shared
+                # _unresolved_disposition so the witness leg cannot classify the same name
+                # differently (F4). Decided AFTER resolution — that ordering ruling
+                # (round-2/S2) is the call site's to keep, and it is kept here.
+                #
+                # `resolved is None` implies `found == []` (resolve_base returns the first
+                # hit, so a non-empty `found` always yields a `resolved`), which is why this
+                # branch may sit above the `len(found) > 1` test without hiding an ambiguity:
+                # a 12-hex name present under two roots is a real file in two homes and takes
+                # the ambiguity branch exactly as any other name does.
+                notes.append(_unresolved_disposition(name, strict, cov,
+                                                     refused=refused))
+                continue
+            if refused:
+                # siege S-3(b) — `_refused_clause` was consumed ONLY by
+                # _unresolved_disposition, so a refusal that the FALLBACK then papered over
+                # was never printed at all: the operator saw a clean run and no mention that
+                # the probe set had been narrowed under them. The refusal is a property of
+                # the RUN, not of the failure, so it is reported whenever it happens.
+                notes.append(f"REFUSED: probe base dropped while resolving "
+                             f"{_show_path(name)}{_refused_clause(refused)}")
             if cov is not None:
-                # Bumped BEFORE the --strict raise, so the item is recorded on exactly
-                # the run the raise truncates.
-                cov.bump("ambiguous")
-            # SIEGE-C2 — _show_path, not str(): `found` holds RESOLVED paths under roots
-            # the reviewed subagent owns, and an unescaped newline in one forges a second
-            # TIER2-COVERAGE: line on the channel callers parse.
-            homes = ", ".join(sorted(_show_path(p) for p in found))
-            # SIEGE-R2BA-4 — the NAME too, not only the homes.
-            msg = f"artifact {_show_path(name)} is ambiguous across roots ({homes})"
-            if strict:
+                cov.art_applicable += 1
+            if len(found) > 1:
+                # #486 / D2 — two or more DISTINCT realpaths. Fail closed under --strict:
+                # first-hit-wins here would verify against a plausible but WRONG file, a
+                # silent-wrong-answer class strictly worse than the loud UNVERIFIABLE it
+                # replaces. Byte-identical copies count too (Q7): collapsing them would make
+                # the disposition depend on the content of a file the receipt may control.
+                # The parenthetical lists EVERY distinct realpath, sorted lexicographically;
+                # with N roots the candidate space is up to 2N, so it is not a two-item bound.
+                if cov is not None:
+                    # Bumped BEFORE the --strict raise, so the item is recorded on exactly
+                    # the run the raise truncates.
+                    cov.bump("ambiguous")
+                # SIEGE-C2 — _show_path, not str(): `found` holds RESOLVED paths under roots
+                # the reviewed subagent owns, and an unescaped newline in one forges a second
+                # TIER2-COVERAGE: line on the channel callers parse.
+                homes = ", ".join(sorted(_show_path(p) for p in found))
+                # SIEGE-R2BA-4 — the NAME too, not only the homes.
+                msg = f"artifact {_show_path(name)} is ambiguous across roots ({homes})"
+                if strict:
+                    if cov is not None:
+                        cov.partial = True     # remaining entries + witness leg uncounted
+                    raise LintError(f"Tier-2 --strict: {msg}")   # BEFORE any read
+                notes.append(f"AMBIGUOUS: {msg}")
+            try:
+                # SIEGE-R2BA-2 — bounded, so an attacker-named 4 GiB sparse file is refused
+                # instead of materialised. The raise is a LintError and lands on the arm
+                # below it, which sets `partial` exactly as the unreadable arm does.
+                raw = _read_capped(resolved, budget, f"ARTIFACTS {_show_path(name)}")
+            except LintError:
+                # Over-cap: bytes NOT read, hash NOT recomputed, remaining entries and the
+                # witness leg uncounted. Fails CLOSED — never a silent skip.
+                if cov is not None:
+                    cov.partial = True
+                raise
+            except (OSError, MemoryError) as e:
+                # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an OSError, so under
+                # `ulimit -v` it escaped this guard and printed a Traceback AFTER the census.
+                # `strerror` via getattr because only the OSError leg has one.
+                #
+                # #486 fixer / F3 — a name that RESOLVES but cannot be READ. #486's whole
+                # purpose is to make these names resolve, under a second, orchestrator-
+                # supplied findings root whose contents this process does not own, so a
+                # mode-000 / EISDIR / ENOENT-since-probe file is now ordinary. _verify_single
+                # catches only LintError and the module guard only _PathReadError, so the
+                # bare read_bytes() escaped as a traceback printed AFTER the
+                # TIER2-COVERAGE: line. A clean classified bullet instead; partial because
+                # the remaining entries and the witness leg go uncounted.
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: ARTIFACTS {_show_path(name)} unreadable "
+                    f"({_strerror(e)})")
+            budget -= len(raw)
+            actual = hashlib.sha256(raw).hexdigest()
+            if cov is not None:
+                # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash
+                # evaluated == VERIFIED, including the entry that then mismatches, so
+                # the increment sits between the recomputation and the comparison —
+                # never after it. The natural placement ("count it once we know it's
+                # good") renders `artifacts 0/N` on exactly the mismatch runs the
+                # census exists to explain.
+                cov.art_verified += 1
+            if actual != meta["hash"]:
                 if cov is not None:
                     cov.partial = True     # remaining entries + witness leg uncounted
-                raise LintError(f"Tier-2 --strict: {msg}")   # BEFORE any read
-            notes.append(f"AMBIGUOUS: {msg}")
-        try:
-            # SIEGE-R2BA-2 — bounded, so an attacker-named 4 GiB sparse file is refused
-            # instead of materialised. The raise is a LintError and lands on the arm
-            # below it, which sets `partial` exactly as the unreadable arm does.
-            raw = _read_capped(resolved, budget, f"ARTIFACTS {_show_path(name)}")
-        except LintError:
-            # Over-cap: bytes NOT read, hash NOT recomputed, remaining entries and the
-            # witness leg uncounted. Fails CLOSED — never a silent skip.
-            if cov is not None:
-                cov.partial = True
-            raise
-        except (OSError, MemoryError) as e:
-            # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an OSError, so under
-            # `ulimit -v` it escaped this guard and printed a Traceback AFTER the census.
-            # `strerror` via getattr because only the OSError leg has one.
-            #
-            # #486 fixer / F3 — a name that RESOLVES but cannot be READ. #486's whole
-            # purpose is to make these names resolve, under a second, orchestrator-
-            # supplied findings root whose contents this process does not own, so a
-            # mode-000 / EISDIR / ENOENT-since-probe file is now ordinary. _verify_single
-            # catches only LintError and the module guard only _PathReadError, so the
-            # bare read_bytes() escaped as a traceback printed AFTER the
-            # TIER2-COVERAGE: line. A clean classified bullet instead; partial because
-            # the remaining entries and the witness leg go uncounted.
-            if cov is not None:
-                cov.partial = True
-            raise LintError(
-                f"Tier-2: ARTIFACTS {_show_path(name)} unreadable "
-                f"({_strerror(e)})")
-        budget -= len(raw)
-        actual = hashlib.sha256(raw).hexdigest()
-        if cov is not None:
-            # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash
-            # evaluated == VERIFIED, including the entry that then mismatches, so
-            # the increment sits between the recomputation and the comparison —
-            # never after it. The natural placement ("count it once we know it's
-            # good") renders `artifacts 0/N` on exactly the mismatch runs the
-            # census exists to explain.
-            cov.art_verified += 1
-        if actual != meta["hash"]:
-            if cov is not None:
-                cov.partial = True     # remaining entries + witness leg uncounted
-            raise LintError(f"Tier-2: ARTIFACTS {_show_path(name)} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
-        if bodies is not None:
-            # SIEGE-R2BA-1 — carried AFTER the comparison, so the buffer the witness leg
-            # evaluates is exactly the buffer this leg hashed AND matched.
-            #
-            # Carried under BOTH keys — the declared NAME and the RESOLVED realpath — and
-            # both are load-bearing in opposite directions. Keying on only one loses a
-            # case the other covers, which is why this is not a single-key choice:
-            #   * NAME alone (the original) missed whenever the two legs SPELLED the same
-            #     file differently. The witness leg's `art_name` for a rangeless grep
-            #     payload is the first token of the cited TRACE entry's args verbatim,
-            #     written independently of the ARTIFACTS line, so a `./f.md` in TRACE
-            #     against an `f.md` in ARTIFACTS silently reinstated the second
-            #     independent read this carry exists to remove — on a name that HAD been
-            #     hashed. Realpath closes `./`, `a/../f.md` and absolute-vs-relative.
-            #   * REALPATH alone missed whenever the same declared name RESOLVES
-            #     differently between the legs — precisely the mid-lint symlink swap this
-            #     carry was written against. Replacing the hashed regular file with a
-            #     symlink to a sanitised sibling moves the realpath, so a realpath-only
-            #     lookup misses and the predicate runs on the sanitised bytes: a receipt
-            #     the carry used to REJECT would be accepted. That is a fail-open, so
-            #     realpath is an ADDITION here, never a replacement.
-            # Two keys for one buffer, so a hit under either binds the predicate to the
-            # bytes this leg hashed AND matched. `name` is a str and `resolved` a Path, so
-            # the two key spaces cannot collide.
-            bodies[name] = raw
-            bodies[resolved] = raw
-        # <size> is parsed-but-not-validated, matching lint.py
+                raise LintError(f"Tier-2: ARTIFACTS {_show_path(name)} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
+            if bodies is not None:
+                # SIEGE-R2BA-1 — carried AFTER the comparison, so the buffer the witness leg
+                # evaluates is exactly the buffer this leg hashed AND matched.
+                #
+                # Carried under BOTH keys — the declared NAME and the RESOLVED realpath — and
+                # both are load-bearing in opposite directions. Keying on only one loses a
+                # case the other covers, which is why this is not a single-key choice:
+                #   * NAME alone (the original) missed whenever the two legs SPELLED the same
+                #     file differently. The witness leg's `art_name` for a rangeless grep
+                #     payload is the first token of the cited TRACE entry's args verbatim,
+                #     written independently of the ARTIFACTS line, so a `./f.md` in TRACE
+                #     against an `f.md` in ARTIFACTS silently reinstated the second
+                #     independent read this carry exists to remove — on a name that HAD been
+                #     hashed. Realpath closes `./`, `a/../f.md` and absolute-vs-relative.
+                #   * REALPATH alone missed whenever the same declared name RESOLVES
+                #     differently between the legs — precisely the mid-lint symlink swap this
+                #     carry was written against. Replacing the hashed regular file with a
+                #     symlink to a sanitised sibling moves the realpath, so a realpath-only
+                #     lookup misses and the predicate runs on the sanitised bytes: a receipt
+                #     the carry used to REJECT would be accepted. That is a fail-open, so
+                #     realpath is an ADDITION here, never a replacement.
+                # Two keys for one buffer, so a hit under either binds the predicate to the
+                # bytes this leg hashed AND matched. `name` is a str and `resolved` a Path, so
+                # the two key spaces cannot collide.
+                bodies[name] = raw
+                bodies[resolved] = raw
+            # #488 / T2 — recorded only AFTER the sha256 comparison above, so "verified"
+            # means resolved AND hash-matched, never merely resolved.
+            verified_bases.add(name.rsplit("/", 1)[-1])
+            # <size> is parsed-but-not-validated, matching lint.py
+    except BaseException:
+        # round-4-of-this-gate S1 — siege S-3(b) parity with tier2_witness's C1-R3-S2
+        # mirror: this leg's OWN UNVERIFIABLE:/REFUSED:/AMBIGUOUS: notes, accumulated
+        # into `notes` above, ride the RETURN value, whose `+=` at the sole production
+        # call site never executes on a raise. Without this arm they are silently
+        # discarded WHOLE on every one of the five truncating raises — the exact
+        # fail-open shape grudge e0f0a6b75692 exists to prevent, and the one the new
+        # PROVENANCE-ONLY:/RESOLVED-BY-WALK: notes do NOT share, because Task 4/5 route
+        # them through `notes_out` directly.
+        if notes_out is not None:
+            notes_out.extend(notes)
+        raise
+    finally:
+        # In a `finally:` so the notes survive all five truncating raise sites, which is
+        # the whole reason the out-parameter exists (§3.4, T2 leg 6).
+        _emit_provenance_notes(
+            trace, verified_bases,
+            {n.rsplit("/", 1)[-1] for n in artifacts if n not in evaluated},
+            notes_out)
     return notes
 
 
@@ -3833,7 +3945,12 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 notes += ([] if v11 is not None else
                           ["UNVERIFIABLE: v1.1 Layer-2 rules not evaluated "
                            "(receipt declares RCPT v1)"])
-                notes += tier2_artifacts(artifacts, trace, root, strict, cov, bodies)
+                # #488 / T2 — `notes` is passed AS the out-param, not collected into a
+                # second list: every drain site emits `notes + wit_notes`, so mirroring
+                # into `notes` directly is what makes the PROVENANCE-ONLY lines reach
+                # stderr on the LintError exits too.
+                notes += tier2_artifacts(artifacts, trace, root, strict, cov, bodies,
+                                         notes)
                 wit_probe = {}
                 if verdict in {"PASS", "FAIL"}:
                     # #486 / D7 — the bound now lives in tier2_witness, so a direct
