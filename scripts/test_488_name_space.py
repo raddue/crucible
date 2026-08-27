@@ -2513,6 +2513,95 @@ class TestSiegeS4ASymlinkInsideAnOwnedRootCannotZeroTheWalkNote(_TwoRootCase):
         self.assertEqual(walk_notes(out.stderr), [], out.stderr)
 
 
+class TestSiegeR11TheAbsoluteSpellingOfTheShortenedCitationAlsoDiscloses(_TwoRootCase):
+    """SIEGE-R1-1 — SIEGE-S4's own fix, bypassed by re-spelling the identical attack.
+
+    `_cited_below_top_level` returned False for EVERY absolute name, on the claim that an
+    absolute citation's depth "is already answered by `rel`". `rel` is computed from
+    `resolved`, the POST-symlink path — which is the very thing SIEGE-S4 showed a
+    root-owned symlink shortens — and §3.2 MANDATES the absolute spelling for a tracked
+    file, so the arm that answered False was the PRIMARY spelling, not an edge case.
+
+    Measured on `8d26620`, same plant as SIEGE-S4's own fixture, varying ONLY how TRACE
+    spells the citation: `sub/top.md` → `resolved-by-walk 1` plus the note;
+    `<root>/sub/top.md` → `resolved-by-walk 0` and silence.
+
+    THE THREE ABSOLUTE SPELLINGS ARE ASSERTED TOGETHER because one lexical form is
+    exactly what round 1 shipped and round 2 walked around: the plain absolute, the
+    doubled-slash `//` form (which `PurePosixPath` and `normpath` both preserve as a
+    distinct root component while `Path.resolve()` collapses it), and a citation written
+    through a SYMLINK-valued `--root` token (`_as_roots` hands the depth check only
+    RESOLVED roots, so no lexical prefix of the raw token survives to compare against).
+
+    The relative control is the parity half — the two spellings of one citation must read
+    the same — and the top-level controls are the non-vacuity half: an ordinary absolute
+    tracked-file citation must stay silent, or the counter stops distinguishing anything."""
+
+    def _plant(self):
+        h, size = self.plant(self.dispatch, "top.md", "t\n")
+        (self.dispatch / "sub").mkdir(parents=True, exist_ok=True)
+        (self.dispatch / "sub" / "top.md").symlink_to("../top.md")
+        return h, size
+
+    def _run(self, cited):
+        h, size = self._plant()
+        return self.verify(receipt(artifacts=[("top.md", h, size)],
+                                   trace=[f"READ  {cited}"]))
+
+    def _assert_discloses(self, cited):
+        out = self._run(cited)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr),
+                         [f"RESOLVED-BY-WALK: {cited} (top.md)"], out.stderr)
+
+    def test_the_relative_spelling_discloses(self):
+        """The parity baseline — this is what SIEGE-S4's fix already got right."""
+        self._assert_discloses("sub/top.md")
+
+    def test_the_absolute_spelling_discloses(self):
+        self._assert_discloses(f"{self.dispatch}/sub/top.md")
+
+    def test_the_doubled_slash_absolute_spelling_discloses(self):
+        self._assert_discloses(f"{self.dispatch}//sub/top.md")
+
+    def test_a_symlink_valued_root_token_does_not_silence_it(self):
+        """The prefix-symlink family: the citation names the root through a symlink, so
+        NO spelling of the resolved root `_as_roots` supplies is a lexical prefix of it.
+        Only resolving the citation's own PARENT (never its basename, which is what the
+        attack symlinks) sees the depth."""
+        link = self.dispatch.parent / "link"
+        link.symlink_to(self.dispatch.name)
+        h, size = self._plant()
+        cited = f"{link}/sub/top.md"
+        p = self.dispatch / "rcpt.txt"
+        p.write_text(receipt(artifacts=[("top.md", h, size)],
+                             trace=[f"READ  {cited}"]))
+        out = run("--tier2", "--strict", "--root", str(link),
+                  "--root", str(self.findings), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr),
+                         [f"RESOLVED-BY-WALK: {cited} (top.md)"], out.stderr)
+
+    def test_an_absolute_top_level_citation_stays_silent(self):
+        """NON-VACUITY — §3.2's mandated spelling for an ORDINARY tracked file. Counting
+        the absolute path's own components (rather than its depth below a supplied root)
+        would fire on every one of these in the corpus."""
+        out = self._run(f"{self.dispatch}/top.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+    def test_a_doubled_slash_top_level_citation_stays_silent(self):
+        """The same bound for the `//` spelling — the collapse must not manufacture a
+        component that makes an ordinary citation read as deep."""
+        out = self._run(f"{self.dispatch}//top.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+
 class TestALaterDisjointRootAnswersTheDepthKey(_RootCase):
     """AC-6 T7 leg 2, the DECLARATION-ORDER existential (round-4-of-this-gate/S2).
 

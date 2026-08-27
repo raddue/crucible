@@ -197,7 +197,7 @@ DEPTH_BODY = '''    contained = None
             contained = rel
     # SIEGE-S4's arm, and it is sited BELOW the loop rather than OR-ed inside it. See
     # the docstring: an `or` measurably breaks rule (2)'s declaration-order existential.
-    if contained is not None and _cited_below_top_level(name):
+    if contained is not None and _cited_below_top_level(name, _as_roots(root)):
         return contained
     return None
 '''
@@ -323,6 +323,11 @@ EVERY = "TestEveryBelowTopLevelEntryInOneRunIsCountedAndNoted"
 SYMLINK = "TestABareBasenameResolvedThroughASymlinkStillFires"
 S4SYM = "TestSiegeS4ASymlinkInsideAnOwnedRootCannotZeroTheWalkNote"
 S5OUT = "TestSiegeS5AnOutOfRootResolutionIsDisclosedOnBothLegs"
+# SIEGE-R1-1 — S4SYM's attack re-spelled absolutely (§3.2's MANDATED form for a
+# tracked file), plus the two spellings a purely lexical prefix test cannot see: the
+# doubled leading slash and a symlink-valued `--root` token. It pins the SAME depth
+# key S4SYM does, so it reddens on every row that drops or re-keys that key.
+R11ABS = "TestSiegeR11TheAbsoluteSpellingOfTheShortenedCitationAlsoDiscloses"
 DISJOINT = "TestALaterDisjointRootAnswersTheDepthKey"
 RELHALF = "TestTheRelpathHalfAloneCannotForgeTheChannel"
 WESC = "TestTheWalkNoteEscapesTheNameHalfToo"
@@ -685,6 +690,13 @@ MUTANTS = [
                    "test_the_verdict_does_not_depend_on_root_ORDER"),
                   (NESTED,
                    "test_the_nested_root_does_not_silence_the_note"),
+                  (R11ABS,
+                   "test_a_doubled_slash_top_level_citation_stays_silent",
+                   "test_a_symlink_valued_root_token_does_not_silence_it",
+                   "test_an_absolute_top_level_citation_stays_silent",
+                   "test_the_absolute_spelling_discloses",
+                   "test_the_doubled_slash_absolute_spelling_discloses",
+                   "test_the_relative_spelling_discloses"),
                   (S4SYM,
                    "test_a_top_level_citation_stays_silent"),
                   (TOPLVL,
@@ -826,6 +838,13 @@ MUTANTS = [
                    "test_the_nested_root_does_not_zero_the_counter",
                    "test_the_run_completes",
                    "test_the_verdict_does_not_depend_on_root_ORDER"),
+                  (R11ABS,
+                   "test_a_doubled_slash_top_level_citation_stays_silent",
+                   "test_a_symlink_valued_root_token_does_not_silence_it",
+                   "test_an_absolute_top_level_citation_stays_silent",
+                   "test_the_absolute_spelling_discloses",
+                   "test_the_doubled_slash_absolute_spelling_discloses",
+                   "test_the_relative_spelling_discloses"),
                   (RELHALF,
                    "test_the_hostile_relpath_renders_fully_escaped",
                    "test_the_run_completes_and_the_note_fires"),
@@ -967,6 +986,11 @@ MUTANTS = [
                   (S5OUT,
                    "test_both_legs_disclose_the_out_of_root_resolution",
                    "test_the_walk_counter_is_not_repurposed_for_it"),
+                  (R11ABS,
+                   "test_a_symlink_valued_root_token_does_not_silence_it",
+                   "test_the_absolute_spelling_discloses",
+                   "test_the_doubled_slash_absolute_spelling_discloses",
+                   "test_the_relative_spelling_discloses"),
                   (S4SYM,
                    "test_the_symlink_shortened_citation_still_discloses"),
                   (NESTED,
@@ -990,6 +1014,11 @@ MUTANTS = [
                   (S5OUT,
                    "test_both_legs_disclose_the_out_of_root_resolution",
                    "test_the_walk_counter_is_not_repurposed_for_it"),
+                  (R11ABS,
+                   "test_a_symlink_valued_root_token_does_not_silence_it",
+                   "test_the_absolute_spelling_discloses",
+                   "test_the_doubled_slash_absolute_spelling_discloses",
+                   "test_the_relative_spelling_discloses"),
                   (S4SYM,
                    "test_the_symlink_shortened_citation_still_discloses"),
                   (GITTOP,

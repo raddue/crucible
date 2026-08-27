@@ -1437,9 +1437,20 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     return None
 
 
-def _cited_below_top_level(name):
-    """SIEGE-S4 — True when the CITATION ITSELF names something below a top level,
-    read from the receipt text alone and never from disk.
+def _collapse_slashes(s):
+    """SIEGE-R1-1 — one spelling of a path with every run of `/` reduced to one.
+
+    `posixpath.normpath` and `PurePosixPath` BOTH deliberately preserve exactly two
+    leading slashes (POSIX reserves `//` for implementation-defined meaning), so
+    `//<root>/f.md` is a distinct root component to every lexical comparison in this
+    file while naming the same file on Linux and collapsing under `Path.resolve()`.
+    That difference is a free spelling of any name a lexical check keys on, which is
+    what makes it a bypass rather than a curiosity."""
+    return re.sub(r"/{2,}", "/", s)
+
+
+def _cited_below_top_level(name, roots=()):
+    """SIEGE-S4 — True when the CITATION ITSELF names something below a top level.
 
     `_below_top_level` keys its depth check on `resolved`, the POST-symlink path, and a
     symlink can only ever SHORTEN that: a subagent with write access to a root it
@@ -1451,27 +1462,95 @@ def _cited_below_top_level(name):
     per-citation mute switch on the one instrument that discloses unusual resolution,
     needing no deployment-specific condition at all.
 
-    RELATIVE NAMES ONLY. For an ABSOLUTE citation — §3.2's mandated form for a tracked
-    file — "how deep is it" is meaningless in the abstract and is already answered by
-    `rel`, the relpath from the root that holds it; counting the absolute path's own
-    components would fire on every tracked-file citation in the corpus.
+    RELATIVE ARM — lexically normalised first, so `./f.md` reads as depth 1 and
+    `sub/../f.md` does too — the two spellings of a top-level file. `../x.md` DOES read
+    as deeper, and that is intended: a `..`-traversal citation that lands on a root's
+    top level is exactly the unusual resolution this channel exists to disclose. Erring
+    toward firing is the DISCLOSURE direction; this note is advisory and never a verdict.
 
-    Lexically normalised first, so `./f.md` reads as depth 1 and `sub/../f.md` does too
-    — the two spellings of a top-level file. `../x.md` DOES read as deeper, and that is
-    intended: a `..`-traversal citation that lands on a root's top level is exactly the
-    unusual resolution this channel exists to disclose. Erring toward firing is the
-    DISCLOSURE direction; this note is advisory and never a verdict.
+    SIEGE-R1-1 — ABSOLUTE ARM, AND WHY THE ORIGINAL `return False` WAS THE WHOLE
+    VULNERABILITY RE-SPELLED. The first form of this function answered False for EVERY
+    absolute name, justified on the claim that an absolute citation's depth "is already
+    answered by `rel`, the relpath from the root that holds it". That claim is precisely
+    what SIEGE-S4 disproved one paragraph up: `rel` is computed from `resolved`, the
+    POST-symlink path, so the shortening attack zeroes it whatever the citation said. And
+    §3.2 MANDATES the absolute spelling for a tracked file, so the arm that returned False
+    was not an edge case — it was the PRIMARY spelling. Measured on `8d26620` with the
+    mandated two-root command line and the identical `sub/top.md -> ../top.md` plant:
+    `sub/top.md` rendered `resolved-by-walk 1` with its note, `<root>/sub/top.md`
+    rendered `resolved-by-walk 0` and silence.
 
-    MUST NOT RAISE: `name` is receipt-controlled."""
+    So an absolute citation's depth is measured HERE TOO, from the citation's own
+    structure, relative to the SUPPLIED ROOTS — never from the absolute path's own
+    component count, which would fire on every tracked-file citation in the corpus. The
+    depth reading is normalised the same way the relative arm's is (`normpath`), so
+    `<root>/f.md` reads 1 and `<root>/sub/top.md` reads 2, matching what the relative
+    spellings of the same two citations already read.
+
+    SPELLING-EXHAUSTIVE ON PURPOSE, because a single lexical form is what round 1's fix
+    shipped and what round 2 bypassed. Three families of candidate are tried, and a hit
+    on ANY of them fires:
+      * the `normpath` form (`.`, trailing `/`, `a/../b` — the pure-string variants);
+      * the SLASH-COLLAPSED form (`_collapse_slashes`), because `//<root>/f.md` is a
+        distinct root component to `PurePosixPath` and to `normpath` alike;
+      * the citation's own RESOLVED PARENT joined to its basename, which is what covers
+        a symlinked DIRECTORY component anywhere in the prefix — a `--root` token that is
+        itself a symlink (`_as_roots` hands this function only RESOLVED roots), or a
+        `ln -s . link` the subagent plants in a root it owns and cites through.
+    The BASENAME is deliberately not resolved: the basename is exactly what the SIEGE-S4
+    attack symlinks, and resolving it is what re-shortens the path and re-mutes the
+    instrument. Only the prefix is.
+
+    Consulting disk for that one candidate is a departure from this function's first
+    form ("never from disk") and is sound here where it would not be in
+    `_carry_spellings`: that one detects a filesystem MOVE between two legs and must not
+    re-read the post-swap tree, while this one is a disclosure channel whose caller
+    already resolved the very same name.
+
+    OR-ED ACROSS EVERY CANDIDATE AND EVERY ROOT, i.e. erring toward firing, on the
+    relative arm's own grounds — this is an advisory note, never a verdict. It costs a
+    note on a citation whose spelling reads deeper than its resolution, which IS the
+    disclosure. `roots` empty (the default) reproduces the old answer for absolute names.
+
+    MUST NOT RAISE: `name` is receipt-controlled and `roots` is caller-supplied."""
     if name is None:
         return False
     try:
         raw = str(name)
-        if pathlib.PurePosixPath(raw).is_absolute():
-            return False
-        return len(pathlib.PurePosixPath(posixpath.normpath(raw)).parts) > 1
+        if not pathlib.PurePosixPath(raw).is_absolute():
+            return len(pathlib.PurePosixPath(posixpath.normpath(raw)).parts) > 1
     except Exception:
         return False
+    cands = set()
+    for form in (raw, _collapse_slashes(raw)):
+        try:
+            cands.add(pathlib.PurePosixPath(posixpath.normpath(form)))
+        except Exception:
+            continue
+    try:
+        p = pathlib.Path(raw)
+        cands.add(pathlib.PurePosixPath(str(p.parent.resolve())) / p.name)
+    except Exception:
+        pass
+    bases = set()
+    for r in roots:
+        try:
+            spelling = str(r)
+        except Exception:
+            continue
+        for form in (spelling, _collapse_slashes(spelling)):
+            try:
+                bases.add(pathlib.PurePosixPath(posixpath.normpath(form)))
+            except Exception:
+                continue
+    for cand in cands:
+        for b in bases:
+            try:
+                if len(cand.relative_to(b).parts) > 1:
+                    return True
+            except Exception:
+                continue
+    return False
 
 
 def _below_top_level(resolved, root, name=None):
@@ -1553,7 +1632,7 @@ def _below_top_level(resolved, root, name=None):
             contained = rel
     # SIEGE-S4's arm, and it is sited BELOW the loop rather than OR-ed inside it. See
     # the docstring: an `or` measurably breaks rule (2)'s declaration-order existential.
-    if contained is not None and _cited_below_top_level(name):
+    if contained is not None and _cited_below_top_level(name, _as_roots(root)):
         return contained
     return None
 
