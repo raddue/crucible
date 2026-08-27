@@ -144,6 +144,35 @@ class _RootCase(unittest.TestCase):
         return run("--tier2", *extra, "--root", str(self.root), str(p))
 
 
+class _TwoRootCase(unittest.TestCase):
+    """The MANDATED two-root production shape (`quality-gate/SKILL.md` › Receipt
+    Linter: `--tier2 --strict --root <dispatch-root> --root <findings-root>`),
+    both roots OUTSIDE the checkout per §6 and SIBLINGS rather than nested —
+    layout pin (b) makes `<findings-root>` the run's scratch directory, not a
+    subdirectory of the dispatch root."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        base = pathlib.Path(self.td.name)
+        self.dispatch = base / "dispatch"
+        self.findings = base / "scratch"
+        self.dispatch.mkdir()
+        self.findings.mkdir()
+
+    def plant(self, root, relname, body):
+        p = pathlib.Path(root) / relname
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body)
+        return hashlib.sha256(body.encode()).hexdigest(), str(len(body))
+
+    def verify(self, text, name="rcpt.txt"):
+        p = self.dispatch / name
+        p.write_text(text)
+        return run("--tier2", "--strict", "--root", str(self.dispatch),
+                   "--root", str(self.findings), str(p))
+
+
 # --------------------------------------------------------------------------
 # AC-1, first half — the ruling is RECORDED.
 # --------------------------------------------------------------------------
@@ -3116,6 +3145,392 @@ class TestAOneShotSectionBodyIsNotDrainedByTheSentinel(unittest.TestCase):
         keeps the two above honest rather than a second reproduction."""
         with self.assertRaises(self.rv.LintError):
             self.rv.parse_artifacts(iter(["  (none)", f"  a.md  sha256:{H64}  1"]))
+
+
+# --------------------------------------------------------------------------
+# #488 inquisitor / Integration AV1 — the verdict dispatch that decides whether
+# the WITNESS LEG runs must not also decide whether the SUPERSEDES
+# witness-evidence consequent is ENFORCED. Promoted from the Integration
+# dimension: this is a permanent pin, not dimension scratch.
+# --------------------------------------------------------------------------
+class TestABlockedVerdictCannotDisarmTheSupersessionWitnessGate(_TwoRootCase):
+    """siege S-7(a)'s Tier-2 half, on the ONE verdict class it was never wired for.
+
+    The consequent used to sit NESTED inside `_verify_single`'s
+    `if verdict in {"PASS", "FAIL"}:` arm, so a BLOCKED receipt took the `else:`,
+    bumped `not-applicable (verdict-not-pass-fail)` and never reached it. Tier-1's
+    half of the same rule (`lint_v11_local`: `kind in {exec, grep}` AND
+    `ran=TRACE#N`) is verdict-INDEPENDENT and still fired, so a BLOCKED receipt had
+    to carry a shape-conformant witness — and then nothing checked whether that
+    witness resolved to anything at all.
+
+    The three receipts below are byte-identical apart from the VERDICT token, which
+    the reviewed subagent writes itself. Measured pre-fix: PASS → exit 1, FAIL →
+    exit 1, BLOCKED → exit 0 with the supersession intact. That is DEC-29's
+    forbidden key verbatim — the guard narrowed by SHAPE, the narrowing restoring a
+    fail-open — and it is the same shape `_verify_single`'s own ⚠ note records
+    being closed for the PASS/FAIL pair.
+
+    Not a paper hole: `return-convention.md` § The Sweep step 3 tells the
+    orchestrator to process SUPERSEDES with NO check of its own ("Tier-1 has
+    already verified: ... witness-evidence (if applicable)") and does not condition
+    that step on the new receipt's verdict, and `quality-gate/SKILL.md` lints
+    BLOCKED receipts like any other. So a fix agent that cannot finish its work
+    could retire a red-team's FAIL finding, its tripwires and its cairn invariant
+    by returning BLOCKED with a witness naming a file that does not exist, at
+    exit 0, with the census's only trace being a `not-applicable 1
+    (verdict-not-pass-fail)` that reads as ordinary for every BLOCKED receipt."""
+
+    def _receipt(self, verdict):
+        # The witness names a DECLARED artifact absent from BOTH roots. A bare
+        # basename, so the artifacts leg's own disposition is a non-fatal
+        # UNVERIFIABLE and the run reaches the consequent under --strict rather
+        # than hard-FAILing before it.
+        return "\n".join([
+            "RCPT v1.1 quality-gate/9-fix",
+            f"VERDICT  {verdict}  conf=0.90",
+            "ARTIFACTS",
+            f"  round-3-findings.md  sha256:{H64}  120",
+            "TRACE",
+            f"  1  WROTE  round-3-findings.md  sha256:{H64}",
+            "CLAIMS",
+            '  fix-verified=true  from=21a1b2c3d4e5#L1-L10  pattern="token rotation"',
+            "WITNESS    grep:round-3-findings.md#L1-L2  "
+            "expect-fail=/Fatal: [1-9]/  ran=TRACE#1",
+            "SUSPICION  0.10",
+            "NEXT       (none)",
+            "TRIPWIRE:  claims-touch(auth/**)",
+            "SUPERSEDES: 21a1b2c3d4e5",
+        ]) + "\n"
+
+    def test_the_pass_twin_is_refused_the_supersession(self):
+        # Non-vacuity control 1: the consequent IS armed and this fixture reaches
+        # it. Without it the BLOCKED assertion could pass on a build where the rule
+        # fires nowhere at all.
+        out = self.verify(self._receipt("PASS"), name="pass.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_the_fail_twin_is_refused_the_supersession(self):
+        # Non-vacuity control 2: GH #501 armed this leg too, so the hole was
+        # specific to the third verdict rather than general to "not PASS".
+        out = self.verify(self._receipt("FAIL"), name="fail.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_the_blocked_twin_is_refused_the_same_supersession(self):
+        """The defect. One receipt-authored token turned a hard structural BLOCK
+        into exit 0 with the supersession intact."""
+        out = self.verify(self._receipt("BLOCKED"), name="blocked.rcpt")
+        line = census(out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr,
+                      f"BLOCKED receipt retired a predecessor with a witness "
+                      f"that resolved nowhere; census: {line}")
+        self.assertEqual(out.returncode, 1, out.stderr)
+
+    def test_the_witness_leg_itself_is_still_verdict_gated(self):
+        """The half that must NOT move. Lifting the consequent out of the arm
+        leaves D8.2 sub-decision 5 exactly where it was: a BLOCKED receipt still
+        does not enter the witness leg, and the census still says so with the
+        literal code rather than a bare `witness 0/0`."""
+        out = self.verify(self._receipt("BLOCKED"), name="blocked2.rcpt")
+        self.assertIn("not-applicable 1 (verdict-not-pass-fail)",
+                      census(out.stderr), census(out.stderr))
+        self.assertIn("witness 0/0", census(out.stderr), census(out.stderr))
+
+
+# --------------------------------------------------------------------------
+# #488 inquisitor / State AV1 — the hashed-body carry across the
+# artifacts → witness boundary, with BOTH of the failure modes its two keys
+# each close ALONE put on ONE run.
+# --------------------------------------------------------------------------
+class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
+        _RootCase):
+    """`bodies` is state one leg BUILDS and another CONSUMES, stored under TWO
+    keys precisely because either alone misses a known failure mode: the NAME key
+    misses when the two legs SPELL the file differently (`f.md` vs `./f.md`), the
+    REALPATH key misses when the name RESOLVES differently between the legs (a
+    mid-lint symlink swap). The write site's conclusion — "a hit under either
+    binds the predicate to the bytes this leg hashed AND matched" — holds for
+    EITHER mode alone and NOT for both together, and both halves are
+    receipt-controlled and free: no Tier-1 rule ties the TRACE spelling to the
+    ARTIFACTS spelling (the membership rule binds only RANGED kind=grep payloads).
+
+    Measured pre-fix: both keys missed, the carry degraded SILENTLY to a fresh
+    disk read of the swapped-in sanitised file, the predicate passed and the
+    receipt was accepted — while the single-spelling twin of the same receipt was
+    correctly rejected."""
+
+    def _run_legs(self, trace_spelling):
+        """_verify_single's own two-leg sequence, with a mid-run swap between them.
+
+        Returns the LintError message the witness leg raised, or None if it passed
+        the receipt clean. Each call gets its OWN root: the swap mutates the tree,
+        so a shared one would make the second call depend on the first."""
+        rv = _import_rv()
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.root = pathlib.Path(td.name)
+        secret = "line one\nSECRET token\n"
+        h, size = self.plant("f.md", secret)
+        self.plant("clean.md", "line one\nharmless\n")
+        text = receipt(
+            artifacts=[("f.md", h, size)],
+            trace=[f"READ {trace_spelling}"],
+            witness="exec:probe  expect-fail=/SECRET/  ran=TRACE#1")
+
+        sections = rv.parse_receipt(text)
+        artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
+        trace = rv.parse_trace(sections["TRACE"])
+        witness = rv.parse_witness(sections["WITNESS"])
+
+        bodies = {}
+        cov = rv._Coverage()
+        rv.tier2_artifacts(artifacts, trace, self.root, True, cov, bodies, [])
+
+        # The swap the carry exists to defeat: the hashed regular file is replaced
+        # by a symlink to a sanitised sibling AFTER it was hashed.
+        (self.root / "f.md").unlink()
+        (self.root / "f.md").symlink_to(self.root / "clean.md")
+
+        try:
+            rv.tier2_witness(witness, trace, self.root, True, "PASS",
+                             cov, bodies, {}, [])
+        except rv.LintError as e:
+            return str(e)
+        return None
+
+    def test_a_second_spelling_does_not_unbind_the_predicate_from_hashed_bytes(self):
+        # CONTROL — one spelling. The NAME key hits, so the predicate runs on the
+        # bytes the artifacts leg hashed and the sanitised file is never consulted.
+        # This is the discriminator: it proves fixture and swap are both live.
+        control = self._run_legs("f.md")
+        self.assertIsNotNone(
+            control,
+            "control precondition broken: the carry did not bind even on the "
+            "single-spelling shape")
+        self.assertIn("expect-fail regex", control)
+
+        # ATTACK — the SAME swap, one spelling apart. `./f.md` and `f.md` name the
+        # same declared file; nothing in the receipt or on disk differs except
+        # which string the TRACE entry carries.
+        attacked = self._run_legs("./f.md")
+        self.assertIsNotNone(
+            attacked,
+            "the witness predicate was evaluated against bytes NO leg hashed: "
+            "bodies.get(name) missed on the spelling and bodies.get(resolved) "
+            "missed on the post-swap realpath, so the carry silently degraded "
+            "to a fresh disk read of the sanitised file and the receipt passed")
+
+    def test_an_undeclared_witness_name_still_takes_the_independent_read(self):
+        """The half the fail-closed raise must NOT swallow. A witness naming a
+        file NO ARTIFACTS line declares has no carry entry under any spelling —
+        that is ordinary, #412 deliberately does not gate it, and the honest
+        disposition is the independent read the census bills `unhashed-body`, not
+        a hard FAIL. Without this arm the detector could fire on every rangeless
+        payload and the suite above would not notice."""
+        h, s = self.plant("declared.md", "declared and verified\n")
+        self.plant("round-3-findings.md", "# Round 3 findings\nFatal: 0\n")
+        out = self.verify(receipt(
+            artifacts=[("declared.md", h, s)],
+            trace=["READ declared.md",
+                   f"WROTE round-3-findings.md  sha256:{H64}"],
+            witness="grep:round-3-findings.md  expect-fail=/Fatal: [1-9]/  "
+                    "ran=TRACE#2"))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("unhashed-body", census(out.stderr), census(out.stderr))
+
+
+# --------------------------------------------------------------------------
+# #488 inquisitor / Edge AV1 — the exact-name override vs §3.2's MANDATED
+# absolute TRACE spelling.
+# --------------------------------------------------------------------------
+class TestTheExactNameOverrideSurvivesTheMandatedAbsoluteSpelling(_RootCase):
+    """A DECLARED name this run evaluated and reported UNVERIFIED must keep its
+    PROVENANCE-ONLY note however §3.2 spells it in TRACE.
+
+    The two halves were built in different tasks: the override is keyed on the
+    DECLARED ARTIFACTS name (a bare relative, §3.1) while §3.2 MANDATES that a
+    tracked repo file's TRACE home carry its ABSOLUTE path — so nobody ever ran
+    the override against the spelling the ruling requires on the other leg. The
+    design doc prices the basename collision as STRUCTURAL rather than
+    hypothetical (`quality-gate/SKILL.md`'s per-chunk `round-N-findings.md` /
+    `fix-journal.md` guarantee sibling chunks share a basename).
+
+    The receipt is otherwise immaculate: `a/x.md` is real and hash-verifies,
+    `b/x.md` is declared and absent. Both arms print
+    `UNVERIFIABLE: b/x.md (no file under root)`; the only difference is which of
+    the two MANDATED name forms the TRACE entry uses."""
+
+    def setUp(self):
+        super().setUp()
+        h, size = self.plant("a/x.md", "the verified sibling\n")
+        self.arts = [("a/x.md", h, size), ("b/x.md", H64, "1")]
+
+    def _run(self, cited):
+        r = self.verify(receipt(artifacts=self.arts, trace=[f"READ {cited}"]),
+                        name="r.txt")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("UNVERIFIABLE: b/x.md", r.stderr,
+                      "fixture vacuous: b/x.md was not reported unverified")
+        return r
+
+    def test_the_bare_declared_spelling_keeps_its_note(self):
+        # CONTROL — proves the override exists and the fixture reaches it.
+        r = self._run("b/x.md")
+        self.assertTrue(any("b/x.md" in n for n in notes(r.stderr)),
+                        f"no note for the bare spelling: {notes(r.stderr)}")
+
+    def test_the_mandated_absolute_spelling_keeps_its_note_too(self):
+        # THE ATTACK. Spelled the way §3.2 mandates, `name` missed all three
+        # exact-name sets (which held declared RELATIVE names) and fell through to
+        # the basename key, where the UNRELATED verified `a/x.md` had already put
+        # `x.md` into `verified_bases`. The run then said `UNVERIFIABLE: b/x.md`
+        # and stayed silent about the TRACE entry citing that same file, on the
+        # same stderr — silence a receipt author buys with one extra ARTIFACTS
+        # line, grudge e0f0a6b75692's direction.
+        r = self._run(str(self.root / "b/x.md"))
+        self.assertTrue(any("b/x.md" in n for n in notes(r.stderr)),
+                        f"no note for the mandated absolute spelling: "
+                        f"{notes(r.stderr)}")
+
+    def test_a_verified_name_cited_absolutely_is_still_silent(self):
+        """The symmetric half, and the one that keeps the fix from being pure
+        noise: §3.2 makes the two legs spell one file differently BY DESIGN, so
+        the absolute citation of a name that DID hash-verify must stay silent.
+        The suppressors gained the same spelling the override did, so this holds
+        for the exact-name reason now and not only via the basename key."""
+        h, size = self.plant("only.md", "verified and cited absolutely\n")
+        r = self.verify(receipt(artifacts=[("only.md", h, size)],
+                                trace=[f"READ {self.root / 'only.md'}"]),
+                        name="v.txt")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("artifacts 1/1", census(r.stderr), census(r.stderr))
+        self.assertEqual([], notes(r.stderr),
+                         f"a verified name was called unverified: {notes(r.stderr)}")
+
+
+# --------------------------------------------------------------------------
+# #488 inquisitor / Edge AV2 — one ARTIFACTS name declared twice.
+# --------------------------------------------------------------------------
+class TestOneNameDeclaredTwiceIsNotSilentlyCollapsed(_RootCase):
+    """Two ARTIFACTS lines naming one file with CONTRADICTORY hashes must not
+    verify clean and silent.
+
+    AC-2 landed a LEXICAL GRAMMAR in `parse_artifacts` ("a legal ARTIFACTS <name>
+    is a POSIX-relative path"), but the accumulator behind it is a dict, so the
+    grammar admitted the same name twice and the LAST line silently won. Task 2
+    owned the grammar, Task 4 owned the verified/unverified bookkeeping the census
+    reports, and neither owned the accumulator between them. `parse_receipt`
+    already rejects a duplicated SECTION by name, so duplicate-rejection was an
+    established policy in this file that the new name grammar did not inherit."""
+
+    def setUp(self):
+        super().setUp()
+        self.h, self.size = self.plant("x.md", "real content\n")
+
+    def _run(self, arts, name):
+        return self.verify(receipt(artifacts=arts, trace=["READ x.md"]), name=name)
+
+    def test_the_outcome_does_not_depend_on_which_line_came_last(self):
+        # The two receipts declare the SAME two facts about the SAME name, in
+        # opposite order. A verifier whose verdict flips on line order is
+        # reporting position, not content. Measured pre-fix: 0 vs 1.
+        honest = ("x.md", self.h, self.size)
+        bogus = ("x.md", H64, self.size)
+        first = self._run([bogus, honest], "dup-honest-last.txt")
+        second = self._run([honest, bogus], "dup-honest-first.txt")
+        self.assertEqual(
+            first.returncode, second.returncode,
+            "the verdict flips on ARTIFACTS line ORDER alone:\n"
+            f"  bogus-then-honest EXIT={first.returncode}\n"
+            f"  honest-then-bogus EXIT={second.returncode}")
+
+    def test_the_dropped_declaration_is_reported_on_some_channel(self):
+        # The receipt makes TWO declarations; the run checked ONE and said so
+        # nowhere. `artifacts 1/1` is indistinguishable from a single-line
+        # receipt, so an orchestrator recording the census could not tell that a
+        # hash it may itself have logged was never verified.
+        r = self._run([("x.md", H64, self.size), ("x.md", self.h, self.size)],
+                      "dup.txt")
+        silent = (r.returncode == 0
+                  and "duplicat" not in r.stderr.lower()
+                  and "artifacts 1/1" in census(r.stderr))
+        self.assertFalse(
+            silent,
+            "a contradictory duplicate declaration verified clean and silent:\n"
+            f"  EXIT={r.returncode}\n  {census(r.stderr)}")
+
+    def test_two_distinct_names_are_untouched(self):
+        """Non-vacuity: the rejection is keyed on the name repeating, not on the
+        entry count. A receipt declaring two DIFFERENT names still verifies."""
+        o, osize = self.plant("y.md", "other content\n")
+        r = self._run([("x.md", self.h, self.size), ("y.md", o, osize)], "two.txt")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("artifacts 2/2", census(r.stderr), census(r.stderr))
+
+
+# --------------------------------------------------------------------------
+# #488 inquisitor / Edge AV4 — the advisory's verb set vs the verb set the
+# Tier-1 grammar admits. RECORDED AS AN ACCEPTED LIMITATION, not closed.
+# --------------------------------------------------------------------------
+class TestTheAdvisoryScopeIsDeliberatelyNarrowerThanTheTraceVerbSet(_RootCase):
+    """§3.4's advisory covers READ/EDIT/WROTE and NOT the other four verbs
+    `parse_trace` admits — `CONSULTED` most consequentially, since
+    `return-convention.md:84` defines it as covering "web/doc/prior-artifact
+    lookup" and a cited PRIOR ARTIFACT is exactly the population the silence rule
+    ranges over. So a `CONSULTED` citation of an undeclared, unverified file gets
+    no advisory at all.
+
+    THIS TEST PINS THE CURRENT, NARROWER BEHAVIOUR AS INTENTIONAL. It is not a
+    statement that the coverage hole is harmless — it is a real gap and it is
+    recorded as one at `_PROVENANCE_VERBS`. It is a statement about WHO may close
+    it: the frozen design doc scopes §3.4 to READ/EDIT/WROTE explicitly
+    throughout, so adding `CONSULTED` to the emitter would make the code diverge
+    from its own ruling, and it would move the advisory's note volume (which the
+    doc costs elsewhere) on receipts naming no file at all, because `CONSULTED`
+    references are frequently URLs. Widening the verb set is a RULING AMENDMENT.
+    If this test goes red, the question to ask is whether the ruling was amended —
+    not how to make it green."""
+
+    def setUp(self):
+        super().setUp()
+        self.h, self.size = self.plant("x.md", "declared and verified\n")
+        # A REAL file the receipt never declares and the run never verifies.
+        self.plant("q.md", "undeclared\n")
+
+    def _notes(self, verb):
+        r = self.verify(
+            receipt(artifacts=[("x.md", self.h, self.size)],
+                    trace=["READ x.md", f"{verb} q.md"]),
+            name=f"{verb.lower()}.txt")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return notes(r.stderr)
+
+    def test_a_read_citation_of_an_undeclared_file_speaks(self):
+        # CONTROL — the same undeclared name under a covered verb. Without it the
+        # assertion below would pass on a build where the advisory fires nowhere.
+        self.assertTrue(any("q.md" in n for n in self._notes("READ")),
+                        "fixture vacuous: even READ was silent")
+
+    def test_a_consulted_citation_of_an_undeclared_file_is_deliberately_silent(self):
+        # THE ACCEPTED GAP, pinned so a later change cannot close it by accident
+        # without amending the ruling first.
+        self.assertFalse(
+            any("q.md" in n for n in self._notes("CONSULTED")),
+            "a CONSULTED citation now emits a PROVENANCE-ONLY note. The design "
+            "doc scopes §3.4 to READ/EDIT/WROTE; if the ruling was amended, "
+            "update this pin and _PROVENANCE_VERBS's note together — if it was "
+            "not, the emitter has silently outgrown its own ruling")
+
+    def test_the_narrow_scope_is_recorded_where_the_verb_set_is_defined(self):
+        """The limitation has to be READABLE at the site a future maintainer
+        edits, or "deliberate" is only true in this test file."""
+        text = SCRIPT.read_text()
+        head = text.split("_PROVENANCE_VERBS = frozenset")[0]
+        self.assertIn("CONSULTED", head[-3000:],
+                      "_PROVENANCE_VERBS carries no record of the accepted "
+                      "CONSULTED gap")
 
 
 

@@ -301,6 +301,20 @@ def parse_artifacts(body):
             raise LintError(f"ARTIFACTS name contains NUL: {_show_path(name)}")
         if not hash_field.startswith("sha256:") or not HEX64.match(hash_field[len("sha256:"):]):
             raise LintError(f"ARTIFACTS bad hash: {raw!r}")
+        # #488 inquisitor/AV2 — the accumulator is a dict, so a name declared TWICE
+        # silently collapsed to LAST-WINS: two receipts making the SAME two claims about
+        # the SAME name in opposite line order produced OPPOSITE exit codes (measured:
+        # bogus-then-honest EXIT=0, honest-then-bogus EXIT=1), and the census billed
+        # `artifacts 1/1` either way — indistinguishable from a single-line receipt, so
+        # an orchestrator could not tell that a hash it may itself have logged was never
+        # checked. Rejected rather than reconciled: `parse_receipt` already rejects a
+        # duplicated SECTION name with the same shape of message, so fail-loud on a
+        # duplicated declaration is this file's established policy and not a new one, and
+        # the alternatives (keep-first, or verify both) each pick a winner the receipt
+        # grammar does not name. Tier-1, deliberately: this is a fact about the receipt's
+        # TEXT and needs no disk, so it is refused before any root is probed.
+        if name in out:
+            raise LintError(f"ARTIFACTS name duplicated: {_show_path(name)}")
         out[name] = {"hash": hash_field[len("sha256:"):], "size": size}
     return out
 
@@ -1959,6 +1973,23 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
     return raw
 
 
+# #488 inquisitor/AV4 (edge) — a KNOWN, DELIBERATELY OUT-OF-SCOPE GAP, recorded here so
+# it is not "fixed" by accident. `parse_trace` admits SEVEN verbs; this set holds three.
+# `return-convention.md:84` defines `CONSULTED <reference>` as covering "web/doc/
+# prior-artifact lookup", and a cited PRIOR ARTIFACT is exactly the population §3.4's
+# silence rule ranges over — so a `CONSULTED` citation of an undeclared, unverified file
+# gets no PROVENANCE-ONLY advisory at all, on an ORDINARY receipt and not only under
+# attack. That is a real hole in the advisory's coverage and it is left OPEN.
+#
+# NOT a code bug: the frozen design doc scopes §3.4 to READ/EDIT/WROTE explicitly
+# throughout, so the code matches its own ruling and the gap is in the RULING's scope.
+# Adding `CONSULTED` here would make the code diverge from the design doc it implements,
+# and it would do so at a measurable price the doc costs elsewhere — `CONSULTED`
+# references are frequently URLs and other non-file strings, so the advisory's note
+# volume (the thing §3.4 trades against silence) would move on receipts that name no
+# file at all. Widening the verb set is a RULING AMENDMENT, not a fix; until one is made,
+# `TestTheAdvisoryScopeIsDeliberatelyNarrowerThanTheTraceVerbSet` in
+# scripts/test_488_name_space.py pins the CURRENT narrower behaviour as intentional.
 _PROVENANCE_VERBS = frozenset({"READ", "EDIT", "WROTE"})
 
 # #488 temper/leg-1 — the basenames that are NOT a usable key for the PROVENANCE-ONLY
@@ -2034,6 +2065,69 @@ def _trace_basename(entry):
     return name, name.rsplit("/", 1)[-1]
 
 
+def _declared_spellings(names, roots, resolutions):
+    """#488 inquisitor/AV1 (edge) — every spelling of a DECLARED ARTIFACTS name that a
+    conformant TRACE entry may cite it by, for the three exact-name sets
+    _emit_provenance_notes tests.
+
+    The three sets used to hold the BARE DECLARED name only, and §3.2 makes that the
+    wrong key on its own: a tracked repo file's TRACE citation is MANDATED to carry its
+    ABSOLUTE path, while §3.1 mandates the ARTIFACTS declaration be POSIX-RELATIVE. The
+    two legs therefore spell one real file differently BY RULING, and an override keyed
+    on one spelling simply never fires for the other. Measured on the honest shape (a
+    declared, evaluated, UNVERIFIED `b/x.md` cited in TRACE by the ruling's own absolute
+    form, beside an unrelated verified `a/x.md`): the run printed
+    `UNVERIFIABLE: b/x.md (no file under root)` and stayed SILENT about the TRACE entry
+    citing that same file, because `x.md` was already in `verified_bases` — silence a
+    receipt author buys with one extra ARTIFACTS line, grudge e0f0a6b75692's direction
+    and the exact failure the override exists to close.
+
+    THREE spellings per name, and the first two are not interchangeable:
+      * the DECLARED name verbatim — the §3.1 form, and the only one available for a
+        name that never resolved;
+      * `<root>/<name>` for each supplied root, derived LEXICALLY (string concatenation,
+        no disk). Lexical is load-bearing rather than lazy: the population this closes is
+        dominated by names that do NOT resolve — `b/x.md` above is absent from every
+        root, so there is no realpath to project, and the resolved-path spelling alone
+        would leave the measured case exactly as it was;
+      * the RESOLVED realpath, when this run recorded one. This is the spelling the
+        lexical join CANNOT produce: a symlinked or `..`-bearing root, or a name that
+        resolved through a git toplevel rather than a root, lands somewhere no
+        root-join names.
+
+    ADDITIVE ONLY, which is what makes it safe in the fail-noisy direction the emitter
+    rules for: every set keeps its bare spelling, so no note that was emitted before
+    stops being emitted, and no suppression that was correct before is lost. What moves
+    is that a citation using the OTHER mandated spelling now reaches the same
+    exact-name test its bare twin already reached.
+
+    Residual, stated rather than left to be found: a name whose declared spelling ends
+    in `/` (or `/.`) has an absolute form ending the same way, and the join normalises
+    neither, so the two spellings of THAT family still only meet at the bare key. Those
+    are the same degenerate spellings `_DEGENERATE_BASES` exists for, and they keep the
+    bare-name leg that `_DEGENERATE_BASES` was added to give them.
+
+    MUST NOT RAISE (#488 round-3/S1): its result feeds tier2_artifacts's `finally:`,
+    where any exception REPLACES the in-flight one. `str()` on an arbitrary ARTIFACTS
+    key can raise, so each name is projected under its own guard and a name that cannot
+    be rendered simply contributes no spellings — never a crash, and never a note the
+    real verdict is replaced by."""
+    out = set()
+    for n in names:
+        try:
+            s = str(n)
+            out.add(s)
+            resolved = resolutions.get(n)
+            if resolved is not None:
+                out.add(str(resolved))
+            if not s.startswith("/"):
+                for base in roots:
+                    out.add(f"{base}/{s}")
+        except Exception:
+            continue
+    return out
+
+
 def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
                            unevaluated_names, unverified_names, notes_out,
                            verified_names=frozenset()):
@@ -2043,7 +2137,10 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
     that Tier-2 RESOLVED AND HASH-VERIFIED. All three verbs, because scoping to
     EDIT/WROTE exempts the one declaration §1.1 quotes as the filed contradiction and
     turns two measured hard-FAILs (corpus17/rcpt-18, live29/rcpt-22, both READ-only)
-    into silence.
+    into silence. The four OTHER verbs `parse_trace` admits are OUT OF SCOPE
+    DELIBERATELY and not by oversight — `CONSULTED` most consequentially, because its
+    own definition names prior-artifact lookup; see `_PROVENANCE_VERBS` for why that gap
+    is a ruling amendment rather than a fix.
 
     The key is the VERIFIED basename set. Both obvious alternatives are wrong in
     opposite directions, and the basename key itself has a THIRD, opposite cost that is
@@ -2322,6 +2419,16 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     # construction, so a raw-key set is always available; the `str()` is applied once,
     # at the `finally:`, to the entries that survive the subtraction.
     verified_keys = set()
+    # #488 inquisitor/AV1 (edge) — where each DECLARED name actually resolved on this
+    # run, accumulated the same incremental way as the sets above. Read only by the
+    # `finally:`, to project the three exact-name sets through §3.2's OTHER mandated
+    # spelling; see _declared_spellings.
+    resolutions = {}
+    # The EFFECTIVE roots, once. Needed in the `finally:` (where an unresolvable name
+    # still has an absolute spelling, derived lexically), and computed here rather than
+    # there because a `finally:` may not acquire a new failure mode — `_as_roots` already
+    # runs inside every resolve_base call below, so this adds none.
+    all_roots = _as_roots(root)
     try:
         for name, meta in artifacts.items():
             evaluated.add(name)     # tried, whatever this iteration goes on to do
@@ -2342,6 +2449,7 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                 notes.append(_unresolved_disposition(name, strict, cov,
                                                      refused=refused))
                 continue
+            resolutions[name] = resolved
             if refused:
                 # siege S-3(b) — `_refused_clause` was consumed ONLY by
                 # _unresolved_disposition, so a refusal that the FALLBACK then papered over
@@ -2597,11 +2705,19 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             # `Exception`, not `BaseException`: KeyboardInterrupt/SystemExit propagate.
             try:
                 unevaluated = [n for n in artifacts if n not in evaluated]
+                # #488 inquisitor/AV1 (edge) — the three EXACT-NAME sets are projected
+                # through _declared_spellings, so each carries §3.2's absolute form
+                # beside §3.1's declared one. The BASENAME set is NOT: it is already
+                # spelling-independent by construction (that is what a basename key is
+                # for), and adding absolute spellings to a set matched by basename would
+                # be a category error.
                 _emit_provenance_notes(
                     trace, verified_bases,
                     {str(n).rsplit("/", 1)[-1] for n in unevaluated},
-                    {str(n) for n in unevaluated},
-                    {str(n) for n in evaluated if n not in verified_keys},
+                    _declared_spellings(unevaluated, all_roots, resolutions),
+                    _declared_spellings(
+                        [n for n in evaluated if n not in verified_keys],
+                        all_roots, resolutions),
                     notes_out,
                     # #488 temper/leg-1 — the verified set's exact-name leg. Built from
                     # `verified_keys`, which already exists (it is what the line above
@@ -2609,7 +2725,11 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                     # Inside the same `try` as its siblings, so it keeps the round-3/S1
                     # no-raise envelope: a raising `__str__` here would otherwise replace
                     # the in-flight LintError.
-                    {str(n) for n in verified_keys})
+                    #
+                    # #488 inquisitor/AV1 (edge) — projected like its two siblings.
+                    # _declared_spellings keeps the same envelope (it is guarded per
+                    # name and cannot raise) and carries the `str()` this used to do.
+                    _declared_spellings(verified_keys, all_roots, resolutions))
             except Exception:
                 pass
     return notes
@@ -3297,6 +3417,48 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
         cov.bump("discarded", probe["result_discarded"])
 
 
+def _carry_should_have_bound(art_name, bodies):
+    """#488 inquisitor/AV1 (state) — True when the witness's cited name is a SPELLING of
+    a name the artifacts leg hash-verified, so a `bodies` miss on BOTH keys is proof the
+    resolution changed mid-run rather than evidence that nothing was hashed.
+
+    PURELY LEXICAL, and that is the whole point: the event being detected is that the
+    FILESYSTEM moved between the two legs, so any test that goes back to disk is testing
+    the post-swap tree and cannot see it. `PurePosixPath` is the normaliser rather than
+    `os.path.normpath` because it collapses `./`, `//` and a trailing `/` — the forms
+    that name the same file under any tree — while leaving `..` alone: collapsing `..`
+    lexically is unsound across a symlinked parent and would make this fire on two names
+    that genuinely resolve differently.
+
+    Only the STRING keys of `bodies` are considered; those are the DECLARED ARTIFACTS
+    names, and only hash-MATCHED entries are ever carried (see the write site). The Path
+    keys are the realpaths, which the caller has already consulted directly.
+
+    Scope, stated because it bounds what the caller's raise can claim: an ABSOLUTE cited
+    name (§3.2's mandated form) never lexically equals a §3.1-relative declaration, so a
+    swap against a name cited in THAT form is not detected here and still degrades to the
+    independent read the census bills `unhashed-body`. Closing that half needs the cited
+    name relativised against the roots, which reintroduces a cross-root collision this
+    detector has no way to adjudicate; it is left open deliberately rather than guessed.
+
+    MUST NOT RAISE on any input: `art_name` is receipt-controlled and `bodies` is a
+    caller-supplied out-param, and a False here costs the old behaviour while an
+    exception costs the verdict."""
+    try:
+        want = pathlib.PurePosixPath(art_name)
+    except Exception:
+        return False
+    for k in bodies:
+        if not isinstance(k, str):
+            continue
+        try:
+            if pathlib.PurePosixPath(k) == want:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                   probe_out=None, notes_out=None):
     """Part 2. Resolve the cited TRACE artifact via resolve_base, read ONLY the cited
@@ -3545,6 +3707,54 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 carried = bodies.get(art_name)
                 if carried is None:
                     carried = bodies.get(resolved)
+                if carried is None and _carry_should_have_bound(art_name, bodies):
+                    # #488 inquisitor/AV1 (state) — the DOUBLE MISS, which the write
+                    # site's own conclusion ("a hit under either binds the predicate to
+                    # the bytes this leg hashed AND matched") does not cover. Each key
+                    # closes a different failure mode ALONE; put both failure modes on
+                    # ONE run and both keys miss:
+                    #   * a TRACE spelling difference (`./f.md` for a declared `f.md`)
+                    #     defeats the NAME key — the witness's `art_name` for a rangeless
+                    #     payload is the cited entry's first token verbatim, written
+                    #     independently of the ARTIFACTS line, and no Tier-1 rule ties
+                    #     the two spellings together;
+                    #   * a mid-lint symlink swap moves the REALPATH after the hash, which
+                    #     is the very attack the realpath key was added for.
+                    # Both halves are receipt-controlled and free. Measured: a declared,
+                    # hash-verified `f.md` containing the token the witness must NOT
+                    # match, replaced between the legs by a symlink to a sanitised
+                    # sibling and cited in TRACE one `./` apart — the carry silently
+                    # degraded to a FRESH READ of the sanitised file, the predicate
+                    # passed, and the run exited 0 still billing `witness 1/1`. The
+                    # single-spelling twin of the same receipt was correctly REJECTED.
+                    #
+                    # The defect is the silent degradation, not the missing key, so the
+                    # fix is fail-CLOSED and not a third key. A third normalised-name key
+                    # would widen the same chain that has now failed twice: it would bind
+                    # the predicate on one more spelling and go on silently re-reading
+                    # disk for the next one. What is DETECTABLE here — with no disk
+                    # access, and therefore immune to the swap itself — is that the cited
+                    # name is a spelling of a name THIS RUN HASHED, while neither key
+                    # bound it. That can only mean the resolution moved between the legs,
+                    # which is exactly the event the carry exists to refuse.
+                    #
+                    # A name the artifacts leg never verified is untouched: it has no
+                    # `bodies` entry under any spelling, so this never fires for it and
+                    # the honest independent-read disposition below still applies (the
+                    # `(none)`-ARTIFACTS and undeclared-payload shapes both keep their
+                    # `unhashed-body` census code and their `independent read` note).
+                    #
+                    # `partial`, and raised before the read: bytes were never decoded and
+                    # the predicate provably never ran, which is the same state the
+                    # `_read_cited_range` LintError arm just below records.
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)} names an artifact this "
+                        f"run hash-verified, but its resolution CHANGED between the "
+                        f"legs (neither the declared name nor the resolved realpath "
+                        f"carries the hashed body); the predicate would have run "
+                        f"against bytes no leg hashed")
             try:
                 body_text = _read_cited_range(resolved, cited,
                                               witness if from_payload else None, meter,
@@ -4507,118 +4717,6 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # callers (--selftest, the direct-call tests) still use it.
                     tier2_witness(witness, trace, root, strict, verdict, cov,
                                   bodies, wit_probe, wit_notes)
-                    if v11 is not None and v11["supersedes"] != "none" \
-                            and not wit_probe.get("unsourced") \
-                            and (not wit_probe.get("evaluated")
-                                 or wit_probe.get("result_discarded")):
-                        # C1-R3-S1 — the exemption is keyed on `unsourced`: tier2_witness
-                        # sourced NO artifact, so resolve_base never ran, verify_witness was
-                        # never called, and `evaluated` cannot be set by any witness this
-                        # receipt could have written. On the FAIL leg that is every kind=grep
-                        # witness, because witness_art_name's payload sourcing is PASS-only —
-                        # not a narrow range, not a well-chosen one. That is a hard structural
-                        # BLOCK with no in-receipt remedy, on the shape return-convention.md
-                        # makes the DEFAULT for research/judge dispatches with no shell — and
-                        # the bullet below would blame "resolved to no evaluated predicate"
-                        # when the witness resolved to nothing at all. lint_v11_local's
-                        # declared over-approximation does not cover it: that one is about the
-                        # TRIGGER, and its 0-site measurement is silent here because no
-                        # committed corpus holds a FAIL + non-`none` SUPERSEDES row.
-                        #
-                        # ⚠ The first attempt keyed on `verdict == "PASS"` and the freeze-guard
-                        # caught it: that exempts the WHOLE FAIL leg, including a witness that
-                        # WAS sourced and merely resolved nowhere — a case whose remedy is
-                        # ordinary (name a file that exists). Measured: such a FAIL receipt
-                        # exited 0 while its byte-identical PASS twin exited 1, reopening
-                        # siege S-7(a) for a whole verdict class. This is DEC-29 exactly:
-                        # narrowing by SHAPE (verdict, or witness kind) silently restores a
-                        # fail-open; the only safe key is whether the cited range addressed
-                        # bytes. Do not re-narrow this on `verdict` or on `kind`.
-                        #
-                        # GH #501 LANDED, and it retired the exemption for the shape this
-                        # note was about: the FAIL leg now sources a ranged payload, so
-                        # `unsourced` is no longer set for the MANDATED form and the gate is
-                        # armed on both legs again. What still reaches here is the residue —
-                        # a FAIL witness with no range to source AND no EXEC `out=` to fall
-                        # back to, which remains genuinely unsatisfiable.
-                        #
-                        # ⚠ Arming it is only real because `evaluated` is keyed on whether
-                        # this leg's outcome can depend on the witness at all (verify_witness):
-                        # `pattern and exit_success`, the exact antecedent of the leg's one
-                        # raise. THREE forms of this key have now been wrong, all in the same
-                        # direction — `exit_m or pattern` (QG-r1/S1: no exit clause at all,
-                        # so the branch is inert), `exit_m` (QG-r2/S2: the PRESENCE of a
-                        # token, DEC-29's forbidden key) — and this consequent consumes the
-                        # flag, so each let a supersession survive on a witness that proved
-                        # nothing.
-                        #
-                        # ⚠ QG-r2/S2 — what the `exit_m` form left open, and why the
-                        # `or result_discarded` conjunct did NOT cover it: an exit-clause
-                        # `expect-fail` (`exit!=0` / `exit=<N>`) derives no pattern from
-                        # `_expect_fail_pattern`, and `result_discarded` is keyed on
-                        # `pattern`, so NEITHER flag fired for it. A FAIL receipt retired a
-                        # peer's finding on the same stderr line that billed its witness
-                        # `witness 0/0 … not-applicable 1 (exit-clause-not-a-body-predicate)`
-                        # — one `expect-fail` token from the shape QG-r1/S1 closed. The whole
-                        # 436-test suite passed with and without the hole, because that arm
-                        # had no pin at all.
-                        #
-                        # WHAT PINS WHAT (each verified by reverting the half on a copy of the
-                        # tree, never by watching a pin go green — DEC-31):
-                        #   * key → `exit_m`: test_501_fail_leg_exit_clause_expect_fail_cannot_
-                        #     retire goes RED on BOTH kind=exec and ranged kind=grep, and
-                        #     NOTHING else does — test_501_13 included.
-                        #   * key → `exit_m or pattern`: that test AND test_501_13 (which pins
-                        #     the `pattern` half at verify_witness's own level).
-                        #   * the `or result_discarded` conjunct removed: NOTHING goes red —
-                        #     437/437 still pass. Stated rather than left to be discovered,
-                        #     because "the pin is green" is not evidence the guard is live.
-                        #     The conjunct is REDUNDANT given the key above: `result_discarded`
-                        #     is `pattern and not exit_success`, whose every case `not
-                        #     evaluated` already covers. It is kept as defence in depth against
-                        #     the two flags drifting apart — NOT as the arming mechanism, and
-                        #     test_501_fail_leg_witness_with_a_DISCARDED_result_cannot_retire
-                        #     now pins the KEY's behaviour on that shape, not the conjunct.
-                        #
-                        # Net on this leg: a predecessor is retired only when a body predicate
-                        # was derived AND the cited entry's exit is 0 — and since
-                        # `exit_success and not content_match` raises separately, only when
-                        # that body also MATCHED (test_501_5's shape). The `unsourced`
-                        # exemption above is the one remaining way past this consequent.
-                        #
-                        # ⚠ THE CORPUS FIGURE BOUNDS THE `PASS` POPULATION ONLY (QG-r2/S3).
-                        # 21 of the 68 receipts in the three enumerated frozen corpora carry a
-                        # non-`none` SUPERSEDES and ALL 21 are `PASS` — re-derived as
-                        # {'n': 68, 'sup': 21, 'supfail': 0, 'fail': 19} — and running all 68
-                        # through the CLI with and without this key gives byte-identical exit
-                        # codes. As evidence ABOUT THIS CONSEQUENT that is VACUOUS: the corpora
-                        # hold ZERO `FAIL` receipts carrying a non-`none` SUPERSEDES of any
-                        # shape, so "0 exit codes move" cannot distinguish "the arming blocks
-                        # nothing" from "the corpus contains none of the targeted shape". What
-                        # it does bound is the `PASS` population, and that bound is real for a
-                        # structural reason rather than a measured one: this key sits inside
-                        # `if verdict == "FAIL"`, and the PASS leg sets `evaluated` at its own
-                        # two sites, so no `PASS` receipt's exit code can move.
-                        #
-                        # siege S-7(a) — the Tier-2 half of the witness-evidence rule.
-                        # Tier-1 checks the witness's SHAPE (`kind ∈ {exec, grep}`,
-                        # `ran=TRACE#N`) and stopped there, so a shape-conformant witness
-                        # whose Tier-2 disposition is `not-applicable` — no artifact name,
-                        # a name that resolves nowhere, an unimplemented kind — retired a
-                        # peer's FAIL finding, its tripwires and its cairn invariant at
-                        # exit 0, having demonstrably evaluated nothing. The convention is
-                        # explicit that the shape check is not the whole rule: "Tier-2
-                        # then verifies the witness normally — supersession only survives
-                        # if the witness demonstrably does NOT match expect-fail".
-                        #
-                        # This does NOT touch the rule's TRIGGER, which is #500's subject:
-                        # the fail-closed over-approximation over EVERY non-`none`
-                        # SUPERSEDES is left exactly as `lint_v11_local` states it.
-                        raise LintError(
-                            "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
-                            "EVALUATED at Tier-2 (witness-evidence requirement: the "
-                            "witness resolved to no evaluated predicate, so it "
-                            "demonstrates nothing about the predecessor it retires)")
                 else:
                     # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
                     # leg, so the collector would hear nothing from it and the line would
@@ -4627,6 +4725,144 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # and an unannotated 0/0 says one did not — indistinguishable from a
                     # PASS receipt with a structurally-absent witness.
                     cov.bump("not-applicable", "verdict-not-pass-fail")
+                # #488 inquisitor/AV1 — LIFTED OUT of the `verdict in {PASS, FAIL}` arm,
+                # which is where it used to sit. The witness LEG stays verdict-gated (D8.2
+                # sub-decision 5 above, unchanged); the CONSEQUENT does not, because the
+                # rule it enforces is not about the witness leg running — it is about
+                # whether a supersession is backed by evidence. Nested in that arm, a
+                # BLOCKED receipt took the `else:`, bumped `not-applicable
+                # (verdict-not-pass-fail)` and never reached this test at all: three
+                # byte-identical receipts differing ONLY in the VERDICT token exited
+                # 1 / 1 / 0, the third retiring its predecessor with a witness naming a
+                # file that does not exist. That is DEC-29's forbidden key verbatim — the
+                # guard narrowed by SHAPE (the verdict), and the narrowing restoring a
+                # fail-open — and it is the same shape the ⚠ note below already records
+                # being closed for the PASS/FAIL pair; it was simply never closed for the
+                # third verdict class. Tier-1's half of the rule (`lint_v11_local`:
+                # `kind in {exec, grep}` AND `ran=TRACE#N`) is already verdict-independent,
+                # so a BLOCKED receipt has to carry a shape-conformant witness and nothing
+                # checked whether it resolved to anything; `return-convention.md` § The
+                # Sweep step 3 tells the orchestrator to process SUPERSEDES with no check
+                # of its own and does not condition that on the new receipt's verdict.
+                #
+                # On the BLOCKED path `wit_probe` is EMPTY by construction (tier2_witness
+                # never ran), so `unsourced` is unset and `evaluated` is falsy and the
+                # raise fires: a receipt that could not finish its work cannot retire a
+                # peer's finding. That is the intended disposition, not a side effect —
+                # the remedy is in the author's hands (return the SUPERSEDES as `none`,
+                # or finish the work and return PASS/FAIL with a witness that resolves).
+                if v11 is not None and v11["supersedes"] != "none" \
+                        and not wit_probe.get("unsourced") \
+                        and (not wit_probe.get("evaluated")
+                             or wit_probe.get("result_discarded")):
+                    # C1-R3-S1 — the exemption is keyed on `unsourced`: tier2_witness
+                    # sourced NO artifact, so resolve_base never ran, verify_witness was
+                    # never called, and `evaluated` cannot be set by any witness this
+                    # receipt could have written. On the FAIL leg that is every kind=grep
+                    # witness, because witness_art_name's payload sourcing is PASS-only —
+                    # not a narrow range, not a well-chosen one. That is a hard structural
+                    # BLOCK with no in-receipt remedy, on the shape return-convention.md
+                    # makes the DEFAULT for research/judge dispatches with no shell — and
+                    # the bullet below would blame "resolved to no evaluated predicate"
+                    # when the witness resolved to nothing at all. lint_v11_local's
+                    # declared over-approximation does not cover it: that one is about the
+                    # TRIGGER, and its 0-site measurement is silent here because no
+                    # committed corpus holds a FAIL + non-`none` SUPERSEDES row.
+                    #
+                    # ⚠ The first attempt keyed on `verdict == "PASS"` and the freeze-guard
+                    # caught it: that exempts the WHOLE FAIL leg, including a witness that
+                    # WAS sourced and merely resolved nowhere — a case whose remedy is
+                    # ordinary (name a file that exists). Measured: such a FAIL receipt
+                    # exited 0 while its byte-identical PASS twin exited 1, reopening
+                    # siege S-7(a) for a whole verdict class. This is DEC-29 exactly:
+                    # narrowing by SHAPE (verdict, or witness kind) silently restores a
+                    # fail-open; the only safe key is whether the cited range addressed
+                    # bytes. Do not re-narrow this on `verdict` or on `kind`.
+                    #
+                    # GH #501 LANDED, and it retired the exemption for the shape this
+                    # note was about: the FAIL leg now sources a ranged payload, so
+                    # `unsourced` is no longer set for the MANDATED form and the gate is
+                    # armed on both legs again. What still reaches here is the residue —
+                    # a FAIL witness with no range to source AND no EXEC `out=` to fall
+                    # back to, which remains genuinely unsatisfiable.
+                    #
+                    # ⚠ Arming it is only real because `evaluated` is keyed on whether
+                    # this leg's outcome can depend on the witness at all (verify_witness):
+                    # `pattern and exit_success`, the exact antecedent of the leg's one
+                    # raise. THREE forms of this key have now been wrong, all in the same
+                    # direction — `exit_m or pattern` (QG-r1/S1: no exit clause at all,
+                    # so the branch is inert), `exit_m` (QG-r2/S2: the PRESENCE of a
+                    # token, DEC-29's forbidden key) — and this consequent consumes the
+                    # flag, so each let a supersession survive on a witness that proved
+                    # nothing.
+                    #
+                    # ⚠ QG-r2/S2 — what the `exit_m` form left open, and why the
+                    # `or result_discarded` conjunct did NOT cover it: an exit-clause
+                    # `expect-fail` (`exit!=0` / `exit=<N>`) derives no pattern from
+                    # `_expect_fail_pattern`, and `result_discarded` is keyed on
+                    # `pattern`, so NEITHER flag fired for it. A FAIL receipt retired a
+                    # peer's finding on the same stderr line that billed its witness
+                    # `witness 0/0 … not-applicable 1 (exit-clause-not-a-body-predicate)`
+                    # — one `expect-fail` token from the shape QG-r1/S1 closed. The whole
+                    # 436-test suite passed with and without the hole, because that arm
+                    # had no pin at all.
+                    #
+                    # WHAT PINS WHAT (each verified by reverting the half on a copy of the
+                    # tree, never by watching a pin go green — DEC-31):
+                    #   * key → `exit_m`: test_501_fail_leg_exit_clause_expect_fail_cannot_
+                    #     retire goes RED on BOTH kind=exec and ranged kind=grep, and
+                    #     NOTHING else does — test_501_13 included.
+                    #   * key → `exit_m or pattern`: that test AND test_501_13 (which pins
+                    #     the `pattern` half at verify_witness's own level).
+                    #   * the `or result_discarded` conjunct removed: NOTHING goes red —
+                    #     437/437 still pass. Stated rather than left to be discovered,
+                    #     because "the pin is green" is not evidence the guard is live.
+                    #     The conjunct is REDUNDANT given the key above: `result_discarded`
+                    #     is `pattern and not exit_success`, whose every case `not
+                    #     evaluated` already covers. It is kept as defence in depth against
+                    #     the two flags drifting apart — NOT as the arming mechanism, and
+                    #     test_501_fail_leg_witness_with_a_DISCARDED_result_cannot_retire
+                    #     now pins the KEY's behaviour on that shape, not the conjunct.
+                    #
+                    # Net on this leg: a predecessor is retired only when a body predicate
+                    # was derived AND the cited entry's exit is 0 — and since
+                    # `exit_success and not content_match` raises separately, only when
+                    # that body also MATCHED (test_501_5's shape). The `unsourced`
+                    # exemption above is the one remaining way past this consequent.
+                    #
+                    # ⚠ THE CORPUS FIGURE BOUNDS THE `PASS` POPULATION ONLY (QG-r2/S3).
+                    # 21 of the 68 receipts in the three enumerated frozen corpora carry a
+                    # non-`none` SUPERSEDES and ALL 21 are `PASS` — re-derived as
+                    # {'n': 68, 'sup': 21, 'supfail': 0, 'fail': 19} — and running all 68
+                    # through the CLI with and without this key gives byte-identical exit
+                    # codes. As evidence ABOUT THIS CONSEQUENT that is VACUOUS: the corpora
+                    # hold ZERO `FAIL` receipts carrying a non-`none` SUPERSEDES of any
+                    # shape, so "0 exit codes move" cannot distinguish "the arming blocks
+                    # nothing" from "the corpus contains none of the targeted shape". What
+                    # it does bound is the `PASS` population, and that bound is real for a
+                    # structural reason rather than a measured one: this key sits inside
+                    # `if verdict == "FAIL"`, and the PASS leg sets `evaluated` at its own
+                    # two sites, so no `PASS` receipt's exit code can move.
+                    #
+                    # siege S-7(a) — the Tier-2 half of the witness-evidence rule.
+                    # Tier-1 checks the witness's SHAPE (`kind ∈ {exec, grep}`,
+                    # `ran=TRACE#N`) and stopped there, so a shape-conformant witness
+                    # whose Tier-2 disposition is `not-applicable` — no artifact name,
+                    # a name that resolves nowhere, an unimplemented kind — retired a
+                    # peer's FAIL finding, its tripwires and its cairn invariant at
+                    # exit 0, having demonstrably evaluated nothing. The convention is
+                    # explicit that the shape check is not the whole rule: "Tier-2
+                    # then verifies the witness normally — supersession only survives
+                    # if the witness demonstrably does NOT match expect-fail".
+                    #
+                    # This does NOT touch the rule's TRIGGER, which is #500's subject:
+                    # the fail-closed over-approximation over EVERY non-`none`
+                    # SUPERSEDES is left exactly as `lint_v11_local` states it.
+                    raise LintError(
+                        "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
+                        "EVALUATED at Tier-2 (witness-evidence requirement: the "
+                        "witness resolved to no evaluated predicate, so it "
+                        "demonstrates nothing about the predecessor it retires)")
                 # Part-3 receipt-ledger binding: only with an orchestrator-supplied
                 # --ledger (no default-path synthesis). A mismatch is a hard FAIL
                 # (strict-independent); absent --ledger is advisory UNVERIFIABLE, and
