@@ -67,6 +67,7 @@ NEXT       <one-line re-verification hint>  [; <hint>]
   - `BLOCKED` — subagent cannot proceed without orchestrator action.
 - **ARTIFACTS** — one or more indented lines: `<name>  sha256:<hex64>  <size>` with optional trailing `<key=value>` pairs (e.g. `lines=+142/-38`). Empty ARTIFACTS is written as the literal indented line `(none)`. `(none)` is the empty-set sentinel and **only** that: it is legal solely as the sole non-blank line of the section body, and a `(none)` co-occurring with any entry is a Tier-1 lint failure (the same rule binds `TRACE` and `CLAIMS`).
   - **`<name>` lexical grammar (#488 c1).** A legal `<name>` is a **POSIX-relative path**: it matches `[^/\s][^\s]*`, has **no leading `/`**, contains **no NUL**, and has **no `..` path component**. Whitespace is already excluded by the line grammar above. The *no leading `/`* and *no NUL* clauses are enforced at Tier-1 and hard-FAIL; the *no `..`* clause is **producer-normative only** — it is not enforced at Tier-1 today, so a `..` name lints clean and is still a convention violation. This paragraph states the name's **shape** only; where a name **resolves** is Tier-2's disposition and is not ruled here.
+  - **`<name>` uniqueness (#488 c1).** Each `<name>` appears **at most once** in an `ARTIFACTS` body. A name declared twice is a **Tier-1 lint failure** — the same disposition `parse_receipt` gives a duplicated section header — and never a last-wins collapse: two lines declaring contradictory hashes for one name would otherwise make the receipt's verdict depend on line order alone.
 - **TRACE** — ordered, 1-indexed. Byte-ranges in `out=` are bounded: form `L<a>-L<b>` or `B<a>-B<b>` with `b - a ≤ 4096 bytes` (or line-count equivalent). Ranges exceeding the bound are a Tier-1 lint failure.
 - **CLAIMS** — zero or more `<key>=<value>  from=<citation>` lines. Citation syntax: `TRACE#<N>`, `<artifact>#<byte-range>`, or `<artifact>#$.<jsonpath>`. Optional `pattern=<regex>` asserts the pattern appears in the cited range.
 - **WITNESS** — exactly one line. See Witness Protocol below.
@@ -143,6 +144,9 @@ fail if any required section is missing, duplicated, or out of order
 fail if text appears outside section bodies (inline bracketed notes permitted by a
   field rule ARE body; unknown headers AFTER NEXT are ignored for forward
   compatibility; unknown headers BEFORE NEXT are a failure)
+
+for each ARTIFACTS entry:
+  fail if <name> is duplicated within the section body
 
 for each CLAIM:
   fail if citation syntax invalid
@@ -237,7 +241,12 @@ if ran=SKIPPED or UNRUNNABLE:
   no Tier-2 read. Orchestrator schedules re-verification via Layer 3 Cairn.
 
 if VERDICT=BLOCKED:
-  no Tier-2; the dispatch is not trusted for forward progress regardless.
+  no Tier-2 witness READ; the dispatch is not trusted for forward progress regardless.
+  # the witness LEG is verdict-gated off here, but the SUPERSEDES witness-evidence
+  #   consequent below is verdict-INDEPENDENT (#488): a non-`none` SUPERSEDES on a
+  #   BLOCKED receipt is an unconditional hard FAIL, because with no witness read
+  #   there is no witness that could satisfy it. The only in-receipt remedy is
+  #   `SUPERSEDES: none`.
 
 if --ledger PATH given:                     # receipt-ledger binding (membership leg)
   # runs for every DISPATCHED line regardless of the parent's own VERDICT (incl.

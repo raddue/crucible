@@ -255,6 +255,76 @@ class TestAStaleAnchorIsARowVerdictNotAProcessAbort(_SweepCase):
                          "an anchor-stale row kept an unmutated tree")
 
 
+class TestATreeThatWillNotBuildIsARowVerdictNotASweepAbort(_SweepCase):
+    """#488 warden-r2/F5 — `main`'s docstring promised that "an anchor that moved, a
+    mutation that breaks collection, a tree that will not build — each is one row's
+    verdict, and the rows after it still run". Only `StaleAnchor` was ever caught.
+
+    `_build_tree()` was called OUTSIDE `_run_row`'s `try:`, so a build failure — an
+    unreadable file under a `COPY_DIRS` member, a `COPY_DIRS` member that is not
+    there, a full disk — propagated straight out of `main`'s loop and aborted the
+    whole sweep, in the worst case with ZERO rows evaluated. That is the same
+    silent-row-drop failure class `c307528` was written to eliminate, reached down a
+    different exception path, and the same is true of anything else `_apply` or the
+    subprocess call could raise.
+
+    The synthetic tree is the point, as for the anchor-stale class above: what is
+    under test is `main`'s loop and `_build_tree`'s failure path, neither of which
+    reads a row's CONTENT."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.mini_repo()
+        # The tree cannot be built: `COPY_DIRS` names `docs`, and `copytree` of a
+        # source that is not there raises. Chosen over a chmod because a
+        # permission-based fixture is a no-op for a root-owned CI runner.
+        (self.root / "docs").rmdir()
+        self.sweep.MUTANTS = [
+            dict(id=1, criterion="synthetic", what="the first mutant row",
+                 edits=[("MARKER_ONE", "MARKER_TWO")], expect=set()),
+            dict(id=2, criterion="synthetic",
+                 what="a row ORDERED AFTER the unbuildable one",
+                 edits=[("MARKER_TWO", "MARKER_ONE")], expect=set()),
+        ]
+        # `_build_tree` uses `tempfile.mkdtemp`, so pointing `tempfile.tempdir` at a
+        # private directory makes the orphan check below exact.
+        self.private = pathlib.Path(tempfile.mkdtemp(prefix="crucible-suite-"))
+        self.addCleanup(shutil.rmtree, self.private, True)
+        self.addCleanup(setattr, tempfile, "tempdir", tempfile.tempdir)
+        tempfile.tempdir = str(self.private)
+
+    def test_every_row_is_still_reported_when_no_tree_can_be_built(self):
+        rc, out = self.run_main()
+        reported = set(re.findall(r"^row +(\d+)", out, re.M))
+        self.assertEqual(
+            reported, {"0", "1", "2"},
+            "a tree that will not build aborted the sweep instead of scoring a "
+            f"row — only {sorted(reported)} were reported.\n{out}")
+        self.assertEqual(out.count("-- ROW-ERROR:"), 3, out)
+        self.assertEqual(rc, 1, "a row that produced no verdict must exit non-zero")
+
+    def test_the_summary_says_those_rows_pins_went_unchecked(self):
+        """A ROW-ERROR row is NOT a row that discriminates — booking it under the
+        pin count would report the sweep as having measured something it did not."""
+        _, out = self.run_main()
+        tail = out.split("ROW-ERROR rows")[-1]
+        self.assertIn("UNCHECKED", tail)
+        self.assertIn("FileNotFoundError", tail)
+        # The closing arithmetic must name BOTH non-verdict classes and must not
+        # charge these rows to the pin count.
+        self.assertIn("3 row(s) failed -- 0 that no longer discriminate as "
+                      "recorded, 0 anchor-stale, 3 row-error.", out)
+
+    def test_a_failed_build_does_not_orphan_its_partial_tree(self):
+        """`copytree` had already copied `scripts/` and `eval/` before `docs/`
+        raised, so without the cleanup each failed row leaks a partial tree into
+        `$TMPDIR` with no handle left anywhere to remove it."""
+        self.run_main()
+        self.assertEqual(
+            sorted(p.name for p in self.private.glob("dec31-*")), [],
+            "a tree that failed to build was left behind in $TMPDIR")
+
+
 class TestReformattingTheLinterDoesNotSilentlyDropMutationRows(_SweepCase):
     """FINDING 3 (measured) — the same claim against the REAL tree, with the real
     row 1, and the trigger that was actually observed: a BEHAVIOUR-PRESERVING edit to

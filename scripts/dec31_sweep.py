@@ -88,7 +88,7 @@ KEEP_DIR = REPO / ".dec31-keep"
 # then went on to print per-row `unexpected`/`missing` diffs computed against a tree
 # it had just declared broken -- noise shaped exactly like the vacuity signal this
 # harness exists to catch.
-_RAN = re.compile(r"^Ran (\d+) tests", re.M)
+_RAN = re.compile(r"^Ran (\d+) tests?", re.M)   # `tests?`: unittest prints "1 test"
 
 _HDR = re.compile(r"^(?:FAIL|ERROR): (\S+) \((.+?)\)", re.M)
 
@@ -114,7 +114,17 @@ def _ids(text):
 
 def _ran(text):
     """Tests COLLECTED by one row's run -- the `Ran N tests` count -- or None when
-    the run never got as far as printing one (an import-time break in the copy)."""
+    the run never got as far as printing one.
+
+    #488 warden-r2/F6 -- NOT "an import-time break in the copy", which is what this
+    used to claim and which this suite's own shape rules out: `test_488_name_space.py`
+    imports `rcpt_verify` LAZILY (`_import_rv()`, per test), so a mutation that makes
+    the linter unimportable still collects the whole suite and still prints a `Ran`
+    line -- the tests merely error. What actually produces None is the runner never
+    reaching its summary at all: a mutation that breaks the TEST FILE's own import
+    (none of the rows below touch it), or the subprocess dying first. Overstating the
+    catch matters because `main` reports None as `<no Ran line>` and blames the
+    row's mutation for breaking collection."""
     m = _RAN.search(text)
     return int(m.group(1)) if m else None
 
@@ -335,6 +345,22 @@ UNEVALTWIN = "TestAnUnreachedTwinCannotSilenceAnEvaluatedUnverifiedName"
 # name and is in neither set, which is what keeps the two rows discriminating
 # rather than merely large.
 ABSSPELL = "TestTheExactNameOverrideSurvivesTheMandatedAbsoluteSpelling"
+
+# warden-r2/F3 — ABSSPELL's fixture reached through a SYMLINKED `--root`. Same two
+# legs, so it lands in the same two rows and for the same two reasons: BOTH arms
+# cite with READ (row 7's silencer), and BOTH declare the same NESTED `a/x.md`, so
+# both resolve below the root's top level and go red when row 10 drops the walk
+# sub-count. Unlike ABSSPELL there is no third, top-level arm to leave out — this
+# class is two arms, both in both rows.
+SYMROOT = "TestTheExactNameOverrideSurvivesASymlinkedRoot"
+
+# warden-r2/F4 — the root-join's degenerate-basename screen. Row 7 ONLY: both arms
+# cite with READ and assert a note FIRES, so the global silencer reddens the defect
+# arm and its non-vacuity control alike. Row 10 does NOT reach it — both declared
+# names sit at a root's TOP LEVEL, so nothing resolves by walk and the dropped
+# sub-count is never bumped. That asymmetry against SYMROOT above is measured, not
+# assumed, and it is what keeps the two rows discriminating rather than merely large.
+DEGENJOIN = "TestTheRootJoinDoesNotWidenADegenerateDeclaration"
 
 # inquisitor/AV4 (edge) — the ACCEPTED-limitation pin on `_PROVENANCE_VERBS`. Only
 # its READ non-vacuity CONTROL belongs to row 7: the class's other two arms assert
@@ -584,6 +610,16 @@ MUTANTS = [
                   (ABSSPELL,
                    "test_the_bare_declared_spelling_keeps_its_note",
                    "test_the_mandated_absolute_spelling_keeps_its_note_too"),
+                  # #488 warden-r2 — four pins GAINED, same reason as the three
+                  # above: every arm cites its TRACE entry with READ and asserts a
+                  # note fires, so the global silencer reddens defect arms and
+                  # non-vacuity controls alike.
+                  (SYMROOT,
+                   "test_the_realpath_spelling_keeps_its_note",
+                   "test_the_as_supplied_symlinked_spelling_keeps_its_note_too"),
+                  (DEGENJOIN,
+                   "test_a_cross_root_degenerate_citation_is_not_silenced",
+                   "test_an_ordinary_cross_root_citation_still_speaks"),
                   (VERBSCOPE,
                    "test_a_read_citation_of_an_undeclared_file_speaks"),
                   (ESC,
@@ -720,6 +756,14 @@ MUTANTS = [
          expect=E((ABSSPELL,
                    "test_the_bare_declared_spelling_keeps_its_note",
                    "test_the_mandated_absolute_spelling_keeps_its_note_too"),
+                  # #488 warden-r2 — two pins GAINED. SYMROOT is ABSSPELL's fixture
+                  # through a symlinked root, so both its arms declare the same
+                  # nested `a/x.md` and reach this counter the same way. DEGENJOIN
+                  # is deliberately ABSENT: its names are top-level, so no walk
+                  # resolution happens and this mutation cannot reach it.
+                  (SYMROOT,
+                   "test_the_realpath_spelling_keeps_its_note",
+                   "test_the_as_supplied_symlinked_spelling_keeps_its_note_too"),
                   (ASTRICT,
                    "test_the_strict_raise_does_not_silence_them",
                    "test_without_strict_the_note_and_the_counter_both_fire"),
@@ -941,9 +985,19 @@ def _keep(tree, row_id):
 
 def _build_tree():
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="dec31-"))
-    for d in COPY_DIRS:
-        shutil.copytree(REPO / d, tmp / d,
-                        ignore=shutil.ignore_patterns("__pycache__"))
+    # #488 warden-r2/F5 — a copytree that raises part-way (an unreadable file under
+    # a COPY_DIRS member, a full disk) used to orphan the partial tree in $TMPDIR
+    # AND leave `_run_row` with no handle to keep or clean, because the assignment
+    # had not happened yet. Nothing is kept here on purpose: a tree that never
+    # finished building is not a mutation artefact worth inspecting, unlike the
+    # ABORTED-after-build case `_run_row` prints.
+    try:
+        for d in COPY_DIRS:
+            shutil.copytree(REPO / d, tmp / d,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     return tmp
 
 
@@ -961,9 +1015,23 @@ def _run_row(row):
     propagating. Without it the abort path orphans a ~5MB tree silently while the
     ordinary failing-row path prints its own, which is the opposite of the
     contract: a row that aborted is exactly the one whose copy you want to look at.
-    The failure still propagates, so the exit stays non-zero."""
-    tree = _build_tree()
+    The failure still propagates, so the exit stays non-zero -- propagation OUT of
+    this function is the contract, and `main` is where the per-row catch lives.
+
+    #488 warden-r2/F5 -- the build is INSIDE the `try:`, so this function's stated
+    envelope ("anything raised between building the tree and reading the run") is
+    true of the build too rather than only of what follows it. STATED PLAINLY,
+    because "the pin is green" is not evidence a guard is live: measured by
+    reverting this half alone, NOTHING in the harness suite goes red. It is
+    behaviour-NEUTRAL today -- a build failure has no tree to keep, so the arm it
+    now reaches prints nothing (`tree is not None`) and re-raises exactly as the
+    bare propagation did, and what catches it either way is `main`'s per-row
+    `except Exception`, which is the half that carries the fix. This is kept for
+    envelope integrity: any future statement added before `_apply` would otherwise
+    sit outside every handler in this function. Do NOT read it as the mechanism."""
+    tree = None
     try:
+        tree = _build_tree()
         _apply(tree / "scripts" / "rcpt_verify.py", row["edits"])
         proc = subprocess.run([sys.executable, SUITE], cwd=tree,
                               capture_output=True, text=True)
@@ -971,8 +1039,10 @@ def _run_row(row):
         shutil.rmtree(tree, ignore_errors=True)
         raise
     except BaseException:
-        print(f"row {row['id']:>2}  ABORTED before a verdict; "
-              f"tree kept for inspection: {_keep(tree, row['id'])}", flush=True)
+        if tree is not None:
+            print(f"row {row['id']:>2}  ABORTED before a verdict; "
+                  f"tree kept for inspection: {_keep(tree, row['id'])}",
+                  flush=True)
         raise
     return tree, _ids(proc.stdout + proc.stderr), proc.stdout + proc.stderr
 
@@ -987,6 +1057,12 @@ def main():
     shutil.rmtree(KEEP_DIR, ignore_errors=True)
     bad = 0
     stale_rows = []
+    # #488 warden-r2/F5 — rows that raised something other than StaleAnchor. Before
+    # this, `StaleAnchor` was the ONLY per-row catch, so a tree that would not build
+    # or any exception inside `_apply`/the subprocess call aborted the WHOLE sweep —
+    # in the worst case with zero rows evaluated, which is the silent-row-drop class
+    # `c307528` was written to eliminate, reached down a different exception path.
+    error_rows = []
     expected_ran = None
     for row in [BASELINE] + MUTANTS:
         label = f"row {row['id']:>2}  {row['criterion']:<38}  {row['what']}"
@@ -1002,6 +1078,19 @@ def main():
                       f"was NOT applied and its pins went UNCHECKED:")
                 for line in anchor.splitlines() or [""]:
                     print(f"    | {line}")
+            continue
+        except Exception as exc:
+            # `Exception`, NOT `BaseException`, deliberately: a KeyboardInterrupt or
+            # a SystemExit must still abort the sweep rather than be booked as one
+            # row's verdict. The message is truncated because `shutil.Error` embeds
+            # every failed path and can run to thousands of characters, which would
+            # bury the rows after it.
+            bad += 1
+            error_rows.append((row, exc))
+            msg = f"{type(exc).__name__}: {exc}"
+            if len(msg) > 200:
+                msg = msg[:197] + "..."
+            print(f"{label}  -- ROW-ERROR: {msg}")
             continue
         ran = _ran(out)
         # The count check FIRST, and EXCLUSIVE of the pin diff: a row whose copy
@@ -1055,10 +1144,17 @@ def main():
                 first = next((l for l in anchor.splitlines() if l.strip()), "")
                 print(f"  row {row['id']:>2}  expected 1 occurrence, found {n}"
                       f"  -- {first.strip()[:72]}")
+    if error_rows:
+        print("\ndec31_sweep: ROW-ERROR rows -- these rows never produced a "
+              "verdict, so their pins went UNCHECKED this run:")
+        for row, exc in error_rows:
+            print(f"  row {row['id']:>2}  {type(exc).__name__}"
+                  f"  -- {row['criterion']}")
     if bad:
-        pin_bad = bad - len(stale_rows)
+        pin_bad = bad - len(stale_rows) - len(error_rows)
         print(f"\ndec31_sweep: {bad} row(s) failed -- {pin_bad} that no longer "
-              f"discriminate as recorded, {len(stale_rows)} anchor-stale.")
+              f"discriminate as recorded, {len(stale_rows)} anchor-stale, "
+              f"{len(error_rows)} row-error.")
         return 1
     return 0
 

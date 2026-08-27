@@ -3261,12 +3261,17 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
     receipt was accepted — while the single-spelling twin of the same receipt was
     correctly rejected."""
 
-    def _run_legs(self, trace_spelling):
+    def _run_legs(self, trace_spelling, key_type=str):
         """_verify_single's own two-leg sequence, with a mid-run swap between them.
 
         Returns the LintError message the witness leg raised, or None if it passed
         the receipt clean. Each call gets its OWN root: the swap mutates the tree,
-        so a shared one would make the second call depend on the first."""
+        so a shared one would make the second call depend on the first.
+
+        `key_type` re-spells the DECLARED ARTIFACTS key in the mapping handed to
+        `tier2_artifacts` — `str` for the CLI's own key space, `PurePosixPath` for
+        the direct-API one this file already treats as in scope (see the write
+        site's `str(name)` note). The carry must bind under BOTH."""
         rv = _import_rv()
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -3281,6 +3286,7 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
 
         sections = rv.parse_receipt(text)
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
+        artifacts = {key_type(k): v for k, v in artifacts.items()}
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
 
@@ -3321,6 +3327,38 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
             "bodies.get(name) missed on the spelling and bodies.get(resolved) "
             "missed on the post-swap realpath, so the carry silently degraded "
             "to a fresh disk read of the sanitised file and the receipt passed")
+
+    def test_the_carry_binds_whatever_type_the_declared_key_is_spelled_as(self):
+        """#488 warden-r2/F2 — the carry's NAME key was stored under the declared
+        key VERBATIM, so a non-`str` declared key (`PurePosixPath`, reachable from
+        the direct-API call sites this file already treats as in scope) never
+        matched the witness leg's always-`str` `art_name`. BOTH halves failed open
+        on it, not just the double-miss half: the ordinary single-spelling lookup
+        missed, and `_carry_should_have_bound`'s `isinstance(k, str)` filter then
+        skipped the key so the mid-run-swap detector said nothing either. The
+        `str` arm is the pre-existing behaviour; the `PurePosixPath` arm is what
+        the fix adds, and it is parameterised rather than duplicated so the two
+        key spaces stay pinned together."""
+        for key_type in (str, pathlib.PurePosixPath):
+            with self.subTest(declared_key=key_type.__name__):
+                # CONTROL, per key type — one spelling: the NAME key must hit, so
+                # the predicate runs on the bytes the artifacts leg hashed.
+                control = self._run_legs("f.md", key_type=key_type)
+                self.assertIsNotNone(
+                    control,
+                    f"a {key_type.__name__} declared key did not bind the carry "
+                    f"even on the single-spelling shape: the witness predicate "
+                    f"ran against the swapped-in sanitised file and the receipt "
+                    f"passed")
+                self.assertIn("expect-fail regex", control)
+
+                # ATTACK, per key type — the same swap, one spelling apart.
+                attacked = self._run_legs("./f.md", key_type=key_type)
+                self.assertIsNotNone(
+                    attacked,
+                    f"with a {key_type.__name__} declared key the predicate was "
+                    f"evaluated against bytes NO leg hashed: both carry keys "
+                    f"missed and the double-miss detector was silent too")
 
     def test_an_undeclared_witness_name_still_takes_the_independent_read(self):
         """The half the fail-closed raise must NOT swallow. A witness naming a
@@ -3408,6 +3446,126 @@ class TestTheExactNameOverrideSurvivesTheMandatedAbsoluteSpelling(_RootCase):
         self.assertIn("artifacts 1/1", census(r.stderr), census(r.stderr))
         self.assertEqual([], notes(r.stderr),
                          f"a verified name was called unverified: {notes(r.stderr)}")
+
+
+# --------------------------------------------------------------------------
+# #488 warden-r2 / F3 — the exact-name override vs a SYMLINKED --root.
+# --------------------------------------------------------------------------
+class TestTheExactNameOverrideSurvivesASymlinkedRoot(unittest.TestCase):
+    """WARDEN-R2/F3 — the same headline case as AV1 above, reached by a second
+    door: the AS-SUPPLIED root spelling.
+
+    `_as_roots` resolves symlinks unconditionally, so when the `--root` argument
+    is ITSELF a symlink the lexical root-join produced only the REALPATH spelling
+    — while a real receipt's §3.2 TRACE citation carries the path the dispatch was
+    handed, i.e. the as-supplied one. The exact-name override therefore missed,
+    the citation fell through to the basename key, and the unrelated verified
+    `a/x.md` had already put `x.md` into `verified_bases`: silence, at exit 0, on
+    the very shape AV1 was filed to make audible.
+
+    Not exotic. Any `/tmp`-rooted dispatch on macOS (`/var`→`/private/var`), and
+    many CI runners' symlinked workdirs, supply a symlinked root by default."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        base = pathlib.Path(self.td.name)
+        self.real = base / "real"
+        (self.real / "a").mkdir(parents=True)
+        self.link = base / "link"
+        self.link.symlink_to(self.real)
+        body = "the verified sibling\n"
+        (self.real / "a" / "x.md").write_text(body)
+        self.arts = [("a/x.md", hashlib.sha256(body.encode()).hexdigest(),
+                      str(len(body))),
+                     ("b/x.md", H64, "1")]
+
+    def _run(self, root, cited, name):
+        p = self.real / name
+        p.write_text(receipt(artifacts=self.arts, trace=[f"READ {cited}"]))
+        out = run("--tier2", "--root", str(root), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("UNVERIFIABLE: b/x.md", out.stderr,
+                      "fixture vacuous: b/x.md was not reported unverified")
+        return out
+
+    def test_the_realpath_spelling_keeps_its_note(self):
+        """CONTROL — the spelling the resolved root-join always produced. Green
+        before and after; it is here so the attack arm cannot be read as the
+        override being broken generally."""
+        out = self._run(self.link, str(self.real / "b/x.md"), "ctl.txt")
+        self.assertTrue(any("b/x.md" in n for n in notes(out.stderr)),
+                        f"no note for the realpath spelling: {notes(out.stderr)}")
+
+    def test_the_as_supplied_symlinked_spelling_keeps_its_note_too(self):
+        """THE ATTACK. Byte-identical to the control except that the TRACE entry
+        spells the root the way the invocation did. Pre-fix this stderr carried
+        `UNVERIFIABLE: b/x.md` and NOTHING about the TRACE entry citing that same
+        file — the grudge e0f0a6b75692 direction, bought by a symlink nobody in
+        the receipt chose."""
+        out = self._run(self.link, str(self.link / "b/x.md"), "atk.txt")
+        self.assertTrue(any("b/x.md" in n for n in notes(out.stderr)),
+                        f"a symlinked --root silenced the override for the "
+                        f"as-supplied spelling: {notes(out.stderr)}")
+
+
+# --------------------------------------------------------------------------
+# #488 warden-r2 / F4 — the root-join must not widen a DEGENERATE basename.
+# --------------------------------------------------------------------------
+class TestTheRootJoinDoesNotWidenADegenerateDeclaration(_TwoRootCase):
+    """WARDEN-R2/F4 — leg-1's silence-via-degenerate-declaration hole, reopened
+    through the EXACT-NAME leg instead of the basename leg it was closed on.
+
+    The lexical root-join widens all THREE exact-name sets uniformly, and two of
+    them (`unevaluated_names`, `verified_names`) are fail-SILENT suppressors. For
+    a non-degenerate declared name that is inert — the basename leg already covers
+    it. For a DEGENERATE-basename one (`x/`, the `_DEGENERATE_BASES` family leg-1
+    added a basename-leg screen for), the join MANUFACTURES an absolute spelling
+    under every supplied root, so one hash-verified `x/` under the dispatch root
+    silently bought silence for `<findings-root>/x/` — a different, unverified,
+    cross-root citation sharing nothing with it but a degenerate basename.
+
+    Nothing in the suite covered this, which is why it stayed green through
+    `4a11bcf`. Measured pre-fix on the MANDATED two-root invocation: exit 0, zero
+    notes. The basename leg cannot catch it either — `_DEGENERATE_BASES` keeps
+    `""` out of `verified_bases`, which is exactly what leaves the exact-name leg
+    as the only suppressor in play."""
+
+    def setUp(self):
+        super().setUp()
+        body = "body\n"
+        self.h = hashlib.sha256(body.encode()).hexdigest()
+        self.size = str(len(body))
+        (self.dispatch / "x").write_text(body)
+
+    def _run(self, cited, name):
+        # TRACE#1 is the witness's own citation and is deliberately the DECLARED
+        # spelling: the cross-root citation under test sits at #2, so the witness
+        # leg cannot hard-FAIL on it and bury the advisory channel's answer.
+        out = self.verify(receipt(artifacts=[("x/", self.h, self.size)],
+                                  trace=["READ  x/", f"READ  {cited}"]),
+                          name=name)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", out.stderr)   # non-vacuity: `x/` verified
+        return out
+
+    def test_a_cross_root_degenerate_citation_is_not_silenced(self):
+        """THE ATTACK. `<findings>/x/` is not the verified `<dispatch>/x/` and no
+        file answers it, yet the unscreened join put it in `verified_names`."""
+        out = self._run(str(self.findings / "x") + "/", "atk.txt")
+        self.assertTrue(
+            any(str(self.findings) in n for n in notes(out.stderr)),
+            f"a verified degenerate declaration bought silence for an unrelated "
+            f"cross-root citation: {notes(out.stderr)}")
+
+    def test_an_ordinary_cross_root_citation_still_speaks(self):
+        """Non-vacuity control: the emitter is live on this fixture for a
+        non-degenerate name too, so the arm above is about the degenerate join
+        and not about the two-root shape."""
+        out = self._run(str(self.findings / "q.md"), "ctl.txt")
+        self.assertTrue(any("q.md" in n for n in notes(out.stderr)),
+                        f"no note for an ordinary cross-root citation: "
+                        f"{notes(out.stderr)}")
 
 
 # --------------------------------------------------------------------------

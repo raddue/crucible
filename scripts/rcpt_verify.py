@@ -2086,14 +2086,20 @@ def _declared_spellings(names, roots, resolutions):
       * the DECLARED name verbatim — the §3.1 form, and the only one available for a
         name that never resolved;
       * `<root>/<name>` for each supplied root, derived LEXICALLY (string concatenation,
-        no disk). Lexical is load-bearing rather than lazy: the population this closes is
-        dominated by names that do NOT resolve — `b/x.md` above is absent from every
-        root, so there is no realpath to project, and the resolved-path spelling alone
-        would leave the measured case exactly as it was;
+        no disk), and SCREENED by `_DEGENERATE_BASES` (see the join). Lexical is
+        load-bearing rather than lazy: the population this closes is dominated by names
+        that do NOT resolve — `b/x.md` above is absent from every root, so there is no
+        realpath to project, and the resolved-path spelling alone would leave the
+        measured case exactly as it was. `roots` carries BOTH the resolved root tokens
+        and the as-supplied ones (#488 warden-r2/F3 widens them at the call site), so
+        the join covers the §3.2 spelling a receipt written against a SYMLINKED root
+        actually uses — the resolved one alone did not;
       * the RESOLVED realpath, when this run recorded one. This is the spelling the
-        lexical join CANNOT produce: a symlinked or `..`-bearing root, or a name that
-        resolved through a git toplevel rather than a root, lands somewhere no
-        root-join names.
+        lexical join CANNOT produce: a name that resolved through a git toplevel rather
+        than a root, or through a symlink BELOW the root, lands somewhere no root-join
+        names. (A symlinked ROOT is not an instance of that — `_as_roots` resolves it
+        before the join, so the join already produces the realpath spelling there and it
+        was the AS-SUPPLIED one that was missing, which is the direction F3 corrects.)
 
     ADDITIVE ONLY, which is what makes it safe in the fail-noisy direction the emitter
     rules for: every set keeps its bare spelling, so no note that was emitted before
@@ -2102,10 +2108,14 @@ def _declared_spellings(names, roots, resolutions):
     exact-name test its bare twin already reached.
 
     Residual, stated rather than left to be found: a name whose declared spelling ends
-    in `/` (or `/.`) has an absolute form ending the same way, and the join normalises
-    neither, so the two spellings of THAT family still only meet at the bare key. Those
-    are the same degenerate spellings `_DEGENERATE_BASES` exists for, and they keep the
-    bare-name leg that `_DEGENERATE_BASES` was added to give them.
+    in `/` (or `/.`) contributes NO joined spelling at all, so the two spellings of THAT
+    family meet only at the bare key. That is true BECAUSE THE JOIN IS SCREENED, not
+    because the join structurally could not produce the absolute form — it can, and
+    unscreened it did, which is the #488 warden-r2/F4 hole: the manufactured spelling let
+    a hash-verified degenerate declaration suppress an unrelated cross-root citation
+    through the fail-silent sets. These are the same degenerate spellings
+    `_DEGENERATE_BASES` exists for, and the screen leaves them exactly the bare-name leg
+    `_DEGENERATE_BASES` was added to give them.
 
     MUST NOT RAISE (#488 round-3/S1): its result feeds tier2_artifacts's `finally:`,
     where any exception REPLACES the in-flight one. `str()` on an arbitrary ARTIFACTS
@@ -2120,7 +2130,28 @@ def _declared_spellings(names, roots, resolutions):
             resolved = resolutions.get(n)
             if resolved is not None:
                 out.add(str(resolved))
-            if not s.startswith("/"):
+            # #488 warden-r2/F4 — the join is SCREENED by `_DEGENERATE_BASES`. It widens
+            # all three sets uniformly, two of which (`unevaluated_names`,
+            # `verified_names`) are fail-SILENT suppressors. For a non-degenerate name
+            # that is inert — the basename leg already covers it — but for a DEGENERATE
+            # one (`x/`, `x/.`) the join manufactured an absolute spelling that let one
+            # hash-verified degenerate declaration buy silence for a completely different,
+            # unverified cross-root citation: leg-1's silence-via-degenerate-declaration
+            # hole, reopened through the exact-name leg instead of the basename leg it was
+            # closed on. Screening by degeneracy is preferred over restricting the
+            # widening to `unverified_names` alone, because the join is already inert for
+            # non-degenerate names in the silent sets — so this is the smaller change and
+            # it does not touch the override's own coverage at all.
+            #
+            # ACCEPTED RESIDUAL: this restores leg-1's cry-wolf for the narrow case of a
+            # verified degenerate name cited by its OWN root's absolute form (`ARTIFACTS
+            # x/` verified under `/dispatch`, `TRACE READ /dispatch/x/` → a false
+            # PROVENANCE-ONLY note again, matching pre-4a11bcf behaviour). That is the
+            # fail-noisy side of the trade `_emit_provenance_notes` already rules on
+            # ("fail-noisy on a spelling tie"), and it is cheaper to accept than the code
+            # needed to avoid it.
+            if (not s.startswith("/")
+                    and s.rsplit("/", 1)[-1] not in _DEGENERATE_BASES):
                 for base in roots:
                     out.add(f"{base}/{s}")
         except Exception:
@@ -2429,6 +2460,22 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     # there because a `finally:` may not acquire a new failure mode — `_as_roots` already
     # runs inside every resolve_base call below, so this adds none.
     all_roots = _as_roots(root)
+    # #488 warden-r2/F3 — widened, FOR SPELLING PURPOSES ONLY, with the AS-SUPPLIED
+    # root token(s) beside the resolved ones. `_as_roots` resolves symlinks
+    # unconditionally and ~50 call sites depend on that resolved-only contract, so it is
+    # not the thing to change; but a `--root` that is ITSELF a symlink (`/tmp` on macOS,
+    # `/var`→`/private/var`, many CI runners' workdirs) then makes the lexical join emit
+    # ONLY the realpath spelling — while a real receipt's §3.2 TRACE citation carries the
+    # path the dispatch was given, i.e. the as-supplied one. That left the exact-name
+    # override fail-SILENT for precisely the spelling production uses, reopening AV1's
+    # headline case through a second door. `all_roots` feeds nothing but the three
+    # `_declared_spellings` calls in the `finally:` (verified above), so widening it here
+    # cannot move resolution, containment or ambiguity. Computed before the `try:` so the
+    # `finally:` acquires no new failure mode. `.rstrip("/")` because the join is
+    # `f"{base}/{s}"` and a trailing-slash-supplied root would otherwise double it.
+    _supplied = [root] if isinstance(root, (str, pathlib.Path)) else list(root)
+    all_roots = list(dict.fromkeys(
+        [str(x) for x in all_roots] + [str(x).rstrip("/") for x in _supplied]))
     try:
         for name, meta in artifacts.items():
             evaluated.add(name)     # tried, whatever this iteration goes on to do
@@ -2602,7 +2649,20 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                 # Two keys for one buffer, so a hit under either binds the predicate to the
                 # bytes this leg hashed AND matched. `name` is a str and `resolved` a Path, so
                 # the two key spaces cannot collide.
-                bodies[name] = raw
+                #
+                # #488 warden-r2/F2 — `str(name)`, matching the `finally:` block's twin below
+                # and for the identical hazard. `name` is only str-typed for the CLI path;
+                # the ~40 direct-API call sites this file already treats as in scope can hand
+                # in an `os.PathLike` (e.g. `PurePosixPath`) declared key. Stored raw, such a
+                # key made BOTH halves of the carry fail open: the ordinary single-spelling
+                # NAME lookup missed (the witness leg's `art_name` is always a str, and
+                # `PurePosixPath("f.md") != "f.md"`), and `_carry_should_have_bound`'s
+                # `isinstance(k, str)` filter then skipped it, so the mid-run-swap detector
+                # was silent too. Normalising here fixes both at once and makes that filter's
+                # stated contract — "the string keys ARE the declared names" — true rather
+                # than aspirational, instead of widening the filter to a key space the
+                # lookup still cannot hit.
+                bodies[str(name)] = raw
                 bodies[resolved] = raw
             # #488 / T2 — recorded only AFTER the sha256 comparison above, so "verified"
             # means resolved AND hash-matched, never merely resolved.
@@ -4858,7 +4918,28 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # This does NOT touch the rule's TRIGGER, which is #500's subject:
                     # the fail-closed over-approximation over EVERY non-`none`
                     # SUPERSEDES is left exactly as `lint_v11_local` states it.
+                    # #488 warden-r2/F1 — the MESSAGE branches, the raise condition does
+                    # NOT. Re-keying the condition on `verdict` is DEC-29's forbidden key
+                    # (see the ⚠ note above; caught twice already in this file's history).
+                    # But the single PASS/FAIL-shaped sentence was factually WRONG on the
+                    # BLOCKED path: there the witness leg is verdict-gated OFF (D8.2
+                    # sub-decision 5), so no predicate was ever evaluated because none was
+                    # ever ATTEMPTED — "the witness resolved to no evaluated predicate"
+                    # names a resolution that never happened and sends the author looking
+                    # for a broken citation that is not the problem. The remedy differs
+                    # too: on PASS/FAIL, cite a witness that resolves; on BLOCKED, there
+                    # is no witness that can satisfy this consequent at all, so the only
+                    # in-receipt move is `SUPERSEDES: none`.
                     raise LintError(
+                        "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
+                        "EVALUATED at Tier-2 (witness-evidence requirement: this "
+                        "receipt is BLOCKED, so the witness leg never ran and no "
+                        "predicate was evaluated — a receipt that could not finish "
+                        "its own work cannot retire a peer's finding, and no witness "
+                        "satisfies this on a BLOCKED verdict; return "
+                        "`SUPERSEDES: none`, or finish the work and return PASS/FAIL "
+                        "with a witness that resolves)"
+                        if verdict == "BLOCKED" else
                         "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
                         "EVALUATED at Tier-2 (witness-evidence requirement: the "
                         "witness resolved to no evaluated predicate, so it "
