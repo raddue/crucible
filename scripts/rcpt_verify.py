@@ -3721,21 +3721,47 @@ def _carry_spellings(name, roots):
     """SIEGE-S2 — every DISK-FREE spelling of `name` that this run must treat as ONE
     identity, as a set of `PurePosixPath`.
 
-    Three forms, and no more:
-      * the name verbatim (what `PurePosixPath` alone gave: `./`, `//` and a trailing
-        `/` already collapse);
+    The forms:
+      * the name verbatim (what `PurePosixPath` alone gave: `./` and a trailing `/`
+        already collapse — `//` DOES NOT, see below);
       * its LEXICAL `..` collapse, via `posixpath.normpath` — the form
         `PurePosixPath` deliberately withholds;
       * for an ABSOLUTE spelling, its relpath from each supplied root — the §3.2
-        MANDATED form for a tracked file, and the one the detector could not see.
+        MANDATED form for a tracked file, and the one the detector could not see;
+      * SIEGE-R1-2: the name's OWN RESOLVED form, and that form's relpath from each
+        supplied root.
 
-    ONLY THE ROOTS ARE RESOLVED, never the cited name. That distinction is the whole
-    reason this stays sound: the event being detected is that the FILESYSTEM MOVED
-    between the two legs, so any test that resolves the receipt-controlled name is
-    testing the post-swap tree and cannot see it (`_carry_should_have_bound`'s
-    docstring). A ROOT is orchestrator-supplied, is not what the swap moved, and both
-    its raw and its resolved spelling are offered so an absolute citation matches
-    whichever the orchestrator's own `--root` token used.
+    SIEGE-R1-2 — THE PURELY LEXICAL SET WAS SIEGE-S2'S FIX RE-SPELLED ROUND THE SAME
+    ATTACK. The first three forms resolve the ROOTS and then ask `relative_to`, so the
+    only absolute citations they can collapse onto a §3.1-relative declaration are the
+    ones a STRING comparison already matched. Every prefix a lexical `relative_to`
+    cannot collapse was therefore a free spelling of the identical mid-lint swap:
+      * a symlinked DIRECTORY component the subagent plants in a root it owns
+        (`ln -s . link`, then cite `<root>/link/f.md` or `link/f.md`);
+      * a DOUBLED LEADING SLASH — `PurePosixPath` and `posixpath.normpath` BOTH preserve
+        `//` as a distinct root component (POSIX reserves it) while `Path.resolve()`
+        collapses it, so `//<root>/f.md` names the file and matches nothing;
+      * a `--root` token that is itself a symlink, since `_carry_should_have_bound`
+        hands this function `_as_roots`' RESOLVED roots and the citation may spell the
+        root as supplied.
+    Measured on `20c7b7b`: `_carry_spellings('<root>/link/f.md', roots)` returned
+    `{'<root>/link/f.md', 'link/f.md'}` — no `f.md` — and each spelling passed the swap
+    clean with the predicate run against the sanitised bytes.
+
+    THE RESOLVED FORM IS ADDED, NEVER SUBSTITUTED, and that is what keeps SIEGE-S2's own
+    argument intact. The event being detected is that the FILESYSTEM MOVED between the
+    two legs, so a test that resolves the receipt-controlled name is reading the
+    POST-swap tree and cannot see the move (`_carry_should_have_bound`'s docstring) —
+    which is an argument for never RELYING on the resolved form, not an argument for
+    withholding it. The lexical forms still carry the whole pre-swap identity; the
+    resolved one only ever ENLARGES the set, and this set's single consumer RAISES on a
+    non-empty intersection. So the added form can cost a false BLOCK on a receipt whose
+    two carry keys BOTH already missed, and can never cost an accepted swap — the same
+    direction, and the same justification, the `..` collapse below already runs on.
+
+    A ROOT is orchestrator-supplied, is not what the swap moved, and both its raw and
+    its resolved spelling are offered so an absolute citation matches whichever the
+    orchestrator's own `--root` token used.
 
     THE LEXICAL `..` COLLAPSE IS UNSOUND ACROSS A SYMLINKED PARENT, and is used anyway
     — deliberately, and only because the direction is safe. `a/../f.md` and `f.md` can
@@ -3772,6 +3798,32 @@ def _carry_spellings(name, roots):
                 out.add(pathlib.PurePosixPath(cand.relative_to(b)))
             except Exception:
                 continue
+    # SIEGE-R1-2 — the cited name's OWN RESOLVED form, ADDED to the lexical set above
+    # and never replacing it. See the docstring for why the addition is sound and why
+    # the lexical forms must survive it.
+    for r in roots:
+        try:
+            rr = pathlib.Path(r).resolve()
+        except Exception:
+            continue
+        try:
+            base = pathlib.Path(raw)
+            real = base.resolve() if base.is_absolute() else (rr / base).resolve()
+            real = pathlib.PurePosixPath(str(real))
+        except Exception:
+            continue
+        if base.is_absolute():
+            # Only for a name that was ALREADY absolute. Adding the root-joined
+            # realpath of a RELATIVE name would manufacture one absolute candidate per
+            # root, which is the cross-root basename identity this function does not
+            # adjudicate (`_carry_should_have_bound`'s docstring). Its relpath below is
+            # free of that: the relpath of a relative name from the root it was joined
+            # to is that name again, modulo exactly the symlink collapse being sought.
+            out.add(real)
+        try:
+            out.add(pathlib.PurePosixPath(real.relative_to(rr)))
+        except Exception:
+            continue
     return out
 
 

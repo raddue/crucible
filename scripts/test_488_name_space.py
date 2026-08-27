@@ -3532,7 +3532,7 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
     receipt was accepted — while the single-spelling twin of the same receipt was
     correctly rejected."""
 
-    def _run_legs(self, trace_spelling, key_type=str, swap=True):
+    def _run_legs(self, trace_spelling, key_type=str, swap=True, prep=None):
         """_verify_single's own two-leg sequence, with a mid-run swap between them.
 
         Returns the LintError message the witness leg raised, or None if it passed
@@ -3556,6 +3556,11 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
         secret = "line one\nSECRET token\n"
         h, size = self.plant("f.md", secret)
         self.plant("clean.md", "line one\nharmless\n")
+        # SIEGE-R1-2 — `prep` plants whatever the spelling under test needs to EXIST
+        # (a symlinked directory component, say) after the two artifacts and before
+        # the receipt is written, so the citation is a live path on the pre-swap tree.
+        if prep is not None:
+            prep(self.root)
         if callable(trace_spelling):
             trace_spelling = trace_spelling(self.root)
         text = receipt(
@@ -3642,6 +3647,53 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
                 self.assertIn("resolution CHANGED between the legs", attacked)
 
                 control = self._run_legs(spelling, swap=False)
+                self.assertIsNotNone(
+                    control,
+                    f"control precondition broken for {label}: the unswapped tree "
+                    f"did not reach the expect-fail predicate at all")
+                self.assertIn("expect-fail regex", control)
+
+    def test_siege_r1_2_the_detector_sees_the_cited_names_own_resolution(self):
+        """SIEGE-R1-2 — SIEGE-S2's own fix, bypassed by re-spelling the identical
+        attack. `_carry_spellings` was purely LEXICAL: it resolved the ROOTS and then
+        did `cand.relative_to(base)`, so the only absolute citations it could collapse
+        onto the declared name were those whose prefix a string comparison already
+        matched. The cited NAME was never resolved, so any spelling whose prefix
+        `relative_to` cannot collapse produced no candidate that intersects the
+        declaration and the detector went silent again:
+
+          * a symlinked DIRECTORY component the subagent plants in a root it owns
+            (`ln -s . link`, then cite through `link/`), absolute or relative;
+          * a DOUBLED LEADING SLASH — `PurePosixPath` and `posixpath.normpath` both
+            preserve `//` as a distinct root component (POSIX reserves it), while
+            `Path.resolve()` collapses it, so `//<root>/f.md` is a free spelling of
+            the mandated absolute one.
+
+        Measured on `20c7b7b`: `_carry_spellings('<root>/link/f.md', roots)` returned
+        `{'<root>/link/f.md', 'link/f.md'}` — no `f.md` — and each of these spellings
+        passed the swap CLEAN with the predicate run against the sanitised bytes.
+
+        Same control discipline as the SIEGE-S2 arm above, and for its reason: without
+        the no-swap control an unconditional raise would satisfy every attack arm."""
+        def link_prep(root):
+            (root / "link").symlink_to(".")
+
+        spellings = {
+            "symlinked-dir-absolute": (lambda r: str(r / "link" / "f.md"), link_prep),
+            "symlinked-dir-relative": ("link/f.md", link_prep),
+            "doubled-leading-slash": (lambda r: "/" + str(r / "f.md"), None),
+        }
+        for label, (spelling, prep) in spellings.items():
+            with self.subTest(spelling=label):
+                attacked = self._run_legs(spelling, prep=prep)
+                self.assertIsNotNone(
+                    attacked,
+                    f"the {label} spelling let a mid-lint symlink swap through: both "
+                    f"carry keys missed and the double-miss detector was silent, so "
+                    f"the predicate ran against bytes NO leg hashed")
+                self.assertIn("resolution CHANGED between the legs", attacked)
+
+                control = self._run_legs(spelling, swap=False, prep=prep)
                 self.assertIsNotNone(
                     control,
                     f"control precondition broken for {label}: the unswapped tree "

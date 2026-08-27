@@ -329,6 +329,12 @@ S5OUT = "TestSiegeS5AnOutOfRootResolutionIsDisclosedOnBothLegs"
 # key S4SYM does, so it reddens on every row that drops or re-keys that key.
 R11ABS = "TestSiegeR11TheAbsoluteSpellingOfTheShortenedCitationAlsoDiscloses"
 DISJOINT = "TestALaterDisjointRootAnswersTheDepthKey"
+# SIEGE-R1-2 — the mid-lint-swap detector's spelling set. Its R1-2 arm cites
+# through a symlinked DIRECTORY component (`link/f.md`), which is two components
+# deep and therefore ALSO crosses the walk channel: it reddens on row 10 (the
+# counter dropped from the census) as incidental coupling, recorded here rather
+# than engineered away, since the citation shape is the one the attack uses.
+CARRY = "TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange"
 RELHALF = "TestTheRelpathHalfAloneCannotForgeTheChannel"
 WESC = "TestTheWalkNoteEscapesTheNameHalfToo"
 WMISMATCH = "TestTheWalkNoteSurvivesAMismatchRaiseOnItsOwnEntry"
@@ -803,6 +809,8 @@ MUTANTS = [
                    "test_the_census_carries_a_resolved_by_walk_sub_count",
                    "test_the_run_completes",
                    "test_the_sub_count_is_reported_beside_the_floor_and_not_summed_into_it"),
+                  (CARRY,
+                   "test_siege_r1_2_the_detector_sees_the_cited_names_own_resolution"),
                   (CLEANPATH,
                    "test_a_none_out_parameter_still_counts_and_never_raises",
                    "test_a_raising_append_manufactures_no_verdict_on_the_clean_path",
