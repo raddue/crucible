@@ -79,6 +79,58 @@ Begin by reading that file.
 - "Begin by reading that file" establishes the first action, not the only action
 - For teammate dispatches: mailbox/communication protocol instructions go in the dispatch file, not the pointer prompt
 
+## Graphify Consult
+
+A `graphify-out/graph.json` call graph (AST-derived, built by graphify) is a
+second, machine-checkable structural-knowledge source alongside cartographer's
+curated prose map. When composing a dispatch file for a target repo, check
+whether that repo carries a graph and whether it is fresh enough to trust; if
+both hold, include a pointer clause directing the receiving agent to query the
+graph FIRST for structural questions before falling back to grep/Explore.
+
+The staleness check is `check-graph-staleness.sh [--json] [repo_dir]` (shipped
+in ai-rack's hooks; generic over any repo). Its human line carries the stable
+prefix `graphify-staleness:`; `--json` emits the same facts as an object
+(`{"state":"stale","commits_behind":N,...}`). The `no-graph` ("never built") and
+`stale:N` ("built N commits behind") states are deliberately distinct and never
+collapsed.
+
+Trust tiers — the dispatch author decides the pointer from the staleness state:
+
+| State | Dispatch action |
+|---|---|
+| `fresh` | Point at the graph; instruct query-first as authoritative for structure. |
+| `stale:N`, N ≤ 5 | Point at the graph with a cross-check caveat: verify any answer whose reachable files fall in `git diff <built>..HEAD`. |
+| `stale:N`, N > 5 / `diverged` / `unknown` / `no-graph` / `no-commit` / `no-git` | Do NOT pre-point; instruct the agent to rebuild (`/graphify`) or fall back to grep/Explore + cartographer. |
+
+The ≤ 5 bound is a structural-freshness call, not an accuracy guarantee: the
+graph answers structure questions, and structure changes only on renames,
+refactors, and dependency edits — ordinary logic commits leave the call graph
+intact. Five commits is one worker session's worth of change; beyond that,
+cross-checking every answer costs more than re-deriving the structure.
+
+The pointer clause, when included:
+
+> A graphify call graph exists at `graphify-out/graph.json` (staleness: <state>).
+> For structural questions — what calls/imports X, blast radius, shortest path,
+> architectural hubs — query it first: `graphify explain <node>`,
+> `graphify affected <node>`, `graphify path A B`, `graphify query "<question>"`.
+> Fall back to grep/Explore only where the graph does not cover the area.
+
+Enforcement stance — **recommended, not enforced**. This is a default-on
+knowledge accelerator, not a hard gate. Including the pointer is the default
+whenever a trust tier says so; omitting it is a deviation the orchestrator
+should note, because the whole point is to stop re-deriving structure the graph
+already knows. It is never a reason to block a dispatch: when the graph is
+absent, stale, or does not cover the area, proceed with grep/Explore and
+cartographer. This matches the staleness script's own posture (an announcement,
+never a gate — it always exits 0) and cartographer's (RECOMMENDED, not
+REQUIRED).
+
+This convention adds a pointer, not a new store. Graphify is the derived call
+graph; cartographer is the curated prose map — see cartographer-skill's "With
+Graphify" note for the division of labor. Do not fold one into the other.
+
 ## Pipeline-Active Marker
 
 **Purpose:** Detect interrupted (crashed) pipelines across sessions. The dispatch-active marker (below, in Compaction Recovery) handles within-session compaction recovery. The pipeline-active marker handles cross-session crash detection.

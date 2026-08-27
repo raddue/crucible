@@ -90,6 +90,10 @@ run python3 scripts/check_crossref.py --selftest
 run python3 scripts/check_crossref.py
 run python3 scripts/catalog.py check
 
+# --- graphify-consult convention structural check (ai-rack#93) ---
+run python3 scripts/check_dispatch_graphify_consult.py --selftest
+run python3 scripts/check_dispatch_graphify_consult.py
+
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
 run python3 scripts/check_warden_structure.py
