@@ -749,6 +749,51 @@ class TestTheNoteSurvivesATruncatedRun(_RootCase):
         self._assert_halves(out)
 
 
+class TestTheEmitterCannotMaskAnInFlightRaise(_RootCase):
+    """AC-6 T2, leg 6's other edge — the emitter runs from `tier2_artifacts`'s
+    `finally:`, so ANY exception IT raises there REPLACES the in-flight one per
+    Python's finally-block semantics: a genuine `--strict` `LintError` would be
+    destroyed and reported as `'NoneType' object is not iterable`.
+
+    Broken copy: `for entry in trace:` without the `or []` guard. That copy has
+    SHIPPED once already — cleanup commit `270c656` deleted the guard and the
+    whole suite stayed green, both before and after it was restored, so nothing
+    but this test stands between the guard and a second removal. `trace` is
+    public-API-supplied (~40 direct call sites, no type enforcement), which is
+    why `None` is reachable by ordinary API misuse even though the sole
+    production call site passes `parse_trace`'s list. Driven by a DIRECT call
+    because the CLI cannot reach the hazard — that is the point of pinning it."""
+
+    ART = {"docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+
+    def test_a_none_trace_does_not_mask_an_in_flight_lint_error(self):
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART, None, [self.root], True,
+                                    None, None, [])
+        # The message identifies the REAL failure, not a TypeError from the
+        # finally: that took its place.
+        self.assertIn("absent under all bases", str(caught.exception))
+
+    def test_the_control_shows_the_same_call_really_reaches_the_emitter(self):
+        """Non-vacuity: the identical call with a well-formed `trace` raises the
+        SAME `LintError` and the emitter demonstrably ran (it appended its note
+        from inside the `finally:`). So the leg above is about the guard, not
+        about the emitter being skipped on this path."""
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(
+                self.ART, [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
+                [self.root], True, None, None, notes_out)
+        self.assertIn("absent under all bases", str(caught.exception))
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/x.md "
+                          "(declared in TRACE, not verified)"])
+
+
 class TestTheNoteEscapesTheLeastConstrainedNameInTheGrammar(_RootCase):
     """AC-6 T2, leg 7. SIEGE-R2BA-4's escaping guarantee, extended to `TRACE`
     names — required *a fortiori* (§3.4), because a `TRACE` name is the LEAST
