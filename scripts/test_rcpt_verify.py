@@ -4162,13 +4162,18 @@ class TestZeroBytesIsNotAVerification(_InqBase):
 
 
 class TestHostilePathCannotForgeACensusLine(_InqBase):
-    """#486 siege / SIEGE-C2 — stderr is a PARSED channel, and three sinks interpolated a
-    RESOLVED path into it. Unlike an ARTIFACTS/witness name (whitespace-split out of the
-    receipt, so it can never hold a newline), a resolved path can: the reviewed subagent
-    creates directories under a root it owns, so one `mkdir` of a name containing
-    `\\nTIER2-COVERAGE: …\\n` put a SECOND, forged census line on the channel — and the
-    documented consumer takes the FIRST match (`grep -m1`, the shape
-    TestCoverageEmission._line uses).
+    """#486 siege / SIEGE-C2 — stderr is a PARSED channel, so every sink that renders a
+    RESOLVED path onto it has to escape that path. There are FOUR: the UTF-8 read guard
+    (`_read_text_lossless`) and the two `is ambiguous across roots` homes lists (the
+    artifacts leg and the witness leg) — the three that interpolated a raw path when
+    SIEGE-C2 was filed — plus #488/T5's `RESOLVED-BY-WALK:` note (`_walk_note`, emitted
+    via `_emit_walk_note` from both `tier2_artifacts` and `tier2_witness`), which renders
+    both halves through `_show_path` by construction. Unlike an ARTIFACTS/witness name
+    (whitespace-split out of the receipt, so it can never hold a newline), a resolved
+    path can: the reviewed subagent creates directories under a root it owns, so one
+    `mkdir` of a name containing `\\nTIER2-COVERAGE: …\\n` put a SECOND, forged census
+    line on the channel — and the documented consumer takes the FIRST match (`grep -m1`,
+    the shape TestCoverageEmission._line uses).
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
@@ -5916,7 +5921,7 @@ class TestALintWitnessOverAnUnhashedFileIsCounted(_InqBase):
     exec/grep), and the `wrong-name` bump was gated on `kind == "grep"`. So swapping
     `grep:` for `lint:` moved the predicate onto an undeclared, never-hashed file cited
     through a `READ` entry — #412's deliberate non-gate — and billed it
-    `witness 1/1` with all six sub-counts at 0: a CLEANER census than the honest grep run
+    `witness 1/1` with every sub-count at 0: a CLEANER census than the honest grep run
     it replaced.
 
     The counter's meaning — "the predicate ran against a file the witness never names" —
@@ -6551,8 +6556,8 @@ class TestTheCensusTokenCannotBeForgedOnTheBulletChannel(_InqBase):
 
     So a receipt REJECTED at Tier-1, on a run where nothing whatsoever was verified,
     handed the documented consumer (`grep -m1 'TIER2-COVERAGE:'`, which takes the first
-    SUBSTRING match) a fully attacker-authored `artifacts 9/9 witness 9/9` with all six
-    sub-counts at zero, ahead of the honest `not-reached (tier1-reject)` line. The exit
+    SUBSTRING match) a fully attacker-authored `artifacts 9/9 witness 9/9` with every
+    sub-count at zero, ahead of the honest `not-reached (tier1-reject)` line. The exit
     code was never in danger (1 ⇒ structurally BLOCKED); the RECORD was, and
     quality-gate/SKILL.md captures this line verbatim into a durable per-dispatch file
     that #486's headline figure is measured from — "the failing run is exactly where the
