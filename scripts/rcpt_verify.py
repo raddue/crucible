@@ -1904,7 +1904,14 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases, notes_out):
     available as a defence at this site."""
     if notes_out is None:
         return
-    for entry in trace:
+    # `or []` is NOT the redundant guard the surrounding file's bare iterations are:
+    # this helper runs from tier2_artifacts's `finally:`, so a `None` trace here
+    # raises TypeError INSIDE the finally, which REPLACES any in-flight exception —
+    # a genuine Tier-2 --strict LintError would be destroyed and reported as
+    # "'NoneType' object is not iterable". `trace` is public-API-supplied (~40 call
+    # sites, no type enforcement), so the masking hazard is not hypothetical even
+    # though the sole production call site passes parse_trace's `[]`.
+    for entry in trace or []:
         if entry["verb"] not in _PROVENANCE_VERBS:
             continue
         name, base = _trace_basename(entry)

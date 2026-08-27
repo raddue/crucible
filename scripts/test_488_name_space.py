@@ -661,6 +661,32 @@ class TestTheNoteIsKeyedOnVerifiedBasenames(_RootCase):
         self.assertEqual(len(emitted), 1, out.stderr)
         self.assertIn("absent-bare.md", emitted[0])
 
+    def test_a_trace_name_matching_a_hash_mismatched_artifact_still_emits_the_note(self):
+        """Legs 4 and 5, the half that fixes the meaning of VERIFIED. §3.4 says
+        RESOLVED *AND* HASH-VERIFIED, so `verified_bases.add(...)` sits AFTER the
+        sha256 comparison, never before it.
+
+        Broken copy (DEC-31): recording the basename as soon as the name RESOLVES.
+        The two legs above cannot see the difference — both of their artifacts
+        either hash-match or never resolve at all — so that build stays green on
+        the whole suite while a MISMATCHED artifact counts as verified and
+        silences the advisory for the `TRACE` entry citing it. Silence on the
+        entry whose declared file failed its hash is the worst direction of the
+        failure grudge e0f0a6b75692 names."""
+        body = "disk content\n"
+        self.plant("mismatch.md", body)
+        out = self.verify(receipt(
+            artifacts=[("mismatch.md", "d" * 64, str(len(body)))],
+            trace=[f"READ  {self.root}/mismatch.md"]))
+        # Non-vacuity: the name RESOLVED and was read and hashed — it failed only
+        # the COMPARISON, which is exactly the state the two candidate placements
+        # of the `.add()` disagree about.
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+        emitted = notes(out.stderr)
+        self.assertEqual(len(emitted), 1, out.stderr)
+        self.assertIn("mismatch.md", emitted[0])
+
 
 class TestTheNoteSurvivesATruncatedRun(_RootCase):
     """AC-6 T2, leg 6 — BOTH halves in one fixture, or the pin cannot tell
@@ -693,6 +719,14 @@ class TestTheNoteSurvivesATruncatedRun(_RootCase):
         self.assertEqual(len(emitted), 1, out.stderr)
         self.assertIn("evaluated-unverified.md", emitted[0])
         self.assertFalse([n for n in emitted if "unreached.md" in n], out.stderr)
+        # Leg 6, THIRD half — the `except BaseException` mirror arm. This leg's OWN
+        # UNVERIFIABLE:/REFUSED:/AMBIGUOUS: notes ride the RETURN value, and the sole
+        # production call site's `notes += tier2_artifacts(...)` never executes on a
+        # raise; the mirror arm is the only thing that puts them on stderr here.
+        # Deleting its `notes_out.extend(notes)` leaves the two assertions above
+        # green (the PROVENANCE-ONLY notes go through `notes_out` directly), so
+        # without this line the arm is entirely unpinned.
+        self.assertIn("UNVERIFIABLE: evaluated-unverified.md", out.stderr)
 
     def test_truncation_by_hash_mismatch_keeps_the_evaluated_half_audible(self):
         body = "disk content\n"
