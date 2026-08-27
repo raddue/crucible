@@ -75,7 +75,7 @@ def receipt(*, artifacts=(), trace=(), claims=("(none)",), verdict="PASS",
     records that a fixture whose WITNESS is a ranged `kind=grep` on a declared
     name (or whose CLAIMS cites one, or whose TRACE carries `EXEC out=` naming
     one) is rejected at Tier-1 by a SHIPPED membership rule
-    (`rcpt_verify.py:903-908`, `:937-953`, `:911-916`) the moment `(none)` wipes
+    (`rcpt_verify.py:932-937`, `:966-982`, `:940-945`) the moment `(none)` wipes
     ARTIFACTS — so such a fixture passes green against the very build the pin
     names as broken, for the wrong reason on the wrong rule.
     """
@@ -433,7 +433,7 @@ class TestTheNoneSentinelIsAnchoredToASingleLineBody(unittest.TestCase):
     C1 = "fatal-fixed=2 from=x.md#L1-L5"
     C2 = "significant-fixed=6 from=x.md#L1-L5"
 
-    # --- leg 1: ARTIFACTS / parse_artifacts (rcpt_verify.py:240-241)
+    # --- leg 1: ARTIFACTS / parse_artifacts (rcpt_verify.py:232-258, called at :264)
     def test_artifacts_none_after_an_entry_is_a_lint_error(self):
         with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_artifacts([f"  {self.A}", "  (none)", f"  {self.B}"])
@@ -459,7 +459,7 @@ class TestTheNoneSentinelIsAnchoredToASingleLineBody(unittest.TestCase):
         with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_artifacts(["  (none)", f"  /etc/passwd  sha256:{H64}  10"])
 
-    # --- leg 2: TRACE / parse_trace (:259-260)
+    # --- leg 2: TRACE / parse_trace (`_none_sentinel` called at :298)
     def test_trace_none_after_an_entry_is_a_lint_error(self):
         with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_trace([f"  {self.T1}", f"  {self.T2}", "  (none)"])
@@ -479,7 +479,7 @@ class TestTheNoneSentinelIsAnchoredToASingleLineBody(unittest.TestCase):
         with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_trace(["  (none)", "  (none)"])
 
-    # --- leg 3: CLAIMS / parse_claims (:352-353)
+    # --- leg 3: CLAIMS / parse_claims (`_none_sentinel` called at :391)
     def test_claims_none_after_an_entry_is_a_lint_error(self):
         with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_claims([f"  {self.C1}", "  (none)"])
@@ -500,8 +500,9 @@ class TestTheNoneSentinelIsAnchoredToASingleLineBody(unittest.TestCase):
             self.rv.parse_claims(["  (none)", "  (none)"])
 
     def test_two_claims_without_a_sentinel_are_both_kept(self):
-        """The control for the two legs above: without `(none)` the parser keeps
-        both entries, so a red leg above is the sentinel and not the grammar."""
+        """The control for the CLAIMS legs above: without `(none)` the parser
+        keeps both entries, so a red leg above is the sentinel and not the
+        grammar."""
         self.assertEqual(len(self.rv.parse_claims([f"  {self.C1}", f"  {self.C2}"])), 2)
 
 
@@ -532,6 +533,7 @@ class TestTheNoneSentinelCannotEmptyArtifactsAtTheCli(_RootCase):
         injected = self.honest.replace("TRACE\n", "  (none)\nTRACE\n")
         out = self.verify(injected, "--strict", name="injected.txt")
         self.assertNotEqual(out.returncode, 0)
+        self.assertIn("empty-set sentinel", out.stderr)
         self.assertNotIn("artifacts 0/0", out.stderr)
 
 
@@ -540,12 +542,12 @@ class TestTheNoneSentinelCannotEmptyArtifactsAtTheCli(_RootCase):
 # --------------------------------------------------------------------------
 class TestAnUnresolvablePathShapedArtifactStillFailsUnderStrict(_RootCase):
     """AC-6 T6. Broken copy (DEC-31): a build that drops the `--strict`
-    path-shaped raise (`rcpt_verify.py:1710-1719`) and lets the name degrade to
+    path-shaped raise (`rcpt_verify.py:1739-1748`) and lets the name degrade to
     `UNVERIFIABLE` at exit 0.
 
     Built the way §5 mandates — the fixture carries the MANDATED ranged-grep
     witness on its resolving artifact (`red-team-prompt.md:193`'s shape), so the
-    shipped #474/D6 rule (`:903-908`) raises at Tier-1 on the `(none)` variant
+    shipped #474/D6 rule (`:932-937`) raises at Tier-1 on the `(none)` variant
     before the `--strict` raise is reached. Without that, T6 pins the raise
     against one way of removing it and not against the cheaper way (§5's ⚠)."""
 
@@ -672,7 +674,7 @@ class TestTheNoteSurvivesATruncatedRun(_RootCase):
     Broken copy (DEC-31): a build accumulating the notes into
     `tier2_artifacts`'s own RETURN VALUE instead of a caller-supplied
     out-parameter — the sole production call site is
-    `notes += tier2_artifacts(...)` (`:3793`), which never executes on a raise,
+    `notes += tier2_artifacts(...)` (`:3836`), which never executes on a raise,
     so every note is discarded. It goes green on the un-evaluated half by
     coincidence and wrong on the evaluated half.
 

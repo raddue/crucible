@@ -697,7 +697,13 @@ class TestRootContainment(unittest.TestCase):
 
 class TestNoneSentinelSymmetry(unittest.TestCase):
     """#397 defect 3 — the `(none)` empty sentinel is accepted uniformly across
-    ARTIFACTS / TRACE / CLAIMS (it already was for ARTIFACTS/NEXT)."""
+    ARTIFACTS / TRACE / CLAIMS (it already was for ARTIFACTS/NEXT).
+
+    Uniform in WHICH sections accept it, not unconditional: per #488 I8 the
+    sentinel is legal only as the SOLE entry of a body — a `(none)` co-occurring
+    with any entry is a Tier-1 `LintError` in all three parsers (see
+    `test_488_name_space.py::TestTheNoneSentinelIsAnchoredToASingleLineBody`).
+    These cases pin the sole-entry form."""
 
     def test_parse_trace_accepts_none(self):
         rv = _import_rv()
@@ -806,7 +812,7 @@ class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
         self.assertEqual(rv.lint_receipt(self._inject("WROTE", "src/secrets.env")), "PASS")
 
     def test_edit_verb_also_passes(self):
-        # The dead branch serves BOTH EDIT and WROTE (rcpt_verify.py:243) — lock both.
+        # The dead branch serves BOTH EDIT and WROTE (rcpt_verify.py:946-962) — lock both.
         rv = _import_rv()
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "secrets.env")), "PASS")
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
