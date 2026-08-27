@@ -6447,6 +6447,60 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
                 self.assertEqual(out.returncode, 1, out.stderr)
                 self.assertIn(expect, out.stderr)
 
+    def test_siege_r1_3_a_blank_cited_range_cannot_grant_the_supersession(self):
+        """SIEGE-R1-3 — SIEGE-S3's own fix, bypassed by re-spelling the identical
+        attack. That fix shipped `body != ""`, which is the narrowest possible spelling
+        of the argument it was written from: `re.search(p, "")` cannot match for ANY
+        pattern, so a range that delivered nothing decided nothing. A range landing on a
+        BLANK line or a WHITESPACE-ONLY one satisfies `!= ""` while carrying nothing a
+        Tier-1-admissible expect-fail pattern (>=4 chars, non-wildcard) can match — so
+        `evaluated` was set, the SUPERSEDES consequent retired the peer at exit 0, and
+        the census read `witness 1/1` with EVERY sub-count at zero. That is strictly
+        WORSE disclosed than the past-EOF case SIEGE-S3 closed, which at least bills
+        `empty-range 1 (past-eof)`.
+
+        ONE receipt, ONE file, ONE token apart across all five arms — the discriminator
+        is the cited range and nothing else. `#L4-L4` is the non-vacuity control that
+        `#L2`/`#L3` are measured against: it delivers real bytes that do NOT match, so
+        it must still bill `witness 1/1` and still retire the peer. Without it the fix
+        is indistinguishable from never setting `evaluated` on this leg. `#L1-L1`
+        (matches) and `#L50-L50` (SIEGE-S3's own pin) are the unchanged bounds on either
+        side.
+
+        Reverting `_delivered_signal` to `body != ""` turns the `#L2`/`#L3` arms RED."""
+        payload = b"BOOM here\n\n   \nmore text\n"
+        h, size = self.plant(self.base, "evidence.log", payload)
+        cases = (
+            ("in-range-match", "L1-L1", 1, "expect-fail regex", None),
+            ("blank-line", "L2-L2", 1, "EVALUATED at Tier-2",
+             "empty-range 1 (blank-range)"),
+            ("whitespace-only-line", "L3-L3", 1, "EVALUATED at Tier-2",
+             "empty-range 1 (blank-range)"),
+            ("real-bytes-no-match-control", "L4-L4", 0, "witness 1/1", None),
+            ("past-eof", "L50-L50", 1, "EVALUATED at Tier-2",
+             "empty-range 1 (past-eof)"),
+        )
+        for name, rng, rc, expect, counter in cases:
+            with self.subTest(shape=name):
+                body = _receipt(
+                    "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+                    verdict="PASS", skill="build/21-implementer",
+                    artifacts=[("evidence.log", h, size)],
+                    trace=[f"EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#{rng}"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"r13-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                self.assertIn(expect, out.stderr)
+                if counter is not None:
+                    self.assertIn(counter, out.stderr)
+                else:
+                    # the two unchanged arms must not acquire the new code either
+                    self.assertNotIn("blank-", out.stderr)
+
     def test_siege_s1_a_rangeless_grep_cannot_buy_the_exemption_on_either_leg(self):
         """SIEGE-S1 — the exploit, and the test that used to pin it green
         (`test_the_scoping_is_not_a_blanket_disable`, which asserted `FAIL -> 0` here).

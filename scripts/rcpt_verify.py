@@ -3310,7 +3310,7 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
             return True
     # regex / literal expect-fail
     pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
-    if probe is not None and pattern and body != "":
+    if probe is not None and pattern and _delivered_signal(body):
         # siege S-7 — see the `evaluated` note above for what this flag asks.
         #
         # SIEGE-S3 — `and body != ""`. This site keyed the flag on the mere PRESENCE of
@@ -3326,10 +3326,16 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
         # Second shape, needing no past-EOF range: a rangeless `grep:` over a declared,
         # hash-verified 0-byte file, same exit 0, `witness 0/1 wrong-name 1`.
         #
-        # `== ""` and not falsiness, MIRRORING `_bill_witness_evaluation`'s DEC-28 arm
+        # SIEGE-R1-3 — `body != ""` was SIEGE-S3's fix RE-SPELLED, not closed. See
+        # `_delivered_signal`, which is now the shared test: a cited range landing on a
+        # BLANK line (`body == "\n"`) or a whitespace-only one satisfies `!= ""` and set
+        # this flag, on a range no Tier-1-admissible pattern can match.
+        #
+        # THROUGH `_delivered_signal`, MIRRORING `_bill_witness_evaluation`'s DEC-28 arm
         # verbatim so the gate and the census cannot disagree: `body_text is None` means
         # "no body supplied at all", which this function returns clean on far above as
-        # documented lint.py parity, and `None == ""` is False so this cannot swallow it.
+        # documented lint.py parity, and the helper answers True for it so this cannot
+        # swallow it.
         #
         # NOT applied to the kind=exec exit-clause site above: that branch compares the
         # RECEIPT's own `expect-fail` against the RECEIPT's own `TRACE exit=` and never
@@ -3474,6 +3480,41 @@ def _slice(path: pathlib.Path, kind, a, b, meter=None, raw=None):
     return sliced.decode("utf-8", errors="replace")  # 1-based inclusive
 
 
+def _delivered_signal(body_text):
+    """SIEGE-R1-3 — True when the cited range delivered bytes a body predicate could
+    plausibly have DECIDED on. The single shared test behind both the PASS leg's
+    `evaluated` gate and the census's withholding arm, so the two cannot disagree about
+    what "the predicate had something to run against" means.
+
+    SIEGE-S3 closed `body == ""` — a range past EOF, or a declared 0-byte file — on the
+    argument that `re.search(p, "")` cannot match for ANY pattern, so the predicate
+    structurally could not have decided anything. THAT ARGUMENT WAS NEVER ABOUT THE
+    EMPTY STRING; it was about a range that carries no signal, and `!= ""` is only the
+    narrowest spelling of it. A cited range landing on a BLANK LINE (`body == "\\n"`) or
+    on a whitespace-only one passes `!= ""` while carrying nothing a Tier-1-admissible
+    expect-fail pattern (≥4 characters, non-wildcard — `_expect_fail_pattern`) can match.
+    Measured on `8dee113`, one PASS receipt over a hash-matched `evidence.log` holding
+    `b"BOOM here\\n\\n   \\nmore text\\n"` with `expect-fail=/BOOM/`, varying ONLY the cited
+    range: `#L1-L1` exit 1 (correctly rejected), `#L50-L50` exit 1 on `empty-range 1
+    (past-eof)` (SIEGE-S3's own pin), and `#L2-L2` / `#L3-L3` exit 0 with `witness 1/1`
+    and EVERY sub-count at zero — a census byte-identical to `#L4-L4`'s genuine
+    non-matching evaluation, and strictly worse-disclosed than the past-EOF case
+    SIEGE-S3 already closed, which at least bills its own counter.
+
+    `.strip()` is the whole test, and the bound is deliberate: it withholds exactly the
+    ranges that deliver NO non-whitespace byte, and nothing else. It does not attempt to
+    decide whether the delivered bytes could match THIS pattern — that would be a second
+    implementation of `re.search` and would move the exit code on real receipts. A range
+    carrying one printable character still reads as delivered, still bills `witness 1/1`,
+    and still grants the supersession.
+
+    `body_text is None` is TRUE here, mirroring DEC-28's `== ""`-not-falsiness note for
+    the same reason: None means "no body was supplied at all", a disposition both
+    callers already return clean on as documented lint.py parity, and it is not this
+    decision's to change."""
+    return body_text is None or body_text.strip() != ""
+
+
 def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
     """SIEGE-C3 — the ONE place `wit_verified` is set, so states (a) and (b) cannot
     disagree about what "verified" means. Returns the WITHHOLDING REASON — `"empty"` for
@@ -3580,8 +3621,14 @@ def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
     """
     code = probe.get("no_predicate")
     if code is None:
-        if body_text == "":
-            return "empty"       # DEC-28 — withheld; _bill_witness_billing buckets it
+        if not _delivered_signal(body_text):
+            # DEC-28 — withheld; _bill_witness_billing buckets it. SIEGE-R1-3 widened
+            # `body_text == ""` to `_delivered_signal` (see it): a blank or
+            # whitespace-only cited range is the same "predicate ran against nothing"
+            # fact one spelling over, and it was reaching `wit_verified = 1`. The
+            # `body_text is None` disposition is unchanged — the helper answers True
+            # for it, exactly as `None == ""` was False here.
+            return "empty"
         if probe.get("result_discarded"):
             # GH #501 — the OTHER way a call reaches here having verified nothing: bytes
             # came off disk and a predicate ran, but the FAIL leg discarded the result
@@ -3704,7 +3751,22 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
         # the census has to be able to tell which one they are looking at.
         cov.bump("wrong-name", "unbound-trace-name")
     elif withheld == "empty" and not ambiguous:
-        cov.bump("empty-range", "past-eof" if ranged else "empty-file")
+        # SIEGE-R1-3 — a THIRD and FOURTH reason code on the existing counter, not a
+        # new counter: `blank` is the same withheld state (`_delivered_signal` said the
+        # range carried no signal) reached by a range that DID deliver bytes, so a
+        # second increment would put one item in two of design :1175's disjoint
+        # sub-counts. C1-R2-S1's rule for which code applies is `ranged`, unchanged; the
+        # distinction the code carries is `past-eof`/`empty-file` (zero bytes) versus
+        # `blank-range`/`blank-file` (bytes, none of them non-whitespace), which an
+        # operator has to be able to tell apart because the remedies differ.
+        #
+        # NEITHER new code is in quality-gate/SKILL.md:36's `{fail-leg-no-exit-evidence,
+        # fail-leg-exit-nonzero}` exemption set, so a receipt earning one is recorded
+        # UNVERIFIED by that rule — which is the disclosure this finding asked for.
+        if body_text:
+            cov.bump("empty-range", "blank-range" if ranged else "blank-file")
+        else:
+            cov.bump("empty-range", "past-eof" if ranged else "empty-file")
     elif withheld == "discarded" and not ambiguous:
         # GH #501 — the SEVENTH sub-count, and the last member of the same ordered
         # sequence for the same reason the sixth was: an item that already earns
