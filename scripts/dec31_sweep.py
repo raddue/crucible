@@ -21,15 +21,35 @@ recorded. Any symmetric difference is a non-zero exit naming the row, printing
 `unexpected` (a pin fired that was not expected — an over-broad mutation, or a new
 test) and `missing` (a pin did NOT fire — the vacuity signal this arc has hit four
 times) as separate lines, and leaving that row's tree on disk with its path printed.
+A kept tree is MOVED to `<repo>/.dec31-keep/row-<id>/` before its path is printed.
+`tempfile.mkdtemp` resolves against `$TMPDIR`, and `scripts/run_tests.sh` -- the one
+entry point CLAUDE.md mandates and CI invokes -- scopes `$TMPDIR` per invocation and
+`rm -rf`s it from an EXIT trap, so a tree left where it was BUILT is deleted before
+anyone can read the path naming it: through the gating harness the keep-on-failure
+contract was void, and on CI the one artifact explaining a red row was already gone.
+`.dec31-keep/` is gitignored and is CLEARED at the start of every run, so kept trees
+are bounded by one run's failures rather than accumulating across a session.
 
-Every `expect` set and `TOTAL_TESTS` below is MEASURED against the tree as it
-stands, never transcribed from the plan: Task 5's five review rounds grew
+A row whose anchor no longer occurs exactly once is its own verdict -- `ANCHOR-STALE`
+-- not a process abort: it is recorded, the sweep CONTINUES to the next row, and the
+final summary lists every anchor-stale row with each anchor's expected vs. actual
+occurrence count. That is load-bearing. The abort it replaces was a `SystemExit` out
+of `_apply`, so one behaviour-preserving edit to `rcpt_verify.py` (a rewrap, an
+autoformatter, a renamed local) silently dropped every row ordered AFTER it, with
+nothing on the channel saying which pins went unchecked. Measured both ways: one
+extra space inside row 1's anchor took the sweep from 16 rows evaluated to 2, and a
+real parser fix on this branch aborted it at row 5, skipping rows 6-15. An
+anchor-stale row still exits non-zero -- something moved, and that is a signal.
+
+Every `expect` set below is MEASURED against the tree as it stands, never
+transcribed from the plan: Task 5's five review rounds grew
 `scripts/test_488_name_space.py` from 54 tests to 160, and temper leg-1 grew it
 again to 168; the plan's own tables were written before that. When the suite
-legitimately gains a test, this file goes red twice over -- once on the `Ran N
-tests` count, once as `unexpected` on any row the new test reaches -- and the fix
-is to RE-MEASURE and record what is true now, never to widen a set until it stops
-complaining. A set that has to LOSE a member is
+legitimately gains a test, this file goes red only where that test actually
+reaches a mutation -- as `unexpected` on that row -- and the fix is to RE-MEASURE
+and record what is true now, never to widen a set until it stops complaining. (The
+suite's test COUNT is deliberately NOT among the things recorded here; see `_RAN`.)
+A set that has to LOSE a member is
 the signal this harness exists for: a pin that stopped discriminating.
 
 This harness does NOT discharge AC-6 on its own: it makes and mutates the copy and
@@ -51,10 +71,24 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 COPY_DIRS = ("scripts", "eval", "docs")
 SUITE = "scripts/test_488_name_space.py"
+# Where a FAILING row's tree is moved to before its path is printed. Inside the
+# checkout on purpose (`.gitignore` carries it); see `_keep`.
+KEEP_DIR = REPO / ".dec31-keep"
 
-# The whole suite must still be COLLECTED on every row, row 0 included: a mutation
-# that changes the NUMBER of tests has broken the tree, not a pin.
-TOTAL_TESTS = 174
+# The whole suite must still be COLLECTED on every mutant row: a mutation that moves
+# the NUMBER of tests collected has broken the tree, not a pin. That count is DERIVED
+# per run, from row 0 -- the unmutated baseline, which is by construction the right
+# count for whatever tree this is -- and is never pinned to a literal. A literal was
+# tried and does not survive contact with this repo: it is a snapshot of
+# `scripts/test_488_name_space.py`, the file every task, review round and fix in this
+# build appends to, and it had already been hand-bumped twice on this branch alone
+# (160 -> 168 -> 174). The churn was the smaller half. The message was the larger: a
+# pin that had merely gone STALE failed all sixteen rows with `the tree is broken,
+# not a pin`, blaming `scripts/rcpt_verify.py` for an addition to a test file, and
+# then went on to print per-row `unexpected`/`missing` diffs computed against a tree
+# it had just declared broken -- noise shaped exactly like the vacuity signal this
+# harness exists to catch.
+_RAN = re.compile(r"^Ran (\d+) tests", re.M)
 
 _HDR = re.compile(r"^(?:FAIL|ERROR): (\S+) \((.+?)\)", re.M)
 
@@ -78,6 +112,25 @@ def _ids(text):
     return out
 
 
+def _ran(text):
+    """Tests COLLECTED by one row's run -- the `Ran N tests` count -- or None when
+    the run never got as far as printing one (an import-time break in the copy)."""
+    m = _RAN.search(text)
+    return int(m.group(1)) if m else None
+
+
+class StaleAnchor(Exception):
+    """One row's anchors no longer occur exactly once in `rcpt_verify.py`.
+
+    A ROW verdict, not a process abort -- see the module docstring. `.stale` is
+    `[(anchor, occurrences), ...]` for EVERY anchor of that row that missed, not
+    just the first, so one run reports everything that moved under the row."""
+
+    def __init__(self, stale):
+        self.stale = stale
+        super().__init__(f"{len(stale)} anchor(s) no longer occur exactly once")
+
+
 def _apply(path, edits):
     """Substring substitution, with EVERY anchor checked for uniqueness FIRST.
 
@@ -93,12 +146,19 @@ def _apply(path, edits):
     notes_ambiguous + ...`. Row 4's anchor carries its surrounding newlines for
     exactly that reason. A row that trips this clause is an ANCHOR bug (the source
     moved under it), not a pin bug — which is why it reads as its own error rather
-    than as a confusing failure count."""
+    than as a confusing failure count.
+
+    `StaleAnchor`, not `SystemExit`: the raise is caught PER ROW by `main`, which
+    records `ANCHOR-STALE` and moves to the next row. `SystemExit` here aborted the
+    whole process, dropping every row ordered after the tripping one."""
     text = path.read_text()
+    stale = []
     for anchor, _ in edits:
         n = text.count(anchor)
         if n != 1:
-            raise SystemExit(f"stale anchor (occurs {n}x, expected 1):\n{anchor}")
+            stale.append((anchor, n))
+    if stale:
+        raise StaleAnchor(stale)
     for anchor, repl in edits:
         text = text.replace(anchor, repl)
     path.write_text(text)
@@ -810,6 +870,28 @@ MUTANTS = [
 ]
 
 
+def _keep(tree, row_id):
+    """Move a failing row's tree OUT of `$TMPDIR` and return where it now lives.
+
+    Trees are built under `$TMPDIR`, which `scripts/run_tests.sh` scopes per
+    invocation and deletes from an EXIT trap — so the path this sweep prints for a
+    kept tree is dangling by the time the harness finishes, which is every CI run
+    and the invocation CLAUDE.md mandates. `.dec31-keep/` is inside the checkout,
+    gitignored, and outlives the trap. The `run_tests.sh` side is deliberately NOT
+    touched: its TMPDIR scoping is load-bearing for other suites.
+
+    A move that fails returns the ORIGINAL path rather than raising: a doomed path
+    is still better than losing the row's verdict to an exception on the way out."""
+    dest = KEEP_DIR / f"row-{row_id}"
+    try:
+        KEEP_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.move(str(tree), str(dest))
+    except OSError:
+        return tree
+    return dest
+
+
 def _build_tree():
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="dec31-"))
     for d in COPY_DIRS:
@@ -821,55 +903,115 @@ def _build_tree():
 def _run_row(row):
     """Returns (tree, actual-failing-id-set, raw-output).
 
-    Any early abort -- a stale anchor's `SystemExit`, or anything else raised
-    between building the tree and reading the run -- prints this row's tree path
-    before propagating. Without it the abort path orphans a ~13MB tree silently
-    while the ordinary failing-row path prints its own, which is the opposite of
-    the contract: a row that aborted is exactly the one whose copy you want to
-    look at. The failure still propagates, so the exit stays non-zero."""
+    Raises `StaleAnchor` when this row's anchors moved. `main` catches it per row.
+    That row's tree is DISCARDED rather than kept: `_apply` checks every anchor
+    before substituting any, so the copy is byte-identical to the shipped build and
+    has nothing in it to inspect — the anchor text and its occurrence count, which
+    the verdict prints, are the whole diagnostic.
+
+    Any OTHER early abort -- anything raised between building the tree and reading
+    the run -- moves this row's tree to `.dec31-keep/` and prints it before
+    propagating. Without it the abort path orphans a ~5MB tree silently while the
+    ordinary failing-row path prints its own, which is the opposite of the
+    contract: a row that aborted is exactly the one whose copy you want to look at.
+    The failure still propagates, so the exit stays non-zero."""
     tree = _build_tree()
     try:
         _apply(tree / "scripts" / "rcpt_verify.py", row["edits"])
         proc = subprocess.run([sys.executable, SUITE], cwd=tree,
                               capture_output=True, text=True)
+    except StaleAnchor:
+        shutil.rmtree(tree, ignore_errors=True)
+        raise
     except BaseException:
         print(f"row {row['id']:>2}  ABORTED before a verdict; "
-              f"tree kept for inspection: {tree}", flush=True)
+              f"tree kept for inspection: {_keep(tree, row['id'])}", flush=True)
         raise
     return tree, _ids(proc.stdout + proc.stderr), proc.stdout + proc.stderr
 
 
 def main():
+    """Every row is ATTEMPTED and REPORTED. Nothing here may abort the loop: an
+    anchor that moved, a mutation that breaks collection, a tree that will not
+    build — each is one row's verdict, and the rows after it still run. The exit
+    code is the aggregate."""
+    # Bounded by one run's failures, not by a session's: kept trees are ~5MB each
+    # and nothing else ever prunes them.
+    shutil.rmtree(KEEP_DIR, ignore_errors=True)
     bad = 0
+    stale_rows = []
+    expected_ran = None
     for row in [BASELINE] + MUTANTS:
-        tree, actual, out = _run_row(row)
         label = f"row {row['id']:>2}  {row['criterion']:<38}  {row['what']}"
-        problems = []
-        if f"Ran {TOTAL_TESTS} tests" not in out:
-            ran = re.search(r"^Ran (\d+) tests", out, re.M)
-            problems.append(
-                f"  test COUNT moved: expected {TOTAL_TESTS}, saw "
-                f"{ran.group(1) if ran else '<no Ran line>'} "
-                f"-- the tree is broken, not a pin")
-        unexpected = sorted(actual - row["expect"])
-        missing = sorted(row["expect"] - actual)
-        if unexpected:
-            problems.append("  unexpected (fired, not expected): "
-                            + ", ".join(unexpected))
-        if missing:
-            problems.append("  missing (did NOT fire -- vacuity signal): "
-                            + ", ".join(missing))
+        try:
+            tree, actual, out = _run_row(row)
+        except StaleAnchor as exc:
+            bad += 1
+            stale_rows.append((row, exc.stale))
+            print(f"{label}  -- ANCHOR-STALE")
+            for anchor, n in exc.stale:
+                print(f"  anchor occurs {n}x in scripts/rcpt_verify.py, expected "
+                      f"1x -- the source moved under this row, so its mutation "
+                      f"was NOT applied and its pins went UNCHECKED:")
+                for line in anchor.splitlines() or [""]:
+                    print(f"    | {line}")
+            continue
+        ran = _ran(out)
+        # The count check FIRST, and EXCLUSIVE of the pin diff: a row whose copy
+        # did not collect the whole suite has no meaningful pin diff, and printing
+        # one anyway is what made a stale count read like a vacuity signal.
+        if row is BASELINE:
+            expected_ran = ran
+            count_problem = None if ran else (
+                "  the unmutated baseline collected "
+                f"{'no `Ran` line at all' if ran is None else 'ZERO tests'} -- the "
+                "TREE is broken (nothing was mutated on this row), and every later "
+                "row's count check is skipped because there is nothing to derive")
+        elif expected_ran is not None and ran != expected_ran:
+            count_problem = (
+                f"  test COUNT moved: row 0 (unmutated) collected {expected_ran} "
+                f"tests, this row's copy collected "
+                f"{'<no Ran line>' if ran is None else ran} -- this row's MUTATION "
+                f"broke collection, not a pin. The pin diff is deliberately NOT "
+                f"computed for this row: against a tree that did not run whole it "
+                f"is noise shaped like the vacuity signal.")
+        else:
+            count_problem = None
+        if count_problem:
+            problems = [count_problem]
+        else:
+            # Row 0 reaches here too, and must: its `expect` is the EMPTY set, so
+            # this is the check that the unmutated build reddens nothing at all.
+            problems = []
+            unexpected = sorted(actual - row["expect"])
+            missing = sorted(row["expect"] - actual)
+            if unexpected:
+                problems.append("  unexpected (fired, not expected): "
+                                + ", ".join(unexpected))
+            if missing:
+                problems.append("  missing (did NOT fire -- vacuity signal): "
+                                + ", ".join(missing))
         if problems:
             bad += 1
             print(f"{label}  red={len(actual)} -- FAILED")
             for p in problems:
                 print(p)
-            print(f"  tree kept for inspection: {tree}")
+            print(f"  tree kept for inspection: {_keep(tree, row['id'])}")
         else:
             print(f"{label}  red={len(actual)} -- ok")
             shutil.rmtree(tree, ignore_errors=True)
+    if stale_rows:
+        print("\ndec31_sweep: ANCHOR-STALE rows -- their mutation was never "
+              "applied, so their pins went UNCHECKED this run:")
+        for row, stale in stale_rows:
+            for anchor, n in stale:
+                first = next((l for l in anchor.splitlines() if l.strip()), "")
+                print(f"  row {row['id']:>2}  expected 1 occurrence, found {n}"
+                      f"  -- {first.strip()[:72]}")
     if bad:
-        print(f"\ndec31_sweep: {bad} row(s) no longer discriminate as recorded.")
+        pin_bad = bad - len(stale_rows)
+        print(f"\ndec31_sweep: {bad} row(s) failed -- {pin_bad} that no longer "
+              f"discriminate as recorded, {len(stale_rows)} anchor-stale.")
         return 1
     return 0
 

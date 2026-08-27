@@ -109,6 +109,7 @@ run bash hooks/tests/test-rcpt-verify-hook.sh
 # --- #488 c1 receipt name-space acceptance tests ---
 run python3 scripts/test_488_name_space.py
 run python3 scripts/dec31_sweep.py          # AC-6 DEC-31 mutant sweep (#488 c1)
+run python3 scripts/test_dec31_sweep_harness.py   # the sweep HARNESS itself
 
 # --- Calibration dispatch / Brier advisory ---
 run python3 scripts/check_calibration_dispatch.py --selftest

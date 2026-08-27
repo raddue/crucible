@@ -69,3 +69,8 @@ mcp-servers/**/__pycache__/
 # Agent-tool scratch state (opencode). Machine-local session bookkeeping, unrelated
 # to any skill or gate; committed by accident in 840994c and removed in this branch.
 .opencode/
+# #488 c1 — scripts/dec31_sweep.py moves a FAILING row's mutant tree here before
+# printing its path. Built under $TMPDIR, which scripts/run_tests.sh scopes per
+# invocation and rm -rf's from an EXIT trap, the printed path would already be
+# dangling. Cleared at the start of every sweep run; never committed.
+.dec31-keep/
