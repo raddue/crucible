@@ -265,7 +265,11 @@ class TestTheCensusFieldListIsAppendOnly(unittest.TestCase):
                             f"{rec['id']}: a counter was renamed, reordered or "
                             f"dropped.\n  old: {old}\n  new: {new}")
             added = [n for n in new if n not in old]
-            self.assertEqual(added, ["resolved-by-walk"],
+            # SIEGE-S5 appends the SECOND field this branch adds relative to the
+            # baseline. The append-only property itself is asserted above and is
+            # unchanged; this list only records WHICH additions are accounted for, so a
+            # third, unreviewed one still fails here.
+            self.assertEqual(added, ["resolved-by-walk", "resolved-outside-roots"],
                              f"{rec['id']}: unexpected census field change\n"
                              f"  old: {old}\n  new: {new}")
         self.assertGreater(checked, 5, "no fixture rendered a full census line")

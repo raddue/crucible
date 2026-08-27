@@ -101,6 +101,15 @@ def walk_notes(stderr):
             if l.strip().startswith(WALK_PREFIX)]
 
 
+def outside_notes(stderr):
+    """The RESOLVED-OUTSIDE-ROOTS advisory lines on a run's stderr, in order
+    (SIEGE-S5). Deliberately a SEPARATE reader from `walk_notes`: the two channels
+    report different facts, and a single reader matching both would let one of them go
+    silent without any assertion noticing."""
+    return [l for l in stderr.splitlines()
+            if l.strip().startswith("RESOLVED-OUTSIDE-ROOTS:")]
+
+
 def census(stderr):
     """The single TIER2-COVERAGE: line, or '' when the run emitted none."""
     for l in stderr.splitlines():
@@ -2648,6 +2657,14 @@ class TestAnotherRootsGitToplevelDoesNotFlagATopLevelName(unittest.TestCase):
 class TestAGitToplevelDeepResolutionIsSilent(unittest.TestCase):
     """AC-6 T7 leg 2, `_below_top_level` clause (1), DEEP direction.
 
+    ⚠ THE CLASS NAME IS NOW HALF TRUE, and SIEGE-S5 is the other half. This fixture
+    is silent on `resolved-by-walk` — correctly, and that is still what the two
+    original assertions pin. It is NOT silent overall: the same resolution now earns
+    the `resolved-outside-roots` counter and its own note, which is the whole subject
+    of `test_siege_s5_*` below. The class is kept under its old name because the
+    ruling it pins (a git toplevel is a probed base, never a root the run was given)
+    is unchanged and still load-bearing.
+
     `TestAnotherRootsGitToplevelDoesNotFlagATopLevelName` above pins the SHALLOW
     case — the resolved file sits at a SUPPLIED root's own top level and another
     root's git toplevel sees it one component down. It leaves the other half of
@@ -2704,6 +2721,97 @@ class TestAGitToplevelDeepResolutionIsSilent(unittest.TestCase):
     def test_the_sub_count_stays_zero(self):
         out = self._run()
         self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+
+    def test_siege_s5_the_resolution_is_not_silent_overall(self):
+        """SIEGE-S5 — `resolved-by-walk` staying 0 here is correct, and the convention
+        used to rule the resulting TOTAL silence intentional and normative. That
+        ruling is retracted: this is a resolution that left every root the
+        orchestrator declared, which is the case most needing disclosure, and the run
+        rendered `artifacts 1/1 … resolved-by-walk 0` with `PROVENANCE-ONLY:`
+        suppressed as well (`verified_bases` gained the basename). An operator reading
+        the durably-captured `TIER2-COVERAGE:` line could not tell.
+
+        The two assertions above are the non-vacuity half of this one: they prove the
+        fix did NOT close the gap by widening `resolved-by-walk` to fire here, which
+        would have destroyed that counter's own meaning."""
+        out = self._run()
+        # 2, not 1: per CITED NAME ON A LEG, exactly as `resolved-by-walk` counts.
+        # This fixture's name is cited on both the ARTIFACTS and the witness leg.
+        self.assertIn("resolved-outside-roots 2", census(out.stderr), out.stderr)
+        notes = outside_notes(out.stderr)
+        self.assertEqual(len(notes), 2, out.stderr)
+        # The realpath is named on every note: WHERE it landed is the disclosure.
+        target = str(self.repo / "sub/round-9-findings.md")
+        for n in notes:
+            self.assertIn(target, n)
+
+
+class TestSiegeS5AnOutOfRootResolutionIsDisclosedOnBothLegs(unittest.TestCase):
+    """SIEGE-S5, the report's own chain fixture, on the MANDATED two-root command line
+    and with the witness leg live so both emission sites are exercised.
+
+    A `git init`-ed tree holds `<repo>/docs/clean.md`; the two supplied roots are
+    `<repo>/scratch/dispatch` and `<repo>/scratch/findings`, and neither holds it.
+    `_resolve_base_one` reaches it through `_git_toplevel(root)`, `_allowed_bases`
+    folds that same toplevel into the containment union so `_contained` passes, and
+    the cross-root ambiguity de-dup collapses to the single out-of-root location.
+    Measured on `ba482e2`: `artifacts 1/1 witness 1/1 … resolved-by-walk 0`, exit 0,
+    not one word about having left the declared scope — while the SUPERSEDES
+    consequent gated on a predicate run against those very bytes.
+
+    The VERDICT is deliberately not asserted to have changed. This finding is
+    Hardening: the fix makes the fact audible, it does not newly refuse the receipt,
+    and a pin demanding exit 1 here would be pinning a behaviour change nobody
+    ordered."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        self.repo = pathlib.Path(self.td.name) / "repo"
+        (self.repo / "scratch/dispatch").mkdir(parents=True)
+        (self.repo / "scratch/findings").mkdir(parents=True)
+        (self.repo / "docs").mkdir()
+        _plant_git_dir(self.repo)
+        body = "clean\n"
+        (self.repo / "docs/clean.md").write_text(body)
+        h = hashlib.sha256(body.encode()).hexdigest()
+        self.rcpt = self.repo / "scratch/dispatch/r.rcpt"
+        self.rcpt.write_text(receipt(
+            artifacts=[("docs/clean.md", h, str(len(body)))],
+            trace=["READ  docs/clean.md"],
+            witness="grep:docs/clean.md#L1-L1  expect-fail=/zzz-absent/  ran=TRACE#1"))
+
+    def _run(self):
+        return run("--tier2", "--strict",
+                   "--root", str(self.repo / "scratch/dispatch"),
+                   "--root", str(self.repo / "scratch/findings"), str(self.rcpt))
+
+    def test_both_legs_disclose_the_out_of_root_resolution(self):
+        out = self._run()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-outside-roots 2", census(out.stderr), out.stderr)
+        self.assertEqual(len(outside_notes(out.stderr)), 2, out.stderr)
+
+    def test_the_walk_counter_is_not_repurposed_for_it(self):
+        """NON-VACUITY — the fix must not close the gap by widening
+        `resolved-by-walk`, whose own subject (depth below a SUPPLIED root's top
+        level) this resolution does not satisfy under any reading."""
+        out = self._run()
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+    def test_an_in_root_control_discloses_nothing(self):
+        """The other non-vacuity bound: the SAME receipt with the file inside a
+        supplied root must leave the new counter at 0, or it stops distinguishing
+        anything."""
+        body = "clean\n"
+        (self.repo / "scratch/dispatch/docs").mkdir(parents=True)
+        (self.repo / "scratch/dispatch/docs/clean.md").write_text(body)
+        (self.repo / "docs/clean.md").unlink()
+        out = self._run()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-outside-roots 0", census(out.stderr), out.stderr)
+        self.assertEqual(outside_notes(out.stderr), [], out.stderr)
 
 
 class TestABareBasenameResolvedThroughASymlinkStillFires(_RootCase):

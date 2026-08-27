@@ -322,6 +322,7 @@ SIBLING = "TestAVerifiedSiblingCannotSilenceADeclaredUnverifiedName"
 EVERY = "TestEveryBelowTopLevelEntryInOneRunIsCountedAndNoted"
 SYMLINK = "TestABareBasenameResolvedThroughASymlinkStillFires"
 S4SYM = "TestSiegeS4ASymlinkInsideAnOwnedRootCannotZeroTheWalkNote"
+S5OUT = "TestSiegeS5AnOutOfRootResolutionIsDisclosedOnBothLegs"
 DISJOINT = "TestALaterDisjointRootAnswersTheDepthKey"
 RELHALF = "TestTheRelpathHalfAloneCannotForgeTheChannel"
 WESC = "TestTheWalkNoteEscapesTheNameHalfToo"
@@ -832,6 +833,9 @@ MUTANTS = [
                    "test_a_top_level_citation_stays_silent",
                    "test_an_ordinary_deep_citation_is_unchanged",
                    "test_the_symlink_shortened_citation_still_discloses"),
+                  (S5OUT,
+                   "test_an_in_root_control_discloses_nothing",
+                   "test_the_walk_counter_is_not_repurposed_for_it"),
                   (SIBLING,
                    "test_the_run_says_out_loud_that_the_cited_name_is_unverified",
                    "test_the_trace_citation_of_that_same_name_still_emits_the_note"),
@@ -958,7 +962,11 @@ MUTANTS = [
          edits=[(DEPTH_BODY, ROUND5_BODY)],
          expect=E((GITDEEP,
                    "test_no_note_is_emitted",
+                   "test_siege_s5_the_resolution_is_not_silent_overall",
                    "test_the_sub_count_stays_zero"),
+                  (S5OUT,
+                   "test_both_legs_disclose_the_out_of_root_resolution",
+                   "test_the_walk_counter_is_not_repurposed_for_it"),
                   (S4SYM,
                    "test_the_symlink_shortened_citation_still_discloses"),
                   (NESTED,
@@ -977,7 +985,11 @@ MUTANTS = [
          edits=[(DEPTH_BODY, ROUND6_BODY)],
          expect=E((GITDEEP,
                    "test_no_note_is_emitted",
+                   "test_siege_s5_the_resolution_is_not_silent_overall",
                    "test_the_sub_count_stays_zero"),
+                  (S5OUT,
+                   "test_both_legs_disclose_the_out_of_root_resolution",
+                   "test_the_walk_counter_is_not_repurposed_for_it"),
                   (S4SYM,
                    "test_the_symlink_shortened_citation_still_discloses"),
                   (GITTOP,

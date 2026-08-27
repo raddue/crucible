@@ -2594,7 +2594,8 @@ class TestCoverageRendering(unittest.TestCase):
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 3/4 witness 0/0 unreached 0 "
             "not-reachable 1 (unresolvable-basename) ambiguous 0 wrong-name 0 "
-            "empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 1 (fail-leg-no-range)")
+            "empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 1 (fail-leg-no-range) "
+            "resolved-outside-roots 0")
 
     def test_partial_shape_renders_witness_0_0(self):
         """S2 — d is what the census MEASURED. A run truncated before the witness leg
@@ -2604,7 +2605,8 @@ class TestCoverageRendering(unittest.TestCase):
         c.bump("ambiguous"); c.partial = True
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 1/4 witness 0/0 unreached 0 not-reachable 0 "
-            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0 partial")
+            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 "
+            "not-applicable 0 resolved-outside-roots 0 partial")
 
     def test_codes_are_sorted_and_deduplicated(self):
         """CPython randomises str hashing per process (PYTHONHASHSEED); an unsorted
@@ -3159,7 +3161,8 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 1/1 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "discarded 0 resolved-by-walk 0 not-applicable 0")
+                         "discarded 0 resolved-by-walk 0 not-applicable 0 "
+                         "resolved-outside-roots 0")
 
     def test_partial_shape_on_a_truncated_census(self):
         out = self._run("--tier2", "--strict", "--root", str(self.root),
@@ -3168,7 +3171,8 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 0/0 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "discarded 0 resolved-by-walk 0 not-applicable 0 partial")
+                         "discarded 0 resolved-by-walk 0 not-applicable 0 "
+                         "resolved-outside-roots 0 partial")
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line

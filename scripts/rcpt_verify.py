@@ -1558,6 +1558,48 @@ def _below_top_level(resolved, root, name=None):
     return None
 
 
+def _outside_all_roots(resolved, root):
+    """SIEGE-S5 — True when `resolved` lands under NO supplied root.
+
+    The complement of `_below_top_level`'s loop, kept as its own function rather than
+    folded into that one's return shape so the two reverted-build rows dec31_sweep
+    anchors on `_below_top_level`'s body (rows 14/15) stay applicable unchanged.
+
+    MUST NOT RAISE for the reason its caller's siblings must not: this feeds an
+    advisory channel and can never be allowed to preempt a verdict."""
+    try:
+        for r in _as_roots(root):
+            try:
+                resolved.relative_to(r)
+            except ValueError:  # not under this root — PurePath op, never OSError
+                continue
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _outside_note(name, resolved):
+    # SIEGE-R2BA-4's rule, on the new channel: both halves take the escaper. The
+    # rendered path is ABSOLUTE by construction — it is outside every root, so there is
+    # no root to render it relative to, and naming WHERE it landed is the disclosure.
+    return (f"RESOLVED-OUTSIDE-ROOTS: {_show_path(name)} "
+            f"({_show_path(str(resolved))})")
+
+
+def _emit_outside_note(notes_out, name, resolved):
+    """`_emit_walk_note`'s envelope, for the sibling channel — see that function for the
+    full argument. The same three properties are load-bearing here: never raise, render
+    INSIDE the envelope (a raising `__str__` on a public-API-supplied key is evaluated
+    before the callee is entered otherwise), and let KeyboardInterrupt/SystemExit
+    through."""
+    try:
+        if notes_out is not None:
+            notes_out.append(_outside_note(name, resolved))
+    except Exception:
+        pass
+
+
 def _walk_note(name, rel):
     # SIEGE-R2BA-4 — BOTH the receipt-supplied name and the rendered relpath take the
     # escaper, on the same grounds as every other name on this channel (§3.1 clause 2
@@ -2627,6 +2669,32 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                 if cov is not None:
                     cov.bump("resolved-by-walk")
                 _emit_walk_note(notes_out, name, _rel)
+            elif _outside_all_roots(resolved, root):
+                # SIEGE-S5 — the case that most needed disclosure was the one this
+                # instrument was SILENT on. `_below_top_level` answers over the SUPPLIED
+                # roots only, so a resolution that landed under none of them returned
+                # None and produced no note and no bump — while `verified_bases` still
+                # gained the basename, suppressing `PROVENANCE-ONLY:` too. The run
+                # rendered `artifacts 1/1 witness 1/1 … resolved-by-walk 0`: an operator
+                # reading the durably-captured `TIER2-COVERAGE:` line had no way to learn
+                # that the git-toplevel walk let a name resolve outside every root the
+                # orchestrator declared, and `_verify_single`'s SUPERSEDES consequent
+                # then gated on a predicate run against those same out-of-scope bytes.
+                # Firing only on benign in-root depth is the INVERSE of what a "did this
+                # leave my declared scope" signal owes.
+                #
+                # Its own counter, not a `resolved-by-walk` bump: the two facts are
+                # different ("resolved deeper than a root's top level" vs "resolved
+                # outside every root"), and folding them would make the existing counter
+                # unable to answer either question. Ninth and LAST in `_COV_COUNTERS`,
+                # which keeps every `<counter> N <next-counter> M` substring assertion in
+                # the suites — and dec31_sweep row 10's anchor — reading as before.
+                #
+                # Counter FIRST, note second, and the note through `notes_out`: the walk
+                # note's two orderings, for the walk note's two reasons (see there).
+                if cov is not None:
+                    cov.bump("resolved-outside-roots")
+                _emit_outside_note(notes_out, name, resolved)
             if len(found) > 1:
                 # #486 / D2 — two or more DISTINCT realpaths. Fail closed under --strict:
                 # first-hit-wins here would verify against a plausible but WRONG file, a
@@ -3894,6 +3962,14 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 if cov is not None:
                     cov.bump("resolved-by-walk")
                 _emit_walk_note(notes_out, art_name, _rel)
+            elif resolved is not None and _outside_all_roots(resolved, root):
+                # SIEGE-S5 — the artifacts leg's arm, on this leg and for its reasons.
+                # Both legs move together deliberately: the leg asymmetry round-1/S2
+                # closed once is exactly what guarding one and not the other recreates,
+                # and this is the leg whose bytes reach the SUPERSEDES consequent.
+                if cov is not None:
+                    cov.bump("resolved-outside-roots")
+                _emit_outside_note(notes_out, art_name, resolved)
             if len(found) > 1:
                 # #486 / D2 — same rule as the artifacts leg, its OWN wording. The two messages
                 # differ because :893 and :1127 already differ ("path-shaped artifact …" vs
@@ -4729,7 +4805,15 @@ class _PathReadError(Exception):
 # the floor buckets', and `resolved-by-walk` stands outside them (return-convention.md's
 # `resolved-by-walk` blockquote says so).
 _COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "empty-range",
-                 "discarded", "resolved-by-walk", "not-applicable")
+                 "discarded", "resolved-by-walk", "not-applicable",
+                 # SIEGE-S5 — the ninth, and LAST for a reason: appending leaves every
+                 # `<counter> N <next> M` substring the suites assert on unchanged, where
+                 # inserting it beside `resolved-by-walk` (where it belongs by subject)
+                 # would move them all. Like `resolved-by-walk` it stands OUTSIDE the
+                 # floor buckets' disjoint partition — it is a fact about HOW a name
+                 # resolved, not about why it failed to — so it may co-occur with any of
+                 # them on the same item.
+                 "resolved-outside-roots")
 
 # SIEGE-C4 — the census state for a --tier2 exit that happens BEFORE _verify_single is
 # entered, where no _Coverage exists and the finally: documented to "survive every
