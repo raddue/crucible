@@ -54,7 +54,7 @@ SUITE = "scripts/test_488_name_space.py"
 
 # The whole suite must still be COLLECTED on every row, row 0 included: a mutation
 # that changes the NUMBER of tests has broken the tree, not a pin.
-TOTAL_TESTS = 168
+TOTAL_TESTS = 174
 
 _HDR = re.compile(r"^(?:FAIL|ERROR): (\S+) \((.+?)\)", re.M)
 
@@ -124,7 +124,14 @@ DEPTH_BODY = '''    for r in _as_roots(root):
 # pre-Task-3 in-loop `return {}` form it replaced. WHOLE BLOCKS including the inline
 # "# body is indented lines..." comment, which sits BETWEEN the guard and the loop
 # and is required for each to be a CONTIGUOUS substring of its file.
+# inquisitor/D2 — the materialisation carries into NONE_NEW because the anchor is a
+# contiguous block and `body = list(body)` sits inside it. NONE_OLD deliberately does
+# NOT carry it: that build iterates `body` exactly once, which is why the drain did not
+# exist before the sentinel helper did.
 NONE_NEW = '''    out = {}
+    # #488 inquisitor/D2 — materialise BEFORE the scan: `_none_sentinel` consumes
+    # `body`, and the entry loop below iterates it again. See its docstring.
+    body = list(body)
     if _none_sentinel(body, "ARTIFACTS"):
         return {}
     # body is indented lines; skip blanks
@@ -239,6 +246,11 @@ WMISMATCH = "TestTheWalkNoteSurvivesAMismatchRaiseOnItsOwnEntry"
 GITDEEP = "TestAGitToplevelDeepResolutionIsSilent"
 WITMASK = "TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise"
 EXACTSENT = "TestOnlyTheExactSentinelIsEverTreatedAsOne"
+# inquisitor/D2 — only the CO-OCCURRENCE arm pins row 11. The two one-shot arms
+# pass against that mutant for a real reason, not by coincidence: NONE_OLD iterates
+# `body` exactly ONCE, so there is no drain to survive there. The drain is a
+# property of the sentinel HELPER, which that build does not have.
+ONESHOT = "TestAOneShotSectionBodyIsNotDrainedByTheSentinel"
 INLINEHDR = "TestTheSentinelRuleReachesTheInlineHeaderBodyShape"
 # temper/leg-1 — the degenerate-basename fail-open and the verified set's
 # exact-name leg. DEGEN's `..` arm is driven by the `--strict` path-shaped
@@ -246,6 +258,14 @@ INLINEHDR = "TestTheSentinelRuleReachesTheInlineHeaderBodyShape"
 # why it joins row 1's set and not only its own.
 DEGEN = "TestADegenerateVerifiedBasenameCannotSilenceUnrelatedNames"
 VERBATIM = "TestAVerifiedNameCitedVerbatimIsSilent"
+
+# inquisitor/D1 — the unevaluated/unverified SPELLING collision. Both arms cite
+# their TRACE entry with READ and read the note off the OUT-PARAMETER, so both go
+# red under row 7's global silencer and row 4's by-value routing. The control
+# going red alongside the defect arm is the point, the same way DEGEN's controls
+# are: a class whose non-vacuity control survives a global silencer would be
+# passing by coincidence.
+UNEVALTWIN = "TestAnUnreachedTwinCannotSilenceAnEvaluatedUnverifiedName"
 
 
 def E(*groups):
@@ -376,6 +396,9 @@ MUTANTS = [
                    "test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read"),
                   (VERBATIM,
                    "test_an_unverified_spelling_still_speaks"),
+                  (UNEVALTWIN,
+                   "test_the_evaluated_unverified_name_keeps_its_note",
+                   "test_the_control_without_the_unreached_twin_emits"),
                   (KEYED,
                    "test_a_trace_name_matching_a_hash_mismatched_artifact_still_emits_the_note"),
                   (MALFORM,
@@ -408,8 +431,8 @@ MUTANTS = [
     # vacuous. Each is simply a strictly weaker copy that drops half the rule instead
     # of the rule, and only the two-edit form reddens all four pins the rule owns.
     dict(id=5, criterion="AC-6 T2 leg 6 (build 2)", what="the truncation rule dropped",
-         edits=[("                if name in unevaluated_names:\n"
-                 "                    continue\n", ""),
+         edits=[("                    if name in unevaluated_names:\n"
+                 "                        continue\n", ""),
                 ("                    if base not in _DEGENERATE_BASES and (\n"
                  "                            base in verified_bases\n"
                  "                            or base in unevaluated_bases):",
@@ -460,6 +483,9 @@ MUTANTS = [
                    "test_the_control_with_a_plain_trace_name_emits"),
                   (VERBATIM,
                    "test_an_unverified_spelling_still_speaks"),
+                  (UNEVALTWIN,
+                   "test_the_evaluated_unverified_name_keeps_its_note",
+                   "test_the_control_without_the_unreached_twin_emits"),
                   (ESC,
                    "test_neither_the_nul_nor_the_ansi_escape_reaches_the_channel_raw",
                    "test_the_hostile_trace_name_is_still_reported"),
@@ -670,6 +696,8 @@ MUTANTS = [
                    "test_one_injected_none_line_cannot_turn_that_hard_fail_into_exit_zero"),
                   (EXACTSENT,
                    "test_a_nbsp_cloaked_sentinel_is_still_bound_by_the_co_occurrence_rule"),
+                  (ONESHOT,
+                   "test_a_one_shot_body_mixing_the_sentinel_with_an_entry_still_raises"),
                   (INLINEHDR,
                    "test_a_sentinel_on_the_header_line_still_binds_the_indented_entry",
                    "test_an_entry_on_the_header_line_still_binds_the_indented_sentinel"))),

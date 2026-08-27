@@ -3011,6 +3011,113 @@ class TestTheEmitterGuardsLayerCorrectlyOnTheCleanPath(_RootCase):
                          [f"{WALK_PREFIX} {self.WALK} ({self.WALK})"])
 
 
+# --------------------------------------------------------------------------
+# INQUISITOR/D1 — the unevaluated/unverified SPELLING collision.
+# --------------------------------------------------------------------------
+class TestAnUnreachedTwinCannotSilenceAnEvaluatedUnverifiedName(_RootCase):
+    """INQUISITOR/D1 — the fourth and last leg of the exact-name ordering.
+
+    `tier2_artifacts` accumulates `evaluated` and `verified_keys` as RAW
+    `ARTIFACTS` dict keys (round-3/Minor-4 made that deliberate) and then hands
+    `_emit_provenance_notes` four SPELLING sets built with `str()`. The two are
+    not the same partition: Minor-4 established that two DISTINCT dict keys can
+    share one `str()` spelling (`PurePosixPath("a.txt")` and `"a.txt"`), so one
+    spelling can sit in `unevaluated_names` and `unverified_names` at once.
+
+    Minor-4 ruled such a tie must go to the FAIL-NOISY set, and nested
+    `verified_names` inside the `unverified_names` override for exactly that
+    reason. `unevaluated_names` was left OUTSIDE it, tested first, so the
+    fail-SILENT set won: an `ARTIFACTS` key this run never reached bought
+    silence for a DIFFERENT key the same run evaluated and reported unverified.
+    Silence a receipt author can buy by adding one `ARTIFACTS` line is the
+    direction grudge `e0f0a6b75692` forbids.
+
+    Not receipt-author-reachable (`parse_artifacts` only ever produces `str`
+    keys) — reachable through the ~40 direct API call sites, the same
+    reachability every sibling leg in this file already accepts."""
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        self.good, self.size = self.plant("a.txt", "hello\n")
+        self.trace = [{"n": 1, "verb": "READ", "args": "a.txt"}]
+
+    def _run(self, artifacts):
+        out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(artifacts, self.trace, [self.root], False,
+                                    None, None, out)
+        # Non-vacuity: the declared key really was evaluated and really failed,
+        # so it really is in the unverified set.
+        self.assertIn("sha256 mismatch", str(caught.exception))
+        return [n for n in out if n.startswith(NOTE_PREFIX)]
+
+    def test_the_evaluated_unverified_name_keeps_its_note(self):
+        """The defect: SILENT before the fix. `"a.txt"` is evaluated and
+        hash-mismatches (-> `unverified_names`); the `PurePosixPath` twin is
+        never reached (-> `unevaluated_names`). One spelling, both sets."""
+        self.assertEqual(
+            self._run({"a.txt": {"hash": "b" * 64, "size": self.size},
+                       pathlib.PurePosixPath("a.txt"): {"hash": self.good,
+                                                        "size": self.size}}),
+            [f"{NOTE_PREFIX} a.txt (declared in TRACE, not verified)"])
+
+    def test_the_control_without_the_unreached_twin_emits(self):
+        """Non-vacuity: with only the mismatching key declared, the identical
+        TRACE citation DOES get its note — so the silence above was caused by
+        the unreached twin's spelling and by nothing else."""
+        self.assertEqual(
+            self._run({"a.txt": {"hash": "b" * 64, "size": self.size}}),
+            [f"{NOTE_PREFIX} a.txt (declared in TRACE, not verified)"])
+
+
+# --------------------------------------------------------------------------
+# INQUISITOR/D2 — `_none_sentinel` must not drain a one-shot section body.
+# --------------------------------------------------------------------------
+class TestAOneShotSectionBodyIsNotDrainedByTheSentinel(unittest.TestCase):
+    """INQUISITOR/D2 — the I8/T10 guard must not itself return the empty set.
+
+    `_none_sentinel` scans `body` for the sentinel, and each parser then
+    iterates `body` again for its own entries. On a one-shot `body` — a
+    generator, an `iter(...)`, a file object — the scan EXHAUSTS it and the
+    entry loop sees nothing, so a body holding legal entries yields `{}`/`[]`
+    silently at exit 0. That is the same fail-open shape I8/T10 exists to close,
+    re-entering through the clause written to close it, and it is a REGRESSION:
+    before `fa108d2` each parser iterated `body` exactly once.
+
+    The section bodies are public-API-supplied with no type enforcement, the
+    identical reachability argument this suite already makes for `trace` and the
+    `ARTIFACTS` keys."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_a_one_shot_artifacts_body_still_yields_its_entries(self):
+        body = [f"  a.md  sha256:{H64}  1", f"  b.md  sha256:{H64}  2"]
+        self.assertEqual(sorted(self.rv.parse_artifacts(iter(body))),
+                         ["a.md", "b.md"])
+
+    def test_a_one_shot_trace_and_claims_body_still_yield_their_entries(self):
+        for parse, body in (
+                (self.rv.parse_trace, ["  1  READ  a.md", "  2  READ  b.md"]),
+                (self.rv.parse_claims, ["  c1=true  from=TRACE#1"])):
+            with self.subTest(parser=parse.__name__):
+                self.assertEqual(len(parse(iter(body))), len(body))
+
+    def test_a_one_shot_body_holding_the_sentinel_is_still_the_empty_set(self):
+        """Non-vacuity from the other side: materialising the body must not
+        cost the sentinel its meaning, on the one-shot shape either."""
+        self.assertEqual(self.rv.parse_artifacts(iter(["  (none)"])), {})
+        self.assertEqual(self.rv.parse_trace(iter(["  (none)"])), [])
+
+    def test_a_one_shot_body_mixing_the_sentinel_with_an_entry_still_raises(self):
+        """And the co-occurrence raise still fires — the scan sees BOTH lines,
+        which on the pre-fix drain it also did, so this arm is the control that
+        keeps the two above honest rather than a second reproduction."""
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_artifacts(iter(["  (none)", f"  a.md  sha256:{H64}  1"]))
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

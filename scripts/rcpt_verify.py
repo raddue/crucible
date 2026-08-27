@@ -247,6 +247,16 @@ def _none_sentinel(body, section):
     ONE helper rather than three copies of the same guard: three parsers already drifted
     into carrying the identical bug verbatim, which is what a duplicated guard invites.
 
+    #488 inquisitor/D2 — this scan CONSUMES `body`. Every caller iterates `body` a
+    SECOND time for its own entries, so a one-shot `body` (a generator, an `iter(...)`,
+    a file object) is exhausted here and the caller's loop sees nothing — `{}`/`[]`
+    returned silently at exit 0, which is the same fail-open shape this guard exists to
+    close. `body` is public-API-supplied with no type enforcement, exactly as `trace`
+    and `artifacts` are, and before fa108d2 each parser iterated it exactly once, so a
+    one-shot body worked. Callers therefore materialise with `list(body)` first; the
+    fix is theirs and not this helper's because they need the ORIGINAL unstripped `raw`
+    line, which this helper does not return.
+
     Returns True when the body IS the legal one-line sentinel, False when it holds no
     sentinel at all, and raises when a `(none)` co-occurs with any entry."""
     entries = [l.strip() for l in body if l.strip()]
@@ -261,6 +271,9 @@ def _none_sentinel(body, section):
 def parse_artifacts(body):
     """Returns {name: {hash, size, meta}} from ARTIFACTS body lines."""
     out = {}
+    # #488 inquisitor/D2 — materialise BEFORE the scan: `_none_sentinel` consumes
+    # `body`, and the entry loop below iterates it again. See its docstring.
+    body = list(body)
     if _none_sentinel(body, "ARTIFACTS"):
         return {}
     # body is indented lines; skip blanks
@@ -295,6 +308,9 @@ def parse_artifacts(body):
 def parse_trace(body):
     """Returns list of {n, verb, args_str} entries."""
     out = []
+    # #488 inquisitor/D2 — materialise BEFORE the scan: `_none_sentinel` consumes
+    # `body`, and the entry loop below iterates it again. See its docstring.
+    body = list(body)
     if _none_sentinel(body, "TRACE"):
         return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
     for raw in body:
@@ -388,6 +404,9 @@ def check_exec_range_bound(args_str):
 
 def parse_claims(body):
     out = []
+    # #488 inquisitor/D2 — materialise BEFORE the scan: `_none_sentinel` consumes
+    # `body`, and the entry loop below iterates it again. See its docstring.
+    body = list(body)
     if _none_sentinel(body, "CLAIMS"):
         return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
     for raw in body:
@@ -2083,9 +2102,23 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
     citing it verbatim emitted a note on a run that had not yet had the chance to verify
     it. That is the truncation rule inverted for exactly the spelling F4 hardened, so
     the fix is the same one F3 already uses: carry the FULL NAMES too, and test them
-    before the basename key. Declared-name sets are disjoint by construction
-    (`unverified_names` is `evaluated`-derived, `unevaluated_names` its complement), so
-    the two exact-name tests cannot contradict each other.
+    before the basename key.
+
+    #488 inquisitor/D1 — the declared-name sets are disjoint as RAW KEYS
+    (`unverified_names` is `evaluated`-derived, `unevaluated_names` its complement) and
+    NOT as SPELLINGS, which is what this function actually receives: tier2_artifacts's
+    `finally:` projects both through `str(n)`, and round-3/Minor-4 established that two
+    DISTINCT `artifacts` dict keys can share one `str()` spelling
+    (`PurePosixPath("a/x.md")` and `"a/x.md"`). So the two exact-name tests CAN name one
+    spelling at once, and what settles that tie is the ORDERING below, not any
+    disjointness. All three suppressors sit INSIDE the `unverified_names` override, so
+    the fail-NOISY set wins — the same resolution Minor-4 already ruled for the
+    verified/unverified pair. An earlier version of this paragraph asserted the
+    disjointness and put the `unevaluated_names` test ABOVE the override, where the
+    fail-SILENT set won: one ARTIFACTS key the run never reached bought silence for a
+    DIFFERENT key the same run evaluated and reported unverified or hash-mismatched.
+    That is silence a receipt author can buy with one extra ARTIFACTS line — the
+    direction grudge e0f0a6b75692 forbids and the one the override exists to close.
 
     `_show_path` is required a fortiori (SIEGE-R2BA-4): `name` here comes out of the
     `args` field, which is exactly the shape `_show_path`'s own docstring says the
@@ -2155,18 +2188,27 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
                 name, base = _trace_basename(entry)
                 if not name:
                     continue
-                # #488 round-3/Minor-3 — §3.4's truncation rule, exact-name leg. Tested
-                # FIRST because it is the rule the other two tests are exceptions to:
-                # an ARTIFACTS entry this run never reached may yet have matched, so
-                # the citation stays silent. Carries the `/`-suffixed spelling that the
-                # empty basename cannot; see the docstring.
-                if name in unevaluated_names:
-                    continue
-                # #488 adversarial/F3 — the exact-name override is tested BEFORE the
-                # basename key, so a colliding sibling cannot silence a name this run
+                # #488 adversarial/F3 — the exact-name override is tested BEFORE every
+                # suppressor, so a colliding sibling cannot silence a name this run
                 # itself evaluated and reported unverified. See the docstring for why
                 # it does not (and must not) close the general collision.
                 if name not in unverified_names:
+                    # #488 round-3/Minor-3 — §3.4's truncation rule, exact-name leg.
+                    # First of the three suppressors, because it is the rule the other
+                    # two are exceptions to: an ARTIFACTS entry this run never reached
+                    # may yet have matched, so the citation stays silent. Carries the
+                    # `/`-suffixed spelling that the empty basename cannot.
+                    #
+                    # #488 inquisitor/D1 — NESTED inside the override, not a sibling
+                    # ABOVE it, for the same reason `verified_names` below is: the four
+                    # sets are disjoint as raw keys but collide as SPELLINGS, and on a
+                    # collision the fail-noisy set must win (Minor-4). Sited above it,
+                    # this `continue` let an UNREACHED key's spelling silence a
+                    # DIFFERENT key the same run evaluated and reported unverified.
+                    # Behaviour-preserving off the collision: an unevaluated name is by
+                    # construction not in `unverified_names`, so it still `continue`s.
+                    if name in unevaluated_names:
+                        continue
                     # #488 temper/leg-1 — the VERIFIED set's exact-name leg, the third
                     # of three and the one that was missing. `unevaluated_names` (above)
                     # and `unverified_names` (this test) already carry the spellings the
@@ -2177,8 +2219,8 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
                     # `PROVENANCE-ONLY: x/ (declared in TRACE, not verified)` on the same
                     # stderr, about the same name.
                     #
-                    # NESTED INSIDE the `unverified_names` test, deliberately, NOT a
-                    # sibling of the `unevaluated_names` test above: round-3/Minor-4
+                    # NESTED INSIDE the `unverified_names` test, deliberately, as every
+                    # suppressor here now is (#488 inquisitor/D1): round-3/Minor-4
                     # established that two DISTINCT ARTIFACTS dict keys can share one
                     # SPELLING, so a spelling can sit in `verified_names` and
                     # `unverified_names` at once. Nesting makes UNVERIFIED win that tie —
@@ -2242,7 +2284,22 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     which is why --eval and --selftest are unaffected.
 
     #488 / T7 — the RESOLVED-BY-WALK: notes this function also emits go through the
-    SAME out-parameter, for the same reason. Do not route them through `notes`."""
+    SAME out-parameter, for the same reason. Do not route them through `notes`.
+
+    #488 inquisitor/M2 — an ACCEPTED, and until now unrecorded, cost of that split: the
+    ORDER the three note classes reach stderr in is not stable across runs. The
+    PROVENANCE-ONLY:/RESOLVED-BY-WALK: notes go into `notes_out` as the loop runs, while
+    this leg's own UNVERIFIABLE:/REFUSED:/AMBIGUOUS: notes ride the RETURN value and are
+    appended by the caller's `+=` afterwards — except on a raise, where the
+    `except BaseException:` arm mirrors them into `notes_out` mid-band. Measured: a
+    clean run renders [WALK, PROVENANCE, UNVERIFIABLE, UNVERIFIABLE] and a truncated one
+    [WALK, WALK, UNVERIFIABLE, PROVENANCE]. Nothing normative pins it —
+    return-convention.md pins the `TIER2-COVERAGE:` line's own position and content, and
+    the walk note's emission BEFORE the ambiguity raise, but says nothing about the
+    bullets' order relative to each other — and all three classes are advisory, bumping
+    no counter and moving no exit code. Do NOT "fix" it by reordering: putting these
+    notes back on the return value re-opens the discard-on-raise fail-open the
+    out-parameter exists to close. Do not read the clean-run order as a contract."""
     notes = []
     # SIEGE-R2BA-2 — what is LEFT of ARTIFACT_READ_CAP for this leg. Cumulative, because
     # the entry count is receipt-controlled; see the constant for why.
@@ -2323,8 +2380,18 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                 # skipped the counter, so the census denied an event the ruling says
                 # happened. This order cannot produce that contradiction: the bump is
                 # unconditional on resolution, and the note is the only half a hostile
-                # out-parameter can suppress (in which case NO note on this channel
-                # reaches stderr at all, so there is nothing left to disagree with).
+                # out-parameter can suppress.
+                #
+                # #488 inquisitor/M1 — that suppression is not always all-or-nothing.
+                # An out-parameter that refuses EVERY append leaves no note of this
+                # class on stderr at all, so nothing remains to disagree with the
+                # census; one that refuses only the Nth delivers some notes and leaves
+                # the count ABOVE them (measured: census 2, notes 1). The order still
+                # stands — it is the census's COUNTS, not the advisory bullets, that
+                # are the machine channel (return-convention.md pins the
+                # `TIER2-COVERAGE:` line, not the bullets), and the production
+                # out-param is a plain list — but the claim it supports is "the census
+                # never denies an event", not "the two halves can never differ".
                 #
                 # REDUNDANT while `_emit_walk_note`'s envelope holds, and deliberately
                 # so: measured on this commit, reverting THIS order alone leaves both
