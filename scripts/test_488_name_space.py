@@ -1636,6 +1636,21 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
         def extend(self, items):
             raise RuntimeError("notes_out.extend exploded")
 
+    class _RaisingAppend:
+        """ROUND-4-of-this-gate/M1 — the shape this class was blind to. Every
+        hostile shape above is `.extend`-flavoured, and `_RaisingExtend` has no
+        `.append` AT ALL, so at the walk-note emission site it degrades to the
+        same `AttributeError` `_NoExtend` already produces. A narrowed guard at
+        `_emit_walk_note` (`except AttributeError:` instead of `except
+        Exception:`) was therefore caught only by the WITNESS leg's sibling pin
+        — the same leg asymmetry round-1/S2 found and closed once already.
+        Deliberately the identical shape
+        `TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise._RaisingAppend`
+        uses, so the two legs are tested against the same hostile object."""
+
+        def append(self, item):
+            raise RuntimeError("notes_out.append exploded")
+
     def setUp(self):
         super().setUp()
         self.rv = _import_rv()
@@ -1653,7 +1668,9 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
         for label, notes_out in (("tuple", ()), ("int", 0),
                                  ("object without .extend", self._NoExtend()),
                                  ("object whose .extend raises",
-                                  self._RaisingExtend())):
+                                  self._RaisingExtend()),
+                                 ("object whose .append raises",
+                                  self._RaisingAppend())):
             with self.subTest(shape=label):
                 self._run(notes_out)
 
@@ -1968,6 +1985,52 @@ class TestABelowTopLevelResolutionIsCounted(_RootCase):
         self.assertIn("artifacts 1/1", c, c)
 
 
+class TestTheWalkNoteEscapesTheNameHalfToo(_RootCase):
+    """AC-6 T7 leg 2, SIEGE-R2BA-4 leg — the `RESOLVED-BY-WALK:` twin of
+    `TestTheNoteEscapesTheLeastConstrainedNameInTheGrammar`.
+
+    `_walk_note` runs `_show_path` over BOTH halves it renders, per its own
+    `SIEGE-R2BA-4` comment. The RELPATH half is pinned by construction —
+    dropping its `_show_path` reddens three tests in `test_rcpt_verify.py`.
+    The NAME half was not: round-4-of-this-gate/S1 measured a mutant that
+    leaves the name raw and escapes only the relpath, and BOTH suites stayed
+    100% green. AC-2's Tier-1 raise bans only a leading `/` and NUL in an
+    ARTIFACTS name, so an ANSI escape and a backslash are both LEGAL there,
+    and this note is captured verbatim into the durable `round-N-coverage.md`
+    a human reads (`quality-gate/SKILL.md`'s coverage-line capture rule) —
+    which is the same threat SIEGE-R2BA-4 names for every other name on this
+    channel.
+
+    Artifacts-leg-only by construction, like
+    `TestABareBasenameResolvedThroughASymlinkStillFires`: TRACE names an
+    absolute path outside every root, so the ONE note on the channel is
+    unambiguously the ARTIFACTS leg's and its name half is the hostile key."""
+
+    HOSTILE = "out-9/ho\x1b[31mst\\ile.md"
+
+    def setUp(self):
+        super().setUp()
+        h, s = self.plant(self.HOSTILE, "# findings\nfatal=0\n")
+        self.out = self.verify(receipt(
+            artifacts=[(self.HOSTILE, h, s)],
+            trace=["READ  /elsewhere/round-0-notes.md"]))
+
+    def test_both_halves_of_the_note_render_escaped(self):
+        self.assertEqual(
+            walk_notes(self.out.stderr),
+            [r"RESOLVED-BY-WALK: out-9/ho\x1b[31mst\\ile.md "
+             r"(out-9/ho\x1b[31mst\\ile.md)"],
+            self.out.stderr)
+
+    def test_the_ansi_escape_never_reaches_the_channel_raw(self):
+        # Asserted together with the note's PRESENCE, for the same reason the
+        # PROVENANCE-ONLY twin states it: a build that emits nothing at all
+        # would otherwise pass this leg by staying silent, which is the
+        # fail-open direction grudge e0f0a6b75692 names.
+        self.assertTrue(walk_notes(self.out.stderr), self.out.stderr)
+        self.assertNotIn("\x1b", self.out.stderr)
+
+
 class TestTheWalkNoteSurvivesATruncatedRun(_RootCase):
     """AC-6 T7 leg 2, truncation leg — the mirror of T2's leg 6, and the pin
     that round 2's build failed.
@@ -2206,6 +2269,74 @@ class TestASecondNestedRootDoesNotSilenceTheCounter(_RootCase):
              "(out-9/round-9-findings.md)"],
             out.stderr)
         self.assertIn("resolved-by-walk 2", census(out.stderr), out.stderr)
+
+
+class TestALaterDisjointRootAnswersTheDepthKey(_RootCase):
+    """AC-6 T7 leg 2, the DECLARATION-ORDER existential (round-4-of-this-gate/S2).
+
+    `_below_top_level`'s `except ValueError: continue` IS the existential: it is
+    what lets the loop walk PAST a supplied root that does not contain the
+    resolution, on to a LATER root that does. No fixture reached that arm's
+    load-bearing case — `TestASecondNestedRootDoesNotSilenceTheCounter` NESTS
+    its two roots (the first already contains the file),
+    `TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise` plants the file
+    under BOTH — so a mutant returning `None` from that arm instead of
+    continuing left both suites 100% green while silently zeroing the note and
+    the counter on the mainline shape.
+
+    That shape is the EVERYDAY one, not an edge case: the mandated gate
+    invocation is `--root <dispatch-root> --root <findings-root>`
+    (`quality-gate/SKILL.md:30`), those two roots are disjoint in the ordinary
+    case, and a cited findings file lives under exactly one of them.
+
+    Artifacts-leg-only by construction (TRACE names an absolute path outside
+    every root), so the count below is the one cited-name-on-a-leg that
+    resolved. Driven through `run` rather than `verify`, because that helper
+    always appends `self.root` — which CONTAINS both roots here — as a third,
+    containing root, which would destroy the shape under test."""
+
+    NAME = "out-9/round-9-findings.md"
+
+    def setUp(self):
+        super().setUp()
+        self.first = self.root / "dispatch-root"
+        self.second = self.root / "findings-root"
+        self.first.mkdir()
+        body = "# findings\nfatal=0\n"
+        planted = self.second / self.NAME
+        planted.parent.mkdir(parents=True)
+        planted.write_text(body)
+        rcpt = self.root / "rcpt.txt"
+        rcpt.write_text(receipt(
+            artifacts=[(self.NAME,
+                        hashlib.sha256(body.encode()).hexdigest(),
+                        str(len(body)))],
+            trace=["READ  /elsewhere/round-0-notes.md"]))
+        self.out = run("--tier2", "--root", str(self.first),
+                       "--root", str(self.second), str(rcpt))
+
+    def test_the_two_roots_are_genuinely_disjoint(self):
+        """Non-vacuity for the fixture itself. If either root contained the
+        other, or the file existed under the first, the `continue` arm would
+        never be the thing that answers and every leg below would go green
+        against the mutant."""
+        self.assertNotIn(self.first, self.second.parents)
+        self.assertNotIn(self.second, self.first.parents)
+        self.assertFalse((self.first / self.NAME).exists())
+        self.assertTrue((self.second / self.NAME).is_file())
+
+    def test_the_run_completes(self):
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+        self.assertIn("artifacts 1/1", census(self.out.stderr), self.out.stderr)
+
+    def test_the_note_carries_the_relpath_from_the_second_root(self):
+        self.assertEqual(walk_notes(self.out.stderr),
+                         [f"RESOLVED-BY-WALK: {self.NAME} ({self.NAME})"],
+                         self.out.stderr)
+
+    def test_the_non_containing_first_root_does_not_zero_the_counter(self):
+        self.assertIn("resolved-by-walk 1", census(self.out.stderr),
+                      self.out.stderr)
 
 
 # --------------------------------------------------------------------------
