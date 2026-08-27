@@ -1583,8 +1583,18 @@ class TestTheEmitterCannotRaiseOutOfTheFinallyOnAnyShape(_RootCase):
 
 
 class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
-    """ROUND-4/S1 — the FIFTH and (intended) LAST instance of the class the four
-    classes above pin one shape at a time, stated at the FUNCTION level instead.
+    """ROUND-4/S1 — the FIFTH instance of the class the four classes above pin one
+    shape at a time, stated at the FUNCTION level instead.
+
+    ROUND-3/S1 corrects this class's original "(intended) LAST": a SIXTH arrived,
+    at the RESOLVED-BY-WALK emission sites Task 5 added to both legs' clean paths.
+    The correction is in the fixture, not the wording — the claim below was always
+    the right claim, but the `ART` it was tested against held only names that never
+    RESOLVE, so control never reached the new site and the FUNCTION-level statement
+    was true of the docstring and not of the test. The resolving entry now sits
+    first (see the comment on `WALK`), and
+    `TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise` states the same
+    property for `tier2_witness`, which had no hostile-`notes_out` pin at all.
 
     `tier2_artifacts` takes THREE caller-controlled parameters with no type
     enforcement — `trace`, `artifacts` and `notes_out` (~40 direct call sites,
@@ -1603,10 +1613,17 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
     drives all three at once. Driven by DIRECT calls because the CLI cannot
     reach the hazard; that is the point of pinning it."""
 
-    #  ORDER IS LOAD-BEARING: the bare basename first, so it appends an
-    #  UNVERIFIABLE note to the RETURN-value list before the path-shaped name
-    #  raises — that note is what the mirror arm exists to mirror, so a `notes`
-    #  list that is empty at the raise would make every leg here vacuous.
+    #  ORDER IS LOAD-BEARING, in TWO places. The RESOLVING below-top-level name
+    #  first, so control reaches the RESOLVED-BY-WALK emission site — round-3/S1
+    #  found that the fixture below stopped at names that never resolve, which
+    #  left the FUNCTION-level claim in the docstring ("no hostile shape on ANY
+    #  of the three parameters") untested against the one site Task 5 added, and
+    #  that site was the sixth instance of the class. Then the bare basename, so
+    #  it appends an UNVERIFIABLE note to the RETURN-value list before the
+    #  path-shaped name raises — that note is what the mirror arm exists to
+    #  mirror, so a `notes` list that is empty at the raise would make every leg
+    #  here vacuous. The planted file is added in setUp (it needs a root).
+    WALK = "out-9/round-9-findings.md"
     ART = {"bare-basename.md": {"hash": H64, "size": "10"},
            "docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
     TRACE = [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}]
@@ -1622,6 +1639,8 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
     def setUp(self):
         super().setUp()
         self.rv = _import_rv()
+        h, s = self.plant(self.WALK, "# findings\nfatal=0\n")
+        self.ART = {self.WALK: {"hash": h, "size": s}, **self.ART}
 
     def _run(self, notes_out, art=None, trace=None):
         with self.assertRaises(self.rv.LintError) as caught:
@@ -1663,9 +1682,114 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
         notes_out = []
         self._run(notes_out)
         self.assertEqual(notes_out,
-                         ["UNVERIFIABLE: bare-basename.md (no file under root)",
+                         [f"{WALK_PREFIX} {self.WALK} ({self.WALK})",
+                          "UNVERIFIABLE: bare-basename.md (no file under root)",
                           f"{NOTE_PREFIX} /elsewhere/x.md (declared in TRACE, "
                           "not verified)"])
+
+    def test_the_walk_note_site_is_actually_reached_by_this_fixture(self):
+        """Non-vacuity for the widening itself — round-3/S1. Without this the
+        fixture could silently drift back to names that never resolve (the
+        state it was found in) and every hostile-shape leg above would go green
+        while never executing the emission site it claims to cover. Asserted on
+        the CENSUS rather than the note, because the counter is the half that
+        survives a hostile out-parameter."""
+        cov = self.rv._Coverage()
+        with self.assertRaises(self.rv.LintError):
+            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
+                                    cov, None, [])
+        self.assertEqual(cov.counts.get("resolved-by-walk"), 1, cov.counts)
+
+
+class TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise(_RootCase):
+    """ROUND-3/S1 — the SIXTH instance of the class, witness-leg half.
+
+    The class above states the property for `tier2_artifacts`. Task 5 added a
+    SECOND RESOLVED-BY-WALK emission site, in `tier2_witness`, with the same
+    unguarded `notes_out.append(...)` and the same siting: BEFORE the
+    `if len(found) > 1:` ambiguity block, which RAISES under `--strict` — the
+    MANDATED invocation (`quality-gate/SKILL.md:30`). Until this class existed
+    the witness leg had no hostile-`notes_out` pin at all, so the artifacts
+    leg's pin could be widened and passed while this leg stayed open — exactly
+    the leg asymmetry round-1/S2 found and closed once already.
+
+    Measured on `8a5a1f9` (pre-fix), this fixture: `()`, `0`, an object without
+    `.append`, and an object whose `.append` raises each replaced the genuine
+    `Tier-2 --strict: witness artifact ... is ambiguous across roots` LintError
+    — the first three with `AttributeError: '<t>' object has no attribute
+    'append'`, the fourth with the object's own RuntimeError. Measured on
+    `b6990c7` (pre-Task-5, same fixture): all four left the LintError intact,
+    so this leg's hole ON THIS PATH is a Task-5 regression too. The witness
+    leg's THREE `notes_out.extend(...)` sites (C1-R3-S2, on the paths BEYOND
+    the ambiguity raise) are older and are NOT in this change's scope; they are
+    reported, unfixed, in the round-3 receipt.
+
+    Driven by a DIRECT call because the CLI cannot supply a hostile
+    out-parameter; that is the point of pinning it."""
+
+    WALK = "out-9/round-9-findings.md"
+
+    class _NoAppend:
+        """Ordinary API misuse: a caller who passed a `set`, a `_Coverage`, or a
+        namedtuple as the out-parameter lands here."""
+
+    class _RaisingAppend:
+        def append(self, item):
+            raise RuntimeError("notes_out.append exploded")
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        body = "# findings\nfatal=0\n"
+        self.h, _ = self.plant(self.WALK, body)
+        self.other = pathlib.Path(self.td.name) / "second-root"
+        (self.other / "out-9").mkdir(parents=True)
+        (self.other / self.WALK).write_text(body)
+        self.trace = self.rv.parse_trace(
+            [f"  1  WROTE  {self.WALK}  sha256:{self.h}"])
+        self.witness = self.rv.parse_witness(
+            ["lint:all-claims-cited  expect-fail=exit!=0  ran=TRACE#1"])
+
+    def _run(self, notes_out, cov=None):
+        return self.rv.tier2_witness(
+            self.witness, self.trace, [self.root, self.other], True, "PASS",
+            cov, None, None, notes_out)
+
+    def test_no_hostile_notes_out_shape_replaces_the_real_lint_error(self):
+        for label, notes_out in (("tuple", ()), ("int", 0),
+                                 ("object without .append", self._NoAppend()),
+                                 ("object whose .append raises",
+                                  self._RaisingAppend())):
+            with self.subTest(shape=label):
+                with self.assertRaises(self.rv.LintError) as caught:
+                    self._run(notes_out)
+                self.assertIn("is ambiguous across roots", str(caught.exception))
+
+    def test_a_real_list_still_receives_the_note(self):
+        """Non-vacuity, and the mutation this fix could otherwise introduce: an
+        envelope that swallowed the WORK as well as the exceptions would make
+        the leg above green while silently discarding the note — the fail-open
+        direction grudge `e0f0a6b75692` forbids."""
+        notes_out = []
+        with self.assertRaises(self.rv.LintError):
+            self._run(notes_out)
+        self.assertEqual(notes_out,
+                         [f"{WALK_PREFIX} {self.WALK} ({self.WALK})"])
+
+    def test_the_counter_and_the_note_cannot_disagree(self):
+        """ROUND-3/S1 second-order half. With the emission ahead of the bump, a
+        hostile out-parameter lost the note AND skipped the counter, so the
+        census denied a resolution the ruling says happened. The counter is the
+        half that must survive, on every shape."""
+        for label, notes_out in (("real list", []), ("tuple", ()),
+                                 ("object whose .append raises",
+                                  self._RaisingAppend())):
+            with self.subTest(shape=label):
+                cov = self.rv._Coverage()
+                with self.assertRaises(self.rv.LintError):
+                    self._run(notes_out, cov)
+                self.assertEqual(cov.counts.get("resolved-by-walk"), 1,
+                                 cov.counts)
 
 
 class TestTheTruncationRuleHoldsForSlashSuffixedNames(_RootCase):

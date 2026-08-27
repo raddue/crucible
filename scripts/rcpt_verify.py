@@ -1465,6 +1465,39 @@ def _walk_note(name, rel):
             f"({_show_path(str(rel))})")
 
 
+def _emit_walk_note(notes_out, name, rel):
+    """Append the RESOLVED-BY-WALK note to `notes_out`, and NEVER raise doing it.
+
+    #488 round-3/S1 — the SIXTH instance of the hazard class the `except
+    BaseException:` arm's comment in tier2_artifacts enumerates (see there for the
+    first five). Task 5 added two `notes_out.append(...)` emission sites, one per leg,
+    and both are sited BEFORE the `if len(found) > 1:` ambiguity block that RAISES
+    under `--strict` — the MANDATED invocation. `notes_out` is a caller-controlled
+    parameter with no type enforcement (~40 call sites, all positional), so `()`, `0`,
+    an object without `.append`, and an object whose `.append` raises are all ordinary
+    API misuse. Measured on `8a5a1f9`, on BOTH legs, all four shapes replaced a genuine
+    `Tier-2 --strict: ... absent under all bases` (artifacts) / `... is ambiguous across
+    roots` (witness) LintError — the first three with `AttributeError: '<t>' object has
+    no attribute 'append'`, the fourth with the object's own RuntimeError. Measured on
+    `b6990c7` (pre-Task-5), same two fixtures: all four left the LintError intact on
+    both legs, so this is a regression Task 5 introduced, not a pre-existing hole.
+
+    The note is RENDERED INSIDE the envelope, not passed in already-rendered: a call's
+    ARGUMENTS are evaluated BEFORE the callee is entered, and `_walk_note` runs
+    `_show_path(name)` -> `str(name)` on a public-API-supplied ARTIFACTS key, which is
+    the same raising-`__str__` shape the `finally:` block's own wrapper exists for. A
+    helper taking a finished string would leave that half outside the guarantee.
+
+    `Exception`, not `BaseException`: KeyboardInterrupt/SystemExit propagate. Swallowing
+    is right here for the reason it is right at the two sibling wrappers — this note is
+    an advisory side channel and must never preempt the verdict."""
+    try:
+        if notes_out is not None:
+            notes_out.append(_walk_note(name, rel))
+    except Exception:
+        pass
+
+
 def resolve_base(name: str, root, found=None, refused=None):
     """Resolve `name` against one or more roots; return the FIRST hit, else None.
 
@@ -2219,10 +2252,25 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             # copy removes the arm as well.
             _rel = _below_top_level(resolved, root)
             if _rel is not None:
-                if notes_out is not None:
-                    notes_out.append(_walk_note(name, _rel))
+                # COUNTER FIRST, note second — round-3/S1. With the emission ahead of
+                # the bump, a `notes_out` that cannot take the note lost the note AND
+                # skipped the counter, so the census denied an event the ruling says
+                # happened. This order cannot produce that contradiction: the bump is
+                # unconditional on resolution, and the note is the only half a hostile
+                # out-parameter can suppress (in which case NO note on this channel
+                # reaches stderr at all, so there is nothing left to disagree with).
+                #
+                # REDUNDANT while `_emit_walk_note`'s envelope holds, and deliberately
+                # so: measured on this commit, reverting THIS order alone leaves both
+                # suites green, because a guarded emission cannot raise past the bump.
+                # It is the second layer — if a later change ever narrows that envelope,
+                # this order degrades the failure to "counter right, note missing"
+                # instead of "counter wrong, note missing, and the verdict replaced".
+                # Only the two mutations TOGETHER redden
+                # `test_the_counter_and_the_note_cannot_disagree`.
                 if cov is not None:
                     cov.bump("resolved-by-walk")
+                _emit_walk_note(notes_out, name, _rel)
             if len(found) > 1:
                 # #486 / D2 — two or more DISTINCT realpaths. Fail closed under --strict:
                 # first-hit-wins here would verify against a plausible but WRONG file, a
@@ -2358,8 +2406,13 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
         # an object whose `.extend` raises are all ordinary API misuse — and all four
         # were measured destroying a genuine `Tier-2 --strict: ... absent under all
         # bases` LintError. Wrapping the BODY rather than the CALL is what stops a
-        # sixth: any line a later change adds to this arm is inside the envelope by
-        # construction, exactly as the `finally:` block's twin wrapper already is.
+        # sixth INSIDE THIS ARM: any line a later change adds here is inside the
+        # envelope by construction, exactly as the `finally:` block's twin wrapper
+        # already is. #488 round-3/S1 records the bound that claim actually has —
+        # the sixth instance arrived, and it arrived OUTSIDE this arm, at the two
+        # RESOLVED-BY-WALK emission sites Task 5 added to the two legs' clean paths.
+        # A per-block envelope closes a block, not a parameter; each new site that
+        # touches `notes_out` still has to carry its own (see `_emit_walk_note`).
         # `Exception`, not `BaseException`: KeyboardInterrupt/SystemExit propagate.
         # Swallowing is right HERE for the same reason it is right there — these notes
         # are an advisory side channel and must never preempt the verdict.
@@ -3270,10 +3323,13 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             _rel = (_below_top_level(resolved, root)
                     if resolved is not None else None)
             if _rel is not None:
-                if notes_out is not None:
-                    notes_out.append(_walk_note(art_name, _rel))
+                # Round-3/S1 — the artifacts leg's order and the artifacts leg's
+                # no-raise envelope, for the artifacts leg's reasons. Both legs move
+                # together deliberately: guarding one and not the other recreates the
+                # leg asymmetry round-1/S2 already found and closed once.
                 if cov is not None:
                     cov.bump("resolved-by-walk")
+                _emit_walk_note(notes_out, art_name, _rel)
             if len(found) > 1:
                 # #486 / D2 — same rule as the artifacts leg, its OWN wording. The two messages
                 # differ because :893 and :1127 already differ ("path-shaped artifact …" vs
