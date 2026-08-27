@@ -88,6 +88,11 @@ KEEP_DIR = REPO / ".dec31-keep"
 # then went on to print per-row `unexpected`/`missing` diffs computed against a tree
 # it had just declared broken -- noise shaped exactly like the vacuity signal this
 # harness exists to catch.
+#
+# The `tests?` half is UNPINNED and currently unreachable: no fixture in this harness
+# ever produces a 1-test collection, so measured by reverting that half alone,
+# nothing in the harness suite goes red. Kept as cheap tolerance for a future
+# single-test run, not as a mechanism any row depends on.
 _RAN = re.compile(r"^Ran (\d+) tests?", re.M)   # `tests?`: unittest prints "1 test"
 
 _HDR = re.compile(r"^(?:FAIL|ERROR): (\S+) \((.+?)\)", re.M)
@@ -1036,7 +1041,14 @@ def _run_row(row):
         proc = subprocess.run([sys.executable, SUITE], cwd=tree,
                               capture_output=True, text=True)
     except StaleAnchor:
-        shutil.rmtree(tree, ignore_errors=True)
+        # Same `tree is not None` guard as the sibling arm below, and for the same
+        # reason: `shutil.rmtree(None, ...)` raises TypeError, which
+        # `ignore_errors=True` does NOT suppress -- it would mask the StaleAnchor and
+        # misattribute the row's failure. Unreachable today (only `_apply` raises
+        # StaleAnchor, and `tree` is bound by then); this matches the `tree = None`
+        # initialization, which is future-proofing against exactly that gap.
+        if tree is not None:
+            shutil.rmtree(tree, ignore_errors=True)
         raise
     except BaseException:
         if tree is not None:

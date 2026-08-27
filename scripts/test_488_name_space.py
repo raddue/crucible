@@ -3210,6 +3210,10 @@ class TestABlockedVerdictCannotDisarmTheSupersessionWitnessGate(_TwoRootCase):
         out = self.verify(self._receipt("PASS"), name="pass.rcpt")
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("EVALUATED at Tier-2", out.stderr)
+        # #488 warden-r2/F-C — the GENERIC half of the message, pinned here so the
+        # BLOCKED assertion below is a distinctness claim and not just "some string
+        # containing `EVALUATED at Tier-2`".
+        self.assertIn("the witness resolved to no evaluated predicate", out.stderr)
 
     def test_the_fail_twin_is_refused_the_supersession(self):
         # Non-vacuity control 2: GH #501 armed this leg too, so the hole was
@@ -3226,6 +3230,21 @@ class TestABlockedVerdictCannotDisarmTheSupersessionWitnessGate(_TwoRootCase):
         self.assertIn("EVALUATED at Tier-2", out.stderr,
                       f"BLOCKED receipt retired a predecessor with a witness "
                       f"that resolved nowhere; census: {line}")
+        # #488 warden-r2/F-C — the substring above occurs in BOTH message branches,
+        # so on its own it does not pin warden-r2/F1's fix at all. F1's whole subject
+        # is the WORDING: on BLOCKED the witness leg is verdict-gated OFF (D8.2
+        # sub-decision 5), so the generic "the witness resolved to no evaluated
+        # predicate" names a resolution that never happened and sends the author
+        # hunting a citation that is not the problem. Pin the BLOCKED-specific
+        # sentence, and pin that the generic one is NOT what this verdict gets.
+        self.assertIn("this receipt is BLOCKED, so the witness leg never ran",
+                      out.stderr,
+                      f"BLOCKED refusal lost its verdict-specific wording; "
+                      f"census: {line}")
+        self.assertNotIn("the witness resolved to no evaluated predicate",
+                         out.stderr,
+                         "BLOCKED refusal regressed to the generic PASS/FAIL "
+                         "sentence, which is factually wrong on this path")
         self.assertEqual(out.returncode, 1, out.stderr)
 
     def test_the_witness_leg_itself_is_still_verdict_gated(self):
