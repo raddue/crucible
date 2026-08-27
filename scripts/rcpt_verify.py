@@ -1942,6 +1942,49 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
 
 _PROVENANCE_VERBS = frozenset({"READ", "EDIT", "WROTE"})
 
+# #488 temper/leg-1 — the basenames that are NOT a usable key for the PROVENANCE-ONLY
+# basename match. `rsplit("/", 1)[-1]` is not a basename function: it is a string split,
+# and three legal ARTIFACTS spellings drive it to a value that names no file —
+# `x/` -> "", `x/.` -> ".", `x/..` -> "..". F4 hardened only the "" symptom, with a
+# TRUTHINESS test. `.` and `..` are truthy, so they still key `verified_bases` /
+# `unevaluated_bases`, and each silences a whole family of unrelated TRACE names.
+#
+# Measured on 5e1b6df, four arms, one harness (`q` is a REAL file the receipt never
+# declares and the run never verifies; ARTIFACTS holds a genuinely hash-verified entry):
+#
+#   ARTIFACTS `x`    TRACE READ `q`     -> PROVENANCE-ONLY: q      artifacts 1/1  EXIT=0
+#   ARTIFACTS `x/.`  TRACE READ `q/.`   -> (SILENT)                artifacts 1/1  EXIT=0
+#   ARTIFACTS `x/.`  TRACE READ `q`     -> PROVENANCE-ONLY: q      artifacts 1/1  EXIT=0
+#   ARTIFACTS `x`    TRACE READ `q/.`   -> PROVENANCE-ONLY: q/.    artifacts 1/1  EXIT=0
+#
+# Rows 1/3/4 are the non-vacuity controls: row 2's silence is caused by the `.` key and
+# by nothing else. `x/.` is legal under §3's lexical grammar (`.` is not `..`), resolves,
+# and hash-verifies, so the receipt looks immaculate — and one extra character in the
+# author's OWN ARTIFACTS spelling buys silence on arbitrarily many undeclared reads.
+# That is silence a receipt author can buy, which is the direction grudge e0f0a6b75692
+# forbids and which _emit_provenance_notes's own F3 paragraph names as the failure the
+# exact-name override exists to prevent.
+#
+# `..` is reachable through `unevaluated_bases` even though it is not through
+# `verified_bases`: a declared `x/..` resolves to a DIRECTORY and so never hash-verifies,
+# but a run truncated before reaching it puts `".."` into the unevaluated set, which keys
+# the same match.
+#
+# ACCEPTED COST, stated because this widening BUYS it and nothing else records it. The
+# degenerate key was also, coincidentally, the only thing bridging §3.2's two spellings
+# for a `/.`-suffixed name: `ARTIFACTS x/.` (verified) cited in TRACE by the absolute form
+# §3.2 mandates was SILENT before, because both sides split to `.`. It now emits a note
+# for an artifact that genuinely verified. That is cry-wolf on an advisory channel — the
+# FAIL-NOISY direction — and it is the side of the trade this emitter's docstring already
+# rules for: the alternative is silence a receipt author buys by spelling their own
+# ARTIFACTS entry with a `/.` suffix, which is grudge e0f0a6b75692's direction. It needs
+# a degenerate spelling in the author's OWN declaration to arise at all; the ordinary
+# `ARTIFACTS x` + absolute-form TRACE control is untouched. It is the same trade F4 made
+# for `x/`, extended to the two spellings F4's truthiness test missed. Not closed by a
+# more specific key: the docstring's first bullet measures 13 verified entries mislabelled
+# when the key is narrowed past basename, which is a strictly worse exchange.
+_DEGENERATE_BASES = frozenset({"", ".", ".."})
+
 
 def _trace_basename(entry):
     """The name a TRACE entry cites, and its basename. The name is the FIRST token of
@@ -1973,7 +2016,8 @@ def _trace_basename(entry):
 
 
 def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
-                           unevaluated_names, unverified_names, notes_out):
+                           unevaluated_names, unverified_names, notes_out,
+                           verified_names=frozenset()):
     """§3.4 / T2 — silence is not permitted (grudge e0f0a6b75692).
 
     One note per READ/EDIT/WROTE entry whose BASENAME matches no ARTIFACTS basename
@@ -2123,19 +2167,41 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
                 # itself evaluated and reported unverified. See the docstring for why
                 # it does not (and must not) close the general collision.
                 if name not in unverified_names:
-                    # #488 adversarial/F4 — `base` must be TRUTHY to match.
-                    # `rsplit("/", 1)[-1]` maps every name ending in `/` to `""`, and
-                    # `if not name: continue` above screens an empty NAME, not an empty
-                    # BASE. One legally-spelled verified `ARTIFACTS` entry (`x/`, which
-                    # resolve_base normalises and hash-verifies) would otherwise put
-                    # `""` into `verified_bases` and from then on silence EVERY TRACE
-                    # name ending in `/`, however unrelated — a degenerate key that
-                    # swallows a whole family of names. Guarded here as well as at the
-                    # `.add` site, so an empty base cannot match `unevaluated_bases`
-                    # either; `unevaluated_names` above carries that set's own
-                    # `/`-suffixed members instead.
-                    if base and (base in verified_bases
-                                 or base in unevaluated_bases):
+                    # #488 temper/leg-1 — the VERIFIED set's exact-name leg, the third
+                    # of three and the one that was missing. `unevaluated_names` (above)
+                    # and `unverified_names` (this test) already carry the spellings the
+                    # basename key cannot; the verified set had no such leg, so a name
+                    # whose basename is degenerate had nothing to fall back on and got a
+                    # note asserting the opposite of the census. Measured on 5e1b6df:
+                    # ARTIFACTS `x/` + TRACE `READ x/` renders `artifacts 1/1` AND
+                    # `PROVENANCE-ONLY: x/ (declared in TRACE, not verified)` on the same
+                    # stderr, about the same name.
+                    #
+                    # NESTED INSIDE the `unverified_names` test, deliberately, NOT a
+                    # sibling of the `unevaluated_names` test above: round-3/Minor-4
+                    # established that two DISTINCT ARTIFACTS dict keys can share one
+                    # SPELLING, so a spelling can sit in `verified_names` and
+                    # `unverified_names` at once. Nesting makes UNVERIFIED win that tie —
+                    # the fail-noisy direction, which is the one Minor-4 already ruled for.
+                    if name in verified_names:
+                        continue
+                    # #488 adversarial/F4, widened by #488 temper/leg-1 — `base` must be
+                    # a NON-DEGENERATE key to match. `rsplit("/", 1)[-1]` maps every name
+                    # ending in `/` to `""`, in `/.` to `"."`, and in `/..` to `".."`, and
+                    # `if not name: continue` above screens an empty NAME, not a degenerate
+                    # BASE. One legally-spelled verified `ARTIFACTS` entry (`x/` or `x/.`,
+                    # both of which resolve_base normalises and hash-verifies) would
+                    # otherwise put that degenerate key into `verified_bases` and from then
+                    # on silence EVERY TRACE name with the same degenerate basename, however
+                    # unrelated — a key that swallows a whole family of names. F4 tested
+                    # truthiness, which caught `""` and missed `.`/`..`; see
+                    # _DEGENERATE_BASES for the four-arm measurement. Guarded here as well
+                    # as at the `.add` site, so a degenerate base cannot match
+                    # `unevaluated_bases` either; `unevaluated_names` above and
+                    # `verified_names` just above carry those sets' own members instead.
+                    if base not in _DEGENERATE_BASES and (
+                            base in verified_bases
+                            or base in unevaluated_bases):
                         continue
                 notes_out.append(
                     f"PROVENANCE-ONLY: {_show_path(name)} "
@@ -2376,11 +2442,13 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             # pre-#488 code returned `[]` for. The advisory's own bookkeeping must never
             # be able to fail a verification that passed.
             #
-            # #488 adversarial/F4 — an EMPTY basename is never stored. A legally-spelled
-            # `x/` resolves and hash-verifies, and `""` in `verified_bases` would then
-            # match every TRACE name ending in `/`; see _emit_provenance_notes.
+            # #488 adversarial/F4, widened by #488 temper/leg-1 — a DEGENERATE basename
+            # is never stored. A legally-spelled `x/` or `x/.` resolves and hash-verifies,
+            # and `""` / `"."` in `verified_bases` would then match every TRACE name
+            # ending in `/` / `/.`; see _DEGENERATE_BASES and _emit_provenance_notes. F4
+            # stored anything TRUTHY, which excluded `""` and admitted `.`.
             vbase = str(name).rsplit("/", 1)[-1]
-            if vbase:
+            if vbase not in _DEGENERATE_BASES:
                 verified_bases.add(vbase)
             verified_keys.add(name)
             # <size> is parsed-but-not-validated, matching lint.py
@@ -2467,7 +2535,14 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                     {str(n).rsplit("/", 1)[-1] for n in unevaluated},
                     {str(n) for n in unevaluated},
                     {str(n) for n in evaluated if n not in verified_keys},
-                    notes_out)
+                    notes_out,
+                    # #488 temper/leg-1 — the verified set's exact-name leg. Built from
+                    # `verified_keys`, which already exists (it is what the line above
+                    # subtracts), so this adds a comprehension and no new bookkeeping.
+                    # Inside the same `try` as its siblings, so it keeps the round-3/S1
+                    # no-raise envelope: a raising `__str__` here would otherwise replace
+                    # the in-flight LintError.
+                    {str(n) for n in verified_keys})
             except Exception:
                 pass
     return notes

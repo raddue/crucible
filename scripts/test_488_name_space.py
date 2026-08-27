@@ -1402,6 +1402,145 @@ class TestATrailingSlashArtifactNameCannotSilenceUnrelatedNames(_RootCase):
                         out.stderr)
 
 
+class TestADegenerateVerifiedBasenameCannotSilenceUnrelatedNames(_RootCase):
+    """TEMPER/LEG-1 — ADVERSARIAL 4's sibling, one character over.
+
+    `rsplit("/", 1)[-1]` is a string split, not a basename function, and THREE
+    legal `ARTIFACTS` spellings drive it to a value that names no file:
+    `x/` -> `""`, `x/.` -> `"."`, `x/..` -> `".."`. F4 hardened only the `""`
+    symptom, and it did so with a TRUTHINESS test — so `.` and `..` still keyed
+    `verified_bases` / `unevaluated_bases`, and each silenced a whole family of
+    unrelated `TRACE` names.
+
+    `x/.` is legal under §3's lexical grammar (`.` is not a `..` component),
+    `resolve_base` normalises the `/.` away, and it hash-verifies — so the
+    receipt renders `artifacts 1/1` and EXIT=0 and looks immaculate. What one
+    extra character in the author's OWN `ARTIFACTS` spelling then buys is silence
+    on arbitrarily many undeclared reads. Silence a receipt author can buy is the
+    direction grudge `e0f0a6b75692` forbids, and is the exact failure
+    `_emit_provenance_notes`'s F3 paragraph says the exact-name override exists
+    to prevent.
+
+    The four arms below are ADVERSARIAL 4's table shifted onto the `.` key, with
+    three non-vacuity controls so the silence can only be attributed to it."""
+
+    def setUp(self):
+        super().setUp()
+        # `q` is REAL, DIFFERENT, and never declared — so its TRACE citation is a
+        # genuinely unverified read the note exists to report.
+        self.plant("q", "secret\n")
+        self.h, self.s = self.plant("x", "body\n")
+
+    def _run(self, art, cited, name):
+        out = self.verify(receipt(artifacts=[(art, self.h, self.s)],
+                                  trace=[f"READ  {cited}"]), name=name)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", out.stderr)   # non-vacuity: it verified
+        return out
+
+    def test_a_dot_suffixed_artifact_cannot_silence_an_undeclared_dot_read(self):
+        """The defect itself: this arm was SILENT before the fix."""
+        out = self._run("x/.", "q/.", "dot.txt")
+        self.assertTrue(any("q/." in n for n in notes(out.stderr)), out.stderr)
+
+    def test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read(self):
+        """`..` reaches the OTHER keyed set, so the guard is needed at both sites.
+
+        It never reaches `verified_bases` — `x/..` resolves to a DIRECTORY and so
+        never hash-verifies — but §3.4's truncation rule puts every NEVER-REACHED
+        declared name's basename into `unevaluated_bases`, which keys the same
+        match. So the fixture declares `x/..` AFTER an absent path-shaped entry
+        whose `--strict` raise truncates the loop before reaching it: `".."`
+        lands in the unevaluated set, and the undeclared `TRACE READ q/..` was
+        silenced by it. Measured pre-fix on this exact receipt: SILENT, with
+        `artifacts 1/2 ... partial`."""
+        out = self.verify(receipt(
+            artifacts=[("x", self.h, self.s),
+                       ("nope/absent.md", "d" * 64, "9"),
+                       ("x/..", self.h, self.s)],
+            trace=["READ  q/.."]), "--strict", name="dotdot.txt")
+        # Non-vacuity: the run really was TRUNCATED, so `x/..` really is
+        # unevaluated rather than merely unverified. `--strict` is what makes the
+        # absent path-shaped entry RAISE rather than degrade to UNVERIFIABLE.
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("partial", out.stderr)
+        self.assertIn("artifacts 1/2", out.stderr)
+        self.assertTrue(any("q/.." in n for n in notes(out.stderr)), out.stderr)
+
+    def test_the_control_with_a_plain_artifact_name_emits(self):
+        """Non-vacuity: the note fires on this TRACE name when the ARTIFACTS
+        spelling is ordinary, so the silence above was about the `.` key."""
+        out = self._run("x", "q/.", "ctl-art.txt")
+        self.assertTrue(any("q/." in n for n in notes(out.stderr)), out.stderr)
+
+    def test_the_control_with_a_plain_trace_name_emits(self):
+        """Non-vacuity from the other side: the same degenerate ARTIFACTS
+        spelling does not silence an ordinary TRACE name."""
+        out = self._run("x/.", "q", "ctl-trace.txt")
+        self.assertTrue(any(n.rstrip().endswith("q (declared in TRACE, not verified)")
+                            for n in notes(out.stderr)), out.stderr)
+
+
+class TestAVerifiedNameCitedVerbatimIsSilent(_RootCase):
+    """TEMPER/LEG-1 — the VERIFIED set's exact-name leg, the third of three.
+
+    `unevaluated_names` (round-3/Minor-3) and `unverified_names` (F3) each carry
+    the full declared spellings that the basename key cannot represent. The
+    VERIFIED set had no such leg — so a name whose basename is degenerate had
+    nothing to fall back on, and a `TRACE` entry citing a name this run declared,
+    resolved and HASH-VERIFIED still got a note saying it was "not verified".
+
+    Measured before the fix: `ARTIFACTS x/` + `TRACE READ x/` rendered
+    `artifacts 1/1` AND `PROVENANCE-ONLY: x/ (declared in TRACE, not verified)`
+    on the SAME stderr, about the SAME name — the advisory channel stating the
+    opposite of the census. Advisory-only, so no exit code moved; the cost is
+    cry-wolf on the channel whose whole job is to be believed.
+
+    This leg is also what keeps the degenerate-key fix above honest: once `.`
+    stops keying `verified_bases`, an honest `ARTIFACTS x/.` + `TRACE READ x/.`
+    receipt would start emitting a false note by exactly this mechanism."""
+
+    def setUp(self):
+        super().setUp()
+        self.h, self.s = self.plant("x", "body\n")
+
+    def _run(self, spelling, name):
+        out = self.verify(receipt(artifacts=[(spelling, self.h, self.s)],
+                                  trace=[f"READ  {spelling}"]), name=name)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", out.stderr)   # non-vacuity: it verified
+        return out
+
+    def test_a_slash_suffixed_verified_name_gets_no_note(self):
+        self.assertEqual(notes(self._run("x/", "slash.txt").stderr), [])
+
+    def test_a_dot_suffixed_verified_name_gets_no_note(self):
+        """CONTROL — green in BOTH directions, deliberately, and the only test of
+        this pair that is. Before the degenerate-key fix this name was silent by
+        COINCIDENCE (`.` keyed `verified_bases`); after it, it is silent because
+        `verified_names` says so. So it reddens no `dec31_sweep` row and pins no
+        leg on its own — what it pins is the COUPLING: it is the test that goes
+        red if the degenerate-key fix is ever landed without this exact-name leg,
+        which would widen the false note from the `/` family to the `/.` family.
+        Its slash-suffixed sibling above is the arm that actually fails pre-fix."""
+        self.assertEqual(notes(self._run("x/.", "dot.txt").stderr), [])
+
+    def test_the_plain_control_also_gets_no_note(self):
+        """Non-vacuity twin: the plain spelling was already silent, so the two
+        tests above are about the VERIFIED leg and not about the spelling."""
+        self.assertEqual(notes(self._run("x", "plain.txt").stderr), [])
+
+    def test_an_unverified_spelling_still_speaks(self):
+        """The fix must not silence by SPELLING. Same degenerate `x/.` name, but
+        the declared sha256 does not match, so the entry is evaluated and NOT
+        verified — `unverified_names` must still win and the note must fire."""
+        bad = "0" * 64
+        out = self.verify(receipt(artifacts=[("x/.", bad, self.s)],
+                                  trace=["READ  x/."]), name="mismatch.txt")
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(any("x/." in n for n in notes(out.stderr)), out.stderr)
+
+
 class TestTheTruncationPartitionHoldsAtScale(_RootCase):
     """ADVERSARIAL 5 — the evaluated/unevaluated partition under a mid-loop raise
     with a large `ARTIFACTS` block.

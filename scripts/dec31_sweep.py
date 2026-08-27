@@ -24,11 +24,12 @@ times) as separate lines, and leaving that row's tree on disk with its path prin
 
 Every `expect` set and `TOTAL_TESTS` below is MEASURED against the tree as it
 stands, never transcribed from the plan: Task 5's five review rounds grew
-`scripts/test_488_name_space.py` from 54 tests to 160, and the plan's own tables
-were written before that. When the suite legitimately gains a test, this file goes
-red twice over -- once on the `Ran N tests` count, once as `unexpected` on any row
-the new test reaches -- and the fix is to RE-MEASURE and record what is true now,
-never to widen a set until it stops complaining. A set that has to LOSE a member is
+`scripts/test_488_name_space.py` from 54 tests to 160, and temper leg-1 grew it
+again to 168; the plan's own tables were written before that. When the suite
+legitimately gains a test, this file goes red twice over -- once on the `Ran N
+tests` count, once as `unexpected` on any row the new test reaches -- and the fix
+is to RE-MEASURE and record what is true now, never to widen a set until it stops
+complaining. A set that has to LOSE a member is
 the signal this harness exists for: a pin that stopped discriminating.
 
 This harness does NOT discharge AC-6 on its own: it makes and mutates the copy and
@@ -53,7 +54,7 @@ SUITE = "scripts/test_488_name_space.py"
 
 # The whole suite must still be COLLECTED on every row, row 0 included: a mutation
 # that changes the NUMBER of tests has broken the tree, not a pin.
-TOTAL_TESTS = 160
+TOTAL_TESTS = 168
 
 _HDR = re.compile(r"^(?:FAIL|ERROR): (\S+) \((.+?)\)", re.M)
 
@@ -239,6 +240,12 @@ GITDEEP = "TestAGitToplevelDeepResolutionIsSilent"
 WITMASK = "TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise"
 EXACTSENT = "TestOnlyTheExactSentinelIsEverTreatedAsOne"
 INLINEHDR = "TestTheSentinelRuleReachesTheInlineHeaderBodyShape"
+# temper/leg-1 — the degenerate-basename fail-open and the verified set's
+# exact-name leg. DEGEN's `..` arm is driven by the `--strict` path-shaped
+# raise (it needs a TRUNCATED run to populate `unevaluated_bases`), which is
+# why it joins row 1's set and not only its own.
+DEGEN = "TestADegenerateVerifiedBasenameCannotSilenceUnrelatedNames"
+VERBATIM = "TestAVerifiedNameCitedVerbatimIsSilent"
 
 
 def E(*groups):
@@ -283,6 +290,8 @@ MUTANTS = [
                    "test_the_whole_finally_body_is_skipped_when_no_notes_were_asked_for"),
                   (PTRUNC,
                    "test_truncation_by_the_strict_path_shaped_raise_behaves_identically"),
+                  (DEGEN,
+                   "test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read"),
                   (SLASHTRUNC,
                    "test_a_never_reached_slash_suffixed_name_stays_silent",
                    "test_an_undeclared_slash_suffixed_name_still_speaks"))),
@@ -291,12 +300,15 @@ MUTANTS = [
     # (`chunk-A/fix-journal.md`) against its own TRACE forms, so COLLISION reddens
     # here too -- measured, not predicted from the class's stated subject.
     #
-    # The match anchor is the CURRENT two-line `if base and (...)` form (the empty-
-    # basename guard landed after the plan's text was written); the mutation is the
-    # same one the plan names -- key the verified test on the LITERAL name.
+    # The match anchor is the CURRENT three-line `if base not in _DEGENERATE_BASES
+    # and (...)` form (the empty-basename guard landed after the plan's text was
+    # written, and temper leg-1 widened it to the whole degenerate set); the
+    # mutation is the same one the plan names -- key the verified test on the
+    # LITERAL name.
     dict(id=2, criterion="AC-6 T2 leg 4", what="the literal parts[0] key",
-         edits=[("                    if base and (base in verified_bases\n"
-                 "                                 or base in unevaluated_bases):",
+         edits=[("                    if base not in _DEGENERATE_BASES and (\n"
+                 "                            base in verified_bases\n"
+                 "                            or base in unevaluated_bases):",
                  "                    if name in verified_bases or base in unevaluated_bases:"),
                 ("                verified_bases.add(vbase)",
                  "                verified_bases.add(str(name))")],
@@ -308,6 +320,11 @@ MUTANTS = [
                    "test_the_two_channels_interleave_in_production_order"),
                   (COLLISION,
                    "test_the_collision_is_silent"),
+                  # temper/leg-1 — this mutation replaces the WHOLE widened guard,
+                  # so the `_DEGENERATE_BASES` screening goes with it and the `..`
+                  # silencing returns.
+                  (DEGEN,
+                   "test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read"),
                   (KEYED,
                    "test_a_trace_absolute_path_of_a_verified_artifact_emits_nothing",
                    "test_a_trace_name_matching_an_unresolved_artifact_still_emits_the_note"),
@@ -332,10 +349,13 @@ MUTANTS = [
     # two copies in AC-6's arithmetic, and why one build plus a coincidence would not do.
     dict(id=4, criterion="AC-6 T2 leg 6 (build 1)", what="notes returned BY VALUE",
          edits=[("    evaluated = set()\n", "    evaluated = set()\n    _late = []\n"),
+                # The anchor carries temper leg-1's `verified_names` argument, which
+                # sits BETWEEN `notes_out` and the close paren -- so the pre-leg-1
+                # two-line form no longer occurs and would abort the row.
                 ("                    {str(n) for n in evaluated if n not in verified_keys},\n"
-                 "                    notes_out)",
+                 "                    notes_out,\n",
                  "                    {str(n) for n in evaluated if n not in verified_keys},\n"
-                 "                    _late)"),
+                 "                    _late,\n"),
                 # NOT the bare `    return notes`: anchors are matched with `str.count`,
                 # and that string is a SUBSTRING of `        return notes_ambiguous + ...`
                 # in tier2_witness, so the bare form counts 2 and trips `_apply`'s
@@ -348,6 +368,14 @@ MUTANTS = [
                    "test_a_hostile_entry_object_cannot_raise_out_of_the_emitter",
                    "test_one_malformed_entry_does_not_cost_the_other_entries_their_notes",
                    "test_the_control_shows_a_well_formed_trace_still_emits"),
+                  # temper/leg-1 — both arms assert a note that this build routes onto
+                  # the return value, so both lose it. VERBATIM's two silent arms stay
+                  # green: a build that emits nothing satisfies "no note" for free,
+                  # which is why only its speaking arm is here.
+                  (DEGEN,
+                   "test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read"),
+                  (VERBATIM,
+                   "test_an_unverified_spelling_still_speaks"),
                   (KEYED,
                    "test_a_trace_name_matching_a_hash_mismatched_artifact_still_emits_the_note"),
                   (MALFORM,
@@ -382,9 +410,11 @@ MUTANTS = [
     dict(id=5, criterion="AC-6 T2 leg 6 (build 2)", what="the truncation rule dropped",
          edits=[("                if name in unevaluated_names:\n"
                  "                    continue\n", ""),
-                ("                    if base and (base in verified_bases\n"
-                 "                                 or base in unevaluated_bases):",
-                 "                    if base and base in verified_bases:")],
+                ("                    if base not in _DEGENERATE_BASES and (\n"
+                 "                            base in verified_bases\n"
+                 "                            or base in unevaluated_bases):",
+                 "                    if base not in _DEGENERATE_BASES and (\n"
+                 "                            base in verified_bases):")],
          expect=E((PTRUNC,
                    "test_truncation_by_hash_mismatch_keeps_the_evaluated_half_audible",
                    "test_truncation_by_the_strict_path_shaped_raise_behaves_identically"),
@@ -416,6 +446,20 @@ MUTANTS = [
                    "test_one_malformed_entry_does_not_cost_the_other_entries_their_notes",
                    "test_the_control_shows_a_well_formed_trace_still_emits",
                    "test_the_emitter_itself_swallows_a_non_iterable_trace"),
+                  # temper/leg-1 — every arm of both classes cites its TRACE entry with
+                  # READ, so this build silences all of them. DEGEN loses all four (two
+                  # defect arms plus both non-vacuity controls, which is the point: the
+                  # controls are what make the class fail LOUDLY under a global silencer
+                  # rather than passing by coincidence). VERBATIM loses only its
+                  # speaking arm — its two silent arms are satisfied for free by a
+                  # build that emits nothing.
+                  (DEGEN,
+                   "test_a_dot_suffixed_artifact_cannot_silence_an_undeclared_dot_read",
+                   "test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read",
+                   "test_the_control_with_a_plain_artifact_name_emits",
+                   "test_the_control_with_a_plain_trace_name_emits"),
+                  (VERBATIM,
+                   "test_an_unverified_spelling_still_speaks"),
                   (ESC,
                    "test_neither_the_nul_nor_the_ansi_escape_reaches_the_channel_raw",
                    "test_the_hostile_trace_name_is_still_reported"),
