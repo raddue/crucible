@@ -2594,7 +2594,7 @@ class TestCoverageRendering(unittest.TestCase):
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 3/4 witness 0/0 unreached 0 "
             "not-reachable 1 (unresolvable-basename) ambiguous 0 wrong-name 0 "
-            "empty-range 0 discarded 0 not-applicable 1 (fail-leg-no-range)")
+            "empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 1 (fail-leg-no-range)")
 
     def test_partial_shape_renders_witness_0_0(self):
         """S2 — d is what the census MEASURED. A run truncated before the witness leg
@@ -2604,7 +2604,7 @@ class TestCoverageRendering(unittest.TestCase):
         c.bump("ambiguous"); c.partial = True
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 1/4 witness 0/0 unreached 0 not-reachable 0 "
-            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 not-applicable 0 partial")
+            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0 partial")
 
     def test_codes_are_sorted_and_deduplicated(self):
         """CPython randomises str hashing per process (PYTHONHASHSEED); an unsorted
@@ -3149,7 +3149,7 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 1/1 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "discarded 0 not-applicable 0")
+                         "discarded 0 resolved-by-walk 0 not-applicable 0")
 
     def test_partial_shape_on_a_truncated_census(self):
         out = self._run("--tier2", "--strict", "--root", str(self.root),
@@ -3158,7 +3158,7 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 0/0 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "discarded 0 not-applicable 0 partial")
+                         "discarded 0 resolved-by-walk 0 not-applicable 0 partial")
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
@@ -4172,7 +4172,7 @@ class TestHostilePathCannotForgeACensusLine(_InqBase):
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
     EVIL = "ev\nTIER2-COVERAGE: " + FORGED + "\nil"
 
     def census_lines(self, stderr):
@@ -4241,7 +4241,7 @@ class TestSplitlinesSeparatorsCannotForgeACensusLine(_InqBase):
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
     # Written as chr()/escape rather than as literals: a raw U+2028 in this file would
     # itself be invisible, and the point of the finding is that it is not inert.
     SEPARATORS = (("NEL", "\x85", r"\x85"),
@@ -5083,6 +5083,19 @@ class TestArtifactReadsAreBounded(_InqBase):
         self.assertGreaterEqual(_import_rv().ARTIFACT_READ_CAP, 16 * 1024 * 1024)
 
 
+def _cov_tail(**overrides):
+    """The full TIER2-COVERAGE: sub-count tail, derived from rv._COV_COUNTERS so a
+    future counter cannot silently go untested here the way the fifth ordering
+    constraint forced this file to be hand-edited for the eighth. `overrides` supplies
+    non-zero values and/or the parenthetical reason codes this file's tails carry
+    (e.g. `_cov_tail(**{"empty-range": "1 (past-eof)"})`); every counter not named
+    renders its bare zero, in _COV_COUNTERS's own order."""
+    rv = _import_rv()
+    return " ".join(
+        f"{c} {overrides[c]}" if c in overrides else f"{c} 0"
+        for c in rv._COV_COUNTERS)
+
+
 class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
     """#486 warden re-temper → maintainer ruling DEC-28. Two halves, both pinned here.
 
@@ -5109,17 +5122,12 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
     did before, and each test asserts its return code.
     """
 
-    TAIL_EMPTY_RANGE = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                        "empty-range 1 (past-eof) discarded 0 not-applicable 0")
-    TAIL_EMPTY_FILE = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                       "empty-range 1 (empty-file) discarded 0 not-applicable 0")
-    TAIL_ALL_ZERO = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                     "empty-range 0 discarded 0 not-applicable 0")
+    TAIL_EMPTY_RANGE = _cov_tail(**{"empty-range": "1 (past-eof)"})
+    TAIL_EMPTY_FILE = _cov_tail(**{"empty-range": "1 (empty-file)"})
+    TAIL_ALL_ZERO = _cov_tail()
     # GH #501 — the seventh sub-count, for a read that delivered bytes to a predicate
     # whose result the FAIL leg then threw away.
-    TAIL_DISCARDED_EXIT = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                           "empty-range 0 discarded 1 (fail-leg-exit-nonzero) "
-                           "not-applicable 0")
+    TAIL_DISCARDED_EXIT = _cov_tail(discarded="1 (fail-leg-exit-nonzero)")
 
     def tail(self, stderr, ratios):
         """The whole sub-count tail after `ratios`, so a test cannot pass on a substring."""
@@ -5254,9 +5262,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.tail(out.stderr, "witness 0/1"),
-                         "unreached 0 not-reachable 0 ambiguous 0 "
-                         "wrong-name 1 (rangeless-grep-payload) empty-range 0 "
-                         "discarded 0 not-applicable 0")
+                         _cov_tail(**{"wrong-name": "1 (rangeless-grep-payload)"}))
 
     def test_a_withheld_ambiguous_item_is_billed_ambiguous_ONLY(self):
         """Disjointness, arm 2, and the reason `_bill_witness_billing` takes an explicit
@@ -5290,8 +5296,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.tail(out.stderr, "witness 0/0"),
-                         "unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                         "empty-range 0 discarded 0 not-applicable 1 (lint-kind-unimplemented)")
+                         _cov_tail(**{"not-applicable": "1 (lint-kind-unimplemented)"}))
 
 
 class TestNotApplicableAndWrongNameAreDisjoint(_InqBase):
@@ -5665,7 +5670,7 @@ class TestTheCensusTokenCannotBeForgedBySubstring(_InqBase):
     supposed to close."""
 
     FORGED = ("artifacts 1/1 witness 1/1 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
 
     def _run(self):
         a = self.base / "A"; a.mkdir()
@@ -5675,7 +5680,7 @@ class TestTheCensusTokenCannotBeForgedBySubstring(_InqBase):
         evil = a / "TIER2-COVERAGE: artifacts 1" / "1 witness 1"
         evil.mkdir(parents=True)
         target = evil / ("1 unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                         "empty-range 0 discarded 0 not-applicable 0")
+                         "empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
         target.write_bytes(b"decoy\n")
         (a / "ev.log").symlink_to(target)
         self.plant(b, "ev.log", b"other\n")     # makes the name ambiguous -> paths render
@@ -6554,7 +6559,7 @@ class TestTheCensusTokenCannotBeForgedOnTheBulletChannel(_InqBase):
     census earns its keep"."""
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
 
     def _run(self, args):
         p = self.base / "r.rcpt"

@@ -23,10 +23,7 @@ Deliberately NOT tested (each is gated by the design doc's own ordering gates):
                          is measured on are machine-local and not CI-gated (§6).
   * AC-6 T1, T1-neg,
     T3, T7 leg 1       — all describe C's bounded within-root walk (#530-gated).
-  * AC-6 T7 leg 2      — the `resolved-by-walk` census field is held by the
-                         FIFTH ordering constraint (§4, §8): the 12 full-literal
-                         `TIER2-COVERAGE` assertions in test_rcpt_verify.py must
-                         be rewritten in the same change first.
+                         T7 **leg 2** is NOT among them and IS covered here.
   * AC-6 T11           — scheduling is OQ-9, undecided in the document.
   * AC-8               — the fourteen prose sites are edited "in the same change
                          that lands the mechanism", i.e. with C (#530-gated).
@@ -36,7 +33,7 @@ Deliberately NOT tested (each is gated by the design doc's own ordering gates):
                          automatable from the test suite; MANUAL verification.
 
 Covered here: AC-1 first half (the tautology), AC-2 (the lexical grammar plus
-I8/T10 across all three parsers) and AC-6's T2 and T6.
+I8/T10 across all three parsers) and AC-6's T2, T6 and T7 leg 2.
 """
 import hashlib
 import importlib.util
@@ -52,6 +49,7 @@ RULING = REPO / "docs/plans/2026-08-21-488-c1-name-space-reduced.md"
 
 H64 = "a" * 64
 NOTE_PREFIX = "PROVENANCE-ONLY:"
+WALK_PREFIX = "RESOLVED-BY-WALK:"
 
 
 def _import_rv():
@@ -92,6 +90,34 @@ def receipt(*, artifacts=(), trace=(), claims=("(none)",), verdict="PASS",
 def notes(stderr):
     """The PROVENANCE-ONLY advisory lines on a run's stderr, in order."""
     return [l for l in stderr.splitlines() if l.strip().startswith(NOTE_PREFIX)]
+
+
+def walk_notes(stderr):
+    """The RESOLVED-BY-WALK advisory lines on a run's stderr, in order."""
+    return [l for l in stderr.splitlines()
+            if l.strip().startswith(WALK_PREFIX)]
+
+
+def census(stderr):
+    """The single TIER2-COVERAGE: line, or '' when the run emitted none."""
+    for l in stderr.splitlines():
+        if l.strip().startswith("TIER2-COVERAGE:"):
+            return l.strip()
+    return ""
+
+
+def _plant_git_dir(repo):
+    """Plant a SHAPE-VALID `.git` directory, making `repo` a git toplevel.
+
+    Mirrors `scripts/test_rcpt_verify.py`'s helper of the same name: SIEGE-C1
+    made `_git_toplevel` reject any ancestor entry merely NAMED `.git`, so a
+    bare `mkdir .git` is not a marker. These are the three entries `git init`
+    always creates. No `git` binary is invoked, so the fixture is hermetic."""
+    g = pathlib.Path(repo) / ".git"
+    (g / "objects").mkdir(parents=True)
+    (g / "refs").mkdir()
+    (g / "HEAD").write_text("ref: refs/heads/main\n")
+    return g
 
 
 class _RootCase(unittest.TestCase):
@@ -1753,6 +1779,307 @@ class TestTwoArtifactsKeysWithTheSameSpellingDoNotMerge(_RootCase):
                 art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
                 [self.root], False, None, None, notes_out), [])
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)], [])
+
+
+# --------------------------------------------------------------------------
+# AC-6 T7 leg 2 — a BELOW-TOP-LEVEL clause-1 resolution is counted.
+#
+# §3.1 clause 2 keys `RESOLVED-BY-WALK:` and its `resolved-by-walk` census
+# sub-count on resolution DEPTH, not on which clause resolved. Leg 1 (a name
+# only C's walk finds) is #530-gated and is NOT tested here. Leg 2 is: §3.4
+# move 1's own recommended remedy — a root-relative citation one directory
+# down, `out-N/round-N-findings.md` — resolves by clause 1's literal join and
+# MUST emit the identical note and bump the identical counter, with no walk
+# involved. The broken copy §5 names for this leg is a build that fires the
+# note on walk resolutions only, which lets move 1's recommended citation
+# resolve clean and silent — the fail-open §3.4 channel 2 exists to prevent.
+# --------------------------------------------------------------------------
+class TestABelowTopLevelResolutionIsCounted(_RootCase):
+    """AC-6 T7 leg 2. Fixture is move 1's own recommended citation form."""
+
+    def setUp(self):
+        super().setUp()
+        h, s = self.plant("out-9/round-9-findings.md", "# findings\nfatal=0\n")
+        self.out = self.verify(receipt(
+            artifacts=[("out-9/round-9-findings.md", h, s)],
+            trace=[f"WROTE  {self.root}/out-9/round-9-findings.md  sha256:{h}"]))
+
+    def test_the_run_completes(self):
+        # Non-vacuity: the note is an advisory, not a failure.
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+
+    def test_a_below_top_level_clause_one_resolution_emits_the_note(self):
+        """One note per LEG that resolved the name, each naming the form THAT
+        leg was given — the ARTIFACTS entry's bare relative path, and the
+        witness leg's absolute cited form. §3.2 mandates the two forms differ
+        by design, so a build emitting one note here has gone silent on a leg."""
+        self.assertEqual(
+            walk_notes(self.out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)",
+             f"RESOLVED-BY-WALK: {self.root}/out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"],
+            self.out.stderr)
+
+    def test_the_census_carries_a_resolved_by_walk_sub_count(self):
+        """PER-LEG, like every other _COV_COUNTERS member: `ambiguous`,
+        `unreached` and `not-reachable` are all bumped from both
+        `tier2_artifacts` and `tier2_witness` for the same file, because the
+        census's unit is a CITED NAME ON A LEG (which is why `artifacts <v>/<a>`
+        and `witness <v>/<a>` are separate) and not a file. This fixture cites
+        the one file on both legs, so the count is 2."""
+        self.assertIn("resolved-by-walk 2", census(self.out.stderr),
+                      self.out.stderr)
+
+    def test_the_sub_count_is_reported_beside_the_floor_and_not_summed_into_it(self):
+        # §3.1 clause 2: reported, NOT summed into `unreached`/`not-reachable`.
+        # Whether it is ever summed is OQ-7, on #530.
+        c = census(self.out.stderr)
+        self.assertIn("unreached 0", c, c)
+        self.assertIn("not-reachable 0", c, c)
+        self.assertIn("artifacts 1/1", c, c)
+
+
+class TestTheWalkNoteSurvivesATruncatedRun(_RootCase):
+    """AC-6 T7 leg 2, truncation leg — the mirror of T2's leg 6, and the pin
+    that round 2's build failed.
+
+    Broken copy (DEC-31): a build appending the artifacts leg's walk note to
+    `tier2_artifacts`'s own RETURN VALUE instead of the `notes_out`
+    out-parameter. The sole production call site is
+    `notes += tier2_artifacts(...)`, whose `+=` never executes on a raise, so
+    on any truncated run the census reports `resolved-by-walk 1` while ZERO
+    `RESOLVED-BY-WALK:` lines reach stderr — the counter and the
+    human-readable note contradict each other on exactly the runs the note
+    exists to make audible. Measured on that build (DEC-31 row 12): this test
+    is the only one of the ten that goes red."""
+
+    def test_a_later_hash_mismatch_does_not_silence_the_earlier_walk_note(self):
+        h, s = self.plant("out-9/round-9-findings.md", "# findings\nfatal=0\n")
+        body = "disk content\n"
+        self.plant("mismatch.md", body)
+        out = self.verify(receipt(
+            artifacts=[("out-9/round-9-findings.md", h, s),
+                       ("mismatch.md", "d" * 64, str(len(body)))],
+            trace=[f"WROTE  {self.root}/out-9/round-9-findings.md  sha256:{h}"]),
+            name="walk-trunc.txt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+        # The FIRST entry resolved below top level and hash-matched before the
+        # SECOND truncated the loop; its note must still be on the channel, and
+        # the census must agree with it rather than contradict it.
+        self.assertEqual(
+            walk_notes(out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"],
+            out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+
+
+class TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise(_RootCase):
+    """AC-6 T7 leg 2, witness-leg truncation leg — round 3's S1.
+
+    `--strict` is the MANDATED invocation (`quality-gate/SKILL.md:36`), and the
+    witness leg's ambiguity check RAISES under it. §3.1 clause 2 binds on
+    RESOLUTION, not on survival: the name DID resolve below top level, so the
+    note and the counter are owed on that run too.
+
+    Broken copy (DEC-31 row 13): a build siting the witness-leg emission AFTER
+    the ambiguity block — round 3's own placement. Measured on it, same fixture,
+    one flag apart: without `--strict`, `resolved-by-walk 1` plus the note; with
+    `--strict`, `resolved-by-walk 0 ... partial` and NO note. That is the
+    silent-on-a-truncated-run shape §3.4 channel 2 exists to arrest, reached
+    through the flag every real run sets.
+
+    The fixture is witness-leg-only by construction: `ARTIFACTS` is `(none)`, so
+    the artifacts leg cannot raise first and the two legs' notes cannot be
+    confused for one another."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = pathlib.Path(self.td.name) / "second-root"
+        (self.other / "out-9").mkdir(parents=True)
+        body = "# findings\nfatal=0\n"
+        self.plant("out-9/round-9-findings.md", body)
+        (self.other / "out-9/round-9-findings.md").write_text(body)
+        self.h = hashlib.sha256(body.encode()).hexdigest()
+        self.rcpt = receipt(
+            trace=[f"WROTE  out-9/round-9-findings.md  sha256:{self.h}"])
+
+    def _run(self, *extra):
+        return self.verify(self.rcpt, *extra, "--root", str(self.other))
+
+    def test_without_strict_the_note_and_the_counter_both_fire(self):
+        """Non-vacuity: the ambiguity is real and the name resolves anyway."""
+        out = self._run()
+        self.assertIn("ambiguous 1", census(out.stderr), out.stderr)
+        self.assertEqual(
+            walk_notes(out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"], out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+
+    def test_the_strict_raise_does_not_silence_them(self):
+        out = self._run("--strict")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("is ambiguous across roots", out.stderr)
+        self.assertEqual(
+            walk_notes(out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"], out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+
+
+class TestATopLevelResolutionIsNotCounted(_RootCase):
+    """The discriminator for the depth key. A name resolving AT a probed root's
+    top level is not a below-top-level resolution and must stay silent and
+    uncounted; a build that fires on every resolution is as blind as one that
+    fires on none."""
+
+    def setUp(self):
+        super().setUp()
+        h, s = self.plant("round-9-findings.md", "# findings\nfatal=0\n")
+        self.out = self.verify(receipt(
+            artifacts=[("round-9-findings.md", h, s)],
+            trace=[f"WROTE  {self.root}/round-9-findings.md  sha256:{h}"]))
+
+    def test_the_run_completes(self):
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+
+    def test_no_note_is_emitted(self):
+        self.assertEqual(walk_notes(self.out.stderr), [], self.out.stderr)
+
+    def test_the_sub_count_stays_zero(self):
+        self.assertIn("resolved-by-walk 0", census(self.out.stderr),
+                      self.out.stderr)
+
+
+class TestASecondNestedRootDoesNotSilenceTheCounter(_RootCase):
+    """AC-6 T7 leg 2, PER-ROOT depth key (round-5 F2).
+
+    §3.1 clause 2 fires when a cited name resolves below *A ROOT's* top level —
+    existential over the supplied roots. The broken copy (DEC-31 row 14) keys
+    the depth check on the shallowest relpath across ALL supplied roots and
+    their git toplevels at once, so a second, NESTED `--root` silently zeroes
+    both the note and the counter for a name that still resolves below the
+    first root's top level. Same receipt, one extra flag apart."""
+
+    def setUp(self):
+        super().setUp()
+        h, s = self.plant("out-9/round-9-findings.md", "# findings\nfatal=0\n")
+        self.rcpt = receipt(
+            artifacts=[("out-9/round-9-findings.md", h, s)],
+            trace=[f"WROTE  {self.root}/out-9/round-9-findings.md  sha256:{h}"])
+        self.nested = self.verify(self.rcpt, "--root", str(self.root / "out-9"))
+
+    def test_the_run_completes(self):
+        self.assertEqual(self.nested.returncode, 0, self.nested.stderr)
+
+    def test_the_nested_root_does_not_silence_the_note(self):
+        self.assertEqual(
+            walk_notes(self.nested.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)",
+             f"RESOLVED-BY-WALK: {self.root}/out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"],
+            self.nested.stderr)
+
+    def test_the_nested_root_does_not_zero_the_counter(self):
+        self.assertIn("resolved-by-walk 2", census(self.nested.stderr),
+                      self.nested.stderr)
+
+
+# --------------------------------------------------------------------------
+# AC-6 T7 leg 2 — the OVER-fire direction (round-6 F1). The mirror of
+# TestASecondNestedRootDoesNotSilenceTheCounter: that class pins that a second
+# root must not SILENCE a below-top-level resolution; this one pins that a
+# second root must not FLAG a resolution that happened AT a root's own top
+# level. Both roots here live inside one git checkout, so the FIRST root's git
+# toplevel sees the file two components down while the file itself sits at the
+# top level of the root that actually resolved it, and under no supplied
+# root's top level otherwise. §3.1 clause 2 quantifies over "a ROOT's top
+# level"; a build that lets a DERIVED base (some other root's git toplevel)
+# decide the depth fires here, on exactly the bare-basename citation form the
+# counter exists to distinguish §3.4 move 1's remedy FROM.
+# --------------------------------------------------------------------------
+class TestAnotherRootsGitToplevelDoesNotFlagATopLevelName(unittest.TestCase):
+    """AC-6 T7 leg 2, over-fire direction. Fixture is the citation form the
+    counter must stay silent on: a bare basename resolving at a root's own top
+    level, with a sibling root inside the same checkout."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        base = pathlib.Path(self.td.name)
+        self.repo = base / "repo"
+        (self.repo / "dispatch").mkdir(parents=True)
+        (self.repo / "findings").mkdir()
+        _plant_git_dir(self.repo)
+        body = "# findings\nfatal=0\n"
+        f = self.repo / "findings/round-9-findings.md"
+        f.write_text(body)
+        h = hashlib.sha256(body.encode()).hexdigest()
+        self.rcpt = base / "rcpt.txt"
+        self.rcpt.write_text(receipt(
+            artifacts=[("round-9-findings.md", h, str(len(body)))],
+            trace=[f"WROTE  {f}  sha256:{h}"]))
+
+    def _run(self, *roots):
+        args = []
+        for r in roots:
+            args += ["--root", str(self.repo / r)]
+        return run("--tier2", "--strict", *args, str(self.rcpt))
+
+    def test_the_run_completes(self):
+        """Non-vacuity: the name DOES resolve and DOES hash-verify, so the
+        only thing under test is whether the note and the counter fire."""
+        out = self._run("dispatch", "findings")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", census(out.stderr), out.stderr)
+
+    def test_no_note_is_emitted(self):
+        out = self._run("dispatch", "findings")
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+    def test_the_sub_count_stays_zero(self):
+        out = self._run("dispatch", "findings")
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+
+    def test_the_verdict_does_not_depend_on_root_ORDER(self):
+        """Declaration order is load-bearing elsewhere (`resolve_base` is
+        first-hit-wins), so the silence is asserted under both orderings."""
+        out = self._run("findings", "dispatch")
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+
+    def test_the_single_root_control_is_silent_too(self):
+        """The discriminator: with only the resolving root supplied there is
+        no second root to leak a base, and every build agrees the answer is
+        silence. A copy that goes red HERE has broken the base case, not the
+        cross-root case."""
+        out = self._run("findings")
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+
+
+class TestTheBasenameKeyIsSilentOnASameBasenameCollision(_RootCase):
+    """Documented cost of §3.4's basename key (round-4-of-this-gate S3), PINNED
+    so the silence is a recorded decision rather than an unmeasured property.
+    A TRACE entry naming a DIFFERENT file whose basename matches a verified
+    ARTIFACTS basename emits nothing. Change this test only by changing the
+    ruled key.
+
+    Fixture is the chunked-gate collision Task 4's docstring names: two
+    same-basename files in two different chunks, one verified, one not."""
+
+    def test_the_collision_is_silent(self):
+        h, s = self.plant("chunk-A/fix-journal.md", "# fix journal\n")
+        out = self.verify(receipt(
+            artifacts=[("chunk-A/fix-journal.md", h, s)],
+            trace=[f"WROTE  {self.root}/chunk-A/fix-journal.md  sha256:{h}",
+                   "READ  /elsewhere/chunk-B/fix-journal.md"]))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(notes(out.stderr), [], out.stderr)
 
 
 if __name__ == "__main__":

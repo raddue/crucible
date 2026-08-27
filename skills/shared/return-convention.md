@@ -262,13 +262,39 @@ The Tier-1 rules (predicate required and well-formed, no second trailing `patter
 
 **Hazard — numeric predicates against command-echo logs (facet (c), documentation only).** A numeric `expect-fail` regex such as `/[1-9]/` matches the `8` in a path like `artifact-8.md`, so a witness pointed at a log that **echoes its own command** (`# cmd: … grep -nE …`) or at a file whose prose quotes prior counts will fire on the echo rather than on the measurement — a false FAIL. Observed live on real receipts. No heuristic echo-stripping is specified: it would have to guess at log format. The workaround is to point the witness at the narrow range carrying the measurement (which the `#<range>` rule above already encourages), or to write the predicate against a sentinel the echo cannot contain.
 
-**`TIER2-COVERAGE:` — the per-run Tier-2 census.** `rcpt_verify.py` writes exactly one `TIER2-COVERAGE:` line to **stderr** per single-receipt `--tier2` run. It is emitted from a `finally:`, so it survives every lint-failure path and is emitted on clean runs too, after the failure bullet and after any `UNVERIFIABLE` notes. `--tier1` emits no such line; neither does the inline `--eval` path, which takes bodies rather than directories to probe, so the counters have no meaning there. A Tier-1 rejection renders the entire line as `TIER2-COVERAGE: not-reached (tier1-reject)` — an all-zeros census would be byte-indistinguishable from a real one over a receipt with nothing to check. Otherwise the line carries two ratios and then seven counters, in this fixed order:
+**`TIER2-COVERAGE:` — the per-run Tier-2 census.** `rcpt_verify.py` writes exactly one `TIER2-COVERAGE:` line to **stderr** per single-receipt `--tier2` run. It is emitted from a `finally:`, so it survives every lint-failure path and is emitted on clean runs too, after the failure bullet and after any `UNVERIFIABLE` notes. `--tier1` emits no such line; neither does the inline `--eval` path, which takes bodies rather than directories to probe, so the counters have no meaning there. A Tier-1 rejection renders the entire line as `TIER2-COVERAGE: not-reached (tier1-reject)` — an all-zeros census would be byte-indistinguishable from a real one over a receipt with nothing to check. Otherwise the line carries two ratios and then eight counters, in this fixed order:
 
 ```
-TIER2-COVERAGE: artifacts <verified>/<applicable> witness <verified>/<applicable> unreached <n> not-reachable <n> ambiguous <n> wrong-name <n> empty-range <n> discarded <n> not-applicable <n> [partial]
+TIER2-COVERAGE: artifacts <verified>/<applicable> witness <verified>/<applicable> unreached <n> not-reachable <n> ambiguous <n> wrong-name <n> empty-range <n> discarded <n> resolved-by-walk <n> not-applicable <n> [partial]
 ```
 
 Any counter for which reason codes were recorded carries them as a sorted, de-duplicated parenthetical in its own printed position (`not-applicable 1 (fail-leg-no-range)`); a counter with none carries no parenthetical. `empty-range` is the witness leg's own: it counts an **applicable** item whose citation named a `#L`/`#B` **range that addressed no bytes of the resolved file** — a range past EOF. The predicate ran against nothing and cannot fire, so the run is not counted as a verification (`witness 0/1`) but is still reported in a sub-count. It keys on the **resolution**, not on the content and not on the witness `kind`: a **rangeless** citation delivers the whole file and is never counted here, even when that file is genuinely empty; a **ranged** one past EOF is counted whatever its kind. `discarded` is the witness leg's other own counter (#501): it counts an **applicable** item that resolved, delivered real bytes and ran its predicate, where the leg then **threw the result away** — the `FAIL` branch rejects only under `exit=0 and not match`, so a cited entry with **no `exit=`** (`fail-leg-no-exit-evidence`) or a **non-zero** one (`fail-leg-exit-nonzero`) leaves the predicate unable to affect the outcome. Like `empty-range` it is a `witness 0/1`, and for the same reason: a result nothing consults is not a verification. It keys on **whether the result could change the outcome** — never on the verdict and never on the witness `kind`, both of which are shapes that have twice been shown to restore a fail-open when used as the key. An item that already earns `ambiguous`, `wrong-name` or `empty-range` is reported only there — the counters are disjoint, and where two descriptions fit, the earlier and more recoverable fact wins. The trailing `partial` appears only when a leg reported that it stopped short. Counts and reason codes only — no paths, no roots, no timings — so the line is machine-independent. Reading it is how a caller distinguishes "the witness was verified" from "the witness resolved nowhere and verified nothing", both of which can exit 0; an orchestrator that wants the census durable captures that stderr, as `quality-gate/SKILL.md` › Coverage-line capture does.
+
+> **`resolved-by-walk` (#488 c1) is the one counter that stands OUTSIDE that disjoint partition,
+> deliberately — provisionally, pending #530's OQ-7 ruling, which is what will settle whether it
+> is ever summed into the Tier-2 census floor.** It counts a cited name that **did** resolve, to a
+> path more than one component below the top level of **at least one of the roots the run was
+> given** — the supplied roots and nothing else. A root's git toplevel is a probed *base* and a
+> member of the containment union, but it is not a root the run was given, so it never decides this
+> counter; a name whose only resolution lands under no supplied root at all is not this counter's
+> case and is silent here. No root that does not hold the resolved path can change the answer in
+> either direction, and no root is ever measured against another root's base. It is a fact about
+> *how* a name resolved, not about why it failed to — so it is reported beside the floor buckets, is
+> **not** summed into them today, and MAY co-occur with `ambiguous` on the same item. It is keyed
+> on resolution **depth**, never on which resolution clause produced the hit, so the same counter
+> serves a literal join of a multi-segment name and any future within-root search alike. Supplying
+> a second root nested inside the first does **not** silence it for a name that still resolves below
+> the outer root's top level, and supplying a second root inside the same git checkout does **not**
+> flag a name that resolved at its own root's top level. Like every
+> other counter it is per **cited name on a leg**, not per file: a name cited on both the ARTIFACTS
+> and the witness leg is counted twice, the same way `ambiguous` and `not-reachable` already are.
+> **Depth is measured on the RESOLVED path, not on the citation** — a deliberate reading, not an
+> oversight: so a bare basename whose file is a symlink into a subdirectory is counted here too, the
+> same as a root-relative citation would be (see *Known limitations*). Each bump is accompanied on
+> stderr by `RESOLVED-BY-WALK: <name> (<relpath-from-root>)` — the relpath from the first supplied
+> root, in declaration order, that holds the name below its own top level — emitted at the moment
+> the name resolves — **before**, not after, the `--strict` ambiguity raise that may truncate the
+> run, so the counter and the note agree on a truncated run as well as a clean one.
 
 **`PROVENANCE-ONLY:` — the TRACE-provenance advisory (#488 T2).** On every `--tier2` run,
 `rcpt_verify.py` prints one `PROVENANCE-ONLY: <name> (declared in TRACE, not verified)` line to

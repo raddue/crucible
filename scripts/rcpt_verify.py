@@ -1404,6 +1404,67 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     return None
 
 
+def _below_top_level(resolved, root):
+    """#488 T7 — the relpath of `resolved` from the first SUPPLIED ROOT, in
+    declaration order, that holds it BELOW its own top level; None when no supplied
+    root does.
+
+    Keyed on resolution DEPTH, never on which clause resolved (§3.1 clause 2): a
+    clause-1 literal join of a multi-segment name that lands below a root's top level
+    is this case exactly as a clause-2 walk hit would be, and one counter serves both
+    so the two producer remedies stay comparable at quality-gate/SKILL.md:36.
+
+    The quantifier is §3.1 clause 2's own: "below A ROOT's top level" — existential
+    over the roots THE RUN WAS GIVEN, and over nothing else. Two things follow, and
+    both are fixes for a measured bug rather than preferences.
+
+    (1) GIT TOPLEVELS ARE NOT IN THE DEPTH KEY. They are probed BASES (`_resolve_base_one`)
+    and they are in the containment union (`_allowed_bases`), but neither makes one a
+    root the run was given. Admitting them lets a root that did not resolve the name
+    decide how deep it is: with `--root <repo>/dispatch --root <repo>/findings` and a
+    bare `round-9-findings.md` living at `<repo>/findings`'s OWN top level, `dispatch`'s
+    git toplevel is `<repo>`, which sees that file two components down — so a build
+    consulting derived bases fires on the one citation form this counter exists to
+    distinguish §3.4 move 1's remedy FROM. A resolution that lands under NO supplied
+    root (the `<git-toplevel>/name` candidate winning) has no relpath from a root at
+    all, and is therefore not this clause's case; it is silent here by construction,
+    which is the design's own placeholder `(<relpath-from-root>)` read literally.
+
+    (2) NO MINIMUM, MAXIMUM OR OTHER COMPARISON ACROSS ROOTS. The first supplied root
+    that sees the name below its top level answers, in DECLARATION order — the same
+    order `resolve_base` already resolves in (D3). Taking a global minimum instead lets
+    a second, NESTED --root zero both the note and the counter for a name that still
+    resolves two components under the first root, silently, which is the failure
+    direction §3.4 channel 2 exists to arrest. A root that does not CONTAIN the resolved
+    path cannot change the answer either way, so no unrelated root ever participates.
+
+    KEYED ON `resolved`, NOT ON THE CITATION — stated because it is a deliberate,
+    disclosed reading and not an oversight (round-1-of-this-gate S1). `resolve_base`
+    returns `c.resolve()`, i.e. symlinks followed, so a BARE BASENAME sitting at a
+    root's own top level whose on-disk target is itself a symlink into a subdirectory
+    DOES fire this note and bump the counter — the realpath genuinely sits below the
+    root's top level, and §3.1 clause 2's "resolves to a path below a root's top
+    level" is satisfied literally by that realpath. See *Known limitations* for the
+    cost this reading has and why it is kept rather than re-keyed on the citation.
+    """
+    for r in _as_roots(root):
+        try:
+            rel = resolved.relative_to(r)
+        except (ValueError, OSError):
+            continue
+        if len(rel.parts) > 1:
+            return rel
+    return None
+
+
+def _walk_note(name, rel):
+    # SIEGE-R2BA-4 — BOTH the receipt-supplied name and the rendered relpath take the
+    # escaper, on the same grounds as every other name on this channel (§3.1 clause 2
+    # says so explicitly for this note).
+    return (f"RESOLVED-BY-WALK: {_show_path(name)} "
+            f"({_show_path(str(rel))})")
+
+
 def resolve_base(name: str, root, found=None, refused=None):
     """Resolve `name` against one or more roots; return the FIRST hit, else None.
 
@@ -2135,6 +2196,26 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                              f"{_show_path(name)}{_refused_clause(refused)}")
             if cov is not None:
                 cov.art_applicable += 1
+            # #488 / T7 — a below-top-level resolution is REPORTED and COUNTED, never
+            # summed into the floor buckets (whether it ever is, is OQ-7 on #530).
+            #
+            # SITED BEFORE the `if len(found) > 1:` ambiguity block, not after it: that
+            # block RAISES under --strict, and --strict is the MANDATED invocation. The
+            # name DID resolve, so an emission below the raise goes silent on exactly
+            # the run the raise truncates — the same reason the `ambiguous` bump inside
+            # that block is itself sited before its own raise.
+            #
+            # ROUTED THROUGH `notes_out`, NOT through `notes`: this function's own
+            # docstring says why — the return value is discarded WHOLE on every one of
+            # the five truncating raise sites, and `TestTheWalkNoteSurvivesATruncatedRun`
+            # is the pin. A build that appends here to `notes` renders the counter and
+            # the note contradicting each other on exactly the truncated runs.
+            _rel = _below_top_level(resolved, root)
+            if _rel is not None:
+                if notes_out is not None:
+                    notes_out.append(_walk_note(name, _rel))
+                if cov is not None:
+                    cov.bump("resolved-by-walk")
             if len(found) > 1:
                 # #486 / D2 — two or more DISTINCT realpaths. Fail closed under --strict:
                 # first-hit-wins here would verify against a plausible but WRONG file, a
@@ -3168,6 +3249,24 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             found = []
             refused = []
             resolved = resolve_base(art_name, root, found, refused)
+            # #488 / T7 — same depth key, same counter, on the witness leg (§4). SITED
+            # HERE, immediately after resolve_base and BEFORE the ambiguity block, for
+            # the same reason that block's own `ambiguous` bump sits before its raise:
+            # `--strict` raises out of it, and `--strict` is the MANDATED invocation
+            # (quality-gate/SKILL.md:36). The name DID resolve, so §3.1 clause 2's "MUST
+            # fire whenever a cited name resolves to a path below a root's top level"
+            # binds on that run too. This mirrors the artifacts leg's placement exactly.
+            #
+            # Through `notes_out` ALONE, never `notes_refused` or the return value:
+            # _verify_single DISCARDS this leg's return value (see the call site), and
+            # every raise between here and the clean-path return drops it in this frame.
+            _rel = (_below_top_level(resolved, root)
+                    if resolved is not None else None)
+            if _rel is not None:
+                if notes_out is not None:
+                    notes_out.append(_walk_note(art_name, _rel))
+                if cov is not None:
+                    cov.bump("resolved-by-walk")
             if len(found) > 1:
                 # #486 / D2 — same rule as the artifacts leg, its OWN wording. The two messages
                 # differ because :893 and :1127 already differ ("path-shaped artifact …" vs
@@ -3947,7 +4046,7 @@ class _PathReadError(Exception):
 # because every counter ahead of it describes an item that is still IN the applicable set,
 # and `not-applicable` — the one bucket for items that left it — reads last.
 _COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "empty-range",
-                 "discarded", "not-applicable")
+                 "discarded", "resolved-by-walk", "not-applicable")
 
 # SIEGE-C4 — the census state for a --tier2 exit that happens BEFORE _verify_single is
 # entered, where no _Coverage exists and the finally: documented to "survive every
