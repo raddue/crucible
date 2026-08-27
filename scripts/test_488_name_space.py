@@ -1844,15 +1844,19 @@ class TestTheWalkNoteSurvivesATruncatedRun(_RootCase):
     """AC-6 T7 leg 2, truncation leg — the mirror of T2's leg 6, and the pin
     that round 2's build failed.
 
-    Broken copy (DEC-31): a build appending the artifacts leg's walk note to
-    `tier2_artifacts`'s own RETURN VALUE instead of the `notes_out`
-    out-parameter. The sole production call site is
-    `notes += tier2_artifacts(...)`, whose `+=` never executes on a raise, so
-    on any truncated run the census reports `resolved-by-walk 1` while ZERO
-    `RESOLVED-BY-WALK:` lines reach stderr — the counter and the
-    human-readable note contradict each other on exactly the runs the note
-    exists to make audible. Measured on that build (DEC-31 row 12): this test
-    is the only one of the ten that goes red."""
+    What this test pins is the PROPERTY — on a run truncated by a later
+    entry's raise, the earlier name's note is still on stderr and the census
+    agrees with it — not the CHANNEL that provides it. On the shipped build
+    the property has two independent providers: the direct `notes_out` routing
+    at the emission site, and round-4-of-this-gate's S1 `except BaseException:`
+    arm (`tier2_artifacts`), which mirrors the leg's own `notes` onto
+    `notes_out` on ANY raise. So a build that appends the walk note to
+    `tier2_artifacts`'s RETURN VALUE instead of `notes_out` is NOT
+    distinguishable here: the rescue arm carries it to stderr anyway and this
+    test — and both suites — stay green. Task 7's DEC-31 row 12 discriminates
+    that channel only because its mutant copy ALSO removes the rescue arm,
+    reproducing the pre-S1 shape; against that copy this test is the one that
+    goes red."""
 
     def test_a_later_hash_mismatch_does_not_silence_the_earlier_walk_note(self):
         h, s = self.plant("out-9/round-9-findings.md", "# findings\nfatal=0\n")
@@ -1905,6 +1909,61 @@ class TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise(_RootCase):
         self.h = hashlib.sha256(body.encode()).hexdigest()
         self.rcpt = receipt(
             trace=[f"WROTE  out-9/round-9-findings.md  sha256:{self.h}"])
+
+    def _run(self, *extra):
+        return self.verify(self.rcpt, *extra, "--root", str(self.other))
+
+    def test_without_strict_the_note_and_the_counter_both_fire(self):
+        """Non-vacuity: the ambiguity is real and the name resolves anyway."""
+        out = self._run()
+        self.assertIn("ambiguous 1", census(out.stderr), out.stderr)
+        self.assertEqual(
+            walk_notes(out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"], out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+
+    def test_the_strict_raise_does_not_silence_them(self):
+        out = self._run("--strict")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("is ambiguous across roots", out.stderr)
+        self.assertEqual(
+            walk_notes(out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"], out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+
+
+class TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise(_RootCase):
+    """AC-6 T7 leg 2, artifacts-leg ambiguity-truncation leg — round-1-of-this-
+    gate S2, the exact mirror of the witness-leg class above.
+
+    The artifacts leg has the SAME siting obligation as the witness leg: its
+    emission is placed BEFORE the `if len(found) > 1:` ambiguity block, which
+    RAISES under `--strict` — the MANDATED invocation
+    (`quality-gate/SKILL.md:36`). §3.1 clause 2 binds on RESOLUTION, not on
+    survival: the name DID resolve below top level, so the note and the counter
+    are owed on that run too. Until this class existed the obligation was
+    unpinned on this leg: a build emitting after the raise (or routing the note
+    through the return value on this ordering) left both suites green.
+
+    The fixture is artifacts-leg-only by construction: the ARTIFACTS name is
+    the ambiguous below-top-level one, while TRACE names a DIFFERENT file at
+    the root's own top level, planted under one root only — so the witness leg
+    contributes neither a walk note nor an ambiguity, and the two legs' notes
+    cannot be confused for one another."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = pathlib.Path(self.td.name) / "second-root"
+        (self.other / "out-9").mkdir(parents=True)
+        body = "# findings\nfatal=0\n"
+        self.h, self.size = self.plant("out-9/round-9-findings.md", body)
+        (self.other / "out-9/round-9-findings.md").write_text(body)
+        th, _ = self.plant("top.md", "top\n")
+        self.rcpt = receipt(
+            artifacts=[("out-9/round-9-findings.md", self.h, self.size)],
+            trace=[f"WROTE  {self.root}/top.md  sha256:{th}"])
 
     def _run(self, *extra):
         return self.verify(self.rcpt, *extra, "--root", str(self.other))
@@ -1987,6 +2046,29 @@ class TestASecondNestedRootDoesNotSilenceTheCounter(_RootCase):
     def test_the_nested_root_does_not_zero_the_counter(self):
         self.assertIn("resolved-by-walk 2", census(self.nested.stderr),
                       self.nested.stderr)
+
+    def test_the_verdict_does_not_depend_on_root_ORDER(self):
+        """Declaration order is load-bearing elsewhere (`resolve_base` is
+        first-hit-wins, and the note's relpath is the one from the FIRST
+        supplied root that holds the name below its own top level), so the
+        existential is asserted under both orderings — mirroring
+        `TestAnotherRootsGitToplevelDoesNotFlagATopLevelName`'s own ORDER
+        test on the over-fire side. setUp's run is NESTED-first; this one is
+        OUTER-first, which is why it calls `run` rather than `verify` (that
+        helper always appends the outer root LAST)."""
+        p = self.root / "rcpt.txt"
+        p.write_text(self.rcpt)
+        out = run("--tier2", "--root", str(self.root),
+                  "--root", str(self.root / "out-9"), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(
+            walk_notes(out.stderr),
+            ["RESOLVED-BY-WALK: out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)",
+             f"RESOLVED-BY-WALK: {self.root}/out-9/round-9-findings.md "
+             "(out-9/round-9-findings.md)"],
+            out.stderr)
+        self.assertIn("resolved-by-walk 2", census(out.stderr), out.stderr)
 
 
 # --------------------------------------------------------------------------

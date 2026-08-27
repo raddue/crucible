@@ -290,7 +290,7 @@ Any counter for which reason codes were recorded carries them as a sorted, de-du
 > and the witness leg is counted twice, the same way `ambiguous` and `not-reachable` already are.
 > **Depth is measured on the RESOLVED path, not on the citation** — a deliberate reading, not an
 > oversight: so a bare basename whose file is a symlink into a subdirectory is counted here too, the
-> same as a root-relative citation would be (see *Known limitations*). Each bump is accompanied on
+> same as a root-relative citation would be, and the census cannot tell the two apart. Each bump is accompanied on
 > stderr by `RESOLVED-BY-WALK: <name> (<relpath-from-root>)` — the relpath from the first supplied
 > root, in declaration order, that holds the name below its own top level — emitted at the moment
 > the name resolves — **before**, not after, the `--strict` ambiguity raise that may truncate the

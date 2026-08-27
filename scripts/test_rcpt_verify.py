@@ -6102,7 +6102,7 @@ class TestAV1HeaderSaysSoOnTheChannel(_InqBase):
     line, so an `RCPT v1` header written by the reviewed subagent opts the entire v1.1
     rule set out — the TRIPWIRE-`none` two-leg rule, the SUPERSEDES justification rule and
     the witness-evidence consequent — with no signal on any channel.
-    `return-convention.md:539` makes mixed-version runs LEGAL, so this is not a rejection;
+    `return-convention.md:565` makes mixed-version runs LEGAL, so this is not a rejection;
     what was missing is that the gate could not tell "the v1.1 rules passed" from "the
     v1.1 rules never ran" while quality-gate/SKILL.md:34,58 treat Layer 2 as enforced."""
 

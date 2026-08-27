@@ -1444,8 +1444,8 @@ def _below_top_level(resolved, root):
     root's own top level whose on-disk target is itself a symlink into a subdirectory
     DOES fire this note and bump the counter — the realpath genuinely sits below the
     root's top level, and §3.1 clause 2's "resolves to a path below a root's top
-    level" is satisfied literally by that realpath. See *Known limitations* for the
-    cost this reading has and why it is kept rather than re-keyed on the citation.
+    level" is satisfied literally by that realpath. The cost: the census cannot
+    tell that case apart from a genuine root-relative citation. Kept, not re-keyed.
     """
     for r in _as_roots(root):
         try:
@@ -2207,9 +2207,16 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             #
             # ROUTED THROUGH `notes_out`, NOT through `notes`: this function's own
             # docstring says why — the return value is discarded WHOLE on every one of
-            # the five truncating raise sites, and `TestTheWalkNoteSurvivesATruncatedRun`
-            # is the pin. A build that appends here to `notes` renders the counter and
-            # the note contradicting each other on exactly the truncated runs.
+            # the five truncating raise sites, so an append to `notes` here would leave
+            # the counter and the note contradicting each other on exactly the truncated
+            # runs. That is the reason for the routing, but it is NOT what the acceptance
+            # suite measures: round-4-of-this-gate's S1 arm (`except BaseException:`
+            # below) mirrors `notes` onto `notes_out` on ANY raise, so a build that
+            # appends here to `notes` still reaches stderr and leaves
+            # `TestTheWalkNoteSurvivesATruncatedRun` — and both suites — green. The
+            # direct routing is what makes this note's survival independent of that arm;
+            # Task 7's DEC-31 row 12 discriminates the channel only because its mutant
+            # copy removes the arm as well.
             _rel = _below_top_level(resolved, root)
             if _rel is not None:
                 if notes_out is not None:
