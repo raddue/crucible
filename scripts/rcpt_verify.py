@@ -229,16 +229,45 @@ def parse_receipt(text):
     return sections
 
 
+def _none_sentinel(body, section):
+    """#488 I8 / T10 — `(none)` is the empty-set sentinel and ONLY that.
+
+    The shipped defect is identical in all three name-bearing parsers:
+    `if line == "(none)": return ...` is an UNANCHORED `return` inside the entry loop,
+    not a `continue`, so one `(none)` line anywhere in the body discards every entry —
+    the ones after it (never reached) and the ones before it (the accumulator is thrown
+    away) alike. Measured on dd06b80, both orderings:
+
+        parse_artifacts(['a.md sha256:…', '(none)', 'b.md sha256:…'])  -> {}
+        parse_artifacts(['(none)', 'a.md sha256:…'])                   -> {}
+
+    and end-to-end, two receipts differing by one appended line: `artifacts 1/2 … partial
+    EXIT=1` becomes `artifacts 0/0 … EXIT=0` (§3.4 channel 5).
+
+    ONE helper rather than three copies of the same guard: three parsers already drifted
+    into carrying the identical bug verbatim, which is what a duplicated guard invites.
+
+    Returns True when the body IS the legal one-line sentinel, False when it holds no
+    sentinel at all, and raises when a `(none)` co-occurs with any entry."""
+    entries = [l.strip() for l in body if l.strip()]
+    if "(none)" not in entries:
+        return False
+    if len(entries) != 1:
+        raise LintError(
+            f"{section} (none) is the empty-set sentinel and must be the only entry")
+    return True
+
+
 def parse_artifacts(body):
     """Returns {name: {hash, size, meta}} from ARTIFACTS body lines."""
     out = {}
-    # body is indented lines; skip blanks and "(none)"
+    if _none_sentinel(body, "ARTIFACTS"):
+        return {}
+    # body is indented lines; skip blanks
     for raw in body:
         line = raw.strip()
         if not line:
             continue
-        if line == "(none)":
-            return {}
         parts = line.split()
         if len(parts) < 3:
             raise LintError(f"ARTIFACTS malformed: {raw!r}")
@@ -266,12 +295,12 @@ def parse_artifacts(body):
 def parse_trace(body):
     """Returns list of {n, verb, args_str} entries."""
     out = []
+    if _none_sentinel(body, "TRACE"):
+        return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
     for raw in body:
         line = raw.strip()
         if not line:
             continue
-        if line == "(none)":
-            return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
         parts = line.split(None, 2)
         if len(parts) < 2:
             raise LintError(f"TRACE malformed: {raw!r}")
@@ -359,12 +388,12 @@ def check_exec_range_bound(args_str):
 
 def parse_claims(body):
     out = []
+    if _none_sentinel(body, "CLAIMS"):
+        return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
     for raw in body:
         line = raw.strip()
         if not line:
             continue
-        if line == "(none)":
-            return []  # #397: empty sentinel accepted uniformly (cf. ARTIFACTS/NEXT)
         # pattern= may be quoted (containing spaces) or a /regex/ form or bare
         m = re.match(
             r'^([^\s=]+)=(\S+)\s+from=(\S+)(?:\s+pattern=("[^"]*"|/[^/]*/|\S+))?$',
