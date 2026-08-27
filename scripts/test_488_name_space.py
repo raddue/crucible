@@ -1149,5 +1149,252 @@ class TestNoEntryModeRoutesAroundTheSentinelRaise(_RootCase):
                     self.assertEqual(out.returncode, 0, out.stderr)
 
 
+# --------------------------------------------------------------------------
+# ADVERSARIAL (Task 4) — five failure modes probed after the two masking
+# hazards of rounds 1-2 were fixed. Written to BREAK the shipped build.
+# --------------------------------------------------------------------------
+class TestAMalformedTraceEntryCannotMaskAnInFlightRaise(_RootCase):
+    """ADVERSARIAL 1 — the THIRD instance of the finally-block masking hazard.
+
+    `_emit_provenance_notes`'s `trace or []` guard hardens the CONTAINER; the
+    ELEMENTS are read naked (`entry["verb"]`, `entry["args"].split()`) and that
+    read still happens inside `tier2_artifacts`'s `finally:`, where any exception
+    REPLACES the in-flight one. A `trace` list holding an entry that is not a
+    two-key `{"verb": str, "args": str}` dict therefore destroys a genuine
+    `Tier-2 --strict: ... absent under all bases` LintError exactly as a `None`
+    `trace` did before `00bfd2e`.
+
+    The reachability argument is the one the two shipped guards make for
+    themselves, verbatim: `trace` is public-API-supplied (~40 direct call sites,
+    no type enforcement). If that argument licenses the `or []`, it licenses this
+    leg too — a caller who can pass `None` can pass `[None]`."""
+
+    ART = {"docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
+
+    #  Each shape is ordinary API misuse, not a contrived object: a hand-built
+    #  entry missing a key, a raw TRACE line never run through `parse_trace`, and
+    #  a `None` where an entry was expected.
+    SHAPES = {
+        "entry missing the args key": [{"n": 1, "verb": "READ"}],
+        "entry missing the verb key": [{"n": 1, "args": "x.md"}],
+        "entry is a raw unparsed line": ["1 READ x.md"],
+        "args is None": [{"n": 1, "verb": "READ", "args": None}],
+        "entry is None": [None],
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+
+    def test_no_malformed_entry_shape_replaces_the_real_lint_error(self):
+        for label, trace in self.SHAPES.items():
+            with self.subTest(shape=label):
+                with self.assertRaises(self.rv.LintError) as caught:
+                    self.rv.tier2_artifacts(self.ART, trace, [self.root], True,
+                                            None, None, [])
+                self.assertIn("absent under all bases", str(caught.exception))
+
+    def test_the_control_shows_the_same_call_really_reaches_the_emitter(self):
+        """Non-vacuity: a well-formed `trace` raises the SAME LintError and the
+        emitter demonstrably ran from inside the `finally:`, so a red leg above
+        is about the element reads and not about the emitter being skipped."""
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(
+                self.ART, [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
+                [self.root], True, None, None, notes_out)
+        self.assertIn("absent under all bases", str(caught.exception))
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
+                         [f"{NOTE_PREFIX} /elsewhere/x.md "
+                          "(declared in TRACE, not verified)"])
+
+
+class TestANonStringArtifactsKeyCannotCrashTheVerifiedPath(_RootCase):
+    """ADVERSARIAL 2 — `0b45be2` hardened ONE of the two `.rsplit` sites this
+    change added.
+
+    The `finally:` twin got `str(n).rsplit(...)`. Its sibling in the loop body,
+    `verified_bases.add(name.rsplit("/", 1)[-1])`, did not — and that line is
+    NOT gated on `notes_out`, so it runs on every caller including the
+    `notes_out=None` `--eval`/`--selftest` shape that asked for no notes at all.
+
+    `PurePosixPath` is the demonstration because it is `os.PathLike`: it survives
+    `resolve_base`, the read and the sha256 comparison, and only then hits
+    `.rsplit`. Measured against `2457fa9` (pre-change), the identical call
+    verified CLEANLY and returned `[]`, so this is a regression the change
+    introduced, on the same public-API-supplied hostile-key class whose sibling
+    site the shipped code already concedes is reachable."""
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        self.body = "hello\n"
+        (self.root / "a.txt").write_text(self.body)
+        self.art = {pathlib.PurePosixPath("a.txt"): {
+            "hash": hashlib.sha256(self.body.encode()).hexdigest(),
+            "size": str(len(self.body))}}
+        self.trace = [{"n": 1, "verb": "READ", "args": "a.txt"}]
+
+    def test_a_pathlike_key_still_verifies_when_no_notes_were_asked_for(self):
+        """`notes_out=None`. These callers opted out of the advisory entirely;
+        the advisory's bookkeeping must not be able to fail their run."""
+        self.assertEqual(
+            self.rv.tier2_artifacts(self.art, self.trace, [self.root], True,
+                                    None, None, None), [])
+
+    def test_a_pathlike_key_still_verifies_when_notes_were_asked_for(self):
+        notes_out = []
+        self.assertEqual(
+            self.rv.tier2_artifacts(self.art, self.trace, [self.root], True,
+                                    None, None, notes_out), [])
+
+    def test_the_control_shows_the_str_key_spelling_verifies(self):
+        """Non-vacuity: the same fixture keyed by `str` verifies and is silent,
+        so the legs above are about the key TYPE and not about the fixture."""
+        art = {str(k): v for k, v in self.art.items()}
+        notes_out = []
+        self.assertEqual(
+            self.rv.tier2_artifacts(art, self.trace, [self.root], True,
+                                    None, None, notes_out), [])
+        self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)], [])
+
+
+class TestAVerifiedSiblingCannotSilenceADeclaredUnverifiedName(_RootCase):
+    """ADVERSARIAL 3 — the basename key's accepted collision is not confined to
+    "a genuinely different file". It also fires on a name the run itself
+    DECLARED and itself reported UNVERIFIABLE in the same breath.
+
+    `TestTheNoteIsKeyedOnVerifiedBasenames`'s leg 5 pins that a TRACE entry
+    naming an unresolved ARTIFACTS entry emits the note. That guarantee is
+    defeated by ONE extra ARTIFACTS line the receipt author chooses freely: any
+    real file whose basename collides. The run then prints
+    `UNVERIFIABLE: b/x.md (no file under root)` and, on the very same stderr,
+    stays silent about the TRACE entry that cites `b/x.md`.
+
+    That makes the advisory OPTIONAL for its author, which for a mechanism whose
+    stated job is closing grudge e0f0a6b75692 ("silence is not permitted") is the
+    failure direction, not a corner of it. It is also cheap: the silencer must
+    hash-verify, but the author owns the dispatch root and picks the name."""
+
+    def setUp(self):
+        super().setUp()
+        h, s = self.plant("a/x.md", "alpha\n")
+        self.out = self.verify(receipt(
+            artifacts=[("a/x.md", h, s), ("b/x.md", "b" * 64, "9")],
+            trace=["READ  b/x.md"]))
+
+    def test_the_run_says_out_loud_that_the_cited_name_is_unverified(self):
+        """Non-vacuity: the run KNOWS. This is not a case where the information
+        was unavailable — it is printed two lines away."""
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+        self.assertIn("UNVERIFIABLE: b/x.md", self.out.stderr)
+
+    def test_the_trace_citation_of_that_same_name_still_emits_the_note(self):
+        emitted = notes(self.out.stderr)
+        self.assertTrue(any("b/x.md" in n for n in emitted), self.out.stderr)
+
+    def test_the_control_without_the_colliding_sibling_emits_the_note(self):
+        """Non-vacuity: delete the sibling and the note returns, so the leg above
+        is about the collision and not about the fixture never qualifying."""
+        out = self.verify(receipt(artifacts=[("b/x.md", "b" * 64, "9")],
+                                  trace=["READ  b/x.md"]),
+                          name="control.txt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(any("b/x.md" in n for n in notes(out.stderr)),
+                        out.stderr)
+
+
+class TestATrailingSlashArtifactNameCannotSilenceUnrelatedNames(_RootCase):
+    """ADVERSARIAL 4 — `rsplit("/", 1)[-1]` maps every name ending in `/` to the
+    EMPTY basename, and the empty basename is stored and matched like any other.
+
+    `_trace_basename`'s `if not name: continue` screens the empty NAME; nothing
+    screens the empty BASE. So a single verified `ARTIFACTS` entry spelled with a
+    trailing slash (`x/` — accepted by `parse_artifacts`, and resolved and
+    hash-verified by `resolve_base`, which normalises the slash away) puts `""`
+    into `verified_bases`, and from then on EVERY `TRACE` name ending in `/`
+    matches it — including names that resolve nowhere and share nothing with the
+    declared artifact.
+
+    A degenerate key that swallows a whole family of unrelated names is the same
+    silence the note exists to prevent, reachable from one legal spelling."""
+
+    def setUp(self):
+        super().setUp()
+        h, s = self.plant("x", "body\n")
+        self.out = self.verify(receipt(
+            artifacts=[("x/", h, s)],
+            trace=["READ  /secret/elsewhere/"]))
+
+    def test_the_slashed_artifact_really_did_verify(self):
+        """Non-vacuity: `x/` resolved AND hash-verified, so `""` is in
+        `verified_bases` by the VERIFIED route, not by the truncation route."""
+        self.assertEqual(self.out.returncode, 0, self.out.stderr)
+        self.assertIn("artifacts 1/1", self.out.stderr)
+
+    def test_an_unrelated_trace_name_ending_in_a_slash_still_emits_the_note(self):
+        emitted = notes(self.out.stderr)
+        self.assertTrue(any("/secret/elsewhere/" in n for n in emitted),
+                        self.out.stderr)
+
+    def test_the_control_without_the_trailing_slash_emits_the_note(self):
+        """Non-vacuity: declare the same file as `x` and the note returns, so the
+        leg above is about the empty basename and not about the TRACE name."""
+        h, s = self.plant("x", "body\n")
+        out = self.verify(receipt(artifacts=[("x", h, s)],
+                                  trace=["READ  /secret/elsewhere/"]),
+                          name="control.txt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(any("/secret/elsewhere/" in n for n in notes(out.stderr)),
+                        out.stderr)
+
+
+class TestTheTruncationPartitionHoldsAtScale(_RootCase):
+    """ADVERSARIAL 5 — the evaluated/unevaluated partition under a mid-loop raise
+    with a large `ARTIFACTS` block.
+
+    §3.4's truncation rule is a statement about two sets that are BOTH built
+    incrementally inside the loop (`verified_bases`, `evaluated`) and consumed
+    once in the `finally:`. With 2000 entries and the raise at entry 4, all three
+    dispositions must be simultaneously right on one run: VERIFIED-before-the-
+    raise silent, EVALUATED-but-not-verified audible, NEVER-REACHED silent, and a
+    name in neither set audible."""
+
+    N = 2000
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        body = "ok\n"
+        h = hashlib.sha256(body.encode()).hexdigest()
+        art = {}
+        for i in range(3):
+            self.plant(f"pre/v{i}.md", body)
+            art[f"pre/v{i}.md"] = {"hash": h, "size": "3"}
+        self.plant("boom.md", body)                 # resolves, hash MISMATCHES
+        art["boom.md"] = {"hash": "b" * 64, "size": "3"}
+        for i in range(self.N):
+            art[f"later/u{i}.md"] = {"hash": H64, "size": "3"}
+        self.art = art
+        self.trace = [
+            {"n": 1, "verb": "READ", "args": "pre/v0.md"},     # verified
+            {"n": 2, "verb": "READ", "args": "boom.md"},       # evaluated, not verified
+            {"n": 3, "verb": "READ", "args": "later/u5.md"},   # never reached
+            {"n": 4, "verb": "READ", "args": "never/heard.md"}]  # in neither set
+
+    def test_all_four_dispositions_are_right_on_one_truncated_run(self):
+        notes_out = []
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.art, self.trace, [self.root], False,
+                                    None, None, notes_out)
+        # Non-vacuity: the run really was truncated, at the entry it was meant to
+        # be truncated at.
+        self.assertIn("boom.md sha256 mismatch", str(caught.exception))
+        self.assertEqual(
+            [n for n in notes_out if n.startswith(NOTE_PREFIX)],
+            [f"{NOTE_PREFIX} boom.md (declared in TRACE, not verified)",
+             f"{NOTE_PREFIX} never/heard.md (declared in TRACE, not verified)"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

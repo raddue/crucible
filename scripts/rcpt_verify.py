@@ -1855,13 +1855,31 @@ def _trace_basename(entry):
     may name anything, and AC-2's Tier-1 grammar binds `ARTIFACTS` only), so nothing
     here may assume path shape. `rsplit("/")` rather than `pathlib`: this is a string
     operation on the LEAST-constrained receipt-controlled string in the grammar, and it
-    must not acquire path semantics (or an exception) on a hostile name."""
-    tokens = entry["args"].split()
+    must not acquire path semantics (or an exception) on a hostile name.
+
+    #488 adversarial/F1 — a MALFORMED entry returns `("", "")` rather than raising.
+    This is the THIRD instance of the `finally:`-block masking hazard the `trace or []`
+    and `str(n)` guards already close: this helper runs from tier2_artifacts's
+    `finally:`, so `entry["args"]` on an entry that is not a `{"verb": ..., "args":
+    str}` dict raises KeyError/TypeError/AttributeError right there and REPLACES the
+    in-flight exception — a genuine `Tier-2 --strict: ... absent under all bases`
+    LintError would be destroyed and reported as the shape error instead. The
+    reachability argument is the one those two guards make verbatim: `trace` is
+    public-API-supplied (~40 direct call sites, no type enforcement), and a caller who
+    can pass `None` can pass `[None]`. `("", "")` routes a malformed entry into the
+    caller's existing `if not name: continue` arm — "not a match", never a crash — which
+    is the same disposition an empty `args` already takes. That ordering is the point:
+    these notes are an advisory side channel and must never preempt the verdict."""
+    args = entry.get("args") if isinstance(entry, dict) else None
+    if not isinstance(args, str):
+        return "", ""
+    tokens = args.split()
     name = tokens[0] if tokens else ""
     return name, name.rsplit("/", 1)[-1]
 
 
-def _emit_provenance_notes(trace, verified_bases, unevaluated_bases, notes_out):
+def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
+                           unverified_names, notes_out):
     """§3.4 / T2 — silence is not permitted (grudge e0f0a6b75692).
 
     One note per READ/EDIT/WROTE entry whose BASENAME matches no ARTIFACTS basename
@@ -1892,6 +1910,26 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases, notes_out):
         rate on live corpora is not measured, unlike the first two bullets' figures,
         so it should be read as unknown rather than as small.
 
+    `unverified_names` is the EXACT-NAME OVERRIDE on that third bullet (#488
+    adversarial/F3), and it closes the one slice of the collision that is CHOSEN rather
+    than coincidental. Held as declared FULL NAMES (not basenames): every ARTIFACTS name
+    this run EVALUATED and did not hash-verify. A TRACE entry citing such a name
+    verbatim gets its note regardless of any OTHER entry's colliding basename. Without
+    it, one extra ARTIFACTS line the receipt author picks freely — any real file whose
+    basename collides — makes the advisory optional for its own author: the run prints
+    `UNVERIFIABLE: b/x.md (no file under root)` and, on the very same stderr, stays
+    silent about the TRACE entry citing `b/x.md`, because the UNRELATED verified `a/x.md`
+    put `x.md` in `verified_bases`. Silence a receipt author can buy is the grudge
+    re-entering through the clause written to close it.
+
+    The override does NOT close the third bullet's general limitation, and is not meant
+    to: a TRACE entry naming a genuinely different file that this run never evaluated at
+    all — the chunked `chunk-N/round-N-findings.md` shape — matches no declared name, so
+    it still falls through to the basename key and still emits nothing. That case stays
+    accepted for the reason the bullet gives (a more specific key re-opens §3.2's
+    by-design mislabeling of verified files). The override only refuses to extend that
+    acceptance to a name the SAME run declared, evaluated, and reported unverified.
+
     `unevaluated_bases` carries §3.4's truncation rule: on a run truncated by any of
     tier2_artifacts's five raise sites, a TRACE entry matching an ARTIFACTS entry the
     loop never reached emits NOTHING (its match may yet have arrived), while one
@@ -1912,13 +1950,30 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases, notes_out):
     # sites, no type enforcement), so the masking hazard is not hypothetical even
     # though the sole production call site passes parse_trace's `[]`.
     for entry in trace or []:
-        if entry["verb"] not in _PROVENANCE_VERBS:
+        # #488 adversarial/F1 — `.get` behind an isinstance, for the reason
+        # _trace_basename's docstring gives: a naked `entry["verb"]` on a malformed
+        # element raises inside the caller's `finally:` and REPLACES the in-flight
+        # exception. A malformed element is "not a match", never a crash.
+        if not isinstance(entry, dict) or entry.get("verb") not in _PROVENANCE_VERBS:
             continue
         name, base = _trace_basename(entry)
         if not name:
             continue
-        if base in verified_bases or base in unevaluated_bases:
-            continue
+        # #488 adversarial/F3 — the exact-name override is tested BEFORE the basename
+        # key, so a colliding sibling cannot silence a name this run itself evaluated
+        # and reported unverified. See the docstring for why it does not (and must not)
+        # close the general collision.
+        if name not in unverified_names:
+            # #488 adversarial/F4 — `base` must be TRUTHY to match. `rsplit("/", 1)[-1]`
+            # maps every name ending in `/` to `""`, and `if not name: continue` above
+            # screens an empty NAME, not an empty BASE. One legally-spelled verified
+            # `ARTIFACTS` entry (`x/`, which resolve_base normalises and hash-verifies)
+            # would otherwise put `""` into `verified_bases` and from then on silence
+            # EVERY TRACE name ending in `/`, however unrelated — a degenerate key that
+            # swallows a whole family of names. Guarded here as well as at the `.add`
+            # site, so an empty base cannot match `unevaluated_bases` either.
+            if base and (base in verified_bases or base in unevaluated_bases):
+                continue
         notes_out.append(
             f"PROVENANCE-ONLY: {_show_path(name)} (declared in TRACE, not verified)")
 
@@ -1962,6 +2017,11 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     # runs so a raise leaves them PARTIAL rather than absent (§3.4's truncation rule).
     verified_bases = set()
     evaluated = set()
+    # #488 adversarial/F3 — the DECLARED FULL NAMES that hash-verified, accumulated the
+    # same incremental way, so `evaluated - verified_names` in the `finally:` is exactly
+    # "declared, evaluated on this run, and NOT verified" however the run ended. That
+    # set is the exact-name override; see _emit_provenance_notes's docstring.
+    verified_names = set()
     try:
         for name, meta in artifacts.items():
             evaluated.add(name)     # tried, whatever this iteration goes on to do
@@ -2086,7 +2146,24 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                 bodies[resolved] = raw
             # #488 / T2 — recorded only AFTER the sha256 comparison above, so "verified"
             # means resolved AND hash-matched, never merely resolved.
-            verified_bases.add(name.rsplit("/", 1)[-1])
+            #
+            # #488 adversarial/F2 — `str(name)`, matching the `finally:` block's twin.
+            # This site was left naked when that one was hardened, and unlike that one it
+            # is NOT gated on `notes_out`, so it runs for EVERY caller including the
+            # `notes_out=None` --eval/--selftest shape that asked for no notes at all: an
+            # `os.PathLike` ARTIFACTS key that survives resolve_base AND the hash
+            # comparison reached `.rsplit` and raised `AttributeError` on an otherwise
+            # SUCCESSFUL run — a new exception, not merely a masking hazard, on input the
+            # pre-#488 code returned `[]` for. The advisory's own bookkeeping must never
+            # be able to fail a verification that passed.
+            #
+            # #488 adversarial/F4 — an EMPTY basename is never stored. A legally-spelled
+            # `x/` resolves and hash-verifies, and `""` in `verified_bases` would then
+            # match every TRACE name ending in `/`; see _emit_provenance_notes.
+            vbase = str(name).rsplit("/", 1)[-1]
+            if vbase:
+                verified_bases.add(vbase)
+            verified_names.add(str(name))
             # <size> is parsed-but-not-validated, matching lint.py
     except BaseException:
         # round-4-of-this-gate S1 — siege S-3(b) parity with tier2_witness's C1-R3-S2
@@ -2130,6 +2207,7 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             _emit_provenance_notes(
                 trace, verified_bases,
                 {str(n).rsplit("/", 1)[-1] for n in artifacts if n not in evaluated},
+                {str(n) for n in evaluated} - verified_names,
                 notes_out)
     return notes
 
