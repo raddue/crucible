@@ -3095,8 +3095,33 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
             return True
     # regex / literal expect-fail
     pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
-    if probe is not None and pattern:
-        probe["evaluated"] = True          # siege S-7 — see the `evaluated` note above
+    if probe is not None and pattern and body != "":
+        # siege S-7 — see the `evaluated` note above for what this flag asks.
+        #
+        # SIEGE-S3 — `and body != ""`. This site keyed the flag on the mere PRESENCE of
+        # a derived pattern, independently of whether the cited range delivered any
+        # bytes for it to run against. `re.search(p, "")` cannot match for ANY pattern,
+        # so an empty body means the predicate structurally could not have decided
+        # anything — yet the SUPERSEDES consequent read `evaluated=True` and retired the
+        # peer. Measured on `ba482e2`, one PASS receipt with a real hash-matched
+        # `evidence.log` containing `BOOM` and `expect-fail=/BOOM/`, varying ONLY the
+        # cited range: `#L1-L1` exit 1 (correctly rejected), `#L50-L50` past EOF exit 0
+        # with the predecessor retired — on a census line reading `witness 0/1
+        # empty-range 1 (past-eof)`, the leg contradicting its own disclosed evidence.
+        # Second shape, needing no past-EOF range: a rangeless `grep:` over a declared,
+        # hash-verified 0-byte file, same exit 0, `witness 0/1 wrong-name 1`.
+        #
+        # `== ""` and not falsiness, MIRRORING `_bill_witness_evaluation`'s DEC-28 arm
+        # verbatim so the gate and the census cannot disagree: `body_text is None` means
+        # "no body supplied at all", which this function returns clean on far above as
+        # documented lint.py parity, and `None == ""` is False so this cannot swallow it.
+        #
+        # NOT applied to the kind=exec exit-clause site above: that branch compares the
+        # RECEIPT's own `expect-fail` against the RECEIPT's own `TRACE exit=` and never
+        # consults disk bytes at all, so an empty body says nothing about whether that
+        # comparison ran. `_bill_witness_evaluation` agrees — an exit clause derives no
+        # pattern, so it takes the `no_predicate` arm and never reaches the DEC-28 one.
+        probe["evaluated"] = True
     if pattern and re.search(pattern, body):
         raise LintError(
             # SIEGE-R2BA-4 — the NAME is escaped; the PATTERN deliberately is not (a

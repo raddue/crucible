@@ -6395,6 +6395,54 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         self.assertNotIn("EVALUATED at Tier-2", out.stderr)
         self.assertIn("witness 1/1", out.stderr)
 
+    def test_siege_s3_an_empty_body_cannot_grant_the_supersession(self):
+        """SIEGE-S3 — the PASS leg set `evaluated` on the mere PRESENCE of a derived
+        pattern, independently of whether the cited range delivered any bytes.
+        `re.search(p, "")` cannot match for ANY pattern, so an empty body means the
+        predicate structurally could not have decided anything — and the SUPERSEDES
+        consequent read the flag and retired the peer anyway, on a census line that said
+        `witness 0/1` on the very same run.
+
+        Two shapes, ONE receipt apart, both measured exit 0 on `ba482e2`:
+          * a past-EOF cited range (`#L50-L50` on a one-line file);
+          * a rangeless `grep:` over a declared, hash-verified 0-BYTE file, which needs
+            no out-of-range citation at all.
+        `_reject_empty_grep_body` covers NEITHER: it requires `kind=grep` AND a non-None
+        range, and these are `kind=exec` + past-EOF and rangeless `kind=grep`.
+
+        The IN-RANGE control (`#L1-L1`) is the non-vacuity half and is deliberately the
+        SAME receipt with one token changed: it must still reach the predicate, which
+        here MATCHES, so the leg rejects it for the ordinary reason. Without that arm
+        the fix is indistinguishable from never setting `evaluated` on this leg."""
+        h, size = self.plant(self.base, "evidence.log", b"BOOM\n")
+        eh, esize = self.plant(self.base, "empty.log", b"")
+        cases = (
+            ("in-range-control", [("evidence.log", h, size)],
+             ["EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L1-L1"],
+             "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+             "expect-fail regex"),
+            ("past-eof-range", [("evidence.log", h, size)],
+             ["EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L50-L50"],
+             "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+             "EVALUATED at Tier-2"),
+            ("rangeless-grep-over-empty-file", [("empty.log", eh, esize)],
+             ["READ  empty.log"],
+             "grep:empty.log  expect-fail=/BOOM/  ran=TRACE#1",
+             "EVALUATED at Tier-2"),
+        )
+        for name, arts, trace, wit, expect in cases:
+            with self.subTest(shape=name):
+                body = _receipt(wit, verdict="PASS", skill="build/21-implementer",
+                                artifacts=arts, trace=trace,
+                                claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"s3-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn(expect, out.stderr)
+
     def test_siege_s1_a_rangeless_grep_cannot_buy_the_exemption_on_either_leg(self):
         """SIEGE-S1 — the exploit, and the test that used to pin it green
         (`test_the_scoping_is_not_a_blanket_disable`, which asserted `FAIL -> 0` here).
