@@ -75,7 +75,7 @@ def receipt(*, artifacts=(), trace=(), claims=("(none)",), verdict="PASS",
     records that a fixture whose WITNESS is a ranged `kind=grep` on a declared
     name (or whose CLAIMS cites one, or whose TRACE carries `EXEC out=` naming
     one) is rejected at Tier-1 by a SHIPPED membership rule
-    (`rcpt_verify.py:889-894`, `:923-939`, `:897-902`) the moment `(none)` wipes
+    (`rcpt_verify.py:903-908`, `:937-953`, `:911-916`) the moment `(none)` wipes
     ARTIFACTS — so such a fixture passes green against the very build the pin
     names as broken, for the wrong reason on the wrong rule.
     """
@@ -191,7 +191,7 @@ class TestALegalArtifactsNameIsAPosixRelativePath(_RootCase):
     # --- clause: no `..` — producer-normative ONLY, deliberately NOT enforced
     def test_a_dotdot_component_is_producer_normative_and_not_a_tier1_raise(self):
         """§3: landing `..` at Tier-1 would make siege S-3's monotonicity pin
-        (`test_rcpt_verify.py:5925-5967`) structurally unreachable while leaving
+        (`test_rcpt_verify.py:5964-6006`) structurally unreachable while leaving
         its exit code unmoved. `_contained`'s realpath test already rejects the
         traversal at Tier-2. Whether it ever lands is OQ-10, undecided — so this
         pin asserts the status quo the document ships, and an implementer who
@@ -315,12 +315,12 @@ class TestTheNoneSentinelCannotEmptyArtifactsAtTheCli(_RootCase):
 # --------------------------------------------------------------------------
 class TestAnUnresolvablePathShapedArtifactStillFailsUnderStrict(_RootCase):
     """AC-6 T6. Broken copy (DEC-31): a build that drops the `--strict`
-    path-shaped raise (`rcpt_verify.py:1696-1705`) and lets the name degrade to
+    path-shaped raise (`rcpt_verify.py:1710-1719`) and lets the name degrade to
     `UNVERIFIABLE` at exit 0.
 
     Built the way §5 mandates — the fixture carries the MANDATED ranged-grep
     witness on its resolving artifact (`red-team-prompt.md:193`'s shape), so the
-    shipped #474/D6 rule (`:889-894`) raises at Tier-1 on the `(none)` variant
+    shipped #474/D6 rule (`:903-908`) raises at Tier-1 on the `(none)` variant
     before the `--strict` raise is reached. Without that, T6 pins the raise
     against one way of removing it and not against the cheaper way (§5's ⚠)."""
 

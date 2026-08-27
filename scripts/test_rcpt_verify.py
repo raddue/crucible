@@ -3664,12 +3664,28 @@ class TestReadFailuresAreClassified(_InqBase):
     def test_a_nul_in_a_cited_name_does_not_traceback(self):
         """`Path.is_file()` swallows OSError/ValueError; `Path.resolve()` does not, and
         a receipt is an untrusted subagent return. A malformed name must degrade to
-        UNVERIFIABLE, never crash the lint."""
-        h, size = self.plant(self.base, "out.log")
-        r = self.rcpt([("out.log", h, size), ("ou\x00t.log", h, size)],
-                      ["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"])
+        UNVERIFIABLE, never crash the lint.
+
+        #488 AC-2 re-authoring: the SUBJECT is unchanged — only the section carrying the
+        malformed name moves. A NUL in an `ARTIFACTS` name is now a Tier-1 `LintError`
+        (§3, *Lexical grammar*), which fires before `resolve_base` is ever reached, so
+        the name moves onto a RANGELESS `kind=grep` witness citing a `READ` leg. The NUL
+        ban is `ARTIFACTS`-only and a rangeless grep payload is exempt from the #474/D6
+        ARTIFACTS-membership rule, so the name still reaches `Path.resolve()` through
+        `tier2_witness` and the guard this test exists for is exercised rather than
+        short-circuited at Tier-1."""
+        h, _ = self.plant(self.base, "out.log")
+        nul = "ou\x00t.log"
+        r = self.rcpt([], [f"READ  {nul}  sha256:{h}"],
+                      witness=f"grep:{nul}  expect-fail=/BOOM/  ran=TRACE#1")
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(r))
         self.assertNotIn("Traceback (most recent call last)", out.stderr)
+        # Non-vacuity: the malformed name really did reach the resolver, and the
+        # ValueError degraded to UNVERIFIABLE (rendered through `_show_path`) instead of
+        # unwinding. Without this the assertNotIn would also hold for a name the lint
+        # rejected before `Path.resolve()` was ever called.
+        self.assertIn(r"UNVERIFIABLE: witness ou\x00t.log (no file under root)",
+                      out.stderr.splitlines())
 
     def test_a_non_utf8_cited_body_is_classified_and_the_census_says_partial(self):
         """The `#L` reader decodes LOSSLESSLY on purpose — the 4 KiB cap's byte-count
@@ -4296,7 +4312,13 @@ class TestHostileReceiptNamesAreEscapedToo(_InqBase):
 
     def _one_name_receipt(self, name, extra_trace=True):
         """A receipt whose ARTIFACTS declares `name` (which resolves nowhere), plus a
-        real out.log so the witness leg is exercised rather than short-circuited."""
+        real out.log so the witness leg is exercised rather than short-circuited.
+
+        #488 AC-2: that holds for three of the four callers. The NUL caller is now the
+        exception — since the §3 *Lexical grammar* NUL clause its `name` is a Tier-1
+        `LintError`, so parsing stops in `parse_artifacts` and neither leg runs; the
+        real `out.log` buys it nothing and the guarantee it pins moved onto the Tier-1
+        message (see that test's own docstring)."""
         h, size = self.plant(self.base, "out.log")
         r = self.rcpt([("out.log", h, size), (name, "a" * 64, "5")],
                       ["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"])
