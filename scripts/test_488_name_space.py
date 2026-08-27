@@ -2449,6 +2449,61 @@ class TestASecondNestedRootDoesNotSilenceTheCounter(_RootCase):
         self.assertIn("resolved-by-walk 2", census(out.stderr), out.stderr)
 
 
+class TestSiegeS4ASymlinkInsideAnOwnedRootCannotZeroTheWalkNote(_TwoRootCase):
+    """SIEGE-S4 — `_below_top_level` keyed its depth check on `resolved`, the
+    POST-symlink path, and a symlink can only ever SHORTEN a path. A subagent owns
+    its `--root` dispatch directory, so it runs `ln -s ../top.md sub/in2.md` and
+    cites `sub/in2.md`: the two-component citation resolves to the root's OWN top
+    level, `len(rel.parts) == 1`, and both the `RESOLVED-BY-WALK:` note and the
+    `resolved-by-walk` counter vanish — a per-citation mute switch on the one
+    instrument that discloses unusual resolution, needing no deployment-specific
+    condition, only write access to a root the subagent already has.
+
+    Measured on `ba482e2` under the mandated two-root command line: `resolved-by-walk
+    0` and no note for the symlink, against `resolved-by-walk 2` and two notes for the
+    non-symlink `sub/y.md` control. The old docstring disclosed only the FALSE-POSITIVE
+    direction (a bare basename whose target is a symlink into a subdirectory DOES
+    fire); this attacker-favourable inverse was stated nowhere.
+
+    The control is the non-vacuity half: an ordinary deep citation must keep firing on
+    exactly the resolution key it always used, so the fix cannot be "always fire"."""
+
+    def _run(self, cited, target_rel):
+        h, size = self.plant(self.dispatch, target_rel, "t\n")
+        text = receipt(artifacts=[(cited, h, size)], trace=[f"READ  {cited}"])
+        return self.verify(text)
+
+    def test_the_symlink_shortened_citation_still_discloses(self):
+        (self.dispatch / "sub").mkdir(parents=True, exist_ok=True)
+        (self.dispatch / "sub" / "in2.md").symlink_to("../top.md")
+        out = self._run("sub/in2.md", "top.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 2", census(out.stderr), out.stderr)
+        # The rendered relpath is the POST-resolution one, and the two spellings
+        # DIFFERING is the disclosure: the citation is two deep, the resolution is not.
+        self.assertEqual(walk_notes(out.stderr),
+                         ["RESOLVED-BY-WALK: sub/in2.md (top.md)"] * 2, out.stderr)
+
+    def test_an_ordinary_deep_citation_is_unchanged(self):
+        """NON-VACUITY — no symlink, same depth. This fired before the fix and must
+        fire identically after it, with the identical relpath: the resolution key is
+        additive-only, never replaced."""
+        out = self._run("sub/y.md", "sub/y.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 2", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr),
+                         ["RESOLVED-BY-WALK: sub/y.md (sub/y.md)"] * 2, out.stderr)
+
+    def test_a_top_level_citation_stays_silent(self):
+        """The other non-vacuity bound: a genuine bare-basename citation at the root's
+        own top level is NOT this clause's case and must stay silent, or the counter
+        stops distinguishing anything at all."""
+        out = self._run("top.md", "top.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+
 class TestALaterDisjointRootAnswersTheDepthKey(_RootCase):
     """AC-6 T7 leg 2, the DECLARATION-ORDER existential (round-4-of-this-gate/S2).
 

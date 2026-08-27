@@ -1437,7 +1437,44 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     return None
 
 
-def _below_top_level(resolved, root):
+def _cited_below_top_level(name):
+    """SIEGE-S4 — True when the CITATION ITSELF names something below a top level,
+    read from the receipt text alone and never from disk.
+
+    `_below_top_level` keys its depth check on `resolved`, the POST-symlink path, and a
+    symlink can only ever SHORTEN that: a subagent with write access to a root it
+    already owns runs `ln -s ../top.md sub/in2.md`, cites `sub/in2.md`, and the
+    two-component citation resolves to the root's own top level — `len(rel.parts) == 1`,
+    so both the note and the counter vanish. Measured on `ba482e2` with the mandated
+    two-root command line: `resolved-by-walk 0` and no note, against `resolved-by-walk
+    2` and two notes for the non-symlink `sub/y.md` control. That hands the subagent a
+    per-citation mute switch on the one instrument that discloses unusual resolution,
+    needing no deployment-specific condition at all.
+
+    RELATIVE NAMES ONLY. For an ABSOLUTE citation — §3.2's mandated form for a tracked
+    file — "how deep is it" is meaningless in the abstract and is already answered by
+    `rel`, the relpath from the root that holds it; counting the absolute path's own
+    components would fire on every tracked-file citation in the corpus.
+
+    Lexically normalised first, so `./f.md` reads as depth 1 and `sub/../f.md` does too
+    — the two spellings of a top-level file. `../x.md` DOES read as deeper, and that is
+    intended: a `..`-traversal citation that lands on a root's top level is exactly the
+    unusual resolution this channel exists to disclose. Erring toward firing is the
+    DISCLOSURE direction; this note is advisory and never a verdict.
+
+    MUST NOT RAISE: `name` is receipt-controlled."""
+    if name is None:
+        return False
+    try:
+        raw = str(name)
+        if pathlib.PurePosixPath(raw).is_absolute():
+            return False
+        return len(pathlib.PurePosixPath(posixpath.normpath(raw)).parts) > 1
+    except Exception:
+        return False
+
+
+def _below_top_level(resolved, root, name=None):
     """#488 T7 — the relpath of `resolved` from the first SUPPLIED ROOT, in
     declaration order, that holds it BELOW its own top level; None when no supplied
     root does.
@@ -1471,15 +1508,40 @@ def _below_top_level(resolved, root):
     direction §3.4 channel 2 exists to arrest. A root that does not CONTAIN the resolved
     path cannot change the answer either way, so no unrelated root ever participates.
 
-    KEYED ON `resolved`, NOT ON THE CITATION — stated because it is a deliberate,
-    disclosed reading and not an oversight (round-1-of-this-gate S1). `resolve_base`
-    returns `c.resolve()`, i.e. symlinks followed, so a BARE BASENAME sitting at a
-    root's own top level whose on-disk target is itself a symlink into a subdirectory
-    DOES fire this note and bump the counter — the realpath genuinely sits below the
-    root's top level, and §3.1 clause 2's "resolves to a path below a root's top
-    level" is satisfied literally by that realpath. The cost: the census cannot
-    tell that case apart from a genuine root-relative citation. Kept, not re-keyed.
+    KEYED ON `resolved` **OR** ON THE CITATION, and SIEGE-S4 is why the second half
+    exists. `resolve_base` returns `c.resolve()`, i.e. symlinks followed, and the
+    original form read ONLY that — stated at the time as a deliberate, disclosed reading
+    (round-1-of-this-gate S1). What the disclosure named was the FALSE-POSITIVE
+    direction: a BARE BASENAME at a root's own top level whose on-disk target is a
+    symlink into a subdirectory DOES fire, because the realpath genuinely sits below the
+    top level and §3.1 clause 2 is satisfied literally by that realpath. That half is
+    unchanged and still fires.
+
+    What the disclosure did NOT name is the attacker-favourable INVERSE, and a symlink
+    can only ever shorten a path: a deep citation whose symlink points UP resolves to
+    the root's own top level and SILENCED both halves of the instrument. See
+    `_cited_below_top_level` for the measurement. The two tests are OR-ed rather than
+    the citation test replacing the resolution one, because they detect different
+    events and each is real on its own; erring toward firing is the DISCLOSURE
+    direction, and this note is advisory and never a verdict.
+
+    The RENDERED relpath stays `rel` — the relpath from the root that actually holds
+    the resolved file — on both halves. On the citation half that makes the note read
+    `RESOLVED-BY-WALK: sub/in2.md (top.md)`, which is not a redundancy but the whole
+    disclosure: the two spellings differing IS the shortening.
+
+    THE CITATION ARM IS SITED BELOW THE LOOP, NOT OR-ED INSIDE IT, and that is a
+    measured requirement rather than a style choice. Inside the loop an `or` lets the
+    first root that merely CONTAINS the name answer, which overrides rule (2) above —
+    the first root that sees the name BELOW ITS OWN TOP LEVEL answers, in declaration
+    order. `TestASecondNestedRootDoesNotSilenceTheCounter` catches it: with `--root
+    <root>/out-9 --root <root>` the `or` form rendered `(round-9-findings.md)` from the
+    nested root in place of `(out-9/round-9-findings.md)` from the outer one. Sited
+    below, the arm is purely ADDITIVE — every input that fired before fires identically
+    and with the identical relpath — and on the inputs that used to be silent it answers
+    with the first CONTAINING root's relpath, in that same declaration order.
     """
+    contained = None
     for r in _as_roots(root):
         try:
             rel = resolved.relative_to(r)
@@ -1487,6 +1549,12 @@ def _below_top_level(resolved, root):
             continue
         if len(rel.parts) > 1:
             return rel
+        if contained is None:
+            contained = rel
+    # SIEGE-S4's arm, and it is sited BELOW the loop rather than OR-ed inside it. See
+    # the docstring: an `or` measurably breaks rule (2)'s declaration-order existential.
+    if contained is not None and _cited_below_top_level(name):
+        return contained
     return None
 
 
@@ -2528,7 +2596,7 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
             # direct routing is what makes this note's survival independent of that arm;
             # Task 7's DEC-31 row 12 discriminates the channel only because its mutant
             # copy removes the arm as well.
-            _rel = _below_top_level(resolved, root)
+            _rel = _below_top_level(resolved, root, name)
             if _rel is not None:
                 # COUNTER FIRST, note second — round-3/S1. With the emission ahead of
                 # the bump, a `notes_out` that cannot take the note lost the note AND
@@ -3816,7 +3884,7 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             # Through `notes_out` ALONE, never `notes_refused` or the return value:
             # _verify_single DISCARDS this leg's return value (see the call site), and
             # every raise between here and the clean-path return drops it in this frame.
-            _rel = (_below_top_level(resolved, root)
+            _rel = (_below_top_level(resolved, root, art_name)
                     if resolved is not None else None)
             if _rel is not None:
                 # Round-3/S1 — the artifacts leg's order and the artifacts leg's

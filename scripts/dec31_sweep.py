@@ -185,13 +185,20 @@ def _apply(path, edits):
 # --------------------------------------------------------------------------- #
 
 # `_below_top_level`'s loop body: `for r in _as_roots(root):` .. `return None`.
-DEPTH_BODY = '''    for r in _as_roots(root):
+DEPTH_BODY = '''    contained = None
+    for r in _as_roots(root):
         try:
             rel = resolved.relative_to(r)
         except ValueError:      # not under this root — PurePath op, never OSError
             continue
         if len(rel.parts) > 1:
             return rel
+        if contained is None:
+            contained = rel
+    # SIEGE-S4's arm, and it is sited BELOW the loop rather than OR-ed inside it. See
+    # the docstring: an `or` measurably breaks rule (2)'s declaration-order existential.
+    if contained is not None and _cited_below_top_level(name):
+        return contained
     return None
 '''
 
@@ -269,7 +276,7 @@ ROUND6_BODY = '''    best = None
 # Round 3's witness-leg form: sited BELOW the `resolved is None` early return (so it
 # needs no None guard) and routed into `notes_refused`, i.e. onto the return value
 # _verify_single discards.
-ROUND3_WIT = '''            _rel = _below_top_level(resolved, root)
+ROUND3_WIT = '''            _rel = _below_top_level(resolved, root, art_name)
             if _rel is not None:
                 notes_refused = notes_refused + [_walk_note(art_name, _rel)]
                 if cov is not None:
@@ -314,6 +321,7 @@ TRAILSLASH = "TestATrailingSlashArtifactNameCannotSilenceUnrelatedNames"
 SIBLING = "TestAVerifiedSiblingCannotSilenceADeclaredUnverifiedName"
 EVERY = "TestEveryBelowTopLevelEntryInOneRunIsCountedAndNoted"
 SYMLINK = "TestABareBasenameResolvedThroughASymlinkStillFires"
+S4SYM = "TestSiegeS4ASymlinkInsideAnOwnedRootCannotZeroTheWalkNote"
 DISJOINT = "TestALaterDisjointRootAnswersTheDepthKey"
 RELHALF = "TestTheRelpathHalfAloneCannotForgeTheChannel"
 WESC = "TestTheWalkNoteEscapesTheNameHalfToo"
@@ -676,6 +684,8 @@ MUTANTS = [
                    "test_the_verdict_does_not_depend_on_root_ORDER"),
                   (NESTED,
                    "test_the_nested_root_does_not_silence_the_note"),
+                  (S4SYM,
+                   "test_a_top_level_citation_stays_silent"),
                   (TOPLVL,
                    "test_no_note_is_emitted",
                    "test_the_sub_count_stays_zero"),
@@ -690,7 +700,7 @@ MUTANTS = [
     # `cov.bump` nor the note runs -- without pinning this file to the wording of
     # twenty lines of comment.
     dict(id=9, criterion="AC-6 T7 leg 2", what="the artifacts leg goes silent",
-         edits=[("            _rel = _below_top_level(resolved, root)\n",
+         edits=[("            _rel = _below_top_level(resolved, root, name)\n",
                  "            _rel = None\n")],
          expect=E((ASTRICT,
                    "test_the_strict_raise_does_not_silence_them",
@@ -725,6 +735,9 @@ MUTANTS = [
                   (RELHALF,
                    "test_the_hostile_relpath_renders_fully_escaped",
                    "test_the_run_completes_and_the_note_fires"),
+                  (S4SYM,
+                   "test_an_ordinary_deep_citation_is_unchanged",
+                   "test_the_symlink_shortened_citation_still_discloses"),
                   (SYMLINK,
                    "test_the_note_and_the_counter_both_fire"),
                   (WESC,
@@ -815,6 +828,10 @@ MUTANTS = [
                   (RELHALF,
                    "test_the_hostile_relpath_renders_fully_escaped",
                    "test_the_run_completes_and_the_note_fires"),
+                  (S4SYM,
+                   "test_a_top_level_citation_stays_silent",
+                   "test_an_ordinary_deep_citation_is_unchanged",
+                   "test_the_symlink_shortened_citation_still_discloses"),
                   (SIBLING,
                    "test_the_run_says_out_loud_that_the_cited_name_is_unverified",
                    "test_the_trace_citation_of_that_same_name_still_emits_the_note"),
@@ -913,7 +930,7 @@ MUTANTS = [
     # First edit nulls the in-place witness emission (see row 9 for why nulling rather
     # than deleting); second re-sites round 3's own emission below the ambiguity raise.
     dict(id=13, criterion="AC-6 T7 leg 2", what="round 3's build: witness emission BELOW the raise",
-         edits=[("            _rel = (_below_top_level(resolved, root)\n"
+         edits=[("            _rel = (_below_top_level(resolved, root, art_name)\n"
                  "                    if resolved is not None else None)\n",
                  "            _rel = None\n"),
                 (MIRROR, ROUND3_WIT + MIRROR)],
@@ -942,6 +959,8 @@ MUTANTS = [
          expect=E((GITDEEP,
                    "test_no_note_is_emitted",
                    "test_the_sub_count_stays_zero"),
+                  (S4SYM,
+                   "test_the_symlink_shortened_citation_still_discloses"),
                   (NESTED,
                    "test_the_nested_root_does_not_silence_the_note",
                    "test_the_nested_root_does_not_zero_the_counter",
@@ -959,6 +978,8 @@ MUTANTS = [
          expect=E((GITDEEP,
                    "test_no_note_is_emitted",
                    "test_the_sub_count_stays_zero"),
+                  (S4SYM,
+                   "test_the_symlink_shortened_citation_still_discloses"),
                   (GITTOP,
                    "test_no_note_is_emitted",
                    "test_the_sub_count_stays_zero",
