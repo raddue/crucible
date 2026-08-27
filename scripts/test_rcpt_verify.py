@@ -2770,8 +2770,11 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
         self.assertTrue(cov.partial)
 
     def test_cov_is_optional_so_no_existing_caller_moves(self):
-        """D8.2's 'no direct caller moves' — the ~50 positional call sites pass five
-        arguments and must keep working."""
+        """D8.2's 'no direct caller moves' — `tier2_artifacts` now takes SEVEN
+        parameters, but `cov`/`bodies`/`notes_out` are each OPTIONAL WITH A DEFAULT, so
+        the four-argument positional form that predates them still works. That is what
+        keeps the ~40 direct call sites (the count `tier2_artifacts`'s own docstring
+        carries) from moving."""
         (self.root / "a.txt").write_bytes(b"hi\n")
         self.assertEqual(
             self.rv.tier2_artifacts({"a.txt": self._entry(b"hi\n")}, [], self.root, True),
@@ -3500,9 +3503,13 @@ class TestNotesSurviveALintError(_InqBase):
         """C1-R3-S2 freeze-guard — the two-list drain (`notes + wit_notes`) sorts anything
         appended to `notes` AFTER the witness call above the witness-leg notes, even
         though it was produced later. The ledger-binding advisory is exactly that, so it
-        is appended to `wit_notes` instead. Pinned because the band order here is
-        byte-identical to the pre-change baseline and the earlier comment wrongly claimed
-        order was preserved when only the note/bullet/census BANDS were."""
+        is appended to `wit_notes` instead. What is pinned is the RELATIVE position of
+        `wit` and `led`, not the band's full byte content: since #488/T2 this fixture's
+        run also emits `PROVENANCE-ONLY: f.txt` into the same band (the `READ  f.txt`
+        TRACE entry against an empty ARTIFACTS list), so the band is no longer
+        byte-identical to the pre-change baseline. Pinned because the earlier comment
+        wrongly claimed order was preserved when only the note/bullet/census BANDS
+        were."""
         self.plant(self.base, "f.txt", b"quiet\n")
         p = self.rcpt(
             artifacts=[], witness="grep:f.txt  expect-fail=/BOOM/  ran=TRACE#1",
@@ -6090,7 +6097,7 @@ class TestAV1HeaderSaysSoOnTheChannel(_InqBase):
     line, so an `RCPT v1` header written by the reviewed subagent opts the entire v1.1
     rule set out — the TRIPWIRE-`none` two-leg rule, the SUPERSEDES justification rule and
     the witness-evidence consequent — with no signal on any channel.
-    `return-convention.md:525` makes mixed-version runs LEGAL, so this is not a rejection;
+    `return-convention.md:539` makes mixed-version runs LEGAL, so this is not a rejection;
     what was missing is that the gate could not tell "the v1.1 rules passed" from "the
     v1.1 rules never ran" while quality-gate/SKILL.md:34,58 treat Layer 2 as enforced."""
 

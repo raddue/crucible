@@ -647,8 +647,12 @@ class TestTheNoteIsKeyedOnVerifiedBasenames(_RootCase):
     def test_a_trace_name_matching_an_unresolved_artifact_still_emits_the_note(self):
         """Leg 5, the leg the whole match-key clause turns on. Broken copy
         (DEC-31): the verified-blind basename key, which stays SILENT here —
-        suppressing a TRUE advisory (66 flat / 89 nested such suppressions
-        across the three frozen corpora). Silence is the failure direction
+        suppressing a TRUE advisory (61 flat / 79 nested such suppressions
+        across the three frozen corpora — the figures `_emit_provenance_notes`'s
+        own docstring carries). The larger 66/89 reading counts a
+        no-raise-and-abandon model; §3.4's truncation rule already keeps a TRACE
+        entry matching an UNEVALUATED artifact silent, so those runs are not
+        suppressions this key is answerable for. Silence is the failure direction
         grudge e0f0a6b75692 names."""
         h, s = self.plant("round-1-findings.md", "# findings\nfatal=0\n")
         out = self.verify(receipt(
@@ -700,7 +704,7 @@ class TestTheNoteSurvivesATruncatedRun(_RootCase):
     Broken copy (DEC-31): a build accumulating the notes into
     `tier2_artifacts`'s own RETURN VALUE instead of a caller-supplied
     out-parameter — the sole production call site is
-    `notes += tier2_artifacts(...)` (`:3836`), which never executes on a raise,
+    `notes += tier2_artifacts(...)` (`:3983`), which never executes on a raise,
     so every note is discarded. It goes green on the un-evaluated half by
     coincidence and wrong on the evaluated half.
 
