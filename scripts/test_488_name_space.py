@@ -1552,6 +1552,92 @@ class TestTheEmitterCannotRaiseOutOfTheFinallyOnAnyShape(_RootCase):
                           "(declared in TRACE, not verified)"])
 
 
+class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
+    """ROUND-4/S1 — the FIFTH and (intended) LAST instance of the class the four
+    classes above pin one shape at a time, stated at the FUNCTION level instead.
+
+    `tier2_artifacts` takes THREE caller-controlled parameters with no type
+    enforcement — `trace`, `artifacts` and `notes_out` (~40 direct call sites,
+    all positional). The first two were hardened one instance at a time; the
+    THIRD was never tested at all, and it is read while an exception is IN
+    FLIGHT: the `except BaseException:` mirror arm does `notes_out.extend(notes)`
+    before re-raising, so a `notes_out` that is not a list REPLACES the real
+    verdict exactly as a `None` `trace` did in the `finally:`. Measured on
+    `3749606` (pre-fix): `()`, `0`, an object without `.extend`, and an object
+    whose `.extend` raises all destroyed the genuine `Tier-2 --strict: ... absent
+    under all bases` LintError, reporting the shape error in its place.
+
+    The property under test is therefore not "this call site is guarded" but
+    "NO hostile shape on ANY of the three parameters, alone or together, can
+    replace the exception that ended the run" — which is why the third leg
+    drives all three at once. Driven by DIRECT calls because the CLI cannot
+    reach the hazard; that is the point of pinning it."""
+
+    #  ORDER IS LOAD-BEARING: the bare basename first, so it appends an
+    #  UNVERIFIABLE note to the RETURN-value list before the path-shaped name
+    #  raises — that note is what the mirror arm exists to mirror, so a `notes`
+    #  list that is empty at the raise would make every leg here vacuous.
+    ART = {"bare-basename.md": {"hash": H64, "size": "10"},
+           "docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
+    TRACE = [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}]
+
+    class _NoExtend:
+        """Ordinary API misuse, not a contrived object: any caller who passed the
+        wrong out-parameter (a `set`, a `_Coverage`, a namedtuple) lands here."""
+
+    class _RaisingExtend:
+        def extend(self, items):
+            raise RuntimeError("notes_out.extend exploded")
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+
+    def _run(self, notes_out, art=None, trace=None):
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(self.ART if art is None else art,
+                                    self.TRACE if trace is None else trace,
+                                    [self.root], True, None, None, notes_out)
+        self.assertIn("absent under all bases", str(caught.exception))
+
+    def test_no_hostile_notes_out_shape_replaces_the_real_lint_error(self):
+        for label, notes_out in (("tuple", ()), ("int", 0),
+                                 ("object without .extend", self._NoExtend()),
+                                 ("object whose .extend raises",
+                                  self._RaisingExtend())):
+            with self.subTest(shape=label):
+                self._run(notes_out)
+
+    def test_all_three_caller_supplied_parameters_hostile_at_once(self):
+        """The function-level statement. Each parameter's guard lives in a
+        DIFFERENT block (`finally:` wrapper, per-entry guard, mirror arm), and
+        the arms run in sequence on one raise — so a fix that closed one by
+        breaking another's ordering would pass the single-parameter legs and
+        fail here."""
+        class _RaisingStr:
+            def __str__(self):
+                raise RuntimeError("__str__ exploded")
+
+        art = dict(self.ART)
+        art[_RaisingStr()] = {"hash": H64, "size": "10"}
+        self._run((), art=art, trace=[None, 5])
+
+    def test_the_mirror_arm_still_delivers_the_notes_it_exists_for(self):
+        """Non-vacuity for every leg above, and the mutation this fix could
+        otherwise have introduced: an envelope that swallowed the arm's WORK as
+        well as its exceptions would make all three legs green while silently
+        discarding the notes the arm was added to save — the fail-open direction
+        grudge `e0f0a6b75692` forbids. A real list still receives both this
+        leg's own UNVERIFIABLE note (via the mirror arm) and the
+        PROVENANCE-ONLY note (via the `finally:`)."""
+        notes_out = []
+        self._run(notes_out)
+        self.assertEqual(notes_out,
+                         ["UNVERIFIABLE: bare-basename.md (no file under root)",
+                          f"{NOTE_PREFIX} /elsewhere/x.md (declared in TRACE, "
+                          "not verified)"])
+
+
 class TestTheTruncationRuleHoldsForSlashSuffixedNames(_RootCase):
     """ROUND-3/Minor-3 — F4's read-site guard (`base` must be TRUTHY to match)
     and §3.4's truncation rule collided on one legal spelling.

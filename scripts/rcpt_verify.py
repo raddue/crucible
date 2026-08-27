@@ -2257,8 +2257,29 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
         # fail-open shape grudge e0f0a6b75692 exists to prevent, and the one the new
         # PROVENANCE-ONLY:/RESOLVED-BY-WALK: notes do NOT share, because Task 4/5 route
         # them through `notes_out` directly.
-        if notes_out is not None:
-            notes_out.extend(notes)
+        #
+        # #488 round-4/S1 — the ENTIRE arm body is inside the no-raise envelope, not
+        # just the `.extend` call, and that scope is the point. This is the FIFTH
+        # instance of one hazard class: an expression evaluated while an exception is
+        # IN FLIGHT, which — by Python's `except`/`finally` semantics — REPLACES the
+        # real verdict with its own failure. The four before it were point-patched one
+        # shape at a time (`trace or []`, `str(n)`, the per-entry guard, the call-site
+        # wrapper) and each patch's own new code carried the next instance in. Here
+        # `notes_out` is the THIRD caller-controlled parameter with no type enforcement
+        # (~40 call sites, positional), so `()`, `0`, an object without `.extend`, and
+        # an object whose `.extend` raises are all ordinary API misuse — and all four
+        # were measured destroying a genuine `Tier-2 --strict: ... absent under all
+        # bases` LintError. Wrapping the BODY rather than the CALL is what stops a
+        # sixth: any line a later change adds to this arm is inside the envelope by
+        # construction, exactly as the `finally:` block's twin wrapper already is.
+        # `Exception`, not `BaseException`: KeyboardInterrupt/SystemExit propagate.
+        # Swallowing is right HERE for the same reason it is right there — these notes
+        # are an advisory side channel and must never preempt the verdict.
+        try:
+            if notes_out is not None:
+                notes_out.extend(notes)
+        except Exception:
+            pass
         raise
     finally:
         # In a `finally:` so the notes survive all five truncating raise sites, which is
