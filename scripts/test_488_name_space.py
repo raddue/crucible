@@ -435,39 +435,69 @@ class TestTheNoneSentinelIsAnchoredToASingleLineBody(unittest.TestCase):
 
     # --- leg 1: ARTIFACTS / parse_artifacts (rcpt_verify.py:240-241)
     def test_artifacts_none_after_an_entry_is_a_lint_error(self):
-        with self.assertRaises(self.rv.LintError):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_artifacts([f"  {self.A}", "  (none)", f"  {self.B}"])
 
     def test_artifacts_none_before_an_entry_is_a_lint_error(self):
-        with self.assertRaises(self.rv.LintError):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_artifacts(["  (none)", f"  {self.A}"])
 
     def test_artifacts_none_alone_remains_the_empty_set_sentinel(self):
         self.assertEqual(self.rv.parse_artifacts(["  (none)"]), {})
 
+    def test_two_artifacts_nones_are_a_lint_error(self):
+        """A body that is nothing BUT sentinels is not a one-line body either:
+        `(none)` co-occurring with `(none)` is the same violation."""
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+            self.rv.parse_artifacts(["  (none)", "  (none)"])
+
+    def test_the_sentinel_raise_precedes_the_name_legality_raise(self):
+        """Precedence pin. `_none_sentinel` runs BEFORE the per-entry
+        absolute/NUL checks, so a body that is BOTH co-occurring and
+        name-illegal reports the sentinel violation. Deliberate: the body is
+        rejected as a whole before any entry in it is read."""
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+            self.rv.parse_artifacts(["  (none)", f"  /etc/passwd  sha256:{H64}  10"])
+
     # --- leg 2: TRACE / parse_trace (:259-260)
     def test_trace_none_after_an_entry_is_a_lint_error(self):
-        with self.assertRaises(self.rv.LintError):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_trace([f"  {self.T1}", f"  {self.T2}", "  (none)"])
 
     def test_trace_none_before_an_entry_is_a_lint_error(self):
-        with self.assertRaises(self.rv.LintError):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_trace(["  (none)", f"  {self.T1}"])
+
+    def test_trace_none_between_two_entries_is_a_lint_error(self):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+            self.rv.parse_trace([f"  {self.T1}", "  (none)", f"  {self.T2}"])
 
     def test_trace_none_alone_remains_the_empty_set_sentinel(self):
         self.assertEqual(self.rv.parse_trace(["  (none)"]), [])
 
+    def test_two_trace_nones_are_a_lint_error(self):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+            self.rv.parse_trace(["  (none)", "  (none)"])
+
     # --- leg 3: CLAIMS / parse_claims (:352-353)
     def test_claims_none_after_an_entry_is_a_lint_error(self):
-        with self.assertRaises(self.rv.LintError):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_claims([f"  {self.C1}", "  (none)"])
 
     def test_claims_none_before_an_entry_is_a_lint_error(self):
-        with self.assertRaises(self.rv.LintError):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
             self.rv.parse_claims(["  (none)", f"  {self.C1}"])
+
+    def test_claims_none_between_two_entries_is_a_lint_error(self):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+            self.rv.parse_claims([f"  {self.C1}", "  (none)", f"  {self.C2}"])
 
     def test_claims_none_alone_remains_the_empty_set_sentinel(self):
         self.assertEqual(self.rv.parse_claims(["  (none)"]), [])
+
+    def test_two_claims_nones_are_a_lint_error(self):
+        with self.assertRaisesRegex(self.rv.LintError, "empty-set sentinel"):
+            self.rv.parse_claims(["  (none)", "  (none)"])
 
     def test_two_claims_without_a_sentinel_are_both_kept(self):
         """The control for the two legs above: without `(none)` the parser keeps
