@@ -15,8 +15,11 @@ where it sites its SEMANTIC half). They were written BEFORE the implementation.
 SCOPE — only the criteria §8 marks schedulable today are covered here.
 Deliberately NOT tested (each is gated by the design doc's own ordering gates):
 
-  * AC-1 second half   — the `return-convention.md:104`/`:256` retraction is
+  * AC-1 second half   — the `return-convention.md:105`/`:257` retraction is
                          gated on GH #530 (§3.1 clause 2, second ordering gate).
+                         §4 of the design doc names those two rows `:104`/`:256`;
+                         AC-2's own edit to `:68` shifted every anchor below it
+                         down by one, so the LIVE lines are `:105`/`:257`.
   * AC-3, AC-5         — moved to GH #530 with the census floor (tombstones).
   * AC-4               — the C walk's 42→14 / 96→2 reproduction. C is not built
                          and is #530-gated (OQ-7, §3.1 clause 2); the corpora it
@@ -148,7 +151,8 @@ class TestTheRulingIsRecorded(unittest.TestCase):
     """AC-1 first half. §8 calls this out as a tautology satisfied by the
     artifact's own existence and discounts its contribution to zero; it is
     pinned anyway so the recorded ruling cannot silently leave the repo. AC-1's
-    SECOND half (the `return-convention.md:104`/`:256` retraction) is #530-gated
+    SECOND half (the `return-convention.md:105`/`:257` retraction — §4's
+    `:104`/`:256` rows, renumbered by AC-2's own `:68` edit) is #530-gated
     and is NOT tested."""
 
     def test_the_name_space_ruling_document_is_in_the_repo(self):
@@ -217,7 +221,7 @@ class TestALegalArtifactsNameIsAPosixRelativePath(_RootCase):
     # --- clause: no `..` — producer-normative ONLY, deliberately NOT enforced
     def test_a_dotdot_component_is_producer_normative_and_not_a_tier1_raise(self):
         """§3: landing `..` at Tier-1 would make siege S-3's monotonicity pin
-        (`test_rcpt_verify.py:5964-6006`) structurally unreachable while leaving
+        (`test_rcpt_verify.py:5982-6055`) structurally unreachable while leaving
         its exit code unmoved. `_contained`'s realpath test already rejects the
         traversal at Tier-2. Whether it ever lands is OQ-10, undecided — so this
         pin asserts the status quo the document ships, and an implementer who
@@ -568,7 +572,7 @@ class TestTheNoneSentinelCannotEmptyArtifactsAtTheCli(_RootCase):
 # --------------------------------------------------------------------------
 class TestAnUnresolvablePathShapedArtifactStillFailsUnderStrict(_RootCase):
     """AC-6 T6. Broken copy (DEC-31): a build that drops the `--strict`
-    path-shaped raise (`rcpt_verify.py:1739-1748`) and lets the name degrade to
+    path-shaped raise (`rcpt_verify.py:1800-1809`) and lets the name degrade to
     `UNVERIFIABLE` at exit 0.
 
     Built the way §5 mandates — the fixture carries the MANDATED ranged-grep
@@ -1855,8 +1859,17 @@ class TestTheWalkNoteSurvivesATruncatedRun(_RootCase):
     distinguishable here: the rescue arm carries it to stderr anyway and this
     test — and both suites — stay green. Task 7's DEC-31 row 12 discriminates
     that channel only because its mutant copy ALSO removes the rescue arm,
-    reproducing the pre-S1 shape; against that copy this test is the one that
-    goes red."""
+    reproducing the pre-S1 shape; against that copy this test is ONE OF FIVE
+    that go red — one of the TWO the channel change itself accounts for.
+    Measured on the two mutants separately, both suites, on this commit: the
+    arm removal ALONE (channel intact) reddens three, none of them about this
+    note — `TestNoCallerSuppliedParameterCanMaskAnInFlightRaise`'s mirror-arm
+    pin and both of `TestTheNoteSurvivesATruncatedRun`'s. The channel change
+    ALONE (arm intact) reddens NONE, which is the paragraph above restated as a
+    measurement. Only the two together reach this test and
+    `TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise`'s
+    `test_the_strict_raise_does_not_silence_them`. `test_rcpt_verify.py` stays
+    green on all three mutants."""
 
     def test_a_later_hash_mismatch_does_not_silence_the_earlier_walk_note(self):
         h, s = self.plant("out-9/round-9-findings.md", "# findings\nfatal=0\n")
@@ -1883,7 +1896,7 @@ class TestTheWalkNoteSurvivesATruncatedRun(_RootCase):
 class TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise(_RootCase):
     """AC-6 T7 leg 2, witness-leg truncation leg — round 3's S1.
 
-    `--strict` is the MANDATED invocation (`quality-gate/SKILL.md:36`), and the
+    `--strict` is the MANDATED invocation (`quality-gate/SKILL.md:30`), and the
     witness leg's ambiguity check RAISES under it. §3.1 clause 2 binds on
     RESOLUTION, not on survival: the name DID resolve below top level, so the
     note and the counter are owed on that run too.
@@ -1941,7 +1954,7 @@ class TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise(_RootCase):
     The artifacts leg has the SAME siting obligation as the witness leg: its
     emission is placed BEFORE the `if len(found) > 1:` ambiguity block, which
     RAISES under `--strict` — the MANDATED invocation
-    (`quality-gate/SKILL.md:36`). §3.1 clause 2 binds on RESOLUTION, not on
+    (`quality-gate/SKILL.md:30`). §3.1 clause 2 binds on RESOLUTION, not on
     survival: the name DID resolve below top level, so the note and the counter
     are owed on that run too. Until this class existed the obligation was
     unpinned on this leg: a build emitting after the raise (or routing the note
@@ -2142,6 +2155,101 @@ class TestAnotherRootsGitToplevelDoesNotFlagATopLevelName(unittest.TestCase):
         out = self._run("findings")
         self.assertEqual(walk_notes(out.stderr), [], out.stderr)
         self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+
+
+class TestAGitToplevelDeepResolutionIsSilent(unittest.TestCase):
+    """AC-6 T7 leg 2, `_below_top_level` clause (1), DEEP direction.
+
+    `TestAnotherRootsGitToplevelDoesNotFlagATopLevelName` above pins the SHALLOW
+    case — the resolved file sits at a SUPPLIED root's own top level and another
+    root's git toplevel sees it one component down. It leaves the other half of
+    clause (1) unpinned: a resolution that lands under NO supplied root at all,
+    reached through the git-toplevel candidate, which the docstring rules
+    "silent here by construction" because there is no relpath from a root to
+    print in the note's `(<relpath-from-root>)` placeholder.
+
+    Fixture: the ONLY supplied root is `<repo>/dispatch`, and the cited file
+    lives at `<repo>/sub/round-9-findings.md` — under `dispatch`'s git toplevel
+    (`<repo>`, a probed BASE and a member of the containment union) but under no
+    supplied root. Measured on a build that adds a git-toplevel fallback to
+    `_below_top_level` — consult each root's toplevel only when no supplied
+    root CONTAINS the resolution — `test_no_note_is_emitted` and
+    `test_the_sub_count_stays_zero` below are the only two tests in either
+    suite that go red; the shallow class above stays green, because its
+    resolution IS contained by a supplied root and that fallback never runs
+    there. (Gate the same fallback on "no supplied root FIRED" instead and the
+    shallow class reddens too — which is why the containment form is the one
+    that isolates this half of the clause.)"""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        base = pathlib.Path(self.td.name)
+        self.repo = base / "repo"
+        (self.repo / "dispatch").mkdir(parents=True)
+        (self.repo / "sub").mkdir()
+        _plant_git_dir(self.repo)
+        body = "# findings\nfatal=0\n"
+        f = self.repo / "sub/round-9-findings.md"
+        f.write_text(body)
+        h = hashlib.sha256(body.encode()).hexdigest()
+        self.rcpt = base / "rcpt.txt"
+        self.rcpt.write_text(receipt(
+            artifacts=[("sub/round-9-findings.md", h, str(len(body)))],
+            trace=[f"WROTE  {f}  sha256:{h}"]))
+
+    def _run(self):
+        return run("--tier2", "--strict", "--root", str(self.repo / "dispatch"),
+                   str(self.rcpt))
+
+    def test_the_run_still_succeeds(self):
+        """Non-vacuity: the git-toplevel candidate DOES resolve the name and it
+        DOES hash-verify, so the only thing under test is the counter."""
+        out = self._run()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", census(out.stderr), out.stderr)
+
+    def test_no_note_is_emitted(self):
+        out = self._run()
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+    def test_the_sub_count_stays_zero(self):
+        out = self._run()
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+
+
+class TestABareBasenameResolvedThroughASymlinkStillFires(_RootCase):
+    """AC-6 T7 leg 2, the "KEYED ON `resolved`, NOT ON THE CITATION" clause.
+
+    `_below_top_level`'s docstring rules this shape IN, explicitly and as a
+    disclosed cost: `resolve_base` returns `c.resolve()`, so a BARE BASENAME at
+    a root's own top level whose on-disk target is a symlink into a
+    subdirectory has a realpath genuinely below that top level, and §3.1 clause
+    2's "resolves to a path below a root's top level" is satisfied literally.
+    Until this class existed the ruling was prose only: every fixture that
+    fires the counter cites a path-shaped name, so a build gating the emission
+    on `is_path_shaped(name)` — i.e. re-keying the predicate on the CITATION,
+    the reading the docstring refuses — left both suites green. Measured on
+    exactly that mutant, both assertions below go red and nothing else moves.
+
+    The note's `(<relpath-from-root>)` is the RESOLVED relpath (`sub/real.md`),
+    not the cited name, which is the same disclosure stated as an assertion.
+
+    The fixture is artifacts-leg-only by construction: TRACE names an absolute
+    path outside every root, so the witness leg resolves nothing and the ONE
+    note on the channel is unambiguously the ARTIFACTS leg's."""
+
+    def test_the_note_and_the_counter_both_fire(self):
+        h, s = self.plant("sub/real.md", "# findings\nfatal=0\n")
+        (self.root / "top.md").symlink_to(pathlib.Path("sub/real.md"))
+        out = self.verify(receipt(
+            artifacts=[("top.md", h, s)],
+            trace=["READ  /elsewhere/round-0-notes.md"]))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr),
+                         ["RESOLVED-BY-WALK: top.md (sub/real.md)"], out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
 
 
 class TestTheBasenameKeyIsSilentOnASameBasenameCollision(_RootCase):

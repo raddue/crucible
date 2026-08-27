@@ -3032,7 +3032,7 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         self.assertTrue(cov.partial)
 
     def test_an_empty_resolved_body_is_NOT_verified_and_IS_partial(self):
-        """return-convention.md:252's own reason — an empty body `can never fire, so it
+        """return-convention.md:253's own reason — an empty body `can never fire, so it
         is indistinguishable from a skipped check`. Counting it VERIFIED would assert
         the opposite of the rule that rejects it."""
         (self.a / "f.txt").write_text("one line\n")
@@ -3162,7 +3162,7 @@ class TestCoverageEmission(unittest.TestCase):
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
-        (return-convention.md:121), so a witness check ALWAYS exists and an unannotated
+        (return-convention.md:122), so a witness check ALWAYS exists and an unannotated
         `witness 0/0` says one did not. BLOCKED is not hypothetical: SKILL.md:32 lints
         them, red-team-prompt.md:227 instructs one, sample-corpus carries one."""
         h, size = self._artifact()
@@ -3789,7 +3789,7 @@ class TestAmbiguityThresholdIsDistinctRealpaths(_InqBase):
 
     `fix-verifier-prompt.md:89` states the trigger outright ("two or more distinct
     realpaths … so one file reached from two roots via a link is not it") and
-    `return-convention.md:256` says a name held at both homes of the SAME root resolves
+    `return-convention.md:257` says a name held at both homes of the SAME root resolves
     silently. Neither shape had a test: `test_trailing_slash_and_symlink_are_the_same_
     root` links the ROOT, not the FILE, and every ambiguity test plants two real files.
     A false ambiguity is a hard `--strict` FAIL, i.e. per quality-gate/SKILL.md:32 a
@@ -5611,7 +5611,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
 class TestCensusSubCountsAreDisjointOnTheAmbiguousPath(_InqBase):
     """C1-R1-S1 — `ambiguous` is bumped at RESOLUTION time and `_bill_witness_evaluation`'s
     `no_predicate` arm then cleared `wit_applicable` and bumped `not-applicable`, so ONE
-    item landed in two of the sub-counts return-convention.md:270 ships as normative
+    item landed in two of the sub-counts return-convention.md:271 ships as normative
     disjoint — on a line whose `witness 0/0` says the item is not in the applicable set
     at all, while `ambiguous` is defined as a sub-count OF that denominator.
 

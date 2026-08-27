@@ -273,7 +273,7 @@ Any counter for which reason codes were recorded carries them as a sorted, de-du
 > **`resolved-by-walk` (#488 c1) is the one counter that stands OUTSIDE that disjoint partition,
 > deliberately — provisionally, pending #530's OQ-7 ruling, which is what will settle whether it
 > is ever summed into the Tier-2 census floor.** It counts a cited name that **did** resolve, to a
-> path more than one component below the top level of **at least one of the roots the run was
+> path **below a root's top level** — the top level of **at least one of the roots the run was
 > given** — the supplied roots and nothing else. A root's git toplevel is a probed *base* and a
 > member of the containment union, but it is not a root the run was given, so it never decides this
 > counter; a name whose only resolution lands under no supplied root at all is not this counter's
@@ -285,12 +285,12 @@ Any counter for which reason codes were recorded carries them as a sorted, de-du
 > serves a literal join of a multi-segment name and any future within-root search alike. Supplying
 > a second root nested inside the first does **not** silence it for a name that still resolves below
 > the outer root's top level, and supplying a second root inside the same git checkout does **not**
-> flag a name that resolved at its own root's top level. Like every
-> other counter it is per **cited name on a leg**, not per file: a name cited on both the ARTIFACTS
-> and the witness leg is counted twice, the same way `ambiguous` and `not-reachable` already are.
-> **Depth is measured on the RESOLVED path, not on the citation** — a deliberate reading, not an
-> oversight: so a bare basename whose file is a symlink into a subdirectory is counted here too, the
-> same as a root-relative citation would be, and the census cannot tell the two apart. Each bump is accompanied on
+> flag a name that resolved at its own root's top level. Like every other counter it is per **cited
+> name on a leg**, not per file: a name cited on both the ARTIFACTS and the witness leg is counted
+> twice, the same way `ambiguous` and `not-reachable` already are. **Depth is measured on the
+> RESOLVED path, not on the citation** — a deliberate reading, not an oversight: so a bare basename
+> whose file is a symlink into a subdirectory is counted here too, the same as a root-relative
+> citation would be, and the census cannot tell the two apart. Each bump is accompanied on
 > stderr by `RESOLVED-BY-WALK: <name> (<relpath-from-root>)` — the relpath from the first supplied
 > root, in declaration order, that holds the name below its own top level — emitted at the moment
 > the name resolves — **before**, not after, the `--strict` ambiguity raise that may truncate the
