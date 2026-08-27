@@ -327,6 +327,21 @@ VERBATIM = "TestAVerifiedNameCitedVerbatimIsSilent"
 # passing by coincidence.
 UNEVALTWIN = "TestAnUnreachedTwinCannotSilenceAnEvaluatedUnverifiedName"
 
+# inquisitor/AV1 (edge) — the exact-name override against §3.2's MANDATED absolute
+# TRACE spelling. Two of its three arms cite with READ (row 7's silencer) and both
+# declare a NESTED name, so both also resolve below a root's top level and go red
+# when row 10 drops the walk sub-count from the census ordering. Its third arm
+# (`test_a_verified_name_cited_absolutely_is_still_silent`) declares a TOP-LEVEL
+# name and is in neither set, which is what keeps the two rows discriminating
+# rather than merely large.
+ABSSPELL = "TestTheExactNameOverrideSurvivesTheMandatedAbsoluteSpelling"
+
+# inquisitor/AV4 (edge) — the ACCEPTED-limitation pin on `_PROVENANCE_VERBS`. Only
+# its READ non-vacuity CONTROL belongs to row 7: the class's other two arms assert
+# SILENCE (a CONSULTED citation emits nothing, and the limitation is recorded in
+# the source), and a build that silences READ satisfies both for free.
+VERBSCOPE = "TestTheAdvisoryScopeIsDeliberatelyNarrowerThanTheTraceVerbSet"
+
 
 def E(*groups):
     """(class, *methods) groups -> the set of qualified `Class.method` ids."""
@@ -392,22 +407,27 @@ MUTANTS = [
                  "                    if name in verified_bases or base in unevaluated_bases:"),
                 ("                verified_bases.add(vbase)",
                  "                verified_bases.add(str(name))")],
-         expect=E((CLEANPATH,
-                   "test_a_real_list_receives_the_note_and_the_run_is_clean",
-                   "test_the_fixture_produces_no_provenance_note"),
-                  (COFIRE,
-                   "test_both_channels_fire_and_neither_suppresses_the_other",
-                   "test_the_two_channels_interleave_in_production_order"),
-                  (COLLISION,
+         # #488 inquisitor (correctness fixer) — RE-MEASURED, and this row LOST six
+         # pins: CLEANPATH's two, COFIRE's two, and KEYED's two. One cause for all
+         # six, and it is a FIX rather than a rot: every one of them cites a
+         # VERIFIED artifact by §3.2's absolute form, and the three exact-name sets
+         # now carry that spelling (`_declared_spellings`), so the suppression
+         # happens at the exact-name leg BEFORE the basename guard this row mutates
+         # is ever consulted. The mutation is therefore genuinely less harmful than
+         # it was — the literal-`parts[0]` key's headline cost (13 verified entries
+         # mislabelled across the three corpora, `_emit_provenance_notes`'s first
+         # bullet) is now covered by a second, independent mechanism — and the six
+         # pins stopped discriminating because the behaviour they pin no longer
+         # depends on the mutated key. The three that REMAIN all turn on the
+         # basename key alone (a same-basename collision, a degenerate `..` base,
+         # and a `/`-suffixed undeclared name), so the row still discriminates.
+         expect=E((COLLISION,
                    "test_the_collision_is_silent"),
                   # temper/leg-1 — this mutation replaces the WHOLE widened guard,
                   # so the `_DEGENERATE_BASES` screening goes with it and the `..`
                   # silencing returns.
                   (DEGEN,
                    "test_a_dotdot_suffixed_artifact_cannot_silence_an_undeclared_read"),
-                  (KEYED,
-                   "test_a_trace_absolute_path_of_a_verified_artifact_emits_nothing",
-                   "test_a_trace_name_matching_an_unresolved_artifact_still_emits_the_note"),
                   (SLASHTRUNC,
                    "test_an_undeclared_slash_suffixed_name_still_speaks"))),
 
@@ -416,8 +436,14 @@ MUTANTS = [
     dict(id=3, criterion="AC-6 T2 leg 5", what="the verified-BLIND basename key",
          edits=[("                    trace, verified_bases,\n",
                  '                    trace, {str(n).rsplit("/", 1)[-1] for n in artifacts},\n')],
+         # #488 inquisitor (correctness fixer) — RE-MEASURED, one pin LOST:
+         # KEYED's hash-mismatch arm. Same cause as row 2's six: it cites the
+         # mismatched artifact by §3.2's absolute form, which `unverified_names`
+         # now carries, and that override is tested BEFORE the basename key this
+         # row blinds. The row still discriminates on the arm whose TRACE name is
+         # NOT a spelling of any declared name (`/elsewhere/absent-bare.md`), which
+         # no exact-name set can reach, plus PTRUNC's two.
          expect=E((KEYED,
-                   "test_a_trace_name_matching_a_hash_mismatched_artifact_still_emits_the_note",
                    "test_a_trace_name_matching_an_unresolved_artifact_still_emits_the_note"),
                   (PTRUNC,
                    "test_truncation_by_hash_mismatch_keeps_the_evaluated_half_audible",
@@ -432,9 +458,16 @@ MUTANTS = [
                 # The anchor carries temper leg-1's `verified_names` argument, which
                 # sits BETWEEN `notes_out` and the close paren -- so the pre-leg-1
                 # two-line form no longer occurs and would abort the row.
-                ("                    {str(n) for n in evaluated if n not in verified_keys},\n"
+                #
+                # #488 inquisitor (correctness fixer) -- RE-ANCHORED. The unverified
+                # set is now built by `_declared_spellings` rather than by an inline
+                # comprehension over `evaluated`, so the previous three-line literal
+                # occurs 0x and this row went ANCHOR-STALE (its mutation unapplied,
+                # its pins UNCHECKED). What the anchor has to pin is unchanged: the
+                # `notes_out,` ARGUMENT POSITION, which is what the mutation swaps.
+                ("                        all_roots, resolutions),\n"
                  "                    notes_out,\n",
-                 "                    {str(n) for n in evaluated if n not in verified_keys},\n"
+                 "                        all_roots, resolutions),\n"
                  "                    _late,\n"),
                 # NOT the bare `    return notes`: anchors are matched with `str.count`,
                 # and that string is a SUBSTRING of `        return notes_ambiguous + ...`
@@ -546,6 +579,13 @@ MUTANTS = [
                   (UNEVALTWIN,
                    "test_the_evaluated_unverified_name_keeps_its_note",
                    "test_the_control_without_the_unreached_twin_emits"),
+                  # #488 inquisitor (correctness fixer) — three pins GAINED, all
+                  # new regression tests that cite their TRACE entry with READ.
+                  (ABSSPELL,
+                   "test_the_bare_declared_spelling_keeps_its_note",
+                   "test_the_mandated_absolute_spelling_keeps_its_note_too"),
+                  (VERBSCOPE,
+                   "test_a_read_citation_of_an_undeclared_file_speaks"),
                   (ESC,
                    "test_neither_the_nul_nor_the_ansi_escape_reaches_the_channel_raw",
                    "test_the_hostile_trace_name_is_still_reported"),
@@ -673,7 +713,14 @@ MUTANTS = [
     # byte-identical result a full-line anchor would.
     dict(id=10, criterion="AC-6 T7 leg 2", what="the counter dropped from the census",
          edits=[('"resolved-by-walk", ', '')],
-         expect=E((ASTRICT,
+         # #488 inquisitor (correctness fixer) — two pins GAINED: ABSSPELL's two
+         # nested-name arms resolve below a root's top level, so dropping the
+         # sub-count from the census ordering reaches them. Its top-level arm does
+         # not, and is deliberately absent.
+         expect=E((ABSSPELL,
+                   "test_the_bare_declared_spelling_keeps_its_note",
+                   "test_the_mandated_absolute_spelling_keeps_its_note_too"),
+                  (ASTRICT,
                    "test_the_strict_raise_does_not_silence_them",
                    "test_without_strict_the_note_and_the_counter_both_fire"),
                   (BELOW,
