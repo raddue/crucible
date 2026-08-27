@@ -1450,7 +1450,7 @@ def _below_top_level(resolved, root):
     for r in _as_roots(root):
         try:
             rel = resolved.relative_to(r)
-        except (ValueError, OSError):
+        except ValueError:      # not under this root — PurePath op, never OSError
             continue
         if len(rel.parts) > 1:
             return rel
