@@ -1904,7 +1904,7 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases, notes_out):
     available as a defence at this site."""
     if notes_out is None:
         return
-    for entry in trace or []:
+    for entry in trace:
         if entry["verb"] not in _PROVENANCE_VERBS:
             continue
         name, base = _trace_basename(entry)
