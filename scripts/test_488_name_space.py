@@ -218,6 +218,201 @@ class TestALegalArtifactsNameIsAPosixRelativePath(_RootCase):
 
 
 # --------------------------------------------------------------------------
+# ADVERSARIAL (Task 2) — five attacks on the two new Tier-1 raises.
+# --------------------------------------------------------------------------
+class TestTheNameBanIsByteExactAndAHomoglyphGainsNothing(_RootCase):
+    """ATTACK 1 — the ban is `name.startswith("/")`, a BYTE test. A fullwidth
+    solidus U+FF0F (`\uff0f`) renders indistinguishably from `/` in most fonts, so
+    `／etc/passwd` reads as absolute to a human reviewing the receipt while
+    sailing past the check.
+
+    The attack only MATTERS if the homoglyph buys a capability the ASCII form
+    would have had, so this pins both halves: the name stays legal at Tier-1
+    (over-implementing the ban to cover look-alikes would flip the first leg and
+    is not what AC-2 rules), and it resolves NOWHERE — the byte U+FF0F is not a
+    POSIX separator, so `root / name` is one literal component that cannot reach
+    the planted file the ASCII twin names."""
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+        self.outside = tempfile.TemporaryDirectory()
+        self.addCleanup(self.outside.cleanup)
+        secret = pathlib.Path(self.outside.name) / "secret.md"
+        secret.write_text("outside-the-root\n")
+        self.abs_name = str(secret)                       # /tmp/.../secret.md
+        self.homo_name = "／" + self.abs_name[1:]     # ／ tmp/.../secret.md
+
+    def test_the_ascii_twin_is_the_one_the_ban_catches(self):
+        """Non-vacuity anchor: the two names differ in exactly one codepoint."""
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_artifacts([f"  {self.abs_name}  sha256:{H64}  10"])
+
+    def test_a_fullwidth_solidus_name_stays_legal_at_tier1(self):
+        out = self.rv.parse_artifacts([f"  {self.homo_name}  sha256:{H64}  10"])
+        self.assertIn(self.homo_name, out)
+
+    def test_the_homoglyph_name_resolves_nowhere_so_it_buys_no_read(self):
+        # Control first — resolve_base really does find a file under this root,
+        # so a None below is the homoglyph failing and not a dead resolver.
+        self.plant("planted.md", "in-the-root\n")
+        self.assertIsNotNone(self.rv.resolve_base("planted.md", self.root))
+        self.assertIsNone(self.rv.resolve_base(self.homo_name, self.root))
+
+    def test_the_homoglyph_name_is_never_billed_as_verified_at_the_cli(self):
+        out = self.verify(receipt(artifacts=[(self.homo_name, H64, "10")],
+                                  trace=["READ  /elsewhere/x.md"]))
+        self.assertNotIn("ARTIFACTS name is not relative", out.stderr)
+        self.assertIn("artifacts 0/1", out.stderr)
+
+
+class TestTheBanReachesTheArtifactsHeaderLineItself(_RootCase):
+    """ATTACK 2 — `parse_receipt` puts any text trailing the section header into
+    the body: `sections[matched] = [rest] if rest else []`. So
+    `ARTIFACTS  /etc/hostname  sha256:...  10` is a one-entry ARTIFACTS body that
+    never appears as an INDENTED line, which is the shape every fixture in this
+    file (and the `receipt()` helper) exercises. A check bolted onto the indented
+    path only would be blind here."""
+
+    def _inline(self, name):
+        text = receipt(artifacts=[(name, H64, "10")],
+                       trace=["READ  /elsewhere/x.md"])
+        return text.replace(f"ARTIFACTS\n  {name}  ", f"ARTIFACTS  {name}  ")
+
+    def test_the_inline_form_really_is_a_one_entry_body(self):
+        """Non-vacuity: a LEGAL inline name parses to a one-entry ARTIFACTS."""
+        out = self.verify(self._inline("round-1-findings.md"), name="ok.txt")
+        self.assertIn("artifacts 0/1", out.stderr)
+
+    def test_an_absolute_name_on_the_header_line_is_rejected_at_tier1(self):
+        out = self.verify(self._inline("/etc/hostname"), name="abs.txt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("ARTIFACTS name is not relative: /etc/hostname",
+                      out.stderr.splitlines())
+
+    def test_a_nul_name_on_the_header_line_is_rejected_at_tier1(self):
+        out = self.verify(self._inline("f\x00.txt"), name="nul.txt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertNotIn("\x00", out.stderr)
+        self.assertIn(r"ARTIFACTS name contains NUL: f\x00.txt",
+                      out.stderr.splitlines())
+
+
+class TestEveryNulPositionIsRejectedAndNoneReachesTheChannel(_RootCase):
+    """ATTACK 3 — `"\x00" in name` is position-blind by construction, but the
+    RENDERING is not: `_show_path` substitutes per match, so a multi-NUL name is
+    the case where a `str.replace`-style or first-match-only escaper would leak a
+    raw byte after escaping the first one. The shipped test covers exactly one
+    NUL, in the middle, at the API boundary.
+
+    Also pins the PRECEDENCE between the two new raises on a name that is both
+    absolute and NUL-bearing: the absolute leg is first, and its message must
+    still escape the NUL — the escaping cannot live on the NUL leg alone."""
+
+    def setUp(self):
+        super().setUp()
+        self.rv = _import_rv()
+
+    def test_a_leading_nul_is_rejected(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_artifacts([f"  \x00f.txt  sha256:{H64}  10"])
+
+    def test_a_trailing_nul_is_rejected(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_artifacts([f"  f.txt\x00  sha256:{H64}  10"])
+
+    def test_a_name_that_is_only_nuls_is_rejected(self):
+        with self.assertRaises(self.rv.LintError):
+            self.rv.parse_artifacts([f"  \x00\x00\x00  sha256:{H64}  10"])
+
+    def test_every_nul_of_a_multi_nul_name_is_escaped_on_the_channel(self):
+        out = self.verify(receipt(artifacts=[("a\x00b\x00c.md", H64, "10")],
+                                  trace=["READ  /elsewhere/x.md"]))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertNotIn("\x00", out.stderr)
+        self.assertIn(r"ARTIFACTS name contains NUL: a\x00b\x00c.md",
+                      out.stderr.splitlines())
+
+    def test_an_absolute_nul_bearing_name_takes_the_absolute_leg_still_escaped(self):
+        out = self.verify(receipt(artifacts=[("/tmp/f\x00.txt", H64, "10")],
+                                  trace=["READ  /elsewhere/x.md"]))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertNotIn("\x00", out.stderr)
+        self.assertIn(r"ARTIFACTS name is not relative: /tmp/f\x00.txt",
+                      out.stderr.splitlines())
+
+
+class TestTheNewTier1RaisesCannotForgeACensusLine(_RootCase):
+    """ATTACK 4 — C1-R2-S2's substring forgery, aimed at the TWO NEW write sites.
+    Both raises print BEFORE `TIER2-COVERAGE: not-reached (tier1-reject)`, and the
+    documented consumer is `grep -m1 'TIER2-COVERAGE:'` — so a name spelling the
+    census token hands that consumer an attacker-authored first match from a
+    receipt that verified NOTHING. A name may hold no whitespace, but the token
+    itself has none, and `grep` matches a SUBSTRING."""
+
+    FORGED = "TIER2-COVERAGE:artifacts=9/9"
+
+    def _first_census(self, stderr):
+        for line in stderr.splitlines():
+            if "TIER2-COVERAGE:" in line:
+                return line
+        return None
+
+    def test_the_absolute_leg_cannot_put_a_live_token_ahead_of_the_census(self):
+        out = self.verify(receipt(artifacts=[("/" + self.FORGED, H64, "10")],
+                                  trace=["READ  /elsewhere/x.md"]))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("ARTIFACTS name is not relative", out.stderr)
+        self.assertEqual(self._first_census(out.stderr),
+                         "TIER2-COVERAGE: not-reached (tier1-reject)")
+
+    def test_the_nul_leg_cannot_put_a_live_token_ahead_of_the_census(self):
+        out = self.verify(receipt(artifacts=[(self.FORGED + "\x00", H64, "10")],
+                                  trace=["READ  /elsewhere/x.md"]))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("ARTIFACTS name contains NUL", out.stderr)
+        self.assertEqual(self._first_census(out.stderr),
+                         "TIER2-COVERAGE: not-reached (tier1-reject)")
+
+
+class TestTheBanAlsoRejectsTheShapeThatUsedToVerifyCleanly(_RootCase):
+    """ATTACK 5 — collateral damage, the failure direction a ban can only have.
+    Before this change an ABSOLUTE ARTIFACTS name pointing at a real file INSIDE
+    the root took `_resolve_base_one`'s `p.is_absolute()` branch, passed
+    `_contained`, hash-verified, and billed `artifacts 1/1` at exit 0. That branch
+    is now unreachable from ARTIFACTS, so this shape flips 0 -> 1.
+
+    The flip is INTENDED; what must not come with it is a crash or a lost census.
+    The relative twin is asserted in the same fixture, from the same planted file
+    and the same digest, so a green run cannot mean "both directions broke"."""
+
+    def setUp(self):
+        super().setUp()
+        self.body = "# findings\nfatal=0\n"
+        self.h, self.s = self.plant("planted.md", self.body)
+
+    def test_the_relative_twin_still_verifies_and_exits_zero(self):
+        out = self.verify(receipt(artifacts=[("planted.md", self.h, self.s)],
+                                  trace=["READ  /elsewhere/x.md"]),
+                          name="rel.txt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("artifacts 1/1", out.stderr)
+
+    def test_the_absolute_twin_hard_fails_with_a_census_and_no_traceback(self):
+        name = str(self.root / "planted.md")
+        out = self.verify(receipt(artifacts=[(name, self.h, self.s)],
+                                  trace=["READ  /elsewhere/x.md"]),
+                          name="abs.txt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertNotIn("artifacts 1/1", out.stderr)
+        self.assertIn(f"ARTIFACTS name is not relative: {name}",
+                      out.stderr.splitlines())
+        self.assertIn("TIER2-COVERAGE: not-reached (tier1-reject)",
+                      out.stderr.splitlines())
+
+
+# --------------------------------------------------------------------------
 # AC-2 / I8 / AC-6 T10 — `(none)` is the empty-set sentinel and ONLY that.
 # --------------------------------------------------------------------------
 class TestTheNoneSentinelIsAnchoredToASingleLineBody(unittest.TestCase):
