@@ -3637,7 +3637,42 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 # AND no EXEC out= to fall back to — still genuinely unsatisfiable, still
                 # exempt. Widening it back to bare `art_name is None` re-exempts the PASS
                 # leg's remediable case; narrowing it further would over-BLOCK only.
-                if probe_out is not None and verdict == "FAIL":
+                #
+                # SIEGE-S1 — #501 retired MORE of this exemption than the paragraph above
+                # claimed. A `kind=grep` payload carries an `#<range>` SLOT, and since
+                # #501 `witness_art_name` sources that slot on EITHER leg — so a
+                # rangeless grep reaches here because the author OMITTED the range, not
+                # because the leg cannot source one. That is an ordinary in-receipt
+                # remedy (write `grep:<artifact>#L<a>-L<b>`), and the exemption's own
+                # stated antecedent — "the receipt has no way to make it source
+                # something" — is false for it. Measured on `ba482e2`: two receipts
+                # differing only in the VERDICT token, witness `grep:evidence.log
+                # expect-fail=/zzz-absent/ ran=TRACE#1`, cited file ABSENT from disk,
+                # exited 1 (PASS) / 0 (FAIL) — the FAIL leg retiring its predecessor on a
+                # witness naming a file that does not exist.
+                #
+                # ⚠ This narrows by `kind`, which DEC-29 forbids in a GUARD — and this is
+                # not one. It is the EXEMPTION, where the direction reverses: narrowing
+                # can only ever produce a false BLOCK (the paragraph above says so), and
+                # the key is not the kind standing in for something else — it is the
+                # literal availability of the remedy, since `kind=grep` is the ONE kind
+                # whose payload has a range slot `witness_art_name` reads.
+                #
+                # WHAT IS LEFT EXEMPT, stated as measured rather than claimed to be a
+                # live residue: through the CLI, on a receipt that actually carries a
+                # SUPERSEDES, NOTHING. Tier-1 admits only `kind in {exec, grep}` for a
+                # non-`none` SUPERSEDES (lint_v11_local), forces a `kind=exec` witness's
+                # `ran=` to point at an EXEC, and forces EVERY EXEC entry to carry a
+                # parseable `out=<artifact>#<range>` (check_exec_range_bound at :974) --
+                # so `derive_art_name` names something on every FAIL-leg exec witness,
+                # and the grep half is what this line closes. The branch STAYS because it
+                # still guards two live shapes: a DIRECT in-process `tier2_witness` call,
+                # which skips Tier-1 (the unit tests' own shape), and any future witness
+                # kind whose payload has no range slot. Keeping it is fail-CLOSED;
+                # deleting it moves the fail-open one layer down, onto whoever adds that
+                # kind.
+                _rangeable = witness.get("kind") == "grep"
+                if probe_out is not None and verdict == "FAIL" and not _rangeable:
                     probe_out["unsourced"] = True
                 # D8.5 — D4's single "NOT-EVALUATED" string folds onto TWO codes, because
                 # this branch has two arms: the FAIL leg with no EXEC out= range, and a PASS

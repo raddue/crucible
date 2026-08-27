@@ -2900,11 +2900,11 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         `assertIsNone` rather than being deleted: it is now the pin that the FAIL leg
         SOURCES a ranged payload, read from this block's own perspective.
         """
-        def unsourced(verdict, verb, range_kind):
+        def unsourced(verdict, verb, range_kind, kind="grep"):
             args = ("f.txt  sha256:" + "0" * 64) if verb != "DISPATCHED" else \
                    ("red-team/seq-1  verdict=PASS  rcpt-sha256:" + "0" * 64)
             cited = {"n": 1, "verb": verb, "args": args}
-            wit = {"kind": "grep", "payload": "f.txt", "expect_fail": "/BOOM/",
+            wit = {"kind": kind, "payload": "f.txt", "expect_fail": "/BOOM/",
                    "ran": "TRACE#1", "range_kind": range_kind,
                    "range_a": 1 if range_kind else None,
                    "range_b": 1 if range_kind else None,
@@ -2918,9 +2918,19 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         # reaches the block and is no longer exempt from the SUPERSEDES consequent. That
         # retirement is the whole point of the fix: the gate is armed on both legs again.
         self.assertIsNone(unsourced("FAIL", "WROTE", "L"))
-        self.assertTrue(unsourced("FAIL", "WROTE", None))    # no remedy -> exempt
+        # SIEGE-S1 — this arm read `assertTrue(...)`, i.e. the suite PINNED the fail-open
+        # GREEN. A rangeless `kind=grep` payload reaches the block because the author
+        # OMITTED the `#<range>`, not because the leg is unable to source one: the arm
+        # directly above is the SAME shape WITH a range and proves the leg sources it.
+        # Omission is an ordinary in-receipt remedy, so the exemption must not fire.
+        self.assertIsNone(unsourced("FAIL", "WROTE", None))
         # remedy exists -> stay armed. Rangeless, so the block under test IS entered.
         self.assertIsNone(unsourced("PASS", "DISPATCHED", None))
+        # NON-VACUITY for that narrowing: a non-grep witness has no payload range slot
+        # at all, so the block's original antecedent ("the receipt has no way to make it
+        # source something") still holds and the exemption still fires. Without this arm
+        # the fix is indistinguishable from deleting the branch.
+        self.assertTrue(unsourced("FAIL", "WROTE", None, kind="exec"))
 
     def test_pass_leg_yielding_no_name_is_no_art_name(self):
         """D8.5 — D4's single NOT-EVALUATED string folds onto TWO codes; mapping the
@@ -6190,19 +6200,36 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         return self.cli("--tier2", "--root", str(self.base), str(p))
 
     def test_the_consequent_does_not_hard_block_the_whole_fail_leg(self):
-        """C1-R3-S1 — `evaluated` is set only by verify_witness, and tier2_witness
-        returns before calling it whenever witness_art_name yields no name — which on the
-        FAIL leg is EVERY kind=grep witness, because that sourcing is PASS-only. Unscoped,
-        this rule admitted NO kind=grep witness a FAIL receipt could carry: not a narrow
-        one, not a well-chosen range. That is a structural BLOCK with no in-receipt remedy,
-        on the shape return-convention.md designates the DEFAULT for research/judge
-        dispatches with no shell — and a fix agent that closed some findings and not others
-        returns exactly this shape. lint_v11_local's declared over-approximation does not
-        cover it: that one is about the TRIGGER, and its measured 0-site cost is silent
-        here because no committed corpus holds a FAIL + non-`none` SUPERSEDES row."""
-        out = self._v11_verdict("FAIL", "failleg-supersedes.rcpt")
+        """C1-R3-S1, RE-AIMED BY SIEGE-S1 — the claim this test defends is unchanged
+        ("the FAIL leg must keep a satisfiable path to a supersession"), but the receipt
+        that demonstrates it moved, because the old one was the exploit.
+
+        The old form asserted a RANGELESS `kind=grep` FAIL receipt exits 0. When it was
+        written that was forced: witness_art_name's payload sourcing was PASS-only, so
+        NO kind=grep witness a FAIL receipt could carry was sourceable and the rule
+        would have hard-blocked the shape return-convention.md makes the default for
+        shell-less research/judge dispatches. GH #501 removed that constraint — the FAIL
+        leg now sources a ranged payload — and the test was not re-aimed, so it went on
+        pinning "rangeless grep + FAIL retires its predecessor" as EXPECTED, on a
+        receipt whose cited file need not exist at all. That is SIEGE-S1, pinned green.
+
+        The satisfiable path is now shown on the receipt an author would actually write:
+        the SAME witness with the `#<range>` #501 taught the leg to source. The rangeless
+        form is now gated, and test_siege_s1_* below is its pin."""
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "grep:evidence.log#L1-L1  expect-fail=/clean/  ran=TRACE#1",
+            verdict="FAIL", skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L1-L1"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "failleg-supersedes.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+        self.assertIn("witness 1/1", out.stderr)
 
     def test_a_sourced_but_unresolvable_fail_witness_is_still_gated(self):
         """C1-R3-S1 freeze-guard regression — ⚠ DEC-29 SHAPE. The first attempt keyed the
@@ -6368,22 +6395,26 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         self.assertNotIn("EVALUATED at Tier-2", out.stderr)
         self.assertIn("witness 1/1", out.stderr)
 
-    def test_the_scoping_is_not_a_blanket_disable(self):
-        """Non-vacuity control: ONE receipt shape, body absent so no witness can evaluate,
-        run under each verdict. PASS still hard-BLOCKs — its rangeless grep witness falls
-        back to derive_art_name, which yields a name on that leg, so the witness IS sourced
-        and the rule keeps every case it can be satisfied in. FAIL exits 0 because
-        derive_art_name is EXEC-only there, so nothing is sourced at all.
+    def test_siege_s1_a_rangeless_grep_cannot_buy_the_exemption_on_either_leg(self):
+        """SIEGE-S1 — the exploit, and the test that used to pin it green
+        (`test_the_scoping_is_not_a_blanket_disable`, which asserted `FAIL -> 0` here).
 
-        The verdicts differ here as a CONSEQUENCE of what gets sourced, not as the key —
-        see test_a_sourced_but_unresolvable_fail_witness_is_still_gated, which is the same
-        leg with a sourced witness and is still gated."""
-        self.assertEqual(
-            self._v11_verdict("PASS", "pl-unevaluated.rcpt", plant_body=None).returncode,
-            1)
-        self.assertEqual(
-            self._v11_verdict("FAIL", "fl-unevaluated.rcpt", plant_body=None).returncode,
-            0)
+        ONE receipt shape, cited body ABSENT from disk so no witness can possibly
+        evaluate, run under each verdict token. Before the fix these exited 1 / 0: the
+        FAIL leg retired its predecessor, its tripwires and its cairn invariant on a
+        witness naming a file that does not exist, selected by the author with nothing
+        but the VERDICT token and an omitted `#<range>`.
+
+        The verdicts must now agree, and for the reason the exemption's own antecedent
+        gives: a rangeless `kind=grep` payload is a CHOICE post-#501, not a structural
+        inability, so neither leg is exempt. Reverting the `_rangeable` conjunct in
+        tier2_witness turns the FAIL arm RED."""
+        for verdict, name in (("PASS", "pl-unevaluated.rcpt"),
+                              ("FAIL", "fl-unevaluated.rcpt")):
+            with self.subTest(verdict=verdict):
+                out = self._v11_verdict(verdict, name, plant_body=None)
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
 
     def test_tier1_only_runs_are_untouched(self):
         """The new leg is Tier-2's; the hook path (`--tier1`) keeps exactly the shape
