@@ -6508,6 +6508,104 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
                     # the two unchanged arms must not acquire the new code either
                     self.assertNotIn("blank-", out.stderr)
 
+    def test_siege_r2it1_an_invisible_or_too_short_range_cannot_grant_it_either(self):
+        """SIEGE-R2IT-1 — SIEGE-S3's fix re-spelled for the SECOND time. SIEGE-R1-3
+        shipped `body.strip() != ""`, and `str.strip()` removes only codepoints for
+        which `str.isspace()` is True: it is an ASCII-shaped WHITESPACE blocklist that
+        says nothing about the zero-width/format categories and nothing at all about
+        LENGTH. Measured on `588a7e9` with the arms below: a lone U+200B, the mandated
+        findings-file separator `---`, and two U+FFFD (from an invalid-UTF-8 `#B` range
+        through `_slice`'s `errors="replace"`) each exited 0 with the predecessor
+        RETIRED and every counter at zero — billing nothing on any channel, and two of
+        the three invisible to a human reading the range the subagent itself authored.
+
+        The fence is no longer a blocklist. It is a CATEGORY rule (a codepoint counts
+        unless its Unicode general category starts with `C` or `Z`, which is closed over
+        all of Unicode rather than over a list someone maintains) plus a LENGTH floor of
+        `_SIGNAL_MIN_CHARS` = 4 — the tight bound for a `"literal"` signature, since
+        Tier-1 rejects a literal under 4 source characters and `re.escape`'s output
+        matches exactly its own source. The floor is DELIBERATELY CONSERVATIVE for the
+        `/regex/` form, whose tight bound is 1 (`/a|bb/` is 5 source characters and
+        matches one), and the `three-visible-chars` arm below pins that
+        under-crediting as intended behaviour rather than a bug: it costs a receipt an
+        `empty-range` sub-count, where over-crediting costs a retired peer finding.
+
+        `four-visible-chars` is the non-vacuity control the floor is measured against —
+        one codepoint more than the arm above it, and it must still bill `witness 1/1`
+        and still retire the peer. Reverting `_delivered_signal` to `.strip() != ""`
+        turns the zero-width, separator and short-content arms RED."""
+        cases = (
+            # (name, payload, range, expected rc, expected stderr fragment)
+            ("zero-width-space", "BOOM here\n\u200b\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("bom-u-feff", "BOOM here\n\ufeff\ufeff\ufeff\ufeff\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("word-joiner-u-2060",
+             "BOOM here\n\u2060\u2060\u2060\u2060\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("soft-hyphen-u-00ad",
+             "BOOM here\n\u00ad\u00ad\u00ad\u00ad\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("ideographic-space-u-3000",
+             "BOOM here\n\u3000\u3000\u3000\u3000\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("line-separator-u-2028",
+             "BOOM here\n\u2028\u2028\u2028\u2028\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("nul-bytes", b"BOOM here\n\x00\x00\x00\x00\nmore text\n",
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("findings-separator", b"BOOM here\n---\nmore text\n",
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("three-visible-chars", b"BOOM here\nabc\nmore text\n",
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("four-visible-chars", b"BOOM here\nabcd\nmore text\n",
+             "L2-L2", 0, "witness 1/1"),
+        )
+        for name, payload, rng, rc, expect in cases:
+            with self.subTest(shape=name):
+                h, size = self.plant(self.base, f"ev-{name}.log", payload)
+                body = _receipt(
+                    "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+                    verdict="PASS", skill="build/21-implementer",
+                    artifacts=[(f"ev-{name}.log", h, size)],
+                    trace=[f"EXEC  `run`  exit=0  dur=1.0s  "
+                           f"out=ev-{name}.log#{rng}"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"r2it1-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                self.assertIn(expect, out.stderr)
+
+    def test_siege_r2it1_the_replacement_character_range_cannot_grant_it(self):
+        """The third reported shape, which needs its own arm because it is reached
+        through a BYTE range over invalid UTF-8 rather than a line range: `_slice`
+        decodes with `errors="replace"`, so `b"\xff\xff"` arrives as two U+FFFD. Those
+        are category `So` — real, visible codepoints — so the CATEGORY half does not
+        withhold them and the LENGTH floor is what does. Its control is one byte-range
+        over, on the same file: four real characters must still be credited."""
+        payload = b"BOOM here\n\xff\xff\nabcd\n"
+        h, size = self.plant(self.base, "ffd.log", payload)
+        for name, rng, rc, expect in (
+                ("two-replacement-chars", "B11-B12", 1, "EVALUATED at Tier-2"),
+                ("four-real-chars-control", "B14-B17", 0, "witness 1/1")):
+            with self.subTest(shape=name):
+                body = _receipt(
+                    "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+                    verdict="PASS", skill="build/21-implementer",
+                    artifacts=[("ffd.log", h, size)],
+                    trace=[f"EXEC  `run`  exit=0  dur=1.0s  out=ffd.log#{rng}"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"r2it1-b-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                self.assertIn(expect, out.stderr)
+
     def test_siege_s1_a_rangeless_grep_cannot_buy_the_exemption_on_either_leg(self):
         """SIEGE-S1 — the exploit, and the test that used to pin it green
         (`test_the_scoping_is_not_a_blanket_disable`, which asserted `FAIL -> 0` here).

@@ -20,6 +20,7 @@ has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advis
 """
 from __future__ import annotations
 import contextlib, io, json, posixpath, re, signal, sys, hashlib, pathlib, typing
+import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORPUS_DIR = ROOT / "eval/ledger-return-protocol"
@@ -3504,6 +3505,68 @@ def _slice(path: pathlib.Path, kind, a, b, meter=None, raw=None):
     return sliced.decode("utf-8", errors="replace")  # 1-based inclusive
 
 
+# SIEGE-R2IT-1 — the floor `_delivered_signal` requires, and the ONE number the whole
+# bound turns on. It is the minimum length of a body that a `"literal"` expect-fail
+# signature can match: Tier-1 rejects a literal shorter than 4 SOURCE characters
+# (parse_witness), `_expect_fail_pattern` re.escape()s it, and re.escape's output always
+# matches exactly its own source text — so 4 source characters is 4 body characters,
+# with no slack anywhere.
+#
+# IT IS NOT THE TIGHT BOUND FOR THE `/regex/` FORM, and saying so is the point. Tier-1
+# rejects a regex SOURCE shorter than 4 characters and rejects `.*`/`.+`, but source
+# length does not bound MATCH length: `/a|bb/` (5 source characters) matches one
+# character, and so do `/ab|c/`, `/[ab]/`, `/a{0}b/` and `/(?:)x/` — measured against
+# `parse_witness` + `_expect_fail_pattern`, not assumed. The tight general bound is
+# therefore 1, which admits every shape SIEGE-R2IT-1 reported. So this floor is
+# DELIBERATELY CONSERVATIVE: it can decline to credit `evaluated` for a genuine match on
+# a body of one to three visible characters. That direction is the safe one —
+# under-crediting verification costs a receipt an `empty-range` sub-count and the
+# UNVERIFIED reading that goes with it, while over-crediting is the vulnerability itself
+# (the SUPERSEDES consequent retiring a peer's finding on a range no honest predicate
+# decided anything about). A tight bound would require deciding, per pattern, the
+# shortest string it can match — a second implementation of the regex engine, which is
+# the declination `_delivered_signal` already records for a different reason.
+_SIGNAL_MIN_CHARS = 4
+
+
+def _substantive_len(body_text):
+    """How many of `body_text`'s codepoints could carry signal, capped at the floor.
+
+    A codepoint counts unless its Unicode GENERAL CATEGORY starts with `C` (Cc control,
+    Cf format, Cs surrogate, Co private-use, Cn unassigned) or `Z` (Zs/Zl/Zp separator).
+    That is a category rule, not a character list, and the difference is the whole
+    point: it is closed over all of Unicode — including codepoints assigned after this
+    was written, which read as `Cn` today and as their real category later — so it
+    cannot be walked around by finding one more invisible character. The two blocklists
+    that preceded it (`!= ""`, then `.strip() != ""`) were each bypassed by exactly that
+    move, `.strip()` because it removes only codepoints for which `str.isspace()` is
+    true and U+200B/U+FEFF/U+2060 are not among them.
+
+    KNOWN RESIDUE, recorded rather than papered over: a handful of ASSIGNED codepoints
+    in counted categories still render as blank in most fonts — U+3164 HANGUL FILLER
+    (Lo), U+2800 BRAILLE PATTERN BLANK (So), a run of bare combining marks (Mn). Four of
+    those still credit `evaluated`. They are NOT excluded, because excluding them is
+    re-entering the character-list game this rule exists to leave, and because the state
+    they produce is honest on its own terms: a predicate really did run against four
+    real codepoints and really did decide, which is the same epistemic state as any
+    other non-matching body. What they defeat is a HUMAN reading the cited range, which
+    is the disclosure surface SIEGE-S7/S8 track, not this gate.
+
+    Counting STOPS at the floor: the caller only ever asks a >= question, and a 4 KiB
+    body should not be walked to answer it.
+
+    MUST NOT RAISE — `unicodedata.category` is total over `str`, and the caller's
+    contract forbids raising anyway."""
+    n = 0
+    for ch in body_text:
+        if unicodedata.category(ch)[0] in ("C", "Z"):
+            continue
+        n += 1
+        if n >= _SIGNAL_MIN_CHARS:
+            break
+    return n
+
+
 def _delivered_signal(body_text):
     """SIEGE-R1-3 — True when the cited range delivered bytes a body predicate could
     plausibly have DECIDED on. The single shared test behind both the PASS leg's
@@ -3514,29 +3577,43 @@ def _delivered_signal(body_text):
     argument that `re.search(p, "")` cannot match for ANY pattern, so the predicate
     structurally could not have decided anything. THAT ARGUMENT WAS NEVER ABOUT THE
     EMPTY STRING; it was about a range that carries no signal, and `!= ""` is only the
-    narrowest spelling of it. A cited range landing on a BLANK LINE (`body == "\\n"`) or
-    on a whitespace-only one passes `!= ""` while carrying nothing a Tier-1-admissible
-    expect-fail pattern (≥4 characters, non-wildcard — `_expect_fail_pattern`) can match.
-    Measured on `8dee113`, one PASS receipt over a hash-matched `evidence.log` holding
-    `b"BOOM here\\n\\n   \\nmore text\\n"` with `expect-fail=/BOOM/`, varying ONLY the cited
-    range: `#L1-L1` exit 1 (correctly rejected), `#L50-L50` exit 1 on `empty-range 1
-    (past-eof)` (SIEGE-S3's own pin), and `#L2-L2` / `#L3-L3` exit 0 with `witness 1/1`
-    and EVERY sub-count at zero — a census byte-identical to `#L4-L4`'s genuine
-    non-matching evaluation, and strictly worse-disclosed than the past-EOF case
-    SIEGE-S3 already closed, which at least bills its own counter.
+    narrowest spelling of it. SIEGE-R1-3 then widened it to `.strip() != ""`, which is
+    the SECOND-narrowest: a cited range landing on a BLANK LINE (`body == "\n"`) or on a
+    whitespace-only one is withheld, and nothing else is.
 
-    `.strip()` is the whole test, and the bound is deliberate: it withholds exactly the
-    ranges that deliver NO non-whitespace byte, and nothing else. It does not attempt to
-    decide whether the delivered bytes could match THIS pattern — that would be a second
-    implementation of `re.search` and would move the exit code on real receipts. A range
-    carrying one printable character still reads as delivered, still bills `witness 1/1`,
-    and still grants the supersession.
+    SIEGE-R2IT-1 — `.strip()` WAS SIEGE-S3'S FIX RE-SPELLED FOR THE SECOND TIME, and
+    the reason is structural rather than a missed character: `str.strip()` removes only
+    codepoints for which `str.isspace()` is True, so it is an ASCII-shaped WHITESPACE
+    blocklist that says nothing about the zero-width/format categories and nothing at
+    all about LENGTH. Measured on `588a7e9`, one PASS receipt with `SUPERSEDES`, over a
+    hash-matched `evidence.log` = `b"BOOM here\n\n\xe2\x80\x8b\n---\nmore\n"` with
+    `expect-fail=/BOOM/`, varying ONLY the cited range: `#L3-L3` (a lone U+200B) exit 0
+    with the predecessor RETIRED and every counter at zero; `#L4-L4` (`---`, the mandated
+    findings-file separator) the same; `#B11-B12` over invalid UTF-8 (two U+FFFD via
+    `_slice`'s `errors="replace"`) the same. Three shapes billing nothing on any channel
+    — exit code, stderr bullet or census — two of them invisible to a human reading the
+    range, on a file the subagent authors.
+
+    A THIRD blocklist would have been bypassed the same way, so the test is now the
+    conjunction of a CATEGORY rule and a LENGTH floor, neither of which enumerates
+    characters: at least `_SIGNAL_MIN_CHARS` codepoints outside the control/format/
+    separator categories. See `_substantive_len` for why a category rule is closed over
+    Unicode where a blocklist is not (and for the residue it does NOT close), and
+    `_SIGNAL_MIN_CHARS` for the exact soundness of the floor — tight for a `"literal"`
+    signature, deliberately conservative for the `/regex/` form, whose tight bound is 1
+    and therefore admits every shape above.
+
+    WHAT IT STILL DOES NOT DO, unchanged from SIEGE-R1-3: it does not decide whether the
+    delivered bytes could match THIS pattern. That would be a second implementation of
+    `re.search` and would move the exit code on real receipts. A range carrying four
+    printable characters still reads as delivered, still bills `witness 1/1`, and still
+    grants the supersession.
 
     `body_text is None` is TRUE here, mirroring DEC-28's `== ""`-not-falsiness note for
     the same reason: None means "no body was supplied at all", a disposition both
     callers already return clean on as documented lint.py parity, and it is not this
     decision's to change."""
-    return body_text is None or body_text.strip() != ""
+    return body_text is None or _substantive_len(body_text) >= _SIGNAL_MIN_CHARS
 
 
 def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
