@@ -94,6 +94,10 @@ run python3 scripts/catalog.py check
 run python3 scripts/check_dispatch_graphify_consult.py --selftest
 run python3 scripts/check_dispatch_graphify_consult.py
 
+# --- handoff hard-stop structural check (#556) ---
+run python3 scripts/check_handoff_stop_contract.py --selftest
+run python3 scripts/check_handoff_stop_contract.py
+
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
 run python3 scripts/check_warden_structure.py
