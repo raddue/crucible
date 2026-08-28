@@ -3803,6 +3803,78 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
         cov.bump("discarded", probe["result_discarded"])
 
 
+def _witness_cited_name(witness, trace, verdict):
+    """The artifact name the witness leg will read, derived EXACTLY as tier2_witness
+    derives it — `ran=TRACE#N` -> that TRACE entry -> `witness_art_name`. None when the
+    leg would not name one.
+
+    Factored out for `witness_pre_identity` alone, and it calls `witness_art_name`
+    rather than restating its rule so the pre-swap snapshot and the witness leg cannot
+    disagree about WHICH file is under discussion — a snapshot of a different name than
+    the one the leg reads would be a detector that silently never fires. The `ran=`
+    decoding is three lines and is duplicated deliberately: lifting tier2_witness's own
+    copy out would move that function's census bumps (`ran-not-trace`, and the two
+    `not-applicable` codes) into a helper whose contract is "must not raise, must not
+    bill".
+
+    MUST NOT RAISE: everything it touches is receipt-controlled."""
+    try:
+        if not str(witness.get("ran", "")).startswith("TRACE#"):
+            return None
+        idx = _trace_idx(witness["ran"])
+        if not 1 <= idx <= len(trace):
+            return None
+        art_name, _ = witness_art_name(witness, trace[idx - 1], verdict)
+        return art_name
+    except Exception:
+        return None
+
+
+def witness_pre_identity(witness, trace, root, verdict):
+    """SIEGE-R2IT-3 — where the witness's cited name resolves BEFORE the ARTIFACTS leg
+    runs, so the witness leg has a PRE-SWAP anchor to compare its own resolution against.
+
+    WHY A SPELLING TEST CANNOT DO THIS JOB, however resolution-aware it is made.
+    `_carry_spellings`/`_carry_should_have_bound` run ONCE, at witness time, i.e.
+    necessarily AFTER any mid-lint swap. SIEGE-R1-2 added the cited name's own RESOLVED
+    form to the spelling set and claimed it closed the class; SIEGE-R2IT-3 measured that
+    it does not, and could not: both sides are resolved on the same POST-swap tree, so
+    moving the swap off the declared FILE and onto a symlinked DIRECTORY COMPONENT the
+    citation passes through (`ln -s . link`, cite `link/f.md`, retarget `link -> d`
+    between the legs) makes both sides resolve to one post-swap target, the sets
+    intersect trivially, and the detector cannot tell a swap happened at all. Measured
+    on `588a7e9` through `_run_legs`: PASSED CLEAN with `probe == {'evaluated': True}`,
+    the `expect-fail=/SECRET/` predicate run against the sanitised bytes. The root-level
+    `alias.md -> f.md` retarget is the same defect with no directory component at all.
+
+    So this is a different KIND of check, not another spelling: TEMPORAL IDENTITY. The
+    snapshot is taken before `tier2_artifacts` — the widest window, so a swap landing
+    DURING the hashing leg is caught too — and the witness leg compares its own fresh
+    resolution of the same name against it. It closes every swap LOCATION at once (the
+    declared file, any symlinked directory component of the citation, a symlink-valued
+    `--root` token, an `alias -> target` retarget), because all of them are ways of
+    changing where one name points, and this reads exactly that.
+
+    Returns `{"name": ..., "resolved": Path|None}` or None. `resolved` is
+    `resolve_base`'s answer, i.e. the same function and the same root precedence the
+    witness leg itself uses — comparing against anything else would manufacture
+    differences that are not swaps.
+
+    NO CENSUS, NO NOTES, NO RAISE. `found`/`refused` are throwaway lists: this call is a
+    measurement taken for the comparison, and letting it bill an ambiguity or emit a
+    REFUSED note would double every such report on every run.
+
+    COST: one extra `resolve_base` per run (a handful of `lstat`s), on a name the run
+    resolves anyway."""
+    try:
+        name = _witness_cited_name(witness, trace, verdict)
+        if name is None:
+            return None
+        return {"name": name, "resolved": resolve_base(name, root, [], [])}
+    except Exception:
+        return None
+
+
 def _carry_spellings(name, roots):
     """SIEGE-S2 — every DISK-FREE spelling of `name` that this run must treat as ONE
     identity, as a set of `PurePosixPath`.
@@ -3970,7 +4042,7 @@ def _carry_should_have_bound(art_name, bodies, root=None):
 
 
 def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
-                  probe_out=None, notes_out=None):
+                  probe_out=None, notes_out=None, pre_ident=None):
     """Part 2. Resolve the cited TRACE artifact via resolve_base, read ONLY the cited
     #L/#B range from disk, then call the shared verify_witness. Absent witness file:
     path-shaped + --strict -> FAIL; else UNVERIFIABLE (non-fatal). Returns UNVERIFIABLE
@@ -4034,6 +4106,17 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
       * A caller that does not pass `bodies` — every direct in-process importer
         (_gen.py, the measure_*_corpus.py scripts, the direct-call tests) — is unbound
         exactly as before. _verify_single and --selftest wire it.
+
+    SIEGE-R2IT-3 — `pre_ident` is `witness_pre_identity`'s snapshot: where THIS witness's
+    cited name resolved BEFORE the ARTIFACTS leg ran. The carry above answers "are these
+    the bytes some leg hashed"; the snapshot answers the question no post-swap test can,
+    "is this still the same file". Both are needed, and the second is not a spelling
+    refinement of the first: `_carry_should_have_bound` resolves both sides at witness
+    time, i.e. on one side of the swap window, which is why moving the swap onto a
+    symlinked directory component of the citation defeated it (see that function and
+    `witness_pre_identity`). Same optional-with-a-default idiom as cov/bodies/probe_out,
+    so no existing call site moves; a caller that omits it keeps the old behaviour and
+    the old gap. `_verify_single` and --selftest wire it.
 
     siege S-7 — `probe_out` is verify_witness's `probe` dict, surfaced to the caller (the
     same optional out-param idiom as cov/bodies/found/meter, so no existing call site
@@ -4260,6 +4343,53 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 carried = bodies.get(art_name)
                 if carried is None:
                     carried = bodies.get(resolved)
+                # SIEGE-R2IT-3 — the PRE-SWAP anchor, tested BEFORE the spelling
+                # detector below because it answers the same question with evidence
+                # rather than inference, and it is the half that closes the class.
+                #
+                # The antecedent is a fact about the ARTIFACTS window: when the snapshot
+                # was taken this citation resolved to R, and R is a realpath key of
+                # `bodies` — which the write site only ever fills AFTER the sha256
+                # comparison, so R is a file this run hashed AND matched. If nothing
+                # moved, the resolution above would still be R. It is not. That is not a
+                # heuristic about spellings; it is the same name resolved twice, on two
+                # sides of the window in which a swap can happen, disagreeing.
+                #
+                # NOT gated on `carried is None`, and that is deliberate. The obvious
+                # narrowing ("only complain when the carry missed") leaves a live
+                # variant: declare TWO artifacts, cite the incriminating one through a
+                # symlink, and retarget the symlink at the SANITISED one. Both are
+                # hash-verified, so the realpath key HITS, `carried` is the sanitised
+                # buffer, and the predicate that would have rejected the receipt runs
+                # against declared, hashed, wrong bytes. The invariant is that the
+                # citation still reaches the file it named when the ARTIFACTS leg ran,
+                # not merely that SOME hashed buffer was found.
+                #
+                # WHAT IS DELIBERATELY NOT CLAIMED. A citation that did NOT resolve to a
+                # hashed artifact at snapshot time is untouched here: it has the honest
+                # independent-read disposition (`unhashed-body`, the UNVERIFIABLE note,
+                # and — since SIEGE-R2IT-2 — no `evaluated`), and complaining about
+                # ordinary filesystem activity under a file no leg hashed would be a
+                # false BLOCK on a receipt this instrument has nothing to say about.
+                # A caller that supplies no `pre_ident` (every direct-API importer, and
+                # --eval) keeps exactly the old behaviour: the spelling detector below
+                # is what it has, with the gap SIEGE-R2IT-3 measured.
+                if (pre_ident is not None
+                        and pre_ident.get("name") == art_name
+                        and pre_ident.get("resolved") is not None
+                        and pre_ident["resolved"] in bodies
+                        and pre_ident["resolved"] != resolved):
+                    # `partial`, and raised before the read, for the sibling arm's
+                    # reason: bytes were never decoded and the predicate provably never
+                    # ran.
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)} resolved to an "
+                        f"artifact this run hash-verified when the ARTIFACTS leg ran, "
+                        f"but its resolution CHANGED between the legs (it now reaches "
+                        f"{_show_path(str(resolved))}); the predicate would have run "
+                        f"against bytes that leg did not hash under this name")
                 if carried is None and _carry_should_have_bound(art_name, bodies, root):
                     # #488 inquisitor/AV1 (state) — the DOUBLE MISS, which the write
                     # site's own conclusion ("a hit under either binds the predicate to
@@ -4810,9 +4940,14 @@ def _selftest_run_fixture(fx, root) -> str:
         # SIEGE-R2BA-1 — the fixture leg wires the carry too, so the committed corpus is
         # exercised through the BOUND path the CLI takes, not a second unbound one.
         bodies = {}
+        # SIEGE-R2IT-3 — the fixture leg wires the pre-swap anchor too, for the same
+        # reason it wires the carry: the committed corpus must run the path the CLI
+        # runs, or the corpus stops being an anti-drift instrument for it.
+        pre_ident = witness_pre_identity(witness, trace, root, verdict)
         tier2_artifacts(artifacts, trace, root, fx["strict"], None, bodies)
         if verdict in {"PASS", "FAIL"}:
-            tier2_witness(witness, trace, root, fx["strict"], verdict, None, bodies)
+            tier2_witness(witness, trace, root, fx["strict"], verdict, None, bodies,
+                          None, None, pre_ident)
         return "pass"
     except WitnessTimeout:
         return "error"        # #486/Q8 — a timeout is NOT a passing expect:fail fixture
@@ -5244,6 +5379,11 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # evaluated against. See tier2_witness for the measured attack and for
                 # what the carry does NOT close.
                 bodies = {}
+                # SIEGE-R2IT-3 — the PRE-SWAP anchor, taken HERE and not one line later.
+                # A mid-lint swap can land at any moment; snapshotting before the
+                # ARTIFACTS leg makes the detection window cover the hashing leg too,
+                # which is where the padded-ARTIFACTS variant widens it to whole seconds.
+                pre_ident = witness_pre_identity(witness, trace, root, verdict)
                 # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
                 # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
                 # witness-evidence consequent), and nothing said so on any channel.
@@ -5277,7 +5417,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # its exits, so nothing is lost by ignoring the return here; other
                     # callers (--selftest, the direct-call tests) still use it.
                     tier2_witness(witness, trace, root, strict, verdict, cov,
-                                  bodies, wit_probe, wit_notes)
+                                  bodies, wit_probe, wit_notes, pre_ident)
                 else:
                     # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
                     # leg, so the collector would hear nothing from it and the line would

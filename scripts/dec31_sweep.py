@@ -341,6 +341,12 @@ DISJOINT = "TestALaterDisjointRootAnswersTheDepthKey"
 # counter dropped from the census) as incidental coupling, recorded here rather
 # than engineered away, since the citation shape is the one the attack uses.
 CARRY = "TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange"
+# SIEGE-R2IT-3 — the PRE-SWAP anchor, CARRY's temporal counterpart. Three of its five
+# arms cite through a symlinked directory component (two components deep), so they
+# cross the walk channel and redden on row 10 for CARRY's reason — incidental coupling,
+# recorded rather than engineered away, since the citation shape is the attack's. Its
+# other two arms cite depth-1 names (`f.md`, `alias.md`) and are in no row.
+R2IT3 = "TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan"
 RELHALF = "TestTheRelpathHalfAloneCannotForgeTheChannel"
 WESC = "TestTheWalkNoteEscapesTheNameHalfToo"
 WMISMATCH = "TestTheWalkNoteSurvivesAMismatchRaiseOnItsOwnEntry"
@@ -871,6 +877,10 @@ MUTANTS = [
                    "test_a_symlink_valued_root_token_plus_a_self_link_does_not_silence_it",
                    "test_a_top_level_citation_through_an_outside_symlink_stays_silent",
                    "test_an_absolute_top_level_citation_stays_silent_with_the_self_link_planted"),
+                  (R2IT3,
+                   "test_a_retargeted_directory_component_is_caught",
+                   "test_a_swap_onto_a_SECOND_declared_artifact_is_caught",
+                   "test_an_undeclared_citation_whose_resolution_moves_is_not_blocked"),
                   (RELHALF,
                    "test_the_hostile_relpath_renders_fully_escaped",
                    "test_the_run_completes_and_the_note_fires"),

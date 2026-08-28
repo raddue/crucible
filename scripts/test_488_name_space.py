@@ -3851,6 +3851,177 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
 
 
 # --------------------------------------------------------------------------
+# SIEGE-R2IT-3 — the PRE-SWAP anchor. The class above tests the SPELLING
+# detector, which runs once and only after any swap; this one tests the
+# temporal check that runs on both sides of the window.
+# --------------------------------------------------------------------------
+class TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan(_RootCase):
+    """SIEGE-R2IT-3 — `_carry_spellings`' resolved-form arm (SIEGE-R1-2) resolves BOTH
+    sides at witness time, i.e. on the same POST-swap tree, so it can never hold a
+    pre-swap identity. Move the swap off the declared FILE and onto a symlinked
+    DIRECTORY COMPONENT the citation passes through and both sides resolve to one
+    post-swap target: the spelling sets intersect trivially and the detector cannot see
+    that anything happened. Measured on `588a7e9`: PASSED CLEAN with
+    `probe == {'evaluated': True}`, the `expect-fail=/SECRET/` predicate that should have
+    rejected the receipt run against the sanitised bytes.
+
+    No amount of resolution-awareness fixes that, because the defect is not which
+    spellings are compared — it is that the comparison happens ONCE, on one side of the
+    window. `witness_pre_identity` resolves the cited name BEFORE the ARTIFACTS leg; the
+    witness leg resolves it again and compares. Every swap LOCATION changes that answer
+    (the file, any symlinked directory component, a symlink-valued `--root`, an
+    `alias -> target` retarget), which is why this is a different kind of check rather
+    than another entry in a candidate list.
+
+    The controls are what keep it honest: a tree that never moved must reach the
+    ORDINARY predicate, and a citation that never named a hashed artifact must keep its
+    independent-read disposition rather than being blocked."""
+
+    SECRET = "line one\nSECRET token\n"
+    CLEAN = "line one\nharmless\n"
+
+    def _run_legs(self, cited, prep=None, swap=None):
+        """The two-leg sequence with the PRE-SWAP anchor wired, as `_verify_single`
+        wires it. Returns the LintError message, or None if the receipt passed clean.
+
+        `prep(root)` plants whatever the citation needs to exist on the PRE-swap tree;
+        `swap(root)` is the mid-run mutation (None = the non-vacuity control)."""
+        rv = _import_rv()
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.root = pathlib.Path(td.name)
+        h, size = self.plant("f.md", self.SECRET)
+        self.plant("clean.md", self.CLEAN)
+        if prep is not None:
+            prep(self.root)
+        if callable(cited):
+            cited = cited(self.root)
+        text = receipt(artifacts=[("f.md", h, size)],
+                       trace=[f"READ {cited}"],
+                       witness="exec:probe  expect-fail=/SECRET/  ran=TRACE#1")
+        sections = rv.parse_receipt(text)
+        artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
+        trace = rv.parse_trace(sections["TRACE"])
+        witness = rv.parse_witness(sections["WITNESS"])
+
+        bodies = {}
+        cov = rv._Coverage()
+        pre = rv.witness_pre_identity(witness, trace, self.root, "PASS")
+        rv.tier2_artifacts(artifacts, trace, self.root, True, cov, bodies, [])
+        if swap is not None:
+            swap(self.root)
+        try:
+            rv.tier2_witness(witness, trace, self.root, True, "PASS",
+                             cov, bodies, {}, [], pre)
+        except rv.LintError as e:
+            return str(e)
+        return None
+
+    # -- the three shapes the finding reported --------------------------------
+    def _dir_component(self, root):
+        (root / "link").symlink_to(".")
+        (root / "d").mkdir()
+        (root / "d" / "f.md").write_text(self.CLEAN)
+
+    @staticmethod
+    def _retarget_link_to_d(root):
+        (root / "link").unlink()
+        (root / "link").symlink_to("d")
+
+    def test_a_retargeted_directory_component_is_caught(self):
+        """The reported repro: the declared FILE is never touched, so a detector that
+        looks at `f.md` sees a pristine tree."""
+        for label, spelling in (("relative", "link/f.md"),
+                                ("absolute", lambda r: str(r / "link" / "f.md"))):
+            with self.subTest(spelling=label):
+                attacked = self._run_legs(spelling, prep=self._dir_component,
+                                          swap=self._retarget_link_to_d)
+                self.assertIsNotNone(
+                    attacked,
+                    f"the {label} spelling let a mid-lint directory-component swap "
+                    f"through: the predicate ran against the sanitised bytes")
+                self.assertIn("resolution CHANGED between the legs", attacked)
+
+                control = self._run_legs(spelling, prep=self._dir_component)
+                self.assertIsNotNone(
+                    control,
+                    f"control precondition broken for {label}: the unswapped tree "
+                    f"did not reach the expect-fail predicate at all")
+                self.assertIn("expect-fail regex", control)
+
+    def test_a_retargeted_root_level_alias_is_caught(self):
+        """The finding's second variant, and the one with NO disclosure residue at all:
+        `alias.md -> f.md` retargeted to `clean.md`. Citation and resolution both read
+        depth 1, so the walk channel stays silent too."""
+        def prep(root):
+            (root / "alias.md").symlink_to("f.md")
+
+        def swap(root):
+            (root / "alias.md").unlink()
+            (root / "alias.md").symlink_to("clean.md")
+
+        attacked = self._run_legs("alias.md", prep=prep, swap=swap)
+        self.assertIsNotNone(attacked, "the retargeted alias passed clean")
+        self.assertIn("resolution CHANGED between the legs", attacked)
+        control = self._run_legs("alias.md", prep=prep)
+        self.assertIsNotNone(control, "control precondition broken")
+        self.assertIn("expect-fail regex", control)
+
+    def test_a_swap_onto_a_SECOND_declared_artifact_is_caught(self):
+        """The variant a `carried is None` gate would have left open, and the reason
+        the check is not conditioned on the carry missing: retarget the citation at a
+        path that resolves to the OTHER hash-verified artifact. The realpath key HITS,
+        so `carried` is a real hashed buffer — of the wrong file."""
+        def prep(root):
+            (root / "link").symlink_to(".")
+
+        def swap(root):
+            (root / "link").unlink()
+            (root / "sane").mkdir()
+            (root / "sane" / "f.md").symlink_to(root / "clean.md")
+            (root / "link").symlink_to("sane")
+
+        attacked = self._run_legs("link/f.md", prep=prep, swap=swap)
+        self.assertIsNotNone(
+            attacked,
+            "the predicate ran against a DIFFERENT declared artifact's hashed bytes")
+        self.assertIn("resolution CHANGED between the legs", attacked)
+
+    # -- the bounds ------------------------------------------------------------
+    def test_a_same_path_replacement_still_runs_on_the_hashed_bytes(self):
+        """NOT this detector's case, and it must not become one: unlink-and-recreate at
+        the SAME path leaves the citation resolving where it always did, so the realpath
+        key binds and the predicate runs on the buffer the ARTIFACTS leg hashed — which
+        is why the anchor needs no inode, only the path."""
+        def swap(root):
+            (root / "f.md").unlink()
+            (root / "f.md").write_text(self.CLEAN)
+
+        out = self._run_legs("f.md", swap=swap)
+        self.assertIsNotNone(out, "the carry did not bind on an unmoved path")
+        self.assertIn("expect-fail regex", out)
+
+    def test_an_undeclared_citation_whose_resolution_moves_is_not_blocked(self):
+        """NON-VACUITY in the other direction. A citation that named NO hash-verified
+        artifact when the snapshot was taken keeps the honest independent-read
+        disposition however the tree moves under it: the two-leg binding argument was
+        never about it, and blocking here would be a false FAIL on a receipt this
+        instrument has nothing to say about."""
+        def prep(root):
+            for d in ("other", "other2"):
+                (root / d).mkdir()
+                (root / d / "x.md").write_text("nothing here\n")
+            (root / "ln").symlink_to("other")
+
+        def swap(root):
+            (root / "ln").unlink()
+            (root / "ln").symlink_to("other2")
+
+        self.assertIsNone(self._run_legs("ln/x.md", prep=prep, swap=swap),
+                          "an undeclared citation was blocked by the swap detector")
+
+
+# --------------------------------------------------------------------------
 # #488 inquisitor / Edge AV1 — the exact-name override vs §3.2's MANDATED
 # absolute TRACE spelling.
 # --------------------------------------------------------------------------

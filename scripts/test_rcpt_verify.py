@@ -4819,7 +4819,13 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
 
         def flipping(name, root, found=None, refused=None):
             seen.append(name)
-            if len(seen) > 1:                 # the witness leg's resolution
+            # SIEGE-R2IT-3 — the THIRD call is the witness leg's. `_verify_single` now
+            # resolves the witness's cited name ONCE MORE, before the artifacts leg, to
+            # take the pre-swap anchor (`witness_pre_identity`), so the ordering is
+            # snapshot -> artifacts -> witness. Flipping on call 2 would rewrite the
+            # file before it is hashed, and the run would die on an ARTIFACTS sha256
+            # mismatch instead of exercising the carry this test is about.
+            if len(seen) > 2:                 # the witness leg's resolution
                 target.write_bytes(self.SANITISED)
             return original(name, root, found, refused)
 
@@ -4827,7 +4833,8 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
         with contextlib.redirect_stderr(buf):
             with mock.patch.object(rv, "resolve_base", flipping):
                 rc = rv._verify_single(text, "tier2", [self.base], True)
-        self.assertEqual(len(seen), 2, "both legs must still resolve independently")
+        self.assertEqual(len(seen), 3,
+                         "the pre-swap snapshot and both legs must each resolve")
         # The predicate runs against the bytes the sha256 was taken of, so it FIRES.
         self.assertEqual(rc, 1, buf.getvalue())
         self.assertIn("expect-fail regex", buf.getvalue())
