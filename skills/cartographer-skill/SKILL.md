@@ -407,6 +407,16 @@ During feed-forward, both run:
 
 During retrospective, Forge captures whether the Cartographer's information was accurate or stale.
 
+### With Graphify
+
+Graphify is a complementary, not redundant, structure source: an AST-derived
+call graph (`graphify-out/graph.json`) with a machine-checkable staleness signal,
+answering "what calls X", blast-radius, and short-path questions. Cartographer
+owns curated prose (responsibility, boundaries, landmines, decisions); graphify
+owns derived structure. See `shared/dispatch-convention.md` ("Graphify Consult")
+for when a dispatch should point an agent at a fresh graph — cartographer
+maintains no call graph and should not replicate one.
+
 ### Skills That Should Call Cartographer
 
 | Calling Skill | Mode | When | What to Pass |
