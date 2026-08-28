@@ -4706,31 +4706,72 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 # citation still reaches the file it named when the ARTIFACTS leg ran,
                 # not merely that SOME hashed buffer was found.
                 #
-                # WHAT IS DELIBERATELY NOT CLAIMED. A citation that did NOT resolve to a
-                # hashed artifact at snapshot time is untouched here: it has the honest
-                # independent-read disposition (`unhashed-body`, the UNVERIFIABLE note,
-                # and — since SIEGE-R2IT-2 — no `evaluated`), and complaining about
-                # ordinary filesystem activity under a file no leg hashed would be a
-                # false BLOCK on a receipt this instrument has nothing to say about.
+                # SIEGE-R3IT-2 — THE ARMING CONDITION USED TO BE A FACT ABOUT THE
+                # ATTACKER'S OWN TREE, AND IS NOW A FACT ABOUT THE CONSEQUENCE.
+                #
+                # The antecedent stood as "the PRE-swap resolution was itself a hashed
+                # artifact" (`pre_ident["resolved"] in bodies`), plus "it resolved at all"
+                # (`... is not None`). Both are chosen by the subagent, because the
+                # subagent owns the PRE-swap tree. Aim the citation at something the run
+                # does not hash before the ARTIFACTS leg runs — an undeclared `junk/f.md`,
+                # or nothing at all — and the detector is off before the interesting
+                # conjunct is reached; then let the swap land the citation on a SECOND
+                # declared, hash-verified artifact and the realpath carry HITS, `bound`
+                # is True and `evaluated` is set. Measured on `1943055` through the
+                # shipped `_run_legs` harness with ONE fixture line changed
+                # (`link -> .` becomes `link -> junk`, and again with no `link` at all):
+                # PASSED CLEAN, `probe == {'evaluated': True}` on both — the shipped
+                # `test_a_swap_onto_a_SECOND_declared_artifact_is_caught` arm's own attack,
+                # bypassed. End-to-end through the CLI with a padded ARTIFACTS list to
+                # widen the window: exit 0, peer RETIRED, 4/4 consecutive runs.
+                #
+                # So the change is read UNCONDITIONALLY — `pre != resolved` compares the
+                # same name's two resolutions with `None` (resolved nowhere) as an
+                # ordinary distinct value, so neither switch exists any more — and what
+                # decides whether the change is ACTIONABLE is the property the attacker
+                # does not choose: whether either END of the move is hash-verified
+                # territory. Reaching it is exactly as significant as leaving it, and it
+                # is the reaching half the attack above needed.
+                #
+                # WHAT IS STILL DELIBERATELY NOT CLAIMED, narrowed to what the round-3
+                # review's own non-goal (attack lines (b)/(d)) actually asks for. A
+                # resolution change BOTH of whose ends are outside `bodies` is ordinary
+                # filesystem churn under a name no leg hashed, and blocking it would be a
+                # false FAIL on a receipt this instrument has nothing to say about; that
+                # citation keeps the honest independent-read disposition (the
+                # UNVERIFIABLE note, the census code, and — since SIEGE-R2IT-2 — no
+                # `evaluated`). What is NO LONGER claimed is the old paragraph's stronger
+                # sentence, that such a citation "has ... no `evaluated`" full stop: it is
+                # FALSE the moment the move ENDS on a hashed artifact, which is the whole
+                # finding, and that case is now the raise rather than an exemption.
+                #
                 # A caller that supplies no `pre_ident` (every direct-API importer, and
                 # --eval) keeps exactly the old behaviour: the spelling detector below
                 # is what it has, with the gap SIEGE-R2IT-3 measured.
+                pre_resolved = (pre_ident.get("resolved")
+                                if pre_ident is not None else None)
                 if (pre_ident is not None
                         and pre_ident.get("name") == art_name
-                        and pre_ident.get("resolved") is not None
-                        and pre_ident["resolved"] in bodies
-                        and pre_ident["resolved"] != resolved):
+                        and pre_resolved != resolved
+                        and (pre_resolved in bodies or resolved in bodies)):
                     # `partial`, and raised before the read, for the sibling arm's
                     # reason: bytes were never decoded and the predicate provably never
                     # ran.
                     if cov is not None:
                         cov.partial = True
+                    # The two directions read differently to an operator and have
+                    # different remedies, so the message says which one happened.
+                    where = (f"it resolved to {_show_path(str(pre_resolved))}"
+                             if pre_resolved is not None else
+                             "it resolved to nothing")
                     raise LintError(
-                        f"Tier-2: witness {_show_path(art_name)} resolved to an "
-                        f"artifact this run hash-verified when the ARTIFACTS leg ran, "
-                        f"but its resolution CHANGED between the legs (it now reaches "
-                        f"{_show_path(str(resolved))}); the predicate would have run "
-                        f"against bytes that leg did not hash under this name")
+                        f"Tier-2: witness {_show_path(art_name)} resolution CHANGED "
+                        f"between the legs — when the ARTIFACTS leg ran {where}, and it "
+                        f"now reaches "
+                        f"{_show_path(str(resolved)) if resolved is not None else 'nothing'}"
+                        f"; one end of that move is a file this run hash-verified, so "
+                        f"the predicate would have run against bytes that leg did not "
+                        f"hash under this name")
                 if carried is None and _carry_should_have_bound(art_name, bodies, root):
                     # #488 inquisitor/AV1 (state) — the DOUBLE MISS, which the write
                     # site's own conclusion ("a hit under either binds the predicate to

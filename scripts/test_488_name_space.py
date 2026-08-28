@@ -4026,23 +4026,33 @@ class TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan(_RootCase):
     SECRET = "line one\nSECRET token\n"
     CLEAN = "line one\nharmless\n"
 
-    def _run_legs(self, cited, prep=None, swap=None):
+    def _run_legs(self, cited, prep=None, swap=None, declare_clean=False, probe=None):
         """The two-leg sequence with the PRE-SWAP anchor wired, as `_verify_single`
         wires it. Returns the LintError message, or None if the receipt passed clean.
 
         `prep(root)` plants whatever the citation needs to exist on the PRE-swap tree;
-        `swap(root)` is the mid-run mutation (None = the non-vacuity control)."""
+        `swap(root)` is the mid-run mutation (None = the non-vacuity control).
+
+        SIEGE-R3IT-2 — `declare_clean` puts the SANITISED file in ARTIFACTS too, which
+        is what makes the POST-swap end of the move hash-verified territory. Without it
+        the attack arms below are not attacks at all: neither carry key hits, `bound` is
+        False and there is no `evaluated` to take. `probe` is the same out-param
+        `_verify_single` passes, so an arm can assert on the flag itself rather than
+        only on the exit disposition."""
         rv = _import_rv()
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
         self.root = pathlib.Path(td.name)
         h, size = self.plant("f.md", self.SECRET)
-        self.plant("clean.md", self.CLEAN)
+        ch, csize = self.plant("clean.md", self.CLEAN)
         if prep is not None:
             prep(self.root)
         if callable(cited):
             cited = cited(self.root)
-        text = receipt(artifacts=[("f.md", h, size)],
+        arts = [("f.md", h, size)]
+        if declare_clean:
+            arts.append(("clean.md", ch, csize))
+        text = receipt(artifacts=arts,
                        trace=[f"READ {cited}"],
                        witness="exec:probe  expect-fail=/SECRET/  ran=TRACE#1")
         sections = rv.parse_receipt(text)
@@ -4052,13 +4062,14 @@ class TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan(_RootCase):
 
         bodies = {}
         cov = rv._Coverage()
+        probe = {} if probe is None else probe
         pre = rv.witness_pre_identity(witness, trace, self.root, "PASS")
         rv.tier2_artifacts(artifacts, trace, self.root, True, cov, bodies, [])
         if swap is not None:
             swap(self.root)
         try:
             rv.tier2_witness(witness, trace, self.root, True, "PASS",
-                             cov, bodies, {}, [], pre)
+                             cov, bodies, probe, [], pre)
         except rv.LintError as e:
             return str(e)
         return None
@@ -4133,6 +4144,62 @@ class TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan(_RootCase):
             "the predicate ran against a DIFFERENT declared artifact's hashed bytes")
         self.assertIn("resolution CHANGED between the legs", attacked)
 
+    # -- SIEGE-R3IT-2: the arming condition itself ------------------------------
+    def _swap_onto_clean(self, root):
+        (root / "link").unlink(missing_ok=True)
+        (root / "sane").mkdir()
+        (root / "sane" / "f.md").symlink_to(root / "clean.md")
+        (root / "link").symlink_to("sane")
+
+    def test_siege_r3it2_an_undeclared_pre_swap_end_no_longer_disarms_the_anchor(self):
+        """SIEGE-R3IT-2 — the antecedent was `pre_ident["resolved"] in bodies`, i.e. "the
+        citation ALREADY pointed at a hash-verified artifact when the snapshot was
+        taken". That is a fact about the PRE-swap tree, and the subagent owns the
+        pre-swap tree. Aim the citation at something the run does not hash — an
+        undeclared `junk/f.md` — and the detector is off before the swap happens; then
+        land the swap on a SECOND declared, hash-verified artifact and the realpath
+        carry HITS, `bound` is True, `evaluated` is set and the peer is retired.
+        Measured on `1943055`: the shipped arm's fixture with ONE prep line changed
+        (`link -> .` becomes `link -> junk`) PASSED CLEAN with
+        `probe == {'evaluated': True}`."""
+        def prep(root):
+            (root / "junk").mkdir()
+            (root / "junk" / "f.md").write_text(self.CLEAN)
+            (root / "link").symlink_to("junk")
+
+        probe = {}
+        out = self._run_legs("link/f.md", prep=prep, swap=self._swap_onto_clean,
+                             declare_clean=True, probe=probe)
+        self.assertIsNotNone(
+            out, "an undeclared pre-swap end disarmed the anchor and the predicate ran "
+                 "against a DIFFERENT declared artifact's hashed bytes")
+        self.assertIn("resolution CHANGED between the legs", out)
+        self.assertNotIn("evaluated", probe)
+
+    def test_siege_r3it2_an_unresolvable_pre_swap_end_no_longer_disarms_it(self):
+        """The same finding's second free switch, one conjunct earlier: make the
+        citation resolve NOWHERE at snapshot time (plant no `link` at all) and the
+        detector was off before the `in bodies` test was even reached. `None` is now an
+        ordinary distinct resolution, so "resolved nowhere, then reached a hashed
+        artifact" is a CHANGE like any other."""
+        probe = {}
+        out = self._run_legs("link/f.md", swap=self._swap_onto_clean,
+                             declare_clean=True, probe=probe)
+        self.assertIsNotNone(out, "an absent pre-swap end disarmed the anchor")
+        self.assertIn("resolution CHANGED between the legs", out)
+        self.assertNotIn("evaluated", probe)
+
+    def test_siege_r3it2_the_shipped_declared_pre_swap_arm_still_raises(self):
+        """The control the two arms above are varied FROM — `prep: link -> .`, the
+        shipped `test_a_swap_onto_a_SECOND_declared_artifact_is_caught` prep, with the
+        sanitised twin declared as well. If widening the antecedent had re-keyed the
+        check rather than widened it, this direction (LEAVING hash-verified territory)
+        would have been traded for the one above."""
+        out = self._run_legs("link/f.md", prep=lambda r: (r / "link").symlink_to("."),
+                             swap=self._swap_onto_clean, declare_clean=True)
+        self.assertIsNotNone(out, "the declared pre-swap end stopped raising")
+        self.assertIn("resolution CHANGED between the legs", out)
+
     # -- the bounds ------------------------------------------------------------
     def test_a_same_path_replacement_still_runs_on_the_hashed_bytes(self):
         """NOT this detector's case, and it must not become one: unlink-and-recreate at
@@ -4165,6 +4232,25 @@ class TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan(_RootCase):
 
         self.assertIsNone(self._run_legs("ln/x.md", prep=prep, swap=swap),
                           "an undeclared citation was blocked by the swap detector")
+
+    def test_an_undeclared_move_is_not_blocked_by_a_colliding_basename(self):
+        """SIEGE-R3IT-2's own bound, and the shape a fix keyed on the NAME rather than
+        on the two resolutions would get wrong: both ends of the move are undeclared,
+        but the citation's basename is the declared artifact's. Neither end is hashed
+        territory, so this is still ordinary filesystem churn and still not blocked."""
+        def prep(root):
+            for d in ("o1", "o2"):
+                (root / d).mkdir()
+                (root / d / "f.md").write_text("nothing here\n")
+            (root / "ln").symlink_to("o1")
+
+        def swap(root):
+            (root / "ln").unlink()
+            (root / "ln").symlink_to("o2")
+
+        self.assertIsNone(self._run_legs("ln/f.md", prep=prep, swap=swap,
+                                         declare_clean=True),
+                          "a wholly undeclared move was blocked on a basename collision")
 
 
 # --------------------------------------------------------------------------
