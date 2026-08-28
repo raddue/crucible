@@ -2214,7 +2214,14 @@ class TestWitnessTimeoutBound(unittest.TestCase):
         # simulated delivery raised WITNESS_TIMEOUT_MSG out of the finally: rc == 1 and
         # `delivered_to` stayed empty.
         self.assertEqual(rc, 0, err.getvalue())
-        self.assertEqual(delivered_to, ["caller"], f"order={order}")
+        # SIEGE-R3BA-3 — TWO deliveries, because `_verify_single` now arms the bound
+        # TWICE in sequence: once around `witness_pre_identity`'s snapshot resolution
+        # (previously unbounded and quadratic in a receipt-authored name) and once
+        # around `tier2_witness`. The instrument synthesises a caller delivery at each
+        # re-arm, so the COUNT is the instrument's; the claim under test is unchanged
+        # and now holds on both cycles — every delivery reaches the CALLER's handler and
+        # none of them lands in `_witness_alarm`.
+        self.assertEqual(delivered_to, ["caller", "caller"], f"order={order}")
 
     def test_36b_the_handler_is_restored_while_no_timer_is_armed(self):
         # Discriminator for 36, and the reason a bare SWAP of the two statements is not
@@ -2225,8 +2232,15 @@ class TestWitnessTimeoutBound(unittest.TestCase):
         _, order = self._instrument_teardown()
         with contextlib.redirect_stderr(io.StringIO()):
             self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
-        # the leading handler-install is the arming one, recorded before our timer exists
-        self.assertEqual(order, ["handler:armed", "arm", "disarm", "handler:idle", "rearm"])
+        # the leading handler-install is the arming one, recorded before our timer exists.
+        # SIEGE-R3BA-3 — the cycle now appears TWICE (witness_pre_identity's snapshot,
+        # then tier2_witness), and the repetition is itself load-bearing: the two arms are
+        # SEQUENTIAL, never nested. A nested pair would read
+        # [handler:armed, arm, handler:armed, arm, disarm, ...] and would double the
+        # effective deadline, which is the hazard `_witness_bound`'s own docstring records
+        # and the reason `_verify_single` stopped arming a third time.
+        cycle = ["handler:armed", "arm", "disarm", "handler:idle", "rearm"]
+        self.assertEqual(order, cycle * 2)
 
 
 class TestMultiRootResolution(unittest.TestCase):

@@ -2701,6 +2701,96 @@ class TestSiegeR2Ba1TheCitationDepthIsWalkedNotGuessed(_TwoRootCase):
         self.assertEqual(walk_notes(out.stderr), [], out.stderr)
 
 
+class TestSiegeR3Ba3ThePreSwapSnapshotIsInsideTheWallClockBound(unittest.TestCase):
+    """SIEGE-R3BA-3 — `witness_pre_identity` moved the witness citation's resolution
+    OUTSIDE the only wall-clock bound this linter has.
+
+    Before SIEGE-R2IT-3 the cited name was resolved exactly once, inside
+    `tier2_witness`'s `with _witness_bound():`, so however hostile the name the run died
+    at 5 s with `witness evaluation exceeded 5s`. The snapshot resolves the SAME
+    receipt-controlled name a second time, before `tier2_artifacts` and therefore before
+    any timer is armed. A citation is a plain TRACE token with no length or component
+    limit and `os.path.realpath` rebuilds the accumulated path per component, so cost is
+    QUADRATIC in a string the receipt author writes — measured on `1943055`: 100 000
+    components 36.0 s, 200 000 components 153.6 s, with no symlinks and no filesystem
+    preparation at all, against `WitnessTimeout` at 5.0 s for the identical call inside
+    the bound.
+
+    Pinned STRUCTURALLY rather than by wall clock — "was a timer armed while the
+    resolution ran" is the property, and asserting on elapsed seconds is a flake on a
+    loaded box."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        (self.root / "evidence.log").write_text("ok\n")
+        self.witness = {"kind": "grep", "range_kind": None, "art": None,
+                        "payload": "evidence.log", "ran": "TRACE#1"}
+        self.trace = [{"n": 1, "verb": "READ", "args": "evidence.log"}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _call(self):
+        return self.rv.witness_pre_identity(self.witness, self.trace,
+                                            [self.root], "PASS")
+
+    def test_the_resolution_runs_under_an_armed_timer(self):
+        import signal as _signal
+        if not (hasattr(_signal, "setitimer") and hasattr(_signal, "SIGALRM")):
+            self.skipTest("no setitimer on this platform")
+        real = self.rv.resolve_base
+        seen = {}
+
+        def watched(*a, **k):
+            seen["delay"] = _signal.getitimer(_signal.ITIMER_REAL)[0]
+            seen["handler"] = _signal.getsignal(_signal.SIGALRM)
+            return real(*a, **k)
+
+        self.rv.resolve_base = watched
+        try:
+            self.assertIsNotNone(self._call())
+        finally:
+            self.rv.resolve_base = real
+        self.assertGreater(seen.get("delay", 0), 0,
+                           "the snapshot's resolve_base ran with no timer armed")
+        self.assertIs(seen.get("handler"), self.rv._witness_alarm)
+
+    def test_a_timeout_during_the_snapshot_is_not_swallowed(self):
+        """The bound firing must FAIL the run, not silently disarm the anchor. Arming a
+        one-shot timer and then eating its alarm is strictly worse than not arming it:
+        the 5 s is spent, the alarm is consumed, and the swap detector the snapshot
+        exists to feed is off with nothing said on any channel."""
+        real = self.rv.resolve_base
+
+        def boom(*a, **k):
+            raise self.rv.WitnessTimeout(self.rv.WITNESS_TIMEOUT_MSG)
+
+        self.rv.resolve_base = boom
+        try:
+            with self.assertRaises(self.rv.WitnessTimeout):
+                self._call()
+        finally:
+            self.rv.resolve_base = real
+
+    def test_every_other_failure_still_answers_none(self):
+        """The BOUND. This function's contract is "no census, no notes, no raise" — a
+        measurement must not manufacture a verdict — and only the wall-clock bound is
+        exempt. An ordinary failure to measure leaves the anchor unarmed and the run
+        continues, which is the documented degradation."""
+        real = self.rv.resolve_base
+
+        def boom(*a, **k):
+            raise OSError("hostile tree")
+
+        self.rv.resolve_base = boom
+        try:
+            self.assertIsNone(self._call())
+        finally:
+            self.rv.resolve_base = real
+
+
 class TestSiegeR3Ba1TheWalkNeitherEatsTheAlarmNorAmplifiesItsOwnCost(unittest.TestCase):
     """SIEGE-R3BA-1 — the two halves of one defect the round-3 walk introduced.
 

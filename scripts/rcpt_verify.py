@@ -4058,17 +4058,53 @@ def witness_pre_identity(witness, trace, root, verdict):
     witness leg itself uses — comparing against anything else would manufacture
     differences that are not swaps.
 
-    NO CENSUS, NO NOTES, NO RAISE. `found`/`refused` are throwaway lists: this call is a
-    measurement taken for the comparison, and letting it bill an ambiguity or emit a
-    REFUSED note would double every such report on every run.
+    NO CENSUS, NO NOTES, NO RAISE — with exactly one exception, below. `found`/`refused`
+    are throwaway lists: this call is a measurement taken for the comparison, and letting
+    it bill an ambiguity or emit a REFUSED note would double every such report on every
+    run.
 
     COST: one extra `resolve_base` per run (a handful of `lstat`s), on a name the run
-    resolves anyway."""
+    resolves anyway — ON AN HONEST NAME. SIEGE-R3BA-3 measured the dishonest one: the
+    citation is a plain TRACE token with no length or component limit (only
+    `parse_artifacts` restricts names), `os.path.realpath` rebuilds the accumulated path
+    string per component, so cost is QUADRATIC in a string the receipt author writes and
+    the receipt is read under a 64 MiB cap. Measured on `1943055`: 100 000 components
+    36.0 s, 200 000 components 153.6 s, 400 000 killed at 120 s — with no symlinks and
+    no filesystem preparation at all. Before SIEGE-R2IT-3 added this call the witness's
+    cited name was resolved exactly ONCE, inside `tier2_witness`'s `with
+    _witness_bound():`, so however hostile the name the run died at 5 s; this snapshot
+    reintroduced an UNBOUNDED entry point for the one name that had a bound.
+
+    So the `resolve_base` here runs under `_witness_bound()` too. It is a SEPARATE arm,
+    not a nested one — this call completes before `tier2_artifacts`, and
+    `tier2_witness`'s own arm is entered long afterwards — so the nesting hazard
+    `_witness_bound`'s docstring records (an inner arm capturing the outer's remaining
+    delay) does not arise; `test_36b_the_handler_is_restored_while_no_timer_is_armed`
+    pins the two cycles as sequential, which is what would go red if one ever nested
+    inside the other. TWO STATED COSTS, both the price of the second measurement being
+    bounded at all: a run's worst-case wall clock is now two 5 s budgets rather than one,
+    and an IMPORTING caller's own SIGALRM deadline can be pushed out by what is spent
+    inside twice rather than once (`_witness_bound` restores the delay it captured at arm
+    time, undecremented — pre-existing, now on one more path).
+
+    THE ONE RAISE, and why it is not a contract break. `WitnessTimeout` propagates;
+    every other exception still answers None. The distinction is not the exception
+    hierarchy but what the two failures MEAN. An ordinary failure to measure leaves the
+    anchor unarmed and the run continues with the pre-SIEGE-R2IT-3 behaviour, which is
+    the documented degradation. A wall-clock timeout is the bound FIRING, and swallowing
+    it would make arming the timer strictly worse than not arming it: the 5 s would be
+    spent, the alarm consumed (`setitimer` is one-shot), and the anchor silently
+    disarmed — the SIEGE-R3BA-1 shape one function over. The receipt whose name times
+    out here would time out on the witness leg's own `resolve_base` too, so this fails
+    the same run closed, earlier and with the same message."""
     try:
         name = _witness_cited_name(witness, trace, verdict)
         if name is None:
             return None
-        return {"name": name, "resolved": resolve_base(name, root, [], [])}
+        with _witness_bound():
+            return {"name": name, "resolved": resolve_base(name, root, [], [])}
+    except WitnessTimeout:
+        raise                           # SIEGE-R3BA-3 — see the paragraph above
     except Exception:
         return None
 
