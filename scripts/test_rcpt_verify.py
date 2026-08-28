@@ -6692,6 +6692,136 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
                     self.assertNotIn("EVALUATED at Tier-2", out.stderr)
                     self.assertIn("witness 1/1", out.stderr)
 
+    def test_siege_r31_a_declared_decoy_cannot_stand_in_for_the_named_artifact(self):
+        """SIEGE-R3-1 — `bound` asked whether the bytes were HASHED, never whether they
+        were the bytes of the file the WITNESS LINE ITSELF names, and the receipt author
+        writes both strings. SIEGE-R2IT-2's own exploit was therefore restored by ONE
+        extra ARTIFACTS line: declare the genuine still-failing findings file AND a
+        sanitised twin, hash-verify both honestly, put the genuine name on the WITNESS
+        payload and the twin on `ran=TRACE#N`. Every gate is satisfied by real hashes and
+        the peer is retired on a predicate that never touched the file the receipt names.
+
+        Measured on `1943055`: the `declared-decoy` arm exited 0 with the peer RETIRED,
+        and the `declared-decoy-top-level` arm did so with a census byte-identical to the
+        honest control's but for the ARTIFACTS denominator — no `unhashed-body` code, no
+        `UNVERIFIABLE` bullet, nothing on any channel.
+
+        The SPELLING arms are the non-vacuity half and they are what keep the fix an
+        IDENTITY test rather than a string test: §3.1's bare name and §3.2's MANDATED
+        absolute spelling name one file, and a receipt that mixes them must still retire
+        its peer. Narrowing the fix to raw string equality passes every attack arm here
+        and breaks those three."""
+        fatal = b"# round 9 findings\nFATAL: unauthenticated write path\n"
+        clean = b"# round 9 findings\nall clear, nothing outstanding\n"
+
+        def receipt_for(arts, trace, wit, name):
+            body = _receipt(wit, verdict="PASS", skill="build/21-implementer",
+                            artifacts=arts, trace=trace,
+                            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+            p = self.base / name
+            p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                         + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                           f"SUPERSEDES: {self.PREFIX}\n")
+            return p
+
+        fh, fsize = self.plant(self.base, "round-9-findings.md", fatal)
+        (self.base / "d").mkdir(exist_ok=True)
+        dh, dsize = self.plant(self.base, "d/round-9-findings.md", clean)
+        th, tsize = self.plant(self.base, "notes.md", clean)
+        gh, gsize = self.plant(self.base, "good-9.md", clean)
+        absolute = str(self.base / "good-9.md")
+
+        both = [("round-9-findings.md", fh, fsize), ("d/round-9-findings.md", dh, dsize)]
+        top = [("round-9-findings.md", fh, fsize), ("notes.md", th, tsize)]
+        one = [("good-9.md", gh, gsize)]
+        cases = (
+            # (name, artifacts, trace, witness, expected rc)
+            # ── the attack: both files honestly declared and hash-verified ──
+            ("declared-decoy", both, ["READ  d/round-9-findings.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            ("declared-decoy-top-level", top, ["READ  notes.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            ("declared-decoy-absolute-citation", both,
+             [f"READ  {self.base / 'd' / 'round-9-findings.md'}"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            # normpath must not be a dodge: a payload that merely NORMALISES onto the
+            # genuine name is still not the cited file.
+            ("declared-decoy-dotdot-payload", both, ["READ  d/round-9-findings.md"],
+             "grep:round-9-findings.md/../round-9-findings.md  "
+             "expect-fail=/FATAL/  ran=TRACE#1", 1),
+            # SELF-ADVERSARIAL — deleting the payload token must not buy back the
+            # exploit. An empty `grep:` payload names nothing, so nothing can be shown
+            # to be it; this arm exists because the first cut of the fix read "states no
+            # target" and granted, restoring the attack verbatim.
+            ("empty-payload", both, ["READ  d/round-9-findings.md"],
+             "grep:  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            # ── non-vacuity: honest receipts, every legitimate spelling ──
+            ("honest-same-spelling", one, ["READ  good-9.md"],
+             "grep:good-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0),
+            ("honest-mandated-absolute-trace", one, [f"READ  {absolute}"],
+             "grep:good-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0),
+            ("honest-absolute-payload", one, ["READ  good-9.md"],
+             f"grep:{absolute}  expect-fail=/FATAL/  ran=TRACE#1", 0),
+            ("honest-dot-slash-trace", one, ["READ  ./good-9.md"],
+             "grep:good-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0),
+        )
+        for name, arts, trace, wit, rc in cases:
+            with self.subTest(shape=name):
+                p = receipt_for(arts, trace, wit, f"r31-{name}.rcpt")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                if rc:
+                    self.assertIn("EVALUATED at Tier-2", out.stderr)
+                    # The census must SAY which conjunct broke — the pre-fix run of the
+                    # `declared-decoy-top-level` arm was byte-identical to the honest
+                    # control's, which is what made this exploit disclosure-free.
+                    self.assertIn("stated-target-not-read", out.stderr)
+                    self.assertIn("UNVERIFIABLE: witness", out.stderr)
+                else:
+                    self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+                    self.assertNotIn("stated-target-not-read", out.stderr)
+                    self.assertIn("witness 1/1", out.stderr)
+
+    def test_siege_r31_a_witness_naming_a_path_that_is_the_cited_file_still_binds(self):
+        """SIEGE-R3-1's BOUND, and the reason the test is resolution-based. A witness
+        that names `alias.md` where `alias.md` is a symlink to the file the citation
+        reads is NOT the attack: the receipt says it grepped `alias.md`, and `alias.md`
+        really does hold those bytes. Blocking it would be a false BLOCK on an honest
+        spelling and would push the fix back toward the string comparison the attack
+        arms above already walk around."""
+        clean = b"# round 9 findings\nall clear, nothing outstanding\n"
+        h, size = self.plant(self.base, "d2/round-9-findings.md", clean)
+        (self.base / "alias.md").symlink_to("d2/round-9-findings.md")
+        body = _receipt("grep:alias.md  expect-fail=/FATAL/  ran=TRACE#1",
+                        verdict="PASS", skill="build/21-implementer",
+                        artifacts=[("d2/round-9-findings.md", h, size)],
+                        trace=["READ  d2/round-9-findings.md"],
+                        claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "r31-alias.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_siege_r31_the_other_witness_kinds_are_deliberately_untouched(self):
+        """The scope bound. `kind=exec`'s payload is a shell command and `kind=lint`'s is
+        a rule name; neither is a filename under any spelling, so neither STATES a target
+        for a citation to disagree with, and a stated-target test that fired on them
+        would be a shape test wearing an identity test's name. A RANGED `grep:` payload
+        is the source of the read (`from_payload`), so it cannot disagree with itself.
+        All three must keep answering True."""
+        w_exec = {"kind": "exec", "payload": "`pytest -q`", "range_kind": None}
+        w_lint = {"kind": "lint", "payload": "no-todo", "range_kind": None}
+        w_ranged = {"kind": "grep", "payload": "f.md#L1-L2", "art": "f.md",
+                    "range_kind": "L"}
+        rv = _import_rv()
+        for w in (w_exec, w_lint, w_ranged):
+            self.assertIsNone(rv._witness_stated_target(w))
+            self.assertTrue(
+                rv._stated_target_binds(w, "some/other.md", None, self.base))
+
     def test_siege_r2it2_the_exit_clause_arm_is_deliberately_untouched(self):
         """The bound on the fix. The `kind=exec` exit-clause site compares the RECEIPT's
         own `expect-fail` against the RECEIPT's own `TRACE exit=` and never consults

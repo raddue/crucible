@@ -3804,7 +3804,8 @@ def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
 
 
 def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguous,
-                          derived_name=False, bound=True):
+                          derived_name=False, bound=True,
+                          unbound_codes=("unhashed-body",)):
     """The witness leg's WHOLE census contribution for one evaluated item, so states (a)
     and (b) — clean return and LintError raise — cannot bill differently.
 
@@ -3883,7 +3884,15 @@ def _bill_witness_billing(cov, probe, body_text, rangeless_grep, ranged, ambiguo
             # this pair exists to keep. A note on stderr carries the same fact for a
             # reader (tier2_witness), because a census with no consumer (#499) is not a
             # channel on its own.
-            cov.note_code("wrong-name", "unhashed-body")
+            # SIEGE-R3-1 — CODES, plural, and every applicable one is attached rather
+            # than the first that fits. `bound` is now a conjunction, so an item can be
+            # unbound for two independent reasons at once (the bytes were never hashed
+            # AND the WITNESS line names a different file than the citation reads), and
+            # the two have different remedies. Still `note_code` and still one item in
+            # one sub-count: the disjointness C1-R1-S1 keeps is a property of the
+            # COUNTER, not of how many facts the parenthetical carries.
+            for _c in unbound_codes:
+                cov.note_code("wrong-name", _c)
     elif derived_name and cov.wit_applicable:
         # siege S-2 — the same counter for the same fact, one kind over. The caller folds
         # `not bound` into `derived_name`, so reaching here means the predicate really did
@@ -4156,6 +4165,127 @@ def _carry_should_have_bound(art_name, bodies, root=None):
         except Exception:
             continue
     return False
+
+
+def _witness_stated_target(witness):
+    """SIEGE-R3-1 — the identity the WITNESS LINE ITSELF names, or None when the line
+    names no file of its own.
+
+    Three categories, and the split is by what the payload GRAMMATICALLY is rather than
+    by any enumeration of shapes:
+
+      * `kind=exec` — the payload is a shell command and `kind=lint` — the payload is a
+        rule name out of LINT_RULES. Neither is a filename under any spelling, so
+        neither states a target and there is nothing for the citation to disagree with.
+        (Their own "the predicate ran against a file the witness never names" surface is
+        the `derived_name`/`unbound-trace-name` half, which is untouched here.)
+      * a RANGED `kind=grep` payload — `witness_art_name` already sources the read FROM
+        this token (`from_payload`), so the stated target and the read target are one
+        object by construction and cannot disagree.
+      * a RANGELESS `kind=grep` payload — the gap. The read's identity comes from the
+        cited TRACE entry (`derive_art_name`), which `ran=TRACE#N` re-points freely,
+        while the payload token is what a reader of the receipt sees as the file that
+        was checked. These are two independently-authored strings that nothing ties
+        together, and this is the one shape where the line states a target it does not
+        source.
+
+    Returns the clause-STRIPPED payload (`witness["payload"]`), never `payload_raw`: a
+    trailing `pattern=` clause is a predicate, not part of the name, and `parse_witness`
+    has already split it off on exactly this field.
+
+    An EMPTY rangeless payload (`WITNESS grep:  expect-fail=/…/  ran=TRACE#1`, which
+    Tier-1 accepts) returns `""` and NOT None — the two answers mean opposite things
+    here and conflating them was a measured self-inflicted bypass of this very fix. None
+    means "this kind of line names no target, so there is nothing to disagree with";
+    `""` means "this line's payload IS its target and the author wrote none", which is a
+    target that cannot be shown to be the artifact read. Returning None for it restored
+    the SIEGE-R3-1 exploit verbatim at the cost of deleting the payload token."""
+    if witness.get("kind") != "grep":
+        return None
+    if witness.get("range_kind") is not None:
+        return None
+    return witness.get("payload") or ""
+
+
+def _stated_target_binds(witness, art_name, resolved, root):
+    """SIEGE-R3-1 — True when the WITNESS line's own stated target and the artifact the
+    leg ACTUALLY read are the same on-disk identity.
+
+    WHAT THIS IS FOR, and why `bound` alone was not it. SIEGE-R2IT-2 made the PASS-leg
+    `evaluated` flag — and therefore the `SUPERSEDES` consequent that retires a peer's
+    finding — require the predicate to have run against the ARTIFACTS leg's
+    hashed-AND-matched buffer. But `carried` is looked up under `art_name`, and for a
+    rangeless `grep:` witness `art_name` is the CITED TRACE entry's own first token. So
+    `bound` answered "were THESE bytes hashed", never "were these the bytes of the file
+    the WITNESS says it checked" — and the receipt author writes both strings. Declare
+    the genuine still-failing findings file AND a sanitised twin, hash-verify both, put
+    the genuine name on the WITNESS line and the twin on `ran=TRACE#N`: every existing
+    gate is satisfied by an honest artifact, and the peer is retired on a predicate that
+    never touched the file the receipt names. Measured on `1943055`: exit 0, peer
+    retired, and with the twin at the root's own top level a census byte-identical to
+    the honest single-artifact control's but for the ARTIFACTS denominator.
+
+    THE TEST IS IDENTITY, NOT SPELLING, and it answers NO whenever it cannot prove YES:
+
+      * NORMALISED-STRING equality first (`posixpath.normpath`, the same normaliser the
+        relative arm of `_cited_below_top_level` and `_carry_spellings` use), which is
+        disk-free and settles every honest receipt where the two strings are the same
+        name — including `./f.md` against `f.md` and `a/../f.md` against `f.md`.
+      * otherwise RESOLUTION equality, through `resolve_base` with the leg's own root
+        precedence, so the two spellings §3.1 and §3.2 both mandate (a bare
+        `round-9-findings.md` on the WITNESS line against the absolute
+        `<root>/round-9-findings.md` §3.2 requires in TRACE) are one identity here.
+        Comparing against anything but `resolve_base` would manufacture disagreements
+        that are not disagreements.
+
+    Note deliberately NOT `_carry_spellings`: that set is built for a consumer that
+    RAISES on a non-empty intersection, so its two deliberate over-approximations (the
+    lexical `..` collapse across a symlinked parent, and the added resolved form) run in
+    the over-BLOCK direction there. Here a non-empty answer GRANTS `bound`, so the same
+    generosity would run fail-OPEN — the set is sound for its consumer and unsound for
+    this one, and reusing it would be the third spelling-patch this file has already
+    replaced twice.
+
+    THE RESOLUTION ARM READS THE POST-SWAP TREE, and that is the right tree for the
+    question it asks. "Did the witness name the file whose bytes reached the predicate"
+    is a question about the read that just happened; "did that file move between the
+    legs" is a different question, and `witness_pre_identity` is the instrument for it.
+    Answering both here would give one check two failure modes and neither a bound.
+
+    A payload that is not a filename at all — the committed `grep:boom  expect-fail=/boom/`
+    shape, where the token is search text — resolves nowhere and equals no citation, so
+    it answers False. That is the honest reading and not a false block: nothing ties
+    `boom` to the file the citation names, so a supersession resting on it would rest on
+    a name the receipt never verified. The consequence is the SAME disposition an
+    undeclared body already gets (`UNVERIFIABLE`, the `wrong-name` census code, and no
+    `evaluated`) — a disclosure, never a verdict.
+
+    MUST NOT RAISE: `witness`, `art_name` and the payload are all receipt-controlled.
+    Every failure to DECIDE answers False, which is the fail-closed direction for a
+    flag whose True grants a supersession."""
+    stated = _witness_stated_target(witness)
+    if stated is None:
+        return True
+    if not stated:
+        # An empty `grep:` payload names nothing, so nothing can be shown to be it.
+        # Fail-closed, for the reason the docstring of _witness_stated_target gives.
+        return False
+    if art_name is None:
+        return False
+    try:
+        if posixpath.normpath(str(stated)) == posixpath.normpath(str(art_name)):
+            return True
+    except Exception:
+        return False
+    if resolved is None:
+        return False
+    try:
+        # `found`/`refused` are throwaway lists, for witness_pre_identity's reason: this
+        # is a measurement taken for a comparison, and letting it bill an ambiguity or
+        # emit a REFUSED note would double every such report on every run.
+        return resolve_base(str(stated), root, [], []) == resolved
+    except Exception:
+        return False
 
 
 def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
@@ -4653,15 +4783,41 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             # siege S-5 — did the predicate run against the bytes the ARTIFACTS leg
             # hashed AND matched, or against an independent read? This is the DISAGREEMENT
             # the `wrong-name` counter was supposed to report and did not.
-            bound = carried is not None
+            # SIEGE-R3-1 — `bound` asks TWO questions now, and the second is the one
+            # SIEGE-R2IT-2 left out. `carried is not None` says the bytes came from the
+            # ARTIFACTS leg's hashed-AND-matched buffer; `stated_binds` says that buffer
+            # belongs to the file the WITNESS LINE ITSELF names. Either alone is
+            # satisfiable by a receipt the same subagent authors — the first by declaring
+            # a decoy, the second by naming a genuine file the citation never reads —
+            # and only the conjunction says the predicate ran against hashed bytes of the
+            # artifact under discussion. See _stated_target_binds for why the test is
+            # identity rather than spelling, and for the kinds it is a no-op on.
+            stated_binds = _stated_target_binds(witness, art_name, resolved, root)
+            bound = carried is not None and stated_binds
+            # SIEGE-R3-1 — one code per FAILED conjunct, so the parenthetical says which
+            # of the two the receipt actually broke (and says both when it broke both).
+            unbound_codes = ((("unhashed-body",) if carried is None else ())
+                             + (() if stated_binds else ("stated-target-not-read",)))
             derived_name = bool(witness.get("kind") != "grep" and not from_payload
                                 and cap is None and not notes_ambiguous and not bound)
             notes_unbound = []
             if (rangeless_grep or derived_name) and not bound:
+                # SIEGE-R3-1 — the note names WHICH disagreement, because the two have
+                # different remedies: an unhashed body is fixed by declaring the file,
+                # a stated-target disagreement by citing the file the witness names.
+                why = " and ".join(
+                    ([] if carried is not None else
+                     ["the name is not a hash-matched ARTIFACTS entry"])
+                    + ([] if stated_binds else
+                       [(f"the WITNESS line names "
+                         f"{_show_path(_witness_stated_target(witness))}, which is not "
+                         f"the artifact this citation reads")
+                        if _witness_stated_target(witness) else
+                        "the WITNESS line names no artifact of its own "
+                        "(empty grep: payload)"]))
                 notes_unbound = [
                     f"UNVERIFIABLE: witness {_show_path(art_name)} (predicate evaluated "
-                    f"against an independent read — the name is not a hash-matched "
-                    f"ARTIFACTS entry)"]
+                    f"against an independent read — {why})"]
                 # C1-R3-S2 — mirrored as produced; the predicate below raises on a
                 # matching expect-fail and this note would be dropped with the frame.
                 if notes_out is not None:
@@ -4698,14 +4854,16 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 if cov is not None:
                     _bill_witness_billing(cov, probe, body_text, rangeless_grep,
                                           ranged, bool(notes_ambiguous),
-                                          derived_name, bound)
+                                          derived_name, bound,
+                                          unbound_codes=unbound_codes)
                 raise
             else:
                 # State (a). Same definition, clean result.
                 if cov is not None:
                     _bill_witness_billing(cov, probe, body_text, rangeless_grep,
                                           ranged, bool(notes_ambiguous),
-                                          derived_name, bound)
+                                          derived_name, bound,
+                                          unbound_codes=unbound_codes)
             return notes_ambiguous + notes_refused + notes_unbound
         except WitnessTimeout:
             if cov is not None:
