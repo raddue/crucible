@@ -95,6 +95,14 @@ prefix `graphify-staleness:`; `--json` emits the same facts as an object
 `stale:N` ("built N commits behind") states are deliberately distinct and never
 collapsed.
 
+The script itself may simply be **not present in the target repo** — today that
+is every repo except `ai-rack`. This is a distinct case from any state the
+script reports, since an absent script cannot be invoked to report anything.
+Before consulting staleness, check the script exists in the target repo; if it
+does not, skip the pointer clause entirely and fall back to grep/Explore +
+cartographer, same as the `no-graph` row below — do not invent a state or try
+to reconstruct one by other means.
+
 Trust tiers — the dispatch author decides the pointer from the staleness state:
 
 | State | Dispatch action |

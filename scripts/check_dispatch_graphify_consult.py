@@ -47,6 +47,7 @@ DISPATCH_REQUIRED: dict[str, str] = {
     "query-first workflow: affected": "graphify affected",
     "query-first workflow: query": "graphify query",
     "enforced-vs-recommended decision": "recommended, not enforced",
+    "script-absent handling": "not present in the target repo",
 }
 
 # label -> literal substring that MUST appear in cartographer-skill/SKILL.md.
