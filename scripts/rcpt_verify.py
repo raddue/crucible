@@ -1437,16 +1437,12 @@ def _resolve_base_one(name: str, root: pathlib.Path, allowed):
     return None
 
 
-def _collapse_slashes(s):
-    """SIEGE-R1-1 — one spelling of a path with every run of `/` reduced to one.
-
-    `posixpath.normpath` and `PurePosixPath` BOTH deliberately preserve exactly two
-    leading slashes (POSIX reserves `//` for implementation-defined meaning), so
-    `//<root>/f.md` is a distinct root component to every lexical comparison in this
-    file while naming the same file on Linux and collapsing under `Path.resolve()`.
-    That difference is a free spelling of any name a lexical check keys on, which is
-    what makes it a bypass rather than a curiosity."""
-    return re.sub(r"/{2,}", "/", s)
+# SIEGE-R2BA-1 — the walk below is bounded, and a name longer than this DISCLOSES
+# rather than going silent. No honest citation is 256 components deep; a name that
+# long is either an ELOOP-shaped abuse or a cost attack, and both are worth a note. The
+# bound exists so a receipt-controlled name cannot turn one advisory measurement into
+# an unbounded syscall loop.
+_CITED_WALK_CAP = 256
 
 
 def _cited_below_top_level(name, roots=()):
@@ -1467,89 +1463,117 @@ def _cited_below_top_level(name, roots=()):
     as deeper, and that is intended: a `..`-traversal citation that lands on a root's
     top level is exactly the unusual resolution this channel exists to disclose. Erring
     toward firing is the DISCLOSURE direction; this note is advisory and never a verdict.
+    The relative arm needs no walk and never had the defect the absolute arm did: a
+    relative name is JOINED to a base, so the number of components the author wrote IS
+    its depth below that base, and no symlink anywhere can change that count.
 
-    SIEGE-R1-1 — ABSOLUTE ARM, AND WHY THE ORIGINAL `return False` WAS THE WHOLE
-    VULNERABILITY RE-SPELLED. The first form of this function answered False for EVERY
-    absolute name, justified on the claim that an absolute citation's depth "is already
-    answered by `rel`, the relpath from the root that holds it". That claim is precisely
-    what SIEGE-S4 disproved one paragraph up: `rel` is computed from `resolved`, the
-    POST-symlink path, so the shortening attack zeroes it whatever the citation said. And
-    §3.2 MANDATES the absolute spelling for a tracked file, so the arm that returned False
-    was not an edge case — it was the PRIMARY spelling. Measured on `8d26620` with the
-    mandated two-root command line and the identical `sub/top.md -> ../top.md` plant:
-    `sub/top.md` rendered `resolved-by-walk 1` with its note, `<root>/sub/top.md`
-    rendered `resolved-by-walk 0` and silence.
+    ABSOLUTE ARM — SIEGE-R2BA-1, AND WHY THE THIRD SPELLING-PATCH WAS REPLACED RATHER
+    THAN EXTENDED. The absolute arm was written twice as CANDIDATE ENUMERATION: build N
+    lexically-transformed spellings of the citation (`normpath`, slash-collapsed,
+    resolved-parent-plus-basename), build N spellings of each root, and fire if any
+    pairing's `relative_to` reads deeper than 1. Round 1 shipped one candidate family
+    and round 2 bypassed it; round 2 shipped three and round 2's own review bypassed
+    those, with a construction no lexical family can reach: `ln -s . <root>/sub` inside
+    a root the subagent owns, plus `ln -s <root> <outside>/L` anywhere outside every
+    supplied root, cited as `<outside>/L/sub/top.md`. No root is a string prefix of that
+    name, so the lexical families raise `ValueError`; and `p.parent.resolve()` collapses
+    BOTH symlinks in one call and lands on the root itself, so the resolved-parent
+    family reads depth 1. Measured on `588a7e9`: `resolved-by-walk 0`, no note, against
+    `resolved-by-walk 1` plus the note for the byte-identical `<root>/sub/top.md`.
 
-    So an absolute citation's depth is measured HERE TOO, from the citation's own
-    structure, relative to the SUPPLIED ROOTS — never from the absolute path's own
-    component count, which would fire on every tracked-file citation in the corpus. The
-    depth reading is normalised the same way the relative arm's is (`normpath`), so
-    `<root>/f.md` reads 1 and `<root>/sub/top.md` reads 2, matching what the relative
-    spellings of the same two citations already read.
+    So the depth is now MEASURED BY WALKING THE CITATION, one written component at a
+    time, instead of guessed from string transformations of the whole name:
 
-    SPELLING-EXHAUSTIVE ON PURPOSE, because a single lexical form is what round 1's fix
-    shipped and what round 2 bypassed. Three families of candidate are tried, and a hit
-    on ANY of them fires:
-      * the `normpath` form (`.`, trailing `/`, `a/../b` — the pure-string variants);
-      * the SLASH-COLLAPSED form (`_collapse_slashes`), because `//<root>/f.md` is a
-        distinct root component to `PurePosixPath` and to `normpath` alike;
-      * the citation's own RESOLVED PARENT joined to its basename, which is what covers
-        a symlinked DIRECTORY component anywhere in the prefix — a `--root` token that is
-        itself a symlink (`_as_roots` hands this function only RESOLVED roots), or a
-        `ln -s . link` the subagent plants in a root it owns and cites through.
-    The BASENAME is deliberately not resolved: the basename is exactly what the SIEGE-S4
-    attack symlinks, and resolving it is what re-shortens the path and re-mutes the
-    instrument. Only the prefix is.
+      * normalise once (`posixpath.normpath`), which is what makes `<root>/./f.md`,
+        `<root>//f.md` and `<root>/a/../f.md` read the same as `<root>/f.md` — the same
+        normalisation the relative arm has always applied, and the reason the `//`
+        candidate family is gone rather than merely unused (`PurePosixPath` keeps the
+        doubled leading slash as a distinct ANCHOR, and the walk starts from `/` and
+        consumes `parts[1:]`, so the anchor's spelling cannot participate at all);
+      * walk from `/`, extending one component at a time and resolving ONLY at a
+        component that is actually a symlink (so the accumulator stays canonical for one
+        `lstat` per component rather than one full `resolve()` per component);
+      * at every prefix that lands inside a supplied root, read the depth the receipt
+        author would still have had to spell out from there: `depth of this prefix below
+        that root` + `components of the citation not yet consumed`. Fire if any such
+        reading exceeds 1.
 
-    Consulting disk for that one candidate is a departure from this function's first
-    form ("never from disk") and is sound here where it would not be in
-    `_carry_spellings`: that one detects a filesystem MOVE between two legs and must not
-    re-read the post-swap tree, while this one is a disclosure channel whose caller
-    already resolved the very same name.
+    WHY THAT IS COMPLETE, and it is a claim about the whole class rather than about the
+    reported spellings. On a symlink-free path every prefix gives the SAME reading (each
+    consumed component adds one to the prefix's depth and removes one from the
+    remainder), and that reading is the citation's true depth below the root — so the
+    measurement is exact where there is nothing to hide. A symlink can only make the
+    readings DISAGREE, and taking the maximum keeps the deepest one, which is the
+    disclosure direction this whole channel runs in. The caller has already established
+    that the FULLY resolved citation lands under a supplied root (`contained is not
+    None`), and the last prefix of the walk is that resolution — so at least one
+    in-root reading always exists and the loop can never come back empty for a citation
+    this arm is asked about. Silence therefore requires EVERY in-root prefix to read
+    <= 1, which is precisely the shape of an ordinary top-level citation: the walk
+    enters the root at the root itself with one component left. No symlink arrangement
+    the subagent can plant — a self-referential `.` link, a prefix link outside every
+    root, a symlink-valued `--root` token, a chain of any length, or all of them at
+    once — can produce that shape for a name written deeper, because every one of them
+    is a step IN the walk rather than a spelling the walk has to anticipate.
 
-    OR-ED ACROSS EVERY CANDIDATE AND EVERY ROOT, i.e. erring toward firing, on the
-    relative arm's own grounds — this is an advisory note, never a verdict. It costs a
-    note on a citation whose spelling reads deeper than its resolution, which IS the
-    disclosure. `roots` empty (the default) reproduces the old answer for absolute names.
+    WHAT IT IS STILL NOT. This measures the citation's spelling, not its resolution; the
+    resolution half is `_below_top_level`'s own loop and the two are OR-ed there. And a
+    `..` that `normpath` cancels across a SYMLINKED parent is collapsed lexically, which
+    can read shallower than the kernel would — the relative arm has always done this
+    (`sub/../f.md` reads 1) and it is pinned; the resolution half covers the cases where
+    that difference matters, because a citation that reads 1 here and lands deep there
+    fires on `rel`.
 
-    MUST NOT RAISE: `name` is receipt-controlled and `roots` is caller-supplied."""
+    Consulting disk is a departure from this function's first form ("never from disk")
+    and is sound here where it would not be in `_carry_spellings`: that one detects a
+    filesystem MOVE between two legs and must not re-read the post-swap tree, while this
+    one is a disclosure channel whose caller already resolved the very same name. Only
+    `lstat`/`readlink` are used — no file is opened.
+
+    `roots` empty (the default) reproduces the old answer for absolute names.
+
+    MUST NOT RAISE: `name` is receipt-controlled and `roots` is caller-supplied. Every
+    failure to MEASURE answers True rather than False: an unmeasurable citation is the
+    disclosure case, and this note is advisory and never a verdict."""
     if name is None:
         return False
     try:
-        raw = str(name)
-        if not pathlib.PurePosixPath(raw).is_absolute():
-            return len(pathlib.PurePosixPath(posixpath.normpath(raw)).parts) > 1
+        norm = pathlib.PurePosixPath(posixpath.normpath(str(name)))
+        parts = norm.parts
+        if not norm.is_absolute():
+            return len(parts) > 1
     except Exception:
         return False
-    cands = set()
-    for form in (raw, _collapse_slashes(raw)):
-        try:
-            cands.add(pathlib.PurePosixPath(posixpath.normpath(form)))
-        except Exception:
-            continue
-    try:
-        p = pathlib.Path(raw)
-        cands.add(pathlib.PurePosixPath(str(p.parent.resolve())) / p.name)
-    except Exception:
-        pass
-    bases = set()
+    bases = []
     for r in roots:
         try:
-            spelling = str(r)
+            bases.append(pathlib.Path(r))
         except Exception:
             continue
-        for form in (spelling, _collapse_slashes(spelling)):
-            try:
-                bases.add(pathlib.PurePosixPath(posixpath.normpath(form)))
-            except Exception:
-                continue
-    for cand in cands:
-        for b in bases:
-            try:
-                if len(cand.relative_to(b).parts) > 1:
+    if not bases:
+        return False
+    comps = parts[1:]
+    if len(comps) > _CITED_WALK_CAP:
+        return True
+    n = len(comps)
+    try:
+        cur = pathlib.Path("/")
+        for i, comp in enumerate(comps):
+            nxt = cur / comp
+            # is_symlink() swallows OSError/ValueError and answers False, so a
+            # malformed or unreachable component degrades to the lexical extension
+            # rather than raising — the same disposition _resolve_base_one gives it.
+            cur = nxt.resolve() if nxt.is_symlink() else nxt
+            remaining = n - 1 - i
+            for b in bases:
+                try:
+                    depth = len(cur.relative_to(b).parts)
+                except ValueError:      # not under this root — PurePath op
+                    continue
+                if depth + remaining > 1:
                     return True
-            except Exception:
-                continue
+    except Exception:
+        return True
     return False
 
 

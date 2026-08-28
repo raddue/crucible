@@ -328,6 +328,12 @@ S5OUT = "TestSiegeS5AnOutOfRootResolutionIsDisclosedOnBothLegs"
 # doubled leading slash and a symlink-valued `--root` token. It pins the SAME depth
 # key S4SYM does, so it reddens on every row that drops or re-keys that key.
 R11ABS = "TestSiegeR11TheAbsoluteSpellingOfTheShortenedCitationAlsoDiscloses"
+# SIEGE-R2BA-1 — R11ABS's attack re-arranged rather than re-spelled: a prefix symlink
+# OUTSIDE every supplied root chained with a self-referential `sub -> .` inside one.
+# It pins the same depth key R11ABS and S4SYM do (the three attack arms redden wherever
+# that key is dropped or re-keyed), and its two SILENCE controls additionally redden on
+# the rows that make the channel fire indiscriminately.
+R2BA1 = "TestSiegeR2Ba1TheCitationDepthIsWalkedNotGuessed"
 DISJOINT = "TestALaterDisjointRootAnswersTheDepthKey"
 # SIEGE-R1-2 — the mid-lint-swap detector's spelling set. Its R1-2 arm cites
 # through a symlinked DIRECTORY component (`link/f.md`), which is two components
@@ -703,6 +709,12 @@ MUTANTS = [
                    "test_the_absolute_spelling_discloses",
                    "test_the_doubled_slash_absolute_spelling_discloses",
                    "test_the_relative_spelling_discloses"),
+                  (R2BA1,
+                   "test_a_chain_of_outside_prefix_symlinks_does_not_silence_it",
+                   "test_a_prefix_symlink_outside_every_root_does_not_silence_it",
+                   "test_a_symlink_valued_root_token_plus_a_self_link_does_not_silence_it",
+                   "test_a_top_level_citation_through_an_outside_symlink_stays_silent",
+                   "test_an_absolute_top_level_citation_stays_silent_with_the_self_link_planted"),
                   (S4SYM,
                    "test_a_top_level_citation_stays_silent"),
                   (TOPLVL,
@@ -853,6 +865,12 @@ MUTANTS = [
                    "test_the_absolute_spelling_discloses",
                    "test_the_doubled_slash_absolute_spelling_discloses",
                    "test_the_relative_spelling_discloses"),
+                  (R2BA1,
+                   "test_a_chain_of_outside_prefix_symlinks_does_not_silence_it",
+                   "test_a_prefix_symlink_outside_every_root_does_not_silence_it",
+                   "test_a_symlink_valued_root_token_plus_a_self_link_does_not_silence_it",
+                   "test_a_top_level_citation_through_an_outside_symlink_stays_silent",
+                   "test_an_absolute_top_level_citation_stays_silent_with_the_self_link_planted"),
                   (RELHALF,
                    "test_the_hostile_relpath_renders_fully_escaped",
                    "test_the_run_completes_and_the_note_fires"),
@@ -999,6 +1017,10 @@ MUTANTS = [
                    "test_the_absolute_spelling_discloses",
                    "test_the_doubled_slash_absolute_spelling_discloses",
                    "test_the_relative_spelling_discloses"),
+                  (R2BA1,
+                   "test_a_chain_of_outside_prefix_symlinks_does_not_silence_it",
+                   "test_a_prefix_symlink_outside_every_root_does_not_silence_it",
+                   "test_a_symlink_valued_root_token_plus_a_self_link_does_not_silence_it"),
                   (S4SYM,
                    "test_the_symlink_shortened_citation_still_discloses"),
                   (NESTED,
@@ -1027,6 +1049,10 @@ MUTANTS = [
                    "test_the_absolute_spelling_discloses",
                    "test_the_doubled_slash_absolute_spelling_discloses",
                    "test_the_relative_spelling_discloses"),
+                  (R2BA1,
+                   "test_a_chain_of_outside_prefix_symlinks_does_not_silence_it",
+                   "test_a_prefix_symlink_outside_every_root_does_not_silence_it",
+                   "test_a_symlink_valued_root_token_plus_a_self_link_does_not_silence_it"),
                   (S4SYM,
                    "test_the_symlink_shortened_citation_still_discloses"),
                   (GITTOP,

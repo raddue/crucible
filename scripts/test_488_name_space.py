@@ -2602,6 +2602,105 @@ class TestSiegeR11TheAbsoluteSpellingOfTheShortenedCitationAlsoDiscloses(_TwoRoo
         self.assertEqual(walk_notes(out.stderr), [], out.stderr)
 
 
+class TestSiegeR2Ba1TheCitationDepthIsWalkedNotGuessed(_TwoRootCase):
+    """SIEGE-R2BA-1 — the third respelling of SIEGE-S4, and the reason the absolute
+    arm stopped enumerating candidate spellings altogether.
+
+    Rounds 1 and 2 both answered "is this absolute citation deeper than one component
+    below a root?" by building lexically-transformed candidate strings and asking
+    `relative_to`. Round 2's own review then found the arrangement no candidate family
+    reaches: `ln -s . <root>/sub` (a self-referential directory link inside a root the
+    subagent owns) plus `ln -s <root> <outside>/L` (a prefix link ANYWHERE outside every
+    supplied root), cited as `<outside>/L/sub/top.md`. No root is a string prefix of that
+    name, so every lexical pairing raises `ValueError`; and `p.parent.resolve()`
+    collapses BOTH links in one call and lands on the root itself, so the
+    resolved-parent family reads depth 1. Measured on `588a7e9`: `resolved-by-walk 0`
+    and silence, against `resolved-by-walk 1` plus the note for the byte-identical
+    `<root>/sub/top.md`.
+
+    The depth is now WALKED — one written component at a time, taking the deepest
+    reading at any prefix that lands inside a supplied root — so a symlink is a STEP in
+    the measurement rather than a spelling the measurement has to anticipate. These
+    pins are therefore not "three more spellings": each is a distinct symlink
+    ARRANGEMENT (outside-prefix, chained outside-prefix, in-root bounce), and the
+    controls below are the bound that keeps the counter meaning something."""
+
+    def _plant(self):
+        h, size = self.plant(self.dispatch, "top.md", "t\n")
+        (self.dispatch / "sub").symlink_to(".")
+        return h, size
+
+    def _run(self, cited, roots=None):
+        h, size = self._plant()
+        p = self.dispatch / "rcpt.txt"
+        p.write_text(receipt(artifacts=[("top.md", h, size)],
+                             trace=[f"READ  {cited}"]))
+        roots = roots or [self.dispatch, self.findings]
+        args = []
+        for r in roots:
+            args += ["--root", str(r)]
+        return run("--tier2", "--strict", *args, str(p))
+
+    def _assert_discloses(self, out, cited):
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 1", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr),
+                         [f"RESOLVED-BY-WALK: {cited} (top.md)"], out.stderr)
+
+    def test_a_prefix_symlink_outside_every_root_does_not_silence_it(self):
+        """The round-2 repro verbatim. `L` lives outside every supplied root, so no
+        root spelling is a lexical prefix of the citation; `sub -> .` is what makes the
+        resolved parent collapse onto the root itself."""
+        outside = self.dispatch.parent / "outside"
+        outside.mkdir()
+        (outside / "L").symlink_to(str(self.dispatch))
+        cited = f"{outside}/L/sub/top.md"
+        self._assert_discloses(self._run(cited), cited)
+
+    def test_a_chain_of_outside_prefix_symlinks_does_not_silence_it(self):
+        """One link deeper than the reported shape — `L2 -> L1 -> <root>`. A candidate
+        family keyed on a single `.resolve()` cannot tell the two apart; a walk does not
+        care how long the chain is, because it only ever asks where each prefix landed."""
+        outside = self.dispatch.parent / "outside"
+        outside.mkdir()
+        (outside / "L1").symlink_to(str(self.dispatch))
+        (outside / "L2").symlink_to(str(outside / "L1"))
+        cited = f"{outside}/L2/sub/top.md"
+        self._assert_discloses(self._run(cited), cited)
+
+    def test_a_symlink_valued_root_token_plus_a_self_link_does_not_silence_it(self):
+        """The second spelling the finding names: `--root` is itself a symlink (the
+        findings root is created by the reviewed subagent per quality-gate/SKILL.md),
+        and `sub -> .` defeats the R1-1 pin, which uses a REAL `sub/` directory."""
+        link = self.dispatch.parent / "link"
+        link.symlink_to("dispatch")
+        cited = f"{link}/sub/top.md"
+        self._assert_discloses(self._run(cited, roots=[link, self.findings]), cited)
+
+    def test_a_top_level_citation_through_an_outside_symlink_stays_silent(self):
+        """NON-VACUITY, and the bound the walk has to respect: naming the root through
+        an outside link is not itself the disclosure — the citation still spells exactly
+        one component below the root, so there is nothing to report. A measurement that
+        counted the citation's own components, or that fired on "a symlink was
+        followed", would fire here and stop distinguishing anything."""
+        outside = self.dispatch.parent / "outside"
+        outside.mkdir()
+        (outside / "L").symlink_to(str(self.dispatch.parent))
+        out = self._run(f"{outside}/L/dispatch/top.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+    def test_an_absolute_top_level_citation_stays_silent_with_the_self_link_planted(self):
+        """The other non-vacuity bound, with the attack's own fixture on disk: the
+        `sub -> .` link EXISTS, and an ordinary tracked-file citation that does not go
+        through it is still silent."""
+        out = self._run(f"{self.dispatch}/top.md")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("resolved-by-walk 0", census(out.stderr), out.stderr)
+        self.assertEqual(walk_notes(out.stderr), [], out.stderr)
+
+
 class TestALaterDisjointRootAnswersTheDepthKey(_RootCase):
     """AC-6 T7 leg 2, the DECLARATION-ORDER existential (round-4-of-this-gate/S2).
 
