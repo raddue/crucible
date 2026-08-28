@@ -3136,7 +3136,8 @@ def witness_art_name(witness, cited, verdict):
     return derive_art_name(cited, verdict), False
 
 
-def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
+def verify_witness(body_text, witness, verdict, cited, probe=None,
+                   bound=True) -> bool:
     """Pure expect-fail decision core — the ONE shared, deliberately-non-verbatim
     factor of lint.py's tier2_verify (verdict=PASS) and tier2_verify_fail (verdict=FAIL).
     Returns True if the witness is clean; RAISES LintError with the BYTE-IDENTICAL
@@ -3215,6 +3216,16 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
         disk are never consulted. `_expect_fail_pattern(...) is None` is the exact test
         — it is None for the exit forms and for nothing else Tier-1 admits — so the two
         legs cannot drift from the derivation they actually use.
+
+    SIEGE-R2IT-2 — `bound` answers "did the bytes in `body_text` come from the ARTIFACTS
+    leg's hashed-AND-MATCHED buffer, or from an independent, never-hashed disk read". It
+    gates the PASS-leg regex/literal `evaluated` site and nothing else: no exit code
+    moves on it, because the predicate below still runs and still raises on a match
+    whatever it says. Only the SUPERSEDES consequent's input changes. Optional with a
+    default of True so no direct-API caller moves — `tier2_witness` is the only caller
+    that can compute the fact (it owns the carry) and it passes the real value; a caller
+    that omits it keeps the pre-SIEGE-R2IT-2 behaviour, which is the same disposition
+    `bodies` itself has. See the `and bound` site for the measured attack.
 
     siege S-7 — `probe["evaluated"]` is the POSITIVE twin of `no_predicate`, and it is a
     deliberately DIFFERENT question from `cov.wit_verified`. `wit_verified` asserts "bytes
@@ -3335,7 +3346,7 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
             return True
     # regex / literal expect-fail
     pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
-    if probe is not None and pattern and _delivered_signal(body):
+    if probe is not None and pattern and bound and _delivered_signal(body):
         # siege S-7 — see the `evaluated` note above for what this flag asks.
         #
         # SIEGE-S3 — `and body != ""`. This site keyed the flag on the mere PRESENCE of
@@ -3367,6 +3378,35 @@ def verify_witness(body_text, witness, verdict, cited, probe=None) -> bool:
         # consults disk bytes at all, so an empty body says nothing about whether that
         # comparison ran. `_bill_witness_evaluation` agrees — an exit clause derives no
         # pattern, so it takes the `no_predicate` arm and never reaches the DEC-28 one.
+        #
+        # SIEGE-R2IT-2 — `and bound`, i.e. "were these bytes HASH-VERIFIED", the one
+        # question this gate never asked. Every previous fix here (S3, R1-3, R2IT-1)
+        # sharpened "did the range deliver signal"; none of them asked where the signal
+        # came from. `tier2_witness` computes exactly that fact one frame up (`bound =
+        # carried is not None`) and the census already BILLS it as the `wrong-name`
+        # reason code `unhashed-body` — it simply was not among the arguments this
+        # function received, so the flag gating the SUPERSEDES consequent was set from
+        # bytes whose provenance the same run had already judged unverified.
+        #
+        # Measured on `588a7e9`, mandated `--tier2 --strict --root <root>`, a PASS
+        # receipt with `SUPERSEDES` and witness `grep:round-9-findings.md
+        # expect-fail=/FATAL/ ran=TRACE#1`: the honest `READ round-9-findings.md` exits 1
+        # and the peer's finding stands, while `READ d/round-9-findings.md` (a decoy the
+        # subagent wrote itself; no symlink needed, and no ARTIFACTS-membership rule
+        # covers a rangeless grep's name) exits 0 with the peer RETIRED and the census
+        # reading `witness 1/1 … wrong-name 1 (rangeless-grep-payload,unhashed-body)` —
+        # the headline ratio saying verified on the same line whose reason code says the
+        # bytes were never hashed. `ARTIFACTS (none)` plus any READ is the same exit on a
+        # run that hashed nothing at all.
+        #
+        # return-convention.md:505 is the rule this restores: supersession survives only
+        # if the predicate's result "was allowed to decide" — a result computed over
+        # bytes no leg hashed decided about a file, not about the evidence.
+        #
+        # The DEFAULT is True, so no direct-API caller moves; `tier2_witness` is the one
+        # site that can answer the question and it passes the real value. `_eval_tier2`
+        # keeps the default and is unaffected either way — it passes no `probe`, so this
+        # branch is unreachable from it.
         probe["evaluated"] = True
     if pattern and re.search(pattern, body):
         raise LintError(
@@ -4636,7 +4676,12 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             # the zero-disk-bytes shape `43e5a50` closed.
             ranged = cap is not None
             try:
-                verify_witness(body_text, witness, verdict, cited, probe)  # raises on FAIL
+                # SIEGE-R2IT-2 — `bound` reaches the PASS-leg `evaluated` gate. It is
+                # computed just above and already bills the census's `unhashed-body`
+                # code; the gate that retires a peer's finding is the one consumer
+                # that was never told.
+                verify_witness(body_text, witness, verdict, cited, probe,
+                               bound)  # raises on FAIL
             except WitnessTimeout:
                 # State (d). WitnessTimeout IS a LintError subclass, so this arm MUST precede
                 # the broader one below — deleting it as a "pointless re-raise" would silently

@@ -6172,11 +6172,24 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
     PREFIX = "21a1b2c3d4e5"
 
     def _v11(self, plant_body, name):
+        """SIEGE-R2IT-2 — when the body IS planted it is also DECLARED, with its real
+        sha256. That is not incidental fixture tidying: the `evaluated` flag now
+        requires the predicate to have run against the ARTIFACTS leg's hashed-and-matched
+        buffer, so a receipt whose witness reads an undeclared file no longer retires its
+        peer. This helper's rc-0 arm exists to show the consequent stays SATISFIABLE, and
+        the shape that satisfies it is the honest one — an undeclared body was the
+        SIEGE-R2IT-2 exploit, and pinning it green here is what let that exploit sit
+        under a passing suite. The `plant_body is None` arm is untouched: nothing is
+        planted, nothing is declared, and the witness resolves nowhere exactly as
+        before."""
+        arts = ()
         if plant_body is not None:
-            self.plant(self.base, "evidence.log", plant_body)
+            h, size = self.plant(self.base, "evidence.log", plant_body)
+            arts = [("evidence.log", h, size)]
         body = _receipt(
             "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
             skill="build/21-implementer",
+            artifacts=arts,
             trace=["READ  evidence.log"],
             claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
         p = self.base / name
@@ -6605,6 +6618,101 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
                 out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
                 self.assertEqual(out.returncode, rc, out.stderr)
                 self.assertIn(expect, out.stderr)
+
+    def test_siege_r2it2_an_unhashed_body_cannot_grant_the_supersession(self):
+        """SIEGE-R2IT-2 — the question this gate never asked. Every earlier fix at the
+        `evaluated` site (SIEGE-S3, SIEGE-R1-3, SIEGE-R2IT-1) sharpened "did the cited
+        range deliver signal"; none of them asked WHERE the signal came from. The
+        linter computes that fact one frame up — `bound = carried is not None` — and the
+        census already bills it as the `wrong-name` reason code `unhashed-body`, but the
+        flag gating the SUPERSEDES consequent never received it.
+
+        The attack needs no symlink and no race: a rangeless `grep:` witness takes its
+        artifact from the cited TRACE entry's own path, which no ARTIFACTS-membership
+        rule covers (that rule binds ranged grep payloads and `EXEC out=` only). So a
+        subagent declares and hash-verifies the GENUINE, still-failing findings file and
+        points the witness at a decoy it wrote itself. Measured on `588a7e9`: the honest
+        citation exits 1 with the peer's finding standing, while `d/round-9-findings.md`
+        exits 0 with the peer RETIRED on a census reading `witness 1/1 … wrong-name 1
+        (rangeless-grep-payload,unhashed-body)` — the headline ratio saying VERIFIED on
+        the same line whose reason code says the bytes were never hashed. `ARTIFACTS
+        (none)` plus any READ is the same exit on a run that hashed nothing at all.
+
+        The last arm is the non-vacuity control and it isolates `bound` rather than the
+        citation SHAPE: the same rangeless grep over the DECLARED, hash-verified file,
+        whose body does not match, must still set `evaluated` and still retire the peer.
+        Without it the gate could be narrowed to "never credit a rangeless grep" and
+        every attack arm would still pass."""
+        genuine = b"# round 9 findings\nFATAL: unauthenticated write path\n"
+        decoy = b"# round 9 findings\nall clear, nothing outstanding\n"
+
+        def receipt_for(arts, trace, wit, name):
+            body = _receipt(wit, verdict="PASS", skill="build/21-implementer",
+                            artifacts=arts, trace=trace,
+                            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+            p = self.base / name
+            p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                         + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                           f"SUPERSEDES: {self.PREFIX}\n")
+            return p
+
+        gh, gsize = self.plant(self.base, "round-9-findings.md", genuine)
+        (self.base / "d").mkdir(exist_ok=True)
+        self.plant(self.base, "d/round-9-findings.md", decoy)
+        link = self.base / "link"
+        if not link.exists():
+            link.symlink_to("d")
+        self.plant(self.base, "anything.md", decoy)
+        ch, csize = self.plant(self.base, "clean-9.md", decoy)
+
+        cases = (
+            # (name, artifacts, trace, witness, expected rc)
+            ("symlinked-decoy", [("round-9-findings.md", gh, gsize)],
+             ["READ link/round-9-findings.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            ("plain-subdir-decoy", [("round-9-findings.md", gh, gsize)],
+             ["READ d/round-9-findings.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            ("artifacts-none", [], ["READ anything.md"],
+             "grep:anything.md  expect-fail=/FATAL/  ran=TRACE#1", 1),
+            ("hash-verified-control", [("clean-9.md", ch, csize)],
+             ["READ clean-9.md"],
+             "grep:clean-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0),
+        )
+        for name, arts, trace, wit, rc in cases:
+            with self.subTest(shape=name):
+                p = receipt_for(arts, trace, wit, f"r2it2-{name}.rcpt")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                if rc:
+                    self.assertIn("EVALUATED at Tier-2", out.stderr)
+                    # The disagreement the census was already reporting, unread.
+                    self.assertIn("unhashed-body", out.stderr)
+                else:
+                    self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+                    self.assertIn("witness 1/1", out.stderr)
+
+    def test_siege_r2it2_the_exit_clause_arm_is_deliberately_untouched(self):
+        """The bound on the fix. The `kind=exec` exit-clause site compares the RECEIPT's
+        own `expect-fail` against the RECEIPT's own `TRACE exit=` and never consults
+        disk bytes at all, so "were these bytes hash-verified" is not a question about
+        it. That arm keeps setting `evaluated`, and the receipt still retires its peer —
+        gating it on `bound` would make the shape return-convention.md's own worked
+        example uses unsupersedable for no gain."""
+        h, size = self.plant(self.base, "exec-evidence.log", b"BOOM here\nmore text\n")
+        body = _receipt("exec:`run`  expect-fail=exit!=0  ran=TRACE#1",
+                        verdict="PASS", skill="build/21-implementer",
+                        artifacts=[("exec-evidence.log", h, size)],
+                        trace=["EXEC  `run`  exit=0  dur=1.0s  "
+                               "out=exec-evidence.log#L1-L2"],
+                        claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "r2it2-exit-clause.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
 
     def test_siege_s1_a_rangeless_grep_cannot_buy_the_exemption_on_either_leg(self):
         """SIEGE-S1 — the exploit, and the test that used to pin it green
