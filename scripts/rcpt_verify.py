@@ -69,7 +69,36 @@ class WitnessTimeout(LintError):
     ITIMER_REAL is wall-clock, so a loaded CI box qualifies, not only catastrophic
     backtracking; without the subclass D7 would introduce "coverage that cannot fail"
     across ~35 sites in this linter's only regression net.
-    """
+
+    SIEGE-R3BA-1 — AND THE RULE EVERY "MUST NOT RAISE" HELPER NOW FOLLOWS. This
+    exception travels by SIGALRM, so it does not arrive at a call site the author
+    chose: it arrives wherever the process happens to be when the timer fires. Every
+    `except Exception:` written to tolerate hostile-but-harmless input is therefore
+    also a place the ONE wall-clock guard on this linter can be silently eaten — and
+    the timer is armed one-shot with interval 0 (`_witness_bound`), so nothing re-arms
+    it and the REST of the leg, including `re.search` over a receipt-authored
+    `expect-fail` regex, then runs unbounded. Measured on `1943055`: a 254-component
+    prefix-symlink citation made `_cited_below_top_level` absorb the alarm and return
+    True after exactly 5.0 s, with no `WitnessTimeout` escaping and the CLI still
+    running when killed at 60 s, where the byte-identical shallow spelling exited 1 at
+    5.0 s with `witness evaluation exceeded 5s`.
+
+    So every catch-all in this module that can execute INSIDE `_witness_bound()` now
+    re-raises `LintError` ahead of its `except Exception:`. The rule is stated over the
+    LintError HIERARCHY, not over WitnessTimeout: a "tolerate bad input" catch-all has
+    no business absorbing any lint failure, and scoping the guard to one subclass would
+    need re-deciding every time another is added.
+
+    ENUMERATING THE TOLERATED TYPES INSTEAD (`except (OSError, ValueError,
+    RuntimeError)`) WAS CONSIDERED AND DECLINED. It is the candidate-enumeration shape
+    this file has already replaced twice: the list is open-ended across pathlib
+    versions (ELOOP surfaces as OSError on some and RuntimeError on others, a NUL byte
+    as ValueError, a public-API-supplied key's raising `__str__` as anything at all),
+    and every type missing from it converts an advisory measurement into a crashed
+    verdict — the exact direction these helpers' MUST-NOT-RAISE contracts exist to
+    forbid. Re-raising LintError names the one class that must never be absorbed and
+    leaves the tolerance open, which is complete over the hazard and closed over the
+    contract."""
 
 
 def _witness_alarm(signum, frame):
@@ -1543,12 +1572,16 @@ def _cited_below_top_level(name, roots=()):
         parts = norm.parts
         if not norm.is_absolute():
             return len(parts) > 1
+    except LintError:
+        raise                           # SIEGE-R3BA-1 — see WitnessTimeout's docstring
     except Exception:
         return False
     bases = []
     for r in roots:
         try:
             bases.append(pathlib.Path(r))
+        except LintError:
+            raise                       # SIEGE-R3BA-1
         except Exception:
             continue
     if not bases:
@@ -1557,6 +1590,26 @@ def _cited_below_top_level(name, roots=()):
     if len(comps) > _CITED_WALK_CAP:
         return True
     n = len(comps)
+    # SIEGE-R3BA-1 — one memo per call, keyed on the PREFIX being resolved. `cur` is
+    # canonical by construction (it is either symlink-free or the answer of an earlier
+    # resolve), so `cur / comp` is a complete description of the resolution being asked
+    # for and two identical prefixes have one answer. That is what collapses the cost
+    # attack rather than merely bounding it: the measured 244x came from a chain
+    # (`k0 -> k1 -> … -> k25000 -> .`) whose last link lands the walk back on the
+    # directory it started in, so all 250 written components ask for the SAME
+    # resolution and `Path.resolve()` re-walks all 25 000 links each time. With the
+    # memo the chain is walked ONCE. What it does not do is make one component cheap —
+    # `posixpath.realpath` is userspace and has no MAXSYMLINKS, so a single component
+    # can still name an arbitrarily long chain, exactly as the pre-round-3
+    # `p.parent.resolve()` could. That residue is what the propagating WitnessTimeout
+    # above is for, and the two are complementary: the memo removes the receipt's
+    # ability to MULTIPLY ordinary cost, the timeout fails the leg closed on whatever
+    # single cost is left.
+    #
+    # The memo is per CALL and never outlives it: it is a cache of a measurement, and a
+    # mid-walk retarget reading the earlier answer is the same disposition the walk
+    # already has for a retarget one component later.
+    memo = {}
     try:
         cur = pathlib.Path("/")
         for i, comp in enumerate(comps):
@@ -1564,7 +1617,13 @@ def _cited_below_top_level(name, roots=()):
             # is_symlink() swallows OSError/ValueError and answers False, so a
             # malformed or unreachable component degrades to the lexical extension
             # rather than raising — the same disposition _resolve_base_one gives it.
-            cur = nxt.resolve() if nxt.is_symlink() else nxt
+            if nxt.is_symlink():
+                key = str(nxt)
+                if key not in memo:
+                    memo[key] = nxt.resolve()
+                cur = memo[key]
+            else:
+                cur = nxt
             remaining = n - 1 - i
             for b in bases:
                 try:
@@ -1573,6 +1632,13 @@ def _cited_below_top_level(name, roots=()):
                     continue
                 if depth + remaining > 1:
                     return True
+    except LintError:
+        # SIEGE-R3BA-1 — the one class a "tolerate hostile input" catch-all must never
+        # absorb. `WitnessTimeout` is a `LintError`, hence an `Exception`, so the bare
+        # arm below ate the process-wide alarm and returned True; the timer is one-shot
+        # and nothing re-arms it. See WitnessTimeout's docstring for the measurement and
+        # for why the tolerated types are not enumerated instead.
+        raise
     except Exception:
         return True
     return False
@@ -1679,6 +1745,8 @@ def _outside_all_roots(resolved, root):
                 continue
             return False
         return True
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         return False
 
@@ -1700,6 +1768,8 @@ def _emit_outside_note(notes_out, name, resolved):
     try:
         if notes_out is not None:
             notes_out.append(_outside_note(name, resolved))
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         pass
 
@@ -1741,6 +1811,8 @@ def _emit_walk_note(notes_out, name, rel):
     try:
         if notes_out is not None:
             notes_out.append(_walk_note(name, rel))
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         pass
 
@@ -4060,11 +4132,15 @@ def _carry_spellings(name, roots):
     out = set()
     try:
         raw = str(name)
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         return out
     for form in (raw, posixpath.normpath(raw) if raw else raw):
         try:
             out.add(pathlib.PurePosixPath(form))
+        except LintError:
+            raise                       # SIEGE-R3BA-1
         except Exception:
             continue
     bases = set()
@@ -4072,6 +4148,8 @@ def _carry_spellings(name, roots):
         for spelling in (r, pathlib.Path(r).resolve()):
             try:
                 bases.add(pathlib.PurePosixPath(str(spelling)))
+            except LintError:
+                raise                   # SIEGE-R3BA-1
             except Exception:
                 continue
     for cand in tuple(out):
@@ -4080,6 +4158,8 @@ def _carry_spellings(name, roots):
         for b in bases:
             try:
                 out.add(pathlib.PurePosixPath(cand.relative_to(b)))
+            except LintError:
+                raise                   # SIEGE-R3BA-1
             except Exception:
                 continue
     # SIEGE-R1-2 — the cited name's OWN RESOLVED form, ADDED to the lexical set above
@@ -4088,12 +4168,16 @@ def _carry_spellings(name, roots):
     for r in roots:
         try:
             rr = pathlib.Path(r).resolve()
+        except LintError:
+            raise                       # SIEGE-R3BA-1
         except Exception:
             continue
         try:
             base = pathlib.Path(raw)
             real = base.resolve() if base.is_absolute() else (rr / base).resolve()
             real = pathlib.PurePosixPath(str(real))
+        except LintError:
+            raise                       # SIEGE-R3BA-1
         except Exception:
             continue
         if base.is_absolute():
@@ -4106,6 +4190,8 @@ def _carry_spellings(name, roots):
             out.add(real)
         try:
             out.add(pathlib.PurePosixPath(real.relative_to(rr)))
+        except LintError:
+            raise                       # SIEGE-R3BA-1
         except Exception:
             continue
     return out
@@ -4152,6 +4238,8 @@ def _carry_should_have_bound(art_name, bodies, root=None):
     try:
         roots = _as_roots(root) if root is not None else ()
         want = _carry_spellings(art_name, roots)
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         return False
     if not want:
@@ -4162,6 +4250,8 @@ def _carry_should_have_bound(art_name, bodies, root=None):
         try:
             if want & _carry_spellings(k, roots):
                 return True
+        except LintError:
+            raise                       # SIEGE-R3BA-1
         except Exception:
             continue
     return False
@@ -4275,6 +4365,8 @@ def _stated_target_binds(witness, art_name, resolved, root):
     try:
         if posixpath.normpath(str(stated)) == posixpath.normpath(str(art_name)):
             return True
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         return False
     if resolved is None:
@@ -4284,6 +4376,8 @@ def _stated_target_binds(witness, art_name, resolved, root):
         # is a measurement taken for a comparison, and letting it bill an ambiguity or
         # emit a REFUSED note would double every such report on every run.
         return resolve_base(str(stated), root, [], []) == resolved
+    except LintError:
+        raise                           # SIEGE-R3BA-1
     except Exception:
         return False
 

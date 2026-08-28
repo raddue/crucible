@@ -2701,6 +2701,152 @@ class TestSiegeR2Ba1TheCitationDepthIsWalkedNotGuessed(_TwoRootCase):
         self.assertEqual(walk_notes(out.stderr), [], out.stderr)
 
 
+class TestSiegeR3Ba1TheWalkNeitherEatsTheAlarmNorAmplifiesItsOwnCost(unittest.TestCase):
+    """SIEGE-R3BA-1 — the two halves of one defect the round-3 walk introduced.
+
+    (a) THE SWALLOW. `_cited_below_top_level`'s absolute arm ends in `except Exception:
+    return True`, written so a receipt-controlled name and a hostile filesystem can
+    never crash a verdict. `WitnessTimeout` subclasses `LintError` subclasses
+    `Exception`, so that arm also ate the SIGALRM this linter's only wall-clock guard
+    raises — and `_witness_bound` arms `setitimer` ONE-SHOT with interval 0, so nothing
+    re-arms it and the rest of the leg, including `re.search` over a receipt-authored
+    `expect-fail` regex, then ran with no bound at all. Measured on `1943055`: the
+    byte-identical shallow spelling exited 1 at 5.0 s with `witness evaluation exceeded
+    5s`; the 250-component spelling was still running when killed at 60 s.
+
+    (b) THE AMPLIFICATION that made (a) reachable at will. The round-3 walk calls
+    `.resolve()` fresh per component with no memo, so a chain whose last link lands the
+    walk back where it started (`k0 -> k1 -> … -> k25000 -> .`) is re-walked once per
+    written component. Measured on `1943055` over a 254-component citation:
+    `resolve_base` 0.039 s, the pre-round-3 `p.parent.resolve()` 0.040 s, the walk
+    9.76 s — a 244x amplification, i.e. the receipt tuning the walk across the 5 s
+    boundary on demand.
+
+    Both are pinned because either alone leaves the other live: a propagating timeout
+    over a walk still tunable to a large multiple of ordinary cost is a receipt that can
+    still spend the whole budget, and a cheap walk that eats the alarm still disarms
+    every LATER predicate on the leg."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+        self.tmp = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self.tmp.name)
+        self.root = base / "dispatch"
+        self.root.mkdir()
+        self.outside = base / "outside"
+        self.outside.mkdir()
+        # The chain's last link lands back on `outside`, so every written `k0`
+        # component asks for the SAME resolution — the shape the memo collapses.
+        chain = 400
+        for i in range(chain):
+            (self.outside / f"k{i}").symlink_to(f"k{i + 1}")
+        (self.outside / f"k{chain}").symlink_to(".")
+        (self.root / "evidence.log").write_text("a" * 16)
+        (self.outside / "evidence.log").symlink_to(str(self.root / "evidence.log"))
+        self.deep = (str(self.outside) + "/" + "/".join(["k0"] * 250)
+                     + "/evidence.log")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_witness_timeout_raised_mid_walk_is_not_swallowed(self):
+        """(a). Fault injection rather than a real 5 s alarm, so the pin states the
+        PROPERTY ("a LintError raised anywhere in the walk leaves the walk") instead of
+        racing a wall clock on a loaded CI box. The alarm's own exception is exactly
+        this class arriving at exactly this kind of site."""
+        real = pathlib.Path.resolve
+        seen = {"n": 0}
+
+        def boom(self_, *a, **k):
+            seen["n"] += 1
+            if seen["n"] == 2:
+                raise self.rv.WitnessTimeout(self.rv.WITNESS_TIMEOUT_MSG)
+            return real(self_, *a, **k)
+
+        pathlib.Path.resolve = boom
+        try:
+            with self.assertRaises(self.rv.WitnessTimeout):
+                self.rv._cited_below_top_level(self.deep, [self.root])
+        finally:
+            pathlib.Path.resolve = real
+
+    def test_the_walk_is_not_the_only_helper_that_must_not_eat_it(self):
+        """(a), stated over the CLASS rather than over the reported site. The witness
+        leg runs several MUST-NOT-RAISE helpers inside `_witness_bound()`, and the alarm
+        arrives wherever the process happens to be — so a rule that fixed only the walk
+        would leave the same swallow one function over. Each of these must let a
+        LintError through its own catch-all."""
+        boom = self.rv.LintError("planted")
+
+        class Hostile(str):
+            def __str__(self):
+                raise boom
+
+        with self.assertRaises(self.rv.LintError):
+            self.rv._carry_spellings(Hostile("f.md"), [self.root])
+
+        class HostileList(list):
+            def append(self, item):
+                raise boom
+
+        with self.assertRaises(self.rv.LintError):
+            self.rv._emit_walk_note(HostileList(), "f.md", "a/f.md")
+        with self.assertRaises(self.rv.LintError):
+            self.rv._emit_outside_note(HostileList(), "f.md", self.root / "f.md")
+
+    def test_an_ordinary_input_still_never_raises_out_of_the_walk(self):
+        """The BOUND on (a). Narrowing the catch-all is only correct if it still
+        tolerates everything it was written for: a malformed component, a NUL byte, a
+        resolution loop, a non-path root. None of these may escape."""
+        loop = self.root / "loop"
+        loop.symlink_to("loop")
+        for name in (f"{self.root}/loop/x.md", f"{self.root}/a\x00b/x.md",
+                     "//" + str(self.root).lstrip("/") + "/x.md",
+                     f"{self.root}/" + "x" * 4096 + "/y.md"):
+            with self.subTest(name=name):
+                self.assertIsInstance(
+                    self.rv._cited_below_top_level(name, [self.root, 0, None]), bool)
+
+    def test_the_walk_does_not_amplify_its_own_cost(self):
+        """(b), counted rather than timed — a wall-clock assertion is a flake on a
+        loaded box, and the defect is not "slow" but "one resolution charged 250 times".
+        Every written component of this citation asks for the same prefix, so a memoised
+        walk resolves ONCE. The pre-fix build issues one `resolve()` per component."""
+        real = pathlib.Path.resolve
+        seen = {"n": 0}
+
+        def counted(self_, *a, **k):
+            seen["n"] += 1
+            return real(self_, *a, **k)
+
+        pathlib.Path.resolve = counted
+        try:
+            self.rv._cited_below_top_level(self.deep, [self.root])
+        finally:
+            pathlib.Path.resolve = real
+        # 250 written `k0` components; a walk with no memo issues one resolve each.
+        self.assertLess(seen["n"], 10, f"{seen['n']} resolve() calls for one prefix")
+
+    def test_the_memo_does_not_change_what_the_walk_answers(self):
+        """The BOUND on (b). A memo that changed a reading would be a silencer wearing
+        an optimisation's name, so the three round-2/round-3 arrangements and both
+        SILENCE controls are re-asserted through the memoised walk directly."""
+        (self.root / "sub").symlink_to(".")
+        (self.root / "top.md").write_text("t\n")
+        (self.outside / "L").symlink_to(str(self.root))
+        (self.outside / "L2").symlink_to(str(self.outside / "L"))
+        (self.outside / "P").symlink_to(str(self.root.parent))
+        for cited, expected in (
+                (f"{self.outside}/L/sub/top.md", True),
+                (f"{self.outside}/L2/sub/top.md", True),
+                (f"{self.root}/sub/top.md", True),
+                (f"{self.outside}/P/dispatch/top.md", False),
+                (f"{self.root}/top.md", False)):
+            with self.subTest(cited=cited):
+                self.assertIs(
+                    self.rv._cited_below_top_level(cited, [self.root]), expected)
+
+
 class TestALaterDisjointRootAnswersTheDepthKey(_RootCase):
     """AC-6 T7 leg 2, the DECLARATION-ORDER existential (round-4-of-this-gate/S2).
 
