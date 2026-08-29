@@ -1,6 +1,6 @@
 ---
 name: crucible-qg-verifier
-description: Mechanical structural checker for Crucible quality-gate — fix verification and the persistence checker. Pinned to Sonnet (cheap structural check). Dispatched via disk-mediated dispatch.
+description: Mechanical structural checker for Crucible quality-gate — fix verification, the persistence checker, and the fix-generated-defect checker. Pinned to Sonnet (cheap structural check). Dispatched via disk-mediated dispatch.
 model: sonnet
 ---
 

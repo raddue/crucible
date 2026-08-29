@@ -86,6 +86,8 @@ run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
+run python3 scripts/check_qg_fan_out.py --selftest
+run python3 scripts/check_qg_fan_out.py
 run python3 scripts/check_crossref.py --selftest
 run python3 scripts/check_crossref.py
 run python3 scripts/catalog.py check
