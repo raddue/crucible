@@ -282,8 +282,25 @@ class StopHookClearanceTest(unittest.TestCase):
             )
 
     def test_stop_hook_skip_entry_clears_shared_file_group(self):
+        """One skip entry naming a member of a shared-file group clears the
+        WHOLE group (both members) at the next Stop. The base fixture's
+        inherited fix(widget) commit (app.py, a disjoint one-member group) is
+        pre-neutralized with a matching grudge so the only unresolved
+        candidates at this scenario's Stops are the shared.py group members.
+        """
         with tempfile.TemporaryDirectory() as root:
             fx = _HookFixture(root)
+            env = fx.env()
+            r0 = subprocess.run(
+                [sys.executable, GRUDGE_APPEND,
+                 "--symptom", "widget exploded on launch",
+                 "--files", "app.py",
+                 "--commit", fx.fix_sha,
+                 "--repo-root", os.path.realpath(fx.repo),
+                 "--repo", fx.repo_key],
+                capture_output=True, text=True, env=env, cwd=root, timeout=60,
+            )
+            self.assertEqual(r0.returncode, 0, f"stderr: {r0.stderr}")
             _write(os.path.join(fx.repo, "shared.py"), "S = 0\n")
             _git(fx.repo, "add", "-A")
             _git(fx.repo, "commit", "-qm", "chore: add shared")
