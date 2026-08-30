@@ -199,10 +199,26 @@ def _fmt_files(hits):
     return ", ".join(parts)
 
 
-def _render_advice(skill, brier_line, fals_hits, grudge_hits):
+def _fmt_complexity(complexity_hits: dict[str, tuple[str, int]]) -> str:
+    """Render {file: (qualname, cc)} complexity desc then file asc, capped at
+    ADVICE_FILE_TOPK with a (+N more) overflow. Same bound and overflow shape
+    as _fmt_files but a different value shape (never reuses _fmt_files/_topk).
+    Pure."""
+    ordered = sorted(complexity_hits.items(), key=lambda kv: (-kv[1][1], kv[0]))
+    head = ordered[:ADVICE_FILE_TOPK]
+    overflow = max(0, len(ordered) - ADVICE_FILE_TOPK)
+    parts = [f"{f}::{fn} (CC {n})" for f, (fn, n) in head]
+    if overflow:
+        parts.append(f"(+{overflow} more)")
+    return ", ".join(parts)
+
+
+def _render_advice(skill, brier_line, fals_hits, grudge_hits,
+                   complexity_hits=None) -> str:
     """Render the bounded DispatchAdvice block, or "" when every signal is
     silent. Pure. File lists are top-K capped; no absolute paths are emitted
-    (inputs are repo-relative by the time they reach here)."""
+    (inputs are repo-relative by the time they reach here). A complexity_hits
+    of None behaves identically to {} (pre-existing call sites unchanged)."""
     lines = []
     if brier_line:
         lines.append(f"- scrutiny: {brier_line}")
@@ -210,11 +226,13 @@ def _render_advice(skill, brier_line, fals_hits, grudge_hits):
         lines.append(f"- past wrong verdicts touched: {_fmt_files(fals_hits)}")
     if grudge_hits:
         lines.append(f"- past regressions on file: {_fmt_files(grudge_hits)}")
+    if complexity_hits:
+        lines.append(f"- high complexity: {_fmt_complexity(complexity_hits)}")
     if not lines:
         return ""
     header = ("[calibration-weighted dispatch] advisory only — does not change "
               "any verdict or score.")
-    footer = ("- suggested weighting: give the named files extra reviewer "
+    footer = ("- suggested weighting: give the named files/functions extra reviewer "
               "attention this run.")
     return "\n".join([header, *lines, footer])
 
@@ -340,15 +358,54 @@ def _grudge_hits(files) -> dict:
         return {}
 
 
-def dispatch_advice(skill: str, files) -> str:
+def _complexity_hits(files, changed_lines=None) -> dict[str, tuple[str, int]]:
+    """file -> (best function qualname, cyclomatic complexity) for every input
+    file with >=1 function clearing MIN_COMPLEXITY (#558). {} on any error
+    (never raises).
+
+    IO: shells `git` via the same resolve_repo() the other signals use and
+    reads the input files. BOTH the file list and changed_lines's own keys
+    are normalized via normalize_path so ./-prefixed/absolute inputs
+    intersect identically. limit=0 then group-by-file keeps each file's FIRST
+    entry — its highest-CC function, since top_functions sorts
+    complexity-desc. changed_lines=None keeps the full-file behavior; a
+    supplied mapping scopes the signal to functions intersecting the hunks."""
+    try:
+        from scripts.complexity_index import top_functions
+        from scripts.grudge_append import normalize_path as _norm, resolve_repo
+    except Exception:  # noqa: BLE001 — complexity module unavailable -> empty
+        return {}
+    try:
+        _repo, repo_root = resolve_repo()
+        norm_files = [_norm(f, repo_root) for f in files if f and f.strip()]
+        if not norm_files:
+            return {}
+        if changed_lines is not None:
+            changed_lines = {
+                _norm(k, repo_root): v for k, v in changed_lines.items()
+            }
+        hits = {}
+        for entry in top_functions(norm_files, repo_root, limit=0,
+                                   changed_lines=changed_lines):
+            hits.setdefault(entry["path"],
+                            (entry["qualname"], entry["complexity"]))
+        return hits
+    except Exception:  # noqa: BLE001 — best-effort; degrade to empty
+        return {}
+
+
+def dispatch_advice(skill: str, files, changed_lines: dict[str, set[int]] | None = None) -> str:
     """Assemble the bounded calibration-weighted DispatchAdvice for `skill`
     about `files`, or "" when every signal is silent.
 
     Advisory-only contract: kill-switch silences the whole block; each of the
-    three components (Brier / falsification / grudge) is wrapped so an internal
-    error degrades THAT signal to empty rather than raising — the caller always
-    gets a string and the CLI always exits 0. Not pure (reads the central store
-    + shells git); tested via the subprocess fixture."""
+    four components (Brier / falsification / grudge / complexity) is wrapped
+    so an internal error degrades THAT signal to empty rather than raising —
+    the caller always gets a string and the CLI always exits 0. Not pure
+    (reads the central store + shells git); tested via the subprocess
+    fixture. `changed_lines` (repo-relative path -> changed new-file line
+    set, e.g. from complexity_index.parse_diff_hunks) scopes the complexity
+    signal to intersecting hunks; None keeps full-file behavior (#558)."""
     if _disabled():
         return ""
 
@@ -391,7 +448,15 @@ def dispatch_advice(skill: str, files) -> str:
     except Exception:  # noqa: BLE001
         grudge_hits = {}
 
-    return _render_advice(skill, brier_line, fals_hits, grudge_hits)
+    # --- Complexity (#558): 4th signal; diff-scoped when changed_lines is
+    #     supplied, full-file when None. ---
+    try:
+        complexity_hits = _complexity_hits(files, changed_lines=changed_lines)
+    except Exception:  # noqa: BLE001
+        complexity_hits = {}
+
+    return _render_advice(skill, brier_line, fals_hits, grudge_hits,
+                          complexity_hits)
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -404,6 +469,10 @@ def main(argv: Optional[list] = None) -> int:
         "advise", help="calibration-weighted DispatchAdvice (#372)")
     p_advise.add_argument("skill", help="ledger skill key, e.g. quality-gate or siege")
     p_advise.add_argument("files", nargs="*", help="in-scope files for this dispatch")
+    p_advise.add_argument(
+        "--diff", default=None, metavar="path",
+        help="unified diff file; scope the complexity signal to functions "
+             "intersecting its changed hunks (#558)")
 
     args = parser.parse_args(argv)
 
@@ -416,7 +485,19 @@ def main(argv: Optional[list] = None) -> int:
     disabled = _disabled()
 
     if args.cmd == "advise":
-        line = dispatch_advice(args.skill, args.files)
+        changed_lines = None
+        if args.diff and not disabled:
+            try:
+                with open(args.diff, "r", encoding="utf-8") as fh:
+                    diff_text = fh.read()
+                from scripts.complexity_index import parse_diff_hunks
+                changed_lines = parse_diff_hunks(diff_text)
+            except Exception:  # noqa: BLE001 — degrade to full-file; exit 0
+                _warn(f"--diff file unreadable/unparseable ({args.diff}); "
+                      f"complexity signal degraded to full-file")
+                changed_lines = None
+        line = dispatch_advice(args.skill, args.files,
+                               changed_lines=changed_lines)
     elif args.cmd == "advisory":
         line = advisory_line(
             _load_brier(_brier_path()),

@@ -111,10 +111,13 @@ class RenderAdviceTest(unittest.TestCase):
 # Subprocess / IO tests                                                       #
 # --------------------------------------------------------------------------- #
 
-def _run_advise(skill, files, *, env, cwd=None):
+def _run_advise(skill, files, *, env, cwd=None, diff=None):
+    cmd = [sys.executable, SCRIPT, "advise", skill]
+    if diff is not None:
+        cmd.extend(["--diff", diff])
+    cmd.extend(files)
     return subprocess.run(
-        [sys.executable, SCRIPT, "advise", skill, *files],
-        capture_output=True, text=True, env=env, cwd=cwd, timeout=30,
+        cmd, capture_output=True, text=True, env=env, cwd=cwd, timeout=30,
     )
 
 
@@ -255,6 +258,317 @@ class FalsificationE2ETest(unittest.TestCase):
             r = _run_advise("siege", ["a.py"], env=self._env(d))
             self.assertEqual(r.returncode, 0)
             self.assertEqual(r.stdout.strip(), "")
+
+
+# --------------------------------------------------------------------------- #
+# Complexity signal (#558): the 4th dispatch_advice signal                    #
+# --------------------------------------------------------------------------- #
+
+def _branchy_fn(name, n_ifs):
+    """Module-level function fixture source; CC == 1 + n_ifs."""
+    lines = [f"def {name}(a):", "    x = a"]
+    for i in range(n_ifs):
+        lines.append(f"    if x != {i}:")
+        lines.append(f"        x += {i + 1}")
+    lines.append("    return x")
+    return "\n".join(lines) + "\n"
+
+
+def _branchy_method(name, n_ifs):
+    """Class-method fixture source (one indent level); CC == 1 + n_ifs."""
+    lines = [f"    def {name}(self, a):", "        x = a"]
+    for i in range(n_ifs):
+        lines.append(f"        if x != {i}:")
+        lines.append(f"            x += {i + 1}")
+    lines.append("        return x")
+    return "\n".join(lines) + "\n"
+
+
+class ComplexityHitsTest(unittest.TestCase):
+    """_complexity_hits direct-import cases. The tmp fixture dir becomes the
+    repo root: resolve_repo() falls back to the realpath of the cwd outside a
+    git repo, so no IO escapes the tmp tree."""
+
+    def setUp(self):
+        self._old_cwd = os.getcwd()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.realpath(self._tmp.name)
+        os.chdir(self.repo)
+
+    def tearDown(self):
+        os.chdir(self._old_cwd)
+        self._tmp.cleanup()
+
+    def _write(self, name, text):
+        with open(os.path.join(self.repo, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def _fixture_batch(self):
+        # file_a.py: module-level alpha (CC 17) + Handler.process (CC 18).
+        self._write("file_a.py",
+                    _branchy_fn("alpha", 16)
+                    + "\n\nclass Handler:\n" + _branchy_method("process", 17))
+        # file_b.py: beta (CC 16).
+        self._write("file_b.py", _branchy_fn("beta", 15))
+        # file_c.py: nothing clears MIN_COMPLEXITY.
+        self._write("file_c.py", "def trivial(a):\n    return a\n")
+
+    def test_complexity_hits_groups_by_file(self):
+        """Multi-file, multi-class batch in the full-file case
+        (changed_lines=None): EVERY file with >=1 function clearing the floor
+        yields exactly one entry — that file's first (highest-CC) function —
+        and Class.method qualnames carry their own independent score."""
+        self._fixture_batch()
+        hits = ba._complexity_hits(["file_a.py", "file_b.py", "file_c.py"])
+        self.assertEqual(hits, {
+            "file_a.py": ("Handler.process", 18),
+            "file_b.py": ("beta", 16),
+        })
+
+    def test_complexity_hits_diff_scoped_no_hunks_contribute_nothing(self):
+        """Diff-scoped variant: a file with no changed hunks (absent key OR an
+        empty line set) contributes nothing even when it carries
+        floor-clearing functions."""
+        self._fixture_batch()
+        hits = ba._complexity_hits(
+            ["file_a.py", "file_b.py"], changed_lines={"file_b.py": {2}})
+        self.assertEqual(hits, {"file_b.py": ("beta", 16)})
+        self.assertEqual(
+            ba._complexity_hits(["file_a.py"],
+                                changed_lines={"file_a.py": set()}),
+            {})
+
+    def test_complexity_hits_normalizes_changed_lines_keys(self):
+        """Un-normalized changed_lines keys (./-prefixed AND absolute) still
+        intersect a repo-relative file list, and the file list itself is
+        normalized the same way. A _complexity_hits that skipped key
+        normalization would score zero intersections on this fixture."""
+        self._fixture_batch()
+        changed = {
+            "./file_a.py": {2},
+            os.path.join(self.repo, "file_b.py"): {2},
+        }
+        hits = ba._complexity_hits(["file_a.py", "file_b.py"],
+                                   changed_lines=changed)
+        self.assertEqual(hits, {
+            "file_a.py": ("alpha", 17),
+            "file_b.py": ("beta", 16),
+        })
+        unnormalized_files = ba._complexity_hits(
+            ["./file_a.py", os.path.join(self.repo, "file_b.py")])
+        self.assertEqual(unnormalized_files, {
+            "file_a.py": ("Handler.process", 18),
+            "file_b.py": ("beta", 16),
+        })
+
+
+class ComplexityFmtTest(unittest.TestCase):
+    """Pure rendering cases for the complexity signal."""
+
+    def test_fmt_complexity_cc_desc_then_file_asc_and_cap(self):
+        hits = {f"f{i}.py": (f"fn{i}", 20 + i) for i in range(8)}
+        out = ba._fmt_complexity(hits)
+        self.assertTrue(out.startswith("f7.py::fn7 (CC 27)"), out)
+        self.assertIn("(+3 more)", out)   # 8 hits, cap 5 -> +3
+        self.assertNotIn("f2.py", out)    # 6th-highest CC is past the cap
+        tie = ba._fmt_complexity({"b.py": ("g", 19), "a.py": ("f", 19)})
+        self.assertEqual(tie, "a.py::f (CC 19), b.py::g (CC 19)")
+
+    def test_render_advice_complexity_none_identical_to_empty(self):
+        base = ba._render_advice("siege", None, {"x.py": 1}, {})
+        self.assertEqual(
+            base,
+            ba._render_advice("siege", None, {"x.py": 1}, {},
+                              complexity_hits=None))
+        self.assertEqual(
+            base,
+            ba._render_advice("siege", None, {"x.py": 1}, {},
+                              complexity_hits={}))
+        self.assertEqual(
+            ba._render_advice("siege", None, {}, {}, complexity_hits=None),
+            "")
+        self.assertEqual(
+            ba._render_advice("siege", None, {}, {}, complexity_hits={}),
+            "")
+
+    def test_render_advice_complexity_line_and_footer(self):
+        out = ba._render_advice("siege", None, {}, {},
+                                complexity_hits={"mod.py": ("hot_path", 19)})
+        self.assertIn("- high complexity: mod.py::hot_path (CC 19)", out)
+        self.assertIn(
+            "- suggested weighting: give the named files/functions extra "
+            "reviewer attention this run.", out)
+
+
+class ComplexitySignalE2ETest(unittest.TestCase):
+    """Complexity signal end-to-end through the advise CLI, per the S-1
+    recipe: tmp `git init` repo holding a committed two-function fixture
+    module (hot_path clears the floor INSIDE the edited hunk, cold_path
+    clears it OUTSIDE), `git diff -U0` captured to a fixture file, and empty
+    tmp CRUCIBLE_LEDGER_DIR / CRUCIBLE_GRUDGE_DIR so only the complexity
+    signal can fire."""
+
+    def _git(self, repo, *args):
+        env = dict(os.environ)
+        env.update(GIT_AUTHOR_NAME="Advise Test",
+                   GIT_AUTHOR_EMAIL="advise@example.invalid",
+                   GIT_COMMITTER_NAME="Advise Test",
+                   GIT_COMMITTER_EMAIL="advise@example.invalid")
+        return subprocess.run(["git", "-C", repo, *args], check=True,
+                              capture_output=True, text=True, env=env,
+                              timeout=30)
+
+    def _env(self, ledger_dir, grudge_dir, **extra):
+        env = dict(os.environ)
+        env["CRUCIBLE_LEDGER_DIR"] = ledger_dir
+        env["CRUCIBLE_GRUDGE_DIR"] = grudge_dir
+        env.pop("CRUCIBLE_CALIBRATION_DISABLED", None)
+        env.update(extra)
+        return env
+
+    def _fixture_repo(self, root):
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.name", "Advise Test")
+        self._git(repo, "config", "user.email", "advise@example.invalid")
+        mod = (_branchy_fn("hot_path", 18)      # CC 19
+               + "\n\n\n"
+               + _branchy_fn("cold_path", 16)   # CC 17
+               + "\n\n\n"
+               + "def tiny(a):\n    return a\n")
+        with open(os.path.join(repo, "mod.py"), "w", encoding="utf-8") as fh:
+            fh.write(mod)
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", "chore: baseline")
+        return repo
+
+    def _edit_first_line_inside_hot(self, repo):
+        path = os.path.join(repo, "mod.py")
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        assert "    x = a\n" in text
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace("    x = a", "    x = a + 1", 1))
+
+    # contract:cli:inv-t11
+    def test_advise_diff_surfaces_only_intersecting_complexity_line(self):
+        """contract:cli:inv-t11 — advise <skill> --diff <fixture> <file>
+        end-to-end renders ONLY the file::func complexity line intersecting
+        the fixture diff's changed hunk (the F1 regression test: fails
+        immediately if --diff is dropped from the advise subparser or
+        disconnected from dispatch_advice)."""
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as ledger, \
+                tempfile.TemporaryDirectory() as grudgedir:
+            repo = self._fixture_repo(root)
+            self._edit_first_line_inside_hot(repo)
+            diff = self._git(repo, "diff", "-U0").stdout
+            self.assertTrue(diff.strip(), "fixture edit produced an empty diff")
+            diff_path = os.path.join(root, "fixture.diff")
+            with open(diff_path, "w", encoding="utf-8") as fh:
+                fh.write(diff)
+            r = _run_advise("inquisitor", ["mod.py"],
+                            env=self._env(ledger, grudgedir), cwd=repo,
+                            diff=diff_path)
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertIn("calibration-weighted dispatch", r.stdout)
+            self.assertIn("- high complexity: mod.py::hot_path (CC 19)",
+                          r.stdout)
+            self.assertNotIn("cold_path", r.stdout)
+            self.assertNotIn("tiny", r.stdout)
+
+    def test_silent_when_no_function_clears_floor(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as ledger, \
+                tempfile.TemporaryDirectory() as grudgedir:
+            repo = self._fixture_repo(root)
+            with open(os.path.join(repo, "trivial.py"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("def tiny(a):\n    return a\n")
+            r = _run_advise("siege", ["trivial.py"],
+                            env=self._env(ledger, grudgedir), cwd=repo)
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertEqual(r.stdout.strip(), "")
+
+    def test_full_file_high_cc_fires_with_rendering_and_footer(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as ledger, \
+                tempfile.TemporaryDirectory() as grudgedir:
+            repo = self._fixture_repo(root)
+            r = _run_advise("siege", ["mod.py"],
+                            env=self._env(ledger, grudgedir), cwd=repo)
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertIn("- high complexity: ", r.stdout)
+            # group-by-file keeps only mod.py's FIRST (highest-CC) entry
+            self.assertIn("mod.py::hot_path (CC 19)", r.stdout)
+            self.assertNotIn("cold_path", r.stdout)
+            self.assertIn(
+                "- suggested weighting: give the named files/functions extra "
+                "reviewer attention this run.", r.stdout)
+
+    def test_killswitch_silences_complexity_signal(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as ledger, \
+                tempfile.TemporaryDirectory() as grudgedir:
+            repo = self._fixture_repo(root)
+            env = self._env(ledger, grudgedir,
+                            CRUCIBLE_CALIBRATION_DISABLED="1")
+            r = _run_advise("siege", ["mod.py"], env=env, cwd=repo)
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertEqual(r.stdout.strip(), "")
+
+    def test_missing_diff_file_degrades_to_full_file_exit0(self):
+        """An unreadable --diff degrades changed_lines to None (full-file
+        across ALL advised files), warns on stderr, and preserves exit 0.
+        Discriminating shape: an empty hunks map (or a crash) would hide
+        mod2.py entirely, so mod2.py surfacing proves changed_lines degraded
+        to None."""
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as ledger, \
+                tempfile.TemporaryDirectory() as grudgedir:
+            repo = self._fixture_repo(root)
+            with open(os.path.join(repo, "mod2.py"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(_branchy_fn("warm_path", 15))   # CC 16
+            r = _run_advise("siege", ["mod.py", "mod2.py"],
+                            env=self._env(ledger, grudgedir), cwd=repo,
+                            diff=os.path.join(root, "no-such.diff"))
+            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+            self.assertIn("mod.py::hot_path", r.stdout)
+            self.assertIn("mod2.py::warm_path", r.stdout)
+            self.assertIn("brier_advisory WARN", r.stderr)
+
+    def test_dispatch_advice_changed_lines_none_keeps_full_file(self):
+        """dispatch_advice(..., changed_lines=None) renders identically to
+        today's call shape (full-file behavior preserved for existing call
+        sites)."""
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as ledger, \
+                tempfile.TemporaryDirectory() as grudgedir:
+            repo = self._fixture_repo(root)
+            old_cwd = os.getcwd()
+            keys = ("CRUCIBLE_LEDGER_DIR", "CRUCIBLE_GRUDGE_DIR",
+                    "CRUCIBLE_CALIBRATION_DISABLED")
+            saved = {k: os.environ.get(k) for k in keys}
+            try:
+                os.chdir(repo)
+                os.environ["CRUCIBLE_LEDGER_DIR"] = ledger
+                os.environ["CRUCIBLE_GRUDGE_DIR"] = grudgedir
+                os.environ.pop("CRUCIBLE_CALIBRATION_DISABLED", None)
+                baseline = ba.dispatch_advice("siege", ["mod.py"])
+                explicit = ba.dispatch_advice("siege", ["mod.py"],
+                                              changed_lines=None)
+                self.assertEqual(baseline, explicit)
+                self.assertIn("mod.py::hot_path (CC 19)", baseline)
+                self.assertNotIn("cold_path", baseline)
+            finally:
+                os.chdir(old_cwd)
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
 
 
 if __name__ == "__main__":
