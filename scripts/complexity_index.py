@@ -125,13 +125,14 @@ def top_functions(paths: list[str], repo_root: str, limit: int, min_complexity: 
     With changed_lines supplied, only functions whose [lineno, end_lineno]
     range intersects that file's changed-line set surface. Per-file error
     isolation: one unparseable/missing file is swallowed, the rest still
-    contribute.
+    contribute. Duplicate input paths are collapsed (first occurrence wins)
+    so a repeated file does not double-report.
     """
     entries = []
-    for p in paths:
+    for p in dict.fromkeys(paths):
         full = p if os.path.isabs(p) else os.path.join(repo_root, p)
         try:
-            with open(full, "r", encoding="utf-8") as fh:
+            with open(full, "r", encoding="utf-8-sig") as fh:
                 source = fh.read()
             tree = ast.parse(source)
             _collect(tree.body, [], p, changed_lines, min_complexity, entries)
@@ -294,7 +295,7 @@ def main(argv=None):
         try:
             with open(args.diff, "r", encoding="utf-8") as fh:
                 diff_text = fh.read()
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             print(f"complexity_index: cannot read --diff file: {exc}",
                   file=sys.stderr)
             return 1
