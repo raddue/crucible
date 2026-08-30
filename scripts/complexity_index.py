@@ -31,7 +31,7 @@ _FILE_RE = re.compile(r"^\+\+\+ b/(.+?)\t?$")
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
-def cyclomatic_complexity(func):
+def cyclomatic_complexity(func: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     """McCabe CC over func.body only (signature/decorator/default excluded).
 
     Base 1 plus the pinned counting rules: +1 per If (elif desugars to a
@@ -116,8 +116,7 @@ def _collect(body, prefix, path, changed_lines, min_complexity, entries):
                                  min_complexity, entries)
 
 
-def top_functions(paths, repo_root, limit, min_complexity=MIN_COMPLEXITY,
-                  changed_lines=None):
+def top_functions(paths: list[str], repo_root: str, limit: int, min_complexity: int = MIN_COMPLEXITY, changed_lines: dict[str, set[int]] | None = None) -> list[dict]:
     """Complexity-ranked function entries for the given files.
 
     repo_root is the only path-resolution basis (never os.getcwd()).
@@ -140,12 +139,12 @@ def top_functions(paths, repo_root, limit, min_complexity=MIN_COMPLEXITY,
             continue
     entries.sort(key=lambda e: (-e["complexity"], -e["lines"],
                                 e["path"], e["qualname"]))
-    if limit and limit > 0:
+    if limit > 0:
         entries = entries[:limit]
     return entries
 
 
-def parse_diff_hunks(diff_text):
+def parse_diff_hunks(diff_text: str) -> dict[str, set[int]]:
     """Unified diff -> {repo-relative path: set of changed new-file lines}.
 
     Tracks the current filename from `+++ ` lines via the pinned regex
@@ -227,8 +226,6 @@ def _selftest_failures():
         "-deletion-only hunk yields an empty range\n")
     check("parse_diff_hunks shape", {"mod.py": {2}},
           {k: v for k, v in hunks.items() if v})
-    check("parse_diff_hunks deletion-only key", set(),
-          hunks.get("mod.py", set()) - {2})
 
     check("MIN_COMPLEXITY pin", 15, MIN_COMPLEXITY)
     tmp = os.path.join(os.environ.get("TMPDIR", "/tmp"),
