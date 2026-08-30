@@ -449,6 +449,15 @@ class TopFunctionsTest(unittest.TestCase):
             )
 
             entries = ci.top_functions(["mod.py", "other.py"], root, limit=0,
+                                       changed_lines={"mod.py": set(),
+                                                      "other.py": {1}})
+            self.assertEqual(
+                [(e["path"], e["qualname"]) for e in entries],
+                [("other.py", "big_c")],
+                "file mapped to an empty set contributes nothing",
+            )
+
+            entries = ci.top_functions(["mod.py", "other.py"], root, limit=0,
                                        changed_lines=None)
             self.assertEqual(
                 {e["qualname"] for e in entries},
@@ -531,14 +540,15 @@ class TopFunctionsTest(unittest.TestCase):
 
     # contract:isolation:inv-t10
     def test_per_file_error_isolation(self):
-        """contract:isolation:inv-t10 — one syntax-error file in the batch
-        still yields hits for every good file."""
+        """contract:isolation:inv-t10 — bad files placed BEFORE the good
+        files still yield hits for every good file; a one-outer-try
+        implementation loses every good file after the first bad one."""
         with tempfile.TemporaryDirectory() as root:
             _write(os.path.join(root, "good_a.py"), _branchy("fn_a", 16) + "\n")
             _write(os.path.join(root, "good_b.py"), _branchy("fn_b", 17) + "\n")
             _write(os.path.join(root, "broken.py"), "def broken(:\n")
             entries = ci.top_functions(
-                ["good_a.py", "good_b.py", "broken.py", "missing.py"],
+                ["broken.py", "good_a.py", "missing.py", "good_b.py"],
                 root, limit=0)
             self.assertEqual(
                 {(e["path"], e["qualname"], e["complexity"]) for e in entries},
