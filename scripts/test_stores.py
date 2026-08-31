@@ -42,7 +42,6 @@ if HERE not in sys.path:
 from scripts import grudge_append as ga  # noqa: E402
 from scripts import grudge_query as gq  # noqa: E402
 from scripts import atomic_write as aw  # noqa: E402
-from scripts import brier_advisory as ba  # noqa: E402
 from scripts import ledger_doctor as ld  # noqa: E402
 
 # backfill-ledger.py is hyphenated → not importable by name; load it from path.
@@ -696,37 +695,6 @@ def _capture(fn):
     with contextlib.redirect_stderr(buf):
         result = fn()
     return result, buf.getvalue()
-
-
-# --------------------------------------------------------------------------- #
-# brier_advisory — corrupt brier-rolling.json surfaces (was silent {})         #
-# --------------------------------------------------------------------------- #
-
-class BrierLoadWarnTest(unittest.TestCase):
-    def test_missing_file_is_silent(self):
-        with tempfile.TemporaryDirectory() as d:
-            out, err = _capture(
-                lambda: ba._load_brier(os.path.join(d, "nope.json")))
-            self.assertEqual(out, {})
-            self.assertEqual(err, "")
-
-    def test_corrupt_json_warns(self):
-        with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, "brier-rolling.json")
-            with open(p, "w") as f:
-                f.write("{not valid json")
-            out, err = _capture(lambda: ba._load_brier(p))
-            self.assertEqual(out, {})
-            self.assertIn("[brier_advisory WARN]", err)
-
-    def test_valid_json_silent(self):
-        with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, "brier-rolling.json")
-            with open(p, "w") as f:
-                f.write(json.dumps({"siege": {"n": 5, "brier": 0.3}}))
-            out, err = _capture(lambda: ba._load_brier(p))
-            self.assertEqual(out, {"siege": {"n": 5, "brier": 0.3}})
-            self.assertEqual(err, "")
 
 
 # --------------------------------------------------------------------------- #

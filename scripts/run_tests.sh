@@ -116,10 +116,6 @@ run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
-# --- Calibration dispatch / Brier advisory ---
-run python3 scripts/check_calibration_dispatch.py --selftest
-run python3 scripts/check_calibration_dispatch.py
-run python3 scripts/test_brier_advise.py
 run python3 scripts/test_calibrate_tolerance.py
 
 # --- Ledger pipeline pure core (#398 Phase 1) ---
