@@ -344,6 +344,50 @@ class TestResolveToReadWindow(unittest.TestCase):
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
 
+    def test_a_declared_collision_member_absent_from_verified_does_not_crash_finalize(self):
+        """#563 inquisitor finding — `_finalize_identity_degenerate`'s comparison of two
+        declared collision members used to be a bare `verified[(rp, dev_ino)]` subscript.
+        On the production `--tier2` path a declared member is always hash-verified before
+        finalize runs (`tier2_artifacts` raises on any mismatch/missing member first), but
+        a caller that swallows that per-entry LintError and calls finalize anyway (e.g. a
+        corpus-measurement tool counting mismatches instead of aborting — exactly
+        `measure_486_corpus.py`'s shape) can reach finalize with a declared member never
+        entered into `verified`, and the bare subscript raised `KeyError` instead of a
+        classified disposition. The fix routes an unverified member into
+        `_IDENTITY_UNVERIFIABLE_COLLISION` (the same bucket an undeclared member takes)
+        via `.get(..., _UNVERIFIED)`, never a bare subscript."""
+        rv = _import_rv()
+        cache = {
+            rv._IDENTITY_COLLISION_CANDIDATES: [
+                {"dev_ino": (7, 42),
+                 "members": [("a.md", True, 2), ("b.md", True, 2)]},
+            ],
+        }
+        # b.md is declared but was never hash-verified into `verified` — the shape a
+        # caller reaches only by swallowing tier2_artifacts's per-entry LintError.
+        verified = {("a.md", (7, 42)): b"REAL"}
+        rv._finalize_identity_degenerate(cache, verified)  # must not raise KeyError
+        self.assertEqual(
+            cache.get(rv._IDENTITY_UNVERIFIABLE_COLLISION, frozenset()), {"b.md"})
+        self.assertNotIn(rv._IDENTITY_DEGENERATE, cache)
+
+    def test_both_members_verified_and_agreeing_is_still_benign(self):
+        """Non-vacuity for the fix above: the common case (both declared members ARE
+        hash-verified and their bytes agree) must still resolve exactly as before —
+        neither sentinel set — proving the `.get()` rewrite changed nothing for the path
+        `tier2_artifacts` actually exercises today."""
+        rv = _import_rv()
+        cache = {
+            rv._IDENTITY_COLLISION_CANDIDATES: [
+                {"dev_ino": (7, 42),
+                 "members": [("a.md", True, 2), ("b.md", True, 2)]},
+            ],
+        }
+        verified = {("a.md", (7, 42)): b"REAL", ("b.md", (7, 42)): b"REAL"}
+        rv._finalize_identity_degenerate(cache, verified)
+        self.assertNotIn(rv._IDENTITY_UNVERIFIABLE_COLLISION, cache)
+        self.assertNotIn(rv._IDENTITY_DEGENERATE, cache)
+
 
 class TestVerifyWitness(unittest.TestCase):
     """Direct unit coverage of the factored verify_witness + derive_art_name."""
