@@ -85,7 +85,7 @@ Extract `keys=` and `files=` discriminators at insertion time (severity-max, `*-
 6. For each firing predicate on manifest entry M, `Read` M's full receipt from disk and narrate the re-read: *"tripwire `<predicate>` on <M-prefix> fired from <new-prefix>; re-read M."*
 7. Only then dispatch the next subagent.
 
-**Supersession fix-flow.** A fix-agent dispatched after a FAIL receipt normally supersedes that FAIL. Its receipt MUST cite the FAIL's hash-prefix in `SUPERSEDES:` and in at least one CLAIM `from=<prefix>#…`, AND its WITNESS must be `kind ∈ {exec, grep}` with `ran=TRACE#N` (not SKIPPED/UNRUNNABLE). Tier-2 then verifies the witness — supersession only survives if the original failure no longer reproduces.
+**Supersession fix-flow.** A fix-agent dispatched after a FAIL receipt normally supersedes that FAIL. Its receipt MUST cite the FAIL's hash-prefix in `SUPERSEDES:` and in at least one CLAIM `from=<prefix>#…`, AND its WITNESS must be `kind ∈ {exec, grep}` with `ran=TRACE#N` (not SKIPPED/UNRUNNABLE). Tier-2 then verifies the witness — supersession only survives if the original failure no longer reproduces. **Except on a `BLOCKED` verdict**, where the convention hard-FAILs any non-`none` `SUPERSEDES:` unconditionally (no witness leg runs on `BLOCKED` to satisfy it) — a fix agent that cannot finish its own work returns `SUPERSEDES: none` instead, and the superseded finding stands into the next round (`return-convention.md` › the SUPERSEDES witness-evidence requirement).
 
 **Mandatory-work declarations for build's subagent types** (add to each dispatch template's `## Return Format` section):
 

@@ -59,6 +59,10 @@ RESOLVE_PHASE_CEILING_S = 2 * WITNESS_TIMEOUT_S
 _IDENTITY_DEGENERATE = object()
 _IDENTITY_COLLISION_CANDIDATES = object()
 _IDENTITY_UNVERIFIABLE_COLLISION = object()
+# #563 inquisitor finding — `_finalize_identity_degenerate`'s `verified.get(..., default)`
+# needs a default that can never collide with a real (possibly falsy/empty-bytes) hashed
+# body, so a missing entry is distinguishable from a genuinely-verified empty read.
+_UNVERIFIED = object()
 
 
 class WitnessTimeout(LintError):
@@ -2098,7 +2102,7 @@ def _is_world_writable(d: pathlib.Path) -> bool:
 # literal two-character escape, so an ordinary path renders BYTE-IDENTICALLY to what it
 # did before and only a hostile one changes. Deliberately NOT applied to the census line
 # itself, which carries no paths at all — that machine-independence is pinned by
-# return-convention.md:271.
+# return-convention.md:280.
 #
 # SIEGE-R2BA-4 — the class was `[\\\x00-\x1f\x7f]`, which is the class for a `grep`
 # consumer and NOT the class for the consumers this channel actually has:
@@ -2379,7 +2383,16 @@ def _read_and_fstat_artifact(realpath, budget, label):
     call (SIG-11-2). No `st_size` pre-test: the file can grow between stat and read, and
     a `budget + 1` read holds the ceiling however it grows — the same argument that
     closes `_read_capped`'s window (SIEGE-R2BA-2).
+
+    #563 inquisitor finding — this leg runs OUTSIDE `_witness_bound()` (uniform policy,
+    C3-R1-S4), so a bare `open()` on a name swapped to a FIFO in the resolve/read gap
+    blocks forever with zero bytes read, before `budget + 1` ever has a chance to cap
+    anything — verbatim the `_read_jsonl` hang siege S-1 already fixed. `is_file()`
+    FIRST, same as that fix: it stats, it does not open, so a FIFO/device/directory is
+    classified without blocking.
     """
+    if not pathlib.Path(realpath).is_file():
+        raise LintError(f"Tier-2: {label} is not a regular file (not read)")
     with open(realpath, "rb") as fh:
         st = os.fstat(fh.fileno())
         raw = fh.read(budget + 1)
@@ -2518,11 +2531,21 @@ def _finalize_identity_degenerate(cache, verified):
     For each pair: if EITHER member is undeclared, the undeclared member's realpath is
     added to `_IDENTITY_UNVERIFIABLE_COLLISION` by a REBINDING assignment (never an
     in-place `.add()` — SIG-14-3) and `_IDENTITY_DEGENERATE` is left untouched
-    (SIG-13-2's citation-axis case). Otherwise both members are declared and necessarily
-    hash-verified: both `nlink_at_resolve == 1` is degenerate immediately (POSIX rules
-    out a hard link, FATAL-11-1); else the pair is degenerate iff the two `verified`
-    buffers DISAGREE — compared raw, never re-hashed (SIG-14-1) — else benign. Every
-    write is an assignment to True, never a clearing of a probe-(1) `True`.
+    (SIG-13-2's citation-axis case). Otherwise both members are declared; on the
+    production `--tier2` path a declared member is necessarily hash-verified into
+    `verified` before this runs (`tier2_artifacts` raises before returning on any
+    unmatched declared entry). A caller that swallows `tier2_artifacts`'s per-entry
+    `LintError` and calls this finalize anyway (#563 inquisitor finding — e.g. a corpus
+    measurement tool counting mismatches instead of aborting) can reach this with a
+    declared member absent from `verified`; that case is treated the same as an
+    undeclared member (§ above) — the pair cannot be disambiguated, so it goes in the
+    "cannot answer" bucket via `.get()`, never a bare subscript (this defensiveness is
+    what the docstring's SIG-13-4 rule already mandates for `cache`; the same rule now
+    applies to `verified`). Otherwise: both `nlink_at_resolve == 1` is degenerate
+    immediately (POSIX rules out a hard link, FATAL-11-1); else the pair is degenerate
+    iff the two `verified` buffers DISAGREE — compared raw, never re-hashed (SIG-14-1) —
+    else benign. Every write is an assignment to True, never a clearing of a probe-(1)
+    `True`.
     """
     candidates = cache.get(_IDENTITY_COLLISION_CANDIDATES, ())
     for cand in candidates:
@@ -2536,15 +2559,25 @@ def _finalize_identity_degenerate(cache, verified):
                 cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
                     cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp2})
             continue
+        b1 = verified.get((rp1, dev_ino), _UNVERIFIED)
+        b2 = verified.get((rp2, dev_ino), _UNVERIFIED)
+        if b1 is _UNVERIFIED or b2 is _UNVERIFIED:
+            if b1 is _UNVERIFIED:
+                cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
+                    cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp1})
+            if b2 is _UNVERIFIED:
+                cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
+                    cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp2})
+            continue
         if nl1 == 1 and nl2 == 1:
             cache[_IDENTITY_DEGENERATE] = True
-        elif verified[(rp1, dev_ino)] != verified[(rp2, dev_ino)]:
+        elif b1 != b2:
             cache[_IDENTITY_DEGENERATE] = True
 
 
 # #488 inquisitor/AV4 (edge) — a KNOWN, DELIBERATELY OUT-OF-SCOPE GAP, recorded here so
 # it is not "fixed" by accident. `parse_trace` admits SEVEN verbs; this set holds three.
-# `return-convention.md:84` defines `CONSULTED <reference>` as covering "web/doc/
+# `return-convention.md:85` defines `CONSULTED <reference>` as covering "web/doc/
 # prior-artifact lookup", and a cited PRIOR ARTIFACT is exactly the population §3.4's
 # silence rule ranges over — so a `CONSULTED` citation of an undeclared, unverified file
 # gets no PROVENANCE-ONLY advisory at all, on an ORDINARY receipt and not only under
@@ -4169,7 +4202,7 @@ def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
         # the author who wrote it did not reach. `ambiguous` is bumped at RESOLUTION time,
         # before applicability is finally known; this arm then cleared `wit_applicable`
         # and bumped `not-applicable`, so ONE item landed in two of the sub-counts
-        # `return-convention.md:271` ships as normative disjoint ("An item that already
+        # `return-convention.md:280` ships as normative disjoint ("An item that already
         # earns `ambiguous` or `wrong-name` is reported only there") — on a line whose
         # `witness 0/0` says the item is not in the applicable set at all, while
         # `ambiguous` is defined as a sub-count OF that denominator.
@@ -5583,7 +5616,7 @@ _COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "empty
 # the mandating paragraphs' only remedy for a non-working tool is the in-context
 # pseudocode fallback, which does zero disk verification. Carries no path: the offending
 # root is named on its OWN bullet, because this line's "no paths, no roots"
-# machine-independence is pinned by return-convention.md:271.
+# machine-independence is pinned by return-convention.md:280.
 #
 # SIEGE-R2BA-5 — C4 established the rule and applied it to ONE exit-2 path. FIVE others
 # stayed silent, one of them (`two-positionals`) CREATED by SIEGE-C15 one commit after
@@ -5778,7 +5811,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # the census is pinned "no paths, no roots". An operator debugging a
                 # surprising `ambiguous 0` had literally nothing to read. Its OWN line,
                 # deliberately not the census line, whose machine-independence is pinned
-                # by return-convention.md:271.
+                # by return-convention.md:280.
                 sys.stderr.write(
                     "ROOTS: " + ", ".join(_show_path(r) for r in _as_roots(root)) + "\n")
                 sections = parse_receipt(text)
@@ -5806,7 +5839,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
                 # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
                 # witness-evidence consequent), and nothing said so on any channel.
-                # `return-convention.md:565` makes mixed-version runs legal, so this is
+                # `return-convention.md:603` makes mixed-version runs legal, so this is
                 # NOT a rejection and there is no `--require-v11` flag to invent here —
                 # what was missing is that the gate could not tell "the v1.1 rules passed"
                 # from "the v1.1 rules never ran", while quality-gate/SKILL.md:34,58 state
@@ -5842,7 +5875,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
                     # leg, so the collector would hear nothing from it and the line would
                     # read a bare `witness 0/0`. Every receipt carries a mandatory WITNESS
-                    # line (return-convention.md:122), so a witness check ALWAYS exists
+                    # line (return-convention.md:123), so a witness check ALWAYS exists
                     # and an unannotated 0/0 says one did not — indistinguishable from a
                     # PASS receipt with a structurally-absent witness.
                     cov.bump("not-applicable", "verdict-not-pass-fail")
@@ -6144,7 +6177,7 @@ def main(argv=None) -> int:
             #
             # The diagnostic deliberately does NOT go on the TIER2-COVERAGE: line — that
             # line's "no paths, no roots" machine-independence is pinned by
-            # return-convention.md:271 — and the empty-string test is on the RAW token,
+            # return-convention.md:280 — and the empty-string test is on the RAW token,
             # because Path("") is already Path(".") and would pass is_dir().
             #
             # Scoped to roots the caller actually passed: the no-`--root` default below

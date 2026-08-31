@@ -65,6 +65,12 @@ def disposition(rv, text, root, strict):
         verified = {}
         notes = rv.tier2_artifacts(artifacts, trace, root, strict,
                                    cache=cache, verified=verified)
+        # #563 inquisitor finding — the real `--tier2` CLI runs this between the
+        # ARTIFACTS and WITNESS legs (rcpt_verify.py's _verify_single); omitting it here
+        # left tier2_witness reading a cache whose _IDENTITY_DEGENERATE /
+        # _IDENTITY_UNVERIFIABLE_COLLISION sentinels were never finalized, diverging from
+        # what "exactly as --tier2 does" (this function's own docstring) promises.
+        rv._finalize_identity_degenerate(cache, verified)
         if verdict in {"PASS", "FAIL"}:
             notes = notes + rv.tier2_witness(witness, trace, root, strict,
                                              verdict, cache=cache,

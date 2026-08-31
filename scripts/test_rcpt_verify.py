@@ -3462,7 +3462,7 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         self.assertTrue(cov.partial)
 
     def test_an_empty_resolved_body_is_NOT_verified_and_IS_partial(self):
-        """return-convention.md:253's own reason — an empty body `can never fire, so it
+        """return-convention.md:262's own reason — an empty body `can never fire, so it
         is indistinguishable from a skipped check`. Counting it VERIFIED would assert
         the opposite of the rule that rejects it."""
         (self.a / "f.txt").write_text("one line\n")
@@ -3608,7 +3608,7 @@ class TestCoverageEmission(unittest.TestCase):
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
-        (return-convention.md:122), so a witness check ALWAYS exists and an unannotated
+        (return-convention.md:123), so a witness check ALWAYS exists and an unannotated
         `witness 0/0` says one did not. BLOCKED is not hypothetical: SKILL.md:32 lints
         them, red-team-prompt.md:227 instructs one, sample-corpus carries one."""
         h, size = self._artifact()
@@ -4235,7 +4235,7 @@ class TestAmbiguityThresholdIsDistinctRealpaths(_InqBase):
 
     `fix-verifier-prompt.md:89` states the trigger outright ("two or more distinct
     realpaths … so one file reached from two roots via a link is not it") and
-    `return-convention.md:257` says a name held at both homes of the SAME root resolves
+    `return-convention.md:266` says a name held at both homes of the SAME root resolves
     silently. Neither shape had a test: `test_trailing_slash_and_symlink_are_the_same_
     root` links the ROOT, not the FILE, and every ambiguity test plants two real files.
     A false ambiguity is a hard `--strict` FAIL, i.e. per quality-gate/SKILL.md:32 a
@@ -5472,6 +5472,40 @@ class TestArtifactReadsAreBounded(_InqBase):
                     verified={}),
                 [])
 
+    def test_a_fifo_swapped_in_after_resolve_fails_closed_instead_of_hanging(self):
+        """#563 inquisitor finding — `_read_and_fstat_artifact`'s bare `open(realpath,
+        "rb")` had no regular-file gate, verbatim the pre-fix shape of `_read_jsonl`
+        (siege S-1, see `test_a_fifo_ledger_fails_closed_instead_of_hanging` above). A
+        FIFO named directly in ARTIFACTS is refused earlier, at resolve time
+        (`_resolve_base_one`'s own `is_file()`), so the reachable shape is a resolve-time
+        REGULAR file swapped to a FIFO before this leg's read — the same swap window
+        `tier2_witness`'s TOCTOU checks exist to police. Run on a worker thread with a
+        bounded join: the defect under test is an indefinite hang, so an unbounded call
+        would hang the suite instead of failing it."""
+        rv = _import_rv()
+        h, size = self.plant(self.base, "f.md", b"REAL")
+        arts = {"f.md": {"hash": h, "size": size}}
+        cache = _cache_for(rv, arts, [], None, "PASS", [self.base])
+        (self.base / "f.md").unlink()
+        os.mkfifo(self.base / "f.md")
+        self.addCleanup(lambda: (self.base / "f.md").unlink(missing_ok=True))
+        result = {}
+
+        def _run():
+            try:
+                rv.tier2_artifacts(arts, [], [self.base], False,
+                                   cache=cache, verified={})
+            except rv.LintError as e:
+                result["error"] = str(e)
+            except BaseException as e:              # pragma: no cover - diagnostic only
+                result["error"] = f"{type(e).__name__}: {e}"
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=5.0)
+        self.assertFalse(t.is_alive(), "tier2_artifacts hung reading a swapped-in FIFO")
+        self.assertIn("is not a regular file", result.get("error", ""))
+
     def test_a_second_spelling_of_an_already_read_realpath_does_not_double_charge_budget(self):
         """#563 — the S3 dedup (:3201-3223) reuses the bytes already read for a realpath's
         first spelling, but the budget decrement ran a second time regardless, charging the
@@ -6126,7 +6160,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
 class TestCensusSubCountsAreDisjointOnTheAmbiguousPath(_InqBase):
     """C1-R1-S1 — `ambiguous` is bumped at RESOLUTION time and `_bill_witness_evaluation`'s
     `no_predicate` arm then cleared `wit_applicable` and bumped `not-applicable`, so ONE
-    item landed in two of the sub-counts return-convention.md:271 ships as normative
+    item landed in two of the sub-counts return-convention.md:280 ships as normative
     disjoint — on a line whose `witness 0/0` says the item is not in the applicable set
     at all, while `ambiguous` is defined as a sub-count OF that denominator.
 
@@ -6627,7 +6661,7 @@ class TestAV1HeaderSaysSoOnTheChannel(_InqBase):
     line, so an `RCPT v1` header written by the reviewed subagent opts the entire v1.1
     rule set out — the TRIPWIRE-`none` two-leg rule, the SUPERSEDES justification rule and
     the witness-evidence consequent — with no signal on any channel.
-    `return-convention.md:565` makes mixed-version runs LEGAL, so this is not a rejection;
+    `return-convention.md:603` makes mixed-version runs LEGAL, so this is not a rejection;
     what was missing is that the gate could not tell "the v1.1 rules passed" from "the
     v1.1 rules never ran" while quality-gate/SKILL.md:34,58 treat Layer 2 as enforced."""
 

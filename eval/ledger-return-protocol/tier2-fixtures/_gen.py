@@ -444,6 +444,12 @@ def verify_fixture(fx):
         verified = {}
         rv.tier2_artifacts(artifacts, trace, root, strict, None,
                            cache=cache, verified=verified)
+        # #563 inquisitor finding — the real --selftest/--tier2 path runs this between
+        # the ARTIFACTS and WITNESS legs; omitting it here reopened the exact unbound
+        # gap the SIEGE-R2BA-1 comment above says this generator's self-verify exists to
+        # close (tier2_witness would read never-finalized _IDENTITY_DEGENERATE /
+        # _IDENTITY_UNVERIFIABLE_COLLISION sentinels, diverging from the shipped reader).
+        rv._finalize_identity_degenerate(cache, verified)
         if verdict in {"PASS", "FAIL"}:
             rv.tier2_witness(witness, trace, root, strict, verdict, None,
                              cache=cache, verified=verified)
