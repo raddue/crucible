@@ -6,13 +6,13 @@ Invariant **L-7** governs schema evolution of `.crucible/ledger/runs.jsonl`,
 ## Rules
 
 1. **Forward-compatible readers.** Every reader (`raddue/crucible-eval`'s
-   `/calibration-reconcile`, `/ledger`, and `scripts/ledger_reduce.py` — moving
+   `/calibration-reconcile`, `/ledger`, and `scripts/ledger_reduce.py` — moved
    there, #460 — plus any future in-repo reader) MUST ignore unknown
    keys. New keys appearing in a newer-version line must not cause parse failure
    or silent data drop.
 
-   > **Cross-repo note (#460).** Every reader named above is **moving to**
-   > `raddue/crucible-eval` (#460); this repo keeps the writers. No gate in
+   > **Cross-repo note (#460).** Every reader named above now lives in
+   > `raddue/crucible-eval`; this repo keeps the writers. No gate in
    > this repo can reach those readers, so a shape change here is a
    > **two-repo change**: it MUST be mirrored into `raddue/crucible-eval` in
    > the same change window. Rule 3's "migrate script ships WITH the

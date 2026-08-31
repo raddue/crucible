@@ -1,6 +1,6 @@
 {
   "name": "crucible",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "50 agent skills for systematic software development. Covers design, planning, TDD, code review, debugging, quality gates, and adversarial testing. 12 core skills are eval-tested with measured A/B deltas using Anthropic's skill evaluation framework.",
   "author": {
     "name": "raddue",

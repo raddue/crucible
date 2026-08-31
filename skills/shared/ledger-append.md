@@ -356,8 +356,8 @@ line, `[ledger_reduce WARN] reduce: skipped N unparseable line(s) in <path>`,
 never one line per bad line.
 
 Reference implementation (inlined verbatim from `scripts/ledger_reduce.py`'s
-body as of #460; that module is being extracted to `raddue/crucible-eval`, and
-this repo's copy is deleted later in the same change). **Transcribe this exactly — the `except OSError`
+body as of #460; that module has moved to `raddue/crucible-eval` and no longer
+exists in this repo). **Transcribe this exactly — the `except OSError`
 guard, the `isinstance(obj, dict)` guard, and the `skipped`/`_warn` corruption
 surfacing are all #400 fixes, and an implementation missing any of them is a
 regression, not a simplification:**
@@ -427,7 +427,7 @@ def reduce(falsification_path: str) -> Dict[str, dict]:
 | L-6 | Emit-side kill-switch | Early return in `append()` + `_cli_emit` graceful skip |
 | L-7 | Migration protocol (forward-compat / never-decrease) | `docs/ledger/MIGRATION-PROTOCOL.md` |
 | L-8 | 16 KiB line cap + truncation + sidecar | `_truncate_payload` + line-bytes check |
-| L-9 | Latest-entry-wins reduction (file-position) | Defined inline above ("L-9 latest-entry-wins reduction"); the executable copy is being extracted to `raddue/crucible-eval` (#460) |
+| L-9 | Latest-entry-wins reduction (file-position) | Defined inline above ("L-9 latest-entry-wins reduction"); `raddue/crucible-eval` carries the executable copy (#460) |
 
 L-5 (backfill exclusion from headline) and L-10 (Brier polarity) are encoded
 in design/contract; no runtime call-sites in Phase 1.
