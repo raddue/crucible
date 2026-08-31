@@ -37,6 +37,14 @@ def _import(name):
 rv = _import("rcpt_verify")
 
 
+def _cache_for(artifacts, trace, witness, verdict, root):
+    cache = {}
+    rv._build_identity_cache(artifacts, trace,
+                             [witness] if witness is not None else [],
+                             verdict, root, cache)
+    return cache
+
+
 def _receipt(*, artifacts, trace, witness, verdict="PASS", claims=("(none)",)):
     lines = [f"RCPT v1 red-team/1-devils-advocate",
              f"VERDICT  {verdict}  conf=0.90", "ARTIFACTS"]
@@ -137,8 +145,10 @@ class TestTheWitnessBoundLeavesNoProcessWideResidue(_RootCase):
             witness = rv.parse_witness(sections["WITNESS"])
             raised = False
             try:
+                cache = _cache_for({}, trace, witness, "PASS", self.root)
                 rv.tier2_witness(witness, trace, self.root, True, "PASS",
-                                 rv._Coverage(), {}, {}, [])
+                                 rv._Coverage(), {}, [],
+                                 cache=cache, verified={})
             except rv.LintError:
                 raised = True
             self.assertEqual(should_raise, raised,

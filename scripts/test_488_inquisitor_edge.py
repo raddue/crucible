@@ -45,6 +45,14 @@ def walk_notes(stderr):
             if l.strip().startswith(WALK_PREFIX)]
 
 
+def _cache_for(rv, artifacts, trace, witness, verdict, root):
+    cache = {}
+    rv._build_identity_cache(artifacts, trace,
+                             [witness] if witness is not None else [],
+                             verdict, root, cache)
+    return cache
+
+
 # --------------------------------------------------------------------------
 # ATTACK VECTOR 3 — the cumulative read ceiling as a truncation site.
 #
@@ -87,9 +95,12 @@ class TestTheTruncationPartitionHoldsAtTheReadBudgetCeiling(unittest.TestCase):
                       {"n": 3, "verb": "READ", "args": "later.md"}]
         self.notes_out = []
         self.cov = self.rv._Coverage()
+        cache = _cache_for(self.rv, self.artifacts, self.trace, None, "PASS",
+                           self.root)
         with self.assertRaises(self.rv.LintError) as ctx:
             self.rv.tier2_artifacts(self.artifacts, self.trace, self.root,
-                                    True, self.cov, None, self.notes_out)
+                                    True, self.cov, self.notes_out,
+                                    cache=cache, verified={})
         self.err = str(ctx.exception)
 
     def test_the_budget_ceiling_is_what_truncated_the_run(self):

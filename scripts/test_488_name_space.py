@@ -62,6 +62,14 @@ def _import_rv():
     return rv
 
 
+def _cache_for(rv, artifacts, trace, witness, verdict, root):
+    cache = {}
+    rv._build_identity_cache(artifacts, trace,
+                             [witness] if witness is not None else [],
+                             verdict, root, cache)
+    return cache
+
+
 def run(*args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
@@ -844,8 +852,10 @@ class TestTheEmitterCannotMaskAnInFlightRaise(_RootCase):
 
     def test_a_none_trace_does_not_mask_an_in_flight_lint_error(self):
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART, None, [self.root], True,
-                                    None, None, [])
+            self.rv.tier2_artifacts(
+                self.ART, None, [self.root], True, None, [],
+                cache=_cache_for(self.rv, self.ART, None, None, "PASS",
+                                 [self.root]), verified={})
         # The message identifies the REAL failure, not a TypeError from the
         # finally: that took its place.
         self.assertIn("absent under all bases", str(caught.exception))
@@ -859,7 +869,11 @@ class TestTheEmitterCannotMaskAnInFlightRaise(_RootCase):
         with self.assertRaises(self.rv.LintError) as caught:
             self.rv.tier2_artifacts(
                 self.ART, [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
-                [self.root], True, None, None, notes_out)
+                [self.root], True, None, notes_out,
+                cache=_cache_for(
+                    self.rv, self.ART,
+                    [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
+                    None, "PASS", [self.root]), verified={})
         self.assertIn("absent under all bases", str(caught.exception))
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
                          [f"{NOTE_PREFIX} /elsewhere/x.md "
@@ -905,8 +919,10 @@ class TestANonStringArtifactsKeyCannotMaskAnInFlightRaise(_RootCase):
         about the argument expression, not about the emitter being skipped."""
         notes_out = []
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
-                                    None, None, notes_out)
+            self.rv.tier2_artifacts(
+                self.ART, self.TRACE, [self.root], True, None, notes_out,
+                cache=_cache_for(self.rv, self.ART, self.TRACE, None, "PASS",
+                                 [self.root]), verified={})
         self.assertIn("absent under all bases", str(caught.exception))
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
                          [f"{NOTE_PREFIX} /elsewhere/x.md "
@@ -932,8 +948,10 @@ class TestANonStringArtifactsKeyCannotMaskAnInFlightRaise(_RootCase):
         self.addCleanup(setattr, self.rv, "_emit_provenance_notes", real)
 
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
-                                    None, None, None)
+            self.rv.tier2_artifacts(
+                self.ART, self.TRACE, [self.root], True, None, None,
+                cache=_cache_for(self.rv, self.ART, self.TRACE, None, "PASS",
+                                 [self.root]), verified={})
         self.assertIn("absent under all bases", str(caught.exception))
         self.assertEqual(calls, [], "the emitter ran for a caller that asked "
                                     "for no notes")
@@ -942,8 +960,10 @@ class TestANonStringArtifactsKeyCannotMaskAnInFlightRaise(_RootCase):
         # patched emitter, so the leg above is about the guard, not about a
         # monkeypatch that never took.
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
-                                    None, None, [])
+            self.rv.tier2_artifacts(
+                self.ART, self.TRACE, [self.root], True, None, [],
+                cache=_cache_for(self.rv, self.ART, self.TRACE, None, "PASS",
+                                 [self.root]), verified={})
         self.assertEqual(len(calls), 1, "the monkeypatch never took")
 
     def test_it_does_not_mask_when_the_caller_wants_no_notes(self):
@@ -951,8 +971,10 @@ class TestANonStringArtifactsKeyCannotMaskAnInFlightRaise(_RootCase):
         real failure must reach them too, rather than an AttributeError raised by
         work whose only product they asked not to receive."""
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
-                                    None, None, None)
+            self.rv.tier2_artifacts(
+                self.ART, self.TRACE, [self.root], True, None, None,
+                cache=_cache_for(self.rv, self.ART, self.TRACE, None, "PASS",
+                                 [self.root]), verified={})
         self.assertIn("absent under all bases", str(caught.exception))
 
 
@@ -1281,8 +1303,10 @@ class TestAMalformedTraceEntryCannotMaskAnInFlightRaise(_RootCase):
         for label, trace in self.SHAPES.items():
             with self.subTest(shape=label):
                 with self.assertRaises(self.rv.LintError) as caught:
-                    self.rv.tier2_artifacts(self.ART, trace, [self.root], True,
-                                            None, None, [])
+                    self.rv.tier2_artifacts(
+                        self.ART, trace, [self.root], True, None, [],
+                        cache=_cache_for(self.rv, self.ART, trace, None, "PASS",
+                                         [self.root]), verified={})
                 self.assertIn("absent under all bases", str(caught.exception))
 
     def test_the_control_shows_the_same_call_really_reaches_the_emitter(self):
@@ -1293,7 +1317,11 @@ class TestAMalformedTraceEntryCannotMaskAnInFlightRaise(_RootCase):
         with self.assertRaises(self.rv.LintError) as caught:
             self.rv.tier2_artifacts(
                 self.ART, [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
-                [self.root], True, None, None, notes_out)
+                [self.root], True, None, notes_out,
+                cache=_cache_for(
+                    self.rv, self.ART,
+                    [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
+                    None, "PASS", [self.root]), verified={})
         self.assertIn("absent under all bases", str(caught.exception))
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
                          [f"{NOTE_PREFIX} /elsewhere/x.md "
@@ -1330,14 +1358,18 @@ class TestANonStringArtifactsKeyCannotCrashTheVerifiedPath(_RootCase):
         """`notes_out=None`. These callers opted out of the advisory entirely;
         the advisory's bookkeeping must not be able to fail their run."""
         self.assertEqual(
-            self.rv.tier2_artifacts(self.art, self.trace, [self.root], True,
-                                    None, None, None), [])
+            self.rv.tier2_artifacts(
+                self.art, self.trace, [self.root], True, None, None,
+                cache=_cache_for(self.rv, self.art, self.trace, None, "PASS",
+                                 [self.root]), verified={}), [])
 
     def test_a_pathlike_key_still_verifies_when_notes_were_asked_for(self):
         notes_out = []
         self.assertEqual(
-            self.rv.tier2_artifacts(self.art, self.trace, [self.root], True,
-                                    None, None, notes_out), [])
+            self.rv.tier2_artifacts(
+                self.art, self.trace, [self.root], True, None, notes_out,
+                cache=_cache_for(self.rv, self.art, self.trace, None, "PASS",
+                                 [self.root]), verified={}), [])
 
     def test_the_control_shows_the_str_key_spelling_verifies(self):
         """Non-vacuity: the same fixture keyed by `str` verifies and is silent,
@@ -1345,8 +1377,10 @@ class TestANonStringArtifactsKeyCannotCrashTheVerifiedPath(_RootCase):
         art = {str(k): v for k, v in self.art.items()}
         notes_out = []
         self.assertEqual(
-            self.rv.tier2_artifacts(art, self.trace, [self.root], True,
-                                    None, None, notes_out), [])
+            self.rv.tier2_artifacts(
+                art, self.trace, [self.root], True, None, notes_out,
+                cache=_cache_for(self.rv, art, self.trace, None, "PASS",
+                                 [self.root]), verified={}), [])
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)], [])
 
 
@@ -1615,8 +1649,10 @@ class TestTheTruncationPartitionHoldsAtScale(_RootCase):
     def test_all_four_dispositions_are_right_on_one_truncated_run(self):
         notes_out = []
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.art, self.trace, [self.root], False,
-                                    None, None, notes_out)
+            self.rv.tier2_artifacts(
+                self.art, self.trace, [self.root], False, None, notes_out,
+                cache=_cache_for(self.rv, self.art, self.trace, None, "PASS",
+                                 [self.root]), verified={})
         # Non-vacuity: the run really was truncated, at the entry it was meant to
         # be truncated at.
         self.assertIn("boom.md sha256 mismatch", str(caught.exception))
@@ -1649,9 +1685,13 @@ class TestTheEmitterCannotRaiseOutOfTheFinallyOnAnyShape(_RootCase):
 
     def _run(self, trace, notes_out=None, art=None):
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART if art is None else art, trace,
-                                    [self.root], True, None, None,
-                                    [] if notes_out is None else notes_out)
+            self.rv.tier2_artifacts(
+                self.ART if art is None else art, trace,
+                [self.root], True, None,
+                [] if notes_out is None else notes_out,
+                cache=_cache_for(self.rv, self.ART if art is None else art,
+                                 trace, None, "PASS", [self.root]),
+                verified={})
         self.assertIn("absent under all bases", str(caught.exception))
 
     def test_a_truthy_non_iterable_trace_does_not_replace_the_lint_error(self):
@@ -1731,12 +1771,14 @@ class TestTheEmitterCannotRaiseOutOfTheFinallyOnAnyShape(_RootCase):
                           "verified)"])
 
     def test_an_artifacts_key_whose_str_raises_cannot_mask_the_lint_error(self):
-        """Pins the CALL-SITE wrapper specifically. A call's ARGUMENTS are
-        evaluated before the callee is entered, so the two set comprehensions in
-        the `finally:` run OUTSIDE the emitter's own guarantee — no guard inside
-        the emitter can ever cover them. This is the same structure as the
-        already-pinned non-string-key leg, one level further out: `str()` fixed
-        `.rsplit` on an `int`, and nothing fixed `str()` itself.
+        """Re-aimed (identity redesign). `str(k)` normalisation moved from this
+        `finally:`'s set comprehension into `_build_identity_cache`'s gather, so a
+        hostile key's `__str__` surfaces at cache-build time, not inside the
+        `finally:`. What survives is the guard the relocation does not remove: the
+        `finally:` still projects the unevaluated names through `str(n)`, and a key
+        with a raising `__str__` must not replace the in-flight `--strict` LintError
+        there. The cache is therefore built from the benign keys so the relocated
+        gather never fires, and the hostile key reaches only the guarded projection.
 
         ORDER IS LOAD-BEARING: the absent path-shaped name first, so `--strict`
         truncates and leaves the hostile key in the UNEVALUATED comprehension."""
@@ -1746,7 +1788,16 @@ class TestTheEmitterCannotRaiseOutOfTheFinallyOnAnyShape(_RootCase):
 
         art = dict(self.ART)
         art[_RaisingStr()] = {"hash": H64, "size": "10"}
-        self._run([{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}], art=art)
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(
+                art, [{"n": 1, "verb": "READ", "args": "/elsewhere/x.md"}],
+                [self.root], True, None, [],
+                cache=_cache_for(self.rv, self.ART,
+                                 [{"n": 1, "verb": "READ",
+                                   "args": "/elsewhere/x.md"}],
+                                 None, "PASS", [self.root]),
+                verified={})
+        self.assertIn("absent under all bases", str(caught.exception))
 
     def test_the_control_shows_a_well_formed_trace_still_emits(self):
         """Non-vacuity for every leg above: the guards did not turn the emitter
@@ -1836,9 +1887,13 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
 
     def _run(self, notes_out, art=None, trace=None):
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART if art is None else art,
-                                    self.TRACE if trace is None else trace,
-                                    [self.root], True, None, None, notes_out)
+            self.rv.tier2_artifacts(
+                self.ART if art is None else art,
+                self.TRACE if trace is None else trace,
+                [self.root], True, None, notes_out,
+                cache=_cache_for(self.rv, self.ART if art is None else art,
+                                 self.TRACE if trace is None else trace,
+                                 None, "PASS", [self.root]), verified={})
         self.assertIn("absent under all bases", str(caught.exception))
 
     def test_no_hostile_notes_out_shape_replaces_the_real_lint_error(self):
@@ -1856,14 +1911,24 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
         DIFFERENT block (`finally:` wrapper, per-entry guard, mirror arm), and
         the arms run in sequence on one raise — so a fix that closed one by
         breaking another's ordering would pass the single-parameter legs and
-        fail here."""
+        fail here.
+
+        Re-aimed (identity redesign): the ARTIFACTS key's `str(k)` normalisation
+        moved into `_build_identity_cache`'s gather, so the cache is built from the
+        benign keys — the hostile key reaches only the `finally:`'s guarded `str(n)`
+        projection, and the hostile `trace`/`notes_out` still run their own guards."""
         class _RaisingStr:
             def __str__(self):
                 raise RuntimeError("__str__ exploded")
 
         art = dict(self.ART)
         art[_RaisingStr()] = {"hash": H64, "size": "10"}
-        self._run((), art=art, trace=[None, 5])
+        with self.assertRaises(self.rv.LintError) as caught:
+            self.rv.tier2_artifacts(
+                art, [None, 5], [self.root], True, None, (),
+                cache=_cache_for(self.rv, self.ART, self.TRACE, None, "PASS",
+                                 [self.root]), verified={})
+        self.assertIn("absent under all bases", str(caught.exception))
 
     def test_the_mirror_arm_still_delivers_the_notes_it_exists_for(self):
         """Non-vacuity for every leg above, and the mutation this fix could
@@ -1890,8 +1955,10 @@ class TestNoCallerSuppliedParameterCanMaskAnInFlightRaise(_RootCase):
         survives a hostile out-parameter."""
         cov = self.rv._Coverage()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_artifacts(self.ART, self.TRACE, [self.root], True,
-                                    cov, None, [])
+            self.rv.tier2_artifacts(
+                self.ART, self.TRACE, [self.root], True, cov, [],
+                cache=_cache_for(self.rv, self.ART, self.TRACE, None, "PASS",
+                                 [self.root]), verified={})
         self.assertEqual(cov.counts.get("resolved-by-walk"), 1, cov.counts)
 
 
@@ -1945,9 +2012,11 @@ class TestNoHostileNotesOutCanMaskTheWitnessLegsInFlightRaise(_RootCase):
             ["lint:all-claims-cited  expect-fail=exit!=0  ran=TRACE#1"])
 
     def _run(self, notes_out, cov=None):
+        cache = _cache_for(self.rv, {}, self.trace, self.witness, "PASS",
+                           [self.root, self.other])
         return self.rv.tier2_witness(
             self.witness, self.trace, [self.root, self.other], True, "PASS",
-            cov, None, None, notes_out)
+            cov, None, notes_out, cache=cache, verified={})
 
     def test_no_hostile_notes_out_shape_replaces_the_real_lint_error(self):
         for label, notes_out in (("tuple", ()), ("int", 0),
@@ -2015,8 +2084,12 @@ class TestTheTruncationRuleHoldsForSlashSuffixedNames(_RootCase):
     def _run(self, trace, art=None):
         notes_out = []
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(self.ART if art is None else art, trace,
-                                    [self.root], True, None, None, notes_out)
+            self.rv.tier2_artifacts(
+                self.ART if art is None else art, trace,
+                [self.root], True, None, notes_out,
+                cache=_cache_for(self.rv, self.ART if art is None else art,
+                                 trace, None, "PASS", [self.root]),
+                verified={})
         # Non-vacuity: the run really was truncated, at the entry it was meant
         # to be truncated at, so `x/` really is UNEVALUATED.
         self.assertIn("absent under all bases", str(caught.exception))
@@ -2043,8 +2116,12 @@ class TestTheTruncationRuleHoldsForSlashSuffixedNames(_RootCase):
                "docs/plans/absent-path-shaped.md": {"hash": H64, "size": "10"}}
         notes_out = []
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(art, [{"n": 1, "verb": "READ", "args": "x/"}],
-                                    [self.root], True, None, None, notes_out)
+            self.rv.tier2_artifacts(
+                art, [{"n": 1, "verb": "READ", "args": "x/"}],
+                [self.root], True, None, notes_out,
+                cache=_cache_for(
+                    self.rv, art, [{"n": 1, "verb": "READ", "args": "x/"}],
+                    None, "PASS", [self.root]), verified={})
         self.assertIn("sha256 mismatch", str(caught.exception))
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
                          [f"{NOTE_PREFIX} x/ (declared in TRACE, not verified)"])
@@ -2082,7 +2159,10 @@ class TestTwoArtifactsKeysWithTheSameSpellingDoNotMerge(_RootCase):
         with self.assertRaises(self.rv.LintError) as caught:
             self.rv.tier2_artifacts(
                 art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
-                [self.root], False, None, None, notes_out)
+                [self.root], False, None, notes_out,
+                cache=_cache_for(
+                    self.rv, art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
+                    None, "PASS", [self.root]), verified={})
         # Non-vacuity: the second key really was evaluated and really did fail.
         self.assertIn("sha256 mismatch", str(caught.exception))
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)],
@@ -2099,7 +2179,10 @@ class TestTwoArtifactsKeysWithTheSameSpellingDoNotMerge(_RootCase):
         self.assertEqual(
             self.rv.tier2_artifacts(
                 art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
-                [self.root], False, None, None, notes_out), [])
+                [self.root], False, None, notes_out,
+                cache=_cache_for(
+                    self.rv, art, [{"n": 1, "verb": "READ", "args": "a.txt"}],
+                    None, "PASS", [self.root]), verified={}), [])
         self.assertEqual([n for n in notes_out if n.startswith(NOTE_PREFIX)], [])
 
 
@@ -2701,96 +2784,6 @@ class TestSiegeR2Ba1TheCitationDepthIsWalkedNotGuessed(_TwoRootCase):
         self.assertEqual(walk_notes(out.stderr), [], out.stderr)
 
 
-class TestSiegeR3Ba3ThePreSwapSnapshotIsInsideTheWallClockBound(unittest.TestCase):
-    """SIEGE-R3BA-3 — `witness_pre_identity` moved the witness citation's resolution
-    OUTSIDE the only wall-clock bound this linter has.
-
-    Before SIEGE-R2IT-3 the cited name was resolved exactly once, inside
-    `tier2_witness`'s `with _witness_bound():`, so however hostile the name the run died
-    at 5 s with `witness evaluation exceeded 5s`. The snapshot resolves the SAME
-    receipt-controlled name a second time, before `tier2_artifacts` and therefore before
-    any timer is armed. A citation is a plain TRACE token with no length or component
-    limit and `os.path.realpath` rebuilds the accumulated path per component, so cost is
-    QUADRATIC in a string the receipt author writes — measured on `1943055`: 100 000
-    components 36.0 s, 200 000 components 153.6 s, with no symlinks and no filesystem
-    preparation at all, against `WitnessTimeout` at 5.0 s for the identical call inside
-    the bound.
-
-    Pinned STRUCTURALLY rather than by wall clock — "was a timer armed while the
-    resolution ran" is the property, and asserting on elapsed seconds is a flake on a
-    loaded box."""
-
-    def setUp(self):
-        self.rv = _import_rv()
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = pathlib.Path(self.tmp.name)
-        (self.root / "evidence.log").write_text("ok\n")
-        self.witness = {"kind": "grep", "range_kind": None, "art": None,
-                        "payload": "evidence.log", "ran": "TRACE#1"}
-        self.trace = [{"n": 1, "verb": "READ", "args": "evidence.log"}]
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def _call(self):
-        return self.rv.witness_pre_identity(self.witness, self.trace,
-                                            [self.root], "PASS")
-
-    def test_the_resolution_runs_under_an_armed_timer(self):
-        import signal as _signal
-        if not (hasattr(_signal, "setitimer") and hasattr(_signal, "SIGALRM")):
-            self.skipTest("no setitimer on this platform")
-        real = self.rv.resolve_base
-        seen = {}
-
-        def watched(*a, **k):
-            seen["delay"] = _signal.getitimer(_signal.ITIMER_REAL)[0]
-            seen["handler"] = _signal.getsignal(_signal.SIGALRM)
-            return real(*a, **k)
-
-        self.rv.resolve_base = watched
-        try:
-            self.assertIsNotNone(self._call())
-        finally:
-            self.rv.resolve_base = real
-        self.assertGreater(seen.get("delay", 0), 0,
-                           "the snapshot's resolve_base ran with no timer armed")
-        self.assertIs(seen.get("handler"), self.rv._witness_alarm)
-
-    def test_a_timeout_during_the_snapshot_is_not_swallowed(self):
-        """The bound firing must FAIL the run, not silently disarm the anchor. Arming a
-        one-shot timer and then eating its alarm is strictly worse than not arming it:
-        the 5 s is spent, the alarm is consumed, and the swap detector the snapshot
-        exists to feed is off with nothing said on any channel."""
-        real = self.rv.resolve_base
-
-        def boom(*a, **k):
-            raise self.rv.WitnessTimeout(self.rv.WITNESS_TIMEOUT_MSG)
-
-        self.rv.resolve_base = boom
-        try:
-            with self.assertRaises(self.rv.WitnessTimeout):
-                self._call()
-        finally:
-            self.rv.resolve_base = real
-
-    def test_every_other_failure_still_answers_none(self):
-        """The BOUND. This function's contract is "no census, no notes, no raise" — a
-        measurement must not manufacture a verdict — and only the wall-clock bound is
-        exempt. An ordinary failure to measure leaves the anchor unarmed and the run
-        continues, which is the documented degradation."""
-        real = self.rv.resolve_base
-
-        def boom(*a, **k):
-            raise OSError("hostile tree")
-
-        self.rv.resolve_base = boom
-        try:
-            self.assertIsNone(self._call())
-        finally:
-            self.rv.resolve_base = real
-
-
 class TestSiegeR3Ba1TheWalkNeitherEatsTheAlarmNorAmplifiesItsOwnCost(unittest.TestCase):
     """SIEGE-R3BA-1 — the two halves of one defect the round-3 walk introduced.
 
@@ -2865,15 +2858,9 @@ class TestSiegeR3Ba1TheWalkNeitherEatsTheAlarmNorAmplifiesItsOwnCost(unittest.Te
         leg runs several MUST-NOT-RAISE helpers inside `_witness_bound()`, and the alarm
         arrives wherever the process happens to be — so a rule that fixed only the walk
         would leave the same swallow one function over. Each of these must let a
-        LintError through its own catch-all."""
+        LintError through its own catch-all. (`_carry_spellings` was retired by the
+        identity redesign; the two disclosure-note emitters remain.)"""
         boom = self.rv.LintError("planted")
-
-        class Hostile(str):
-            def __str__(self):
-                raise boom
-
-        with self.assertRaises(self.rv.LintError):
-            self.rv._carry_spellings(Hostile("f.md"), [self.root])
 
         class HostileList(list):
             def append(self, item):
@@ -3583,7 +3570,9 @@ class TestTheEmitterGuardsLayerCorrectlyOnTheCleanPath(_RootCase):
 
     def _run(self, notes_out, cov):
         return self.rv.tier2_artifacts(
-            self.artifacts, self.trace, self.root, True, cov, None, notes_out)
+            self.artifacts, self.trace, self.root, True, cov, notes_out,
+            cache=_cache_for(self.rv, self.artifacts, self.trace, None, "PASS",
+                             self.root), verified={})
 
     def test_a_real_list_receives_the_note_and_the_run_is_clean(self):
         # Non-vacuity for the two shapes below: this is the same call with a
@@ -3661,8 +3650,10 @@ class TestAnUnreachedTwinCannotSilenceAnEvaluatedUnverifiedName(_RootCase):
     def _run(self, artifacts):
         out = []
         with self.assertRaises(self.rv.LintError) as caught:
-            self.rv.tier2_artifacts(artifacts, self.trace, [self.root], False,
-                                    None, None, out)
+            self.rv.tier2_artifacts(
+                artifacts, self.trace, [self.root], False, None, out,
+                cache=_cache_for(self.rv, artifacts, self.trace, None, "PASS",
+                                 [self.root]), verified={})
         # Non-vacuity: the declared key really was evaluated and really failed,
         # so it really is in the unverified set.
         self.assertIn("sha256 mismatch", str(caught.exception))
@@ -3909,9 +3900,11 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
 
-        bodies = {}
+        cache = _cache_for(rv, artifacts, trace, witness, "PASS", self.root)
+        verified = {}
         cov = rv._Coverage()
-        rv.tier2_artifacts(artifacts, trace, self.root, True, cov, bodies, [])
+        rv.tier2_artifacts(artifacts, trace, self.root, True, cov, [],
+                           cache=cache, verified=verified)
 
         # The swap the carry exists to defeat: the hashed regular file is replaced
         # by a symlink to a sanitised sibling AFTER it was hashed.
@@ -3921,32 +3914,10 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
 
         try:
             rv.tier2_witness(witness, trace, self.root, True, "PASS",
-                             cov, bodies, {}, [])
+                             cov, {}, [], cache=cache, verified=verified)
         except rv.LintError as e:
             return str(e)
         return None
-
-    def test_a_second_spelling_does_not_unbind_the_predicate_from_hashed_bytes(self):
-        # CONTROL — one spelling. The NAME key hits, so the predicate runs on the
-        # bytes the artifacts leg hashed and the sanitised file is never consulted.
-        # This is the discriminator: it proves fixture and swap are both live.
-        control = self._run_legs("f.md")
-        self.assertIsNotNone(
-            control,
-            "control precondition broken: the carry did not bind even on the "
-            "single-spelling shape")
-        self.assertIn("expect-fail regex", control)
-
-        # ATTACK — the SAME swap, one spelling apart. `./f.md` and `f.md` name the
-        # same declared file; nothing in the receipt or on disk differs except
-        # which string the TRACE entry carries.
-        attacked = self._run_legs("./f.md")
-        self.assertIsNotNone(
-            attacked,
-            "the witness predicate was evaluated against bytes NO leg hashed: "
-            "bodies.get(name) missed on the spelling and bodies.get(resolved) "
-            "missed on the post-swap realpath, so the carry silently degraded "
-            "to a fresh disk read of the sanitised file and the receipt passed")
 
     def test_siege_s2_the_swap_detector_is_spelling_invariant(self):
         """SIEGE-S2 — the detector compared `PurePosixPath` values RAW-lexically, so it
@@ -3979,7 +3950,7 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
                     f"the {label} spelling let a mid-lint symlink swap through: both "
                     f"carry keys missed and the double-miss detector was silent, so "
                     f"the predicate ran against bytes NO leg hashed")
-                self.assertIn("resolution CHANGED between the legs", attacked)
+                self.assertIn("identity CHANGED between the legs", attacked)
 
                 control = self._run_legs(spelling, swap=False)
                 self.assertIsNotNone(
@@ -4026,7 +3997,7 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
                     f"the {label} spelling let a mid-lint symlink swap through: both "
                     f"carry keys missed and the double-miss detector was silent, so "
                     f"the predicate ran against bytes NO leg hashed")
-                self.assertIn("resolution CHANGED between the legs", attacked)
+                self.assertIn("identity CHANGED between the legs", attacked)
 
                 control = self._run_legs(spelling, swap=False, prep=prep)
                 self.assertIsNotNone(
@@ -4035,312 +4006,23 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
                     f"did not reach the expect-fail predicate at all")
                 self.assertIn("expect-fail regex", control)
 
-    def test_the_carry_binds_whatever_type_the_declared_key_is_spelled_as(self):
-        """#488 warden-r2/F2 — the carry's NAME key was stored under the declared
-        key VERBATIM, so a non-`str` declared key (`PurePosixPath`, reachable from
-        the direct-API call sites this file already treats as in scope) never
-        matched the witness leg's always-`str` `art_name`. BOTH halves failed open
-        on it, not just the double-miss half: the ordinary single-spelling lookup
-        missed, and `_carry_should_have_bound`'s `isinstance(k, str)` filter then
-        skipped the key so the mid-run-swap detector said nothing either. The
-        `str` arm is the pre-existing behaviour; the `PurePosixPath` arm is what
-        the fix adds, and it is parameterised rather than duplicated so the two
-        key spaces stay pinned together."""
-        for key_type in (str, pathlib.PurePosixPath):
-            with self.subTest(declared_key=key_type.__name__):
-                # CONTROL, per key type — one spelling: the NAME key must hit, so
-                # the predicate runs on the bytes the artifacts leg hashed.
-                control = self._run_legs("f.md", key_type=key_type)
-                self.assertIsNotNone(
-                    control,
-                    f"a {key_type.__name__} declared key did not bind the carry "
-                    f"even on the single-spelling shape: the witness predicate "
-                    f"ran against the swapped-in sanitised file and the receipt "
-                    f"passed")
-                self.assertIn("expect-fail regex", control)
-
-                # ATTACK, per key type — the same swap, one spelling apart.
-                attacked = self._run_legs("./f.md", key_type=key_type)
-                self.assertIsNotNone(
-                    attacked,
-                    f"with a {key_type.__name__} declared key the predicate was "
-                    f"evaluated against bytes NO leg hashed: both carry keys "
-                    f"missed and the double-miss detector was silent too")
-
     def test_an_undeclared_witness_name_still_takes_the_independent_read(self):
-        """The half the fail-closed raise must NOT swallow. A witness naming a
-        file NO ARTIFACTS line declares has no carry entry under any spelling —
-        that is ordinary, #412 deliberately does not gate it, and the honest
-        disposition is the independent read the census bills `unhashed-body`, not
-        a hard FAIL. Without this arm the detector could fire on every rangeless
-        payload and the suite above would not notice."""
+        """Re-aimed onto the empty-payload shape FATAL-12-1/FATAL-13-1 prescribes:
+        a rangeless `grep:` witness whose non-empty payload names an undeclared file
+        now hard-FAILs at the Tier-1-style membership rule before `bound` is
+        computed, so the independent-read disposition (`unhashed-body`) is reached
+        only via the empty payload (`stated == ""`). The cited TRACE entry still
+        names the same undeclared file, so the read, and therefore the note, is
+        unchanged."""
         h, s = self.plant("declared.md", "declared and verified\n")
         self.plant("round-3-findings.md", "# Round 3 findings\nFatal: 0\n")
         out = self.verify(receipt(
             artifacts=[("declared.md", h, s)],
             trace=["READ declared.md",
                    f"WROTE round-3-findings.md  sha256:{H64}"],
-            witness="grep:round-3-findings.md  expect-fail=/Fatal: [1-9]/  "
-                    "ran=TRACE#2"))
+            witness="grep:  expect-fail=/Fatal: [1-9]/  ran=TRACE#2"))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("unhashed-body", census(out.stderr), census(out.stderr))
-
-
-# --------------------------------------------------------------------------
-# SIEGE-R2IT-3 — the PRE-SWAP anchor. The class above tests the SPELLING
-# detector, which runs once and only after any swap; this one tests the
-# temporal check that runs on both sides of the window.
-# --------------------------------------------------------------------------
-class TestSiegeR2It3ThePreSwapAnchorSeesASwapNoSpellingTestCan(_RootCase):
-    """SIEGE-R2IT-3 — `_carry_spellings`' resolved-form arm (SIEGE-R1-2) resolves BOTH
-    sides at witness time, i.e. on the same POST-swap tree, so it can never hold a
-    pre-swap identity. Move the swap off the declared FILE and onto a symlinked
-    DIRECTORY COMPONENT the citation passes through and both sides resolve to one
-    post-swap target: the spelling sets intersect trivially and the detector cannot see
-    that anything happened. Measured on `588a7e9`: PASSED CLEAN with
-    `probe == {'evaluated': True}`, the `expect-fail=/SECRET/` predicate that should have
-    rejected the receipt run against the sanitised bytes.
-
-    No amount of resolution-awareness fixes that, because the defect is not which
-    spellings are compared — it is that the comparison happens ONCE, on one side of the
-    window. `witness_pre_identity` resolves the cited name BEFORE the ARTIFACTS leg; the
-    witness leg resolves it again and compares. Every swap LOCATION changes that answer
-    (the file, any symlinked directory component, a symlink-valued `--root`, an
-    `alias -> target` retarget), which is why this is a different kind of check rather
-    than another entry in a candidate list.
-
-    The controls are what keep it honest: a tree that never moved must reach the
-    ORDINARY predicate, and a citation that never named a hashed artifact must keep its
-    independent-read disposition rather than being blocked."""
-
-    SECRET = "line one\nSECRET token\n"
-    CLEAN = "line one\nharmless\n"
-
-    def _run_legs(self, cited, prep=None, swap=None, declare_clean=False, probe=None):
-        """The two-leg sequence with the PRE-SWAP anchor wired, as `_verify_single`
-        wires it. Returns the LintError message, or None if the receipt passed clean.
-
-        `prep(root)` plants whatever the citation needs to exist on the PRE-swap tree;
-        `swap(root)` is the mid-run mutation (None = the non-vacuity control).
-
-        SIEGE-R3IT-2 — `declare_clean` puts the SANITISED file in ARTIFACTS too, which
-        is what makes the POST-swap end of the move hash-verified territory. Without it
-        the attack arms below are not attacks at all: neither carry key hits, `bound` is
-        False and there is no `evaluated` to take. `probe` is the same out-param
-        `_verify_single` passes, so an arm can assert on the flag itself rather than
-        only on the exit disposition."""
-        rv = _import_rv()
-        td = tempfile.TemporaryDirectory()
-        self.addCleanup(td.cleanup)
-        self.root = pathlib.Path(td.name)
-        h, size = self.plant("f.md", self.SECRET)
-        ch, csize = self.plant("clean.md", self.CLEAN)
-        if prep is not None:
-            prep(self.root)
-        if callable(cited):
-            cited = cited(self.root)
-        arts = [("f.md", h, size)]
-        if declare_clean:
-            arts.append(("clean.md", ch, csize))
-        text = receipt(artifacts=arts,
-                       trace=[f"READ {cited}"],
-                       witness="exec:probe  expect-fail=/SECRET/  ran=TRACE#1")
-        sections = rv.parse_receipt(text)
-        artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
-        trace = rv.parse_trace(sections["TRACE"])
-        witness = rv.parse_witness(sections["WITNESS"])
-
-        bodies = {}
-        cov = rv._Coverage()
-        probe = {} if probe is None else probe
-        pre = rv.witness_pre_identity(witness, trace, self.root, "PASS")
-        rv.tier2_artifacts(artifacts, trace, self.root, True, cov, bodies, [])
-        if swap is not None:
-            swap(self.root)
-        try:
-            rv.tier2_witness(witness, trace, self.root, True, "PASS",
-                             cov, bodies, probe, [], pre)
-        except rv.LintError as e:
-            return str(e)
-        return None
-
-    # -- the three shapes the finding reported --------------------------------
-    def _dir_component(self, root):
-        (root / "link").symlink_to(".")
-        (root / "d").mkdir()
-        (root / "d" / "f.md").write_text(self.CLEAN)
-
-    @staticmethod
-    def _retarget_link_to_d(root):
-        (root / "link").unlink()
-        (root / "link").symlink_to("d")
-
-    def test_a_retargeted_directory_component_is_caught(self):
-        """The reported repro: the declared FILE is never touched, so a detector that
-        looks at `f.md` sees a pristine tree."""
-        for label, spelling in (("relative", "link/f.md"),
-                                ("absolute", lambda r: str(r / "link" / "f.md"))):
-            with self.subTest(spelling=label):
-                attacked = self._run_legs(spelling, prep=self._dir_component,
-                                          swap=self._retarget_link_to_d)
-                self.assertIsNotNone(
-                    attacked,
-                    f"the {label} spelling let a mid-lint directory-component swap "
-                    f"through: the predicate ran against the sanitised bytes")
-                self.assertIn("resolution CHANGED between the legs", attacked)
-
-                control = self._run_legs(spelling, prep=self._dir_component)
-                self.assertIsNotNone(
-                    control,
-                    f"control precondition broken for {label}: the unswapped tree "
-                    f"did not reach the expect-fail predicate at all")
-                self.assertIn("expect-fail regex", control)
-
-    def test_a_retargeted_root_level_alias_is_caught(self):
-        """The finding's second variant, and the one with NO disclosure residue at all:
-        `alias.md -> f.md` retargeted to `clean.md`. Citation and resolution both read
-        depth 1, so the walk channel stays silent too."""
-        def prep(root):
-            (root / "alias.md").symlink_to("f.md")
-
-        def swap(root):
-            (root / "alias.md").unlink()
-            (root / "alias.md").symlink_to("clean.md")
-
-        attacked = self._run_legs("alias.md", prep=prep, swap=swap)
-        self.assertIsNotNone(attacked, "the retargeted alias passed clean")
-        self.assertIn("resolution CHANGED between the legs", attacked)
-        control = self._run_legs("alias.md", prep=prep)
-        self.assertIsNotNone(control, "control precondition broken")
-        self.assertIn("expect-fail regex", control)
-
-    def test_a_swap_onto_a_SECOND_declared_artifact_is_caught(self):
-        """The variant a `carried is None` gate would have left open, and the reason
-        the check is not conditioned on the carry missing: retarget the citation at a
-        path that resolves to the OTHER hash-verified artifact. The realpath key HITS,
-        so `carried` is a real hashed buffer — of the wrong file."""
-        def prep(root):
-            (root / "link").symlink_to(".")
-
-        def swap(root):
-            (root / "link").unlink()
-            (root / "sane").mkdir()
-            (root / "sane" / "f.md").symlink_to(root / "clean.md")
-            (root / "link").symlink_to("sane")
-
-        attacked = self._run_legs("link/f.md", prep=prep, swap=swap)
-        self.assertIsNotNone(
-            attacked,
-            "the predicate ran against a DIFFERENT declared artifact's hashed bytes")
-        self.assertIn("resolution CHANGED between the legs", attacked)
-
-    # -- SIEGE-R3IT-2: the arming condition itself ------------------------------
-    def _swap_onto_clean(self, root):
-        (root / "link").unlink(missing_ok=True)
-        (root / "sane").mkdir()
-        (root / "sane" / "f.md").symlink_to(root / "clean.md")
-        (root / "link").symlink_to("sane")
-
-    def test_siege_r3it2_an_undeclared_pre_swap_end_no_longer_disarms_the_anchor(self):
-        """SIEGE-R3IT-2 — the antecedent was `pre_ident["resolved"] in bodies`, i.e. "the
-        citation ALREADY pointed at a hash-verified artifact when the snapshot was
-        taken". That is a fact about the PRE-swap tree, and the subagent owns the
-        pre-swap tree. Aim the citation at something the run does not hash — an
-        undeclared `junk/f.md` — and the detector is off before the swap happens; then
-        land the swap on a SECOND declared, hash-verified artifact and the realpath
-        carry HITS, `bound` is True, `evaluated` is set and the peer is retired.
-        Measured on `1943055`: the shipped arm's fixture with ONE prep line changed
-        (`link -> .` becomes `link -> junk`) PASSED CLEAN with
-        `probe == {'evaluated': True}`."""
-        def prep(root):
-            (root / "junk").mkdir()
-            (root / "junk" / "f.md").write_text(self.CLEAN)
-            (root / "link").symlink_to("junk")
-
-        probe = {}
-        out = self._run_legs("link/f.md", prep=prep, swap=self._swap_onto_clean,
-                             declare_clean=True, probe=probe)
-        self.assertIsNotNone(
-            out, "an undeclared pre-swap end disarmed the anchor and the predicate ran "
-                 "against a DIFFERENT declared artifact's hashed bytes")
-        self.assertIn("resolution CHANGED between the legs", out)
-        self.assertNotIn("evaluated", probe)
-
-    def test_siege_r3it2_an_unresolvable_pre_swap_end_no_longer_disarms_it(self):
-        """The same finding's second free switch, one conjunct earlier: make the
-        citation resolve NOWHERE at snapshot time (plant no `link` at all) and the
-        detector was off before the `in bodies` test was even reached. `None` is now an
-        ordinary distinct resolution, so "resolved nowhere, then reached a hashed
-        artifact" is a CHANGE like any other."""
-        probe = {}
-        out = self._run_legs("link/f.md", swap=self._swap_onto_clean,
-                             declare_clean=True, probe=probe)
-        self.assertIsNotNone(out, "an absent pre-swap end disarmed the anchor")
-        self.assertIn("resolution CHANGED between the legs", out)
-        self.assertNotIn("evaluated", probe)
-
-    def test_siege_r3it2_the_shipped_declared_pre_swap_arm_still_raises(self):
-        """The control the two arms above are varied FROM — `prep: link -> .`, the
-        shipped `test_a_swap_onto_a_SECOND_declared_artifact_is_caught` prep, with the
-        sanitised twin declared as well. If widening the antecedent had re-keyed the
-        check rather than widened it, this direction (LEAVING hash-verified territory)
-        would have been traded for the one above."""
-        out = self._run_legs("link/f.md", prep=lambda r: (r / "link").symlink_to("."),
-                             swap=self._swap_onto_clean, declare_clean=True)
-        self.assertIsNotNone(out, "the declared pre-swap end stopped raising")
-        self.assertIn("resolution CHANGED between the legs", out)
-
-    # -- the bounds ------------------------------------------------------------
-    def test_a_same_path_replacement_still_runs_on_the_hashed_bytes(self):
-        """NOT this detector's case, and it must not become one: unlink-and-recreate at
-        the SAME path leaves the citation resolving where it always did, so the realpath
-        key binds and the predicate runs on the buffer the ARTIFACTS leg hashed — which
-        is why the anchor needs no inode, only the path."""
-        def swap(root):
-            (root / "f.md").unlink()
-            (root / "f.md").write_text(self.CLEAN)
-
-        out = self._run_legs("f.md", swap=swap)
-        self.assertIsNotNone(out, "the carry did not bind on an unmoved path")
-        self.assertIn("expect-fail regex", out)
-
-    def test_an_undeclared_citation_whose_resolution_moves_is_not_blocked(self):
-        """NON-VACUITY in the other direction. A citation that named NO hash-verified
-        artifact when the snapshot was taken keeps the honest independent-read
-        disposition however the tree moves under it: the two-leg binding argument was
-        never about it, and blocking here would be a false FAIL on a receipt this
-        instrument has nothing to say about."""
-        def prep(root):
-            for d in ("other", "other2"):
-                (root / d).mkdir()
-                (root / d / "x.md").write_text("nothing here\n")
-            (root / "ln").symlink_to("other")
-
-        def swap(root):
-            (root / "ln").unlink()
-            (root / "ln").symlink_to("other2")
-
-        self.assertIsNone(self._run_legs("ln/x.md", prep=prep, swap=swap),
-                          "an undeclared citation was blocked by the swap detector")
-
-    def test_an_undeclared_move_is_not_blocked_by_a_colliding_basename(self):
-        """SIEGE-R3IT-2's own bound, and the shape a fix keyed on the NAME rather than
-        on the two resolutions would get wrong: both ends of the move are undeclared,
-        but the citation's basename is the declared artifact's. Neither end is hashed
-        territory, so this is still ordinary filesystem churn and still not blocked."""
-        def prep(root):
-            for d in ("o1", "o2"):
-                (root / d).mkdir()
-                (root / d / "f.md").write_text("nothing here\n")
-            (root / "ln").symlink_to("o1")
-
-        def swap(root):
-            (root / "ln").unlink()
-            (root / "ln").symlink_to("o2")
-
-        self.assertIsNone(self._run_legs("ln/f.md", prep=prep, swap=swap,
-                                         declare_clean=True),
-                          "a wholly undeclared move was blocked on a basename collision")
 
 
 # --------------------------------------------------------------------------

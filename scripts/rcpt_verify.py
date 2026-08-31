@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, io, json, posixpath, re, signal, sys, hashlib, pathlib, typing
+import contextlib, io, json, os, posixpath, re, signal, sys, hashlib, pathlib, typing
 import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -45,6 +45,20 @@ WITNESS_TIMEOUT_S = 5
 # wrap is still the right one (see _verify_single) — it is the string that was wrong.
 WITNESS_TIMEOUT_MSG = (f"witness evaluation exceeded {WITNESS_TIMEOUT_S}s "
                        "(predicate backtracking or a slow/large artifact read)")
+
+# #488 c1 leg-3 — the resolve-phase timeout budget (SIG-3 / SIG-C / FATAL-R5-4). Sized
+# against a measured ~75µs resolve_base call; see the redesign's Architecture section.
+# The ceiling, not the scaling formula, is what bounds a hostile receipt's achievable
+# deadline (n_names is receipt-controlled and uncapped).
+RESOLVE_PER_NAME_BUDGET_S = 0.05
+RESOLVE_PHASE_CEILING_S = 2 * WITNESS_TIMEOUT_S
+
+# SIG-9-3 / round-9 — sentinel keys for the identity cache. Plain object() so they can
+# never collide with a receipt-controlled name: every genuine cache record is keyed on
+# str(name) (SIG-7-3), so a non-str sentinel is structurally distinguishable.
+_IDENTITY_DEGENERATE = object()
+_IDENTITY_COLLISION_CANDIDATES = object()
+_IDENTITY_UNVERIFIABLE_COLLISION = object()
 
 
 class WitnessTimeout(LintError):
@@ -101,6 +115,12 @@ class WitnessTimeout(LintError):
     contract."""
 
 
+# SIG-10-1 / round-10 — the CURRENT ARM the SIGALRM handler raises against. _witness_bound
+# sets it on entry and restores the previous one on exit; without it the new resolve-phase
+# arm would report "witness evaluation exceeded 5s" on a 10s resolve-phase timeout.
+_CURRENT_ARM = {"seconds": WITNESS_TIMEOUT_S, "what": "witness evaluation"}
+
+
 def _witness_alarm(signum, frame):
     """SIGALRM → WitnessTimeout, so a catastrophically-backtracking witness predicate
     lint-FAILs one receipt (exit 1, message on stderr) instead of hanging the process
@@ -111,11 +131,15 @@ def _witness_alarm(signum, frame):
     function's caller catches, which is why the exception is WitnessTimeout(LintError)
     rather than a bare LintError (Q8). Every existing handler still catches it; the
     three that would silently swallow it classify it instead."""
-    raise WitnessTimeout(WITNESS_TIMEOUT_MSG)
+    # SIG-10-1 — raised against the CURRENT ARM, not the module constant, so a
+    # resolve-phase timeout reports its own phase and its own (scaled) budget.
+    raise WitnessTimeout(
+        f"{_CURRENT_ARM['what']} exceeded {_CURRENT_ARM['seconds']}s "
+        f"(predicate backtracking or a slow/large artifact read)")
 
 
 @contextlib.contextmanager
-def _witness_bound():
+def _witness_bound(seconds=WITNESS_TIMEOUT_S, what="witness evaluation"):
     """#486 / D7 — the CLI-only bound, re-sited so a direct tier2_witness() importer is
     bounded too. EXACTLY ONE ARM on the path through tier2_witness: _verify_single no
     longer arms, because nesting would make the inner arm capture the outer's REMAINING
@@ -140,6 +164,11 @@ def _witness_bound():
     """
     armed = False
     prev = prev_delay = prev_interval = None
+    # SIG-10-1 — save/restore the current-arm record so nested (or sequential) arms each
+    # report their own noun and duration. Part of the existing teardown, not a new step.
+    prev_arm = (_CURRENT_ARM["seconds"], _CURRENT_ARM["what"])
+    _CURRENT_ARM["seconds"] = seconds
+    _CURRENT_ARM["what"] = what
     if hasattr(signal, "setitimer") and hasattr(signal, "SIGALRM"):
         try:
             prev = signal.signal(signal.SIGALRM, _witness_alarm)
@@ -147,11 +176,12 @@ def _witness_bound():
             pass                      # off the main thread — unbounded, never a raise
         else:
             prev_delay, prev_interval = signal.setitimer(
-                signal.ITIMER_REAL, WITNESS_TIMEOUT_S)
+                signal.ITIMER_REAL, seconds)
             armed = True
     try:
         yield
     finally:
+        _CURRENT_ARM["seconds"], _CURRENT_ARM["what"] = prev_arm
         if armed:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, prev)
@@ -1858,6 +1888,79 @@ def resolve_base(name: str, root, found=None, refused=None):
     return first
 
 
+def _witness_stat_dev_ino(path, include_nlink=False):
+    """SIEGE-R4IT-3 / F1 — a single `os.stat` sample of a resolved realpath's identity.
+
+    Returns `(st_dev, st_ino)` on success when `include_nlink` is False; appends
+    `st_nlink` when True. On any `OSError` returns the caught exception instance itself
+    (never None), so a stat failure is a distinguishable third state, never a silent
+    "no change" a caller could misread as success — callers split the three states with
+    `isinstance(result, OSError)` (SIG-7-2).
+
+    Exactly ONE `os.stat` call regardless of `include_nlink`: `st_nlink` comes from the
+    same `os.stat_result` the 2-tuple already produces (FATAL-11-1), so the
+    `include_nlink=True` form adds zero syscalls. `_resolve_once` is the only caller
+    that passes `include_nlink=True`; every T0/T1 identity re-stat site (tier2_witness's
+    F5/SIG-7-2, the stated-target axis's FATAL-9-1) uses the default and gets the
+    original 2-tuple back untouched.
+    """
+    try:
+        st = os.stat(path)
+    except OSError as e:
+        return e
+    if include_nlink:
+        return (st.st_dev, st.st_ino, st.st_nlink)
+    return (st.st_dev, st.st_ino)
+
+
+def _resolve_once(name, root, cache):
+    """SIG-7-3 — resolve `name` exactly once per distinct `str(name)`, memoized in `cache`.
+
+    The value is a record, not a bare `Path | None` (FATAL-12-1): `{"realpath",
+    "found", "refused", "dev_ino_at_resolve", "resolve_stat_failed", "dev_ino",
+    "nlink_at_resolve", "declared"}`. First call for a key runs the real `resolve_base`
+    and, immediately after it returns a non-None realpath, ONE `_witness_stat_dev_ino`
+    call with `include_nlink=True` filling `dev_ino_at_resolve`/`nlink_at_resolve`
+    (FATAL-7-1 / FATAL-11-1); every later call is a dict lookup. A stat that raises
+    `OSError` after a successful resolve leaves `realpath` set but records
+    `resolve_stat_failed=True` with both identity fields None — the "no realpath to
+    stat" and "stat failed with a realpath in hand" causes stay distinguishable in the
+    record (FATAL-8-2).
+
+    `declared` and `dev_ino` are never set to a meaningful value here: `declared`
+    defaults False and is set once during gather (_build_identity_cache); `dev_ino`
+    defaults None and is filled by tier2_artifacts at first open (FATAL-12-1 /
+    FATAL-7-1). Not module-level and not `lru_cache`-backed — `cache` is constructed
+    once per _verify_single / _selftest_run_fixture / _selftest_crosscheck invocation
+    (SIG-6-5).
+    """
+    key = str(name)
+    if key in cache:
+        return cache[key]["realpath"]
+    found = []
+    refused = []
+    rec = {
+        "realpath": None,
+        "found": found,
+        "refused": refused,
+        "dev_ino_at_resolve": None,
+        "resolve_stat_failed": False,
+        "dev_ino": None,
+        "nlink_at_resolve": None,
+        "declared": False,
+    }
+    cache[key] = rec
+    rec["realpath"] = resolve_base(name, root, found, refused)
+    if rec["realpath"] is not None:
+        st = _witness_stat_dev_ino(rec["realpath"], include_nlink=True)
+        if isinstance(st, OSError):
+            rec["resolve_stat_failed"] = True
+        else:
+            rec["dev_ino_at_resolve"] = (st[0], st[1])
+            rec["nlink_at_resolve"] = st[2]
+    return rec["realpath"]
+
+
 def _contained(child: pathlib.Path, base: pathlib.Path) -> bool:
     """True iff resolved `child` is `base` itself or lies beneath it. Both paths
     must already be realpath-resolved by the caller (resolve_base does so)."""
@@ -2257,6 +2360,186 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
             f"Tier-2: {label} exceeds the Tier-2 read budget "
             f"({budget} B remaining of {ARTIFACT_READ_CAP} B; not read)")
     return raw
+
+
+def _read_and_fstat_artifact(realpath, budget, label):
+    """S17-8 / S2 — open a realpath, capture `(st_dev, st_ino)` from the FILE DESCRIPTOR,
+    and read the bytes from that same fd, race-free.
+
+    `open(realpath, "rb")` → `os.fstat(fh.fileno())` (the T0 identity sample) →
+    `fh.read(budget + 1)` on that same descriptor, closed in the `with` block's finally.
+    Capturing from the open fd — not a fresh path stat — pins the identity sample to the
+    exact file this read opens (SIG-8-4's fd-pinned comparison; see tier2_artifacts step
+    (1b)). If the first read already yields more than `budget` bytes, raise the SAME
+    over-cap LintError `_read_capped` raises, with `label` in place and the "; not read"
+    semantics.
+
+    `OSError`/`MemoryError` propagate unchanged — the caller classifies both (SIEGE-R2BA-2 /
+    SIG-10-3), so tier2_artifacts keeps BOTH of its adjacent handler arms around this
+    call (SIG-11-2). No `st_size` pre-test: the file can grow between stat and read, and
+    a `budget + 1` read holds the ceiling however it grows — the same argument that
+    closes `_read_capped`'s window (SIEGE-R2BA-2).
+    """
+    with open(realpath, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        raw = fh.read(budget + 1)
+    if len(raw) > budget:
+        raise LintError(
+            f"Tier-2: {label} exceeds the Tier-2 read budget "
+            f"({budget} B remaining of {ARTIFACT_READ_CAP} B; not read)")
+    return ((st.st_dev, st.st_ino), raw)
+
+
+def _build_identity_cache(artifacts, trace, witnesses, verdict, root, cache_out, cov=None):
+    """FATAL-12-1 — the one upfront pass that builds the shared identity cache, in two
+    phases.
+
+    GATHER (untimed, receipt-parse only, no disk I/O): the three sentinel keys are
+    written FIRST (SIG-13-4 / SIG-14-2 — `_IDENTITY_DEGENERATE=False`,
+    `_IDENTITY_COLLISION_CANDIDATES=[]`, `_IDENTITY_UNVERIFIABLE_COLLISION=frozenset()`,
+    all present on every exit path including a mid-resolve WitnessTimeout), then an
+    insertion-ordered list of distinct `str(name)` — ARTIFACTS-declaration order first,
+    then each witness's `_witness_cited_name` in witness order, None results skipped —
+    via `dict.fromkeys` (SIG-9-4: never a set), plus a `str(name) -> declared` map
+    (`declared` iff `str(name)` is in the str-normalised artifacts keys, FATAL-12-1).
+
+    RESOLVE (one whole-phase timer): budget =
+    `min(RESOLVE_PHASE_CEILING_S, max(WITNESS_TIMEOUT_S, RESOLVE_PER_NAME_BUDGET_S *
+    n_names))` (SIG-C / FATAL-R5-4). Each name resolves via `_resolve_once` under
+    `_witness_bound(seconds=budget, what="the resolve phase")`; probe (1) latches
+    `_IDENTITY_DEGENERATE=True` on any successful sample whose `st_ino == 0` (the
+    `sshfs -o noino` signature — SIG-9-3, evaluated for EVERY sample, never only the
+    first, SIG-10-5). On `WitnessTimeout`, every not-yet-reached name gets a full record
+    with `realpath=None` and its gather `declared` before re-raising (F7).
+
+    PROBE (2) (after resolve, no new disk I/O): a `(st_dev, st_ino) -> Path` dict over
+    every resolved name whose `dev_ino_at_resolve` is non-None detects two distinct
+    realpaths sharing one identity (the key is never overwritten on a 3+-way collision,
+    MIN-14-4); each candidate record carries the shared pair and, per member, a
+    `(realpath, OR-accumulated declared, nlink_at_resolve)` triple (SIG-14-1). The
+    degenerate-vs-unverifiable verdict is NOT decided here — `_finalize_identity_degenerate`
+    does that once `verified` exists (SIG-12-1 / SIG-13-3). Never raises for --strict
+    ambiguity (S1): that stays in tier2_artifacts/tier2_witness. `cov` is accepted for
+    signature parity and unused (S1).
+    """
+    cache_out[_IDENTITY_DEGENERATE] = False
+    cache_out[_IDENTITY_COLLISION_CANDIDATES] = []
+    cache_out[_IDENTITY_UNVERIFIABLE_COLLISION] = frozenset()
+
+    declared_names = {str(k) for k in artifacts}
+    cited = []
+    for w in witnesses:
+        cn = _witness_cited_name(w, trace, verdict)
+        if cn is None:
+            continue
+        cited.append(str(cn))
+    names = list(dict.fromkeys([str(k) for k in artifacts] + cited))
+    declared_map = {nm: nm in declared_names for nm in names}
+
+    n_names = len(names)
+    budget = min(RESOLVE_PHASE_CEILING_S,
+                 max(WITNESS_TIMEOUT_S, RESOLVE_PER_NAME_BUDGET_S * n_names))
+    try:
+        with _witness_bound(seconds=budget, what="the resolve phase"):
+            for nm in names:
+                _resolve_once(nm, root, cache_out)
+                cache_out[nm]["declared"] = declared_map[nm]
+                dev_ino = cache_out[nm]["dev_ino_at_resolve"]
+                if dev_ino is not None and dev_ino[1] == 0:
+                    cache_out[_IDENTITY_DEGENERATE] = True
+    except WitnessTimeout:
+        # F7 — every not-yet-reached name gets a full record with realpath=None; and
+        # a name whose _resolve_once was interrupted MID-resolve already has a record
+        # (declared left at _resolve_once's False default, since the resolve loop's
+        # declared write never ran) — re-assert gather `declared` for EVERY name so a
+        # genuinely-declared name is never left carrying False after a timeout.
+        for nm in names:
+            if nm in cache_out:
+                cache_out[nm]["declared"] = declared_map[nm]
+                continue
+            cache_out[nm] = {
+                "realpath": None,
+                "found": [],
+                "refused": [],
+                "dev_ino_at_resolve": None,
+                "resolve_stat_failed": False,
+                "dev_ino": None,
+                "nlink_at_resolve": None,
+                "declared": declared_map[nm],
+            }
+        raise
+
+    realpath_declared = {}
+    for nm in names:
+        rec = cache_out[nm]
+        dev_ino = rec["dev_ino_at_resolve"]
+        if dev_ino is None:
+            continue
+        rp = rec["realpath"]
+        realpath_declared[rp] = realpath_declared.get(rp, False) or rec["declared"]
+
+    dev_ino_to_realpath = {}
+    dev_ino_to_nlink = {}
+    candidates = []
+    for nm in names:
+        rec = cache_out[nm]
+        dev_ino = rec["dev_ino_at_resolve"]
+        if dev_ino is None:
+            continue
+        rp = rec["realpath"]
+        if dev_ino not in dev_ino_to_realpath:
+            dev_ino_to_realpath[dev_ino] = rp
+            dev_ino_to_nlink[dev_ino] = rec["nlink_at_resolve"]
+        elif dev_ino_to_realpath[dev_ino] != rp:
+            first_rp = dev_ino_to_realpath[dev_ino]
+            candidates.append({
+                "dev_ino": dev_ino,
+                "members": [
+                    (first_rp, realpath_declared.get(first_rp, False),
+                     dev_ino_to_nlink[dev_ino]),
+                    (rp, realpath_declared[rp], rec["nlink_at_resolve"]),
+                ],
+            })
+    cache_out[_IDENTITY_COLLISION_CANDIDATES] = candidates
+
+
+def _finalize_identity_degenerate(cache, verified):
+    """SIG-13-3 / SIG-13-2 — the second and last writer of `_IDENTITY_DEGENERATE` and the
+    sole writer of `_IDENTITY_UNVERIFIABLE_COLLISION`, called once per receipt after every
+    one of its tier2_artifacts calls completes (so every declared candidate's sha256 is
+    already hash-verified into `verified`).
+
+    Reads `cache.get(_IDENTITY_COLLISION_CANDIDATES, ())` defensively (SIG-13-4, never a
+    bare subscript) and `verified`; no new disk touch. Every disambiguation input is
+    carried on the candidate record itself (shared `(st_dev, st_ino)` + per-member
+    `(realpath, OR-declared, nlink_at_resolve)` — SIG-14-1), so no `cache.items()`
+    reverse lookup is needed.
+
+    For each pair: if EITHER member is undeclared, the undeclared member's realpath is
+    added to `_IDENTITY_UNVERIFIABLE_COLLISION` by a REBINDING assignment (never an
+    in-place `.add()` — SIG-14-3) and `_IDENTITY_DEGENERATE` is left untouched
+    (SIG-13-2's citation-axis case). Otherwise both members are declared and necessarily
+    hash-verified: both `nlink_at_resolve == 1` is degenerate immediately (POSIX rules
+    out a hard link, FATAL-11-1); else the pair is degenerate iff the two `verified`
+    buffers DISAGREE — compared raw, never re-hashed (SIG-14-1) — else benign. Every
+    write is an assignment to True, never a clearing of a probe-(1) `True`.
+    """
+    candidates = cache.get(_IDENTITY_COLLISION_CANDIDATES, ())
+    for cand in candidates:
+        dev_ino = cand["dev_ino"]
+        (rp1, dec1, nl1), (rp2, dec2, nl2) = cand["members"]
+        if not dec1 or not dec2:
+            if not dec1:
+                cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
+                    cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp1})
+            if not dec2:
+                cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
+                    cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp2})
+            continue
+        if nl1 == 1 and nl2 == 1:
+            cache[_IDENTITY_DEGENERATE] = True
+        elif verified[(rp1, dev_ino)] != verified[(rp2, dev_ino)]:
+            cache[_IDENTITY_DEGENERATE] = True
 
 
 # #488 inquisitor/AV4 (edge) — a KNOWN, DELIBERATELY OUT-OF-SCOPE GAP, recorded here so
@@ -2668,8 +2951,8 @@ def _emit_provenance_notes(trace, verified_bases, unevaluated_bases,
         return
 
 
-def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
-                    notes_out=None):
+def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
+                    *, cache, verified):
     """Part 1. For each ARTIFACTS <name>: resolve_base; if found, recompute sha256
     and compare (mismatch -> FAIL). If absent: path-shaped + strict -> FAIL;
     else UNVERIFIABLE (non-fatal). Returns list of UNVERIFIABLE notes; raises LintError on FAIL.
@@ -2714,6 +2997,8 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     no counter and moving no exit code. Do NOT "fix" it by reordering: putting these
     notes back on the return value re-opens the discard-on-raise fail-open the
     out-parameter exists to close. Do not read the clean-run order as a contract."""
+    if cache is None or verified is None:
+        raise LintError("Tier-2: the identity cache and verified buffer are required")
     notes = []
     # SIEGE-R2BA-2 — what is LEFT of ARTIFACT_READ_CAP for this leg. Cumulative, because
     # the entry count is receipt-controlled; see the constant for why.
@@ -2762,12 +3047,30 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
     _supplied = [root] if isinstance(root, (str, pathlib.Path)) else list(root)
     all_roots = list(dict.fromkeys(
         [str(x) for x in all_roots] + [str(x).rstrip("/") for x in _supplied]))
+    # SIG-4 / FATAL-10-1 — the reverse index, built ONCE via a single cache.items() pass
+    # before the per-entry loop, so dev_ino propagation is O(1) amortised per entry. The
+    # isinstance(nm, str) guard skips the non-str sentinel keys that share this dict.
+    by_realpath = {}
+    for nm, rec in cache.items():
+        if not isinstance(nm, str):
+            continue
+        if rec["realpath"] is not None:
+            by_realpath.setdefault(rec["realpath"], []).append(nm)
+    opened = {}
     try:
         for name, meta in artifacts.items():
             evaluated.add(name)     # tried, whatever this iteration goes on to do
-            found = []
-            refused = []
-            resolved = resolve_base(name, root, found, refused)
+            try:
+                rec = cache[str(name)]
+            except KeyError:
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: ARTIFACTS {_show_path(name)} is missing from the "
+                    f"identity cache")
+            found = rec["found"]
+            refused = rec["refused"]
+            resolved = rec["realpath"]
             if resolved is None:
                 # D8.3's arm, and the --strict/UNVERIFIABLE arms, now live in the shared
                 # _unresolved_disposition so the witness leg cannot classify the same name
@@ -2894,36 +3197,57 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                         cov.partial = True     # remaining entries + witness leg uncounted
                     raise LintError(f"Tier-2 --strict: {msg}")   # BEFORE any read
                 notes.append(f"AMBIGUOUS: {msg}")
-            try:
-                # SIEGE-R2BA-2 — bounded, so an attacker-named 4 GiB sparse file is refused
-                # instead of materialised. The raise is a LintError and lands on the arm
-                # below it, which sets `partial` exactly as the unreadable arm does.
-                raw = _read_capped(resolved, budget, f"ARTIFACTS {_show_path(name)}")
-            except LintError:
-                # Over-cap: bytes NOT read, hash NOT recomputed, remaining entries and the
-                # witness leg uncounted. Fails CLOSED — never a silent skip.
-                if cov is not None:
-                    cov.partial = True
-                raise
-            except (OSError, MemoryError) as e:
-                # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an OSError, so under
-                # `ulimit -v` it escaped this guard and printed a Traceback AFTER the census.
-                # `strerror` via getattr because only the OSError leg has one.
-                #
-                # #486 fixer / F3 — a name that RESOLVES but cannot be READ. #486's whole
-                # purpose is to make these names resolve, under a second, orchestrator-
-                # supplied findings root whose contents this process does not own, so a
-                # mode-000 / EISDIR / ENOENT-since-probe file is now ordinary. _verify_single
-                # catches only LintError and the module guard only _PathReadError, so the
-                # bare read_bytes() escaped as a traceback printed AFTER the
-                # TIER2-COVERAGE: line. A clean classified bullet instead; partial because
-                # the remaining entries and the witness leg go uncounted.
+            label = f"ARTIFACTS {_show_path(name)}"
+            pair = opened.get(resolved)
+            if pair is None:
+                try:
+                    # S3 — the dedup is scoped to open/fstat/read only; the first spelling
+                    # of a realpath opens, fd-fstats and reads once, later spellings reuse.
+                    st_dev_ino, raw = _read_and_fstat_artifact(
+                        resolved, budget, label)
+                except LintError:
+                    # Over-cap: bytes NOT read, hash NOT recomputed, remaining entries and
+                    # the witness leg uncounted. Fails CLOSED — never a silent skip.
+                    if cov is not None:
+                        cov.partial = True
+                    raise
+                except (OSError, MemoryError) as e:
+                    # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an OSError, so
+                    # under `ulimit -v` it escaped this guard and printed a Traceback AFTER
+                    # the census. `_strerror` via getattr because only the OSError leg has one.
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(f"Tier-2: {label} unreadable ({_strerror(e)})")
+                opened[resolved] = (st_dev_ino, raw)
+            else:
+                st_dev_ino, raw = pair
+            # FATAL-7-1 / FATAL-8-2 / SIG-11-7 — on EVERY entry (first-opened or reused)
+            # require dev_ino_at_resolve to be non-None and equal to the fd identity.
+            dev_ino_at_resolve = rec["dev_ino_at_resolve"]
+            if dev_ino_at_resolve is None:
                 if cov is not None:
                     cov.partial = True
                 raise LintError(
-                    f"Tier-2: ARTIFACTS {_show_path(name)} unreadable "
-                    f"({_strerror(e)})")
+                    f"Tier-2: {label}'s identity could not be sampled at "
+                    f"resolution time")
+            if dev_ino_at_resolve != st_dev_ino:
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: {label} resolved to a path contained under an "
+                    f"allowed root at resolution time ({dev_ino_at_resolve}), but "
+                    f"the file opened for reading has a different identity "
+                    f"({st_dev_ino}); the path was replaced between resolution "
+                    f"and read")
+            prev_budget = budget
             budget -= len(raw)
+            if budget < 0:
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: {label} exceeds the Tier-2 read budget "
+                    f"({prev_budget} B remaining of {ARTIFACT_READ_CAP} B; bytes "
+                    f"reused from an earlier spelling)")
             actual = hashlib.sha256(raw).hexdigest()
             if cov is not None:
                 # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash
@@ -2937,45 +3261,12 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, bodies=None,
                 if cov is not None:
                     cov.partial = True     # remaining entries + witness leg uncounted
                 raise LintError(f"Tier-2: ARTIFACTS {_show_path(name)} sha256 mismatch (disk={actual[:12]} receipt={meta['hash'][:12]})")
-            if bodies is not None:
-                # SIEGE-R2BA-1 — carried AFTER the comparison, so the buffer the witness leg
-                # evaluates is exactly the buffer this leg hashed AND matched.
-                #
-                # Carried under BOTH keys — the declared NAME and the RESOLVED realpath — and
-                # both are load-bearing in opposite directions. Keying on only one loses a
-                # case the other covers, which is why this is not a single-key choice:
-                #   * NAME alone (the original) missed whenever the two legs SPELLED the same
-                #     file differently. The witness leg's `art_name` for a rangeless grep
-                #     payload is the first token of the cited TRACE entry's args verbatim,
-                #     written independently of the ARTIFACTS line, so a `./f.md` in TRACE
-                #     against an `f.md` in ARTIFACTS silently reinstated the second
-                #     independent read this carry exists to remove — on a name that HAD been
-                #     hashed. Realpath closes `./`, `a/../f.md` and absolute-vs-relative.
-                #   * REALPATH alone missed whenever the same declared name RESOLVES
-                #     differently between the legs — precisely the mid-lint symlink swap this
-                #     carry was written against. Replacing the hashed regular file with a
-                #     symlink to a sanitised sibling moves the realpath, so a realpath-only
-                #     lookup misses and the predicate runs on the sanitised bytes: a receipt
-                #     the carry used to REJECT would be accepted. That is a fail-open, so
-                #     realpath is an ADDITION here, never a replacement.
-                # Two keys for one buffer, so a hit under either binds the predicate to the
-                # bytes this leg hashed AND matched. `name` is a str and `resolved` a Path, so
-                # the two key spaces cannot collide.
-                #
-                # #488 warden-r2/F2 — `str(name)`, matching the `finally:` block's twin below
-                # and for the identical hazard. `name` is only str-typed for the CLI path;
-                # the ~40 direct-API call sites this file already treats as in scope can hand
-                # in an `os.PathLike` (e.g. `PurePosixPath`) declared key. Stored raw, such a
-                # key made BOTH halves of the carry fail open: the ordinary single-spelling
-                # NAME lookup missed (the witness leg's `art_name` is always a str, and
-                # `PurePosixPath("f.md") != "f.md"`), and `_carry_should_have_bound`'s
-                # `isinstance(k, str)` filter then skipped it, so the mid-run-swap detector
-                # was silent too. Normalising here fixes both at once and makes that filter's
-                # stated contract — "the string keys ARE the declared names" — true rather
-                # than aspirational, instead of widening the filter to a key space the
-                # lookup still cannot hit.
-                bodies[str(name)] = raw
-                bodies[resolved] = raw
+            # S17-2 / SIG-8-1 — only on a match. dev_ino is propagated realpath-keyed and
+            # axis-blind, to every name (any axis) sharing this realpath; `verified` is the
+            # sole writer here and is gated on the ARTIFACTS declaration axis alone.
+            for n in by_realpath.get(resolved, ()):
+                cache[n]["dev_ino"] = st_dev_ino
+            verified[(resolved, st_dev_ino)] = raw
             # #488 / T2 — recorded only AFTER the sha256 comparison above, so "verified"
             # means resolved AND hash-matched, never merely resolved.
             #
@@ -4024,273 +4315,10 @@ def _witness_cited_name(witness, trace, verdict):
             return None
         art_name, _ = witness_art_name(witness, trace[idx - 1], verdict)
         return art_name
-    except Exception:
-        return None
-
-
-def witness_pre_identity(witness, trace, root, verdict):
-    """SIEGE-R2IT-3 — where the witness's cited name resolves BEFORE the ARTIFACTS leg
-    runs, so the witness leg has a PRE-SWAP anchor to compare its own resolution against.
-
-    WHY A SPELLING TEST CANNOT DO THIS JOB, however resolution-aware it is made.
-    `_carry_spellings`/`_carry_should_have_bound` run ONCE, at witness time, i.e.
-    necessarily AFTER any mid-lint swap. SIEGE-R1-2 added the cited name's own RESOLVED
-    form to the spelling set and claimed it closed the class; SIEGE-R2IT-3 measured that
-    it does not, and could not: both sides are resolved on the same POST-swap tree, so
-    moving the swap off the declared FILE and onto a symlinked DIRECTORY COMPONENT the
-    citation passes through (`ln -s . link`, cite `link/f.md`, retarget `link -> d`
-    between the legs) makes both sides resolve to one post-swap target, the sets
-    intersect trivially, and the detector cannot tell a swap happened at all. Measured
-    on `588a7e9` through `_run_legs`: PASSED CLEAN with `probe == {'evaluated': True}`,
-    the `expect-fail=/SECRET/` predicate run against the sanitised bytes. The root-level
-    `alias.md -> f.md` retarget is the same defect with no directory component at all.
-
-    So this is a different KIND of check, not another spelling: TEMPORAL IDENTITY. The
-    snapshot is taken before `tier2_artifacts` — the widest window, so a swap landing
-    DURING the hashing leg is caught too — and the witness leg compares its own fresh
-    resolution of the same name against it. It closes every swap LOCATION at once (the
-    declared file, any symlinked directory component of the citation, a symlink-valued
-    `--root` token, an `alias -> target` retarget), because all of them are ways of
-    changing where one name points, and this reads exactly that.
-
-    Returns `{"name": ..., "resolved": Path|None}` or None. `resolved` is
-    `resolve_base`'s answer, i.e. the same function and the same root precedence the
-    witness leg itself uses — comparing against anything else would manufacture
-    differences that are not swaps.
-
-    NO CENSUS, NO NOTES, NO RAISE — with exactly one exception, below. `found`/`refused`
-    are throwaway lists: this call is a measurement taken for the comparison, and letting
-    it bill an ambiguity or emit a REFUSED note would double every such report on every
-    run.
-
-    COST: one extra `resolve_base` per run (a handful of `lstat`s), on a name the run
-    resolves anyway — ON AN HONEST NAME. SIEGE-R3BA-3 measured the dishonest one: the
-    citation is a plain TRACE token with no length or component limit (only
-    `parse_artifacts` restricts names), `os.path.realpath` rebuilds the accumulated path
-    string per component, so cost is QUADRATIC in a string the receipt author writes and
-    the receipt is read under a 64 MiB cap. Measured on `1943055`: 100 000 components
-    36.0 s, 200 000 components 153.6 s, 400 000 killed at 120 s — with no symlinks and
-    no filesystem preparation at all. Before SIEGE-R2IT-3 added this call the witness's
-    cited name was resolved exactly ONCE, inside `tier2_witness`'s `with
-    _witness_bound():`, so however hostile the name the run died at 5 s; this snapshot
-    reintroduced an UNBOUNDED entry point for the one name that had a bound.
-
-    So the `resolve_base` here runs under `_witness_bound()` too. It is a SEPARATE arm,
-    not a nested one — this call completes before `tier2_artifacts`, and
-    `tier2_witness`'s own arm is entered long afterwards — so the nesting hazard
-    `_witness_bound`'s docstring records (an inner arm capturing the outer's remaining
-    delay) does not arise; `test_36b_the_handler_is_restored_while_no_timer_is_armed`
-    pins the two cycles as sequential, which is what would go red if one ever nested
-    inside the other. TWO STATED COSTS, both the price of the second measurement being
-    bounded at all: a run's worst-case wall clock is now two 5 s budgets rather than one,
-    and an IMPORTING caller's own SIGALRM deadline can be pushed out by what is spent
-    inside twice rather than once (`_witness_bound` restores the delay it captured at arm
-    time, undecremented — pre-existing, now on one more path).
-
-    THE ONE RAISE, and why it is not a contract break. `WitnessTimeout` propagates;
-    every other exception still answers None. The distinction is not the exception
-    hierarchy but what the two failures MEAN. An ordinary failure to measure leaves the
-    anchor unarmed and the run continues with the pre-SIEGE-R2IT-3 behaviour, which is
-    the documented degradation. A wall-clock timeout is the bound FIRING, and swallowing
-    it would make arming the timer strictly worse than not arming it: the 5 s would be
-    spent, the alarm consumed (`setitimer` is one-shot), and the anchor silently
-    disarmed — the SIEGE-R3BA-1 shape one function over. The receipt whose name times
-    out here would time out on the witness leg's own `resolve_base` too, so this fails
-    the same run closed, earlier and with the same message."""
-    try:
-        name = _witness_cited_name(witness, trace, verdict)
-        if name is None:
-            return None
-        with _witness_bound():
-            return {"name": name, "resolved": resolve_base(name, root, [], [])}
-    except WitnessTimeout:
-        raise                           # SIEGE-R3BA-3 — see the paragraph above
-    except Exception:
-        return None
-
-
-def _carry_spellings(name, roots):
-    """SIEGE-S2 — every DISK-FREE spelling of `name` that this run must treat as ONE
-    identity, as a set of `PurePosixPath`.
-
-    The forms:
-      * the name verbatim (what `PurePosixPath` alone gave: `./` and a trailing `/`
-        already collapse — `//` DOES NOT, see below);
-      * its LEXICAL `..` collapse, via `posixpath.normpath` — the form
-        `PurePosixPath` deliberately withholds;
-      * for an ABSOLUTE spelling, its relpath from each supplied root — the §3.2
-        MANDATED form for a tracked file, and the one the detector could not see;
-      * SIEGE-R1-2: the name's OWN RESOLVED form, and that form's relpath from each
-        supplied root.
-
-    SIEGE-R1-2 — THE PURELY LEXICAL SET WAS SIEGE-S2'S FIX RE-SPELLED ROUND THE SAME
-    ATTACK. The first three forms resolve the ROOTS and then ask `relative_to`, so the
-    only absolute citations they can collapse onto a §3.1-relative declaration are the
-    ones a STRING comparison already matched. Every prefix a lexical `relative_to`
-    cannot collapse was therefore a free spelling of the identical mid-lint swap:
-      * a symlinked DIRECTORY component the subagent plants in a root it owns
-        (`ln -s . link`, then cite `<root>/link/f.md` or `link/f.md`);
-      * a DOUBLED LEADING SLASH — `PurePosixPath` and `posixpath.normpath` BOTH preserve
-        `//` as a distinct root component (POSIX reserves it) while `Path.resolve()`
-        collapses it, so `//<root>/f.md` names the file and matches nothing;
-      * a `--root` token that is itself a symlink, since `_carry_should_have_bound`
-        hands this function `_as_roots`' RESOLVED roots and the citation may spell the
-        root as supplied.
-    Measured on `20c7b7b`: `_carry_spellings('<root>/link/f.md', roots)` returned
-    `{'<root>/link/f.md', 'link/f.md'}` — no `f.md` — and each spelling passed the swap
-    clean with the predicate run against the sanitised bytes.
-
-    THE RESOLVED FORM IS ADDED, NEVER SUBSTITUTED, and that is what keeps SIEGE-S2's own
-    argument intact. The event being detected is that the FILESYSTEM MOVED between the
-    two legs, so a test that resolves the receipt-controlled name is reading the
-    POST-swap tree and cannot see the move (`_carry_should_have_bound`'s docstring) —
-    which is an argument for never RELYING on the resolved form, not an argument for
-    withholding it. The lexical forms still carry the whole pre-swap identity; the
-    resolved one only ever ENLARGES the set, and this set's single consumer RAISES on a
-    non-empty intersection. So the added form can cost a false BLOCK on a receipt whose
-    two carry keys BOTH already missed, and can never cost an accepted swap — the same
-    direction, and the same justification, the `..` collapse below already runs on.
-
-    A ROOT is orchestrator-supplied, is not what the swap moved, and both its raw and
-    its resolved spelling are offered so an absolute citation matches whichever the
-    orchestrator's own `--root` token used.
-
-    THE LEXICAL `..` COLLAPSE IS UNSOUND ACROSS A SYMLINKED PARENT, and is used anyway
-    — deliberately, and only because the direction is safe. `a/../f.md` and `f.md` can
-    genuinely resolve differently when `a` is a symlink, so this can call two distinct
-    files one identity. The only consumer is `_carry_should_have_bound`, whose single
-    caller RAISES on True: a wrong answer here costs a false BLOCK on a receipt whose
-    two carry keys BOTH already missed, never an accepted swap. The inverse — leaving
-    `..` alone, which is what `PurePosixPath` does — is a fail-OPEN, and `f.md/../f.md`
-    was a measured second bypass spelling of SIEGE-S2.
-
-    MUST NOT RAISE: `name` is receipt-controlled and `roots` is caller-supplied."""
-    out = set()
-    try:
-        raw = str(name)
-    except LintError:
+    except (LintError, WitnessTimeout):
         raise                           # SIEGE-R3BA-1
     except Exception:
-        return out
-    for form in (raw, posixpath.normpath(raw) if raw else raw):
-        try:
-            out.add(pathlib.PurePosixPath(form))
-        except LintError:
-            raise                       # SIEGE-R3BA-1
-        except Exception:
-            continue
-    bases = set()
-    for r in roots:
-        for spelling in (r, pathlib.Path(r).resolve()):
-            try:
-                bases.add(pathlib.PurePosixPath(str(spelling)))
-            except LintError:
-                raise                   # SIEGE-R3BA-1
-            except Exception:
-                continue
-    for cand in tuple(out):
-        if not cand.is_absolute():
-            continue
-        for b in bases:
-            try:
-                out.add(pathlib.PurePosixPath(cand.relative_to(b)))
-            except LintError:
-                raise                   # SIEGE-R3BA-1
-            except Exception:
-                continue
-    # SIEGE-R1-2 — the cited name's OWN RESOLVED form, ADDED to the lexical set above
-    # and never replacing it. See the docstring for why the addition is sound and why
-    # the lexical forms must survive it.
-    for r in roots:
-        try:
-            rr = pathlib.Path(r).resolve()
-        except LintError:
-            raise                       # SIEGE-R3BA-1
-        except Exception:
-            continue
-        try:
-            base = pathlib.Path(raw)
-            real = base.resolve() if base.is_absolute() else (rr / base).resolve()
-            real = pathlib.PurePosixPath(str(real))
-        except LintError:
-            raise                       # SIEGE-R3BA-1
-        except Exception:
-            continue
-        if base.is_absolute():
-            # Only for a name that was ALREADY absolute. Adding the root-joined
-            # realpath of a RELATIVE name would manufacture one absolute candidate per
-            # root, which is the cross-root basename identity this function does not
-            # adjudicate (`_carry_should_have_bound`'s docstring). Its relpath below is
-            # free of that: the relpath of a relative name from the root it was joined
-            # to is that name again, modulo exactly the symlink collapse being sought.
-            out.add(real)
-        try:
-            out.add(pathlib.PurePosixPath(real.relative_to(rr)))
-        except LintError:
-            raise                       # SIEGE-R3BA-1
-        except Exception:
-            continue
-    return out
-
-
-def _carry_should_have_bound(art_name, bodies, root=None):
-    """#488 inquisitor/AV1 (state) — True when the witness's cited name is a SPELLING of
-    a name the artifacts leg hash-verified, so a `bodies` miss on BOTH keys is proof the
-    resolution changed mid-run rather than evidence that nothing was hashed.
-
-    PURELY LEXICAL, and that is the whole point: the event being detected is that the
-    FILESYSTEM moved between the two legs, so any test that goes back to disk is testing
-    the post-swap tree and cannot see it. `PurePosixPath` is the normaliser rather than
-    `os.path.normpath` because it collapses `./`, `//` and a trailing `/` — the forms
-    that name the same file under any tree — while leaving `..` alone: collapsing `..`
-    lexically is unsound across a symlinked parent and would make this fire on two names
-    that genuinely resolve differently.
-
-    Only the STRING keys of `bodies` are considered; those are the DECLARED ARTIFACTS
-    names, and only hash-MATCHED entries are ever carried (see the write site). The Path
-    keys are the realpaths, which the caller has already consulted directly.
-
-    SIEGE-S2 — THE SCOPE PARAGRAPH THAT STOOD HERE WAS THE VULNERABILITY, WRITTEN DOWN.
-    It read: an ABSOLUTE cited name (§3.2's MANDATED form for a tracked file) never
-    lexically equals a §3.1-relative declaration, so a swap against a name cited that way
-    "is left open deliberately rather than guessed". Measured on `ba482e2` with the
-    existing `_run_legs` harness: `./f.md` RAISED, `/<root>/f.md` — the mandated spelling
-    — passed CLEAN with the predicate run against the swapped-in sanitised bytes, and so
-    did `f.md/../f.md`. Every subagent following §3.2 lost the protection the relative
-    form kept.
-
-    The identity check is therefore SPELLING-INVARIANT, not raw-lexical: both sides go
-    through `_carry_spellings` (see it for exactly which forms, and for why resolving the
-    ROOTS keeps this disk-free where it matters — the cited NAME is still never
-    resolved). The cross-root basename collision the old paragraph cited as the reason to
-    guess nothing is not adjudicated here either, and does not need to be: under the
-    MANDATED `--strict` the artifacts leg already refuses such a receipt with "ambiguous
-    across roots" before any body is stored, and on a non-strict run the residue lands on
-    this raise, which is the over-BLOCK direction.
-
-    MUST NOT RAISE on any input: `art_name` is receipt-controlled and `bodies` is a
-    caller-supplied out-param, and a False here costs the old behaviour while an
-    exception costs the verdict."""
-    try:
-        roots = _as_roots(root) if root is not None else ()
-        want = _carry_spellings(art_name, roots)
-    except LintError:
-        raise                           # SIEGE-R3BA-1
-    except Exception:
-        return False
-    if not want:
-        return False
-    for k in bodies:
-        if not isinstance(k, str):
-            continue
-        try:
-            if want & _carry_spellings(k, roots):
-                return True
-        except LintError:
-            raise                       # SIEGE-R3BA-1
-        except Exception:
-            continue
-    return False
+        return None
 
 
 def _witness_stated_target(witness):
@@ -4333,93 +4361,8 @@ def _witness_stated_target(witness):
     return witness.get("payload") or ""
 
 
-def _stated_target_binds(witness, art_name, resolved, root):
-    """SIEGE-R3-1 — True when the WITNESS line's own stated target and the artifact the
-    leg ACTUALLY read are the same on-disk identity.
-
-    WHAT THIS IS FOR, and why `bound` alone was not it. SIEGE-R2IT-2 made the PASS-leg
-    `evaluated` flag — and therefore the `SUPERSEDES` consequent that retires a peer's
-    finding — require the predicate to have run against the ARTIFACTS leg's
-    hashed-AND-matched buffer. But `carried` is looked up under `art_name`, and for a
-    rangeless `grep:` witness `art_name` is the CITED TRACE entry's own first token. So
-    `bound` answered "were THESE bytes hashed", never "were these the bytes of the file
-    the WITNESS says it checked" — and the receipt author writes both strings. Declare
-    the genuine still-failing findings file AND a sanitised twin, hash-verify both, put
-    the genuine name on the WITNESS line and the twin on `ran=TRACE#N`: every existing
-    gate is satisfied by an honest artifact, and the peer is retired on a predicate that
-    never touched the file the receipt names. Measured on `1943055`: exit 0, peer
-    retired, and with the twin at the root's own top level a census byte-identical to
-    the honest single-artifact control's but for the ARTIFACTS denominator.
-
-    THE TEST IS IDENTITY, NOT SPELLING, and it answers NO whenever it cannot prove YES:
-
-      * NORMALISED-STRING equality first (`posixpath.normpath`, the same normaliser the
-        relative arm of `_cited_below_top_level` and `_carry_spellings` use), which is
-        disk-free and settles every honest receipt where the two strings are the same
-        name — including `./f.md` against `f.md` and `a/../f.md` against `f.md`.
-      * otherwise RESOLUTION equality, through `resolve_base` with the leg's own root
-        precedence, so the two spellings §3.1 and §3.2 both mandate (a bare
-        `round-9-findings.md` on the WITNESS line against the absolute
-        `<root>/round-9-findings.md` §3.2 requires in TRACE) are one identity here.
-        Comparing against anything but `resolve_base` would manufacture disagreements
-        that are not disagreements.
-
-    Note deliberately NOT `_carry_spellings`: that set is built for a consumer that
-    RAISES on a non-empty intersection, so its two deliberate over-approximations (the
-    lexical `..` collapse across a symlinked parent, and the added resolved form) run in
-    the over-BLOCK direction there. Here a non-empty answer GRANTS `bound`, so the same
-    generosity would run fail-OPEN — the set is sound for its consumer and unsound for
-    this one, and reusing it would be the third spelling-patch this file has already
-    replaced twice.
-
-    THE RESOLUTION ARM READS THE POST-SWAP TREE, and that is the right tree for the
-    question it asks. "Did the witness name the file whose bytes reached the predicate"
-    is a question about the read that just happened; "did that file move between the
-    legs" is a different question, and `witness_pre_identity` is the instrument for it.
-    Answering both here would give one check two failure modes and neither a bound.
-
-    A payload that is not a filename at all — the committed `grep:boom  expect-fail=/boom/`
-    shape, where the token is search text — resolves nowhere and equals no citation, so
-    it answers False. That is the honest reading and not a false block: nothing ties
-    `boom` to the file the citation names, so a supersession resting on it would rest on
-    a name the receipt never verified. The consequence is the SAME disposition an
-    undeclared body already gets (`UNVERIFIABLE`, the `wrong-name` census code, and no
-    `evaluated`) — a disclosure, never a verdict.
-
-    MUST NOT RAISE: `witness`, `art_name` and the payload are all receipt-controlled.
-    Every failure to DECIDE answers False, which is the fail-closed direction for a
-    flag whose True grants a supersession."""
-    stated = _witness_stated_target(witness)
-    if stated is None:
-        return True
-    if not stated:
-        # An empty `grep:` payload names nothing, so nothing can be shown to be it.
-        # Fail-closed, for the reason the docstring of _witness_stated_target gives.
-        return False
-    if art_name is None:
-        return False
-    try:
-        if posixpath.normpath(str(stated)) == posixpath.normpath(str(art_name)):
-            return True
-    except LintError:
-        raise                           # SIEGE-R3BA-1
-    except Exception:
-        return False
-    if resolved is None:
-        return False
-    try:
-        # `found`/`refused` are throwaway lists, for witness_pre_identity's reason: this
-        # is a measurement taken for a comparison, and letting it bill an ambiguity or
-        # emit a REFUSED note would double every such report on every run.
-        return resolve_base(str(stated), root, [], []) == resolved
-    except LintError:
-        raise                           # SIEGE-R3BA-1
-    except Exception:
-        return False
-
-
-def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
-                  probe_out=None, notes_out=None, pre_ident=None):
+def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=None,
+                  notes_out=None, *, cache, verified):
     """Part 2. Resolve the cited TRACE artifact via resolve_base, read ONLY the cited
     #L/#B range from disk, then call the shared verify_witness. Absent witness file:
     path-shaped + --strict -> FAIL; else UNVERIFIABLE (non-fatal). Returns UNVERIFIABLE
@@ -4500,6 +4443,8 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
     moves). `_verify_single` reads `evaluated` from it to enforce the SUPERSEDES
     witness-evidence rule's Tier-2 half — "Tier-2 then verifies the witness normally"
     (return-convention.md § SUPERSEDES), which was the half nothing checked."""
+    if cache is None or verified is None:
+        raise LintError("Tier-2: the identity cache and verified buffer are required")
     with _witness_bound():
         try:
             if not witness["ran"].startswith("TRACE#"):
@@ -4615,9 +4560,10 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             if cov is not None:
                 # S2 — applicability is a MEASURED fact from here on, so d becomes 1 only now.
                 cov.wit_applicable = 1
-            found = []
-            refused = []
-            resolved = resolve_base(art_name, root, found, refused)
+            rec = cache.get(art_name)
+            found = rec["found"] if rec else []
+            refused = rec["refused"] if rec else []
+            resolved = rec["realpath"] if rec else None
             # #488 / T7 — same depth key, same counter, on the witness leg (§4). SITED
             # HERE, immediately after resolve_base and BEFORE the ambiguity block, for
             # the same reason that block's own `ambiguous` bump sits before its raise:
@@ -4706,160 +4652,97 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 notes_out.extend(notes_ambiguous)
                 notes_out.extend(notes_refused)
             meter = {}     # SIEGE-R2BA-2 — filled on the #B branch, read by the cap below
-            # SIEGE-R2BA-1 — the artifacts leg's hashed-AND-matched buffer for THIS FILE,
-            # or None when there is none (no carry supplied; the name never resolved on
-            # that leg; or a rangeless grep name that is not an ARTIFACTS entry at all).
-            # NAME first, then realpath — the order matters. The name key is authoritative
-            # for identity across a mid-lint resolution change (a symlink swap moves the
-            # realpath but not the declared name), and the realpath key catches the two
-            # legs spelling the same file differently. Consulting both is what makes the
-            # carry hit in either failure mode; see the write site for why neither key
-            # alone is sufficient.
-            carried = None
-            if bodies:
-                carried = bodies.get(art_name)
-                if carried is None:
-                    carried = bodies.get(resolved)
-                # SIEGE-R2IT-3 — the PRE-SWAP anchor, tested BEFORE the spelling
-                # detector below because it answers the same question with evidence
-                # rather than inference, and it is the half that closes the class.
-                #
-                # The antecedent is a fact about the ARTIFACTS window: when the snapshot
-                # was taken this citation resolved to R, and R is a realpath key of
-                # `bodies` — which the write site only ever fills AFTER the sha256
-                # comparison, so R is a file this run hashed AND matched. If nothing
-                # moved, the resolution above would still be R. It is not. That is not a
-                # heuristic about spellings; it is the same name resolved twice, on two
-                # sides of the window in which a swap can happen, disagreeing.
-                #
-                # NOT gated on `carried is None`, and that is deliberate. The obvious
-                # narrowing ("only complain when the carry missed") leaves a live
-                # variant: declare TWO artifacts, cite the incriminating one through a
-                # symlink, and retarget the symlink at the SANITISED one. Both are
-                # hash-verified, so the realpath key HITS, `carried` is the sanitised
-                # buffer, and the predicate that would have rejected the receipt runs
-                # against declared, hashed, wrong bytes. The invariant is that the
-                # citation still reaches the file it named when the ARTIFACTS leg ran,
-                # not merely that SOME hashed buffer was found.
-                #
-                # SIEGE-R3IT-2 — THE ARMING CONDITION USED TO BE A FACT ABOUT THE
-                # ATTACKER'S OWN TREE, AND IS NOW A FACT ABOUT THE CONSEQUENCE.
-                #
-                # The antecedent stood as "the PRE-swap resolution was itself a hashed
-                # artifact" (`pre_ident["resolved"] in bodies`), plus "it resolved at all"
-                # (`... is not None`). Both are chosen by the subagent, because the
-                # subagent owns the PRE-swap tree. Aim the citation at something the run
-                # does not hash before the ARTIFACTS leg runs — an undeclared `junk/f.md`,
-                # or nothing at all — and the detector is off before the interesting
-                # conjunct is reached; then let the swap land the citation on a SECOND
-                # declared, hash-verified artifact and the realpath carry HITS, `bound`
-                # is True and `evaluated` is set. Measured on `1943055` through the
-                # shipped `_run_legs` harness with ONE fixture line changed
-                # (`link -> .` becomes `link -> junk`, and again with no `link` at all):
-                # PASSED CLEAN, `probe == {'evaluated': True}` on both — the shipped
-                # `test_a_swap_onto_a_SECOND_declared_artifact_is_caught` arm's own attack,
-                # bypassed. End-to-end through the CLI with a padded ARTIFACTS list to
-                # widen the window: exit 0, peer RETIRED, 4/4 consecutive runs.
-                #
-                # So the change is read UNCONDITIONALLY — `pre != resolved` compares the
-                # same name's two resolutions with `None` (resolved nowhere) as an
-                # ordinary distinct value, so neither switch exists any more — and what
-                # decides whether the change is ACTIONABLE is the property the attacker
-                # does not choose: whether either END of the move is hash-verified
-                # territory. Reaching it is exactly as significant as leaving it, and it
-                # is the reaching half the attack above needed.
-                #
-                # WHAT IS STILL DELIBERATELY NOT CLAIMED, narrowed to what the round-3
-                # review's own non-goal (attack lines (b)/(d)) actually asks for. A
-                # resolution change BOTH of whose ends are outside `bodies` is ordinary
-                # filesystem churn under a name no leg hashed, and blocking it would be a
-                # false FAIL on a receipt this instrument has nothing to say about; that
-                # citation keeps the honest independent-read disposition (the
-                # UNVERIFIABLE note, the census code, and — since SIEGE-R2IT-2 — no
-                # `evaluated`). What is NO LONGER claimed is the old paragraph's stronger
-                # sentence, that such a citation "has ... no `evaluated`" full stop: it is
-                # FALSE the moment the move ENDS on a hashed artifact, which is the whole
-                # finding, and that case is now the raise rather than an exemption.
-                #
-                # A caller that supplies no `pre_ident` (every direct-API importer, and
-                # --eval) keeps exactly the old behaviour: the spelling detector below
-                # is what it has, with the gap SIEGE-R2IT-3 measured.
-                pre_resolved = (pre_ident.get("resolved")
-                                if pre_ident is not None else None)
-                if (pre_ident is not None
-                        and pre_ident.get("name") == art_name
-                        and pre_resolved != resolved
-                        and (pre_resolved in bodies or resolved in bodies)):
-                    # `partial`, and raised before the read, for the sibling arm's
-                    # reason: bytes were never decoded and the predicate provably never
-                    # ran.
-                    if cov is not None:
-                        cov.partial = True
-                    # The two directions read differently to an operator and have
-                    # different remedies, so the message says which one happened.
-                    where = (f"it resolved to {_show_path(str(pre_resolved))}"
-                             if pre_resolved is not None else
-                             "it resolved to nothing")
-                    raise LintError(
-                        f"Tier-2: witness {_show_path(art_name)} resolution CHANGED "
-                        f"between the legs — when the ARTIFACTS leg ran {where}, and it "
-                        f"now reaches "
-                        f"{_show_path(str(resolved)) if resolved is not None else 'nothing'}"
-                        f"; one end of that move is a file this run hash-verified, so "
-                        f"the predicate would have run against bytes that leg did not "
-                        f"hash under this name")
-                if carried is None and _carry_should_have_bound(art_name, bodies, root):
-                    # #488 inquisitor/AV1 (state) — the DOUBLE MISS, which the write
-                    # site's own conclusion ("a hit under either binds the predicate to
-                    # the bytes this leg hashed AND matched") does not cover. Each key
-                    # closes a different failure mode ALONE; put both failure modes on
-                    # ONE run and both keys miss:
-                    #   * a TRACE spelling difference (`./f.md` for a declared `f.md`)
-                    #     defeats the NAME key — the witness's `art_name` for a rangeless
-                    #     payload is the cited entry's first token verbatim, written
-                    #     independently of the ARTIFACTS line, and no Tier-1 rule ties
-                    #     the two spellings together;
-                    #   * a mid-lint symlink swap moves the REALPATH after the hash, which
-                    #     is the very attack the realpath key was added for.
-                    # Both halves are receipt-controlled and free. Measured: a declared,
-                    # hash-verified `f.md` containing the token the witness must NOT
-                    # match, replaced between the legs by a symlink to a sanitised
-                    # sibling and cited in TRACE one `./` apart — the carry silently
-                    # degraded to a FRESH READ of the sanitised file, the predicate
-                    # passed, and the run exited 0 still billing `witness 1/1`. The
-                    # single-spelling twin of the same receipt was correctly REJECTED.
-                    #
-                    # The defect is the silent degradation, not the missing key, so the
-                    # fix is fail-CLOSED and not a third key. A third normalised-name key
-                    # would widen the same chain that has now failed twice: it would bind
-                    # the predicate on one more spelling and go on silently re-reading
-                    # disk for the next one. What is DETECTABLE here — with no disk
-                    # access, and therefore immune to the swap itself — is that the cited
-                    # name is a spelling of a name THIS RUN HASHED, while neither key
-                    # bound it. That can only mean the resolution moved between the legs,
-                    # which is exactly the event the carry exists to refuse.
-                    #
-                    # A name the artifacts leg never verified is untouched: it has no
-                    # `bodies` entry under any spelling, so this never fires for it and
-                    # the honest independent-read disposition below still applies (the
-                    # `(none)`-ARTIFACTS and undeclared-payload shapes both keep their
-                    # `unhashed-body` census code and their `independent read` note).
-                    #
-                    # `partial`, and raised before the read: bytes were never decoded and
-                    # the predicate provably never ran, which is the same state the
-                    # `_read_cited_range` LintError arm just below records.
+            art_realpath = rec["realpath"] if rec else None
+            recorded_dev_ino = rec["dev_ino"] if rec else None
+            # F1 — re-stat NOW (T1) and require it to still match the dev_ino recorded
+            # when the ARTIFACTS leg hash-verified this realpath (T0).
+            current_state = (_witness_stat_dev_ino(art_realpath)
+                             if art_realpath is not None else None)
+            # SIG-7-2 — a stat FAILURE is a distinct cause from a stat DISAGREEMENT.
+            if recorded_dev_ino is not None and isinstance(current_state, OSError):
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: witness {_show_path(art_name)} names an artifact this run "
+                    f"hash-verified, but its identity could not be re-checked at witness time "
+                    f"({_strerror(current_state)})")
+            current_dev_ino = (current_state
+                               if not isinstance(current_state, OSError) else None)
+            # F5 — a T0/T1 mismatch on a hash-verified name stays a hard raise.
+            if recorded_dev_ino is not None and current_dev_ino != recorded_dev_ino:
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: witness {_show_path(art_name)} names an artifact this run "
+                    f"hash-verified, but its identity CHANGED between the legs (recorded "
+                    f"{recorded_dev_ino} when the ARTIFACTS leg hashed it, now "
+                    f"{current_dev_ino}); the predicate would have run against bytes this "
+                    f"leg did not hash under this name")
+            # SIG-9-3 — a filesystem that cannot produce unique (st_dev, st_ino) pairs
+            # cannot answer ANY of this run's identity comparisons.
+            identity_degenerate = cache.get(_IDENTITY_DEGENERATE, False)
+            # SIG-14-2 — the sibling citation-axis disposition; gates unbound_codes/why only.
+            identity_unverifiable = (
+                art_realpath is not None and art_realpath in cache.get(
+                    _IDENTITY_UNVERIFIABLE_COLLISION, frozenset()))
+            # FATAL-10-2 — identity_verified answers only the byte-source question.
+            identity_verified = (recorded_dev_ino is not None
+                                 and current_dev_ino == recorded_dev_ino
+                                 and (art_realpath, recorded_dev_ino) in verified)
+            # FATAL-R5-2 — the byte source is keyed on identity_verified alone.
+            raw = verified.get((art_realpath, recorded_dev_ino)) if identity_verified else None
+            # identity_degenerate gates supersession eligibility only — never the byte source.
+            identity_ok = identity_verified and not identity_degenerate
+            stated = _witness_stated_target(witness)
+            # FATAL-12-1 — a non-empty stated payload must name a declared ARTIFACTS entry
+            # whose realpath equals art_name's, checked before bound / any read.
+            if stated is not None and stated != "":
+                stated_rec = cache.get(stated)
+                if stated_rec is None or not stated_rec["declared"]:
                     if cov is not None:
                         cov.partial = True
                     raise LintError(
-                        f"Tier-2: witness {_show_path(art_name)} names an artifact this "
-                        f"run hash-verified, but its resolution CHANGED between the "
-                        f"legs (neither the declared name nor the resolved realpath "
-                        f"carries the hashed body); the predicate would have run "
-                        f"against bytes no leg hashed")
+                        f"Tier-2: witness {_show_path(art_name)}'s stated target "
+                        f"{_show_path(stated)} is not a declared ARTIFACTS entry")
+                stated_realpath = stated_rec["realpath"]
+                if stated_realpath is None or stated_realpath != art_realpath:
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)}'s stated target "
+                        f"{_show_path(stated)} does not name the same file as the "
+                        f"TRACE entry it cites")
+            bound = identity_ok and stated != ""
+            if probe_out is not None:
+                probe_out["bound"] = bound
+            # FATAL-10-3 — the unbound read must re-check containment against the T-1
+            # sample via the fd _read_and_fstat_artifact actually opens.
+            if not identity_verified and raw is None and art_realpath is not None:
+                try:
+                    st_dev_ino, raw = _read_and_fstat_artifact(
+                        art_realpath, ARTIFACT_READ_CAP,
+                        f"witness {_show_path(art_name)}")
+                except LintError:
+                    if cov is not None:
+                        cov.partial = True
+                    raise
+                except (OSError, MemoryError) as e:
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)} unreadable "
+                        f"({_strerror(e)})")
+                if (rec["dev_ino_at_resolve"] is None
+                        or rec["dev_ino_at_resolve"] != st_dev_ino):
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)}'s identity changed "
+                        f"between resolution and the witness read")
             try:
-                body_text = _read_cited_range(resolved, cited,
+                body_text = _read_cited_range(art_realpath, cited,
                                               witness if from_payload else None, meter,
-                                              carried)
+                                              raw)
             except LintError:
                 # #486 fixer / F3 — state (c)'s sibling: the body was never decoded, so
                 # the predicate provably never ran and this leg did not finish. Without
@@ -4963,12 +4846,15 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
             # and only the conjunction says the predicate ran against hashed bytes of the
             # artifact under discussion. See _stated_target_binds for why the test is
             # identity rather than spelling, and for the kinds it is a no-op on.
-            stated_binds = _stated_target_binds(witness, art_name, resolved, root)
-            bound = carried is not None and stated_binds
-            # SIEGE-R3-1 — one code per FAILED conjunct, so the parenthetical says which
-            # of the two the receipt actually broke (and says both when it broke both).
-            unbound_codes = ((("unhashed-body",) if carried is None else ())
-                             + (() if stated_binds else ("stated-target-not-read",)))
+            # T-7 — unbound_codes reconstituted from the remaining independent booleans.
+            unbound_codes = (
+                (("unhashed-body",) if (not identity_ok and not identity_degenerate)
+                 else ())
+                + (("identity-not-unique",) if identity_degenerate else ())
+                + (("stated-target-not-read",) if stated == "" else ())
+                + (("identity-unverifiable-collision",) if identity_unverifiable else ()))
+            if probe_out is not None:
+                probe_out["unbound_codes"] = unbound_codes
             derived_name = bool(witness.get("kind") != "grep" and not from_payload
                                 and cap is None and not notes_ambiguous and not bound)
             notes_unbound = []
@@ -4977,15 +4863,18 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, bodies=None,
                 # different remedies: an unhashed body is fixed by declaring the file,
                 # a stated-target disagreement by citing the file the witness names.
                 why = " and ".join(
-                    ([] if carried is not None else
+                    ([] if identity_verified else
                      ["the name is not a hash-matched ARTIFACTS entry"])
-                    + ([] if stated_binds else
-                       [(f"the WITNESS line names "
-                         f"{_show_path(_witness_stated_target(witness))}, which is not "
-                         f"the artifact this citation reads")
-                        if _witness_stated_target(witness) else
-                        "the WITNESS line names no artifact of its own "
-                        "(empty grep: payload)"]))
+                    + ([] if stated != "" else
+                       ["the WITNESS line names no artifact of its own "
+                        "(empty grep: payload)"])
+                    + (["the filesystem cannot produce unique (device, inode) identity "
+                        "pairs for this run's artifacts, so no identity comparison can "
+                        "be trusted"] if identity_degenerate else [])
+                    + (["this name shares a (device, inode) pair with a declared "
+                        "artifact but was never declared itself, so its identity cannot "
+                        "be corroborated against any declared hash"]
+                       if identity_unverifiable else []))
                 notes_unbound = [
                     f"UNVERIFIABLE: witness {_show_path(art_name)} (predicate evaluated "
                     f"against an independent read — {why})"]
@@ -5388,17 +5277,18 @@ def _selftest_run_fixture(fx, root) -> str:
         artifacts = parse_artifacts(sections["ARTIFACTS"])
         trace = parse_trace(sections["TRACE"])
         witness = parse_witness(sections["WITNESS"])
-        # SIEGE-R2BA-1 — the fixture leg wires the carry too, so the committed corpus is
-        # exercised through the BOUND path the CLI takes, not a second unbound one.
-        bodies = {}
-        # SIEGE-R2IT-3 — the fixture leg wires the pre-swap anchor too, for the same
-        # reason it wires the carry: the committed corpus must run the path the CLI
-        # runs, or the corpus stops being an anti-drift instrument for it.
-        pre_ident = witness_pre_identity(witness, trace, root, verdict)
-        tier2_artifacts(artifacts, trace, root, fx["strict"], None, bodies)
+        # #488 c1 leg-3 — build the one shared identity cache + verified buffer (INV-5),
+        # so the committed corpus keeps exercising the BOUND identity-binding path the
+        # CLI takes rather than a second, unbound one.
+        cache = {}
+        verified = {}
+        _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
+        tier2_artifacts(artifacts, trace, root, fx["strict"], None,
+                        cache=cache, verified=verified)
+        _finalize_identity_degenerate(cache, verified)
         if verdict in {"PASS", "FAIL"}:
-            tier2_witness(witness, trace, root, fx["strict"], verdict, None, bodies,
-                          None, None, pre_ident)
+            tier2_witness(witness, trace, root, fx["strict"], verdict, None,
+                          cache=cache, verified=verified)
         return "pass"
     except WitnessTimeout:
         return "error"        # #486/Q8 — a timeout is NOT a passing expect:fail fixture
@@ -5440,6 +5330,7 @@ def _selftest_crosscheck(rec, bodies):
     did = rec.get("dispatch-id", "?")
     verdict = lint_receipt(text)
     sections = parse_receipt(text)
+    artifacts = parse_artifacts(sections["ARTIFACTS"])
     trace = parse_trace(sections["TRACE"])
     witness = parse_witness(sections["WITNESS"])
     idx = _trace_idx(witness["ran"])
@@ -5496,16 +5387,34 @@ def _selftest_crosscheck(rec, bodies):
                 if cited_range != body:
                     problems.append(f"crosscheck {did}: inline body != cited range "
                                     f"(disk path reads only the range — fixture invariant broken)")
+        # FATAL-C / SIG-11-3 — build a REAL identity cache over this tempdir root, so
+        # tier2_witness's cache.get(art_name) actually resolves (never cache={}, which
+        # resolves every row's art_name to None and silently turns the disk leg into a
+        # vacuous LINT-PASS under strict=False). verified stays {} — SIG-6-3: the
+        # committed fixture's declared sha256s are hand-written placeholders that
+        # deliberately do not match its bodies, and this crosscheck never calls
+        # tier2_artifacts (MIN-14-1), so nothing has the single-writer right to
+        # populate verified here.
+        cache = {}
         try:
-            tier2_witness(witness, trace, root, False, verdict)
-            disk_disp = "LINT-PASS"
+            _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
         except WitnessTimeout as e:
-            # #486/Q8 — recording "LINT-FAIL" here AGREES with an inline LINT-FAIL and
-            # so reports no problem: the swallow this crosscheck exists to prevent.
+            # SIG-6-5 — a resolve-phase timeout is a distinct raise site from the
+            # tier2_witness-arm timeout below; record it as a problem, not a swallow.
             disk_disp = "TIMEOUT"
-            problems.append(f"crosscheck {did}: witness evaluation timed out ({e})")
-        except LintError:
-            disk_disp = "LINT-FAIL"
+            problems.append(f"crosscheck {did}: identity-cache resolve timed out ({e})")
+        else:
+            try:
+                tier2_witness(witness, trace, root, False, verdict,
+                              cache=cache, verified={})
+                disk_disp = "LINT-PASS"
+            except WitnessTimeout as e:
+                # #486/Q8 — recording "LINT-FAIL" here AGREES with an inline LINT-FAIL and
+                # so reports no problem: the swallow this crosscheck exists to prevent.
+                disk_disp = "TIMEOUT"
+                problems.append(f"crosscheck {did}: witness evaluation timed out ({e})")
+            except LintError:
+                disk_disp = "LINT-FAIL"
     if disk_disp != inline_disp:
         problems.append(f"crosscheck {did}: inline={inline_disp} != disk={disk_disp}")
     return problems
@@ -5776,6 +5685,10 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
     # them twice whenever the witness leg succeeded and a later leg raised. Every drain
     # site therefore emits `notes + wit_notes`.
     wit_notes = []
+    # #488 c1 leg-3 / FATAL-9-2 — the resolve-phase timeout flag. Bound here (not in the
+    # tier2 branch) so the LintError handler can consult it on every exit without a
+    # NameError on the paths that raise before the tier2 block is reached.
+    cache_timeout = None
     try:
         try:
             verdict = lint_receipt(text)
@@ -5825,16 +5738,24 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 artifacts = parse_artifacts(sections["ARTIFACTS"])
                 trace = parse_trace(sections["TRACE"])
                 witness = parse_witness(sections["WITNESS"])
-                # SIEGE-R2BA-1 — the ONE buffer the two legs share, so the sha256 this
-                # run verifies is a statement about the bytes its witness predicate is
-                # evaluated against. See tier2_witness for the measured attack and for
-                # what the carry does NOT close.
-                bodies = {}
-                # SIEGE-R2IT-3 — the PRE-SWAP anchor, taken HERE and not one line later.
-                # A mid-lint swap can land at any moment; snapshotting before the
-                # ARTIFACTS leg makes the detection window cover the hashing leg too,
-                # which is where the padded-ARTIFACTS variant widens it to whole seconds.
-                pre_ident = witness_pre_identity(witness, trace, root, verdict)
+                # #488 c1 leg-3 — the one shared identity cache and verified buffer
+                # (INV-5), built before the ARTIFACTS leg so the identity binding the two
+                # legs share is established once per receipt.
+                cache = {}
+                verified = {}
+                try:
+                    _build_identity_cache(artifacts, trace, [witness], verdict,
+                                          root, cache, cov)
+                except WitnessTimeout as e:
+                    # FATAL-9-2 — a truncated resolve phase must not land on a clean
+                    # exit 0 (the mandated bare-basename shape reaches a non-raising
+                    # UNVERIFIABLE arm); remember it so EVERY exit hard-fails naming
+                    # the resolve phase, not as an ordinary Tier-2 failure.
+                    cache_timeout = (
+                        "Tier-2: the resolve phase exceeded its budget while "
+                        f"establishing artifact identities ({e}); refusing to report "
+                        "a verdict that a truncated identity resolution could have "
+                        "faked")
                 # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
                 # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
                 # witness-evidence consequent), and nothing said so on any channel.
@@ -5852,8 +5773,9 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # second list: every drain site emits `notes + wit_notes`, so mirroring
                 # into `notes` directly is what makes the PROVENANCE-ONLY lines reach
                 # stderr on the LintError exits too.
-                notes += tier2_artifacts(artifacts, trace, root, strict, cov, bodies,
-                                         notes)
+                notes += tier2_artifacts(artifacts, trace, root, strict, cov, notes,
+                                         cache=cache, verified=verified)
+                _finalize_identity_degenerate(cache, verified)
                 wit_probe = {}
                 if verdict in {"PASS", "FAIL"}:
                     # #486 / D7 — the bound now lives in tier2_witness, so a direct
@@ -5868,7 +5790,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # its exits, so nothing is lost by ignoring the return here; other
                     # callers (--selftest, the direct-call tests) still use it.
                     tier2_witness(witness, trace, root, strict, verdict, cov,
-                                  bodies, wit_probe, wit_notes, pre_ident)
+                                  wit_probe, wit_notes, cache=cache, verified=verified)
                 else:
                     # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
                     # leg, so the collector would hear nothing from it and the line would
@@ -5906,6 +5828,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 if v11 is not None and v11["supersedes"] != "none" \
                         and not wit_probe.get("unsourced") \
                         and (not wit_probe.get("evaluated")
+                             or not wit_probe.get("bound")
                              or wit_probe.get("result_discarded")):
                     # C1-R3-S1 — the exemption is keyed on `unsourced`: tier2_witness
                     # sourced NO artifact, so resolve_base never ran, verify_witness was
@@ -6022,6 +5945,24 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # too: on PASS/FAIL, cite a witness that resolves; on BLOCKED, there
                     # is no witness that can satisfy this consequent at all, so the only
                     # in-receipt move is `SUPERSEDES: none`.
+                    # SIG-10-2 — a third, condition-specific message branch for the
+                    # `or not bound` disjunct added at the condition above (S4). When the
+                    # predicate WAS evaluated but its identity did not bind to the
+                    # hash-verified artifact it cites, the generic no-evidence wording
+                    # ("resolved to no evaluated predicate") is affirmatively false on
+                    # that shape; name the identity-binding cause instead, threading the
+                    # unbound_codes tier2_witness already computed so the message says
+                    # which conjunct failed.
+                    if wit_probe.get("evaluated") and not wit_probe.get("bound"):
+                        raise LintError(
+                            "SUPERSEDES requires witness ran=TRACE#N whose predicate "
+                            "was EVALUATED at Tier-2 and BOUND to the hash-verified "
+                            "artifact it cites (witness-evidence requirement: the "
+                            "witness's predicate was evaluated, but its identity did "
+                            "not bind to the artifact this run hash-verified, so the "
+                            "predicate demonstrates nothing about the predecessor it "
+                            "retires — unbound: "
+                            + ", ".join(wit_probe.get("unbound_codes", ())) + ")")
                     raise LintError(
                         "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
                         "EVALUATED at Tier-2 (witness-evidence requirement: this "
@@ -6049,6 +5990,12 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # the witness-leg notes even though it was produced after them. This
                     # leg genuinely runs last, so it belongs at the end of the note band.
                     wit_notes.append("UNVERIFIABLE: ledger binding (no --ledger)")
+                if cache_timeout:
+                    # FATAL-9-2 — the resolve phase timed out; convert the clean exit
+                    # to a hard LintError (exit 1) naming the resolve phase. The
+                    # LintError handler below drains the notes, so do not drain here
+                    # (the notes would be emitted twice).
+                    raise LintError(cache_timeout)
                 _drain(notes + wit_notes)
             elif ledger is not None:
                 sys.stderr.write("UNVERIFIABLE: --ledger ignored under --tier1 "
@@ -6075,7 +6022,10 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
             # un-escaped, and it is live on exactly the runs the census was built for
             # ("the failing run is exactly where the census earns its keep"). See
             # _show_diag.
-            sys.stderr.write(_show_diag(e) + "\n")
+            # FATAL-9-2 — if the resolve phase timed out, whatever LintError is in flight
+            # is downstream of a truncated identity resolution, so the bullet must name
+            # the resolve phase rather than the incidental failure.
+            sys.stderr.write(_show_diag(cache_timeout if cache_timeout else e) + "\n")
             return 1
         except BaseException:
             # C1-R3-S2 (freeze-guard revision) — the third exit drains too. An

@@ -186,8 +186,7 @@ class TestAnEmptyArtifactsSetCannotSilenceTheUnhashedWitnessRead(_TwoRootCase):
             f"  1  WROTE  round-3-findings.md  sha256:{H64}",
             "CLAIMS",
             "  (none)",
-            "WITNESS    grep:round-3-findings.md  "
-            "expect-fail=/Fatal: [1-9]/  ran=TRACE#1",
+            "WITNESS    grep:  expect-fail=/Fatal: [1-9]/  ran=TRACE#1",
             "SUSPICION  0.10",
             "NEXT       (none)",
         ]) + "\n")
@@ -203,7 +202,7 @@ class TestAnEmptyArtifactsSetCannotSilenceTheUnhashedWitnessRead(_TwoRootCase):
 
     def test_the_census_carries_the_disagreement_code(self):
         c = census(self.out.stderr)
-        self.assertIn("wrong-name 1 (rangeless-grep-payload,unhashed-body)", c, c)
+        self.assertIn("wrong-name 1 (rangeless-grep-payload,stated-target-not-read,unhashed-body)", c, c)
 
     def test_the_witness_leg_says_the_read_was_independent(self):
         self.assertIn("UNVERIFIABLE: witness round-3-findings.md "
