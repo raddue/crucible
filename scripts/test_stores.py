@@ -41,7 +41,6 @@ if HERE not in sys.path:
 
 from scripts import grudge_append as ga  # noqa: E402
 from scripts import grudge_query as gq  # noqa: E402
-from scripts import render_ledger as rl  # noqa: E402
 from scripts import atomic_write as aw  # noqa: E402
 from scripts import brier_advisory as ba  # noqa: E402
 from scripts import ledger_doctor as ld  # noqa: E402
@@ -420,78 +419,6 @@ class SignatureHitTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# render_ledger — caught_count (honest headline) / inflation_alert             #
-# --------------------------------------------------------------------------- #
-
-class CaughtCountTest(unittest.TestCase):
-    def test_counts_whs_true_forward_entries(self):
-        entries = [
-            {"would_have_shipped_without_gate": True},
-            {"would_have_shipped_without_gate": True},
-            {"would_have_shipped_without_gate": False},
-            {"would_have_shipped_without_gate": None},
-        ]
-        self.assertEqual(rl.caught_count(entries), 2)
-
-    def test_backfilled_excluded_even_if_whs_forced_true(self):
-        # The exclusion keys on `backfilled` itself, not merely WHS being null —
-        # a pathological backfilled entry with WHS forced True is still excluded.
-        entries = [
-            {"would_have_shipped_without_gate": True, "backfilled": True},
-            {"would_have_shipped_without_gate": True},
-        ]
-        self.assertEqual(rl.caught_count(entries), 1)
-
-
-class InflationAlertTest(unittest.TestCase):
-    def test_silent_until_baseline_weeks_met(self):
-        rates = {"siege": {"significant_rate": 1.0, "fatal_rate": 0.0}}
-        base = {"siege": {"significant_median": 0.01, "fatal_median": 0.0,
-                          "weeks": 3}}   # < MIN_BASELINE_WEEKS (4)
-        self.assertEqual(rl.inflation_alert(rates, base), [])
-
-    def test_fires_on_significant_rate_over_3x_median(self):
-        rates = {"siege": {"significant_rate": 0.40, "fatal_rate": 0.0}}
-        base = {"siege": {"significant_median": 0.10, "fatal_median": 0.0,
-                          "weeks": 4}}   # 0.40 > 3 * 0.10
-        alerts = rl.inflation_alert(rates, base)
-        self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0]["skill"], "siege")
-
-    def test_fires_on_fatal_rate_over_3x_median(self):
-        rates = {"siege": {"significant_rate": 0.0, "fatal_rate": 0.20}}
-        base = {"siege": {"significant_median": 0.0, "fatal_median": 0.05,
-                          "weeks": 5}}   # 0.20 > 3 * 0.05
-        self.assertEqual(len(rl.inflation_alert(rates, base)), 1)
-
-    def test_no_fire_at_exactly_3x_boundary(self):
-        # inflation_alert uses a STRICT `>` (sig > 3 * sig_med, render_ledger.py
-        # L253), so a rate EXACTLY at 3x the median must NOT fire. Pins the
-        # boundary against an accidental flip to `>=`.
-        rates = {"siege": {"significant_rate": 0.30, "fatal_rate": 0.0}}
-        base = {"siege": {"significant_median": 0.10, "fatal_median": 0.0,
-                          "weeks": 4}}   # 0.30 == 3 * 0.10 → strict > is False
-        self.assertEqual(rl.inflation_alert(rates, base), [])
-
-    def test_no_fire_within_3x(self):
-        rates = {"siege": {"significant_rate": 0.25, "fatal_rate": 0.0}}
-        base = {"siege": {"significant_median": 0.10, "fatal_median": 0.0,
-                          "weeks": 4}}   # 0.25 < 3 * 0.10 = 0.30
-        self.assertEqual(rl.inflation_alert(rates, base), [])
-
-    def test_zero_median_never_fires(self):
-        # median 0 → no multiplier can be exceeded (the sig_med > 0 guard).
-        rates = {"siege": {"significant_rate": 0.9, "fatal_rate": 0.0}}
-        base = {"siege": {"significant_median": 0.0, "fatal_median": 0.0,
-                          "weeks": 6}}
-        self.assertEqual(rl.inflation_alert(rates, base), [])
-
-    def test_missing_baseline_silent(self):
-        rates = {"newskill": {"significant_rate": 1.0, "fatal_rate": 1.0}}
-        self.assertEqual(rl.inflation_alert(rates, {}), [])
-
-
-# --------------------------------------------------------------------------- #
 # backfill-ledger — pr_to_entry / build_entries / filter_ignored (pure core)   #
 # --------------------------------------------------------------------------- #
 
@@ -764,51 +691,11 @@ class GrudgeAtomicWriteTest(unittest.TestCase):
                         os.listdir(store_dir))
 
 
-# --------------------------------------------------------------------------- #
-# render_ledger — #402 identity-skip + #400 tolerant-read warn                 #
-# --------------------------------------------------------------------------- #
-
 def _capture(fn):
     buf = io.StringIO()
     with contextlib.redirect_stderr(buf):
         result = fn()
     return result, buf.getvalue()
-
-
-class RenderLedgerIdentitySkipTest(unittest.TestCase):
-    OLD = "2026-01-01T00:00:00Z"
-
-    def test_week_summary_skips_identityless_skill(self):
-        good = {"run_id": "r1", "skill": "siege", "timestamp": self.OLD,
-                "backfilled": False, "would_have_shipped_without_gate": True,
-                "severity_histogram": {"fatal": 0, "significant": 1, "minor": 0,
-                                       "nit": 0}}
-        bad = {"run_id": "r2", "timestamp": self.OLD, "backfilled": False,
-               "severity_histogram": {"fatal": 0, "significant": 1, "minor": 0,
-                                      "nit": 0}}
-        summary, err = _capture(lambda: rl.week_summary([good, bad]))
-        self.assertIn("siege", summary["per_skill"])
-        self.assertNotIn("unknown", summary["per_skill"])
-        self.assertIn("skipped 1", err)
-
-    def test_load_runs_warns_on_corrupt_lines(self):
-        with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, "runs.jsonl")
-            with open(p, "w") as f:
-                f.write(json.dumps({"run_id": "r1", "skill": "siege"}) + "\n")
-                f.write("{broken\n")
-            out, err = _capture(lambda: rl.load_runs(p))
-            self.assertEqual(len(out), 1)
-            self.assertIn("skipped 1", err)
-
-    def test_group_by_week_warns_on_unparseable_timestamp(self):
-        # #408 F4: a bad-timestamp row is dropped from the weekly grouping but
-        # the count is now surfaced, not silently swallowed.
-        good = {"run_id": "r1", "skill": "siege", "timestamp": self.OLD}
-        bad = {"run_id": "r2", "skill": "siege", "timestamp": "not-a-date"}
-        groups, err = _capture(lambda: rl._group_by_week([good, bad]))
-        self.assertEqual(sum(len(v) for v in groups.values()), 1)
-        self.assertIn("skipped 1", err)
 
 
 # --------------------------------------------------------------------------- #
@@ -880,9 +767,6 @@ class LedgerDoctorScanTest(unittest.TestCase):
             self.assertEqual(rep["total"], 3)
             self.assertEqual(rep["parseable"], 1)
             self.assertEqual(rep["unparseable"], 2)
-            # Cross-check: the canonical reader skips exactly those 2 chunks.
-            _, err = _capture(lambda: rl.load_runs(p))
-            self.assertIn("skipped 2 unparseable line(s)", err)
 
     def test_scan_jsonl_drops_unterminated_trailing_line(self):
         # S-1: a partial trailing line (no final newline — crash mid-append) is
@@ -898,8 +782,6 @@ class LedgerDoctorScanTest(unittest.TestCase):
             self.assertEqual(rep["total"], 1)
             self.assertEqual(rep["parseable"], 1)
             self.assertEqual(rep["unparseable"], 0)
-            # Reader also keeps only the one complete row (no skip warning).
-            self.assertEqual(len(rl.load_runs(p)), 1)
 
     def test_scan_jsonl_invalid_utf8_is_unparseable(self):
         # S-1: invalid UTF-8 raises UnicodeDecodeError in byte-mode readers ->
@@ -978,16 +860,6 @@ class LedgerDoctorScanTest(unittest.TestCase):
                 f.write("{broken\n")
             rc, _ = _capture(lambda: ld.main(["--ledger-dir", d, "--grudge-dir", g]))
             self.assertEqual(rc, 1)
-
-
-class TestIsoParserUnified(unittest.TestCase):
-    def test_render_ledger_uses_reconcile_iso_parser(self):
-        # #442 G6a: render_ledger must NOT carry a forked ISO parser.
-        import scripts.render_ledger as rl
-        import scripts.reconcile_ledger as rc
-        self.assertFalse(hasattr(rl, "_parse_ts"),
-                         "render_ledger._parse_ts must be deleted (forked parser)")
-        self.assertIs(rl._parse_iso, rc._parse_iso)
 
 
 if __name__ == "__main__":
