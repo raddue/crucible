@@ -78,6 +78,8 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from measure_474_corpus import _cache_for  # noqa: E402 — shared identity-cache builder
 HOME = pathlib.Path.home()
 MEM = HOME / ".claude/projects/-mnt-coding-Coding-crucible/memory/quality-gate"
 EV486 = MEM / "evidence-486-tier2-resolution"
@@ -258,14 +260,6 @@ class ReceiptResult:
         self.wit_cov = None
         self.wit_disposition = "not-entered"
         self.partial = False
-
-
-def _cache_for(rv, artifacts, trace, witness, verdict, root):
-    cache = {}
-    rv._build_identity_cache(artifacts, trace,
-                             [witness] if witness is not None else [],
-                             verdict, root, cache)
-    return cache
 
 
 def measure_receipt(rv, text, roots, strict):
