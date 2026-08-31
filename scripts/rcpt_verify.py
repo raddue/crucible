@@ -3199,6 +3199,7 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
                 notes.append(f"AMBIGUOUS: {msg}")
             label = f"ARTIFACTS {_show_path(name)}"
             pair = opened.get(resolved)
+            reused = pair is not None
             if pair is None:
                 try:
                     # S3 — the dedup is scoped to open/fstat/read only; the first spelling
@@ -3230,6 +3231,21 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
                 raise LintError(
                     f"Tier-2: {label}'s identity could not be sampled at "
                     f"resolution time")
+            # #563 — SIG-9-3's degenerate-identity signature (`st_ino == 0`, e.g.
+            # `sshfs -o noino`) makes dev_ino a CONSTANT across every file on the
+            # filesystem, so the equality check below is trivially satisfied by a
+            # resolve-time/read-time swap instead of catching it. tier2_witness already
+            # treats this sentinel as "identity comparisons cannot answer this" (SIG-9-3);
+            # this leg's own TOCTOU check needs the same gate, or a swap on a degenerate
+            # filesystem slips through unnoticed.
+            if cache.get(_IDENTITY_DEGENERATE, False):
+                if cov is not None:
+                    cov.partial = True
+                raise LintError(
+                    f"Tier-2: {label}'s identity cannot be checked across the "
+                    f"resolve/read gap (this filesystem does not produce unique file "
+                    f"identities); a path swap between resolution and read cannot be "
+                    f"ruled out")
             if dev_ino_at_resolve != st_dev_ino:
                 if cov is not None:
                     cov.partial = True
@@ -3239,15 +3255,20 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
                     f"the file opened for reading has a different identity "
                     f"({st_dev_ino}); the path was replaced between resolution "
                     f"and read")
-            prev_budget = budget
-            budget -= len(raw)
-            if budget < 0:
-                if cov is not None:
-                    cov.partial = True
-                raise LintError(
-                    f"Tier-2: {label} exceeds the Tier-2 read budget "
-                    f"({prev_budget} B remaining of {ARTIFACT_READ_CAP} B; bytes "
-                    f"reused from an earlier spelling)")
+            if not reused:
+                # #563 — the S3 dedup above reuses already-read bytes for a later
+                # spelling of the same realpath; charging the budget again here double-
+                # counted bytes that were never re-read from disk, hard-FAILing a
+                # legitimate receipt that cites one file under two spellings.
+                prev_budget = budget
+                budget -= len(raw)
+                if budget < 0:
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: {label} exceeds the Tier-2 read budget "
+                        f"({prev_budget} B remaining of {ARTIFACT_READ_CAP} B; not "
+                        f"read)")
             actual = hashlib.sha256(raw).hexdigest()
             if cov is not None:
                 # ⚠ PLACEMENT IS LOAD-BEARING (round-5/SIG-3): bytes read + hash

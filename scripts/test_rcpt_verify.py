@@ -320,6 +320,30 @@ class TestResolveToReadWindow(unittest.TestCase):
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
 
+    def test_a_degenerate_identity_filesystem_hard_fails_instead_of_trusting_the_toctou_check(self):
+        """#563 — `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`) means every file on the
+        filesystem shares one identity, so `dev_ino_at_resolve != st_dev_ino` is trivially
+        FALSE for a resolve-time/read-time swap: the exact case the check exists to catch.
+        tier2_witness already gates supersession on this sentinel; tier2_artifacts's own
+        TOCTOU check must fail closed on it too, not silently trust an equality it cannot
+        distinguish from a swap."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = {"f.md": {"hash": hashlib.sha256(b"REAL").hexdigest(), "size": "4"}}
+            cache = _cache_for(rv, arts, [], None, "PASS", root)
+            cache[rv._IDENTITY_DEGENERATE] = True
+            cov = rv._Coverage()
+            verified = {}
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], root, True, cov,
+                                   cache=cache, verified=verified)
+            self.assertIn("identity cannot be checked across the resolve/read gap",
+                          str(cm.exception))
+            self.assertTrue(cov.partial)
+            self.assertEqual(verified, {})
+
 
 class TestVerifyWitness(unittest.TestCase):
     """Direct unit coverage of the factored verify_witness + derive_art_name."""
@@ -5415,6 +5439,29 @@ class TestArtifactReadsAreBounded(_InqBase):
                     {"a0.log": arts["a0.log"]}, [], [self.base], False,
                     cache=_cache_for(rv, {"a0.log": arts["a0.log"]}, [], None, "PASS",
                                      [self.base]),
+                    verified={}),
+                [])
+
+    def test_a_second_spelling_of_an_already_read_realpath_does_not_double_charge_budget(self):
+        """#563 — the S3 dedup (:3201-3223) reuses the bytes already read for a realpath's
+        first spelling, but the budget decrement ran a second time regardless, charging the
+        SAME bytes twice. A receipt that legitimately cites one file under two spellings
+        (e.g. `report.md` and `./report.md`) then hard-FAILs even though the actual bytes
+        read from disk never left the cap."""
+        rv = _import_rv()
+        data = b"z" * 400
+        h, size = self.plant(self.base, "report.md", data)
+        arts = {
+            "report.md": {"hash": h, "size": size},
+            "./report.md": {"hash": h, "size": size},
+        }
+        # Both spellings resolve to the same realpath, so only 400 B are ever actually
+        # read — comfortably inside a 700 B cap. A double-charge sees 800 B and rejects.
+        with mock.patch.object(rv, "ARTIFACT_READ_CAP", 700):
+            self.assertEqual(
+                rv.tier2_artifacts(
+                    arts, [], [self.base], False,
+                    cache=_cache_for(rv, arts, [], None, "PASS", [self.base]),
                     verified={}),
                 [])
 
