@@ -118,10 +118,10 @@ def _save_kill_switch():
 def _restore_kill_switch(saved):
     """UNCONDITIONAL restore: always clear the var first, then re-set it only if
     it was present at setUp. The non-leak guarantee holds ONLY for the classes
-    that call these helpers in setUp/tearDown (AppendTest, ReconcileTest,
-    ReconcilePredicatesTest) — it is not a whole-file property. For those classes,
-    on a clean checkout `saved` is None, so a test that set the var to "1" can NOT
-    leak it to a sibling test or out of the process.
+    that call these helpers in setUp/tearDown (AppendTest) — it is not a
+    whole-file property. For those classes, on a clean checkout `saved` is
+    None, so a test that set the var to "1" can NOT leak it to a sibling test
+    or out of the process.
     """
     os.environ.pop("CRUCIBLE_CALIBRATION_DISABLED", None)
     if saved is not None:
@@ -129,11 +129,12 @@ def _restore_kill_switch(saved):
 
 
 # NOTE (kill-switch guard scope): classes that never reach _ledger_append do NOT
-# need the setUp/tearDown above and intentionally omit it (ComputeBrierTest,
-# HashAndLoadTest are pure read/compute). If a future case in ANY such class
-# starts appending to a ledger (directly or via reconcile/reconcile_predicates),
-# it MUST adopt the _save_kill_switch/_restore_kill_switch guard, or it will go
-# RED under an ambient CRUCIBLE_CALIBRATION_DISABLED=1.
+# need the setUp/tearDown above and intentionally omit it (CallerDedupTest,
+# TruncatePayloadTest, ValidLedgerIdentityTest, DefaultRepoRealpathTest,
+# TolerantReaderWarnTest are pure read/compute). If a future case in ANY such
+# class starts appending to a ledger, it MUST adopt the
+# _save_kill_switch/_restore_kill_switch guard, or it will go RED under an
+# ambient CRUCIBLE_CALIBRATION_DISABLED=1.
 
 
 class AppendTest(unittest.TestCase):
