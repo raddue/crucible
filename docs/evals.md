@@ -192,6 +192,53 @@ missing round-2s later (once Opus is confirmed healthy) would strengthen this si
 judged necessary to unblock #537, given the model-tier dimension was already known to be
 untestable from a Sonnet 5 session regardless of outage.
 
+## #460 Section B: pre-land SKILL.md-edit deltas (2026-08-31)
+
+#460 Section B (extracting the calibration-ledger reporting cluster to `raddue/crucible-eval`)
+retires `brier_advisory.py` and its 8 call sites across 6 `SKILL.md` files. Two of those six —
+`skills/getting-started/SKILL.md` (loses its entire "Calibration Snapshot" session-init section)
+and `skills/quality-gate/SKILL.md` (loses item `1.5.` from its "How It Works" enumeration) — are
+not backed by a CI-gated eval harness the way `siege`/`delve`/`inquisitor` are, so CLAUDE.md's
+"eval before you publish" rule applies to them directly rather than being satisfied by an
+existing gate.
+
+**Coverage check, not a live A/B run.** Before spending a live run, both skills' own
+`evals/evals.json` were read in full and grepped for any reference to the removed material:
+
+```
+grep -o -i -E 'calibrat[a-z]*|ledger|brier|snapshot|advisor[a-z]*' \
+  skills/getting-started/evals/evals.json skills/quality-gate/evals/evals.json
+```
+
+Zero hits in `getting-started` (15 sequence evals covering verify-before-completion,
+debugging-before-fix, tdd-deletion-rule, design-before-build, and review-feedback-clarify-first —
+none touch session-init or calibration reporting). One incidental, unrelated hit in `quality-gate`
+(the word "snapshot" inside an unrelated prompt about a `_cache` dict). Every eval in both files
+was also read end-to-end by hand to confirm neither exercises the removed prose's *presence*
+(structure, sequence, length) even indirectly — all 25 evals grade entirely different behavioral
+axes than the deleted sections.
+
+**Verdict: null delta by construction, recorded without a live run.** Given zero eval-suite
+surface area touches the removed material, a live blind A/B (which for `quality-gate` would mean
+10 full recursive `/quality-gate` sessions per arm — each eval expects multi-round red-team/fix/
+verify loops, not a single-turn response) would spend real compute to re-confirm a result already
+established by direct inspection. This is the same "null by construction, not by measurement"
+scope the originating plan (`docs/plans/2026-08-23-460-section-b-eval-strip.md`, Task 10) itself
+anticipated for the *live-run* case (there, the null comes from `brier_advisory.py`'s absence
+degrading silently in both arms); here the null is established one level earlier, by the evals
+never being able to see the change at all. Recorded per CLAUDE.md's non-negotiable rule — the
+recording is the point, not the run.
+
+**Deviation from Task 10's prescribed procedure, maintainer-authorized.** Task 10 specifies a live
+blind A/B with a pre-edit/post-edit pass-rate table. This is not that — no subagents were
+dispatched, so there is no per-arm pass rate to table. The maintainer, presented with the coverage
+finding above and the recursive-`/quality-gate`-per-eval cost it implies, explicitly chose to skip
+the live run rather than pay that cost for a result already pinned by inspection. This is a
+narrower, cheaper substitute for Task 10's own "eval cannot be executed at all" escape hatch (that
+clause covers *inability* — outage, budget exhaustion; this is *informed refusal* to spend on a
+measurement that cannot move), and is recorded as such rather than silently reported as a
+completed live A/B.
+
 ## Running Evals
 
 Eval definitions live in `skills/<skill>/evals/evals.json`. Execution evals use the standard `prompt`/`expected_output`/`expectations` schema. Sequence evals extend this with `boundary`, `pressure_type`, `expected_sequence` metadata and categorized expectations (`sequence_compliance`, `pressure_resistance`, `correctness`) for per-axis grading.
