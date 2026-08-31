@@ -28,7 +28,8 @@ The live ledger is **machine-local and shared across every repo**:
 It is deliberately **not** inside any git repo — entries carry private file
 paths and verbatim finding quotes, and crucible is public. Gating skills run
 in arbitrary repos (any project on the machine, …); they all aggregate here so
-`/ledger` can render one honest cross-repo headline with a per-repo breakdown.
+`raddue/crucible-eval`'s `/ledger` (moved there — #460) can render one honest
+cross-repo headline with a per-repo breakdown.
 `scripts.ledger_append.default_ledger_path()` is the single source of truth for
 this path; the renderer imports it too.
 
@@ -148,8 +149,9 @@ Tier B stubs also set `gated_files_truncated: 0` (explicit) and `comment: null`.
 
 `would_have_shipped_without_gate = (severity_histogram.fatal + severity_histogram.significant) >= 1`
 **when `severity_histogram != null`**. When the histogram is `null` (Tier B
-stubs), WHS is also `null`. The headline "caught N" count in `/ledger`
-excludes entries where WHS is `null`.
+stubs), WHS is also `null`. The headline "caught N" count in
+`raddue/crucible-eval`'s `/ledger` (moved there — #460) excludes entries
+where WHS is `null`.
 
 This rule is mechanical — emitters do not decide WHS; they emit the histogram
 and the boolean follows from arithmetic. Tampering at emit is structurally
@@ -177,9 +179,10 @@ corresponding `snake_case` ledger keys.
 
 A pre-registered, machine-checkable predicate co-emitted with each Tier A
 verdict (design §3a). It converts the ledger from a scorecard into a prediction
-market: every PASS/FAIL is a dated, falsifiable hypothesis. The reconciler's
-second pass parses it and checks whether it fired; `/ledger` surfaces per-skill
-hit-rate and unparseable-rate.
+market: every PASS/FAIL is a dated, falsifiable hypothesis. `raddue/crucible-eval`'s
+reconciler runs a second pass that parses it and checks whether it fired;
+its `/ledger` (moved there — #460) surfaces per-skill hit-rate and
+unparseable-rate.
 
 **When to emit (Tier A code gates only — e.g. `quality-gate`, `siege`, `temper`):**
 
@@ -202,7 +205,8 @@ hit-rate and unparseable-rate.
   `CVE referencing token-refresh within 90d`.
 
   Free-form prose is permitted but counts as **unparseable** for auto-checking
-  (surfaced in `/ledger`'s `unparseable_predicate_rate`, never rejected at emit).
+  (surfaced in `raddue/crucible-eval`'s `/ledger` (moved there — #460)
+  `unparseable_predicate_rate`, never rejected at emit).
   Max 256 chars. Auto-checking covers the `touching` form at v1.
 - **`null`** for all other Tier A cases: escalation verdicts (STAGNATION /
   ESCALATED / ARCHITECTURAL / SUSTAINED_REGRESSION — not predictions about
@@ -215,7 +219,8 @@ hit-rate and unparseable-rate.
 
 **Bootstrap sentinel (historical).** Between the Phase 1 and Phase 7 merges,
 Tier A wrote the literal `"<DEFERRED:pre-phase-7>"` in place of a real predicate.
-The reconciler and `/ledger` early-return on it (`if predicted_falsifier ==
+`raddue/crucible-eval`'s reconciler and `/ledger` (moved there — #460)
+early-return on it (`if predicted_falsifier ==
 "<DEFERRED:pre-phase-7>": exclude from both rate denominators`); it is neither
 parseable nor unparseable. New emits MUST NOT write the sentinel — write a real
 predicate or `null` per the rules above.
@@ -233,7 +238,8 @@ the `falsification.jsonl` entry the reconciler derives from them) — it is **no
   path-touching fix captures). This is the seam that lets a **non-code** verdict be
   Brier-scored: `compute_brier` admits a non-code verdict into the sample only when
   it carries a `bad_implementation` falsification. PASS-side only. Full semantics +
-  JSONL shape live in `skills/calibration-reconcile/SKILL.md`.
+  JSONL shape live in `raddue/crucible-eval`'s `skills/calibration-reconcile/SKILL.md`
+  (moved there — #460).
 
 The reconciler threads `signal_type` onto both the top level of the derived
 falsification entry and into its `falsified_by`.
@@ -316,7 +322,8 @@ across all supported filesystems and IS the mutex.
    - Crash after step 2, before step 3 → Branch A fires; ESRCH; recovery rmdirs.
    - Crash during step 3 → fsync may or may not complete; trailing partial
      line possible. JSONL readers skip partial trailing lines per the L-9
-     reduction protocol (see `shared/ledger-reduce.md`).
+     reduction protocol (see "L-9 latest-entry-wins reduction (inlined, #460)"
+     below).
    - Crash after step 3, before step 4 → Branch A fires after 60 s; recovery
      rmdirs; no data loss (append already committed).
 
@@ -325,6 +332,89 @@ across all supported filesystems and IS the mutex.
 
 The lock IS the correctness mechanism. `O_APPEND` is convenience (no offset
 tracking); not relied upon for cross-writer atomicity.
+
+## L-9 latest-entry-wins reduction (inlined, #460)
+
+Reader-side reduction over `falsification.jsonl` (or any ledger-shaped JSONL).
+**File-position ordering is authoritative — NOT the `timestamp` field.** A
+late-arriving entry (later byte position) overwrites an earlier entry with the
+same `ledger_entry_hash`; out-of-order `timestamp`s (clock skew, manual edits,
+batched backfill) do not flip precedence — the reader walks line-by-line and
+the last fully-terminated line per key wins.
+
+Tolerant read rules: missing file → `{}`; empty file → `{}`; **an unreadable
+file (any `OSError` — permissions, a directory in the path, a vanished mount)
+→ `{}`, never a raised exception**; a trailing partial line (file does not end
+with `\n`) is silently skipped, with the last fully-terminated entry winning
+for that key; an unparseable line (invalid JSON) is counted as corruption and
+skipped, and reduction continues; **a valid-JSON but non-object line (`[1,2,3]`,
+`42`, `"x"`) is counted as corruption and skipped** — it has no `.get`, so
+treating it as an entry would raise `AttributeError` on a torn store (#400);
+an entry with no `ledger_entry_hash` is skipped (not counted as corruption);
+and **skipped lines are surfaced once per read on stderr** as a single summary
+line, `[ledger_reduce WARN] reduce: skipped N unparseable line(s) in <path>`,
+never one line per bad line.
+
+Reference implementation (inlined verbatim from `scripts/ledger_reduce.py`'s
+body as of #460; that module is being extracted to `raddue/crucible-eval`, and
+this repo's copy is deleted later in the same change). **Transcribe this exactly — the `except OSError`
+guard, the `isinstance(obj, dict)` guard, and the `skipped`/`_warn` corruption
+surfacing are all #400 fixes, and an implementation missing any of them is a
+regression, not a simplification:**
+
+```python
+def _warn(msg: str) -> None:
+    print(f"[ledger_reduce WARN] {msg}", file=sys.stderr)
+
+
+def reduce(falsification_path: str) -> Dict[str, dict]:
+    """Return dict keyed by ledger_entry_hash with the latest entry per hash.
+
+    Tolerant read: trailing partial line (no terminating newline) is silently skipped.
+    Missing file → {}. Empty file → {}.
+    """
+    if not os.path.exists(falsification_path):
+        return {}
+    try:
+        with open(falsification_path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return {}
+    if not raw:
+        return {}
+
+    # Split on newline; if the file does NOT end with \n, the last element is a
+    # partial trailing line and is dropped. Otherwise the trailing empty element
+    # from the split is naturally falsy and skipped.
+    parts = raw.split(b"\n")
+    ends_with_newline = raw.endswith(b"\n")
+    if not ends_with_newline:
+        parts = parts[:-1]
+
+    out: Dict[str, dict] = {}
+    skipped = 0  # #400: surface corruption instead of degrading silently
+    for chunk in parts:
+        if not chunk:
+            continue
+        try:
+            obj = json.loads(chunk)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            skipped += 1
+            continue
+        if not isinstance(obj, dict):
+            # #400: a valid-JSON-but-non-object line (e.g. `[1,2,3]`, `42`) has
+            # no `.get` — the obj.get below would AttributeError. Count it as
+            # corruption, same as render_ledger.load_runs.
+            skipped += 1
+            continue
+        key = obj.get("ledger_entry_hash")
+        if key is None:
+            continue
+        out[key] = obj  # later positions overwrite earlier ones (L-9)
+    if skipped:
+        _warn(f"reduce: skipped {skipped} unparseable line(s) in {falsification_path}")
+    return out
+```
 
 ## Invariants index (L-1..L-9)
 
@@ -337,7 +427,7 @@ tracking); not relied upon for cross-writer atomicity.
 | L-6 | Emit-side kill-switch | Early return in `append()` + `_cli_emit` graceful skip |
 | L-7 | Migration protocol (forward-compat / never-decrease) | `docs/ledger/MIGRATION-PROTOCOL.md` |
 | L-8 | 16 KiB line cap + truncation + sidecar | `_truncate_payload` + line-bytes check |
-| L-9 | Latest-entry-wins reduction (file-position) | `shared/ledger-reduce.md` |
+| L-9 | Latest-entry-wins reduction (file-position) | Defined inline above ("L-9 latest-entry-wins reduction"); the executable copy is being extracted to `raddue/crucible-eval` (#460) |
 
 L-5 (backfill exclusion from headline) and L-10 (Brier polarity) are encoded
 in design/contract; no runtime call-sites in Phase 1.
@@ -416,8 +506,9 @@ def _kill_switch_active() -> bool:
 # The live ledger is machine-local and aggregates EVERY repo's gating runs    #
 # into one place — never inside any git repo, because entries carry private   #
 # file paths and verbatim finding quotes and crucible is a public repo.       #
-# These helpers are the single source of truth for the path; render_ledger    #
-# imports them. default_repo() shells to git and is therefore CLI-only —      #
+# These helpers are the single source of truth for the path; the weekly      #
+# renderer (now in raddue/crucible-eval, #460) imports them. default_repo()   #
+# shells to git and is therefore CLI-only —                                  #
 # append() stays free of git/subprocess side effects (INV-2).                 #
 # --------------------------------------------------------------------------- #
 SCHEMA_VERSION = 2

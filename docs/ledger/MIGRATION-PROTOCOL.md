@@ -5,10 +5,19 @@ Invariant **L-7** governs schema evolution of `.crucible/ledger/runs.jsonl`,
 
 ## Rules
 
-1. **Forward-compatible readers.** Every reader (`/calibration-reconcile`,
-   `/ledger`, advisory hooks, `scripts/ledger_reduce.py`) MUST ignore unknown
+1. **Forward-compatible readers.** Every reader (`raddue/crucible-eval`'s
+   `/calibration-reconcile`, `/ledger`, and `scripts/ledger_reduce.py` — moving
+   there, #460 — plus any future in-repo reader) MUST ignore unknown
    keys. New keys appearing in a newer-version line must not cause parse failure
    or silent data drop.
+
+   > **Cross-repo note (#460).** Every reader named above is **moving to**
+   > `raddue/crucible-eval` (#460); this repo keeps the writers. No gate in
+   > this repo can reach those readers, so a shape change here is a
+   > **two-repo change**: it MUST be mirrored into `raddue/crucible-eval` in
+   > the same change window. Rule 3's "migrate script ships WITH the
+   > version-bump PR" pairing is reviewer-enforced here and cannot be
+   > machine-checked across the boundary.
 
 2. **Never-decrease writers.** A writer at schema vN MUST emit every key that
    was present at any previous v1..vN-1. Tier B emitters set deprecated /
