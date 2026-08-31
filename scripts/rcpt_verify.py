@@ -4764,6 +4764,21 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
                     raise LintError(
                         f"Tier-2: witness {_show_path(art_name)} unreadable "
                         f"({_strerror(e)})")
+                # #563 gate-fix — the sibling tier2_artifacts TOCTOU check (line ~3242)
+                # was hardened against SIG-9-3's degenerate-identity signature
+                # (`st_ino == 0`, e.g. `sshfs -o noino`), which makes dev_ino a CONSTANT
+                # across every file on the filesystem: the equality check below is then
+                # trivially satisfied by a resolve-time/read-time swap instead of
+                # catching it. This independent-read fallback needs the same gate, or a
+                # swap on a degenerate filesystem slips through unnoticed here too.
+                if identity_degenerate:
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)}'s identity cannot be "
+                        f"checked across the resolve/read gap (this filesystem does not "
+                        f"produce unique file identities); a path swap between "
+                        f"resolution and the witness read cannot be ruled out")
                 if (rec["dev_ino_at_resolve"] is None
                         or rec["dev_ino_at_resolve"] != st_dev_ino):
                     if cov is not None:

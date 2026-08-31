@@ -509,6 +509,36 @@ class TestTier2Witness(unittest.TestCase):
                     cache=_cache_for(rv, {}, trace, self._w("/x/"), "PASS", root),
                     verified={})
 
+    def test_a_degenerate_identity_filesystem_hard_fails_the_unbound_independent_read_too(self):
+        """warden gate (#563 leg-3 follow-up) — `tier2_artifacts`'s own TOCTOU check was
+        hardened against `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`, e.g.
+        `sshfs -o noino`) so a resolve-time/read-time swap can't hide behind a trivially-
+        satisfied equality. `tier2_witness`'s independent-read fallback (FATAL-10-3, taken
+        whenever a rangeless-grep-cited name was never hash-verified by the ARTIFACTS leg)
+        runs the identical `dev_ino_at_resolve != st_dev_ino` comparison but had no such
+        gate — the one other read site this PR added. On a degenerate filesystem every
+        file shares one identity, so the comparison is trivially satisfied by a swap
+        instead of catching it. This must now hard-fail closed instead of trusting the
+        equality, exactly like the sibling leg."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.txt").write_text("quiet\n")
+            # No ARTIFACTS declared → never hash-verified → identity_verified is False →
+            # falls into the unbound independent-read fallback (FATAL-10-3).
+            cited = {"n": 1, "verb": "WROTE", "args": f"f.txt  sha256:{'0' * 64}"}
+            trace = [cited]
+            wit = {"kind": "grep", "payload": "", "expect_fail": "/BOOM/",
+                   "ran": "TRACE#1", "range_kind": None, "range_a": None,
+                   "range_b": None, "art": "f.txt", "pattern": None}
+            cache = _cache_for(rv, {}, trace, wit, "PASS", root)
+            cache[rv._IDENTITY_DEGENERATE] = True
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_witness(wit, trace, root, False, "PASS",
+                                 cache=cache, verified={})
+            self.assertIn("identity cannot be checked across the resolve/read gap",
+                          str(cm.exception))
+
 
 class TestCliDispatch(unittest.TestCase):
     def test_tier1_good_receipt_stdin_silent_zero(self):
