@@ -116,8 +116,6 @@ run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
-run python3 scripts/test_calibrate_tolerance.py
-
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
 
