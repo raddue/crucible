@@ -2961,18 +2961,19 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
     deliberate: the ~50 direct call sites pass positionally, so a required parameter
     would change arity everywhere and falsify D8.2's "no existing caller moves".
 
-    SIEGE-R2BA-1 — `bodies` is an optional out-parameter (a dict, same idiom and same
-    reason as `cov`/`found`/`probe`/`meter`). When passed, each entry whose sha256
-    MATCHED is recorded under BOTH keys — `{declared-name: raw}` AND
-    `{resolved-realpath: raw}` — and tier2_witness evaluates ITS predicate against that
-    buffer instead of re-resolving the name and re-reading the file. Two keys because
-    each covers a miss the other does not; see the write site. Only
-    matched entries are carried, because the whole point of the carry is that the
-    verified hash is a statement about the bytes the predicate ran against.
+    SIEGE-R2BA-1 — `cache`/`verified` are the shared identity mechanism this function
+    builds for tier2_witness (redesigned from an earlier `bodies=` out-parameter —
+    SUPERSEDES witness identity-binding redesign, #488), REQUIRED keyword-only params
+    (unlike `cov`/`notes_out`, there is no unbound-by-omission mode). On each sha256
+    MATCH, `verified[(resolved, st_dev_ino)] = raw` is recorded and `cache[n]["dev_ino"]`
+    is propagated realpath-keyed to EVERY name — declared or cited — sharing that
+    realpath (S17-2/SIG-8-1, below), so tier2_witness's own T0/T1 re-stat can evaluate
+    its predicate against `verified`'s buffer instead of re-resolving the name and
+    re-reading the file. See tier2_witness's docstring for the full T0/T1 mechanism.
 
     #488 / T2 — `notes_out` is an optional out-parameter list for the PROVENANCE-ONLY
     notes, the same idiom tier2_witness already uses for wit_notes/notes_out and the
-    same OPTIONAL-WITH-A-DEFAULT reason as cov/bodies: the ~40 call sites pass
+    same OPTIONAL-WITH-A-DEFAULT reason as cov: the ~40 call sites pass
     positionally, so a required parameter would change arity everywhere. The notes MUST
     NOT ride the return value: this function raises on five sites that truncate the
     entry loop, and the sole production call site is `notes += tier2_artifacts(...)`,
@@ -4397,15 +4398,19 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
     applicable set that belongs to none of design :1175's disjoint sub-counts, and this is
     the leg #486's headline figure (0 of 14 witness resolutions) is about.
 
-    SIEGE-R2BA-1 — `bodies` is tier2_artifacts' carry: the buffers that leg HASHED AND
-    MATCHED, keyed under BOTH the declared NAME and the RESOLVED REALPATH. When the cited
-    artifact matches either key, the predicate below is evaluated against that buffer and
-    the file is NOT read again. Both keys are load-bearing and neither is redundant: the
-    two legs derive their names from different receipt lines (ARTIFACTS vs. the cited
-    TRACE entry's args), so a NAME-only key missed on `./f.md` vs `f.md`; and a
-    REALPATH-only key missed whenever the same declared name RESOLVES differently between
-    the legs — the mid-lint symlink swap this carry was written against, where missing is
-    a fail-open. See the write site.
+    SIEGE-R2BA-1 — `cache`/`verified` are the shared identity mechanism `_build_identity_cache`
+    and `tier2_artifacts` build (redesigned from an earlier `bodies=` carry — SUPERSEDES
+    witness identity-binding redesign, #488): `cache[name]["dev_ino"]` holds the T0 identity
+    `tier2_artifacts` recorded WHEN it hash-verified that realpath, propagated realpath-keyed
+    to EVERY name — declared or cited — sharing it (S17-2/SIG-8-1), and `verified` holds the
+    matching raw bytes, keyed `(realpath, dev_ino)`. `cache`/`verified` are REQUIRED (a caller
+    passing either as None raises immediately, above) — there is no unbound-by-omission mode.
+
+    This leg re-stats the cited artifact's realpath NOW (T1, `current_dev_ino`) and compares
+    it against that T0 identity (`recorded_dev_ino`). `identity_verified` requires T0 present,
+    T0 == T1, AND `(art_realpath, recorded_dev_ino)` present in `verified` (FATAL-10-2); only
+    then is the predicate run against `verified`'s buffer directly (`raw`) — the file is NOT
+    read again, so nothing ties a re-read's bytes to the ones the artifacts leg actually hashed.
 
     Why that is a security fix and not a micro-optimisation: this leg used to do its OWN
     resolve_base and its OWN read of the same name, and the #B cap check did a third, so
@@ -4418,49 +4423,55 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
     reviewed subagent owns the dispatch root and can leave such a process behind; an
     inotify-triggered flipper raises the 20% to near-certainty.
 
+    SIG-9-3 / FATAL-10-3 — two further gates layer on `identity_verified` alone:
+      * `identity_degenerate` (`cache[_IDENTITY_DEGENERATE]`) is True whenever this run
+        sampled an `st_ino == 0` file (a filesystem, e.g. `sshfs -o noino`, that cannot
+        produce unique identities at all). It gates SUPERSEDES eligibility ONLY —
+        `identity_ok = identity_verified and not identity_degenerate` — never the byte
+        source; `raw` is read off `identity_verified` alone (FATAL-R5-2).
+      * A non-empty SUPERSEDES `stated` payload (FATAL-12-1) must name a declared
+        ARTIFACTS entry whose realpath equals this witness's, checked before any read.
+        `bound = identity_ok and stated != ""` is the value `probe_out["bound"]` carries
+        back to `_verify_single`'s SUPERSEDES rule (siege S-7, below).
+
+    When `identity_verified` is False, this leg falls back to its OWN independent read —
+    `_read_and_fstat_artifact` under the full `ARTIFACT_READ_CAP`, followed by its own T-1/T0
+    identity re-check against `rec["dev_ino_at_resolve"]` (FATAL-10-3) — so an unbound witness
+    still cannot be swapped between resolution and read; it just cannot reuse the ARTIFACTS
+    leg's hash.
+
     WHAT IS NOT CLOSED, precisely:
       * The RANGELESS grep path has no ARTIFACTS-membership rule (its name comes from
         the cited READ/WROTE entry, which #412 deliberately does not gate), so such a
         name need never have been declared at all. It is bound whenever it RESOLVES to a
-        file the artifacts leg hashed and matched (the realpath key above is what makes
-        that work regardless of how the two lines spell it), and unbound — keeping its
-        single independent read — when it resolves anywhere else. Every RANGED read is of
-        a declared name: Tier-1 requires both the payload artifact and the EXEC out=
+        file the artifacts leg hashed and matched — `cache[name]["dev_ino"]` propagates
+        realpath-keyed to every name sharing that realpath (above), so this works
+        regardless of how the two lines spell it — and unbound, keeping its single
+        independent read, when it resolves anywhere else. Every RANGED read is of a
+        declared name: Tier-1 requires both the payload artifact and the EXEC out=
         artifact to be in ARTIFACTS.
-        So the carry covers every read of a name that RESOLVED AND MATCHED on the
+        So binding covers every read of a name that RESOLVED AND MATCHED on the
         artifacts leg — NOT "every read a sha256 was ever claimed about". A declared name
-        the artifacts leg could not resolve is recorded in no carry (the write sits after
-        the comparison, and the unresolved arm `continue`s before it), so if that name
-        starts resolving here it gets an independent, never-hashed read.
+        the artifacts leg could not resolve carries no `dev_ino` in `cache` (the write
+        sits after the comparison, and the unresolved arm `continue`s before it — see
+        tier2_artifacts), so if that name starts resolving here it gets an independent,
+        never-hashed read.
       * RESOLUTION is still independent. This leg re-runs resolve_base, so the census
         classification (resolved / unresolved / ambiguous) and the path rendered into
         messages still come from a second stat walk and may disagree with the artifacts
         leg's. That residual is FAIL-CLOSED IN THE STOPS-RESOLVING DIRECTION ONLY: a name
         that stops resolving between the legs becomes UNVERIFIABLE (or, for a path-shaped
         name under --strict, a FAIL), never a silent pass. The converse is NOT closed —
-        a name that resolves HERE but not on the artifacts leg is read independently and
-        still billed `witness 1/1`, visible only as that leg's `artifacts N-1/N` plus its
-        `unreached`/`not-reachable` sub-count. Refusing to read such a name would move the
-        exit code on a receipt-controlled predicate; that is a new gate and a separate
-        decision (the natural companion to #488's proposed --strict floor).
-        What can no longer diverge is the BYTES, for the names the carry holds.
-      * A caller that does not pass `bodies` — every direct in-process importer
-        (_gen.py, the measure_*_corpus.py scripts, the direct-call tests) — is unbound
-        exactly as before. _verify_single and --selftest wire it.
-
-    SIEGE-R2IT-3 — `pre_ident` is `witness_pre_identity`'s snapshot: where THIS witness's
-    cited name resolved BEFORE the ARTIFACTS leg ran. The carry above answers "are these
-    the bytes some leg hashed"; the snapshot answers the question no post-swap test can,
-    "is this still the same file". Both are needed, and the second is not a spelling
-    refinement of the first: `_carry_should_have_bound` resolves both sides at witness
-    time, i.e. on one side of the swap window, which is why moving the swap onto a
-    symlinked directory component of the citation defeated it (see that function and
-    `witness_pre_identity`). Same optional-with-a-default idiom as cov/bodies/probe_out,
-    so no existing call site moves; a caller that omits it keeps the old behaviour and
-    the old gap. `_verify_single` and --selftest wire it.
+        a name that resolves HERE but not on the artifacts leg (`identity_verified` False)
+        is read independently and still billed `witness 1/1`, visible only as that leg's
+        `artifacts N-1/N` plus its `unreached`/`not-reachable` sub-count. Refusing to read
+        such a name would move the exit code on a receipt-controlled predicate; that is a
+        new gate and a separate decision (the natural companion to #488's proposed --strict
+        floor).
+        What can no longer diverge, for a name `identity_verified` binds, is the BYTES.
 
     siege S-7 — `probe_out` is verify_witness's `probe` dict, surfaced to the caller (the
-    same optional out-param idiom as cov/bodies/found/meter, so no existing call site
+    same optional out-param idiom as cov/notes_out/found/meter, so no existing call site
     moves). `_verify_single` reads `evaluated` from it to enforce the SUPERSEDES
     witness-evidence rule's Tier-2 half — "Tier-2 then verifies the witness normally"
     (return-convention.md § SUPERSEDES), which was the half nothing checked."""
