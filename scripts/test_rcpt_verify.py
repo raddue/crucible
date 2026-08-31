@@ -6013,15 +6013,28 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         wit = rv.parse_witness(["grep:f.md  expect-fail=/fatal=[1-9]/  ran=TRACE#1"])
         opens = []
         real_open = builtins.open
+        real_os_open = os.open
 
         def spy(file, *a, **k):
             if str(file).endswith("f.md"):
                 opens.append(1)
             return real_open(file, *a, **k)
 
+        def os_spy(path, *a, **k):
+            # SIEGE-R4BA-2 — the ARTIFACTS leg's read is `os.open` + `os.fdopen` now
+            # (one descriptor from open to read, so there is no name to re-resolve
+            # between the classification and the read). `builtins.open` alone therefore
+            # counts ZERO artifact reads and this instrument would pass vacuously; the
+            # subject of the test is the CARRY, not which syscall opens the file, so
+            # both spellings feed the same counter.
+            if str(path).endswith("f.md"):
+                opens.append(1)
+            return real_os_open(path, *a, **k)
+
         cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         verified = {}
-        with mock.patch.object(builtins, "open", spy):
+        with mock.patch.object(builtins, "open", spy), \
+                mock.patch.object(os, "open", os_spy):
             rv.tier2_artifacts(arts, trace, [self.base], False,
                                cache=cache, verified=verified)
             after_artifacts = len(opens)
@@ -7866,7 +7879,13 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
     def test_501_2_the_fail_leg_reaches_resolve_base(self):
         """The behavioural half of test_501_1 — `found` is populated only if
         resolve_base actually ran, which is the thing #486 built and the FAIL leg
-        never used."""
+        never used.
+
+        TWO calls, not one, since SIEGE-R4BA-1: `_resolve_once` re-proves containment
+        immediately after sampling the resolve-time identity, and the re-proof is a
+        second `resolve_base` on the SAME cited name. The count is pinned rather than
+        relaxed to a membership test so this still goes RED if the leg stops resolving
+        altogether, which is what the test is for."""
         wit, trace = self._ranged_grep()
         seen = []
         real = self.rv.resolve_base
@@ -7881,7 +7900,7 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
             wit, trace, self.a, False, "FAIL", self._cov(),
             cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
             verified={})
-        self.assertEqual(seen, ["f.txt"])
+        self.assertEqual(seen, ["f.txt", "f.txt"])
 
     def test_501_3_the_old_unreached_arm_is_retired(self):
         """`fail-leg-payload-not-sourced` described the linter declining to source. It
@@ -8092,6 +8111,281 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
             verified={})
         self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
         self.assertEqual(cov.counts["discarded"], 0)
+
+
+class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
+    """SIEGE-R4BA-1 — the resolve-time identity sample was taken AFTER the containment
+    proof, not atomically with it.
+
+    `_resolve_base_one` returns a path string once `real.is_file()` and `_contained()`
+    both hold; `_resolve_once` then takes a SEPARATE `os.stat` on that string. A
+    reviewed subagent that owns the directory swaps the name in that gap — a regular
+    file replaced by a symlink pointing outside every `--root` — and the stat samples
+    the DECOY's identity. That corrupted sample is exactly what tier2_artifacts' own
+    TOCTOU re-check compares its fd identity against, so the check compares the decoy
+    with itself and agrees: a silent false PASS over out-of-root content, reproduced
+    4/120 times against the real CLI.
+
+    THE RACE IS INJECTED, NOT RUN. A 4-in-120 wall-clock race is not a regression pin —
+    it is a flaky one. The swap is performed inside a patched `_witness_stat_dev_ino`,
+    which is precisely the gap's far end, so the linter sees byte-for-byte the state an
+    attacker who WINS the race produces, deterministically and on every run."""
+
+    def _swap_at_stat(self, rv, outside_real):
+        """Replace `base/f.md` with a symlink to an out-of-root decoy at stat time."""
+        real_stat = rv._witness_stat_dev_ino
+        done = []
+
+        def spy(path, include_nlink=False):
+            if not done and str(path).endswith("f.md"):
+                done.append(1)
+                (self.base / "f.md").unlink()
+                (self.base / "f.md").symlink_to(outside_real)
+            return real_stat(path, include_nlink)
+
+        return mock.patch.object(rv, "_witness_stat_dev_ino", spy)
+
+    def _setup(self, rv):
+        outside = pathlib.Path(self._td.name).resolve().parent / (
+            "r4ba1-outside-" + os.path.basename(self._td.name))
+        outside.mkdir()
+        self.addCleanup(shutil.rmtree, outside, True)
+        decoy = outside / "decoy.md"
+        decoy.write_bytes(b"OUT-OF-ROOT DECOY CONTENT\n")
+        (self.base / "f.md").write_bytes(b"honest in-root content\n")
+        # The receipt DECLARES the decoy's hash: an attacker who wins the race wants the
+        # linter to hash-verify the file it must never have been allowed to read.
+        h = hashlib.sha256(decoy.read_bytes()).hexdigest()
+        arts = {"f.md": {"hash": h, "size": str(decoy.stat().st_size)}}
+        return decoy, arts
+
+    def test_a_swap_in_the_resolve_stat_gap_is_not_sampled_as_valid(self):
+        rv = _import_rv()
+        decoy, arts = self._setup(rv)
+        cache = {}
+        with self._swap_at_stat(rv, decoy):
+            rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        rec = cache["f.md"]
+        # Pre-fix this held the DECOY's (st_dev, st_ino) — an identity for a file
+        # outside every root, recorded as if containment had been proven for it.
+        self.assertIsNone(rec["dev_ino_at_resolve"])
+        self.assertTrue(rec["resolve_stat_failed"])
+
+    def test_the_leg_hard_fails_instead_of_hashing_out_of_root_content(self):
+        """The end-to-end consequence, which is the finding: pre-fix the ARTIFACTS leg
+        read the decoy, matched the declared hash, compared the fd identity against the
+        decoy identity it had already sampled, agreed with itself, and exited clean."""
+        rv = _import_rv()
+        decoy, arts = self._setup(rv)
+        cache = {}
+        with self._swap_at_stat(rv, decoy):
+            rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], [self.base], False,
+                                   cache=cache, verified={})
+        self.assertIn("identity could not be sampled", str(cm.exception))
+
+    def test_an_unswapped_name_still_resolves_and_verifies(self):
+        """Non-vacuity — the re-proof must not reject the honest case."""
+        rv = _import_rv()
+        body = b"honest in-root content\n"
+        (self.base / "f.md").write_bytes(body)
+        arts = {"f.md": {"hash": hashlib.sha256(body).hexdigest(),
+                         "size": str(len(body))}}
+        cache = {}
+        rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        self.assertIsNotNone(cache["f.md"]["dev_ino_at_resolve"])
+        self.assertFalse(cache["f.md"]["resolve_stat_failed"])
+        rv.tier2_artifacts(arts, [], [self.base], False, cache=cache, verified={})
+
+
+class TestSiegeR4BA2CheckThenOpenRace(_InqBase):
+    """SIEGE-R4BA-2 — `is_file()` then a separate `open()` is a check-then-open WINDOW,
+    not a fix for the FIFO hang.
+
+    The #563 fix put `is_file()` in front of `_read_and_fstat_artifact`'s open and siege
+    S-1 put it in front of `_read_jsonl`'s. Both close only "the target is a FIFO for the
+    whole run": `is_file()` stats a NAME and the open resolves THAT NAME AGAIN, so a
+    target that is a regular file at the stat and a FIFO at the open passes the gate and
+    blocks forever — on the one leg with no timeout, in a directory the reviewed subagent
+    owns, with zero bytes on stdout AND stderr and no exit code at all. That is not
+    merely DoS: the documented remedy for a linter that does not work is the in-context
+    pseudocode fallback, which performs zero disk verification.
+
+    THE RACE IS INJECTED. `pathlib.Path.is_file` is forced True for the duration of the
+    call — byte-for-byte the state an attacker who wins the race produces — while the
+    object on disk is a FIFO with no writer. Post-fix there is no `is_file()` on either
+    path at all, so the patch is inert and the fd's own `S_ISREG` classifies it; pre-fix
+    both calls hang until the join timeout expires."""
+
+    def _run_bounded(self, fn):
+        """Call `fn` on a daemon thread with a join deadline — the defect under test is
+        an unbounded hang, so an unguarded call would hang the SUITE rather than fail
+        it."""
+        result = {}
+
+        def _go():
+            try:
+                result["value"] = fn()
+            except BaseException as e:                # pragma: no cover - diagnostic
+                result["error"] = f"{type(e).__name__}: {e}"
+
+        t = threading.Thread(target=_go, daemon=True)
+        t.start()
+        t.join(timeout=5.0)
+        return t.is_alive(), result
+
+    def test_artifact_read_classifies_from_the_fd_not_a_prior_name_stat(self):
+        rv = _import_rv()
+        fifo = self.base / "swapped.log"
+        os.mkfifo(fifo)
+        self.addCleanup(fifo.unlink)
+        with mock.patch.object(pathlib.Path, "is_file", lambda self: True):
+            alive, result = self._run_bounded(
+                lambda: rv._read_and_fstat_artifact(
+                    fifo, rv.ARTIFACT_READ_CAP, "ARTIFACTS swapped.log"))
+        self.assertFalse(alive, "_read_and_fstat_artifact hung on a FIFO that passed "
+                                "the is_file() check")
+        self.assertIn("is not a regular file", result.get("error", ""))
+
+    def test_read_jsonl_classifies_from_the_fd_too(self):
+        """The IDENTICAL pre-existing pattern one function away — same bug class, same
+        file, same directory-ownership premise. `--ledger` is mandated by
+        `quality-gate/SKILL.md` to point INSIDE the dispatch root."""
+        rv = _import_rv()
+        fifo = self.base / "receipt-ledger.jsonl"
+        os.mkfifo(fifo)
+        self.addCleanup(fifo.unlink)
+        with mock.patch.object(pathlib.Path, "is_file", lambda self: True):
+            alive, result = self._run_bounded(lambda: rv._read_jsonl(fifo))
+        self.assertFalse(alive, "_read_jsonl hung on a FIFO that passed the is_file() "
+                                "check")
+        self.assertIn("is not a regular file", result.get("error", ""))
+
+    def test_a_real_regular_file_is_still_read_by_both(self):
+        """Non-vacuity for the descriptor rewrite — the ordinary path is unchanged."""
+        rv = _import_rv()
+        art = self.base / "ok.log"
+        art.write_bytes(b"hello\n")
+        dev_ino, raw = rv._read_and_fstat_artifact(art, rv.ARTIFACT_READ_CAP, "L")
+        self.assertEqual(raw, b"hello\n")
+        st = os.stat(art)
+        self.assertEqual(dev_ino, (st.st_dev, st.st_ino))
+        led = self.base / "l.jsonl"
+        led.write_text('{"a": 1}\n\n{"a": 2}\n')
+        self.assertEqual(rv._read_jsonl(led), [{"a": 1}, {"a": 2}])
+
+
+class TestSiegeR4BA4ReplacementCharactersAreNotSignal(_InqBase):
+    """SIEGE-R4BA-4 — U+FFFD is manufactured by the DECODER, and it was counting as
+    "substantive content delivered".
+
+    `_slice` decodes with `errors="replace"`, so every undecodable byte sequence becomes
+    one U+FFFD; its general category is `So`, which `_substantive_len`'s C/Z filter
+    counts. Four undecodable bytes — the minimum a `#B` range can cite — therefore reach
+    `_SIGNAL_MIN_CHARS` and register as delivered signal, on a range where NONE of the
+    receipt-cited bytes decoded at all. `#B` ranges seek and slice raw bytes, so they do
+    not pass the `_read_text_lossless` UTF-8 gate that would otherwise reject them."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def test_the_helper_does_not_count_replacement_characters(self):
+        rv = _import_rv()
+        self.assertEqual(rv._substantive_len("����"), 0)
+        self.assertFalse(rv._delivered_signal("����"))
+        # The bound: real characters beside them still count, and four of THEM still do.
+        self.assertTrue(rv._delivered_signal("�BOOM�"))
+
+    def _b_range_receipt(self, raw, name):
+        h, size = self.plant(self.base, "evidence.log", raw)
+        body = _receipt(
+            "grep:evidence.log#B1-B4  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / name
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {self.PREFIX}\n")
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    def test_a_range_over_undecodable_bytes_cannot_retire_a_predecessor(self):
+        """Pre-fix: `witness 1/1`, exit 0, predecessor retired — over four bytes that
+        did not decode to anything."""
+        out = self._b_range_receipt(b"\xff\xfe\xff\xfe\ntail text\n", "fffd.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_range_over_decodable_bytes_still_does(self):
+        """Non-vacuity — four REAL characters in the same position still deliver."""
+        out = self._b_range_receipt(b"BOOM\ntail text\n", "decodable.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("witness 1/1", out.stderr)
+
+
+class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
+    """SIEGE-R4BA-5 — an `RCPT v1` header skipped the ENTIRE SUPERSEDES
+    witness-evidence consequent.
+
+    `parse_v11_sections` returns None on a v1 header, and the consequent is gated on
+    `if v11 is not None`. The only remaining signal was the soft `UNVERIFIABLE: v1.1
+    Layer-2 rules not evaluated` note — a channel this file's own docstrings call
+    order-unstable, which moves no counter and no exit code. So the receipt's own author
+    chose, with one token in its first line, whether a newer safety rule applied to it,
+    while `return-convention.md` § The Sweep step 3 tells the orchestrator to process
+    SUPERSEDES with no check of its own because Tier-2 is supposed to have done it.
+
+    The advisory is NOT replaced: mixed-version runs stay legal, and a v1 receipt
+    claiming no supersession still exits 0 carrying the note."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _receipt_text(self, supersedes, v11):
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],          # evidence.log is never planted
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        if v11:
+            body = body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+        return (body + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {supersedes}\n")
+
+    def _run(self, supersedes, v11, name):
+        p = self.base / name
+        p.write_text(self._receipt_text(supersedes, v11))
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    def test_the_two_header_spellings_agree_on_a_bogus_supersedes(self):
+        """The finding verbatim: byte-identical receipts differing ONLY in the header
+        token exited 1 (v1.1, correctly rejected) and 0 (v1, silently accepted)."""
+        v11 = self._run(self.PREFIX, True, "v11.rcpt")
+        legacy = self._run(self.PREFIX, False, "v1.rcpt")
+        self.assertEqual(v11.returncode, 1, v11.stderr)
+        self.assertEqual(legacy.returncode, 1, legacy.stderr)
+        self.assertIn("EVALUATED at Tier-2", legacy.stderr)
+        self.assertIn("RCPT v1", legacy.stderr)     # the cause is NAMED, not generic
+
+    def test_a_v1_receipt_claiming_no_supersession_is_untouched(self):
+        """The bound. `return-convention.md:603` makes mixed-version runs legal, so the
+        gate is narrowed to the one shape where the version dispatch is a BYPASS — the
+        advisory keeps carrying every other v1 receipt at exit 0."""
+        out = self._run("none", False, "v1-none.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("UNVERIFIABLE: v1.1 Layer-2 rules not evaluated", out.stderr)
+
+    def test_a_trailing_non_none_supersedes_wins_over_a_leading_none(self):
+        """`parse_v11_sections` rejects a duplicated section outright and the legacy
+        tail scan cannot, so a first-hit-wins read would let `SUPERSEDES: none` followed
+        by a real claim answer "none" — the appender's shape the `pattern=` clause rules
+        already record. Fail-CLOSED: any non-`none` body wins."""
+        p = self.base / "v1-dup.rcpt"
+        p.write_text(self._receipt_text("none", False)
+                     + f"SUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
 
 
 if __name__ == "__main__":

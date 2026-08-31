@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, io, json, os, posixpath, re, signal, sys, hashlib, pathlib, typing
+import contextlib, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
 import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1243,6 +1243,33 @@ def parse_v11_sections(text):
             "supersedes": supersedes, "trip_child": trip_child}
 
 
+def _legacy_supersedes_claim(text):
+    """SIEGE-R4BA-5 — the `SUPERSEDES:` body of a receipt `parse_v11_sections` REFUSED.
+
+    Same post-NEXT tail scan `parse_v11_sections` runs, with the version dispatch and
+    every v1.1 STRUCTURE rule (TRIPWIRE presence, TRIPWIRE-CHILD-when-DISPATCHED,
+    duplicate detection) left out: this is not a second parser for the v1.1 grammar and
+    must not become one. It answers exactly one question — does this receipt CLAIM a
+    supersession — for the one caller that needs the answer on a header the v1.1 parser
+    version-dispatched away.
+
+    Returns None when no `SUPERSEDES:` line is present at all. Otherwise the STRONGEST
+    claim on the receipt: `parse_v11_sections` rejects a duplicated section outright and
+    this scan cannot, so a first-hit-wins read would let `SUPERSEDES: none` followed by
+    `SUPERSEDES: <prefix>` answer "none" — an appender's shape, and the exact
+    first-vs-trailing asymmetry the `pattern=` clause rules already record. Any non-`none`
+    body therefore wins over `none`, which is the fail-CLOSED direction: the cost of
+    over-reading a claim is a receipt told to declare `RCPT v1.1`."""
+    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
+    claim = None
+    for line in (l for l in tail.splitlines()[1:] if l.strip()):
+        if line.startswith("SUPERSEDES:"):
+            body = line[len("SUPERSEDES:"):].strip()
+            if claim is None or claim == "none":
+                claim = body
+    return claim
+
+
 def lint_v11_local(parsed):
     """Receipt-local v1.1 value checks: TRIPWIRE: none two-leg rule; predicate
     vocabulary + glob-subset cap (TRIPWIRE and TRIPWIRE-CHILD); SUPERSEDES
@@ -1917,6 +1944,41 @@ def _witness_stat_dev_ino(path, include_nlink=False):
     return (st.st_dev, st.st_ino)
 
 
+def _resolve_identity_still_contained(name, root, realpath, dev_ino):
+    """SIEGE-R4BA-1 — re-prove containment for the identity `_resolve_once` just sampled.
+
+    `_resolve_base_one` returns a path STRING the moment `real.is_file()` and
+    `_contained(real, base)` both hold; the identity sample is a SEPARATE `os.stat` on
+    that string, taken after `resolve_base` has already returned. Between the two, a
+    reviewed subagent that owns the directory replaces the name with a symlink pointing
+    OUTSIDE every `--root` — the stat then samples the DECOY's identity, and because that
+    corrupted sample is exactly what tier2_artifacts' later TOCTOU check compares its
+    fd-based re-stat against, the swap is invisible to that check: it compares the decoy
+    against itself and agrees. Measured on this tree, 4/120 runs of the real CLI produced
+    a silent false PASS over out-of-root decoy content.
+
+    So the sample is not TRUSTED on the strength of a containment proof taken before it —
+    containment is re-proven IMMEDIATELY AFTER it, against the same receipt-cited name,
+    and the fresh resolution must land on the SAME realpath AND still carry the SAME
+    `(st_dev, st_ino)`. That is the discipline tier2_artifacts already applies to the
+    resolve/read gap (SIG-8-4), applied to the resolve/stat gap the sample itself opens.
+    A swap in the gap now fails BOTH ways: leave the decoy in place and the re-resolution
+    either escapes containment or lands elsewhere; swap the honest file back and the
+    identities differ.
+
+    Throwaway `found`/`refused` lists deliberately: this call must not add a second
+    ambiguity candidate or a duplicate `REFUSED:` note to the record the FIRST resolution
+    built — it is a re-proof, not a second observation, and every disclosure belongs to
+    the first. `WitnessTimeout` propagates (SIEGE-R3BA-1), exactly as it does out of the
+    first `resolve_base`; the whole re-proof sits inside the RESOLVE phase's own timer.
+    """
+    again = resolve_base(name, root, [], [])
+    if again is None or again != realpath:
+        return False
+    st = _witness_stat_dev_ino(again)
+    return not isinstance(st, OSError) and st == dev_ino
+
+
 def _resolve_once(name, root, cache):
     """SIG-7-3 — resolve `name` exactly once per distinct `str(name)`, memoized in `cache`.
 
@@ -1929,7 +1991,10 @@ def _resolve_once(name, root, cache):
     `OSError` after a successful resolve leaves `realpath` set but records
     `resolve_stat_failed=True` with both identity fields None — the "no realpath to
     stat" and "stat failed with a realpath in hand" causes stay distinguishable in the
-    record (FATAL-8-2).
+    record (FATAL-8-2). SIEGE-R4BA-1 — a sample whose containment does NOT survive an
+    immediate re-proof (`_resolve_identity_still_contained`) lands on that same
+    `resolve_stat_failed` disposition, and for the same reason: there is a realpath in
+    hand and no identity for it that this run is willing to stand behind.
 
     `declared` and `dev_ino` are never set to a meaningful value here: `declared`
     defaults False and is set once during gather (_build_identity_cache); `dev_ino`
@@ -1958,6 +2023,19 @@ def _resolve_once(name, root, cache):
     if rec["realpath"] is not None:
         st = _witness_stat_dev_ino(rec["realpath"], include_nlink=True)
         if isinstance(st, OSError):
+            rec["resolve_stat_failed"] = True
+        elif not _resolve_identity_still_contained(
+                name, root, rec["realpath"], (st[0], st[1])):
+            # SIEGE-R4BA-1 — the sample is not backed by a containment proof taken
+            # AFTER it, so it is discarded rather than recorded. It lands on
+            # `resolve_stat_failed` and both identity fields stay None: that is
+            # precisely the "there is a realpath but no trustworthy identity for it"
+            # state the record already carries (FATAL-8-2), and it is what every
+            # consumer already fails CLOSED on — tier2_artifacts raises on
+            # `dev_ino_at_resolve is None` before any hash is credited, and
+            # tier2_witness's FATAL-10-3 re-check leaves the witness unbound. Fail-
+            # closed is the only safe direction here: the alternative reading of a
+            # failed re-proof is "trust the sample", which is the vulnerability.
             rec["resolve_stat_failed"] = True
         else:
             rec["dev_ino_at_resolve"] = (st[0], st[1])
@@ -2387,14 +2465,39 @@ def _read_and_fstat_artifact(realpath, budget, label):
     #563 inquisitor finding — this leg runs OUTSIDE `_witness_bound()` (uniform policy,
     C3-R1-S4), so a bare `open()` on a name swapped to a FIFO in the resolve/read gap
     blocks forever with zero bytes read, before `budget + 1` ever has a chance to cap
-    anything — verbatim the `_read_jsonl` hang siege S-1 already fixed. `is_file()`
-    FIRST, same as that fix: it stats, it does not open, so a FIFO/device/directory is
-    classified without blocking.
+    anything — verbatim the `_read_jsonl` hang siege S-1 already fixed.
+
+    SIEGE-R4BA-2 — the FIRST spelling of that fix was `is_file()` FIRST, and it closed
+    only the case where the target is a FIFO for the WHOLE run. `is_file()` STATS a NAME
+    and `open()` then RESOLVES THAT NAME AGAIN: a target that is a regular file at the
+    stat and a FIFO at the open passes the gate and hangs anyway, in a directory the
+    reviewed subagent owns and on the one leg with no timeout. Measured on this tree,
+    that check-then-open race hung the real CLI past 20-45 s with zero bytes on stdout
+    AND stderr — the same unclassifiable EXIT=124 shape siege S-1 exists to eliminate,
+    reached one syscall later.
+
+    ONE DESCRIPTOR FROM OPEN TO READ, so there is no name to re-resolve and no window at
+    all. `os.open(..., O_RDONLY | O_NONBLOCK)` never blocks: on a regular file the flag
+    is inert, and on a FIFO with no writer a read-only non-blocking open returns
+    immediately (POSIX). The CLASSIFICATION is then `os.fstat` on that same fd —
+    `S_ISREG`, not a second `is_file()` on the name — so what is classified is exactly
+    what was opened, and it is also the identity sample tier2_artifacts' TOCTOU check
+    compares against (SIG-8-4). `O_NONBLOCK` is left set on the descriptor handed to
+    `os.fdopen`: it is confirmed `S_ISREG` by then, where the flag has no effect on
+    reads. The fd is closed on every path — `os.fdopen` takes ownership on success, and
+    the `except BaseException` arm closes it on the reject/raise paths (including the
+    `LintError` below it and any KeyboardInterrupt/WitnessTimeout in between).
     """
-    if not pathlib.Path(realpath).is_file():
-        raise LintError(f"Tier-2: {label} is not a regular file (not read)")
-    with open(realpath, "rb") as fh:
-        st = os.fstat(fh.fileno())
+    fd = os.open(realpath, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise LintError(f"Tier-2: {label} is not a regular file (not read)")
+        fh = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with fh:
         raw = fh.read(budget + 1)
     if len(raw) > budget:
         raise LintError(
@@ -4013,10 +4116,27 @@ def _substantive_len(body_text):
     Counting STOPS at the floor: the caller only ever asks a >= question, and a 4 KiB
     body should not be walked to answer it.
 
+    U+FFFD IS EXCLUDED, AND IT IS NOT AN EXCEPTION TO THE "NO CHARACTER LISTS" RULE — it
+    is the one codepoint in the count that the DECODER manufactures rather than the file
+    supplying (SIEGE-R4BA-4). `_slice` decodes with `errors="replace"`, which emits one
+    REPLACEMENT CHARACTER per undecodable byte sequence; its category is `So`, so the
+    category rule counts it, and FOUR non-UTF-8 bytes — the minimum a `#B` range can
+    cite — manufacture exactly `_SIGNAL_MIN_CHARS` apparent codepoints. Measured: a `#B`
+    range over 4 undecodable bytes billed `witness 1/1` and carried a `SUPERSEDES`
+    through at exit 0, on a range where NONE of the receipt-cited bytes decoded at all.
+    The category rule is closed over Unicode CONTENT and that is what makes it sound;
+    U+FFFD is not content, it is the decoder reporting that there was none, so counting
+    it lets a decode FAILURE manufacture the very signal this function measures. Nothing
+    else here is a blocklist entry, and this arm cannot be walked around by finding one
+    more invisible character — a receipt wanting credit for real bytes must supply bytes
+    that decode.
+
     MUST NOT RAISE — `unicodedata.category` is total over `str`, and the caller's
     contract forbids raising anyway."""
     n = 0
     for ch in body_text:
+        if ch == "�":
+            continue
         if unicodedata.category(ch)[0] in ("C", "Z"):
             continue
         n += 1
@@ -5183,21 +5303,34 @@ def _read_jsonl(path):
     fallback, which performs zero disk verification. A 4 GiB sparse ledger drove 8.4 GB
     RSS on the same path.
 
-    `is_file()` FIRST and it is what closes the hang: it stats, it does not open, so a
-    FIFO/device/directory is classified without blocking. Then `_read_capped` — the same
-    race-free ceiling every other reader on this leg already took, and for the same
-    reason (the file lives where the reviewed party can grow it between the check and the
-    read). A LintError, so `tier2_ledger`'s caller renders one bullet plus the census and
-    exits 1.
+    SIEGE-R4BA-2 — `is_file()` FIRST, then a separate `_read_capped` open, was the shape
+    of that fix, and it closes only the case where the target is a FIFO for the WHOLE
+    run: `is_file()` stats a NAME and the open RESOLVES THAT NAME AGAIN, so a target that
+    is a regular file at the stat and a FIFO at the open passes the gate and hangs
+    anyway. Identical bug class, identical directory-ownership premise, one function away
+    from `_read_and_fstat_artifact`, which is why the fix is that function rather than a
+    second local spelling of it: ONE descriptor from open to read, classified by
+    `os.fstat` on that same fd. It carries the same `ARTIFACT_READ_CAP` ceiling
+    `_read_capped` did (`budget + 1`, race-free however the file GROWS) and the identity
+    half of its return is simply unused here. A LintError, so `tier2_ledger`'s caller
+    renders one bullet plus the census and exits 1.
+
+    An `OSError`/`ValueError` from the open maps onto that SAME LintError rather than
+    propagating, because that is what the retired `is_file()` did: `Path.is_file()`
+    swallows both and returns False, so a missing, unsearchable, permission-denied or
+    NUL-bearing `--ledger` path already rendered "is not a regular file (not read)" and
+    nothing downstream is prepared for a raw traceback here.
 
     The corpus callers in `run_selftest` read committed, in-repo files well under the
     ceiling, so they are unaffected — but they are covered by the same guard rather than
     routed around it, because a second reader is how this one got missed."""
     p = pathlib.Path(path)
-    if not p.is_file():
+    try:
+        _, raw = _read_and_fstat_artifact(p, ARTIFACT_READ_CAP,
+                                          f"JSONL {_show_path(p)}")
+    except (OSError, ValueError):
         raise LintError(
             f"Tier-2: {_show_path(p)} is not a regular file (not read)")
-    raw = _read_capped(p, ARTIFACT_READ_CAP, f"JSONL {_show_path(p)}")
     try:
         text = raw.decode()
     except UnicodeDecodeError as e:
@@ -5905,6 +6038,35 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # peer's finding. That is the intended disposition, not a side effect —
                 # the remedy is in the author's hands (return the SUPERSEDES as `none`,
                 # or finish the work and return PASS/FAIL with a witness that resolves).
+                # SIEGE-R4BA-5 — THE ADVISORY ABOVE WAS THE WHOLE CONSEQUENCE, and on a
+                # receipt CLAIMING A SUPERSESSION that is not enough. `RCPT v1` makes
+                # `parse_v11_sections` return None, the `if v11 is not None` guard below
+                # skips the ENTIRE witness-evidence consequent, and the only remaining
+                # signal is an UNVERIFIABLE note on the notes channel — which moves no
+                # counter and no exit code. Measured: one receipt, bogus `SUPERSEDES:`,
+                # witness naming a file that does not exist — exit 1 under `RCPT v1.1`
+                # (correctly rejected), exit 0 under `RCPT v1`. The OLDER, LESS-CHECKED
+                # HEADER FORMAT WAS A WAY TO SKIP A NEWER SAFETY RULE, chosen by the
+                # reviewed subagent that writes the header, and `return-convention.md`
+                # § The Sweep step 3 tells the orchestrator to process SUPERSEDES with no
+                # check of its own precisely because Tier-2 is supposed to have done it.
+                #
+                # This is the advisory-narrows-to-a-gate move `_IDENTITY_DEGENERATE`'s
+                # own additions make: the advisory STAYS (mixed-version runs remain legal
+                # per return-convention.md:603, and a v1 receipt with no supersession
+                # claim still exits 0 with the note, unmoved), and it is narrowed to a
+                # hard FAIL on the one shape where "the v1.1 rules never ran" is not a
+                # disclosure problem but a bypass. Sited HERE rather than beside the
+                # advisory so a v1 claim and a v1.1 claim fail at the same point in the
+                # run and render the same census.
+                if v11 is None and _legacy_supersedes_claim(text) not in (None, "none"):
+                    raise LintError(
+                        "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
+                        "EVALUATED at Tier-2 (witness-evidence requirement: this receipt "
+                        "declares `RCPT v1`, so the v1.1 Layer-2 rules — including this "
+                        "one — were not evaluated, and a supersession cannot be granted "
+                        "by the header format that opts out of checking it; declare "
+                        "`RCPT v1.1` and satisfy the rule, or return `SUPERSEDES: none`)")
                 if v11 is not None and v11["supersedes"] != "none" \
                         and not wit_probe.get("unsourced") \
                         and (not wit_probe.get("evaluated")
