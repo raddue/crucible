@@ -363,6 +363,12 @@ surfacing are all #400 fixes, and an implementation missing any of them is a
 regression, not a simplification:**
 
 ```python
+import json
+import os
+import sys
+from typing import Dict
+
+
 def _warn(msg: str) -> None:
     print(f"[ledger_reduce WARN] {msg}", file=sys.stderr)
 
