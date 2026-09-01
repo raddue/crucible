@@ -964,7 +964,7 @@ def check_rt_prompt(text: str) -> list[str]:
                 )
 
     # [A13] CLAIMS citations use the convention's two-endpoint range form
-    #       (<artifact>#L<a>-L<b>; return-convention.md:85), NOT a bare <artifact>#L<n>.
+    #       (<artifact>#L<a>-L<b>; return-convention.md:93), NOT a bare <artifact>#L<n>.
     #       Bare #L<n> is not an enumerated citation grammar form. Scans every CLAIMS
     #       `from=` in both worked-example blocks: each must carry an L-range, and NONE
     #       may carry a bare #L<n> with no '-L' suffix.
@@ -980,7 +980,7 @@ def check_rt_prompt(text: str) -> list[str]:
             errs.append(
                 f"[A13] red-team-prompt.md: {label} example CLAIMS citation uses the "
                 "non-conformant bare '#L<n>' form instead of the convention's '#L<a>-L<b>' "
-                f"range form (return-convention.md:85): {bad}"
+                f"range form (return-convention.md:93): {bad}"
             )
 
     return errs

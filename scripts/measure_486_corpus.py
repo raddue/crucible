@@ -78,6 +78,8 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from measure_474_corpus import _cache_for  # noqa: E402 — shared identity-cache builder
 HOME = pathlib.Path.home()
 MEM = HOME / ".claude/projects/-mnt-coding-Coding-crucible/memory/quality-gate"
 EV486 = MEM / "evidence-486-tier2-resolution"
@@ -310,12 +312,18 @@ def measure_receipt(rv, text, roots, strict):
     # ── ARTIFACTS leg, ONE ENTRY AT A TIME (rule 8). A per-receipt call would abandon
     #    every later entry of a receipt whose first entry mismatches — silently, and in
     #    the direction that makes the residual look smaller.
+    #    FATAL-8-1(c) — ONE cache per receipt, built from the receipt's FULL artifacts
+    #    dict BEFORE the per-entry loop, and ONE verified dict shared across every
+    #    tier2_artifacts call and the subsequent tier2_witness call.
+    cache = _cache_for(rv, artifacts, trace, witness, verdict, roots)
+    verified = {}
     for name, meta in artifacts.items():
         cov = rv._Coverage()
         cov.tier1_ok()
         blocked = ""
         try:
-            rv.tier2_artifacts({name: meta}, trace, roots, strict, cov)
+            rv.tier2_artifacts({name: meta}, trace, roots, strict, cov,
+                               cache=cache, verified=verified)
         except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
             # UNREACHABLE TODAY, uniform by policy — the ARTIFACTS leg runs OUTSIDE
             # `_witness_bound()` and has no timeout of any kind. THIS is the arm that
@@ -328,13 +336,17 @@ def measure_receipt(rv, text, roots, strict):
         res.partial = res.partial or cov.partial
         res.entries.append((name, cov.art_verified == 1,
                             "sha256 mismatch" in blocked, blocked))
+    # SIG-13-3 — finalize probe (2)'s degenerate-collision disambiguation ONCE, after the
+    # per-entry loop completes; never per entry, never inside the loop.
+    rv._finalize_identity_degenerate(cache, verified)
 
     # ── witness leg, verdict-gated exactly as `_verify_single` gates it.
     if verdict in {"PASS", "FAIL"}:
         cov = rv._Coverage()
         cov.tier1_ok()
         try:
-            notes = rv.tier2_witness(witness, trace, roots, strict, verdict, cov)
+            notes = rv.tier2_witness(witness, trace, roots, strict, verdict, cov,
+                                     cache=cache, verified=verified)
             res.wit_disposition = ("unverifiable"
                                    if any(n.startswith("UNVERIFIABLE") for n in notes)
                                    else "clean")

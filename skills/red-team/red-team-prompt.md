@@ -227,7 +227,18 @@ Task tool (subagent_type: crucible-red-team):
       pattern really runs against its bytes. Before #486 it did not: only the dispatch root
       was supplied, a findings file placed anywhere else did not resolve under it, and the
       `PASS` leg degraded to `UNVERIFIABLE: witness <findings-file> (no file under root)`,
-      exit 0 — measured at 0 of 14 resolutions over the #474 §0g corpus. What survives is a
+      exit 0 — measured at 0 of 14 resolutions over the #474 §0g corpus. **Cite the file by the
+      shortest name that resolves under the root you were given.** Under the
+      findings-file location pin (`quality-gate/SKILL.md` › *Findings-file location
+      pin*) that is the **bare basename**, and that remains the correct citation for
+      the ordinary case. If — and only if — your findings file is genuinely one or
+      more directories below a supplied root, a **root-relative** path —
+      `out-N/round-N-findings.md` — is joined whole to each supplied root and resolves
+      by the same literal join; such a resolution is announced on stderr as
+      `RESOLVED-BY-WALK: <name> (<relpath-from-root>)` and counted in the run's
+      `resolved-by-walk` census sub-count. **A root-relative name is path-shaped: if
+      the prefix is wrong it does not degrade to `UNVERIFIABLE`, it hard-FAILs the
+      whole receipt under the mandated `--strict`.** Do not guess the prefix. What survives is a
       **weaker asymmetry than it used to be**, and since GH #501 it is no longer about
       reading. Your `FAIL`-leg witness now resolves under `--root` and its pattern really
       runs against your findings file's bytes, exactly as on the `PASS` leg. What differs
