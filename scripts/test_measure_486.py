@@ -50,6 +50,7 @@ import os
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "measure_486_corpus.py"
 
@@ -207,6 +208,55 @@ class TestUnmeasurableInputsAreNamedNotRaised(_SyntheticCorpus):
         _, out = self._run(["rcpt-99-asreturned.txt"])
         self.assertIn("unmeasured entry  findings.md", out)
         self.assertIn("NOT counted above", out)
+
+
+class TestFdLeakGuardSurvivesABuildRaise(unittest.TestCase):
+    """R2 finding on the first fix attempt for the temper-R1 fd-leak finding (scoped
+    re-temper, warden 2026-08-31T-563-warden-r2). `_build_identity_cache` now opens and
+    HOLDS a real fd per resolved name; `measure_receipt`'s first fix bound `cache` to
+    `_cache_for(...)`'s RETURN value, which is only produced on `_build_identity_cache`'s
+    own success — an exception from inside it (e.g. `WitnessTimeout` mid-resolve;
+    UNREACHABLE TODAY by policy, per this module's docstring, but the defensive shape
+    must not silently depend on that staying true) left `cache` unbound to whatever the
+    dict already held, so every fd already opened for names resolved before the raise
+    was unreachable to any cleanup. Fixed by creating `cache = {}` in `measure_receipt`'s
+    own frame and passing it BY REFERENCE into `_build_identity_cache`, inside the `try`
+    whose `finally` always closes it — the same pattern `rcpt_verify.py`'s own
+    `_selftest_run_fixture` uses for this exact hazard."""
+
+    def test_fds_opened_before_a_build_raise_are_still_closed(self):
+        m = _import_m486()
+        rv = m.load_rcpt_verify()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"hi")
+            h = hashlib.sha256(b"hi").hexdigest()
+            text = _receipt(
+                "grep:f.md#L1-L1  pattern=/x/  expect-fail=match  ran=TRACE#1",
+                artifacts=[("f.md", h, "2")], trace=[f"WROTE  f.md  sha256:{h}"],
+                verdict="PASS")
+
+            real_build = rv._build_identity_cache
+            leaked = []
+
+            def spy_build(artifacts, trace, witnesses, verdict, roots, cache):
+                # A real name resolves and its fd is genuinely opened and held, exactly
+                # as `_resolve_once` does — THEN the call raises before returning, as a
+                # mid-resolve `WitnessTimeout` would.
+                real_build(artifacts, trace, witnesses, verdict, roots, cache)
+                leaked.append(cache["f.md"]["fd"])
+                raise rv.WitnessTimeout("synthetic mid-build timeout")
+
+            with mock.patch.object(rv, "_build_identity_cache", spy_build):
+                with self.assertRaises(rv.WitnessTimeout):
+                    m.measure_receipt(rv, text, [root], False)
+
+            self.assertEqual(len(leaked), 1)
+            self.assertIsNotNone(leaked[0])
+            # The fd must have been closed by `measure_receipt`'s `finally`, not merely
+            # dropped: a second close on the same (now-invalid) fd number raises EBADF.
+            with self.assertRaises(OSError):
+                os.close(leaked[0])
 
 
 class TestWitnessTimeoutIsANamedStopNotADisposition(_SyntheticCorpus):

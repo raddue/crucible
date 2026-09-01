@@ -2085,10 +2085,25 @@ def _resolve_once(name, root, cache):
         except OSError:
             rec["resolve_stat_failed"] = True
         else:
-            st = os.fstat(fd)
-            rec["fd"] = fd
-            rec["dev_ino_at_resolve"] = (st.st_dev, st.st_ino)
-            rec["nlink_at_resolve"] = st.st_nlink
+            # temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
+            # `os.fstat(fd)` needs its OWN guard: a bare call here left an `OSError`
+            # from THIS step (e.g. ESTALE on a network `--root` whose file vanishes
+            # between the walk's open and this fstat) propagating uncaught out of
+            # `_resolve_once`/`_build_identity_cache` — a raw traceback instead of the
+            # fail-closed `resolve_stat_failed` disposition every other failure on this
+            # path produces — AND leaked `fd` (never stored, never closed). The
+            # pre-fix code never had this gap: `_witness_stat_dev_ino` wrapped its own
+            # `os.stat` in `try/except OSError: return e`, so a stat failure there was
+            # always a sentinel, never a raise.
+            try:
+                st = os.fstat(fd)
+            except OSError:
+                os.close(fd)
+                rec["resolve_stat_failed"] = True
+            else:
+                rec["fd"] = fd
+                rec["dev_ino_at_resolve"] = (st.st_dev, st.st_ino)
+                rec["nlink_at_resolve"] = st.st_nlink
     return rec["realpath"]
 
 
@@ -2592,7 +2607,27 @@ def _read_and_fstat_artifact(realpath, budget, label):
     safety and was a real regression when this function was still shared with the
     ARTIFACTS/witness path's TOCTOU-sensitive reads. Those reads now go through
     `_read_from_fd` directly on a fd `_open_nofollow_walk` already produced and never
-    call this function at all — see `_read_from_fd`'s docstring."""
+    call this function at all — see `_read_from_fd`'s docstring.
+
+    DISCLOSED RESIDUAL (temper R1, scoped re-temper, warden 2026-08-31T-563-warden-r2)
+    — `_read_jsonl`'s own docstring notes the mandated `--ledger` path sits INSIDE the
+    directory the reviewed subagent owns, so a subagent that can plant a symlink there
+    (rather than a real file) can redirect this read to bytes it did not directly write
+    at that name. Two things bound this, rather than closing it outright: (1) `--ledger`
+    has never been containment-checked against `--root` (unlike ARTIFACTS/TRACE names,
+    which resolve through `resolve_base`) — that is a pre-existing, separate gap this
+    fix does not touch, not something this change introduces or narrows; closing it
+    would mean resolving `--ledger` the same way ARTIFACTS names are, a materially
+    larger change out of scope here. (2) `tier2_ledger`'s binding still requires an
+    EXACT `(dispatch_id, rcpt_sha256, verdict)` match against what the SAME subagent's
+    OWN receipt claims in its DISPATCHED line, so redirecting to an attacker-owned file
+    buys nothing beyond writing that file's content directly (already possible without
+    any symlink); redirecting to a genuinely independent, already-existing ledger
+    (e.g. a sibling dispatch's) only succeeds if that ledger happens to already contain
+    the exact triple the attacker is trying to fabricate — binding to someone else's
+    real, already-verified work, not forging new trust. Accepted as a narrow, disclosed
+    tradeoff in favor of restoring the legitimate-symlink case; a full fix (containment
+    enforcement for `--ledger`) is a separate, larger change."""
     fd = os.open(realpath, os.O_RDONLY | os.O_NONBLOCK)
     return _read_from_fd(fd, budget, label)
 

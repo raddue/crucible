@@ -44,24 +44,37 @@ def load(path):
     return mod
 
 
-def _cache_for(rv, artifacts, trace, witness, verdict, root):
-    cache = {}
-    rv._build_identity_cache(artifacts, trace,
-                             [witness] if witness is not None else [],
-                             verdict, root, cache)
-    return cache
-
-
 def disposition(rv, text, root, strict):
     """Run one receipt through Tier-1 + Tier-2 exactly as `--tier2` does.
     Returns (verdict_label, message_or_notes)."""
+    # temper R1 cross-file finding (scoped re-temper, warden 2026-08-31T-563-warden-r2)
+    # — `_build_identity_cache` now opens and HOLDS an fd per resolved name
+    # (rcpt_verify.py's F1 structural fix); the three in-module call sites close every
+    # unconsumed one via `rv._close_identity_cache_fds()` in a `finally:`, but this
+    # corpus loop (and measure_486_corpus.py's equivalent) had no equivalent — a
+    # receipt that raises before every entry's fd is consumed (e.g. a `--strict`
+    # ambiguity) leaked it, accumulating across the corpus.
+    #
+    # temper R2 finding on the FIRST attempt at this fix — `cache = None` followed by
+    # `cache = _cache_for(...)` (which only `return`s the dict on `_cache_for`'s OWN
+    # success) left `cache` still `None` if `_build_identity_cache` itself raised
+    # (e.g. `WitnessTimeout` mid-resolve-phase) — every fd it had already opened for
+    # names resolved before the raise was then unreachable to the `finally:` below.
+    # Fixed the way `rcpt_verify.py`'s own `_selftest_run_fixture` does it: `cache = {}`
+    # is created HERE, in this frame, BEFORE the call, and passed BY REFERENCE into
+    # `_build_identity_cache` (which mutates it in place per name as it resolves) —
+    # so this frame's `cache` variable already points at the same dict object, with
+    # whatever it holds so far, even when the build call raises partway through.
+    cache = {}
     try:
         verdict = rv.lint_receipt(text)
         sections = rv.parse_receipt(text)
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
-        cache = _cache_for(rv, artifacts, trace, witness, verdict, root)
+        rv._build_identity_cache(artifacts, trace,
+                                 [witness] if witness is not None else [],
+                                 verdict, root, cache)
         verified = {}
         notes = rv.tier2_artifacts(artifacts, trace, root, strict,
                                    cache=cache, verified=verified)
@@ -78,6 +91,8 @@ def disposition(rv, text, root, strict):
         return "clean", "; ".join(notes)
     except rv.LintError as e:
         return "BLOCKED", str(e)
+    finally:
+        rv._close_identity_cache_fds(cache)
 
 
 def body_source(rv, text, verdict_override=None):

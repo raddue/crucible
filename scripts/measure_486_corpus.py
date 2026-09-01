@@ -78,8 +78,6 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-from measure_474_corpus import _cache_for  # noqa: E402 — shared identity-cache builder
 HOME = pathlib.Path.home()
 MEM = HOME / ".claude/projects/-mnt-coding-Coding-crucible/memory/quality-gate"
 EV486 = MEM / "evidence-486-tier2-resolution"
@@ -315,52 +313,76 @@ def measure_receipt(rv, text, roots, strict):
     #    FATAL-8-1(c) — ONE cache per receipt, built from the receipt's FULL artifacts
     #    dict BEFORE the per-entry loop, and ONE verified dict shared across every
     #    tier2_artifacts call and the subsequent tier2_witness call.
-    cache = _cache_for(rv, artifacts, trace, witness, verdict, roots)
-    verified = {}
-    for name, meta in artifacts.items():
-        cov = rv._Coverage()
-        cov.tier1_ok()
-        blocked = ""
-        try:
-            rv.tier2_artifacts({name: meta}, trace, roots, strict, cov,
-                               cache=cache, verified=verified)
-        except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
-            # UNREACHABLE TODAY, uniform by policy — the ARTIFACTS leg runs OUTSIDE
-            # `_witness_bound()` and has no timeout of any kind. THIS is the arm that
-            # goes live the moment a bound is armed there, and it is the reason the
-            # policy is uniform rather than pinned-only (C3-R1-S4).
-            raise Skip(f"witness-timeout: {e}", stop=True)
-        except rv.LintError as e:
-            blocked = str(e)
-        res.art_covs.append(cov)
-        res.partial = res.partial or cov.partial
-        res.entries.append((name, cov.art_verified == 1,
-                            "sha256 mismatch" in blocked, blocked))
-    # SIG-13-3 — finalize probe (2)'s degenerate-collision disambiguation ONCE, after the
-    # per-entry loop completes; never per entry, never inside the loop.
-    rv._finalize_identity_degenerate(cache, verified)
+    # temper R1 cross-file finding (scoped re-temper, warden 2026-08-31T-563-warden-r2)
+    # — `_build_identity_cache` now opens and HOLDS an fd per resolved name
+    # (rcpt_verify.py's F1 structural fix); the three in-module call sites close every
+    # unconsumed one via `rv._close_identity_cache_fds()` in a `finally:`, and this
+    # per-receipt cache needs the same discipline — a per-entry `--strict` ambiguity
+    # raise below leaves that entry's fd unconsumed, and this function runs once per
+    # receipt across the whole corpus.
+    #
+    # temper R2 finding on the FIRST attempt at this fix — calling `_cache_for(...)`
+    # BEFORE the `try:` meant an exception from `_build_identity_cache` itself (e.g.
+    # `WitnessTimeout` mid-resolve-phase) propagated straight out of this function
+    # WITHOUT ever entering the `try/finally` below, so every fd already opened for
+    # names resolved before the raise was unreachable. Fixed the way
+    # `rcpt_verify.py`'s own `_selftest_run_fixture` does it: `cache = {}` is created
+    # first and passed BY REFERENCE into `_build_identity_cache` (which mutates it in
+    # place per name as it resolves) INSIDE the try, so the `finally:` always has a
+    # live reference to whatever the dict holds so far, even when the build call
+    # raises partway through.
+    cache = {}
+    try:
+        rv._build_identity_cache(artifacts, trace,
+                                 [witness] if witness is not None else [],
+                                 verdict, roots, cache)
+        verified = {}
+        for name, meta in artifacts.items():
+            cov = rv._Coverage()
+            cov.tier1_ok()
+            blocked = ""
+            try:
+                rv.tier2_artifacts({name: meta}, trace, roots, strict, cov,
+                                   cache=cache, verified=verified)
+            except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
+                # UNREACHABLE TODAY, uniform by policy — the ARTIFACTS leg runs OUTSIDE
+                # `_witness_bound()` and has no timeout of any kind. THIS is the arm that
+                # goes live the moment a bound is armed there, and it is the reason the
+                # policy is uniform rather than pinned-only (C3-R1-S4).
+                raise Skip(f"witness-timeout: {e}", stop=True)
+            except rv.LintError as e:
+                blocked = str(e)
+            res.art_covs.append(cov)
+            res.partial = res.partial or cov.partial
+            res.entries.append((name, cov.art_verified == 1,
+                                "sha256 mismatch" in blocked, blocked))
+        # SIG-13-3 — finalize probe (2)'s degenerate-collision disambiguation ONCE, after
+        # the per-entry loop completes; never per entry, never inside the loop.
+        rv._finalize_identity_degenerate(cache, verified)
 
-    # ── witness leg, verdict-gated exactly as `_verify_single` gates it.
-    if verdict in {"PASS", "FAIL"}:
-        cov = rv._Coverage()
-        cov.tier1_ok()
-        try:
-            notes = rv.tier2_witness(witness, trace, roots, strict, verdict, cov,
-                                     cache=cache, verified=verified)
-            res.wit_disposition = ("unverifiable"
-                                   if any(n.startswith("UNVERIFIABLE") for n in notes)
-                                   else "clean")
-        except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
-            # THE ONE REACHABLE ARM, and the one `test_measure_486.py` pins: the watchdog
-            # is armed inside `tier2_witness` only (C3-R1-S4).
-            raise Skip(f"witness-timeout: {e}", stop=True)
-        except rv.LintError as e:
-            res.wit_disposition = f"raise: {e}"
-        res.wit_cov = cov
-        res.partial = res.partial or cov.partial
-    elif verdict is not None:
-        res.wit_disposition = "not-entered (verdict not PASS/FAIL)"
-    return res
+        # ── witness leg, verdict-gated exactly as `_verify_single` gates it.
+        if verdict in {"PASS", "FAIL"}:
+            cov = rv._Coverage()
+            cov.tier1_ok()
+            try:
+                notes = rv.tier2_witness(witness, trace, roots, strict, verdict, cov,
+                                         cache=cache, verified=verified)
+                res.wit_disposition = ("unverifiable"
+                                       if any(n.startswith("UNVERIFIABLE") for n in notes)
+                                       else "clean")
+            except rv.WitnessTimeout as e:            # MUST precede `except rv.LintError`
+                # THE ONE REACHABLE ARM, and the one `test_measure_486.py` pins: the
+                # watchdog is armed inside `tier2_witness` only (C3-R1-S4).
+                raise Skip(f"witness-timeout: {e}", stop=True)
+            except rv.LintError as e:
+                res.wit_disposition = f"raise: {e}"
+            res.wit_cov = cov
+            res.partial = res.partial or cov.partial
+        elif verdict is not None:
+            res.wit_disposition = "not-entered (verdict not PASS/FAIL)"
+        return res
+    finally:
+        rv._close_identity_cache_fds(cache)
 
 
 def witness_name(rv, text):

@@ -329,6 +329,53 @@ class TestResolveToReadWindow(unittest.TestCase):
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
 
+    def test_an_fstat_failure_on_the_walked_fd_fails_closed_not_uncaught(self):
+        """temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
+        `_resolve_once`'s `os.fstat(fd)` on the fd `_open_nofollow_walk` just handed
+        back used to sit OUTSIDE any exception guard: an `OSError` from THIS specific
+        step (not the walk itself) propagated uncaught out of `_resolve_once` — a raw
+        traceback, and the fd was never closed nor stored. Fixed by wrapping the fstat
+        in its own try/except that closes the fd and lands on the same
+        `resolve_stat_failed` disposition every other failure on this path uses."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = self._art("f.md", b"REAL")
+            real_walk = rv._open_nofollow_walk
+            real_fstat = rv.os.fstat
+            walked_fd = []
+
+            def walk_spy(path):
+                fd = real_walk(path)
+                walked_fd.append(fd)
+                return fd
+
+            def fstat_spy(fd, *a, **k):
+                if walked_fd and fd == walked_fd[-1]:
+                    raise OSError("simulated fstat failure on the walked fd")
+                return real_fstat(fd, *a, **k)
+
+            with mock.patch.object(rv, "_open_nofollow_walk", walk_spy), \
+                    mock.patch.object(rv.os, "fstat", fstat_spy):
+                cache = _cache_for(rv, arts, [], None, "PASS", root)
+            self.assertTrue(cache["f.md"]["resolve_stat_failed"])
+            self.assertIsNone(cache["f.md"]["fd"])
+            self.assertIsNone(cache["f.md"]["dev_ino_at_resolve"])
+            # The fd must have been closed, not merely dropped: a second close on the
+            # same (now-invalid) fd number raises EBADF, proving it isn't still open.
+            with self.assertRaises(OSError):
+                os.close(walked_fd[-1])
+            cov = rv._Coverage()
+            verified = {}
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], root, True, cov,
+                                   cache=cache, verified=verified)
+            self.assertIn("identity could not be sampled at resolution time",
+                          str(cm.exception))
+            self.assertTrue(cov.partial)
+            self.assertEqual(verified, {})
+
     def test_a_degenerate_identity_filesystem_hard_fails_instead_of_trusting_the_toctou_check(self):
         """#563 — `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`) means every file on the
         filesystem shares one identity, so `dev_ino_at_resolve != st_dev_ino` is trivially
