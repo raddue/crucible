@@ -1361,10 +1361,33 @@ def _legacy_supersedes_claim(text):
     demonstrated the category-based version does not stay bounded in every
     position. No enumerated codepoint list and no category list backs this
     version — there is no fifth blocklist entry for a future codepoint, category,
-    or line-break definition to reopen."""
+    or line-break definition to reopen.
+
+    ROUND-3 FIX-OF-A-FIX (found by this fix's own mandated scoped re-temper,
+    before shipping) — step 1 (`split("\\n")`, not `splitlines()`) was applied
+    without revisiting the `[1:]` slice immediately below, which used to be safe
+    ONLY because `splitlines()` guaranteed `tail.splitlines()[0]` was EXACTLY the
+    residue of the `NEXT` line and nothing past it: `splitlines()` recognizes
+    U+2028/U+2029/several `Cc` controls as line breaks too, so ANY of those
+    between the `NEXT` residue and a following `SUPERSEDES:` line still produced
+    two separate elements under the OLD split, with `[1:]` discarding only the
+    first. Switching to a literal `\\n`-only split without also revisiting `[1:]`
+    reopened exactly this: one of those codepoints placed where a `\\n` would
+    normally sit now leaves the `NEXT` residue and the `SUPERSEDES:` line FUSED
+    into one `split("\\n")` element, and `[1:]` discarded that whole fused
+    element — the claim, gone, `None`, before the ASCII-skeleton step even runs.
+    Confirmed live via the CLI before fixing (byte-identical `v1`/`v1.1` receipts
+    again disagreed on exit code, same shape as the original SIEGE-R4BA-5
+    finding). Fixed by dropping the `[1:]` skip entirely: it was never
+    correctness-load-bearing, only a "don't bother scanning a fragment we know is
+    irrelevant" tidiness step — the `NEXT` residue cannot itself match the
+    `SUPERSEDES:` substring search under the confirmed grammar any more than any
+    other non-matching line can, so scanning every element (including whatever a
+    crafted separator fuses into the first one) costs nothing and leaves no
+    element unscanned for any adversarial choice of separator."""
     tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
     claim = None
-    for raw_line in (l for l in tail.split("\n")[1:] if l.strip()):
+    for raw_line in (l for l in tail.split("\n") if l.strip()):
         skeleton = re.sub(r"[^A-Za-z0-9:]", "", raw_line)
         idx = skeleton.find("SUPERSEDES:")
         if idx != -1:
@@ -2054,6 +2077,20 @@ def _witness_stat_dev_ino(path, include_nlink=False):
     return (st.st_dev, st.st_ino)
 
 
+# warden 2026-08-31T-563-warden-r3 — `os.O_PATH` is Linux-only (CPython does not
+# define the attribute at all on a platform whose libc lacks it, e.g. macOS); a bare
+# `os.O_PATH` reference below would raise `AttributeError` — NOT `OSError` — on import
+# of this module on such a platform, escaping `_resolve_once`'s `except OSError` guard
+# as an uncaught traceback instead of the fail-closed `resolve_stat_failed` disposition
+# every other failure on this path produces (the file's own `_witness_bound` docstring,
+# :176, already names this exact hazard class for `signal.setitimer`/`SIGALRM` and
+# guards it the same way). `getattr(..., 0)` degrades to the pre-fix ancestor-open
+# flags on a platform without `O_PATH` (ORing in 0 is a no-op) rather than crashing —
+# restoring the read-permission requirement there, which is what that platform already
+# required before this fix, not a new regression on it.
+_ANCESTOR_OPEN_FLAGS = os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_PATH", 0)
+
+
 def _open_nofollow_walk(path):
     """F1 STRUCTURAL FIX — open `path` end-to-end via one `os.open` PER PATH COMPONENT,
     each relative to the previous component's already-open directory file descriptor
@@ -2099,16 +2136,20 @@ def _open_nofollow_walk(path):
     permission on the directories traversed to reach it, matching pre-fix's
     permission floor. `O_NOFOLLOW` still refuses a symlink at that component — an
     `O_PATH` fd support of an unfollowed symlink is a separate, deliberately-unused
-    capability of the flag; combined with `O_NOFOLLOW` here the open still fails
-    (`ELOOP`) exactly as before if the component is a symlink. The LEAF keeps its
-    original read-intent flags (`O_RDONLY | O_NONBLOCK | O_NOFOLLOW`) unchanged —
-    it is the fd `_read_from_fd` actually reads from, so it must remain a real
-    readable open, not `O_PATH`."""
+    capability of the flag; combined with `O_DIRECTORY` and `O_NOFOLLOW` here the
+    open still fails (measured: `ENOTDIR`, both before and after this fix — the
+    unfollowed symlink is never itself a directory) exactly as before if the
+    component is a symlink. `_ANCESTOR_OPEN_FLAGS` (module level, above) degrades
+    to the pre-`O_PATH` flags on a platform without `os.O_PATH` rather than
+    raising `AttributeError` at the reference site. The LEAF keeps its original
+    read-intent flags (`O_RDONLY | O_NONBLOCK | O_NOFOLLOW`) unchanged — it is the
+    fd `_read_from_fd` actually reads from, so it must remain a real readable
+    open, not `O_PATH`."""
     parts = pathlib.Path(path).parts
-    dir_fd = os.open(parts[0], os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
+    dir_fd = os.open(parts[0], _ANCESTOR_OPEN_FLAGS)
     try:
         for component in parts[1:-1]:
-            next_fd = os.open(component, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW,
+            next_fd = os.open(component, _ANCESTOR_OPEN_FLAGS,
                               dir_fd=dir_fd)
             os.close(dir_fd)
             dir_fd = next_fd

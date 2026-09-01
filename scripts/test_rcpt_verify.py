@@ -8744,6 +8744,42 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
                 self.assertEqual(out.returncode, 1, out.stderr)
                 self.assertIn("EVALUATED at Tier-2", out.stderr)
 
+    def test_a_line_separator_right_after_next_does_not_lose_the_claim(self):
+        """Round-3 fix-of-a-fix (found by this fix's own mandated scoped re-temper,
+        before shipping) — switching the outer split from `str.splitlines()` to a
+        literal `\\n`-only split, without also dropping the `[1:]` skip that used to
+        rely on `splitlines()`'s broader line-break set, let a `splitlines()`-special
+        separator placed WHERE the `\\n` after `NEXT` would normally sit fuse the
+        `NEXT` residue and the `SUPERSEDES:` line into one `split("\\n")` element —
+        which `[1:]` then discarded whole, losing the claim entirely (`None`,
+        exit 0) rather than merely failing to strip a codepoint inside the keyword.
+        Fixed by dropping `[1:]`: it was never correctness-load-bearing.
+
+        DISCRIMINATION NOTE: `SUPERSEDES:` must be the line FUSED to `NEXT`'s own
+        residue — with a real `\\n`-delimited `TRIPWIRE:` line still in between (as
+        `_receipt_text` normally emits), `[1:]` only discards the NEXT+TRIPWIRE
+        fusion and `SUPERSEDES:` survives as its own element regardless of this
+        bug, so this test builds the tail directly rather than via
+        `_receipt_text`."""
+        base_body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        for label, cp in {"u2028_line_sep": chr(0x2028),
+                          "u2029_para_sep": chr(0x2029),
+                          "u0085_nel": chr(0x0085),
+                          "u001e_rs": chr(0x001E)}.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-nextfuse-{label}.rcpt"
+                text = base_body.replace(
+                    "NEXT       (none)\n",
+                    f"NEXT       (none){cp}SUPERSEDES: {self.PREFIX}\n", 1)
+                p.write_text(text)
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
     def test_a_unicode_line_separator_does_not_split_the_keyword_past_detection(self):
         """`str.splitlines()` treats U+2028/U+2029 (and several `Cc` controls) as
         line breaks in addition to `\\n` — a round-3-first-attempt residual that
