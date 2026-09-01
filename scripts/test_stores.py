@@ -7,7 +7,9 @@ the highest-blast-radius helpers in the suite:
     into the repo tree, because grudges carry private file paths and this repo is
     PUBLIC) — a regression there leaks private paths into a public git history.
   - `grudge_query` parses untrusted on-disk grudge files and runs a user-authored
-    `anti_pattern_signature` regex under a SIGALRM wall-clock budget.
+    `anti_pattern_signature` regex under a SIGALRM wall-clock budget; it also shells
+    out to `git` (list-form argv, no shell, 30s per-call timeout) in a caller-supplied
+    `session_root`, on commit ids read from those same untrusted grudge files.
   - `render_ledger` computes the honest "caught N silent bugs" headline and the
     3x-rolling-median inflation detector (the anti-gaming check).
   - `backfill-ledger` builds synthetic ledger entries; its module docstring used
@@ -205,9 +207,13 @@ class ParseGrudgeTest(unittest.TestCase):
             p = self._write(d, "g.md", "---\nfiles_touched: [\"a.py\"]\n")
             self.assertIsNone(gq.parse_grudge(p))
 
-    def test_malformed_files_touched_warns_and_empties(self):
-        # #408 F4: a malformed files_touched silently empties the grudge's match
-        # scope (it then matches no path) — surface the corruption, don't hide it.
+    def test_malformed_files_touched_json_warns_and_empties(self):
+        # #408 F4: a files_touched that fails to JSON-DECODE silently empties the
+        # grudge's match scope (it then matches no path) — surface the corruption,
+        # don't hide it. The guard wraps `json.loads` only, so a files_touched that
+        # DOES decode, to a non-list (`5`, `null`) or to a list holding a non-string,
+        # is stored verbatim — not emptied — and raises downstream in `survivors()`
+        # (see `find_by_files`'s TypeError/AttributeError guard).
         with tempfile.TemporaryDirectory() as d:
             p = self._write(d, "g.md",
                             '---\n'
