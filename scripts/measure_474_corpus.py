@@ -44,6 +44,14 @@ def load(path):
     return mod
 
 
+def _cache_for(rv, artifacts, trace, witness, verdict, root):
+    cache = {}
+    rv._build_identity_cache(artifacts, trace,
+                             [witness] if witness is not None else [],
+                             verdict, root, cache)
+    return cache
+
+
 def disposition(rv, text, root, strict):
     """Run one receipt through Tier-1 + Tier-2 exactly as `--tier2` does.
     Returns (verdict_label, message_or_notes)."""
@@ -53,9 +61,14 @@ def disposition(rv, text, root, strict):
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
-        notes = rv.tier2_artifacts(artifacts, trace, root, strict)
+        cache = _cache_for(rv, artifacts, trace, witness, verdict, root)
+        verified = {}
+        notes = rv.tier2_artifacts(artifacts, trace, root, strict,
+                                   cache=cache, verified=verified)
         if verdict in {"PASS", "FAIL"}:
-            notes = notes + rv.tier2_witness(witness, trace, root, strict, verdict)
+            notes = notes + rv.tier2_witness(witness, trace, root, strict,
+                                             verdict, cache=cache,
+                                             verified=verified)
         return "clean", "; ".join(notes)
     except rv.LintError as e:
         return "BLOCKED", str(e)
