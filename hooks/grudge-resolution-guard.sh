@@ -242,10 +242,39 @@ SCAN_HEAD="$(_git "$SESSION_ROOT" rev-parse HEAD)"
 # The subject is EVERYTHING after the second `|`, so an embedded `|` cannot
 # truncate it. --root so a parentless root commit still lists its paths.
 _has_non_md() {
-  # $1 = newline-separated RAW paths. BOTH branches of filter (c) — the fresh
-  # diff-tree and the persisted sha_files — call THIS one predicate, so the two
-  # can never disagree about the same commit.
-  printf '%s\n' "$1" | grep -qvE '\.md$'
+  # "$@" = one RAW path per ARGUMENT — never a delimited string. BOTH branches
+  # of filter (c) — the fresh diff-tree and the persisted sha_files — call THIS
+  # one predicate, so the two can never disagree about the same commit.
+  #
+  # Taking an ARRAY rather than a delimited string is the whole point. Every
+  # string form has some byte it cannot carry: git's display form cannot carry a
+  # non-ASCII byte, a `"` or a `\` (it C-quotes them), and a newline-joined
+  # string cannot carry a path that CONTAINS a newline — which is legal on every
+  # POSIX filesystem, and which split `docs/a<LF>b.md` into `docs/a` (not .md,
+  # so "at least one non-.md path") plus `b.md`, turning a DOCUMENTATION-ONLY
+  # fix(*) commit into a candidate. That is the same INV-T14 violation the
+  # quoting bug caused, by a different byte class. An argument vector is
+  # delimiter-free, so it is correct for EVERY byte a path can hold and needs no
+  # enumeration of shapes.
+  local p
+  for p in "$@"; do
+    case "$p" in *.md) ;; *) return 0 ;; esac
+  done
+  return 1
+}
+
+_split_csv() {
+  # $1 = comma-joined paths -> CSV_PARTS array, split on the COMMA delimiter
+  # ONLY. `read -r -a` with IFS=, would additionally stop at the first NEWLINE,
+  # re-introducing the very line-orientation _has_non_md exists to avoid.
+  CSV_PARTS=()
+  local rest="$1" head
+  while :; do
+    head="${rest%%,*}"
+    CSV_PARTS+=("$head")
+    [ "$head" = "$rest" ] && break
+    rest="${rest#*,}"
+  done
 }
 
 IS_SHA=(); IS_AT=(); IS_FILES=()
@@ -270,13 +299,36 @@ while IFS= read -r line; do
     # INV-T14. The predicate must see the path, not its rendering. The raw form
     # is also what gets persisted into sha_files, and therefore what the
     # `--by-files` clearance lookup and the Step-15 prefill go on to use.
-    c_raw="$(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$c_sha" | tr '\0' '\n')"
-    [ -z "$c_raw" ] && continue
-    _has_non_md "$c_raw" || continue
-    c_files="$(printf '%s' "$c_raw" | tr '\n' ',')"
+    #
+    # The NUL delimiter is kept end to end, into an ARRAY. Translating it to a
+    # newline first (`tr '\0' '\n'`) only swaps one impossible delimiter for
+    # another: NUL is the single byte a path cannot contain, a newline is not.
+    c_paths=()
+    while IFS= read -r -d '' c_p; do
+      c_paths+=("$c_p")
+    done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$c_sha")
+    [ "${#c_paths[@]}" -eq 0 ] && continue
+    _has_non_md "${c_paths[@]}" || continue
+    # STORAGE is a separate question from the predicate, and its encoding is
+    # narrower: the state file holds sha_files as one `F<TAB>sha<TAB>csv` LINE
+    # per commit and #568 freezes the comma join, so the stored form can carry
+    # neither a comma nor a newline. Stating that limit rather than papering
+    # over it: a newline is folded onto the comma delimiter HERE, at the store,
+    # exactly as it was before — never left to truncate the record at write
+    # time, which would drop every path after the first and could turn a stored
+    # candidate back into a non-candidate on the next Stop. The fold cannot
+    # change a VERDICT: splitting a path that does not end in `.md` leaves a
+    # last fragment that still does not end in `.md`, so a candidate stays a
+    # candidate, and only candidates are ever stored. Widening the encoding so
+    # the stored PATHS are exact too is #568's business, not filter (c)'s.
+    c_files="$(printf '%s,' "${c_paths[@]}" | tr '\n' ',')"
     c_files="${c_files%,}"
   else
-    _has_non_md "${c_files//,/$'\n'}" || continue
+    # Split on the COMMA delimiter only. The old form replaced commas with
+    # newlines and then let the predicate split on lines as well, which is what
+    # let one real path containing a newline read as two.
+    _split_csv "$c_files"
+    _has_non_md "${CSV_PARTS[@]}" || continue
   fi
   IS_SHA+=("$c_sha"); IS_AT+=("$c_at"); IS_FILES+=("$c_files")
 done < <(printf '%s\n' "$LOG")

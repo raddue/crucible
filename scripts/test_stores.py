@@ -1107,6 +1107,94 @@ class GitEnvAllowlistTest(unittest.TestCase):
                 self.assertIsNotNone(hit, f"{name} silently emptied the lookup")
                 self.assertTrue(hit["_path"].endswith("g1.md"))
 
+    # ── The ==1-survivor branch: _patch_id's OWN two subprocess sites ──────
+    # test_inherited_git_config_cannot_change_a_clearance_answer reaches exactly
+    # ONE of the module's three shell-out sites (_git, via find_by_commit ->
+    # _resolve_commit). Deleting `env=_git_env()` from EITHER _patch_id call left
+    # the suite at 88/88 OK, so the regression this whole class exists to prevent
+    # could return at two of the three doors unnoticed. This fixture drives
+    # find_by_files -> _structural_match -> _patch_id, which runs `diff-tree -p`
+    # and `patch-id --stable` — one site each — and a poisoned env makes either
+    # of them exit non-zero, _patch_id return "", and the clearance silently miss.
+
+    def _structural_fixture(self):
+        """A repo where the stored fix is NOT reachable from HEAD but carries the
+        same patch as the candidate, so find_by_files must take the ==1-survivor
+        structural branch. Returns (repo_root, store, candidate_sha)."""
+        root = os.path.join(self.tmp, "sm")
+        repo = os.path.join(root, "repo")
+        store = os.path.join(root, "store")
+        os.makedirs(repo)
+        os.makedirs(os.path.join(store, "sm", "grudges"))
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
+
+        def g(*args, **kw):
+            return subprocess.run(["git", "-C", repo, *args], check=True,
+                                  capture_output=True, text=True, env=env, **kw)
+
+        g("init", "-q", "-b", "main")
+        with open(os.path.join(repo, "f.txt"), "w") as fh:
+            fh.write("a\n")
+        g("add", "f.txt"); g("commit", "-q", "-m", "chore: base")
+        # The stored fix, on a branch that is never merged: `merge-base
+        # --is-ancestor stored HEAD` must be non-zero or _structural_match
+        # short-circuits before _patch_id is ever called.
+        g("checkout", "-q", "-b", "side")
+        with open(os.path.join(repo, "f.txt"), "w") as fh:
+            fh.write("b\n")
+        # A distinct subject: same tree, same parent and same timestamps would
+        # otherwise hash to the SAME commit id as the candidate below.
+        g("add", "f.txt"); g("commit", "-q", "-m", "fix(f): repair f on side")
+        stored = g("rev-parse", "HEAD").stdout.strip()
+        # The candidate, on main: same parent content, same new content, so the
+        # two patch-ids are equal by construction.
+        g("checkout", "-q", "main")
+        with open(os.path.join(repo, "f.txt"), "w") as fh:
+            fh.write("b\n")
+        g("add", "f.txt"); g("commit", "-q", "-m", "fix(f): repair f on main")
+        cand = g("rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(stored, cand)
+        self.assertNotEqual(
+            0, subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor",
+                               stored, "HEAD"], capture_output=True).returncode,
+            "fixture is wrong: the stored fix is reachable, so the structural "
+            "branch is never taken")
+        repo_root = os.path.realpath(repo)
+        with open(os.path.join(store, "sm", "grudges", "g2.md"), "w") as fh:
+            fh.write("---\nschema: 1\nhash: h2\nrepo: sm\n"
+                     f"repo_root: {repo_root}\n"
+                     f"fixed_in_commit: {stored[:7]}\n"
+                     'symptom: s\nroot_cause: r\nfiles_touched: ["f.txt"]\n'
+                     'anti_pattern_signature: ""\ndate_fixed: 2026-01-01\n'
+                     "---\nbody\n")
+        return repo_root, store, cand
+
+    def test_structural_branch_is_reached_and_matches_on_a_clean_env(self):
+        # Non-vacuity guard for the test below: without it, a fixture that never
+        # reaches _patch_id at all would "pass" the poison comparison trivially.
+        repo_root, store, cand = self._structural_fixture()
+        with mock.patch.dict(os.environ, {"CRUCIBLE_GRUDGE_DIR": store}):
+            hit = gq.find_by_files(["f.txt"], "sm", repo_root, repo_root,
+                                   cand, 1800000000)
+        self.assertIsNotNone(hit, "the ==1-survivor structural branch did not match")
+        self.assertTrue(hit["_path"].endswith("g2.md"))
+
+    def test_patch_id_sites_are_immune_to_inherited_git_config(self):
+        # The discriminating check for _patch_id's TWO subprocess sites. Deleting
+        # `env=_git_env()` from the `diff-tree -p` call, or from the
+        # `patch-id --stable` call, or from _git, turns every one of these red.
+        repo_root, store, cand = self._structural_fixture()
+        for name, poison in self._channels().items():
+            with self.subTest(channel=name):
+                env = dict(poison, CRUCIBLE_GRUDGE_DIR=store)
+                with mock.patch.dict(os.environ, env):
+                    hit = gq.find_by_files(["f.txt"], "sm", repo_root, repo_root,
+                                           cand, 1800000000)
+                self.assertIsNotNone(
+                    hit, f"{name} silently emptied the structural lookup")
+                self.assertTrue(hit["_path"].endswith("g2.md"))
+
 
 if __name__ == "__main__":
     unittest.main()

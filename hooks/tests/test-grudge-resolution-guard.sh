@@ -834,7 +834,7 @@ check 284 "the boundary candidate is named — contract:hook:inv-t13" yes "$(has
 # INV-T14 — trigger shapes: .md-only, non-.md, `fix:` colon form, merges,
 # and a parentless ROOT fix commit
 # ========================================================================
-# contract:hook:inv-t14 checks=22
+# contract:hook:inv-t14 checks=26
 hook_case t14md
 echo "# notes" > "$HC_REPO/notes.md"; echo "VALUE = 0" > "$HC_REPO/app.py"
 commit_all "$HC_REPO" "chore: baseline"
@@ -911,6 +911,42 @@ T14Q="$(sha_of "$HC_REPO" HEAD)"
 run_hook s14mdquote
 check 287 "an all-.md fix commit whose name holds a quote never blocks — contract:hook:inv-t14" 0 "$RC"
 check 288 "the quote-named .md commit is never named — contract:hook:inv-t14" no "$(has "$ERR" "$T14Q")"
+
+# The byte class `-z` alone does NOT close: a path may legally CONTAIN a
+# newline. Reading git's NUL-delimited output back through a newline-delimited
+# string splits `docs/a<LF>b.md` into `docs/a` (no `.md` suffix) and `b.md`, so
+# filter (c) concludes "at least one non-.md path" and this documentation-only
+# commit BLOCKS — the same INV-T14 violation the quoting bug caused, by a
+# different byte. The predicate now takes an argument VECTOR, which has no
+# delimiter to collide with and is therefore correct for every byte at once.
+hook_case t14mdnewline
+mkdir -p "$HC_REPO/docs"; echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+printf 'prose\n' > "$HC_REPO/docs/$(printf 'a\nb.md')"
+commit_all "$HC_REPO" "fix(docs): note name holding a newline"
+T14NL="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14mdnewline
+check 324 "an all-.md fix commit whose name holds a newline never blocks — contract:hook:inv-t14" 0 "$RC"
+check 325 "the newline-named .md commit is never named — contract:hook:inv-t14" no "$(has "$ERR" "$T14NL")"
+
+# The same byte in the BLOCKING direction, across two Stops. The path is
+# `src/a.md<LF>b.py`: it is a CODE path (it ends `.py`), so Stop 1 must block
+# from the fresh diff-tree — but everything before the newline ends `.md`, so
+# Stop 2 is only correct if the persisted sha_files still carries the whole
+# path. The stored encoding is a comma-joined value on ONE line, so the newline
+# is folded onto the comma delimiter at the store rather than left to truncate
+# the record; without the fold the stored value is just `src/a.md`, the commit
+# reads as documentation-only on Stop 2, and enforcement silently stops.
+hook_case t14nlcode
+mkdir -p "$HC_REPO/src"; echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+printf 'code\n' > "$HC_REPO/src/$(printf 'a.md\nb.py')"
+commit_all "$HC_REPO" "fix(widget): code path holding a newline"
+run_hook s14nlcode
+check 326 "a newline-named code path blocks on Stop 1 — contract:hook:inv-t14" 2 "$RC"
+run_hook s14nlcode true
+check 327 "the persisted branch still blocks it on Stop 2 — contract:hook:inv-t14" yes \
+  "$(has "$ERR" "(2/3)")"
 
 # The same path beside a code path IS a candidate, and what lands in sha_files
 # is the raw path — which is what the --by-files clearance lookup and the
@@ -1064,7 +1100,7 @@ check 296 "seeded_at is that earliest record's epoch — contract:hook:inv-t22" 
 # "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
 # check". They additionally support INV-C8's grep-checked degradation clause.
 # ========================================================================
-# contract:hook:inv-t23 checks=85
+# contract:hook:inv-t23 checks=88
 hook_case t23nongit
 mkdir -p "$HC_ROOT/notgit"
 HC_CWD="$HC_ROOT/notgit"
@@ -1240,6 +1276,39 @@ HOOK_ENV="GIT_CONFIG_PARAMETERS='i18n.logoutputencoding=UTF-16'"
 run_hook s23cfgparams
 HOOK_ENV=""
 check 323 "an inherited GIT_CONFIG_PARAMETERS cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
+
+# The three checks above name channels the OLD denylist already named, so they
+# cannot tell an allowlist from a denylist that merely got longer. These three
+# can: not one of them appears in any drop list this hook has ever carried, and
+# each one alone flipped the same fixture from enforcing to a silent allow. The
+# property being pinned is "NOTHING outside the allowlist reaches git" — an
+# enumeration of names rots the way the denylist did, so the fixtures are
+# chosen from OUTSIDE every enumeration in the source.
+#
+# GIT_CONFIG_SYSTEM is the one that matters most: it is in the very config
+# family the allowlist was introduced for, and it was in neither drop list.
+_t23cfg_case t23cfgsystem
+printf 'this is not valid git config\n' > "$HC_ROOT/bad.gitconfig"
+HOOK_ENV="GIT_CONFIG_SYSTEM=$HC_ROOT/bad.gitconfig"
+run_hook s23cfgsystem
+HOOK_ENV=""
+check 328 "an inherited GIT_CONFIG_SYSTEM cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
+
+# GIT_OBJECT_DIRECTORY and GIT_COMMON_DIR are two of Task 6's seven
+# repository-location variables that the hook suite never pinned;
+# GIT_COMMON_DIR is the one the hook's OWN store identity is derived from.
+_t23cfg_case t23objdir
+HOOK_ENV="GIT_OBJECT_DIRECTORY=$HC_ROOT/nonexistent-objects"
+run_hook s23objdir
+HOOK_ENV=""
+check 329 "an inherited GIT_OBJECT_DIRECTORY cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
+
+_t23cfg_case t23commondir
+git init -q "$HC_ROOT/decoy" >/dev/null 2>&1
+HOOK_ENV="GIT_COMMON_DIR=$HC_ROOT/decoy/.git"
+run_hook s23commondir
+HOOK_ENV=""
+check 330 "an inherited GIT_COMMON_DIR cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
 
 # C1′. `test -s "$STATE_FILE"` is NOT the durability predicate the termination
 # argument needs: a non-empty file left by an EARLIER successful persist
@@ -1975,7 +2044,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=323
+EXPECTED_CHECKS=330
 ROOT_SKIPPED_CHECKS=29
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
