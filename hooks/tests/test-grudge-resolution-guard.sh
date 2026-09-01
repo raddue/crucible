@@ -1874,7 +1874,7 @@ check 309 "the later member carries that same frozen id — contract:group:inv-t
 # The complementary fixture — asserting C2 is ALLOWED unblocked on the join
 # Stop — must FAIL against the implementation; that is the regression this
 # scenario exists to catch.
-# contract:group:inv-t20 checks=11
+# contract:group:inv-t20 checks=13
 hook_case t20
 echo "H = 0" > "$HC_REPO/hub.py"
 commit_all "$HC_REPO" "chore: baseline"
@@ -1906,6 +1906,41 @@ append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "hub.py regressed again" "hub.py"
   "$T20_C2" "2026-05-01" >/dev/null
 run_hook s20 true
 check 230 "a grudge naming the joiner clears the persisted group — contract:group:inv-t20" 0 "$RC"
+
+# The NEGATIVE grudge case — the half of the clause the eight skip-path checks
+# above leave unpinned. Same clause, other door: "persisted membership alone is
+# never sufficient for a member to confer or receive clearance". The grudge
+# names an OUT-OF-SCOPE persisted member (C1, already behind last_checked_sha),
+# so the group must NOT clear; only a grudge naming a commit in THIS Stop's
+# in-scope set may. Check 230 above is the in-scope positive; this is its
+# out-of-scope negative. A step-13 loop that ran --by-commit over every
+# persisted member of the group instead of over IS_SHA passes every other check
+# in this file — including the frozen acceptance oracle — and reds only here.
+# The grudge's fixed_in_commit is reachable from HEAD, so (as in t19f) the
+# one-survivor file-set branch cannot match it either.
+hook_case t20b
+echo "H = 0" > "$HC_REPO/hub.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "H = 1" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c1): first hub fix"
+T20B_C1="$(sha_of "$HC_REPO" HEAD)"
+run_hook s20b
+add_skip "$HC_REPO" "$T20B_C1 skipping C1"
+run_hook s20b true
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "hub.py regressed" "hub.py" \
+  "$T20B_C1" "2026-05-01" >/dev/null
+echo "H = 2" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c3): later hub fix"
+T20B_C3="$(sha_of "$HC_REPO" HEAD)"
+run_hook s20b true
+# Fixture premise, asserted as a hard abort rather than a `check` so the tag
+# arithmetic above is unchanged: the candidate must really have joined C1's
+# persisted group. On a private group the two checks below would pass while
+# pinning nothing.
+if [ "$(st "$HC_REPO" s20b ".sha_group[\"$T20B_C3\"] == .sha_group[\"$T20B_C1\"]")" != "true" ]; then
+  echo "FIXTURE ERROR: t20b candidate did not join C1's persisted group" >&2
+  exit 1
+fi
+check 331 "a grudge naming an out-of-scope persisted member does not clear the group — contract:group:inv-t20" 2 "$RC"
+check 332 "the never-before-seen candidate still blocks at (1/3) — contract:group:inv-t20" yes "$(has "$ERR" "(1/3)")"
 
 # ========================================================================
 # INV-T21 — join / merge re-arm
@@ -2044,7 +2079,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=330
+EXPECTED_CHECKS=332
 ROOT_SKIPPED_CHECKS=29
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
