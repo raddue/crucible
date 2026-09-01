@@ -676,15 +676,670 @@ run_query "$SV4" --by-files "feat.py" --candidate-sha "$CV4" --candidate-at "$AT
   --repo-root "$RV4" --repo kadvroot --session-root "$RV4"
 check 70 "a root commit as the stored fix still matches by patch-id" "$(stem_of "$PV4")" "$OUT"
 
+
+# ========================================================================
+# Stop-hook fixtures (#559 Task 7). Everything below drives the real hook
+# `hooks/grudge-resolution-guard.sh` as a subprocess against a per-case tmp
+# tree: its own HOME (so $PROJECT_MEMORY lands in the fixture), its own
+# CRUCIBLE_GRUDGE_DIR store, and its own `git init` repo. No real machine
+# state is read or written.
+# ========================================================================
+HOOK="$REPO_ROOT/hooks/grudge-resolution-guard.sh"
+
+# Per-case fixture root. Sets HC_ROOT/HC_HOME/HC_STORE/HC_REPO/HC_KEY/
+# HC_CWD/HC_TRANSCRIPT. The transcript's earliest ISO-8601 `.timestamp` is
+# 2026-01-01T00:00:00Z, so `commit_all`'s default 2026-05-01 author date is
+# inside the session window and 2025-* dates are outside it.
+hook_case() {
+  local name="$1"
+  HC_ROOT="$TMPROOT/hook-$name"
+  HC_HOME="$HC_ROOT/home"
+  HC_STORE="$HC_ROOT/store"
+  mkdir -p "$HC_HOME" "$HC_STORE"
+  HC_REPO="$HC_ROOT/repo"
+  new_repo "$HC_REPO"
+  HC_REPO="$(cd "$HC_REPO" && pwd -P)"
+  HC_KEY="$(basename "$HC_REPO")"
+  HC_CWD="$HC_REPO"
+  HC_TRANSCRIPT="$HC_ROOT/transcript.jsonl"
+  {
+    echo '{"type":"user","timestamp":"2026-01-01T00:00:00.000Z"}'
+    echo '{"type":"assistant","timestamp":"2026-01-01T00:00:05.000Z"}'
+  } > "$HC_TRANSCRIPT"
+  mkdir -p "$HC_STORE/$HC_KEY/grudges"
+}
+
+# $PROJECT_MEMORY for a given project root, using the hook's own derivation
+# (hooks/build-routing-advisor.sh:141-143).
+mem_dir() { printf '%s/.claude/projects/%s/memory' "$HC_HOME" "$(printf '%s' "$1" | tr '/' '-')"; }
+guard_dir() { printf '%s/grudge-guard' "$(mem_dir "$1")"; }
+
+# Extra VAR=value words injected into the hook's environment (word-split on
+# purpose), e.g. the env-var kill-switch.
+HOOK_ENV=""
+_invoke_hook() {
+  # reads $TMPROOT/last-payload.json; sets OUT / ERR / RC.
+  # Deliberately NOT a pipeline: with `pipefail` set, a hook that exits
+  # before draining stdin would SIGPIPE the writer and report 141.
+  set +e
+  OUT="$(cd "$HC_CWD" && env HOME="$HC_HOME" CLAUDE_PROJECT_DIR="$REPO_ROOT" \
+    CRUCIBLE_GRUDGE_DIR="$HC_STORE" ${HOOK_ENV:-} \
+    bash "$HOOK" <"$TMPROOT/last-payload.json" 2>"$TMPROOT/last-stderr.txt")"
+  RC=$?
+  set -e
+  ERR="$(cat "$TMPROOT/last-stderr.txt")"
+}
+
+run_hook() {
+  # run_hook <session_id> [stop_hook_active]
+  printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":%s}' \
+    "$1" "$HC_TRANSCRIPT" "$HC_CWD" "${2:-false}" > "$TMPROOT/last-payload.json"
+  _invoke_hook
+}
+
+run_hook_raw() {
+  # run_hook_raw <raw stdin payload>
+  printf '%s' "$1" > "$TMPROOT/last-payload.json"
+  _invoke_hook
+}
+
+st() {
+  # st <project-root> <session-id> <jq filter> — read the per-session state file
+  jq -r "$3" "$(guard_dir "$1")/$2.json" 2>/dev/null || echo "STATE-READ-FAILED"
+}
+
+add_skip() {
+  # add_skip <project-root> <line>
+  local d; d="$(guard_dir "$1")"
+  mkdir -p "$d"
+  echo "$2" >> "$d/skips.log"
+}
+
+exists() { if [ -e "$1" ]; then echo "yes"; else echo "no"; fi; }
+
+# ========================================================================
+# INV-T12 — bounded blocking (1/3)(2/3)(3/3) then give up, with the
+# Step-15 grudge_append.py prefill on both the block and the give-up path
+# ========================================================================
+# contract:hook:inv-t12 checks=16
+hook_case t12
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "# notes" > "$HC_REPO/notes.md"
+commit_all "$HC_REPO" "chore: baseline"
+printf '# notes\n\nmore prose\n' > "$HC_REPO/notes.md"
+commit_all "$HC_REPO" "fix(docs): expand notes"
+T12_DOCS="$(sha_of "$HC_REPO" HEAD)"
+echo "VALUE = 1" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "fix(widget): repair the widget"
+T12_FIX="$(sha_of "$HC_REPO" HEAD)"
+
+run_hook s12
+check 71 "Stop 1 blocks — contract:hook:inv-t12" 2 "$RC"
+check 72 "Stop 1 carries the (1/3) counter — contract:hook:inv-t12" yes "$(has "$ERR" "(1/3)")"
+check 73 "Stop 1 names the unresolved candidate — contract:hook:inv-t12" yes "$(has "$ERR" "$T12_FIX")"
+check 74 "docs-only fix is never named — contract:hook:inv-t12" no "$(has "$ERR" "$T12_DOCS")"
+check 75 "Stop 1 prefills grudge_append.py — contract:hook:inv-t12" yes "$(has "$ERR" "grudge_append.py")"
+check 76 "prefill carries the shared-clone --repo-root — contract:hook:inv-t12" yes "$(has "$ERR" "--repo-root \"$HC_REPO\"")"
+check 77 "prefill carries the shared-clone --repo key — contract:hook:inv-t12" yes "$(has "$ERR" "--repo \"$HC_KEY\"")"
+check 78 "prefill carries the candidate's sha_files — contract:hook:inv-t12" yes "$(has "$ERR" "--files \"app.py\"")"
+run_hook s12 true
+check 79 "Stop 2 re-blocks — contract:hook:inv-t12" 2 "$RC"
+check 80 "Stop 2 carries the (2/3) counter — contract:hook:inv-t12" yes "$(has "$ERR" "(2/3)")"
+run_hook s12 true
+check 81 "Stop 3 re-blocks — contract:hook:inv-t12" 2 "$RC"
+check 82 "Stop 3 carries the (3/3) counter — contract:hook:inv-t12" yes "$(has "$ERR" "(3/3)")"
+run_hook s12 true
+check 83 "Stop 4 allows — contract:hook:inv-t12" 0 "$RC"
+check 84 "Stop 4 says it is giving up — contract:hook:inv-t12" yes "$(has "$ERR" "giving up")"
+check 85 "give-up path still prefills grudge_append.py — contract:hook:inv-t12" yes "$(has "$ERR" "grudge_append.py")"
+check 86 "give-up prefill names the candidate SHA — contract:hook:inv-t12" yes "$(has "$ERR" "$T12_FIX")"
+
+# ========================================================================
+# INV-T13 — FATAL-C: candidacy uses the AUTHOR date, not the committer date
+# ========================================================================
+# contract:hook:inv-t13 checks=4
+hook_case t13ctl
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+run_hook s13ctl
+check 87 "control: an in-window fix does block — contract:hook:inv-t13" 2 "$RC"
+
+hook_case t13
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline" "2025-05-01T09:00:00+00:00"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): pre-session fix" "2025-06-01T09:00:00+00:00"
+# `git commit --amend` with no date env rewrites the COMMITTER date to now and
+# leaves the AUTHOR date alone — FATAL-C's own source shape.
+git -C "$HC_REPO" commit -q --amend --no-edit
+T13_FIX="$(sha_of "$HC_REPO" HEAD)"
+T13_AT="$(git -C "$HC_REPO" log -1 --format=%at)"
+T13_CT="$(git -C "$HC_REPO" log -1 --format=%ct)"
+check 88 "fixture really rewrote the committer date — contract:hook:inv-t13" yes \
+  "$(if [ "$T13_CT" -gt "$T13_AT" ]; then echo yes; else echo no; fi)"
+run_hook s13
+check 89 "author date before seeded_at is not a candidate — contract:hook:inv-t13" 0 "$RC"
+check 90 "the rebased commit is never named — contract:hook:inv-t13" no "$(has "$ERR" "$T13_FIX")"
+
+# ========================================================================
+# INV-T14 — trigger shapes: .md-only, non-.md, `fix:` colon form, merges,
+# and a parentless ROOT fix commit
+# ========================================================================
+# contract:hook:inv-t14 checks=12
+hook_case t14md
+echo "# notes" > "$HC_REPO/notes.md"; echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+printf '# notes\n\nmore\n' > "$HC_REPO/notes.md"; commit_all "$HC_REPO" "fix(docs): prose only"
+T14MD="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14md
+check 91 "an all-.md fix commit never blocks — contract:hook:inv-t14" 0 "$RC"
+check 92 "an all-.md fix commit is never named — contract:hook:inv-t14" no "$(has "$ERR" "$T14MD")"
+
+hook_case t14code
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T14CODE="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14code
+check 93 "one non-.md path makes a fix commit a candidate — contract:hook:inv-t14" 2 "$RC"
+check 94 "the non-.md candidate is named — contract:hook:inv-t14" yes "$(has "$ERR" "$T14CODE")"
+
+hook_case t14colon
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix: colon-no-scope repair"
+T14COLON="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14colon
+check 95 "a fix: colon subject qualifies identically — contract:hook:inv-t14" 2 "$RC"
+check 96 "the colon-form candidate is named — contract:hook:inv-t14" yes "$(has "$ERR" "$T14COLON")"
+
+hook_case t14merge
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" checkout -q -b topic
+echo "feature" > "$HC_REPO/feature.py"; commit_all "$HC_REPO" "chore: branch work"
+git -C "$HC_REPO" checkout -q main
+GIT_AUTHOR_DATE="2026-05-01T09:00:00+00:00" GIT_COMMITTER_DATE="2026-05-01T09:00:00+00:00" \
+  git -C "$HC_REPO" merge -q --no-ff -m "fix(widget): merge the topic branch" topic
+T14MERGE="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14merge
+check 97 "a merge commit with a fix( subject never qualifies — contract:hook:inv-t14" 0 "$RC"
+check 98 "the merge commit is never named — contract:hook:inv-t14" no "$(has "$ERR" "$T14MERGE")"
+
+# A repo whose ROOT commit is the fix. Stop 2 must report (2/3): reporting
+# (1/3) again would mean item 16's parentless-checkpoint sentinel was skipped
+# and the state was discarded every Stop.
+hook_case t14root
+echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "fix(widget): initial repair"
+T14ROOT="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14root
+check 99 "a parentless root fix commit blocks — contract:hook:inv-t14" 2 "$RC"
+check 100 "root-commit Stop 1 reports (1/3) — contract:hook:inv-t14" yes "$(has "$ERR" "(1/3)")"
+run_hook s14root true
+check 101 "root-commit Stop 2 re-blocks — contract:hook:inv-t14" 2 "$RC"
+check 102 "root-commit Stop 2 reports (2/3), not (1/3) — contract:hook:inv-t14" yes "$(has "$ERR" "(2/3)")"
+
+# ========================================================================
+# INV-T18 — skips.log clears by SHA, tolerantly
+# ========================================================================
+# contract:skip:inv-t18 checks=5
+_t18_case() {
+  # _t18_case <name>; leaves T18_FIX / T18_BASE set
+  hook_case "$1"
+  echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+  T18_BASE="$(sha_of "$HC_REPO" HEAD)"
+  echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+  T18_FIX="$(sha_of "$HC_REPO" HEAD)"
+}
+
+_t18_case t18full
+add_skip "$HC_REPO" "$T18_FIX deliberately skipped"
+run_hook s18full
+check 103 "a skips.log line naming the candidate clears it — contract:skip:inv-t18" 0 "$RC"
+
+_t18_case t18other
+add_skip "$HC_REPO" "$T18_BASE a different commit entirely"
+run_hook s18other
+check 104 "a skips.log line naming another SHA clears nothing — contract:skip:inv-t18" 2 "$RC"
+
+_t18_case t18abbrev
+add_skip "$HC_REPO" "$(git -C "$HC_REPO" rev-parse --short=7 "$T18_FIX") abbreviated skip"
+run_hook s18abbrev
+check 105 "a 7-char abbreviation clears the 40-char candidate — contract:skip:inv-t18" 0 "$RC"
+
+_t18_case t18junk
+add_skip "$HC_REPO" "zzzzzzz not a resolvable object"
+run_hook s18junk
+check 106 "an unresolvable skip token clears nothing — contract:skip:inv-t18" 2 "$RC"
+check 107 "an unresolvable skip token never errors the Stop — contract:skip:inv-t18" yes "$(has "$ERR" "(1/3)")"
+
+# ========================================================================
+# INV-T22 — first-Stop seeding
+# ========================================================================
+# contract:hook:inv-t22 checks=10
+hook_case t22
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "# notes" > "$HC_REPO/notes.md"
+commit_all "$HC_REPO" "chore: baseline"
+printf '# notes\n\nmore\n' > "$HC_REPO/notes.md"; commit_all "$HC_REPO" "fix(docs): expand notes"
+T22_PARENT="$(sha_of "$HC_REPO" HEAD)"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T22_HEAD="$(sha_of "$HC_REPO" HEAD)"
+run_hook s22
+check 108 "a first-turn fix commit blocks on the first Stop — contract:hook:inv-t22" 2 "$RC"
+check 109 "first Stop reports (1/3) — contract:hook:inv-t22" yes "$(has "$ERR" "(1/3)")"
+check 110 "last_checked_sha seeds to the blocked commit's first parent — contract:hook:inv-t22" \
+  "$T22_PARENT" "$(st "$HC_REPO" s22 '.last_checked_sha')"
+check 111 "last_checked_sha is NOT seeded to HEAD — contract:hook:inv-t22" no \
+  "$(has "$(st "$HC_REPO" s22 '.last_checked_sha')" "$T22_HEAD")"
+run_hook s22 true
+check 112 "the second Stop re-blocks — contract:hook:inv-t22" 2 "$RC"
+check 113 "the second Stop reports (2/3) — contract:hook:inv-t22" yes "$(has "$ERR" "(2/3)")"
+
+hook_case t22empty
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+T22E_HEAD="$(sha_of "$HC_REPO" HEAD)"
+run_hook s22empty
+check 114 "a first Stop with no candidates allows — contract:hook:inv-t22" 0 "$RC"
+check 115 "the seeded state carries exactly INV-C12's five fields — contract:hook:inv-t22" \
+  "block_counts,last_checked_sha,seeded_at,sha_files,sha_group" \
+  "$(st "$HC_REPO" s22empty '[keys[]]|sort|join(",")')"
+check 116 "a candidate-free first Stop seeds last_checked_sha to HEAD — contract:hook:inv-t22" \
+  "$T22E_HEAD" "$(st "$HC_REPO" s22empty '.last_checked_sha')"
+check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22" \
+  number "$(st "$HC_REPO" s22empty '.seeded_at|type')"
+
+# ========================================================================
+# INV-T23 — graceful degradation + the .last-run evidence trail.
+# The kill-switch and malformed-JSON cases live INSIDE this scenario's block
+# (G1: a tag may be named only by `check` calls in its own block, and every
+# such call counts toward `checks=`), since INV-T23's own description pins
+# "EVERY invocation (allowed/blocked/kill-switched) touches .last-run" and
+# "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
+# check". They additionally support INV-C8's grep-checked degradation clause.
+# ========================================================================
+# contract:hook:inv-t23 checks=20
+hook_case t23nongit
+mkdir -p "$HC_ROOT/notgit"
+HC_CWD="$HC_ROOT/notgit"
+run_hook s23nongit
+check 118 "a non-git cwd allows — contract:hook:inv-t23" 0 "$RC"
+
+hook_case t23nosid
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook_raw "$(printf '{"transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' \
+  "$HC_TRANSCRIPT" "$HC_REPO")"
+check 119 "a payload with no .session_id allows — contract:hook:inv-t23" 0 "$RC"
+check 120 "a payload with no .session_id writes no state file — contract:hook:inv-t23" 0 \
+  "$(find "$(guard_dir "$HC_REPO")" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l)"
+
+hook_case t23blocked
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+rm -f "$(guard_dir "$HC_REPO")/.last-run"
+run_hook s23blocked
+check 121 "a BLOCKED invocation touches .last-run — contract:hook:inv-t23" yes \
+  "$(exists "$(guard_dir "$HC_REPO")/.last-run")"
+
+hook_case t23quiet
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+rm -f "$(guard_dir "$HC_REPO")/.last-run"
+run_hook s23quiet
+check 122 "an ALLOWED invocation touches .last-run — contract:hook:inv-t23" yes \
+  "$(exists "$(guard_dir "$HC_REPO")/.last-run")"
+
+rm -f "$(guard_dir "$HC_REPO")/.last-run"
+HOOK_ENV="CRUCIBLE_DISABLE_GRUDGE_RESOLUTION_GUARD=1"
+run_hook s23quiet
+HOOK_ENV=""
+check 123 "the env-var kill-switch allows — contract:hook:inv-t23" 0 "$RC"
+check 124 "the env-var kill-switch says it is disabled — contract:hook:inv-t23" yes "$(has "$ERR" "disabled")"
+check 125 "an env-kill-switched invocation still touches .last-run — contract:hook:inv-t23" yes \
+  "$(exists "$(guard_dir "$HC_REPO")/.last-run")"
+
+rm -f "$(guard_dir "$HC_REPO")/.last-run"
+mkdir -p "$(mem_dir "$HC_REPO")"
+touch "$(mem_dir "$HC_REPO")/.grudge-resolution-guard-disabled"
+run_hook s23quiet
+rm -f "$(mem_dir "$HC_REPO")/.grudge-resolution-guard-disabled"
+check 126 "the sentinel-file kill-switch allows — contract:hook:inv-t23" 0 "$RC"
+check 127 "the sentinel-file kill-switch says it is disabled — contract:hook:inv-t23" yes "$(has "$ERR" "disabled")"
+check 128 "a sentinel-kill-switched invocation still touches .last-run — contract:hook:inv-t23" yes \
+  "$(exists "$(guard_dir "$HC_REPO")/.last-run")"
+
+# First-EVER invocation on a kill-switched setup: grudge-guard/ does not exist
+# yet, so the mkdir -p must run before the kill-switch check or the breadcrumb
+# is never created at all.
+hook_case t23killfirst
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+HOOK_ENV="CRUCIBLE_DISABLE_GRUDGE_RESOLUTION_GUARD=1"
+run_hook s23killfirst
+HOOK_ENV=""
+check 129 "a first-ever kill-switched invocation mkdir -p's grudge-guard/ — contract:hook:inv-t23" yes \
+  "$(exists "$(guard_dir "$HC_REPO")")"
+check 130 "a first-ever kill-switched invocation touches .last-run — contract:hook:inv-t23" yes \
+  "$(exists "$(guard_dir "$HC_REPO")/.last-run")"
+
+# An unresolvable stale last_checked_sha must discard state and re-run the
+# first-Stop full scan, not allow for the rest of the session.
+hook_case t23stale
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+mkdir -p "$(guard_dir "$HC_REPO")"
+cat > "$(guard_dir "$HC_REPO")/s23stale.json" <<'STALEJSON'
+{"last_checked_sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef","seeded_at":1767225600,
+ "sha_group":{},"sha_files":{},"block_counts":{}}
+STALEJSON
+run_hook s23stale true
+check 131 "an unresolvable last_checked_sha re-scans instead of allowing — contract:hook:inv-t23" 2 "$RC"
+check 132 "the re-scan is a fresh first-Stop scan at (1/3) — contract:hook:inv-t23" yes "$(has "$ERR" "(1/3)")"
+
+# SIG-3: a clearance lookup that fails internally degrades PER CANDIDATE
+# (still blocked), never into a whole-Stop allow.
+hook_case t23lookup
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T23L_FIX="$(sha_of "$HC_REPO" HEAD)"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: clearance-lookup degradation fixture needs a non-root uid"
+else
+  chmod 000 "$HC_STORE/$HC_KEY/grudges"
+  run_hook s23lookup
+  check 133 "an unreadable store still blocks the candidate — contract:hook:inv-t23" 2 "$RC"
+  check 134 "the degraded Stop still counts as (1/3) — contract:hook:inv-t23" yes "$(has "$ERR" "(1/3)")"
+  check 135 "the failed lookup is announced with its SHA — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "clearance lookup failed for $T23L_FIX")"
+  check 136 "the failed lookup is treated as unresolved — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "treating as unresolved")"
+  chmod 755 "$HC_STORE/$HC_KEY/grudges"
+fi
+
+hook_case t23malformed
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook_raw "{ this is not json"
+check 137 "a malformed JSON payload allows — contract:hook:inv-t23" 0 "$RC"
+
+# ========================================================================
+# INV-T24 — store-presence bootstrap across BOTH identity keys
+# ========================================================================
+# contract:hook:inv-t24 checks=5
+# (a) the linked-worktree shape: the worktree's own basename key has no store
+#     dir, but the shared-clone key does — enforcement must still run.
+hook_case t24wt
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbr
+T24_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T24_WT" wtbr
+T24_WT="$(cd "$T24_WT" && pwd -P)"
+echo "VALUE = 1" > "$T24_WT/app.py"
+commit_all "$T24_WT" "fix(widget): repair inside the linked worktree"
+T24_FIX="$(sha_of "$T24_WT" HEAD)"
+HC_CWD="$T24_WT"
+check 138 "fixture: the worktree key really differs from the shared key — contract:hook:inv-t24" no \
+  "$(has "$(basename "$T24_WT")" "$HC_KEY")"
+run_hook s24wt
+check 139 "shared-clone store present blocks from a linked worktree — contract:hook:inv-t24" 2 "$RC"
+check 140 "the worktree candidate is named — contract:hook:inv-t24" yes "$(has "$ERR" "$T24_FIX")"
+
+# (b) neither key has a store dir -> allow once, loudly.
+hook_case t24none
+rm -rf "$HC_STORE/$HC_KEY"
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s24none
+check 141 "both store keys absent allows — contract:hook:inv-t24" 0 "$RC"
+check 142 "both store keys absent says so — contract:hook:inv-t24" yes "$(has "$ERR" "no grudge store")"
+
+# ========================================================================
+# INV-T19 — grouping by changed-file overlap, one increment per group per
+# Stop, and the clearance counter reset
+# ========================================================================
+# contract:group:inv-t19 checks=45
+# (a) two candidates sharing NO files -> two independent one-member groups
+hook_case t19a
+echo "A = 0" > "$HC_REPO/a.py"; echo "B = 0" > "$HC_REPO/b.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "A = 1" > "$HC_REPO/a.py"; commit_all "$HC_REPO" "fix(a): repair a"
+T19A_A="$(sha_of "$HC_REPO" HEAD)"
+echo "B = 1" > "$HC_REPO/b.py"; commit_all "$HC_REPO" "fix(b): repair b"
+T19A_B="$(sha_of "$HC_REPO" HEAD)"
+run_hook s19a
+check 143 "disjoint candidates block — contract:group:inv-t19" 2 "$RC"
+check 144 "disjoint candidates are two groups in one message — contract:group:inv-t19" yes \
+  "$(has "$ERR" "2 unresolved fix(*) group(s)")"
+check 145 "the first disjoint candidate is named — contract:group:inv-t19" yes "$(has "$ERR" "$T19A_A")"
+check 146 "the second disjoint candidate is named — contract:group:inv-t19" yes "$(has "$ERR" "$T19A_B")"
+check 147 "sha_group records two distinct group ids — contract:group:inv-t19" 2 \
+  "$(st "$HC_REPO" s19a '[.sha_group[]]|unique|length')"
+check 148 "each disjoint group has its own counter — contract:group:inv-t19" 2 \
+  "$(st "$HC_REPO" s19a '.block_counts|length')"
+add_skip "$HC_REPO" "$T19A_A skipping only the a.py fix"
+run_hook s19a true
+check 149 "clearing one group leaves the other blocking — contract:group:inv-t19" 2 "$RC"
+check 150 "only the still-unresolved group is reported — contract:group:inv-t19" yes \
+  "$(has "$ERR" "1 unresolved fix(*) group(s)")"
+check 151 "the cleared candidate is no longer named — contract:group:inv-t19" no "$(has "$ERR" "$T19A_A")"
+check 152 "the independent counter advanced to (2/3) — contract:group:inv-t19" yes "$(has "$ERR" "(2/3)")"
+
+# (b) two candidates sharing a file -> ONE group, one counter, and one skip
+#     naming EITHER same-Stop member clears both
+hook_case t19b
+echo "S = 0" > "$HC_REPO/shared.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "S = 1" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "fix(shared): part one"
+T19B_A="$(sha_of "$HC_REPO" HEAD)"
+echo "S = 2" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "fix(shared): part two"
+T19B_B="$(sha_of "$HC_REPO" HEAD)"
+run_hook s19b
+check 153 "file-sharing candidates block — contract:group:inv-t19" 2 "$RC"
+check 154 "file-sharing candidates collapse to one group — contract:group:inv-t19" yes \
+  "$(has "$ERR" "1 unresolved fix(*) group(s)")"
+check 155 "both members of the group are named — contract:group:inv-t19" yes \
+  "$(if [ "$(has "$ERR" "$T19B_A")" = yes ] && [ "$(has "$ERR" "$T19B_B")" = yes ]; then echo yes; else echo no; fi)"
+check 156 "the group has a single counter entry — contract:group:inv-t19" 1 \
+  "$(st "$HC_REPO" s19b '.block_counts|length')"
+check 157 "both SHAs map to the same frozen group_id — contract:group:inv-t19" true \
+  "$(st "$HC_REPO" s19b ".sha_group[\"$T19B_A\"] == .sha_group[\"$T19B_B\"]")"
+check 158 "the counter incremented once, not once per member — contract:group:inv-t19" 1 \
+  "$(st "$HC_REPO" s19b ".block_counts[.sha_group[\"$T19B_A\"]]")"
+add_skip "$HC_REPO" "$T19B_B one skip for the second member"
+run_hook s19b true
+check 159 "one skip naming either member clears the whole group — contract:group:inv-t19" 0 "$RC"
+
+# (c)+(d) transitive A-B / B-C overlap makes ONE 3-member group that takes
+#         three Stops to exhaust
+hook_case t19c
+for f in x y z w; do echo "V = 0" > "$HC_REPO/$f.py"; done
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/x.py"; echo "V = 1" > "$HC_REPO/y.py"
+commit_all "$HC_REPO" "fix(a): x and y"
+T19C_A="$(sha_of "$HC_REPO" HEAD)"
+echo "V = 2" > "$HC_REPO/y.py"; echo "V = 1" > "$HC_REPO/z.py"
+commit_all "$HC_REPO" "fix(b): y and z"
+T19C_B="$(sha_of "$HC_REPO" HEAD)"
+echo "V = 2" > "$HC_REPO/z.py"; echo "V = 1" > "$HC_REPO/w.py"
+commit_all "$HC_REPO" "fix(c): z and w"
+T19C_C="$(sha_of "$HC_REPO" HEAD)"
+run_hook s19c
+check 160 "the transitive trio blocks — contract:group:inv-t19" 2 "$RC"
+check 161 "A-B/B-C with no direct A-C is ONE group — contract:group:inv-t19" yes \
+  "$(has "$ERR" "1 unresolved fix(*) group(s)")"
+check 162 "all three SHAs are recorded in sha_group — contract:group:inv-t19" 3 \
+  "$(st "$HC_REPO" s19c '.sha_group|length')"
+check 163 "all three share one group id — contract:group:inv-t19" 1 \
+  "$(st "$HC_REPO" s19c '[.sha_group[]]|unique|length')"
+check 164 "A and C join transitively despite no shared file — contract:group:inv-t19" true \
+  "$(st "$HC_REPO" s19c ".sha_group[\"$T19C_A\"] == .sha_group[\"$T19C_C\"]")"
+check 165 "Stop 1 leaves block_counts at 1 — contract:group:inv-t19" 1 \
+  "$(st "$HC_REPO" s19c ".block_counts[.sha_group[\"$T19C_B\"]]")"
+check 166 "Stop 1 reports (1/3) — contract:group:inv-t19" yes "$(has "$ERR" "(1/3)")"
+run_hook s19c true
+check 167 "Stop 2 re-blocks the trio — contract:group:inv-t19" 2 "$RC"
+check 168 "Stop 2 leaves block_counts at 2 — contract:group:inv-t19" 2 \
+  "$(st "$HC_REPO" s19c ".block_counts[.sha_group[\"$T19C_B\"]]")"
+check 169 "Stop 2 reports (2/3) — contract:group:inv-t19" yes "$(has "$ERR" "(2/3)")"
+run_hook s19c true
+check 170 "Stop 3 re-blocks the trio — contract:group:inv-t19" 2 "$RC"
+check 171 "Stop 3 leaves block_counts at 3 — contract:group:inv-t19" 3 \
+  "$(st "$HC_REPO" s19c ".block_counts[.sha_group[\"$T19C_B\"]]")"
+check 172 "Stop 3 reports (3/3) — contract:group:inv-t19" yes "$(has "$ERR" "(3/3)")"
+run_hook s19c true
+check 173 "Stop 4 gives up on the trio — contract:group:inv-t19" 0 "$RC"
+
+# (e) clearance-then-rejoin (FATAL-1 r2): a joiner must NOT inherit the
+#     cleared group's spent counter
+hook_case t19e
+echo "H = 0" > "$HC_REPO/hub.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "H = 1" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c): first hub fix"
+T19E_C="$(sha_of "$HC_REPO" HEAD)"
+run_hook s19e
+check 174 "the first hub fix blocks — contract:group:inv-t19" 2 "$RC"
+check 175 "the first hub fix reports (1/3) — contract:group:inv-t19" yes "$(has "$ERR" "(1/3)")"
+run_hook s19e true
+check 176 "the first hub fix re-blocks — contract:group:inv-t19" 2 "$RC"
+check 177 "the first hub fix reports (2/3) — contract:group:inv-t19" yes "$(has "$ERR" "(2/3)")"
+check 178 "block_counts reached 2 before clearance — contract:group:inv-t19" 2 \
+  "$(st "$HC_REPO" s19e ".block_counts[.sha_group[\"$T19E_C\"]]")"
+add_skip "$HC_REPO" "$T19E_C clearing the first hub fix"
+run_hook s19e true
+check 179 "the cleared group allows — contract:group:inv-t19" 0 "$RC"
+check 180 "clearance resets block_counts to 0 — contract:group:inv-t19" 0 \
+  "$(st "$HC_REPO" s19e ".block_counts[.sha_group[\"$T19E_C\"]]")"
+echo "H = 2" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(d): second hub fix"
+T19E_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s19e true
+check 181 "a new joiner on a cleared group blocks — contract:group:inv-t19" 2 "$RC"
+check 182 "the joiner starts at (1/3), not (3/3) — contract:group:inv-t19" yes "$(has "$ERR" "(1/3)")"
+check 183 "the joiner is named — contract:group:inv-t19" yes "$(has "$ERR" "$T19E_D")"
+check 184 "the already-cleared member is not named — contract:group:inv-t19" no "$(has "$ERR" "$T19E_C")"
+check 185 "the joiner lands in the same persisted group — contract:group:inv-t19" true \
+  "$(st "$HC_REPO" s19e ".sha_group[\"$T19E_D\"] == .sha_group[\"$T19E_C\"]")"
+run_hook s19e true
+check 186 "the joiner re-blocks at (2/3) — contract:group:inv-t19" yes "$(has "$ERR" "(2/3)")"
+run_hook s19e true
+check 187 "the joiner re-blocks at (3/3) — contract:group:inv-t19" yes "$(has "$ERR" "(3/3)")"
+
+# ========================================================================
+# INV-T20 — clearance is scoped to THIS Stop's in-scope set (round-14 Fatal 1)
+# ========================================================================
+# The complementary fixture — asserting C2 is ALLOWED unblocked on the join
+# Stop — must FAIL against the implementation; that is the regression this
+# scenario exists to catch.
+# contract:group:inv-t20 checks=10
+hook_case t20
+echo "H = 0" > "$HC_REPO/hub.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "H = 1" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c1): first hub fix"
+T20_C1="$(sha_of "$HC_REPO" HEAD)"
+run_hook s20
+check 188 "C1 blocks on its first Stop — contract:group:inv-t20" 2 "$RC"
+check 189 "C1's first Stop reports (1/3) — contract:group:inv-t20" yes "$(has "$ERR" "(1/3)")"
+add_skip "$HC_REPO" "$T20_C1 skipping C1"
+run_hook s20 true
+check 190 "the skip clears C1 — contract:group:inv-t20" 0 "$RC"
+check 191 "last_checked_sha advances past the cleared C1 — contract:group:inv-t20" \
+  "$(sha_of "$HC_REPO" HEAD)" "$(st "$HC_REPO" s20 '.last_checked_sha')"
+check 192 "sha_group still holds C1 after clearance — contract:group:inv-t20" true \
+  "$(st "$HC_REPO" s20 '.sha_group|has("'"$T20_C1"'")')"
+check 193 "sha_files still holds C1 after clearance — contract:group:inv-t20" true \
+  "$(st "$HC_REPO" s20 '.sha_files|has("'"$T20_C1"'")')"
+echo "H = 2" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c2): second hub fix"
+T20_C2="$(sha_of "$HC_REPO" HEAD)"
+run_hook s20 true
+check 194 "C2 joining C1's persisted group is BLOCKED — contract:group:inv-t20" 2 "$RC"
+check 195 "C2 is named in the block message — contract:group:inv-t20" yes "$(has "$ERR" "$T20_C2")"
+check 196 "C1's old skip confers nothing on C2 — contract:group:inv-t20" yes "$(has "$ERR" "(1/3)")"
+check 197 "C2 really did join C1's persisted group — contract:group:inv-t20" true \
+  "$(st "$HC_REPO" s20 ".sha_group[\"$T20_C2\"] == .sha_group[\"$T20_C1\"]")"
+
+# ========================================================================
+# INV-T21 — join / merge re-arm
+# ========================================================================
+# contract:group:inv-t21 checks=22
+# (a) two disjoint count-1 groups bridged by a NEW candidate: merged count is
+#     max(1,1)=1, plus this Stop's single increment -> persisted 2. A summing
+#     implementation persists 3; a no-increment one persists 1.
+hook_case t21a
+for f in x y z; do echo "V = 0" > "$HC_REPO/$f.py"; done
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/x.py"; echo "V = 1" > "$HC_REPO/y.py"
+commit_all "$HC_REPO" "fix(c): x and y"
+T21A_C="$(sha_of "$HC_REPO" HEAD)"
+echo "V = 1" > "$HC_REPO/z.py"; commit_all "$HC_REPO" "fix(d): z only"
+T21A_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21a
+check 198 "the two pre-merge groups block — contract:group:inv-t21" 2 "$RC"
+check 199 "they start as two distinct groups — contract:group:inv-t21" 2 \
+  "$(st "$HC_REPO" s21a '.block_counts|length')"
+check 200 "each pre-merge group is at 1 — contract:group:inv-t21" "1" \
+  "$(st "$HC_REPO" s21a '[.block_counts[]]|unique|map(tostring)|join(",")')"
+echo "V = 2" > "$HC_REPO/y.py"; echo "V = 2" > "$HC_REPO/z.py"
+commit_all "$HC_REPO" "fix(e): y and z bridge"
+T21A_E="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21a true
+check 201 "the bridging candidate is blocked on the merge Stop — contract:group:inv-t21" 2 "$RC"
+check 202 "the bridging candidate is named — contract:group:inv-t21" yes "$(has "$ERR" "$T21A_E")"
+check 203 "the merge collapses to one counter — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21a '.block_counts|length')"
+check 204 "merged count is max(1,1)+1 = 2 — contract:group:inv-t21" 2 \
+  "$(st "$HC_REPO" s21a ".block_counts[.sha_group[\"$T21A_E\"]]")"
+check 205 "all three bridged SHAs share the canonical id — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21a '[.sha_group[]]|unique|length')"
+add_skip "$HC_REPO" "$T21A_C one skip for the merged group"
+run_hook s21a true
+check 206 "one skip clears the whole merged group — contract:group:inv-t21" 0 "$RC"
+
+# (b) a NEW member joining an EXHAUSTED group re-arms it to MAX_BLOCKS-1
+hook_case t21b
+echo "H = 0" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "H = 1" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c): hub fix"
+T21B_C="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21b; run_hook s21b true; run_hook s21b true
+check 207 "the group is exhausted after three Stops — contract:group:inv-t21" 3 \
+  "$(st "$HC_REPO" s21b ".block_counts[.sha_group[\"$T21B_C\"]]")"
+echo "H = 2" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(d): second hub fix"
+T21B_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21b true
+check 208 "joining an exhausted group re-arms and blocks — contract:group:inv-t21" 2 "$RC"
+check 209 "the new member is named on the join Stop — contract:group:inv-t21" yes "$(has "$ERR" "$T21B_D")"
+check 210 "re-arm min(3,2)=2 plus one increment persists 3 — contract:group:inv-t21" 3 \
+  "$(st "$HC_REPO" s21b ".block_counts[.sha_group[\"$T21B_D\"]]")"
+run_hook s21b true
+check 211 "the Stop after the re-armed block allows — contract:group:inv-t21" 0 "$RC"
+check 212 "the give-up note re-fires after the re-arm — contract:group:inv-t21" yes "$(has "$ERR" "giving up")"
+
+# (c) two EQUAL-count exhausted groups bridged by one new SHA still block
+hook_case t21c
+echo "V = 0" > "$HC_REPO/x.py"; echo "V = 0" > "$HC_REPO/z.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/x.py"; commit_all "$HC_REPO" "fix(c): x only"
+T21C_C="$(sha_of "$HC_REPO" HEAD)"
+echo "V = 1" > "$HC_REPO/z.py"; commit_all "$HC_REPO" "fix(d): z only"
+T21C_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21c; run_hook s21c true; run_hook s21c true
+check 213 "both groups exist before the merge — contract:group:inv-t21" 2 \
+  "$(st "$HC_REPO" s21c '.block_counts|length')"
+check 214 "both groups are exhausted at 3 — contract:group:inv-t21" "3" \
+  "$(st "$HC_REPO" s21c '[.block_counts[]]|unique|map(tostring)|join(",")')"
+echo "V = 2" > "$HC_REPO/x.py"; echo "V = 2" > "$HC_REPO/z.py"
+commit_all "$HC_REPO" "fix(e): x and z bridge"
+T21C_E="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21c true
+check 215 "an equal-count (3,3) merge still blocks — contract:group:inv-t21" 2 "$RC"
+check 216 "the bridging SHA is named — contract:group:inv-t21" yes "$(has "$ERR" "$T21C_E")"
+check 217 "the equal-count merge collapses to one counter — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21c '.block_counts|length')"
+check 218 "min(max(3,3),2)=2 plus one increment persists 3 — contract:group:inv-t21" 3 \
+  "$(st "$HC_REPO" s21c ".block_counts[.sha_group[\"$T21C_E\"]]")"
+run_hook s21c true
+check 219 "the Stop after the equal-count merge allows — contract:group:inv-t21" 0 "$RC"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
 
 # TOTAL accumulates per `check`, so a skipped scenario shrinks the denominator
 # instead of failing. Pin the expected count so the loss is loud: only a root
-# uid may run fewer (the two chmod-000 fixtures), and even then it is announced.
-EXPECTED_CHECKS=70
-ROOT_SKIPPED_CHECKS=6
+# uid may run fewer (the three chmod-000 fixtures), and even then it is announced.
+EXPECTED_CHECKS=219
+ROOT_SKIPPED_CHECKS=10
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
     echo "SKIPPED: $ROOT_SKIPPED_CHECKS of $EXPECTED_CHECKS checks did not run (root uid cannot exercise the unreadable-store paths)"
