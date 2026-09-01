@@ -276,7 +276,10 @@ done
 # ── 13. Clearance — SCOPED TO THIS STOP'S IN-SCOPE SET ──────────────────
 declare -A SKIP_SET
 if [ -f "$SKIPS_FILE" ]; then
-  while read -r sk_tok _sk_rest; do
+  # `|| [ -n "$sk_tok" ]`: `read` exits non-zero on a final line with no
+  # trailing newline, which would silently drop the last skip — on the hook's
+  # primary user-facing escape hatch.
+  while read -r sk_tok _sk_rest || [ -n "$sk_tok" ]; do
     [ -z "$sk_tok" ] && continue
     sk_norm="$(_git "$SESSION_ROOT" rev-parse --verify "${sk_tok}^{commit}")"
     [ -n "$sk_norm" ] && SKIP_SET["$sk_norm"]=1
@@ -388,21 +391,48 @@ _write_state() {
         sha_files:        (map(select(.[0] == "F")) | map({key: .[1], value: (.[2] | split(","))}) | from_entries),
         block_counts:     (map(select(.[0] == "B")) | map({key: .[1], value: (.[2] | tonumber)}) | from_entries)
       }' > "$tmp" 2>/dev/null
-  if [ -s "$tmp" ]; then
-    mv -f "$tmp" "$STATE_FILE" 2>/dev/null
-  else
+  if [ ! -s "$tmp" ]; then
     rm -f "$tmp" 2>/dev/null
+    return 1
   fi
+  if ! mv -f "$tmp" "$STATE_FILE" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  # READ BACK — the one predicate the whole termination argument rests on.
+  # `mv` reporting success is not proof the intended document is now at
+  # $STATE_FILE (a DIRECTORY there swallows the tmp and still exits 0), and a
+  # write truncated mid-flight lands non-empty invalid JSON. So compare what
+  # this Stop meant to persist — its checkpoint AND every counter it just
+  # computed — against what actually reads back. This subsumes a bare
+  # `jq -e . "$STATE_FILE"` parse gate: unparseable input makes jq exit
+  # non-zero, `got` empty, and the comparison fail. Kept as ONE predicate on
+  # purpose; a separate parse gate would be untestable dead redundancy.
+  local want got
+  want="$( { printf 'L\t%s\n' "$LAST_NEW"
+             for s in "${!BLOCK_COUNTS[@]}"; do printf 'B\t%s\t%s\n' "$s" "${BLOCK_COUNTS[$s]}"; done
+           } | LC_ALL=C sort )"
+  got="$(jq -r '"L\t\(.last_checked_sha // "")", ((.block_counts // {}) | to_entries[] | "B\t\(.key)\t\(.value)")' \
+           "$STATE_FILE" 2>/dev/null | LC_ALL=C sort)"
+  [ "$want" = "$got" ] || return 1
+  return 0
 }
 _write_state
+STATE_WRITTEN=$?
 
-# A block is only safe once its counter is durable. With no state file every
-# Stop is a fresh first Stop: the counter restarts at 1, MAX_BLOCKS is never
-# reached, and the loop is unbreakable — and both escape hatches (skips.log and
+# A block is only safe once THIS Stop's own counter is durable. The predicate is
+# "did this write land", verified by reading it back — NOT "is there a non-empty
+# file here": a stale file from an earlier successful persist satisfies
+# file-existence while the counter inside it is frozen, and the block then never
+# reaches MAX_BLOCKS. With a frozen or absent counter every Stop is a fresh
+# first Stop, the loop is unbreakable, and both escape hatches (skips.log and
 # the sentinel kill-switch) live under this same unwritable directory. Degrade
 # to allow, loudly, exactly like every other infra failure in this hook.
-if [ ! -s "$STATE_FILE" ]; then
-  echo "grudge-resolution-guard: could not persist state to $STATE_FILE — without it every Stop restarts the counter at 1 and the block would never end. Allowing Stop; grudge compliance is NOT enforced. Check that $PROJECT_MEMORY exists and is writable." >&2
+# Corollary the block message below depends on: reaching this point proves a
+# file of ours landed in $STATE_DIR, so the `>> skips.log` remedy it prescribes
+# is writable — the hook never prints a hatch it has not just proven usable.
+if [ "$STATE_WRITTEN" -ne 0 ] || [ ! -s "$STATE_FILE" ]; then
+  echo "grudge-resolution-guard: could not persist state to $STATE_FILE — the write did not land or did not read back intact. Without a durable counter every Stop restarts at 1 and the block would never end. Allowing Stop; grudge compliance is NOT enforced. Check that $PROJECT_MEMORY exists, is writable, and has free space." >&2
   exit 0
 fi
 

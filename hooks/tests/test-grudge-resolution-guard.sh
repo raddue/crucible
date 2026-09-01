@@ -877,7 +877,7 @@ check 102 "root-commit Stop 2 reports (2/3), not (1/3) — contract:hook:inv-t14
 # ========================================================================
 # INV-T18 — skips.log clears by SHA, tolerantly
 # ========================================================================
-# contract:skip:inv-t18 checks=5
+# contract:skip:inv-t18 checks=7
 _t18_case() {
   # _t18_case <name>; leaves T18_FIX / T18_BASE set
   hook_case "$1"
@@ -907,6 +907,23 @@ add_skip "$HC_REPO" "zzzzzzz not a resolvable object"
 run_hook s18junk
 check 106 "an unresolvable skip token clears nothing — contract:skip:inv-t18" 2 "$RC"
 check 107 "an unresolvable skip token never errors the Stop — contract:skip:inv-t18" yes "$(has "$ERR" "(1/3)")"
+
+# `read` exits non-zero on a final line with no trailing newline, so a plain
+# `while read` drops it — silently, on the hook's primary escape hatch. An
+# operator who uses `printf`/`echo -n`, or an editor with no final-newline,
+# writes exactly this file.
+_t18_case t18nonl
+mkdir -p "$(guard_dir "$HC_REPO")"
+printf '%s deliberately skipped' "$T18_FIX" > "$(guard_dir "$HC_REPO")/skips.log"
+run_hook s18nonl
+check 233 "a lone skips.log line with no trailing newline still clears — contract:skip:inv-t18" 0 "$RC"
+
+_t18_case t18nonl2
+mkdir -p "$(guard_dir "$HC_REPO")"
+{ printf '%s an earlier, terminated line\n' "$T18_BASE"
+  printf '%s deliberately skipped' "$T18_FIX"; } > "$(guard_dir "$HC_REPO")/skips.log"
+run_hook s18nonl2
+check 234 "an unterminated LAST line among several still clears — contract:skip:inv-t18" 0 "$RC"
 
 # ========================================================================
 # INV-T22 — first-Stop seeding
@@ -952,7 +969,7 @@ check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22
 # "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
 # check". They additionally support INV-C8's grep-checked degradation clause.
 # ========================================================================
-# contract:hook:inv-t23 checks=26
+# contract:hook:inv-t23 checks=42
 hook_case t23nongit
 mkdir -p "$HC_ROOT/notgit"
 HC_CWD="$HC_ROOT/notgit"
@@ -1094,6 +1111,78 @@ HOOK_ENV=""
 check 224 "an inherited GIT_DIR cannot redirect the hook git calls — contract:hook:inv-t23" 2 "$RC"
 check 225 "the session repo own candidate is still named — contract:hook:inv-t23" yes \
   "$(has "$ERR" "$T23GE_FIX")"
+
+# C1′. `test -s "$STATE_FILE"` is NOT the durability predicate the termination
+# argument needs: a non-empty file left by an EARLIER successful persist
+# satisfies it while the counter inside is frozen, so the block never reaches
+# MAX_BLOCKS. The three fixtures below are the three shapes of "this Stop's own
+# write did not land" — dir unwritable mid-session, a truncated file that can
+# never be repaired, and a write whose `mv` succeeds but cannot be read back.
+# Each blocks forever against a file-existence gate and allows against a
+# verified-write gate.
+hook_case t23frozen
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23frozen
+check 235 "premise: Stop 1 blocks while the state dir is writable — contract:hook:inv-t23" 2 "$RC"
+check 236 "premise: Stop 1 left a non-empty state file behind — contract:hook:inv-t23" yes \
+  "$(if [ -s "$(guard_dir "$HC_REPO")/s23frozen.json" ]; then echo yes; else echo no; fi)"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: the mid-session-unwritable fixture needs a non-root uid"
+else
+  # The disk fills (or perms change) BETWEEN two Stops. The stale file stays.
+  chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  run_hook s23frozen true
+  check 237 "a state dir gone unwritable mid-session allows — contract:hook:inv-t23" 0 "$RC"
+  check 238 "the un-persisted Stop announces the failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "could not persist state")"
+  check 239 "it never blocks on the frozen counter — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+  run_hook s23frozen true
+  check 240 "the Stop after that allows too — no unbreakable (2/3) loop — contract:hook:inv-t23" 0 "$RC"
+  chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+fi
+
+# The ENOSPC shape: jq's output was truncated mid-write, so a NON-EMPTY but
+# invalid state file landed and the now-unwritable dir can never be repaired.
+# Every later Stop re-parses it as a first scan and re-blocks at (1/3).
+hook_case t23trunc
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23trunc
+check 241 "premise: Stop 1 blocks while the state dir is writable — contract:hook:inv-t23" 2 "$RC"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: the truncated-state fixture needs a non-root uid"
+else
+  printf '{\n  "last_checked_sha": "0000",\n  "seeded_' > "$(guard_dir "$HC_REPO")/s23trunc.json"
+  chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  run_hook s23trunc true
+  check 242 "a truncated state file on an unwritable dir allows — contract:hook:inv-t23" 0 "$RC"
+  check 243 "the truncated-state Stop announces the failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "could not persist state")"
+  check 244 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+  run_hook s23trunc true
+  check 245 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+  chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+fi
+
+# A DIRECTORY at the state path: `mv -f "$tmp" "$STATE_FILE"` moves the tmp
+# INSIDE it and exits 0, and `test -s` is true of a directory — so both a
+# file-existence gate and an mv-return-code gate pass while nothing durable was
+# written. Only reading the file back catches it. Needs no special uid.
+hook_case t23noreadback
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23noreadback
+check 246 "premise: Stop 1 blocks with a normal state file — contract:hook:inv-t23" 2 "$RC"
+rm -f "$(guard_dir "$HC_REPO")/s23noreadback.json"
+mkdir -p "$(guard_dir "$HC_REPO")/s23noreadback.json"
+check 247 "premise: the state path still satisfies test -s — contract:hook:inv-t23" yes \
+  "$(if [ -s "$(guard_dir "$HC_REPO")/s23noreadback.json" ]; then echo yes; else echo no; fi)"
+run_hook s23noreadback true
+check 248 "a write that cannot be read back allows — contract:hook:inv-t23" 0 "$RC"
+check 249 "the unreadable-back Stop announces the failure — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "could not persist state")"
+check 250 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
 
 # ========================================================================
 # INV-T24 — store-presence bootstrap across BOTH identity keys
@@ -1420,14 +1509,16 @@ check 219 "the Stop after the equal-count merge allows — contract:group:inv-t2
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
 
-# Checks 220+ are round-1 review additions, numbered from the end on purpose:
-# they sit inside their own scenario blocks, so renumbering in place would have
-# rewritten every later check id and broken the mutation report's citations.
+# Checks 220+ (round-1 review) and 233+ (round-2 review) are numbered from the
+# end on purpose: they sit inside their own scenario blocks, so renumbering in
+# place would have rewritten every later check id and broken the mutation
+# report's citations.
 # TOTAL accumulates per `check`, so a skipped scenario shrinks the denominator
 # instead of failing. Pin the expected count so the loss is loud: only a root
-# uid may run fewer (the three chmod-000 fixtures), and even then it is announced.
-EXPECTED_CHECKS=232
-ROOT_SKIPPED_CHECKS=10
+# uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
+# and even then it is announced.
+EXPECTED_CHECKS=250
+ROOT_SKIPPED_CHECKS=18
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
     echo "SKIPPED: $ROOT_SKIPPED_CHECKS of $EXPECTED_CHECKS checks did not run (root uid cannot exercise the unreadable-store paths)"
