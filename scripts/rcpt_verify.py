@@ -1246,6 +1246,23 @@ def parse_v11_sections(text):
 def _legacy_supersedes_claim(text):
     """SIEGE-R4BA-5 — the `SUPERSEDES:` body of a receipt `parse_v11_sections` REFUSED.
 
+    KNOWN GAP (tracked on GH #567, deferred pending a design decision — NOT closed by
+    the fix below). This detector remains bypassable by two mechanisms distinct from
+    the invisible-character / mid-token-insertion class this fix round closes: (1)
+    homoglyph substitution — replacing an ASCII letter of the `SUPERSEDES:` keyword
+    itself with a visually identical non-ASCII codepoint (e.g. U+0405 CYRILLIC CAPITAL
+    LETTER DZE for Latin "S") causes the ASCII-only stripping step below to DELETE that
+    letter rather than preserve it, so the keyword search misses a line that renders
+    identically to a human or an LLM orchestrator; (2) the scan is scoped to the tail
+    AFTER `NEXT` only, so a plain-ASCII `SUPERSEDES:` line placed BEFORE `NEXT` is
+    invisible to this function even though `parse_receipt` accepts it and the
+    orchestrator's Sweep step (`return-convention.md` § The Sweep) reads a
+    `SUPERSEDES:` line wherever it appears, with no positional constraint. Two design
+    options are open (TR39-style confusables/skeleton normalization vs. restricting
+    receipts to ASCII-printable outright) — see GH #567 for the full writeup (six
+    distinct bypass mechanisms found this round, the two real design options, and the
+    separate scan-scope bug).
+
     Same post-NEXT tail scan `parse_v11_sections` runs, with the version dispatch and
     every v1.1 STRUCTURE rule (TRIPWIRE presence, TRIPWIRE-CHILD-when-DISPATCHED,
     duplicate detection) left out: this is not a second parser for the v1.1 grammar and
@@ -1360,8 +1377,13 @@ def _legacy_supersedes_claim(text):
     than any Unicode-category enumeration, and this fix's own testing is what
     demonstrated the category-based version does not stay bounded in every
     position. No enumerated codepoint list and no category list backs this
-    version — there is no fifth blocklist entry for a future codepoint, category,
-    or line-break definition to reopen.
+    version for the INSERTION class of attack (a codepoint added somewhere in the
+    line) — that class has no known further gap. It does NOT close every class:
+    SUBSTITUTION (replacing one of the keyword's own ASCII letters with a
+    visually-identical non-ASCII homoglyph, which this allowlist's strip step
+    deletes rather than preserves) and the separate tail-only SCAN-SCOPE gap
+    (a claim placed before `NEXT` is never scanned at all) are open — see the
+    KNOWN GAP paragraph above and GH #567.
 
     ROUND-3 FIX-OF-A-FIX (found by this fix's own mandated scoped re-temper,
     before shipping) — step 1 (`split("\\n")`, not `splitlines()`) was applied
