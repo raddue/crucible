@@ -1271,30 +1271,106 @@ def _legacy_supersedes_claim(text):
     either — `parse_v11_sections` is left as-is (its column-0 check fails closed via the
     ABSENT-section path already, so tolerating indentation there is a no-op, not a fix).
 
-    CHAIN-1 residual — the FIRST fix here was `raw_line.lstrip()`, an ASCII-whitespace
-    blocklist verbatim the class `_substantive_len`'s docstring already names: it closes
-    an indent built from ordinary spaces/tabs and nothing else, because `str.lstrip()`
-    removes only codepoints for which `str.isspace()` is true. A line prefixed with
-    U+200B ZERO WIDTH SPACE, U+FEFF BOM, U+2060 WORD JOINER, U+200C ZWNJ, U+00AD SOFT
-    HYPHEN or U+180E MONGOLIAN VOWEL SEPARATOR is invisible in a rendered receipt but
-    `str.isspace()` is False for every one of them, so `.lstrip()` leaves the prefix in
-    place, `line.startswith("SUPERSEDES:")` still matches nothing, and the bypass this
-    docstring already describes reopens one Unicode codepoint later — the same
-    blocklist-vs-category lesson `_substantive_len` exists to have learned once.
-    `_is_format_or_separator` is that category rule (Unicode `C*`/`Z*`, which is a
-    superset of `str.isspace()`'s ASCII/whitespace-property notion and closed over
-    Unicode rather than enumerated): stripping leading codepoints it accepts closes
-    the indent AND the zero-width-prefix bypass with the same test, and the next
-    invisible codepoint some future Unicode version assigns needs no new list entry
-    to stay closed."""
+    CHAIN-1 residual (round 1) — the FIRST fix here was `raw_line.lstrip()`, an
+    ASCII-whitespace blocklist verbatim the class `_substantive_len`'s docstring
+    already names: it closes an indent built from ordinary spaces/tabs and nothing
+    else, because `str.lstrip()` removes only codepoints for which `str.isspace()`
+    is true. A line prefixed with U+200B ZERO WIDTH SPACE, U+FEFF BOM, U+2060 WORD
+    JOINER, U+200C ZWNJ, U+00AD SOFT HYPHEN or U+180E MONGOLIAN VOWEL SEPARATOR is
+    invisible in a rendered receipt but `str.isspace()` is False for every one of
+    them, so `.lstrip()` left the prefix in place and the bypass reopened one
+    Unicode codepoint later.
+
+    CHAIN-1 residual (round 2) — the SECOND fix stripped a LEADING run of
+    `_is_format_or_separator`-true codepoints instead of an ASCII-whitespace-true
+    one: closed over Unicode category rather than an enumerated list, but still
+    positional. `SUPER<U+200B>SEDES:` (an insubstantial codepoint INSIDE the
+    keyword, not before it) renders identically to `SUPERSEDES:` in any viewer, but
+    `line.startswith("SUPERSEDES:")` — unchanged since round 1 — does not match a
+    string whose 6th character is U+200B, so `claim` stayed `None` regardless of
+    which category rule stripped the leading run. Separately, `_substantive_len`'s
+    own docstring records KNOWN RESIDUE — assigned codepoints that render blank but
+    sit outside categories `C*`/`Z*` (U+3164 HANGUL FILLER is `Lo`, U+2800 BRAILLE
+    PATTERN BLANK is `So`, bare combining marks are `Mn`) — as an accepted tradeoff
+    THERE, because that call site only needs "did a predicate see real codepoints".
+    That residue does not transfer to a keyword-detector: a LEADING `ㅤ` renders
+    blank and is invisible to a human/LLM/`grep '^SUPERSEDES:'` alike, and round 2's
+    `_is_format_or_separator` filter (`C*`/`Z*` only) does not strip it, so
+    `line.startswith` failed on that prefix too. Two independent round-3 fresh-eyes
+    reviews confirmed both mechanisms live via the actual CLI before this fix.
+
+    CHAIN-1 fix (round 3, ALLOWLIST — not another instance of the denylist pattern
+    that has now failed repeatedly: ASCII blocklist, then a Unicode-whitespace
+    blocklist, then a positional/leading-only category strip, then (round-3's own
+    FIRST attempt, caught by this fix's own mandated re-verification before
+    shipping) a full-line `C*`/`Z*` strip + substring search — defeated by (a)
+    `_substantive_len`'s KNOWN-RESIDUE categories (`Lo`/`So`/`Mn`) placed INSIDE
+    the keyword, which `_is_format_or_separator` does not strip and which
+    therefore still fragment `SUPERSEDES:` into two non-adjacent pieces even
+    under a substring search, and (b) `str.splitlines()` itself treating
+    additional codepoints (U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR,
+    U+0085 NEL, several `Cc` controls) as line breaks BEFORE any per-character
+    filtering runs, splitting the keyword across two `raw_line` strings that
+    never get concatenated. Both are documented here because a category-based
+    strip — whichever category set backs it — is structurally the same shape as
+    a codepoint blocklist: it has an edge wherever a codepoint outside the
+    enumerated categories still fragments the parse in some position, and
+    round-3's own first attempt found that edge.
+
+    This is why the ACTUAL closing move drops category reasoning entirely and
+    goes ASCII-STRUCTURAL instead — a genuine allowlist ("list everything a
+    legitimate `SUPERSEDES:` line can be made of"), not a broader or better
+    denylist:
+
+      1. Split the tail on the LITERAL `\\n` byte only (`str.split("\\n")`, never
+         `str.splitlines()`), so no Unicode line-break codepoint the receipt body
+         might contain is ever treated as a line boundary before this function
+         gets to look at it — the round-3-first-attempt (b) residual.
+      2. Within EACH such line, build an ASCII SKELETON by keeping only
+         `[A-Za-z0-9:]` (`re.sub(r"[^A-Za-z0-9:]", "", raw_line)`) and discarding
+         every other codepoint outright — `C*`/`Z*`, `Lo`/`So`/`Mn`, anything
+         assigned in a future Unicode version, ALL of it, uniformly, because none
+         of those codepoints can ever be part of a well-formed `SUPERSEDES:`
+         keyword or a well-formed body under the confirmed grammar. This closes
+         the round-3-first-attempt (a) residual (an `Lo`/`So`/`Mn` codepoint
+         inside `SUPER<..>SEDES:` is simply gone, and the keyword's own ASCII
+         letters re-join into one contiguous run) together with everything the
+         first attempt already closed (interior and leading insertion of any
+         `C*`/`Z*` codepoint) — in one pass, with no per-category reasoning at
+         all.
+      3. Search the resulting skeleton for the literal `SUPERSEDES:` substring —
+         not anchored to column 0, so nothing that could not survive step 2's
+         allowlist (i.e. nothing) can sit between the start of the line and the
+         keyword and still defeat detection.
+      4. Validate the remainder of the skeleton after the keyword against the
+         CONFIRMED GRAMMAR for a `SUPERSEDES:` value — `none` or a bare 12-hex
+         receipt-hash prefix (`return-convention.md`; the same shape
+         `resolve_base`-adjacent code checks via `re.fullmatch(r"[0-9a-f]{12}",
+         name)` at :2434) — anchored, full-string, no partial match. Anything
+         else is a malformed/non-`none` claim BY CONSTRUCTION: anything not
+         exactly `none` is `!= "none"`, which is what the caller's `not in (None,
+         "none")` gate already treats as "claims a supersession" (fail-CLOSED —
+         see above).
+
+    `_is_format_or_separator` is deliberately NOT reused here even though it
+    remains correct for its own call site (`_substantive_len`'s "did a predicate
+    see real content" question, a different question from "does this line spell
+    a specific 11-character keyword"): a keyword-detector's allowlist is bounded
+    by the keyword's own alphabet, which is a strictly smaller and simpler claim
+    than any Unicode-category enumeration, and this fix's own testing is what
+    demonstrated the category-based version does not stay bounded in every
+    position. No enumerated codepoint list and no category list backs this
+    version — there is no fifth blocklist entry for a future codepoint, category,
+    or line-break definition to reopen."""
     tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
     claim = None
-    for raw_line in (l for l in tail.splitlines()[1:] if l.strip()):
-        line = raw_line
-        while line and _is_format_or_separator(line[0]):
-            line = line[1:]
-        if line.startswith("SUPERSEDES:"):
-            body = line[len("SUPERSEDES:"):].strip()
+    for raw_line in (l for l in tail.split("\n")[1:] if l.strip()):
+        skeleton = re.sub(r"[^A-Za-z0-9:]", "", raw_line)
+        idx = skeleton.find("SUPERSEDES:")
+        if idx != -1:
+            body = skeleton[idx + len("SUPERSEDES:"):]
+            if not re.fullmatch(r"none|[0-9a-f]{12}", body):
+                body = "malformed"
             if claim is None or claim == "none":
                 claim = body
     return claim
@@ -2009,12 +2085,31 @@ def _open_nofollow_walk(path):
     path `resolve_base` returned; the walk starts at `/` and independently re-proves
     every component of it. Raises `OSError` (`ELOOP`, `ENOENT`, `ENOTDIR`, `EACCES`,
     ...) on any failure — the caller's existing `OSError` handling maps that onto the
-    same fail-closed disposition a name-based race already produced."""
+    same fail-closed disposition a name-based race already produced.
+
+    ANCESTOR COMPONENTS OPEN `O_PATH` (warden 2026-08-31T-563-warden-r3 fix). The
+    pre-fix walk opened every ancestor with plain `O_DIRECTORY | O_NOFOLLOW`, which
+    defaults to `O_RDONLY` and therefore demands READ permission on each ancestor
+    directory — pre-fix (`os.stat`/a single name-based `os.open` on the realpath)
+    only ever needed EXECUTE (traverse) permission, so a search-only ancestor
+    (`0o111`, `0o311`, ...) that verified cleanly before this fix started hard-
+    failing resolution afterward: a false-rejection regression, not a security
+    weakening. `O_PATH` obtains a usable `dir_fd` (valid as the `dir_fd=` of a later
+    `openat`-backed `os.open`, since Linux 2.6.39) while requiring only search
+    permission on the directories traversed to reach it, matching pre-fix's
+    permission floor. `O_NOFOLLOW` still refuses a symlink at that component — an
+    `O_PATH` fd support of an unfollowed symlink is a separate, deliberately-unused
+    capability of the flag; combined with `O_NOFOLLOW` here the open still fails
+    (`ELOOP`) exactly as before if the component is a symlink. The LEAF keeps its
+    original read-intent flags (`O_RDONLY | O_NONBLOCK | O_NOFOLLOW`) unchanged —
+    it is the fd `_read_from_fd` actually reads from, so it must remain a real
+    readable open, not `O_PATH`."""
     parts = pathlib.Path(path).parts
-    dir_fd = os.open(parts[0], os.O_DIRECTORY | os.O_NOFOLLOW)
+    dir_fd = os.open(parts[0], os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for component in parts[1:-1]:
-            next_fd = os.open(component, os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            next_fd = os.open(component, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW,
+                              dir_fd=dir_fd)
             os.close(dir_fd)
             dir_fd = next_fd
         return os.open(parts[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,

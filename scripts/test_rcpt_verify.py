@@ -8694,6 +8694,101 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
                 self.assertEqual(out.returncode, 1, out.stderr)
                 self.assertIn("EVALUATED at Tier-2", out.stderr)
 
+    # CHAIN-1 residual — warden 2026-08-31T-563-warden round-3. The SECOND fix
+    # (round-2, above) stripped a LEADING run of `_is_format_or_separator`-true
+    # codepoints, still positional: `SUPER<U+200B>SEDES:` (the codepoint INSIDE
+    # the keyword, not before it) survived because `line.startswith("SUPERSEDES:")`
+    # never matched a string whose 6th character is a zero-width space, regardless
+    # of what got stripped from the front. Two independent fresh-eyes reviews
+    # confirmed this live via the CLI before this fix. The round-3 fix drops
+    # category reasoning (`_is_format_or_separator`) entirely for this function and
+    # keeps only an ASCII skeleton (`[A-Za-z0-9:]`) before the keyword search —
+    # closing interior insertion of ANY codepoint outside that skeleton, not one
+    # more category.
+    INTERIOR_CODEPOINTS = {
+        "u200b_zero_width_space": chr(0x200B),
+        "ufeff_bom": chr(0xFEFF),
+        "u200d_zwj": chr(0x200D),
+        # KNOWN-RESIDUE categories (Lo/So/Mn) `_substantive_len` documents as an
+        # accepted tradeoff THERE — `_is_format_or_separator` (C*/Z* only) does
+        # NOT strip these, so a round-2-style category strip still fragments the
+        # keyword on these three specifically; the ASCII skeleton does not care
+        # what category a non-allowlisted codepoint carries.
+        "u3164_hangul_filler": chr(0x3164),
+        "u2800_braille_blank": chr(0x2800),
+        "u0301_combining_acute": chr(0x0301),
+    }
+
+    def test_an_interior_codepoint_inside_the_keyword_does_not_disarm_the_gate(self):
+        for label, cp in self.INTERIOR_CODEPOINTS.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-interior-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    "SUPERSEDES:", f"SUPER{cp}SEDES:", 1))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_known_residue_codepoint_leading_the_line_does_not_disarm_the_gate(self):
+        """Round-2's category strip did not cover `Lo`/`So`/`Mn` at all — a LEADING
+        one defeated `line.startswith` regardless of what else got stripped. The
+        round-3 ASCII skeleton drops it (it isn't `[A-Za-z0-9:]`) before the search
+        even runs, so position no longer matters."""
+        for label, cp in {"u3164": chr(0x3164), "u2800": chr(0x2800),
+                          "u0301": chr(0x0301)}.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-leading-residue-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    f"SUPERSEDES: {self.PREFIX}", f"{cp}SUPERSEDES: {self.PREFIX}"))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_unicode_line_separator_does_not_split_the_keyword_past_detection(self):
+        """`str.splitlines()` treats U+2028/U+2029 (and several `Cc` controls) as
+        line breaks in addition to `\\n` — a round-3-first-attempt residual that
+        split `SUPER<U+2028>SEDES:` into two `raw_line` strings before any
+        per-character filtering ran, so neither fragment matched. Fixed by
+        splitting on the literal `\\n` byte only."""
+        for label, cp in {"u2028_line_sep": chr(0x2028),
+                          "u2029_para_sep": chr(0x2029)}.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-linesep-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    "SUPERSEDES:", f"SUPER{cp}SEDES:", 1))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_malformed_supersedes_body_is_treated_as_a_claim_not_as_none(self):
+        """The confirmed grammar (`return-convention.md`) is `none` or a bare
+        12-hex prefix — anchored, full-string. A body that matches neither is a
+        claim BY CONSTRUCTION (never silently coerced to `none`), so it still
+        fails closed via the caller's `not in (None, "none")` gate."""
+        for label, body in {
+            "garbage_text": "not-a-valid-hash",
+            "uppercase_hex": "21A1B2C3D4E5",
+            "short_hex": "21a1b2c3",
+            "hex_plus_trailing_junk": "21a1b2c3d4e5extra",
+        }.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-malformed-{label}.rcpt"
+                p.write_text(self._receipt_text(body, False))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_legitimate_valid_prefix_still_supersedes_correctly_under_v11(self):
+        """Discriminator for the whole class: the allowlist/grammar redesign must
+        not turn INTO a denylist of its own by rejecting well-formed claims. A
+        genuine 12-hex prefix declared under `RCPT v1.1` (where the real Layer-2
+        rules run) is unaffected by this legacy-header-only detector."""
+        out = self._run(self.PREFIX, True, "v11-valid.rcpt")
+        # Rejected for the SAME reason every valid-shaped SUPERSEDES claim in this
+        # class is (the witness-evidence requirement, not this detector) — the
+        # point is it is NOT rejected via the legacy-header path this class tests.
+        self.assertNotIn("declares `RCPT v1`", out.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
