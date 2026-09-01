@@ -263,9 +263,14 @@ class TestResolveToReadWindow(unittest.TestCase):
 
     def test_fatal_7_1_path_replaced_between_resolution_and_read_hard_fails(self):
         """A path that resolves (T-1) then is swapped for an out-of-tree file before the
-        ARTIFACTS leg opens it (T0) must hard-FAIL on identity mismatch — never hash the
-        outside file's bytes into `verified` (the bytes match on purpose, so identity is
-        the only thing that can catch the swap)."""
+        ARTIFACTS leg opens it (T0) must hard-FAIL — never hash the outside file's bytes
+        into `verified` (the bytes match on purpose, so identity is the only thing that
+        can catch the swap). SIEGE-R4BA-1 residual: the swap here is a symlink, and
+        `O_NOFOLLOW` now refuses to open THROUGH it at all (`ELOOP`), so the failure
+        surfaces one step earlier than the post-read identity mismatch this test
+        originally pinned — never opening the wrong file beats opening it and then
+        catching the mismatch, and the outcome (hard fail, `verified` untouched) is the
+        same or stronger."""
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             outer = pathlib.Path(td)
@@ -284,8 +289,7 @@ class TestResolveToReadWindow(unittest.TestCase):
             with self.assertRaises(rv.LintError) as cm:
                 rv.tier2_artifacts(arts, [], root, True, cov,
                                    cache=cache, verified=verified)
-            self.assertIn("the path was replaced between resolution and read",
-                          str(cm.exception))
+            self.assertIn("Too many levels of symbolic links", str(cm.exception))
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
 
@@ -8174,7 +8178,12 @@ class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
     def test_the_leg_hard_fails_instead_of_hashing_out_of_root_content(self):
         """The end-to-end consequence, which is the finding: pre-fix the ARTIFACTS leg
         read the decoy, matched the declared hash, compared the fd identity against the
-        decoy identity it had already sampled, agreed with itself, and exited clean."""
+        decoy identity it had already sampled, agreed with itself, and exited clean.
+
+        SIEGE-R4BA-1 residual: `_swap_at_stat` leaves the swapped-in symlink in place, so
+        `O_NOFOLLOW` now refuses the open itself before `tier2_artifacts` ever reaches the
+        `dev_ino_at_resolve is None` check this test originally pinned — an earlier hard
+        fail on the same swap, not a weaker one."""
         rv = _import_rv()
         decoy, arts = self._setup(rv)
         cache = {}
@@ -8183,7 +8192,7 @@ class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
             with self.assertRaises(rv.LintError) as cm:
                 rv.tier2_artifacts(arts, [], [self.base], False,
                                    cache=cache, verified={})
-        self.assertIn("identity could not be sampled", str(cm.exception))
+        self.assertIn("Too many levels of symbolic links", str(cm.exception))
 
     def test_an_unswapped_name_still_resolves_and_verifies(self):
         """Non-vacuity — the re-proof must not reject the honest case."""
@@ -8383,6 +8392,22 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
         p = self.base / "v1-dup.rcpt"
         p.write_text(self._receipt_text("none", False)
                      + f"SUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_an_indented_supersedes_line_does_not_disarm_the_legacy_gate(self):
+        """CHAIN-1 (siege Phase 4, round 1 on this fix) — `_legacy_supersedes_claim`
+        mirrored `parse_v11_sections`'s column-0 `line.startswith("SUPERSEDES:")`, which
+        is safe on a v1.1 receipt (an indented section reads as ABSENT and the receipt
+        still hard-FAILs on a missing required section) but is the ONLY reader of the
+        tail on a legacy `RCPT v1` header — indenting the line by one space made the
+        claim invisible to this scan entirely, `claim` stayed `None`, and the gate never
+        fired. Measured live: byte-identical column-0 and indented receipts exited 1 and
+        0 respectively before this fix."""
+        p = self.base / "v1-indent.rcpt"
+        p.write_text(self._receipt_text(self.PREFIX, False).replace(
+            f"SUPERSEDES: {self.PREFIX}", f"  SUPERSEDES: {self.PREFIX}"))
         out = self.cli("--tier2", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("EVALUATED at Tier-2", out.stderr)

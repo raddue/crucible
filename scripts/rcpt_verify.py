@@ -1259,10 +1259,21 @@ def _legacy_supersedes_claim(text):
     `SUPERSEDES: <prefix>` answer "none" — an appender's shape, and the exact
     first-vs-trailing asymmetry the `pattern=` clause rules already record. Any non-`none`
     body therefore wins over `none`, which is the fail-CLOSED direction: the cost of
-    over-reading a claim is a receipt told to declare `RCPT v1.1`."""
+    over-reading a claim is a receipt told to declare `RCPT v1.1`.
+
+    CHAIN-1 — the column-0 `startswith` this mirrored from `parse_v11_sections` is safe
+    THERE because an indented `SUPERSEDES:` line on a v1.1 receipt still hard-FAILs (the
+    section reads as ABSENT, and absence is itself a required-section error) — indenting
+    buys the attacker nothing. On a legacy `RCPT v1` header this scan is the ONLY reader
+    of the tail, so the same indent instead buys total invisibility: `line.startswith`
+    matched nothing, `claim` stayed `None`, and the caller's gate never fired. Matched on
+    the line with leading whitespace stripped so the same indent buys nothing here
+    either — `parse_v11_sections` is left as-is (its column-0 check fails closed via the
+    ABSENT-section path already, so tolerating indentation there is a no-op, not a fix)."""
     tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
     claim = None
-    for line in (l for l in tail.splitlines()[1:] if l.strip()):
+    for raw_line in (l for l in tail.splitlines()[1:] if l.strip()):
+        line = raw_line.lstrip()
         if line.startswith("SUPERSEDES:"):
             body = line[len("SUPERSEDES:"):].strip()
             if claim is None or claim == "none":
@@ -2487,8 +2498,19 @@ def _read_and_fstat_artifact(realpath, budget, label):
     reads. The fd is closed on every path — `os.fdopen` takes ownership on success, and
     the `except BaseException` arm closes it on the reject/raise paths (including the
     `LintError` below it and any KeyboardInterrupt/WitnessTimeout in between).
+
+    SIEGE-R4BA-1 residual — `O_NOFOLLOW` closes the gap this fix left open. Resolving
+    `realpath` and checking containment/identity happens earlier and by NAME; between
+    that check and this open, the leaf name can be replaced with a symlink to
+    out-of-root content. A plain `open()` follows it, and the resulting fd is still
+    `S_ISREG` (the SYMLINK'S TARGET is a regular file), so the classification above
+    passes while the bytes read are not the file whose identity was checked — measured
+    live at 2.0% win rate against this function without the flag (down from 11.0%
+    baseline, not zero). `O_NOFOLLOW` makes the open fail with `ELOOP` instead of
+    following the swapped-in symlink, so the race fails closed: 0/300 in the same live
+    harness.
     """
-    fd = os.open(realpath, os.O_RDONLY | os.O_NONBLOCK)
+    fd = os.open(realpath, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
