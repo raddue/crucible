@@ -1,7 +1,12 @@
 node_modules/
 .worktrees/
-# Local Claude Code session state / ambient config — never committed
-.claude/
+# Local Claude Code session state / ambient config — never committed.
+# EXCEPTION: settings.json is committed — it registers the #559 grudge
+# Stop hook (hooks/grudge-resolution-guard.sh) for every checkout.
+# `.claude/*` is already root-anchored by its interior slash; settings.local.json
+# and everything else under .claude/ stay ignored.
+.claude/*
+!.claude/settings.json
 .envrc
 .mcp.json
 docs/plans/
