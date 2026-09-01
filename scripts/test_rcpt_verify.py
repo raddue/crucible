@@ -262,15 +262,23 @@ class TestResolveToReadWindow(unittest.TestCase):
         return {name: {"hash": hashlib.sha256(data).hexdigest(), "size": str(len(data))}}
 
     def test_fatal_7_1_path_replaced_between_resolution_and_read_hard_fails(self):
-        """A path that resolves (T-1) then is swapped for an out-of-tree file before the
-        ARTIFACTS leg opens it (T0) must hard-FAIL — never hash the outside file's bytes
-        into `verified` (the bytes match on purpose, so identity is the only thing that
-        can catch the swap). SIEGE-R4BA-1 residual: the swap here is a symlink, and
-        `O_NOFOLLOW` now refuses to open THROUGH it at all (`ELOOP`), so the failure
-        surfaces one step earlier than the post-read identity mismatch this test
-        originally pinned — never opening the wrong file beats opening it and then
-        catching the mismatch, and the outcome (hard fail, `verified` untouched) is the
-        same or stronger."""
+        """F1 STRUCTURAL FIX — a path that resolves (T-1) and is then swapped for an
+        out-of-tree file before the ARTIFACTS leg reads it must never let the swap's
+        bytes reach `verified` under the RESOLVED name's identity. `_resolve_once` now
+        HOLDS the fd `_open_nofollow_walk` opened at resolve time and the ARTIFACTS leg
+        reads from that SAME descriptor rather than re-opening `f.md` by name — so the
+        swap performed in the window below never affects what gets read at all: the fd
+        already refers to the ORIGINAL file's inode, immune to the name later pointing
+        elsewhere (POSIX: unlinking/replacing a directory entry does not invalidate an
+        fd already open on the inode it named). This is STRONGER than the prior round's
+        `ELOOP` outcome (which detected the race and failed closed) — there is no race
+        left to detect, because the read was never going to touch the swapped-in name
+        again. The declared hash is deliberately the ORIGINAL content's, and the decoy
+        carries DIFFERENT bytes: if a regression reopened `f.md` by name instead of
+        using the held fd, it would read the decoy's bytes and hash-mismatch, not
+        ELOOP — so this test distinguishes "read the original via the held fd" from
+        both of the two things that could go wrong (silently trusting the decoy, or
+        reopening it at all)."""
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             outer = pathlib.Path(td)
@@ -278,42 +286,39 @@ class TestResolveToReadWindow(unittest.TestCase):
             root.mkdir()
             (root / "f.md").write_bytes(b"REAL")
             outside = outer / "outside.md"
-            outside.write_bytes(b"REAL")   # same bytes, different identity — outside root
+            outside.write_bytes(b"DECOY-DIFFERENT-BYTES")   # different identity AND content
             arts = self._art("f.md", b"REAL")
-            cache = _cache_for(rv, arts, [], None, "PASS", root)   # T-1 sample taken here
-            # The window: after resolution, before tier2_artifacts opens it.
+            cache = _cache_for(rv, arts, [], None, "PASS", root)   # fd opened+held here
+            original_dev_ino = cache["f.md"]["dev_ino_at_resolve"]
+            # The window: after resolution, before tier2_artifacts reads it.
             (root / "f.md").unlink()
             (root / "f.md").symlink_to(outside)
             cov = rv._Coverage()
             verified = {}
-            with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_artifacts(arts, [], root, True, cov,
-                                   cache=cache, verified=verified)
-            self.assertIn("Too many levels of symbolic links", str(cm.exception))
-            self.assertTrue(cov.partial)
-            self.assertEqual(verified, {})
+            notes = rv.tier2_artifacts(arts, [], root, True, cov,
+                                       cache=cache, verified=verified)
+            self.assertEqual(notes, [])
+            self.assertFalse(cov.partial)
+            self.assertEqual(verified, {(cache["f.md"]["realpath"], original_dev_ino):
+                                        b"REAL"})
 
     def test_fatal_8_2_t1_stat_failure_hard_fails(self):
         """A T-1 sample that FAILS (dev_ino_at_resolve is None) is a raising disposition,
         not a skipped comparison: the ARTIFACTS leg must hard-FAIL, never hash the file's
-        bytes into `verified`. Only the `include_nlink=True` call (the T-1 sample) is made
-        to fail; the default include_nlink=False form is left unmocked."""
+        bytes into `verified`. F1 STRUCTURAL FIX — the T-1 sample now comes from
+        `_open_nofollow_walk`'s fd rather than a separate `_witness_stat_dev_ino` call,
+        so the failure is injected there instead."""
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             (root / "f.md").write_bytes(b"REAL")
             arts = self._art("f.md", b"REAL")
-            real_stat = rv._witness_stat_dev_ino
 
-            def _t1_stat_fails(path, include_nlink=False):
-                if include_nlink:
-                    return OSError("simulated T-1 stat failure")
-                return real_stat(path, include_nlink=include_nlink)
-
-            with mock.patch.object(rv, "_witness_stat_dev_ino",
-                                   side_effect=_t1_stat_fails):
+            with mock.patch.object(rv, "_open_nofollow_walk",
+                                   side_effect=OSError("simulated T-1 open failure")):
                 cache = _cache_for(rv, arts, [], None, "PASS", root)
             self.assertTrue(cache["f.md"]["resolve_stat_failed"])
+            self.assertIsNone(cache["f.md"]["fd"])
             cov = rv._Coverage()
             verified = {}
             with self.assertRaises(rv.LintError) as cm:
@@ -4154,6 +4159,12 @@ class TestReadFailuresAreClassified(_InqBase):
     """
 
     def test_an_unreadable_resolved_artifact_is_a_bullet_not_a_traceback(self):
+        """F1 STRUCTURAL FIX moved the open earlier: `_resolve_once`'s
+        `_open_nofollow_walk` now opens the leaf (with real read-permission
+        requirements) at RESOLVE time, so a mode-000 file fails the WALK, not the
+        later read — `resolve_stat_failed` lands True and the ARTIFACTS leg raises the
+        "identity could not be sampled" bullet instead of "unreadable". Still one
+        clean bullet, never a traceback, and `partial` still set."""
         if os.geteuid() == 0:
             self.skipTest("running as root — mode 000 does not deny")
         h, size = self.plant(self.base, "out.log")
@@ -4164,7 +4175,8 @@ class TestReadFailuresAreClassified(_InqBase):
                       ["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"])
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(r))
         self.assertNotIn("Traceback (most recent call last)", out.stderr)
-        self.assertIn("Tier-2: ARTIFACTS out.log unreadable", out.stderr)
+        self.assertIn("Tier-2: ARTIFACTS out.log's identity could not be sampled at "
+                      "resolution time", out.stderr)
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("partial", self.cov_line(out.stderr))
 
@@ -5520,16 +5532,23 @@ class TestArtifactReadsAreBounded(_InqBase):
                     verified={}),
                 [])
 
-    def test_a_fifo_swapped_in_after_resolve_fails_closed_instead_of_hanging(self):
-        """#563 inquisitor finding — `_read_and_fstat_artifact`'s bare `open(realpath,
-        "rb")` had no regular-file gate, verbatim the pre-fix shape of `_read_jsonl`
-        (siege S-1, see `test_a_fifo_ledger_fails_closed_instead_of_hanging` above). A
-        FIFO named directly in ARTIFACTS is refused earlier, at resolve time
-        (`_resolve_base_one`'s own `is_file()`), so the reachable shape is a resolve-time
-        REGULAR file swapped to a FIFO before this leg's read — the same swap window
-        `tier2_witness`'s TOCTOU checks exist to police. Run on a worker thread with a
-        bounded join: the defect under test is an indefinite hang, so an unbounded call
-        would hang the suite instead of failing it."""
+    def test_a_fifo_swapped_in_after_resolve_reads_the_held_fd_not_the_fifo(self):
+        """F1 STRUCTURAL FIX — a FIFO named directly in ARTIFACTS is refused at resolve
+        time (`_resolve_base_one`'s own `is_file()`), so the reachable shape is a
+        resolve-time REGULAR file swapped to a FIFO before this leg's read. Before the
+        structural fix, `_read_and_fstat_artifact` re-opened `f.md` BY NAME at read
+        time and hit the FIFO (the hang siege S-1 / SIEGE-R4BA-2 exist to police, closed
+        with `O_NONBLOCK` + fd-based classification). Now `_resolve_once` holds the fd
+        `_open_nofollow_walk` opened AT RESOLVE TIME — before the swap — and the
+        ARTIFACTS leg reads from that same descriptor, which still refers to the
+        ORIGINAL regular file's inode regardless of what gets created at that name
+        afterward (POSIX: unlinking/replacing a directory entry does not touch an
+        fd already open on the inode it named). There is no name left to hit the FIFO
+        with, so there is nothing left to hang on OR to misclassify — this is a
+        stronger outcome than the prior round's fail-closed detection, not a weaker
+        one. Run on a worker thread with a bounded join regardless, as a regression
+        backstop: if a future change reintroduces a by-name reopen here, this test
+        still catches the hang rather than stalling the suite."""
         rv = _import_rv()
         h, size = self.plant(self.base, "f.md", b"REAL")
         arts = {"f.md": {"hash": h, "size": size}}
@@ -5538,11 +5557,12 @@ class TestArtifactReadsAreBounded(_InqBase):
         os.mkfifo(self.base / "f.md")
         self.addCleanup(lambda: (self.base / "f.md").unlink(missing_ok=True))
         result = {}
+        verified = {}
 
         def _run():
             try:
-                rv.tier2_artifacts(arts, [], [self.base], False,
-                                   cache=cache, verified={})
+                result["notes"] = rv.tier2_artifacts(arts, [], [self.base], False,
+                                                      cache=cache, verified=verified)
             except rv.LintError as e:
                 result["error"] = str(e)
             except BaseException as e:              # pragma: no cover - diagnostic only
@@ -5552,7 +5572,8 @@ class TestArtifactReadsAreBounded(_InqBase):
         t.start()
         t.join(timeout=5.0)
         self.assertFalse(t.is_alive(), "tier2_artifacts hung reading a swapped-in FIFO")
-        self.assertIn("is not a regular file", result.get("error", ""))
+        self.assertNotIn("error", result)
+        self.assertEqual(list(verified.values()), [b"REAL"])
 
     def test_a_second_spelling_of_an_already_read_realpath_does_not_double_charge_budget(self):
         """#563 — the S3 dedup (:3201-3223) reuses the bytes already read for a realpath's
@@ -5579,12 +5600,16 @@ class TestArtifactReadsAreBounded(_InqBase):
 
     def test_a_memory_error_is_classified_not_an_unwind(self):
         """MemoryError is NOT an OSError. Under `ulimit -v` it went straight past the
-        read guard and out of the CLI as a Traceback printed after the census."""
+        read guard and out of the CLI as a Traceback printed after the census.
+        F1 STRUCTURAL FIX — the ARTIFACTS leg now reads via `_read_from_fd` on the fd
+        `_resolve_once` already opened, not via `_read_and_fstat_artifact` (that
+        function is now the `--ledger`-only, name-opening sibling — see its
+        docstring), so the guard under test here is `_read_from_fd`'s."""
         rv = _import_rv()
         h, size = self.plant(self.base, "out.log")
         arts = {"out.log": {"hash": h, "size": size}}
         cov = rv._Coverage()
-        with mock.patch.object(rv, "_read_and_fstat_artifact", side_effect=MemoryError()):
+        with mock.patch.object(rv, "_read_from_fd", side_effect=MemoryError()):
             with self.assertRaises(rv.LintError) as cm:
                 rv.tier2_artifacts(
                     arts, [], [self.base], False, cov,
@@ -6015,37 +6040,34 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         arts = {"f.md": {"hash": h, "size": str(len(body))}}
         trace = [{"n": 1, "verb": "WROTE", "args": f"{trace_spelling}  sha256:{h}"}]
         wit = rv.parse_witness(["grep:f.md  expect-fail=/fatal=[1-9]/  ran=TRACE#1"])
-        opens = []
-        real_open = builtins.open
-        real_os_open = os.open
+        reads = []
+        real_read_from_fd = rv._read_from_fd
 
-        def spy(file, *a, **k):
-            if str(file).endswith("f.md"):
-                opens.append(1)
-            return real_open(file, *a, **k)
-
-        def os_spy(path, *a, **k):
-            # SIEGE-R4BA-2 — the ARTIFACTS leg's read is `os.open` + `os.fdopen` now
-            # (one descriptor from open to read, so there is no name to re-resolve
-            # between the classification and the read). `builtins.open` alone therefore
-            # counts ZERO artifact reads and this instrument would pass vacuously; the
-            # subject of the test is the CARRY, not which syscall opens the file, so
-            # both spellings feed the same counter.
-            if str(path).endswith("f.md"):
-                opens.append(1)
-            return real_os_open(path, *a, **k)
+        def spy(fd, budget, label):
+            # F1 STRUCTURAL FIX — every name's fd now opens during the RESOLVE phase
+            # (via `_open_nofollow_walk`, one `os.open` per DISTINCT NAME STRING,
+            # whether or not that name's bytes ever get consumed), so counting
+            # `os.open`/`builtins.open` calls no longer measures "did this leg
+            # actually READ the file" — it measures "how many name spellings needed
+            # resolving", which both legs may do regardless of the carry. The carry's
+            # own claim is about BYTE consumption: `_read_from_fd` is the one function
+            # every actual read funnels through (ARTIFACTS' first-spelling read, and
+            # the witness leg's fallback read when the carry does NOT apply), so
+            # counting calls to it is the direct measurement of "did this leg
+            # actually read the file", independent of how many names resolved to it.
+            reads.append(label)
+            return real_read_from_fd(fd, budget, label)
 
         cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         verified = {}
-        with mock.patch.object(builtins, "open", spy), \
-                mock.patch.object(os, "open", os_spy):
+        with mock.patch.object(rv, "_read_from_fd", spy):
             rv.tier2_artifacts(arts, trace, [self.base], False,
                                cache=cache, verified=verified)
-            after_artifacts = len(opens)
+            after_artifacts = len(reads)
             with self.assertRaises(rv.LintError):
                 rv.tier2_witness(wit, trace, [self.base], False, "PASS",
                                  cache=cache, verified=verified)
-        return after_artifacts, len(opens) - after_artifacts
+        return after_artifacts, len(reads) - after_artifacts
 
     def test_a_dot_slash_spelling_still_hits_the_carry(self):
         artifacts_reads, witness_reads = self._run("./f.md")
@@ -6517,6 +6539,29 @@ class TestTheLedgerAndReceiptReadsAreBounded(_InqBase):
                                    "rcpt_sha256": self.HASH, "verdict": "PASS"}) + "\n")
         out = self._cli_bounded("--tier2", "--root", str(self.base), "--ledger", str(led),
                                 str(self._receipt_with_dispatch()))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_symlinked_ledger_path_still_binds(self):
+        """warden 2026-08-31T-563-warden round-2 — regression flagged in the prior
+        round: `_read_and_fstat_artifact` picked up `O_NOFOLLOW` when it was still the
+        SHARED opener for both the ARTIFACTS/witness TOCTOU-sensitive path and
+        `_read_jsonl`'s `--ledger` read, and a `--ledger` path is routinely a symlink
+        in ordinary orchestrator use (a symlinked dispatch root, a test harness that
+        stages the ledger elsewhere and links it in) — that legitimate use started
+        hard-failing with `ELOOP` even though a `--ledger` read has no earlier resolve
+        step for a symlink swap to race against. F1's fix moves the ARTIFACTS/witness
+        reads onto `_resolve_once`'s own held fd entirely, leaving
+        `_read_and_fstat_artifact` — and therefore `_read_jsonl` — as a plain
+        `O_RDONLY | O_NONBLOCK` open with no `O_NOFOLLOW` again; this pins that a
+        symlinked ledger path keeps working."""
+        real_led = self.base / "real-receipt-ledger.jsonl"
+        real_led.write_text(json.dumps({"dispatch_id": "24-child", "phase": "code",
+                                        "rcpt_sha256": self.HASH, "verdict": "PASS"}) + "\n")
+        linked = self.base / "linked-receipt-ledger.jsonl"
+        linked.symlink_to(real_led)
+        out = self._cli_bounded("--tier2", "--root", str(self.base), "--ledger", str(linked),
+                                str(self._receipt_with_dispatch()))
+        self.assertNotIn("Too many levels of symbolic links", out.stderr)
         self.assertEqual(out.returncode, 0, out.stderr)
 
 
@@ -7885,11 +7930,14 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         resolve_base actually ran, which is the thing #486 built and the FAIL leg
         never used.
 
-        TWO calls, not one, since SIEGE-R4BA-1: `_resolve_once` re-proves containment
-        immediately after sampling the resolve-time identity, and the re-proof is a
-        second `resolve_base` on the SAME cited name. The count is pinned rather than
-        relaxed to a membership test so this still goes RED if the leg stops resolving
-        altogether, which is what the test is for."""
+        ONE call, not two: SIEGE-R4BA-1's original fix re-proved containment with a
+        SECOND `resolve_base` call immediately after sampling the resolve-time
+        identity, but the F1 structural fix (warden 2026-08-31T-563-warden round-2)
+        retires that re-proof entirely — `_resolve_once` now opens the realpath via
+        `_open_nofollow_walk`, a component-by-component `O_NOFOLLOW` walk that IS its
+        own proof, so there is no second by-name resolution left to make. The count is
+        still pinned rather than relaxed to a membership test so this still goes RED
+        if the leg stops resolving altogether, which is what the test is for."""
         wit, trace = self._ranged_grep()
         seen = []
         real = self.rv.resolve_base
@@ -7904,7 +7952,7 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
             wit, trace, self.a, False, "FAIL", self._cov(),
             cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
             verified={})
-        self.assertEqual(seen, ["f.txt", "f.txt"])
+        self.assertEqual(seen, ["f.txt"])
 
     def test_501_3_the_old_unreached_arm_is_retired(self):
         """`fail-leg-payload-not-sourced` described the linter declining to source. It
@@ -8118,36 +8166,46 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
 
 
 class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
-    """SIEGE-R4BA-1 — the resolve-time identity sample was taken AFTER the containment
-    proof, not atomically with it.
+    """SIEGE-R4BA-1 and its F1 structural fix — the resolve-time identity sample used
+    to be taken AFTER the containment proof, not atomically with it, and re-opening
+    the realpath BY NAME a second time at read time reopened the same class of gap
+    one step later (the leaf-`O_NOFOLLOW` residual, then the intermediate-directory
+    residual this warden round closes — see `TestF1DirectoryComponentRace` below).
 
     `_resolve_base_one` returns a path string once `real.is_file()` and `_contained()`
-    both hold; `_resolve_once` then takes a SEPARATE `os.stat` on that string. A
-    reviewed subagent that owns the directory swaps the name in that gap — a regular
-    file replaced by a symlink pointing outside every `--root` — and the stat samples
-    the DECOY's identity. That corrupted sample is exactly what tier2_artifacts' own
-    TOCTOU re-check compares its fd identity against, so the check compares the decoy
-    with itself and agrees: a silent false PASS over out-of-root content, reproduced
-    4/120 times against the real CLI.
+    both hold; `_resolve_once` now opens that string via `_open_nofollow_walk` (a
+    component-by-component, `O_NOFOLLOW`-at-every-step walk) and HOLDS the resulting
+    fd rather than merely stat'ing and discarding it. A reviewed subagent that owns
+    the directory swaps the name in the gap between `resolve_base` returning and this
+    walk running — a regular file replaced by a symlink pointing outside every
+    `--root` — and the walk's own leaf `os.open` now refuses to follow it (`ELOOP`),
+    deterministically, before any identity is ever sampled from the decoy. Pre-fix,
+    the corrupted sample was exactly what tier2_artifacts' own TOCTOU re-check
+    compared its fd identity against, so the check compared the decoy with itself and
+    agreed: a silent false PASS over out-of-root content, reproduced 4/120 times
+    against the real CLI.
 
     THE RACE IS INJECTED, NOT RUN. A 4-in-120 wall-clock race is not a regression pin —
-    it is a flaky one. The swap is performed inside a patched `_witness_stat_dev_ino`,
-    which is precisely the gap's far end, so the linter sees byte-for-byte the state an
-    attacker who WINS the race produces, deterministically and on every run."""
+    it is a flaky one. The swap is performed inside a patched `os.open`, triggered on
+    the walk's OWN leaf-open call — precisely the gap's far end under the new
+    mechanism — so the linter sees byte-for-byte the state an attacker who WINS the
+    race produces, deterministically and on every run."""
 
-    def _swap_at_stat(self, rv, outside_real):
-        """Replace `base/f.md` with a symlink to an out-of-root decoy at stat time."""
-        real_stat = rv._witness_stat_dev_ino
+    def _swap_at_open(self, rv, outside_real):
+        """Replace `base/f.md` with a symlink to an out-of-root decoy right as
+        `_open_nofollow_walk`'s leaf `os.open` call is about to resolve it — the
+        walk's own choke point under the F1 structural fix (see class docstring)."""
+        real_open = rv.os.open
         done = []
 
-        def spy(path, include_nlink=False):
-            if not done and str(path).endswith("f.md"):
+        def spy(path, flags, *args, **kwargs):
+            if not done and path == "f.md":
                 done.append(1)
                 (self.base / "f.md").unlink()
                 (self.base / "f.md").symlink_to(outside_real)
-            return real_stat(path, include_nlink)
+            return real_open(path, flags, *args, **kwargs)
 
-        return mock.patch.object(rv, "_witness_stat_dev_ino", spy)
+        return mock.patch.object(rv.os, "open", spy)
 
     def _setup(self, rv):
         outside = pathlib.Path(self._td.name).resolve().parent / (
@@ -8163,36 +8221,41 @@ class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
         arts = {"f.md": {"hash": h, "size": str(decoy.stat().st_size)}}
         return decoy, arts
 
-    def test_a_swap_in_the_resolve_stat_gap_is_not_sampled_as_valid(self):
+    def test_a_swap_in_the_resolve_open_gap_is_not_sampled_as_valid(self):
         rv = _import_rv()
         decoy, arts = self._setup(rv)
         cache = {}
-        with self._swap_at_stat(rv, decoy):
+        with self._swap_at_open(rv, decoy):
             rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
         rec = cache["f.md"]
-        # Pre-fix this held the DECOY's (st_dev, st_ino) — an identity for a file
+        # Pre-F1-fix this held the DECOY's (st_dev, st_ino) — an identity for a file
         # outside every root, recorded as if containment had been proven for it.
         self.assertIsNone(rec["dev_ino_at_resolve"])
         self.assertTrue(rec["resolve_stat_failed"])
+        self.assertIsNone(rec["fd"])
 
     def test_the_leg_hard_fails_instead_of_hashing_out_of_root_content(self):
         """The end-to-end consequence, which is the finding: pre-fix the ARTIFACTS leg
         read the decoy, matched the declared hash, compared the fd identity against the
         decoy identity it had already sampled, agreed with itself, and exited clean.
 
-        SIEGE-R4BA-1 residual: `_swap_at_stat` leaves the swapped-in symlink in place, so
-        `O_NOFOLLOW` now refuses the open itself before `tier2_artifacts` ever reaches the
-        `dev_ino_at_resolve is None` check this test originally pinned — an earlier hard
-        fail on the same swap, not a weaker one."""
+        F1 STRUCTURAL FIX — `_swap_at_open` leaves the swapped-in symlink in place, and
+        the walk's own leaf `os.open` (not a later name-based reopen) is what refuses
+        to follow it, `ELOOP`, before `tier2_artifacts` is even reached with a
+        readable identity. The failure surfaces at the earliest possible point, one
+        step before this test's PRIOR round even ran, and stays a hard fail either
+        way: `verified` is never touched."""
         rv = _import_rv()
         decoy, arts = self._setup(rv)
         cache = {}
-        with self._swap_at_stat(rv, decoy):
+        with self._swap_at_open(rv, decoy):
             rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
-            with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_artifacts(arts, [], [self.base], False,
-                                   cache=cache, verified={})
-        self.assertIn("Too many levels of symbolic links", str(cm.exception))
+        verified = {}
+        with self.assertRaises(rv.LintError) as cm:
+            rv.tier2_artifacts(arts, [], [self.base], False,
+                               cache=cache, verified=verified)
+        self.assertIn("identity could not be sampled at resolution time", str(cm.exception))
+        self.assertEqual(verified, {})
 
     def test_an_unswapped_name_still_resolves_and_verifies(self):
         """Non-vacuity — the re-proof must not reject the honest case."""
@@ -8206,6 +8269,143 @@ class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
         self.assertIsNotNone(cache["f.md"]["dev_ino_at_resolve"])
         self.assertFalse(cache["f.md"]["resolve_stat_failed"])
         rv.tier2_artifacts(arts, [], [self.base], False, cache=cache, verified={})
+
+
+class TestF1DirectoryComponentRace(_InqBase):
+    """warden 2026-08-31T-563-warden round-2 — the residual SIEGE-R4BA-1 left open.
+
+    A single whole-path `os.open(realpath, ... | O_NOFOLLOW)` hands the KERNEL the
+    entire path string, and the kernel follows a symlink at every component except
+    the LAST one: `O_NOFOLLOW` never sees a symlink substituted one level ABOVE the
+    leaf. A reviewed subagent that owns an INTERMEDIATE directory (not just the leaf's
+    immediate parent) can replace it with a symlink into an out-of-root tree between
+    resolve time and read time, and the leaf reached through that symlink is still an
+    ordinary regular file — the leaf-only flag passes it clean. `_open_nofollow_walk`
+    is supposed to close this too, by opening every component against a HELD parent
+    `dir_fd` with its OWN `O_NOFOLLOW`, not only the final one; this class proves it
+    does, racing the INTERMEDIATE component specifically rather than the leaf.
+
+    THE RACE IS INJECTED, NOT RUN, for the same reason `TestSiegeR4BA1...` injects
+    its leaf race: deterministic on every run, rather than a wall-clock race that
+    would be flaky. The swap is performed inside a patched `os.open`, triggered on
+    the walk's call for the INTERMEDIATE component's name."""
+
+    def _swap_intermediate_at_open(self, rv, component_name, real_dir, evil_dir):
+        """Replace `real_dir` (an intermediate PATH COMPONENT, not the leaf) with a
+        symlink to `evil_dir` right as `_open_nofollow_walk` is about to open that
+        component by name."""
+        real_open = rv.os.open
+        done = []
+
+        def spy(path, flags, *args, **kwargs):
+            if not done and path == component_name:
+                done.append(1)
+                shutil.rmtree(real_dir)
+                real_dir.symlink_to(evil_dir)
+            return real_open(path, flags, *args, **kwargs)
+
+        return mock.patch.object(rv.os, "open", spy)
+
+    def test_an_intermediate_directory_swapped_to_a_symlink_fails_the_walk_closed(self):
+        rv = _import_rv()
+        root = self.base / "root"
+        (root / "subdir").mkdir(parents=True)
+        (root / "subdir" / "f.md").write_bytes(b"honest in-root content\n")
+        evil = self.base / "evil"
+        evil.mkdir()
+        # Same leaf NAME, different identity AND content — a directory-component swap
+        # never needs the leaf itself to be a symlink to reach an out-of-root file.
+        decoy = evil / "f.md"
+        decoy.write_bytes(b"OUT-OF-ROOT DECOY CONTENT, DIFFERENT LENGTH TOO\n")
+        h = hashlib.sha256(decoy.read_bytes()).hexdigest()
+        arts = {"subdir/f.md": {"hash": h, "size": str(decoy.stat().st_size)}}
+
+        cache = {}
+        with self._swap_intermediate_at_open(rv, "subdir", root / "subdir", evil):
+            rv._build_identity_cache(arts, [], [], "PASS", [root], cache)
+        rec = cache["subdir/f.md"]
+        # The walk's leaf-open never ran at all: `subdir` itself failed to open
+        # (ELOOP) one component before the leaf, so there is no identity to sample.
+        self.assertIsNone(rec["dev_ino_at_resolve"])
+        self.assertTrue(rec["resolve_stat_failed"])
+        self.assertIsNone(rec["fd"])
+
+        verified = {}
+        with self.assertRaises(rv.LintError) as cm:
+            rv.tier2_artifacts(arts, [], [root], False, cache=cache, verified=verified)
+        self.assertIn("identity could not be sampled at resolution time", str(cm.exception))
+        self.assertEqual(verified, {},
+                         "the decoy's declared hash must never be credited")
+
+    def test_an_unswapped_intermediate_directory_still_resolves_and_verifies(self):
+        """Non-vacuity — walking every component must not reject the honest case."""
+        rv = _import_rv()
+        root = self.base / "root"
+        (root / "subdir").mkdir(parents=True)
+        body = b"honest in-root content\n"
+        (root / "subdir" / "f.md").write_bytes(body)
+        arts = {"subdir/f.md": {"hash": hashlib.sha256(body).hexdigest(),
+                                "size": str(len(body))}}
+        cache = {}
+        rv._build_identity_cache(arts, [], [], "PASS", [root], cache)
+        self.assertIsNotNone(cache["subdir/f.md"]["dev_ino_at_resolve"])
+        self.assertFalse(cache["subdir/f.md"]["resolve_stat_failed"])
+        notes = rv.tier2_artifacts(arts, [], [root], False, cache=cache, verified={})
+        self.assertEqual(notes, [])
+
+    def test_two_names_of_one_realpath_disagreeing_on_identity_still_hard_fails(self):
+        """The `dev_ino_at_resolve != st_dev_ino` cross-check in the S3 dedup's REUSED
+        branch (:tier2_artifacts) — the one comparison the F1 structural fix leaves
+        genuinely reachable, since a SINGLE name's own fresh read now always agrees
+        with its own resolve-time sample by construction (same held fd, same inode,
+        both ends of the comparison). Two DIFFERENT declared names that resolve to the
+        same realpath STRING each walk and hold their OWN fd independently; if the
+        file at that path is replaced (new inode) between the first name's walk and
+        the second's, the two fds disagree even though `resolved` — the dedup key — is
+        the same string both times. This is the honest replacement for the old
+        dev_ino-comparison pin the prior warden round flagged as no longer live (it
+        had been superseded by an earlier ELOOP on the SAME name's own re-resolution,
+        which F1 replaces with a held fd — see `TestSiegeR4BA1...`); this test
+        exercises the comparison that is still actually reachable after the fix."""
+        rv = _import_rv()
+        shared = self.base / "shared.md"
+        body = b"original content\n"
+        shared.write_bytes(body)
+        (self.base / "a.md").symlink_to(shared)
+        (self.base / "b.md").symlink_to(shared)
+        h = hashlib.sha256(body).hexdigest()
+        # Both names declare the ORIGINAL content's hash — "a.md" is read first (its
+        # bytes are what get hash-verified and cached under the shared realpath); the
+        # swap below only needs to change IDENTITY, not content, to trip the check.
+        arts = {"a.md": {"hash": h, "size": str(len(body))},
+               "b.md": {"hash": h, "size": str(len(body))}}
+
+        real_walk = rv._open_nofollow_walk
+        calls = []
+
+        def spy(path):
+            calls.append(path)
+            if len(calls) == 2:
+                # Between "a.md"'s walk and "b.md"'s walk: replace shared.md with a
+                # NEW inode carrying byte-identical content, so only IDENTITY moved.
+                shared.unlink()
+                shared.write_bytes(body)
+            return real_walk(path)
+
+        cache = {}
+        with mock.patch.object(rv, "_open_nofollow_walk", spy):
+            rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(cache["a.md"]["realpath"], cache["b.md"]["realpath"])
+        self.assertNotEqual(cache["a.md"]["dev_ino_at_resolve"],
+                            cache["b.md"]["dev_ino_at_resolve"])
+
+        verified = {}
+        with self.assertRaises(rv.LintError) as cm:
+            rv.tier2_artifacts(arts, [], [self.base], False,
+                               cache=cache, verified=verified)
+        self.assertIn("the path was replaced between resolution and read",
+                      str(cm.exception))
 
 
 class TestSiegeR4BA2CheckThenOpenRace(_InqBase):
@@ -8411,6 +8611,41 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
         out = self.cli("--tier2", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    # CHAIN-1 residual — warden 2026-08-31T-563-warden round-2. The FIRST fix above
+    # was `raw_line.lstrip()`, an ASCII-whitespace blocklist: `str.lstrip()` removes
+    # only codepoints for which `str.isspace()` is true, and every one of these six
+    # is False under `str.isspace()`, so each defeats `.lstrip()` exactly as an
+    # ordinary space did before this class's own indent test above. `_is_format_or_
+    # separator` (Unicode category `C*`/`Z*`) is a superset of `str.isspace()`'s
+    # notion and closes all six with the SAME test the ASCII case uses — proving the
+    # fix is class-based (a category rule), not the next entry in an enumeration.
+    ZERO_WIDTH_CODEPOINTS = {
+        "u200b_zero_width_space": chr(0x200B),
+        "ufeff_bom": chr(0xFEFF),
+        "u2060_word_joiner": chr(0x2060),
+        "u200c_zwnj": chr(0x200C),
+        "u00ad_soft_hyphen": chr(0x00AD),
+        "u180e_mongolian_vowel_separator": chr(0x180E),
+        # Beyond the six named in the finding — a broader Cf sample, not more
+        # enumeration: none of these are `str.isspace()`-true either (`.lstrip()`
+        # would have missed them just as it missed the six above), and the category
+        # rule closes all of them with the same test.
+        "u200d_zwj": chr(0x200D),                   # zero width joiner
+        "u061c_arabic_letter_mark": chr(0x061C),    # bidi format control
+        "u200e_left_to_right_mark": chr(0x200E),    # bidi format control
+        "u2061_function_application": chr(0x2061),  # invisible math operator
+    }
+
+    def test_an_invisible_unicode_prefixed_supersedes_line_does_not_disarm_the_gate(self):
+        for label, cp in self.ZERO_WIDTH_CODEPOINTS.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    f"SUPERSEDES: {self.PREFIX}", f"{cp}SUPERSEDES: {self.PREFIX}"))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
 
 
 if __name__ == "__main__":
