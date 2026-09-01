@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import builtins
 import unittest
 from unittest import mock
 
@@ -61,6 +62,13 @@ def _plant_git_dir(repo):
 
 def _load(name):
     return [json.loads(l) for l in (CORPUS / name).read_text().splitlines() if l.strip()]
+
+
+def _cache_for(rv, artifacts, trace, witness, verdict, root):
+    cache = {}
+    rv._build_identity_cache(
+        artifacts, trace, [witness] if witness is not None else [], verdict, root, cache)
+    return cache
 
 
 class TestSkeleton(unittest.TestCase):
@@ -183,7 +191,11 @@ class TestTier2Artifacts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             (root / "f.txt").write_bytes(b"hello")
-            notes = rv.tier2_artifacts(self._art("f.txt", b"hello"), [], root, False)
+            notes = rv.tier2_artifacts(
+                self._art("f.txt", b"hello"), [], root, False,
+                cache=_cache_for(rv, self._art("f.txt", b"hello"), [], None, "PASS",
+                                 root),
+                verified={})
             self.assertEqual(notes, [])
 
     def test_tampered_hash_raises(self):
@@ -192,13 +204,21 @@ class TestTier2Artifacts(unittest.TestCase):
             root = pathlib.Path(td)
             (root / "f.txt").write_bytes(b"changed")
             with self.assertRaises(rv.LintError):
-                rv.tier2_artifacts(self._art("f.txt", b"hello"), [], root, False)
+                rv.tier2_artifacts(
+                    self._art("f.txt", b"hello"), [], root, False,
+                    cache=_cache_for(rv, self._art("f.txt", b"hello"), [], None,
+                                     "PASS", root),
+                    verified={})
 
     def test_absent_basename_unverifiable_even_strict(self):
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
-            notes = rv.tier2_artifacts(self._art("findings.md", b"x"), [], root, True)
+            notes = rv.tier2_artifacts(
+                self._art("findings.md", b"x"), [], root, True,
+                cache=_cache_for(rv, self._art("findings.md", b"x"), [], None, "PASS",
+                                 root),
+                verified={})
             self.assertEqual(len(notes), 1)
             self.assertIn("UNVERIFIABLE", notes[0])
 
@@ -207,15 +227,122 @@ class TestTier2Artifacts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             with self.assertRaises(rv.LintError):
-                rv.tier2_artifacts(self._art("src/foo.ts", b"x"), [], root, True)
+                rv.tier2_artifacts(
+                    self._art("src/foo.ts", b"x"), [], root, True,
+                    cache=_cache_for(rv, self._art("src/foo.ts", b"x"), [], None,
+                                     "PASS", root),
+                    verified={})
 
     def test_absent_pathshaped_nonstrict_unverifiable(self):
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
-            notes = rv.tier2_artifacts(self._art("src/foo.ts", b"x"), [], root, False)
+            notes = rv.tier2_artifacts(
+                self._art("src/foo.ts", b"x"), [], root, False,
+                cache=_cache_for(rv, self._art("src/foo.ts", b"x"), [], None, "PASS",
+                                 root),
+                verified={})
             self.assertEqual(len(notes), 1)
             self.assertIn("UNVERIFIABLE", notes[0])
+
+
+class TestResolveToReadWindow(unittest.TestCase):
+    """#488 / FATAL-7-1 + FATAL-8-2 — the three-point (T-1/T0/T1) identity mechanism.
+
+    tier2_artifacts step (1b) requires each entry's `cache[name]["dev_ino_at_resolve"]`
+    (the T-1 sample, taken by `_resolve_once` via `_witness_stat_dev_ino(path,
+    include_nlink=True)` immediately after resolve_base resolves a realpath) to be
+    non-None and equal to the `(st_dev, st_ino)` that `_read_and_fstat_artifact` captured
+    from the open fd at read time (T0). The two raises below pin that the resolve-to-read
+    window is closed: a mismatch (FATAL-7-1) and a T-1 stat failure (FATAL-8-2) are both
+    HARD failures, never a successful hash-and-write of `verified`.
+    """
+
+    def _art(self, name, data):
+        return {name: {"hash": hashlib.sha256(data).hexdigest(), "size": str(len(data))}}
+
+    def test_fatal_7_1_path_replaced_between_resolution_and_read_hard_fails(self):
+        """A path that resolves (T-1) then is swapped for an out-of-tree file before the
+        ARTIFACTS leg opens it (T0) must hard-FAIL on identity mismatch — never hash the
+        outside file's bytes into `verified` (the bytes match on purpose, so identity is
+        the only thing that can catch the swap)."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            outer = pathlib.Path(td)
+            root = outer / "root"
+            root.mkdir()
+            (root / "f.md").write_bytes(b"REAL")
+            outside = outer / "outside.md"
+            outside.write_bytes(b"REAL")   # same bytes, different identity — outside root
+            arts = self._art("f.md", b"REAL")
+            cache = _cache_for(rv, arts, [], None, "PASS", root)   # T-1 sample taken here
+            # The window: after resolution, before tier2_artifacts opens it.
+            (root / "f.md").unlink()
+            (root / "f.md").symlink_to(outside)
+            cov = rv._Coverage()
+            verified = {}
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], root, True, cov,
+                                   cache=cache, verified=verified)
+            self.assertIn("the path was replaced between resolution and read",
+                          str(cm.exception))
+            self.assertTrue(cov.partial)
+            self.assertEqual(verified, {})
+
+    def test_fatal_8_2_t1_stat_failure_hard_fails(self):
+        """A T-1 sample that FAILS (dev_ino_at_resolve is None) is a raising disposition,
+        not a skipped comparison: the ARTIFACTS leg must hard-FAIL, never hash the file's
+        bytes into `verified`. Only the `include_nlink=True` call (the T-1 sample) is made
+        to fail; the default include_nlink=False form is left unmocked."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = self._art("f.md", b"REAL")
+            real_stat = rv._witness_stat_dev_ino
+
+            def _t1_stat_fails(path, include_nlink=False):
+                if include_nlink:
+                    return OSError("simulated T-1 stat failure")
+                return real_stat(path, include_nlink=include_nlink)
+
+            with mock.patch.object(rv, "_witness_stat_dev_ino",
+                                   side_effect=_t1_stat_fails):
+                cache = _cache_for(rv, arts, [], None, "PASS", root)
+            self.assertTrue(cache["f.md"]["resolve_stat_failed"])
+            cov = rv._Coverage()
+            verified = {}
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], root, True, cov,
+                                   cache=cache, verified=verified)
+            self.assertIn("identity could not be sampled at resolution time",
+                          str(cm.exception))
+            self.assertTrue(cov.partial)
+            self.assertEqual(verified, {})
+
+    def test_a_degenerate_identity_filesystem_hard_fails_instead_of_trusting_the_toctou_check(self):
+        """#563 — `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`) means every file on the
+        filesystem shares one identity, so `dev_ino_at_resolve != st_dev_ino` is trivially
+        FALSE for a resolve-time/read-time swap: the exact case the check exists to catch.
+        tier2_witness already gates supersession on this sentinel; tier2_artifacts's own
+        TOCTOU check must fail closed on it too, not silently trust an equality it cannot
+        distinguish from a swap."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = {"f.md": {"hash": hashlib.sha256(b"REAL").hexdigest(), "size": "4"}}
+            cache = _cache_for(rv, arts, [], None, "PASS", root)
+            cache[rv._IDENTITY_DEGENERATE] = True
+            cov = rv._Coverage()
+            verified = {}
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], root, True, cov,
+                                   cache=cache, verified=verified)
+            self.assertIn("identity cannot be checked across the resolve/read gap",
+                          str(cm.exception))
+            self.assertTrue(cov.partial)
+            self.assertEqual(verified, {})
 
 
 class TestVerifyWitness(unittest.TestCase):
@@ -294,7 +421,10 @@ class TestTier2Witness(unittest.TestCase):
             cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#L1-L40"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
             # reads ONLY lines 1-40 → BOOM not seen → no raise
-            notes = rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+            notes = rv.tier2_witness(
+                self._w("/BOOM/"), trace, root, False, "PASS",
+                cache=_cache_for(rv, {}, trace, self._w("/BOOM/"), "PASS", root),
+                verified={})
             self.assertEqual(notes, [])
 
     def test_byte_range_1based_inclusive(self):
@@ -309,7 +439,10 @@ class TestTier2Witness(unittest.TestCase):
             cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=out.log#B2-B5"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
             with self.assertRaises(rv.LintError):
-                rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+                rv.tier2_witness(
+                    self._w("/BOOM/"), trace, root, False, "PASS",
+                    cache=_cache_for(rv, {}, trace, self._w("/BOOM/"), "PASS", root),
+                    verified={})
             # And the raw range reader returns exactly the inclusive slice.
             self.assertEqual(rv._read_cited_range(root / "out.log", cited), "BOOM")
 
@@ -330,7 +463,10 @@ class TestTier2Witness(unittest.TestCase):
             self.assertEqual(rv._read_cited_range(root / "out.log", cited), "BOOMx")
             # Witness fires → PASS rejected (no silent clean).
             with self.assertRaises(rv.LintError):
-                rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+                rv.tier2_witness(
+                    self._w("/BOOM/"), trace, root, False, "PASS",
+                    cache=_cache_for(rv, {}, trace, self._w("/BOOM/"), "PASS", root),
+                    verified={})
 
     def test_a0_line_start_no_slice_from_end_witness_fires(self):
         # Parallel #L0-L5 guard: a=0 line start must clamp to 1, not slice from the end.
@@ -343,7 +479,10 @@ class TestTier2Witness(unittest.TestCase):
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
             self.assertIn("BOOM", rv._read_cited_range(root / "out.log", cited))
             with self.assertRaises(rv.LintError):
-                rv.tier2_witness(self._w("/BOOM/"), trace, root, False, "PASS")
+                rv.tier2_witness(
+                    self._w("/BOOM/"), trace, root, False, "PASS",
+                    cache=_cache_for(rv, {}, trace, self._w("/BOOM/"), "PASS", root),
+                    verified={})
 
     def test_absent_witness_basename_unverifiable(self):
         rv = _import_rv()
@@ -351,7 +490,10 @@ class TestTier2Witness(unittest.TestCase):
             root = pathlib.Path(td)
             cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=ephemeral.log#L1-L5"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
-            notes = rv.tier2_witness(self._w("/x/"), trace, root, True, "PASS")
+            notes = rv.tier2_witness(
+                self._w("/x/"), trace, root, True, "PASS",
+                cache=_cache_for(rv, {}, trace, self._w("/x/"), "PASS", root),
+                verified={})
             self.assertEqual(len(notes), 1)
             self.assertIn("UNVERIFIABLE", notes[0])
 
@@ -362,7 +504,10 @@ class TestTier2Witness(unittest.TestCase):
             cited = {"n": 2, "verb": "EXEC", "args": "`x`  exit=0  out=logs/run.log#L1-L5"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
             with self.assertRaises(rv.LintError):
-                rv.tier2_witness(self._w("/x/"), trace, root, True, "PASS")
+                rv.tier2_witness(
+                    self._w("/x/"), trace, root, True, "PASS",
+                    cache=_cache_for(rv, {}, trace, self._w("/x/"), "PASS", root),
+                    verified={})
 
 
 class TestCliDispatch(unittest.TestCase):
@@ -671,7 +816,9 @@ class TestRootContainment(unittest.TestCase):
             # Even though the out-of-tree file's hash WOULD match, containment forbids
             # the read → strict + path-shaped → FAIL (never a silent hash "proof").
             with self.assertRaises(rv.LintError):
-                rv.tier2_artifacts(art, [], root, True)
+                rv.tier2_artifacts(art, [], root, True,
+                                   cache=_cache_for(rv, art, [], None, "PASS", root),
+                                   verified={})
 
     def test_resolve_base_repo_toplevel_allowance_boundary(self):
         rv = _import_rv()
@@ -697,7 +844,13 @@ class TestRootContainment(unittest.TestCase):
 
 class TestNoneSentinelSymmetry(unittest.TestCase):
     """#397 defect 3 — the `(none)` empty sentinel is accepted uniformly across
-    ARTIFACTS / TRACE / CLAIMS (it already was for ARTIFACTS/NEXT)."""
+    ARTIFACTS / TRACE / CLAIMS (it already was for ARTIFACTS/NEXT).
+
+    Uniform in WHICH sections accept it, not unconditional: per #488 I8 the
+    sentinel is legal only as the SOLE entry of a body — a `(none)` co-occurring
+    with any entry is a Tier-1 `LintError` in all three parsers (see
+    `test_488_name_space.py::TestTheNoneSentinelIsAnchoredToASingleLineBody`).
+    These cases pin the sole-entry form."""
 
     def test_parse_trace_accepts_none(self):
         rv = _import_rv()
@@ -737,7 +890,10 @@ class TestWitnessSpanCapActual(unittest.TestCase):
             cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#L1-L40"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
             with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_witness(self._w(), trace, root, False, "PASS")
+                rv.tier2_witness(
+                    self._w(), trace, root, False, "PASS",
+                    cache=_cache_for(rv, {}, trace, self._w(), "PASS", root),
+                    verified={})
             self.assertIn("4 KiB", str(cm.exception))
 
     def test_short_lines_within_cap_clean(self):
@@ -747,7 +903,12 @@ class TestWitnessSpanCapActual(unittest.TestCase):
             (root / "out.log").write_text("".join(f"line {i}\n" for i in range(1, 41)))
             cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#L1-L40"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
-            self.assertEqual(rv.tier2_witness(self._w(), trace, root, False, "PASS"), [])
+            self.assertEqual(
+                rv.tier2_witness(self._w(), trace, root, False, "PASS",
+                                 cache=_cache_for(rv, {}, trace, self._w(), "PASS",
+                                                  root),
+                                 verified={}),
+                [])
 
     def test_byte_range_invalid_utf8_within_cap_no_false_fail(self):
         # 4000 raw bytes of 0xFF: under WITNESS_SPAN_CAP (4096), but each byte decodes
@@ -760,7 +921,12 @@ class TestWitnessSpanCapActual(unittest.TestCase):
             (root / "out.log").write_bytes(b"\xff" * 4000)
             cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#B1-B4000"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
-            self.assertEqual(rv.tier2_witness(self._w(), trace, root, False, "PASS"), [])
+            self.assertEqual(
+                rv.tier2_witness(self._w(), trace, root, False, "PASS",
+                                 cache=_cache_for(rv, {}, trace, self._w(), "PASS",
+                                                  root),
+                                 verified={}),
+                [])
 
     def test_byte_range_raw_span_exceeds_cap_raises(self):
         # The cap is real for #B too: 5000 raw bytes (> 4096) must still raise.
@@ -771,7 +937,10 @@ class TestWitnessSpanCapActual(unittest.TestCase):
             cited = {"n": 2, "verb": "EXEC", "args": "`run`  exit=0  out=out.log#B1-B5000"}
             trace = [{"n": 1, "verb": "READ", "args": "a"}, cited]
             with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_witness(self._w(), trace, root, False, "PASS")
+                rv.tier2_witness(
+                    self._w(), trace, root, False, "PASS",
+                    cache=_cache_for(rv, {}, trace, self._w(), "PASS", root),
+                    verified={})
             self.assertIn("4 KiB", str(cm.exception))
 
 
@@ -806,7 +975,7 @@ class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
         self.assertEqual(rv.lint_receipt(self._inject("WROTE", "src/secrets.env")), "PASS")
 
     def test_edit_verb_also_passes(self):
-        # The dead branch serves BOTH EDIT and WROTE (rcpt_verify.py:243) — lock both.
+        # The dead branch serves BOTH EDIT and WROTE (rcpt_verify.py:946-962) — lock both.
         rv = _import_rv()
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "secrets.env")), "PASS")
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
@@ -1406,8 +1575,11 @@ class TestWitness474Tier2(unittest.TestCase):
         w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
                     "expect-fail=match  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w, self._wrote("round-1-findings.md"),
-                                  self.root, False, "PASS")
+            self.rv.tier2_witness(
+                w, self._wrote("round-1-findings.md"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._wrote("round-1-findings.md"), w,
+                                 "PASS", self.root),
+                verified={})
         self.assertIn("witness would have fired → PASS rejected", str(cm.exception))
         self.assertIn("round-1-findings.md", str(cm.exception))
 
@@ -1417,8 +1589,12 @@ class TestWitness474Tier2(unittest.TestCase):
         w = self._w(f"grep:round-1-findings.md#L1-L1  {MANDATED_CLAUSE}  "
                     "expect-fail=match  ran=TRACE#1")
         self.assertEqual(
-            self.rv.tier2_witness(w, self._wrote("round-1-findings.md"),
-                                  self.root, False, "PASS"), [])
+            self.rv.tier2_witness(
+                w, self._wrote("round-1-findings.md"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._wrote("round-1-findings.md"), w,
+                                 "PASS", self.root),
+                verified={}),
+            [])
 
     # --- test 5 — facet (b), WROTE-cited: the payload's own #range is what is read
     def test_5_wrote_cited_payload_range_narrows_the_body(self):
@@ -1426,13 +1602,22 @@ class TestWitness474Tier2(unittest.TestCase):
         w = self._w("grep:f.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
         # line 3 matches, line 1 does not — a whole-file read false-BLOCKs.
         self.assertEqual(
-            self.rv.tier2_witness(w, self._wrote("f.md"), self.root, False, "PASS"), [])
+            self.rv.tier2_witness(
+                w, self._wrote("f.md"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._wrote("f.md"), w, "PASS",
+                                 self.root),
+                verified={}),
+            [])
 
     def test_5b_wrote_cited_payload_range_still_fires_inside_the_range(self):
         self._write("f.md", COUNTS_HIT + "prose\n" + COUNTS_CLEAN)
         w = self._w(f"grep:f.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_witness(w, self._wrote("f.md"), self.root, False, "PASS")
+            self.rv.tier2_witness(
+                w, self._wrote("f.md"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._wrote("f.md"), w, "PASS",
+                                 self.root),
+                verified={})
 
     # --- test 6 — facet (b), EXEC-cited MISMATCH: payload names X, out= names Y
     def test_6_exec_cited_mismatch_reads_the_payload_artifact(self):
@@ -1440,7 +1625,11 @@ class TestWitness474Tier2(unittest.TestCase):
         self._write("y.log", "all quiet\n" * 5)
         w = self._w(f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "PASS")
+            self.rv.tier2_witness(
+                w, self._exec("y.log#L1-L5"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._exec("y.log#L1-L5"), w, "PASS",
+                                 self.root),
+                verified={})
         self.assertIn("matches body of x.md", str(cm.exception))
         self.assertNotIn("y.log", str(cm.exception))
 
@@ -1450,7 +1639,11 @@ class TestWitness474Tier2(unittest.TestCase):
         w = self._w("grep:big.md#L1-L40  pattern=/zzzz-no-match/  "
                     "expect-fail=match  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w, self._wrote("big.md"), self.root, False, "PASS")
+            self.rv.tier2_witness(
+                w, self._wrote("big.md"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._wrote("big.md"), w, "PASS",
+                                 self.root),
+                verified={})
         self.assertIn("4 KiB", str(cm.exception))
 
     # --- test 11 — an empty resolved body on a ranged grep witness is a LintError,
@@ -1459,9 +1652,13 @@ class TestWitness474Tier2(unittest.TestCase):
         self._write("x.md", "one line\n")
         for line in (f"grep:x.md#L50-L60  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
                      "grep:x.md#L50-L60  expect-fail=/fatal=[1-9]/  ran=TRACE#1"):
+            w = self._w(line)
             with self.assertRaises(self.rv.LintError, msg=line):
-                self.rv.tier2_witness(self._w(line), self._wrote("x.md"),
-                                      self.root, False, "PASS")
+                self.rv.tier2_witness(
+                    w, self._wrote("x.md"), self.root, False, "PASS",
+                    cache=_cache_for(self.rv, {}, self._wrote("x.md"), w, "PASS",
+                                     self.root),
+                    verified={})
 
     def test_11b_empty_string_body_raises_on_the_eval_path(self):
         for line in (f"grep:x.md#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1",
@@ -1493,7 +1690,11 @@ class TestWitness474Tier2(unittest.TestCase):
         # exit=0 → the ordinary FAIL-leg rejection fires. The MESSAGE is the assertion:
         # it is the weak positive-evidence check, not the empty-body guard.
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w, self._exec("y.log#L1-L5"), self.root, False, "FAIL")
+            self.rv.tier2_witness(
+                w, self._exec("y.log#L1-L5"), self.root, False, "FAIL",
+                cache=_cache_for(self.rv, {}, self._exec("y.log#L1-L5"), w, "FAIL",
+                                 self.root),
+                verified={})
         self.assertIn("no evidence of failure", str(cm.exception))
         self.assertNotIn("witness could not fire", str(cm.exception))
 
@@ -1508,8 +1709,12 @@ class TestWitness474Tier2(unittest.TestCase):
         w = self._w("grep:x.md#L1-L1  expect-fail=/fatal=[1-9]/  ran=TRACE#1")
         cov = self.rv._Coverage(); cov.tier1_ok()
         self.assertEqual(
-            self.rv.tier2_witness(w, self._exec("y.log#L1-L5", exit_code=1),
-                                  self.root, False, "FAIL", cov),
+            self.rv.tier2_witness(
+                w, self._exec("y.log#L1-L5", exit_code=1), self.root, False, "FAIL",
+                cov,
+                cache=_cache_for(self.rv, {}, self._exec("y.log#L1-L5", exit_code=1),
+                                 w, "FAIL", self.root),
+                verified={}),
             [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertEqual(cov.counts["empty-range"], 1)
@@ -1521,21 +1726,34 @@ class TestWitness474Tier2(unittest.TestCase):
         w = self._w("grep:verify-log.txt#L1-L1  expect-fail=/[1-9][0-9]/  ran=TRACE#1")
         # today's linter reads out=#L1-L11 and matches the unrelated `67` at line 6
         self.assertEqual(
-            self.rv.tier2_witness(w, self._exec("verify-log.txt#L1-L11"),
-                                  self.root, False, "PASS"), [])
+            self.rv.tier2_witness(
+                w, self._exec("verify-log.txt#L1-L11"), self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, self._exec("verify-log.txt#L1-L11"), w,
+                                 "PASS", self.root),
+                verified={}),
+            [])
 
     # --- test 17 — FAIL-leg pattern threading (both legs)
     def test_17_fail_leg_matching_body_supplies_evidence(self):
         self._write("y.log", COUNTS_HIT)
         w = self._w(f"grep:y.log#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
         self.assertEqual(
-            self.rv.tier2_witness(w, self._exec("y.log#L1-L1"), self.root, False, "FAIL"), [])
+            self.rv.tier2_witness(
+                w, self._exec("y.log#L1-L1"), self.root, False, "FAIL",
+                cache=_cache_for(self.rv, {}, self._exec("y.log#L1-L1"), w, "FAIL",
+                                 self.root),
+                verified={}),
+            [])
 
     def test_17b_fail_leg_nonmatching_body_keeps_the_byte_identical_message(self):
         self._write("y.log", COUNTS_CLEAN)
         w = self._w(f"grep:y.log#L1-L1  {MANDATED_CLAUSE}  expect-fail=match  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w, self._exec("y.log#L1-L1"), self.root, False, "FAIL")
+            self.rv.tier2_witness(
+                w, self._exec("y.log#L1-L1"), self.root, False, "FAIL",
+                cache=_cache_for(self.rv, {}, self._exec("y.log#L1-L1"), w, "FAIL",
+                                 self.root),
+                verified={})
         self.assertEqual(
             str(cm.exception),
             "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
@@ -1547,7 +1765,10 @@ class TestWitness474Tier2(unittest.TestCase):
                     "expect-fail=match  ran=TRACE#1")
         trace = [{"n": 1, "verb": "WROTE",
                   "args": f"/nonexistent/abs/round-1-findings.md  sha256:{H64}"}]
-        notes = self.rv.tier2_witness(w, trace, self.root, True, "PASS")
+        notes = self.rv.tier2_witness(
+            w, trace, self.root, True, "PASS",
+            cache=_cache_for(self.rv, {}, trace, w, "PASS", self.root),
+            verified={})
         self.assertEqual(
             notes, ["UNVERIFIABLE: witness round-1-findings.md (no file under root)"])
 
@@ -1570,11 +1791,19 @@ class TestWitness474Tier2(unittest.TestCase):
         trace = self._exec("y.log#L1-L2")
         # the body is x.md sliced at the PAYLOAD range → the X marker supplies evidence
         w_hit = self._w("grep:x.md#L5-L6  expect-fail=/MARKERX/  ran=TRACE#1")
-        self.assertEqual(self.rv.tier2_witness(w_hit, trace, self.root, False, "FAIL"), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                w_hit, trace, self.root, False, "FAIL",
+                cache=_cache_for(self.rv, {}, trace, w_hit, "FAIL", self.root),
+                verified={}),
+            [])
         # …and the Y marker (present only in the cited out= file+range) does NOT
         w_miss = self._w("grep:x.md#L5-L6  expect-fail=/MARKERY/  ran=TRACE#1")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w_miss, trace, self.root, False, "FAIL")
+            self.rv.tier2_witness(
+                w_miss, trace, self.root, False, "FAIL",
+                cache=_cache_for(self.rv, {}, trace, w_miss, "FAIL", self.root),
+                verified={})
         self.assertEqual(
             str(cm.exception),
             "Tier-2 FAIL: no evidence of failure — exit=0 AND body does not match "
@@ -1765,7 +1994,10 @@ class TestRound1InlineDiskDisposition(unittest.TestCase):
         witness = self.rv.parse_witness(sections["WITNESS"])
         trace = self.rv.parse_trace(sections["TRACE"])
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(witness, trace, self.root, False, "PASS")
+            self.rv.tier2_witness(
+                witness, trace, self.root, False, "PASS",
+                cache=_cache_for(self.rv, {}, trace, witness, "PASS", self.root),
+                verified={})
         self.assertEqual(
             str(cm.exception),
             "Tier-2: WITNESS expect-fail regex /significant=[1-9]|fatal=[1-9]/ matches "
@@ -1945,7 +2177,10 @@ class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
         (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
         witness, trace = self._parts("FAIL")
         cov = self.rv._Coverage(); cov.tier1_ok()
-        notes = self.rv.tier2_witness(witness, trace, self.root, True, "FAIL", cov)
+        notes = self.rv.tier2_witness(
+            witness, trace, self.root, True, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, witness, "FAIL", self.root),
+            verified={})
         self.assertEqual(notes, [])          # no raise AND no UNVERIFIABLE note
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertIn("fail-leg-no-exit-evidence", cov.codes["discarded"])
@@ -1956,7 +2191,10 @@ class TestRound2FailLegIsNotEvaluated(unittest.TestCase):
         (self.root / "round-7-findings.md").write_text(COUNTS_HIT)
         witness, trace = self._parts("PASS")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(witness, trace, self.root, True, "PASS")
+            self.rv.tier2_witness(
+                witness, trace, self.root, True, "PASS",
+                cache=_cache_for(self.rv, {}, trace, witness, "PASS", self.root),
+                verified={})
         self.assertIn("matches body of round-7-findings.md", str(cm.exception))
 
 
@@ -2035,18 +2273,33 @@ class TestWitnessTimeoutBound(unittest.TestCase):
     #     lint-FAILs with the timeout message instead of hanging. Bound injected to 50 ms.
     def test_32_catastrophic_predicate_becomes_a_LintError_not_a_hang(self):
         self.rv.WITNESS_TIMEOUT_S = 0.05
+        # SIG-10-1 — `_witness_bound(seconds=…)` binds its default to the module constant
+        # at definition time, so `WITNESS_TIMEOUT_S = 0.05` alone no longer shortens the
+        # witness leg's bare `_witness_bound()` arm. Re-bind the default in the test so the
+        # catastrophic predicate is still bounded at 50 ms instead of the shipped 5 s, while
+        # the resolve-phase arm keeps its own budget (`_build_identity_cache` passes
+        # `seconds=` explicitly, so the wrapper forwards it unchanged).
+        real_bound = self.rv._witness_bound
+
+        @contextlib.contextmanager
+        def short_bound(seconds=0.05, what="witness evaluation"):
+            with real_bound(seconds, what):
+                yield
+
         err = io.StringIO()
         started = time.monotonic()
-        with contextlib.redirect_stderr(err):
-            rc = self.rv._verify_single(self._catastrophic_receipt(), "tier2",
-                                        self.root, True)
+        with mock.patch.object(self.rv, "_witness_bound", short_bound):
+            with contextlib.redirect_stderr(err):
+                rc = self.rv._verify_single(self._catastrophic_receipt(), "tier2",
+                                            self.root, True)
         elapsed = time.monotonic() - started
         self.assertEqual(rc, 1)
         # #486 / D8.5 — DECLARED C3 FLIP. Direction: byte-exact whole-stream assertEqual
         # -> an assertion scoped to the timeout line. Disposition (exit 1, timeout
         # message present) is UNCHANGED. _verify_single's stderr now also carries the
-        # TIER2-COVERAGE: line, by design.
-        self.assertIn(self.rv.WITNESS_TIMEOUT_MSG, err.getvalue())
+        # TIER2-COVERAGE: line, by design. The message text is now phase-aware
+        # (SIG-10-1): the witness arm reports the injected 0.05 s bound, not 5 s.
+        self.assertIn("witness evaluation exceeded 0.05s", err.getvalue())
         self.assertLess(elapsed, 2.0)        # it did NOT wait out the real predicate
         # the finally disarmed the timer even on the raising path
         self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
@@ -2208,7 +2461,14 @@ class TestWitnessTimeoutBound(unittest.TestCase):
         # simulated delivery raised WITNESS_TIMEOUT_MSG out of the finally: rc == 1 and
         # `delivered_to` stayed empty.
         self.assertEqual(rc, 0, err.getvalue())
-        self.assertEqual(delivered_to, ["caller"], f"order={order}")
+        # SIEGE-R3BA-3 — TWO deliveries, because `_verify_single` now arms the bound
+        # TWICE in sequence: once around `witness_pre_identity`'s snapshot resolution
+        # (previously unbounded and quadratic in a receipt-authored name) and once
+        # around `tier2_witness`. The instrument synthesises a caller delivery at each
+        # re-arm, so the COUNT is the instrument's; the claim under test is unchanged
+        # and now holds on both cycles — every delivery reaches the CALLER's handler and
+        # none of them lands in `_witness_alarm`.
+        self.assertEqual(delivered_to, ["caller", "caller"], f"order={order}")
 
     def test_36b_the_handler_is_restored_while_no_timer_is_armed(self):
         # Discriminator for 36, and the reason a bare SWAP of the two statements is not
@@ -2219,8 +2479,15 @@ class TestWitnessTimeoutBound(unittest.TestCase):
         _, order = self._instrument_teardown()
         with contextlib.redirect_stderr(io.StringIO()):
             self.rv._verify_single(self._benign_receipt(), "tier2", self.root, True)
-        # the leading handler-install is the arming one, recorded before our timer exists
-        self.assertEqual(order, ["handler:armed", "arm", "disarm", "handler:idle", "rearm"])
+        # the leading handler-install is the arming one, recorded before our timer exists.
+        # SIEGE-R3BA-3 — the cycle now appears TWICE (witness_pre_identity's snapshot,
+        # then tier2_witness), and the repetition is itself load-bearing: the two arms are
+        # SEQUENTIAL, never nested. A nested pair would read
+        # [handler:armed, arm, handler:armed, arm, disarm, ...] and would double the
+        # effective deadline, which is the hazard `_witness_bound`'s own docstring records
+        # and the reason `_verify_single` stopped arming a third time.
+        cycle = ["handler:armed", "arm", "disarm", "handler:idle", "rearm"]
+        self.assertEqual(order, cycle * 2)
 
 
 class TestMultiRootResolution(unittest.TestCase):
@@ -2322,7 +2589,10 @@ class TestCrossRootAmbiguity(unittest.TestCase):
     def test_strict_raises_on_two_distinct_realpaths(self):
         arts = self._plant(b"aaa", b"bbb")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_artifacts(arts, [], [self.a, self.b], True)
+            self.rv.tier2_artifacts(
+                arts, [], [self.a, self.b], True,
+                cache=_cache_for(self.rv, arts, [], None, "PASS", [self.a, self.b]),
+                verified={})
         self.assertIn("is ambiguous across roots", str(cm.exception))
         self.assertTrue(str(cm.exception).startswith("Tier-2 --strict: artifact f.txt"))
 
@@ -2332,11 +2602,17 @@ class TestCrossRootAmbiguity(unittest.TestCase):
         may control."""
         arts = self._plant(b"same", b"same")
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_artifacts(arts, [], [self.a, self.b], True)
+            self.rv.tier2_artifacts(
+                arts, [], [self.a, self.b], True,
+                cache=_cache_for(self.rv, arts, [], None, "PASS", [self.a, self.b]),
+                verified={})
 
     def test_non_strict_notes_and_first_hit_wins(self):
         arts = self._plant(b"aaa", b"bbb")
-        notes = self.rv.tier2_artifacts(arts, [], [self.a, self.b], False)
+        notes = self.rv.tier2_artifacts(
+            arts, [], [self.a, self.b], False,
+            cache=_cache_for(self.rv, arts, [], None, "PASS", [self.a, self.b]),
+            verified={})
         self.assertTrue(any(n.startswith("AMBIGUOUS: artifact f.txt") for n in notes))
 
     def test_strict_raises_before_reading_bytes(self):
@@ -2344,13 +2620,21 @@ class TestCrossRootAmbiguity(unittest.TestCase):
         WRONG hash still reports ambiguity, not a mismatch."""
         arts = self._plant(b"aaa", b"bbb", declared=b"neither")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_artifacts(arts, [], [self.a, self.b], True)
+            self.rv.tier2_artifacts(
+                arts, [], [self.a, self.b], True,
+                cache=_cache_for(self.rv, arts, [], None, "PASS", [self.a, self.b]),
+                verified={})
         self.assertIn("ambiguous across roots", str(cm.exception))
         self.assertNotIn("sha256 mismatch", str(cm.exception))
 
     def test_one_root_is_never_ambiguous(self):
         arts = self._plant(b"aaa", b"bbb")
-        self.assertEqual(self.rv.tier2_artifacts(arts, [], self.a, True), [])
+        self.assertEqual(
+            self.rv.tier2_artifacts(
+                arts, [], self.a, True,
+                cache=_cache_for(self.rv, arts, [], None, "PASS", self.a),
+                verified={}),
+            [])
 
     # --- Task 7: the same rule on the witness leg, with its OWN wording ---
 
@@ -2371,14 +2655,20 @@ class TestCrossRootAmbiguity(unittest.TestCase):
     def test_witness_leg_strict_ambiguity(self):
         w, trace = self._witness_case()
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(w, trace, [self.a, self.b], True, "PASS")
+            self.rv.tier2_witness(
+                w, trace, [self.a, self.b], True, "PASS",
+                cache=_cache_for(self.rv, {}, trace, w, "PASS", [self.a, self.b]),
+                verified={})
         self.assertTrue(str(cm.exception).startswith(
             "Tier-2 --strict: witness artifact "))
         self.assertIn("is ambiguous across roots", str(cm.exception))
 
     def test_witness_leg_non_strict_note(self):
         w, trace = self._witness_case()
-        notes = self.rv.tier2_witness(w, trace, [self.a, self.b], False, "PASS")
+        notes = self.rv.tier2_witness(
+            w, trace, [self.a, self.b], False, "PASS",
+            cache=_cache_for(self.rv, {}, trace, w, "PASS", [self.a, self.b]),
+            verified={})
         self.assertTrue(any(n.startswith("AMBIGUOUS: witness artifact") for n in notes))
 
 
@@ -2494,7 +2784,10 @@ class TestWitnessBoundIsInTier2Witness(unittest.TestCase):
         w, trace = self._pathological()
         with mock.patch.object(self.rv, "WITNESS_TIMEOUT_S", 1):
             with self.assertRaises(self.rv.WitnessTimeout):
-                self.rv.tier2_witness(w, trace, self.root, False, "PASS")
+                self.rv.tier2_witness(
+                    w, trace, self.root, False, "PASS",
+                    cache=_cache_for(self.rv, {}, trace, w, "PASS", self.root),
+                    verified={})
 
     def test_witness_timeout_is_a_lint_error_subclass(self):
         """#485's contract is untouched: every existing handler still catches it."""
@@ -2563,9 +2856,11 @@ class TestWitnessBoundIsInTier2Witness(unittest.TestCase):
         main-thread guarantee the way _verify_single did. Degradation is UNBOUNDED
         evaluation, never a raise."""
         w, trace = self._benign()
+        cache = _cache_for(self.rv, {}, trace, w, "PASS", self.root)
         out = []
         t = threading.Thread(target=lambda: out.append(
-            self.rv.tier2_witness(w, trace, self.root, False, "PASS")))
+            self.rv.tier2_witness(w, trace, self.root, False, "PASS",
+                                  cache=cache, verified={})))
         t.start(); t.join()
         self.assertEqual(out, [[]])       # clean, not a ValueError
 
@@ -2588,7 +2883,8 @@ class TestCoverageRendering(unittest.TestCase):
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 3/4 witness 0/0 unreached 0 "
             "not-reachable 1 (unresolvable-basename) ambiguous 0 wrong-name 0 "
-            "empty-range 0 discarded 0 not-applicable 1 (fail-leg-no-range)")
+            "empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 1 (fail-leg-no-range) "
+            "resolved-outside-roots 0")
 
     def test_partial_shape_renders_witness_0_0(self):
         """S2 — d is what the census MEASURED. A run truncated before the witness leg
@@ -2598,7 +2894,8 @@ class TestCoverageRendering(unittest.TestCase):
         c.bump("ambiguous"); c.partial = True
         self.assertEqual(c.render(),
             "TIER2-COVERAGE: artifacts 1/4 witness 0/0 unreached 0 not-reachable 0 "
-            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 not-applicable 0 partial")
+            "ambiguous 1 wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 "
+            "not-applicable 0 resolved-outside-roots 0 partial")
 
     def test_codes_are_sorted_and_deduplicated(self):
         """CPython randomises str hashing per process (PYTHONHASHSEED); an unsorted
@@ -2659,8 +2956,11 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
     def test_a_resolved_and_hashed_entry_is_1_of_1(self):
         (self.root / "a.txt").write_bytes(b"hi\n")
         cov = self._cov()
-        notes = self.rv.tier2_artifacts({"a.txt": self._entry(b"hi\n")},
-                                        [], self.root, True, cov)
+        notes = self.rv.tier2_artifacts(
+            {"a.txt": self._entry(b"hi\n")}, [], self.root, True, cov,
+            cache=_cache_for(self.rv, {"a.txt": self._entry(b"hi\n")}, [], None, "PASS",
+                             self.root),
+            verified={})
         self.assertEqual(notes, [])
         self.assertEqual((cov.art_verified, cov.art_applicable), (1, 1))
         self.assertFalse(cov.partial)
@@ -2670,8 +2970,11 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
         """S6 — the entry is skipped, not silenced. A receipt-controlled predicate that
         produces neither a check nor a word on stderr is the #474 shape."""
         cov = self._cov()
-        notes = self.rv.tier2_artifacts({"35558ca1ee6c": {"hash": "0" * 64, "size": 0}},
-                                        [], self.root, True, cov)
+        notes = self.rv.tier2_artifacts(
+            {"35558ca1ee6c": {"hash": "0" * 64, "size": 0}}, [], self.root, True, cov,
+            cache=_cache_for(self.rv, {"35558ca1ee6c": {"hash": "0" * 64, "size": 0}},
+                             [], None, "PASS", self.root),
+            verified={})
         self.assertEqual(cov.counts["not-applicable"], 1)
         self.assertEqual(cov.art_applicable, 0)
         self.assertTrue(any(n.startswith("NOT-APPLICABLE: 35558ca1ee6c") for n in notes))
@@ -2679,8 +2982,11 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
     def test_a_receipt_hash_prefix_is_never_counted_UNREACHED(self):
         """It is not a file and never will be; counting it UNREACHED would be false."""
         cov = self._cov()
-        self.rv.tier2_artifacts({"35558ca1ee6c": {"hash": "0" * 64, "size": 0}},
-                                [], self.root, True, cov)
+        self.rv.tier2_artifacts(
+            {"35558ca1ee6c": {"hash": "0" * 64, "size": 0}}, [], self.root, True, cov,
+            cache=_cache_for(self.rv, {"35558ca1ee6c": {"hash": "0" * 64, "size": 0}},
+                             [], None, "PASS", self.root),
+            verified={})
         self.assertEqual(cov.counts["unreached"], 0)
         self.assertEqual(cov.counts["not-reachable"], 0)
         self.assertIn("receipt-hash-prefix", cov.codes["not-applicable"])
@@ -2694,8 +3000,12 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
         (self.root / "35558ca1ee6c").write_bytes(b"real bytes\n")
         cov = self._cov()
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_artifacts({"35558ca1ee6c": {"hash": "0" * 64, "size": 11}},
-                                    [], self.root, True, cov)
+            self.rv.tier2_artifacts(
+                {"35558ca1ee6c": {"hash": "0" * 64, "size": 11}}, [], self.root, True,
+                cov,
+                cache=_cache_for(self.rv, {"35558ca1ee6c": {"hash": "0" * 64, "size": 11}},
+                                 [], None, "PASS", self.root),
+                verified={})
         self.assertIn("sha256 mismatch", str(cm.exception))
         self.assertEqual(cov.counts["not-applicable"], 0)
         self.assertEqual(cov.art_applicable, 1)
@@ -2709,23 +3019,32 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
         (self.root / "a.txt").write_bytes(b"real\n")
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_artifacts({"a.txt": {"hash": "0" * 64, "size": 5}},
-                                    [], self.root, True, cov)
+            self.rv.tier2_artifacts(
+                {"a.txt": {"hash": "0" * 64, "size": 5}}, [], self.root, True, cov,
+                cache=_cache_for(self.rv, {"a.txt": {"hash": "0" * 64, "size": 5}},
+                                 [], None, "PASS", self.root),
+                verified={})
         self.assertEqual((cov.art_verified, cov.art_applicable), (1, 1))
         self.assertTrue(cov.partial)          # remaining entries + witness leg uncounted
 
     def test_unresolved_path_shaped_entry_is_UNREACHED(self):
         cov = self._cov()
-        notes = self.rv.tier2_artifacts({"sub/x.txt": {"hash": "0" * 64, "size": 1}},
-                                        [], self.root, False, cov)
+        notes = self.rv.tier2_artifacts(
+            {"sub/x.txt": {"hash": "0" * 64, "size": 1}}, [], self.root, False, cov,
+            cache=_cache_for(self.rv, {"sub/x.txt": {"hash": "0" * 64, "size": 1}},
+                             [], None, "PASS", self.root),
+            verified={})
         self.assertEqual(cov.counts["unreached"], 1)
         self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
         self.assertTrue(any(n.startswith("UNVERIFIABLE: sub/x.txt") for n in notes))
 
     def test_unresolved_bare_basename_is_NOT_REACHABLE(self):
         cov = self._cov()
-        self.rv.tier2_artifacts({"nope.txt": {"hash": "0" * 64, "size": 1}},
-                                [], self.root, False, cov)
+        self.rv.tier2_artifacts(
+            {"nope.txt": {"hash": "0" * 64, "size": 1}}, [], self.root, False, cov,
+            cache=_cache_for(self.rv, {"nope.txt": {"hash": "0" * 64, "size": 1}},
+                             [], None, "PASS", self.root),
+            verified={})
         self.assertEqual(cov.counts["not-reachable"], 1)
         self.assertEqual(cov.counts["unreached"], 0)
         self.assertIn("unresolvable-basename", cov.codes["not-reachable"])
@@ -2736,8 +3055,11 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
         this raise site sets `partial` exactly as the mismatch one does."""
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_artifacts({"sub/x.txt": {"hash": "0" * 64, "size": 1}},
-                                    [], self.root, True, cov)
+            self.rv.tier2_artifacts(
+                {"sub/x.txt": {"hash": "0" * 64, "size": 1}}, [], self.root, True, cov,
+                cache=_cache_for(self.rv, {"sub/x.txt": {"hash": "0" * 64, "size": 1}},
+                                 [], None, "PASS", self.root),
+                verified={})
         self.assertEqual(cov.counts["unreached"], 1)
         self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
         self.assertTrue(cov.partial)
@@ -2745,8 +3067,11 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
     def test_ambiguous_non_strict_is_INSIDE_the_numerator(self):
         """First hit is read and hashed, so the item is verified as well as ambiguous."""
         cov = self._cov()
-        notes = self.rv.tier2_artifacts(self._plant_both(), [],
-                                        [self.root, self.b], False, cov)
+        notes = self.rv.tier2_artifacts(
+            self._plant_both(), [], [self.root, self.b], False, cov,
+            cache=_cache_for(self.rv, self._plant_both(), [], None, "PASS",
+                             [self.root, self.b]),
+            verified={})
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual((cov.art_verified, cov.art_applicable), (1, 1))
         self.assertFalse(cov.partial)
@@ -2757,18 +3082,28 @@ class TestCoverageArtifactsLeg(unittest.TestCase):
         census, so `partial` is set (Task 13)."""
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_artifacts(self._plant_both(), [],
-                                    [self.root, self.b], True, cov)
+            self.rv.tier2_artifacts(
+                self._plant_both(), [], [self.root, self.b], True, cov,
+                cache=_cache_for(self.rv, self._plant_both(), [], None, "PASS",
+                                 [self.root, self.b]),
+                verified={})
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual((cov.art_verified, cov.art_applicable), (0, 1))
         self.assertTrue(cov.partial)
 
     def test_cov_is_optional_so_no_existing_caller_moves(self):
-        """D8.2's 'no direct caller moves' — the ~50 positional call sites pass five
-        arguments and must keep working."""
+        """D8.2's 'no direct caller moves' — `tier2_artifacts` now takes SEVEN
+        parameters, but `cov`/`bodies`/`notes_out` are each OPTIONAL WITH A DEFAULT, so
+        the four-argument positional form that predates them still works. That is what
+        keeps the ~40 direct call sites (the count `tier2_artifacts`'s own docstring
+        carries) from moving."""
         (self.root / "a.txt").write_bytes(b"hi\n")
         self.assertEqual(
-            self.rv.tier2_artifacts({"a.txt": self._entry(b"hi\n")}, [], self.root, True),
+            self.rv.tier2_artifacts(
+                {"a.txt": self._entry(b"hi\n")}, [], self.root, True,
+                cache=_cache_for(self.rv, {"a.txt": self._entry(b"hi\n")}, [], None,
+                                 "PASS", self.root),
+                verified={}),
             [])
 
 
@@ -2808,7 +3143,11 @@ class TestCoverageWitnessLeg(unittest.TestCase):
             (getattr(self, w) / "f.txt").write_text(body)
         cited = {"n": 1, "verb": "WROTE", "args": f"f.txt  sha256:{'0' * 64}"}
         trace = [cited]
-        wit = {"kind": "grep", "payload": "f.txt", "expect_fail": "/BOOM/",
+        # FATAL-12-1 — a non-empty rangeless grep payload that is not a declared
+        # ARTIFACTS entry now hard-FAILs before the census is reached, so the surviving
+        # shape for these PASS-leg coverage pins is the EMPTY payload (`stated == ""`),
+        # which still sources its read from the cited TRACE entry.
+        wit = {"kind": "grep", "payload": "", "expect_fail": "/BOOM/",
                "ran": "TRACE#1", "range_kind": None, "range_a": None,
                "range_b": None, "art": "f.txt", "pattern": None}
         return wit, trace
@@ -2819,7 +3158,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         wit, trace = self._exec_case()
         wit["ran"] = "EXEC#2"
         cov = self._cov()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "PASS", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+                verified={}),
+            [])
         self.assertIn("ran-not-trace", cov.codes["not-applicable"])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 0))
 
@@ -2828,7 +3172,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         wit, trace = self._exec_case()
         trace[1]["args"] = "`x`  exit=1"          # no out= range
         cov = self._cov()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "FAIL", cov), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "FAIL", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+                verified={}),
+            [])
         self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 0))
 
@@ -2855,7 +3204,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         decline it described."""
         wit, trace = self._grep_ranged_case()
         cov = self._cov()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "FAIL", cov), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "FAIL", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+                verified={}),
+            [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertIn("fail-leg-no-exit-evidence", cov.codes["discarded"])
         self.assertEqual(cov.counts["discarded"], 1)
@@ -2870,7 +3224,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         receipt."""
         wit, trace = self._grep_rangeless_case()
         cov = self._cov()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "FAIL", cov), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "FAIL", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+                verified={}),
+            [])
         self.assertEqual(cov.counts["unreached"], 0)
         self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
 
@@ -2891,27 +3250,40 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         `assertIsNone` rather than being deleted: it is now the pin that the FAIL leg
         SOURCES a ranged payload, read from this block's own perspective.
         """
-        def unsourced(verdict, verb, range_kind):
+        def unsourced(verdict, verb, range_kind, kind="grep"):
             args = ("f.txt  sha256:" + "0" * 64) if verb != "DISPATCHED" else \
                    ("red-team/seq-1  verdict=PASS  rcpt-sha256:" + "0" * 64)
             cited = {"n": 1, "verb": verb, "args": args}
-            wit = {"kind": "grep", "payload": "f.txt", "expect_fail": "/BOOM/",
+            wit = {"kind": kind, "payload": "f.txt", "expect_fail": "/BOOM/",
                    "ran": "TRACE#1", "range_kind": range_kind,
                    "range_a": 1 if range_kind else None,
                    "range_b": 1 if range_kind else None,
                    "art": "f.txt", "pattern": None}
             probe = {}
-            self.rv.tier2_witness(wit, [cited], self.a, False, verdict, self._cov(),
-                                  {}, probe, [])
+            self.rv.tier2_witness(
+                wit, [cited], self.a, False, verdict, self._cov(),
+                probe_out=probe, notes_out=[],
+                cache=_cache_for(self.rv, {}, [cited], wit, verdict, self.a),
+                verified={})
             return probe.get("unsourced")
 
         # GH #501 — a RANGED payload is now sourced on the FAIL leg, so this shape never
         # reaches the block and is no longer exempt from the SUPERSEDES consequent. That
         # retirement is the whole point of the fix: the gate is armed on both legs again.
         self.assertIsNone(unsourced("FAIL", "WROTE", "L"))
-        self.assertTrue(unsourced("FAIL", "WROTE", None))    # no remedy -> exempt
+        # SIEGE-S1 — this arm read `assertTrue(...)`, i.e. the suite PINNED the fail-open
+        # GREEN. A rangeless `kind=grep` payload reaches the block because the author
+        # OMITTED the `#<range>`, not because the leg is unable to source one: the arm
+        # directly above is the SAME shape WITH a range and proves the leg sources it.
+        # Omission is an ordinary in-receipt remedy, so the exemption must not fire.
+        self.assertIsNone(unsourced("FAIL", "WROTE", None))
         # remedy exists -> stay armed. Rangeless, so the block under test IS entered.
         self.assertIsNone(unsourced("PASS", "DISPATCHED", None))
+        # NON-VACUITY for that narrowing: a non-grep witness has no payload range slot
+        # at all, so the block's original antecedent ("the receipt has no way to make it
+        # source something") still holds and the exemption still fires. Without this arm
+        # the fix is indistinguishable from deleting the branch.
+        self.assertTrue(unsourced("FAIL", "WROTE", None, kind="exec"))
 
     def test_pass_leg_yielding_no_name_is_no_art_name(self):
         """D8.5 — D4's single NOT-EVALUATED string folds onto TWO codes; mapping the
@@ -2919,7 +3291,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         wit, trace = self._exec_case()
         trace[1]["args"] = "`x`  exit=0"          # EXEC, no out= → derive returns None
         cov = self._cov()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "PASS", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+                verified={}),
+            [])
         self.assertIn("no-art-name", cov.codes["not-applicable"])
         self.assertNotIn("fail-leg-no-range", cov.codes["not-applicable"])
 
@@ -2930,14 +3307,20 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         every counter at 0 is an applicable item in none of :1175's disjoint sub-counts."""
         wit, trace = self._exec_case(name="sub/out.log", where=())
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertEqual(cov.counts["unreached"], 1)
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
 
     def test_unresolved_bare_basename_witness_is_NOT_REACHABLE(self):
         wit, trace = self._exec_case(name="gone.log", where=())
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertEqual(cov.counts["not-reachable"], 1)
         self.assertIn("unresolvable-basename", cov.codes["not-reachable"])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
@@ -2946,7 +3329,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         wit, trace = self._exec_case(name="sub/out.log", where=())
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov)
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "PASS", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+                verified={})
         self.assertEqual(cov.counts["unreached"], 1)
         self.assertTrue(cov.partial)
 
@@ -2955,7 +3341,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         (design :1201-1206). Non-strict: first hit is read, so it is INSIDE c/d."""
         wit, trace = self._exec_case(where=("a", "b"))
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, [self.a, self.b], False, "PASS", cov)
+        self.rv.tier2_witness(
+            wit, trace, [self.a, self.b], False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", [self.a, self.b]),
+            verified={})
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
 
@@ -2963,7 +3352,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         wit, trace = self._exec_case(where=("a", "b"))
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_witness(wit, trace, [self.a, self.b], True, "PASS", cov)
+            self.rv.tier2_witness(
+                wit, trace, [self.a, self.b], True, "PASS", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "PASS", [self.a, self.b]),
+                verified={})
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertTrue(cov.partial)
@@ -2974,7 +3366,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         in Step 3 the disjointness at :1175 fails on this one shape."""
         wit, trace = self._grep_rangeless_case(where=("a", "b"))
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, [self.a, self.b], False, "PASS", cov)
+        self.rv.tier2_witness(
+            wit, trace, [self.a, self.b], False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", [self.a, self.b]),
+            verified={})
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual(cov.counts["wrong-name"], 0)
 
@@ -2984,7 +3379,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         exists': VERIFIED and counted wrong-name."""
         wit, trace = self._grep_rangeless_case()
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertEqual(cov.counts["wrong-name"], 1)
         self.assertIn("rangeless-grep-payload", cov.codes["wrong-name"])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
@@ -2994,7 +3392,12 @@ class TestCoverageWitnessLeg(unittest.TestCase):
     def test_state_a_clean_predicate_is_1_of_1_and_not_partial(self):
         wit, trace = self._exec_case()
         cov = self._cov()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS", cov), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "PASS", cov,
+                cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+                verified={}),
+            [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
         self.assertFalse(cov.partial)
         self.assertEqual(sum(cov.counts.values()), 0)
@@ -3006,7 +3409,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         wit, trace = self._exec_case(body="BOOM\n")
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
         self.assertFalse(cov.partial)
 
@@ -3017,13 +3423,16 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         (self.a / "out.log").write_text(("y" * 60 + "\n") * 200)   # ~12 KiB
         cov = self._cov()
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertIn("exceeds 4 KiB actual bytes", str(cm.exception))
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertTrue(cov.partial)
 
     def test_an_empty_resolved_body_is_NOT_verified_and_IS_partial(self):
-        """return-convention.md:252's own reason — an empty body `can never fire, so it
+        """return-convention.md:253's own reason — an empty body `can never fire, so it
         is indistinguishable from a skipped check`. Counting it VERIFIED would assert
         the opposite of the rule that rejects it."""
         (self.a / "f.txt").write_text("one line\n")
@@ -3033,7 +3442,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
                "art": "f.txt", "pattern": "/BOOM/"}          # range past EOF → ""
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_witness(wit, [cited], self.a, False, "PASS", cov)
+            self.rv.tier2_witness(wit, [cited], self.a, False, "PASS", cov,
+                                cache=_cache_for(self.rv, {}, [cited], wit, "PASS",
+                                                 self.a),
+                                verified={})
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertTrue(cov.partial)
 
@@ -3053,7 +3465,10 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         cov = self._cov()
         with mock.patch.object(self.rv, "WITNESS_TIMEOUT_S", 0.001):
             with self.assertRaises(self.rv.WitnessTimeout):
-                self.rv.tier2_witness(wit, [cited], self.a, False, "PASS", cov)
+                self.rv.tier2_witness(wit, [cited], self.a, False, "PASS", cov,
+                                cache=_cache_for(self.rv, {}, [cited], wit, "PASS",
+                                                 self.a),
+                                verified={})
         self.assertTrue(cov.partial)
         self.assertEqual(cov.wit_verified, 0)
 
@@ -3069,13 +3484,21 @@ class TestCoverageWitnessLeg(unittest.TestCase):
                                side_effect=self.rv.WitnessTimeout(
                                    self.rv.WITNESS_TIMEOUT_MSG)):
             with self.assertRaises(self.rv.WitnessTimeout):
-                self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+                self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertTrue(cov.partial)
 
     def test_cov_is_optional_so_no_existing_caller_moves(self):
         wit, trace = self._exec_case()
-        self.assertEqual(self.rv.tier2_witness(wit, trace, self.a, True, "PASS"), [])
+        self.assertEqual(
+            self.rv.tier2_witness(
+                wit, trace, self.a, True, "PASS",
+                cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+                verified={}),
+            [])
 
 
 class TestCoverageEmission(unittest.TestCase):
@@ -3140,7 +3563,8 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 1/1 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "discarded 0 not-applicable 0")
+                         "discarded 0 resolved-by-walk 0 not-applicable 0 "
+                         "resolved-outside-roots 0")
 
     def test_partial_shape_on_a_truncated_census(self):
         out = self._run("--tier2", "--strict", "--root", str(self.root),
@@ -3149,11 +3573,12 @@ class TestCoverageEmission(unittest.TestCase):
         self.assertEqual(self._line(out.stderr),
                          "TIER2-COVERAGE: artifacts 1/1 witness 0/0 unreached 0 "
                          "not-reachable 0 ambiguous 0 wrong-name 0 empty-range 0 "
-                         "discarded 0 not-applicable 0 partial")
+                         "discarded 0 resolved-by-walk 0 not-applicable 0 "
+                         "resolved-outside-roots 0 partial")
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
-        (return-convention.md:121), so a witness check ALWAYS exists and an unannotated
+        (return-convention.md:122), so a witness check ALWAYS exists and an unannotated
         `witness 0/0` says one did not. BLOCKED is not hypothetical: SKILL.md:32 lints
         them, red-team-prompt.md:227 instructs one, sample-corpus carries one."""
         h, size = self._artifact()
@@ -3459,7 +3884,7 @@ class TestNotesSurviveALintError(_InqBase):
         MATCHES expect-fail, so verify_witness raises after the note was built."""
         self.plant(self.base, "f.txt", b"BOOM happened\n")
         p = self.rcpt(artifacts=[], trace=["READ  f.txt"],
-                      witness="grep:f.txt  expect-fail=/BOOM/  ran=TRACE#1")
+                      witness="grep:  expect-fail=/BOOM/  ran=TRACE#1")
         out = self.cli("--tier2", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("expect-fail", out.stderr)          # the predicate bullet
@@ -3478,7 +3903,7 @@ class TestNotesSurviveALintError(_InqBase):
         self.plant(self.base, "f.txt", b"quiet\n")
         zero = "0" * 64
         p = self.rcpt(
-            artifacts=[], witness="grep:f.txt  expect-fail=/BOOM/  ran=TRACE#1",
+            artifacts=[], witness="grep:  expect-fail=/BOOM/  ran=TRACE#1",
             trace=["READ  f.txt",
                    f"DISPATCHED  red-team/seq-1  verdict=PASS  rcpt-sha256:{zero}"])
         led = self.base / "led.jsonl"
@@ -3494,12 +3919,16 @@ class TestNotesSurviveALintError(_InqBase):
         """C1-R3-S2 freeze-guard — the two-list drain (`notes + wit_notes`) sorts anything
         appended to `notes` AFTER the witness call above the witness-leg notes, even
         though it was produced later. The ledger-binding advisory is exactly that, so it
-        is appended to `wit_notes` instead. Pinned because the band order here is
-        byte-identical to the pre-change baseline and the earlier comment wrongly claimed
-        order was preserved when only the note/bullet/census BANDS were."""
+        is appended to `wit_notes` instead. What is pinned is the RELATIVE position of
+        `wit` and `led`, not the band's full byte content: since #488/T2 this fixture's
+        run also emits `PROVENANCE-ONLY: f.txt` into the same band (the `READ  f.txt`
+        TRACE entry against an empty ARTIFACTS list), so the band is no longer
+        byte-identical to the pre-change baseline. Pinned because the earlier comment
+        wrongly claimed order was preserved when only the note/bullet/census BANDS
+        were."""
         self.plant(self.base, "f.txt", b"quiet\n")
         p = self.rcpt(
-            artifacts=[], witness="grep:f.txt  expect-fail=/BOOM/  ran=TRACE#1",
+            artifacts=[], witness="grep:  expect-fail=/BOOM/  ran=TRACE#1",
             trace=["READ  f.txt",
                    f"DISPATCHED  qg/24-child  verdict=PASS  rcpt-sha256:{'0' * 64}"])
         err = self.cli("--tier2", "--root", str(self.base), str(p)).stderr.splitlines()
@@ -3664,12 +4093,28 @@ class TestReadFailuresAreClassified(_InqBase):
     def test_a_nul_in_a_cited_name_does_not_traceback(self):
         """`Path.is_file()` swallows OSError/ValueError; `Path.resolve()` does not, and
         a receipt is an untrusted subagent return. A malformed name must degrade to
-        UNVERIFIABLE, never crash the lint."""
-        h, size = self.plant(self.base, "out.log")
-        r = self.rcpt([("out.log", h, size), ("ou\x00t.log", h, size)],
-                      ["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"])
+        UNVERIFIABLE, never crash the lint.
+
+        #488 AC-2 re-authoring: the SUBJECT is unchanged — only the section carrying the
+        malformed name moves. A NUL in an `ARTIFACTS` name is now a Tier-1 `LintError`
+        (§3, *Lexical grammar*), which fires before `resolve_base` is ever reached, so
+        the name moves onto a RANGELESS `kind=grep` witness citing a `READ` leg. The NUL
+        ban is `ARTIFACTS`-only and a rangeless grep payload is exempt from the #474/D6
+        ARTIFACTS-membership rule, so the name still reaches `Path.resolve()` through
+        `tier2_witness` and the guard this test exists for is exercised rather than
+        short-circuited at Tier-1."""
+        h, _ = self.plant(self.base, "out.log")
+        nul = "ou\x00t.log"
+        r = self.rcpt([], [f"READ  {nul}  sha256:{h}"],
+                      witness=f"grep:{nul}  expect-fail=/BOOM/  ran=TRACE#1")
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(r))
         self.assertNotIn("Traceback (most recent call last)", out.stderr)
+        # Non-vacuity: the malformed name really did reach the resolver, and the
+        # ValueError degraded to UNVERIFIABLE (rendered through `_show_path`) instead of
+        # unwinding. Without this the assertNotIn would also hold for a name the lint
+        # rejected before `Path.resolve()` was ever called.
+        self.assertIn(r"UNVERIFIABLE: witness ou\x00t.log (no file under root)",
+                      out.stderr.splitlines())
 
     def test_a_non_utf8_cited_body_is_classified_and_the_census_says_partial(self):
         """The `#L` reader decodes LOSSLESSLY on purpose — the 4 KiB cap's byte-count
@@ -3760,7 +4205,7 @@ class TestAmbiguityThresholdIsDistinctRealpaths(_InqBase):
 
     `fix-verifier-prompt.md:89` states the trigger outright ("two or more distinct
     realpaths … so one file reached from two roots via a link is not it") and
-    `return-convention.md:256` says a name held at both homes of the SAME root resolves
+    `return-convention.md:257` says a name held at both homes of the SAME root resolves
     silently. Neither shape had a test: `test_trailing_slash_and_symlink_are_the_same_
     root` links the ROOT, not the FILE, and every ambiguity test plants two real files.
     A false ambiguity is a hard `--strict` FAIL, i.e. per quality-gate/SKILL.md:32 a
@@ -4133,17 +4578,22 @@ class TestZeroBytesIsNotAVerification(_InqBase):
 
 
 class TestHostilePathCannotForgeACensusLine(_InqBase):
-    """#486 siege / SIEGE-C2 — stderr is a PARSED channel, and three sinks interpolated a
-    RESOLVED path into it. Unlike an ARTIFACTS/witness name (whitespace-split out of the
-    receipt, so it can never hold a newline), a resolved path can: the reviewed subagent
-    creates directories under a root it owns, so one `mkdir` of a name containing
-    `\\nTIER2-COVERAGE: …\\n` put a SECOND, forged census line on the channel — and the
-    documented consumer takes the FIRST match (`grep -m1`, the shape
-    TestCoverageEmission._line uses).
+    """#486 siege / SIEGE-C2 — stderr is a PARSED channel, so every sink that renders a
+    RESOLVED path onto it has to escape that path. There are FOUR: the UTF-8 read guard
+    (`_read_text_lossless`) and the two `is ambiguous across roots` homes lists (the
+    artifacts leg and the witness leg) — the three that interpolated a raw path when
+    SIEGE-C2 was filed — plus #488/T5's `RESOLVED-BY-WALK:` note (`_walk_note`, emitted
+    via `_emit_walk_note` from both `tier2_artifacts` and `tier2_witness`), which renders
+    both halves through `_show_path` by construction. Unlike an ARTIFACTS/witness name
+    (whitespace-split out of the receipt, so it can never hold a newline), a resolved
+    path can: the reviewed subagent creates directories under a root it owns, so one
+    `mkdir` of a name containing `\\nTIER2-COVERAGE: …\\n` put a SECOND, forged census
+    line on the channel — and the documented consumer takes the FIRST match (`grep -m1`,
+    the shape TestCoverageEmission._line uses).
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
     EVIL = "ev\nTIER2-COVERAGE: " + FORGED + "\nil"
 
     def census_lines(self, stderr):
@@ -4212,7 +4662,7 @@ class TestSplitlinesSeparatorsCannotForgeACensusLine(_InqBase):
     """
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
     # Written as chr()/escape rather than as literals: a raw U+2028 in this file would
     # itself be invisible, and the point of the finding is that it is not inert.
     SEPARATORS = (("NEL", "\x85", r"\x85"),
@@ -4296,17 +4746,30 @@ class TestHostileReceiptNamesAreEscapedToo(_InqBase):
 
     def _one_name_receipt(self, name, extra_trace=True):
         """A receipt whose ARTIFACTS declares `name` (which resolves nowhere), plus a
-        real out.log so the witness leg is exercised rather than short-circuited."""
+        real out.log so the witness leg is exercised rather than short-circuited.
+
+        #488 AC-2: that holds for three of the four callers. The NUL caller is now the
+        exception — since the §3 *Lexical grammar* NUL clause its `name` is a Tier-1
+        `LintError`, so parsing stops in `parse_artifacts` and neither leg runs; the
+        real `out.log` buys it nothing and the guarantee it pins moved onto the Tier-1
+        message (see that test's own docstring)."""
         h, size = self.plant(self.base, "out.log")
         r = self.rcpt([("out.log", h, size), (name, "a" * 64, "5")],
                       ["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"])
         return r
 
     def test_a_nul_in_a_receipt_name_never_reaches_the_channel(self):
+        """#488 AC-2 re-authoring: a NUL in an `ARTIFACTS` name is now a Tier-1
+        `LintError` (§3, *Lexical grammar*), so the guarantee this leg exists for — the
+        NUL never reaching the channel — MOVES from the Tier-2 `UNVERIFIABLE` line onto
+        the Tier-1 message, which renders the name through `_show_path` for exactly that
+        reason. The sibling ANSI leg below is untouched by the rule and keeps the Tier-2
+        half of the same guarantee."""
         r = self._one_name_receipt("f\x00.txt")
         out = self.cli("--tier2", "--root", str(self.base), str(r))
+        self.assertEqual(out.returncode, 1, out.stderr)
         self.assertNotIn("\x00", out.stderr)
-        self.assertIn(r"UNVERIFIABLE: f\x00.txt (no file under root)",
+        self.assertIn(r"ARTIFACTS name contains NUL: f\x00.txt",
                       out.stderr.splitlines())
 
     def test_an_ansi_sequence_in_a_receipt_name_is_neutralised(self):
@@ -4747,36 +5210,42 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
         return text
 
     def test_a_flip_between_the_legs_no_longer_buys_a_clean_verdict(self):
-        """The headline. `resolve_base` is wrapped so that the WITNESS leg's resolution
-        rewrites the file first — the flipper, made deterministic — and the whole real
-        `_verify_single` runs on top of it."""
+        """The headline. `resolve_base` / `witness_pre_identity` are retired: the
+        identity the ARTIFACTS leg records is `(st_dev, st_ino)`, sampled from the open
+        file descriptor. A flipper that swaps the file between the legs now changes that
+        identity, and the witness leg hard-fails with "identity CHANGED between the
+        legs" instead of silently reading the swapped-in bytes.
+        `_finalize_identity_degenerate` is the deterministic seam: it runs after
+        tier2_artifacts and before tier2_witness."""
         rv = _import_rv()
         text = self._witness_receipt()
         target = self.base / "findings.md"
-        original = rv.resolve_base
+        decoy = self.base / "sanitised.md"
+        decoy.write_bytes(self.SANITISED)
+        original = rv._finalize_identity_degenerate
         seen = []
 
-        def flipping(name, root, found=None, refused=None):
-            seen.append(name)
-            if len(seen) > 1:                 # the witness leg's resolution
-                target.write_bytes(self.SANITISED)
-            return original(name, root, found, refused)
+        def flipping(cache, verified):
+            # Runs after tier2_artifacts has hash-verified the REAL bytes and recorded
+            # their identity — and before the witness leg re-stats the path. An atomic
+            # replace (new inode) is what the re-stat must catch.
+            target.unlink()
+            target.symlink_to(decoy.name)
+            seen.append(True)
+            return original(cache, verified)
 
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
-            with mock.patch.object(rv, "resolve_base", flipping):
+            with mock.patch.object(rv, "_finalize_identity_degenerate", flipping):
                 rc = rv._verify_single(text, "tier2", [self.base], True)
-        self.assertEqual(len(seen), 2, "both legs must still resolve independently")
-        # The predicate runs against the bytes the sha256 was taken of, so it FIRES.
+        self.assertTrue(seen, "the flip must land between the two legs")
+        # The witness leg re-stats the path, sees a different identity, and hard-fails —
+        # never a clean verdict.
         self.assertEqual(rc, 1, buf.getvalue())
-        self.assertIn("expect-fail regex", buf.getvalue())
-        # The attack's tell was `artifacts 1/1 witness 1/1` WITH exit 0. Both counters
-        # still read 1/1 — a predicate really did run against real bytes — but the
-        # verdict is now the one those bytes justify.
-        self.assertIn("artifacts 1/1 witness 1/1", self.cov_line(buf.getvalue()))
-        # And the flip did land: the file on disk really is the sanitised copy now, so
-        # a re-read would have reported clean.
-        self.assertEqual(target.read_bytes(), self.SANITISED)
+        self.assertIn("identity CHANGED between the legs", buf.getvalue())
+        # And the flip did land: the file on disk really is the sanitised copy now, so a
+        # re-read would have reported clean.
+        self.assertEqual(target.resolve().read_bytes(), self.SANITISED)
 
     def test_the_divergence_is_real_when_the_legs_are_not_bound(self):
         """Negative control — without the carry the SAME flip is invisible, which is
@@ -4789,12 +5258,15 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
                                 "expect-fail=match  ran=TRACE#1"])
         trace = [{"n": 1, "verb": "EXEC",
                   "args": "`x`  exit=0  dur=1.0s  out=findings.md#L1-L2"}]
+        cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         # Leg 1 hashes the REAL bytes and matches.
-        self.assertEqual(rv.tier2_artifacts(arts, trace, [self.base], True), [])
+        self.assertEqual(rv.tier2_artifacts(arts, trace, [self.base], True,
+                                            cache=cache, verified={}), [])
         (self.base / "findings.md").write_bytes(self.SANITISED)
         # Leg 2, unbound: re-reads, sees the sanitised copy, reports clean.
         self.assertEqual(
-            rv.tier2_witness(wit, trace, [self.base], True, "PASS"), [])
+            rv.tier2_witness(wit, trace, [self.base], True, "PASS",
+                             cache=cache, verified={}), [])
 
     def test_the_carry_binds_the_two_legs(self):
         """The same sequence with the carry wired: the predicate is evaluated against
@@ -4807,16 +5279,18 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
                                 "expect-fail=match  ran=TRACE#1"])
         trace = [{"n": 1, "verb": "EXEC",
                   "args": "`x`  exit=0  dur=1.0s  out=findings.md#L1-L2"}]
-        bodies = {}
-        rv.tier2_artifacts(arts, trace, [self.base], True, None, bodies)
-        # Carried under BOTH the declared name and the resolved realpath: the name key
-        # survives a mid-lint resolution change (symlink swap), the realpath key survives
-        # the two legs spelling the same file differently. See the write site.
-        self.assertEqual(bodies, {"findings.md": self.REAL,
-                                  (self.base / "findings.md").resolve(): self.REAL})
+        cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
+        verified = {}
+        rv.tier2_artifacts(arts, trace, [self.base], True,
+                           cache=cache, verified=verified)
+        # Carried under the resolved realpath and its filesystem identity: the witness
+        # leg evaluates the predicate against these bytes, so a mid-lint flip changes
+        # nothing. See the write site.
+        self.assertEqual(list(verified.values()), [self.REAL])
         (self.base / "findings.md").write_bytes(self.SANITISED)
         with self.assertRaises(rv.LintError):
-            rv.tier2_witness(wit, trace, [self.base], True, "PASS", None, bodies)
+            rv.tier2_witness(wit, trace, [self.base], True, "PASS",
+                             cache=cache, verified=verified)
 
     def test_a_mismatching_artifact_is_never_carried(self):
         """Only bytes whose sha256 MATCHED may be carried — carrying is the claim that
@@ -4825,11 +5299,12 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
         (self.base / "findings.md").write_bytes(self.SANITISED)
         arts = {"findings.md": {"hash": hashlib.sha256(self.REAL).hexdigest(),
                                 "size": str(len(self.REAL))}}
-        bodies = {}
+        cache = _cache_for(rv, arts, [], None, "PASS", [self.base])
+        verified = {}
         with self.assertRaises(rv.LintError):
             rv.tier2_artifacts(arts, trace=[], root=[self.base], strict=True,
-                               cov=None, bodies=bodies)
-        self.assertEqual(bodies, {})
+                               cov=None, cache=cache, verified=verified)
+        self.assertEqual(verified, {})
 
     def test_a_byte_range_is_carried_too(self):
         """#B goes through the same carry — it was the branch with THREE reads (slice,
@@ -4842,11 +5317,14 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
         wit = rv.parse_witness(["exec:`x`  expect-fail=/significant=[1-9]/  ran=TRACE#1"])
         trace = [{"n": 1, "verb": "EXEC",
                   "args": "`x`  exit=0  dur=1.0s  out=findings.md#B1-B25"}]
-        bodies = {}
-        rv.tier2_artifacts(arts, trace, [self.base], True, None, bodies)
+        cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
+        verified = {}
+        rv.tier2_artifacts(arts, trace, [self.base], True,
+                           cache=cache, verified=verified)
         (self.base / "findings.md").write_bytes(b"HEADER significant=0 TAIL\n")
         with self.assertRaises(rv.LintError):
-            rv.tier2_witness(wit, trace, [self.base], True, "PASS", None, bodies)
+            rv.tier2_witness(wit, trace, [self.base], True, "PASS",
+                             cache=cache, verified=verified)
 
     def test_the_carried_decode_matches_the_file_reader_on_crlf(self):
         """The carried buffer is decoded through `io.TextIOWrapper`, not `bytes.decode`,
@@ -4870,8 +5348,10 @@ class TestTheHashedBytesAreTheEvaluatedBytes(_InqBase):
         wit = rv.parse_witness(["grep:loose  expect-fail=/significant=[1-9]/  ran=TRACE#1"])
         self.assertIsNone(wit["range_kind"])
         trace = [{"n": 1, "verb": "READ", "args": "loose.log"}]
+        cache = _cache_for(rv, {}, trace, wit, "PASS", [self.base])
         with self.assertRaises(rv.LintError):
-            rv.tier2_witness(wit, trace, [self.base], True, "PASS", None, {})
+            rv.tier2_witness(wit, trace, [self.base], True, "PASS",
+                             cache=cache, verified={})
 
 
 class TestArtifactReadsAreBounded(_InqBase):
@@ -4947,12 +5427,43 @@ class TestArtifactReadsAreBounded(_InqBase):
             arts[f"a{i}.log"] = {"hash": h, "size": size}
         with mock.patch.object(rv, "ARTIFACT_READ_CAP", 1000):
             with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_artifacts(arts, [], [self.base], False)
+                rv.tier2_artifacts(
+                    arts, [], [self.base], False,
+                    cache=_cache_for(rv, arts, [], None, "PASS", [self.base]),
+                    verified={})
         self.assertIn("exceeds the Tier-2 read budget", str(cm.exception))
         # Non-vacuity: each entry ON ITS OWN is comfortably inside the ceiling.
         with mock.patch.object(rv, "ARTIFACT_READ_CAP", 1000):
             self.assertEqual(
-                rv.tier2_artifacts({"a0.log": arts["a0.log"]}, [], [self.base], False), [])
+                rv.tier2_artifacts(
+                    {"a0.log": arts["a0.log"]}, [], [self.base], False,
+                    cache=_cache_for(rv, {"a0.log": arts["a0.log"]}, [], None, "PASS",
+                                     [self.base]),
+                    verified={}),
+                [])
+
+    def test_a_second_spelling_of_an_already_read_realpath_does_not_double_charge_budget(self):
+        """#563 — the S3 dedup (:3201-3223) reuses the bytes already read for a realpath's
+        first spelling, but the budget decrement ran a second time regardless, charging the
+        SAME bytes twice. A receipt that legitimately cites one file under two spellings
+        (e.g. `report.md` and `./report.md`) then hard-FAILs even though the actual bytes
+        read from disk never left the cap."""
+        rv = _import_rv()
+        data = b"z" * 400
+        h, size = self.plant(self.base, "report.md", data)
+        arts = {
+            "report.md": {"hash": h, "size": size},
+            "./report.md": {"hash": h, "size": size},
+        }
+        # Both spellings resolve to the same realpath, so only 400 B are ever actually
+        # read — comfortably inside a 700 B cap. A double-charge sees 800 B and rejects.
+        with mock.patch.object(rv, "ARTIFACT_READ_CAP", 700):
+            self.assertEqual(
+                rv.tier2_artifacts(
+                    arts, [], [self.base], False,
+                    cache=_cache_for(rv, arts, [], None, "PASS", [self.base]),
+                    verified={}),
+                [])
 
     def test_a_memory_error_is_classified_not_an_unwind(self):
         """MemoryError is NOT an OSError. Under `ulimit -v` it went straight past the
@@ -4961,9 +5472,12 @@ class TestArtifactReadsAreBounded(_InqBase):
         h, size = self.plant(self.base, "out.log")
         arts = {"out.log": {"hash": h, "size": size}}
         cov = rv._Coverage()
-        with mock.patch.object(rv, "_read_capped", side_effect=MemoryError()):
+        with mock.patch.object(rv, "_read_and_fstat_artifact", side_effect=MemoryError()):
             with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_artifacts(arts, [], [self.base], False, cov)
+                rv.tier2_artifacts(
+                    arts, [], [self.base], False, cov,
+                    cache=_cache_for(rv, arts, [], None, "PASS", [self.base]),
+                    verified={})
         # `e.strerror or e` rendered a bare MemoryError as `unreadable ()` — a bullet
         # naming nothing on the channel an orchestrator records verbatim.
         self.assertIn("unreadable (MemoryError)", str(cm.exception))
@@ -5020,7 +5534,10 @@ class TestArtifactReadsAreBounded(_InqBase):
                   "args": "`x`  exit=0  dur=1.0s  out=out.log#B1-B9000"}]
         cov = rv._Coverage()
         with self.assertRaises(rv.LintError) as cm:
-            rv.tier2_witness(wit, trace, [self.base], False, "PASS", cov)
+            rv.tier2_witness(
+                wit, trace, [self.base], False, "PASS", cov,
+                cache=_cache_for(rv, {}, trace, wit, "PASS", [self.base]),
+                verified={})
         self.assertIn("exceeds 4 KiB actual bytes", str(cm.exception))
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertTrue(cov.partial)
@@ -5039,6 +5556,19 @@ class TestArtifactReadsAreBounded(_InqBase):
         # anywhere near those would start false-rejecting legitimate findings files,
         # diffs and build logs — which is the failure mode a cap must not have.
         self.assertGreaterEqual(_import_rv().ARTIFACT_READ_CAP, 16 * 1024 * 1024)
+
+
+def _cov_tail(**overrides):
+    """The full TIER2-COVERAGE: sub-count tail, derived from rv._COV_COUNTERS so a
+    future counter cannot silently go untested here the way the fifth ordering
+    constraint forced this file to be hand-edited for the eighth. `overrides` supplies
+    non-zero values and/or the parenthetical reason codes this file's tails carry
+    (e.g. `_cov_tail(**{"empty-range": "1 (past-eof)"})`); every counter not named
+    renders its bare zero, in _COV_COUNTERS's own order."""
+    rv = _import_rv()
+    return " ".join(
+        f"{c} {overrides[c]}" if c in overrides else f"{c} 0"
+        for c in rv._COV_COUNTERS)
 
 
 class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
@@ -5067,17 +5597,12 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
     did before, and each test asserts its return code.
     """
 
-    TAIL_EMPTY_RANGE = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                        "empty-range 1 (past-eof) discarded 0 not-applicable 0")
-    TAIL_EMPTY_FILE = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                       "empty-range 1 (empty-file) discarded 0 not-applicable 0")
-    TAIL_ALL_ZERO = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                     "empty-range 0 discarded 0 not-applicable 0")
+    TAIL_EMPTY_RANGE = _cov_tail(**{"empty-range": "1 (past-eof)"})
+    TAIL_EMPTY_FILE = _cov_tail(**{"empty-range": "1 (empty-file)"})
+    TAIL_ALL_ZERO = _cov_tail()
     # GH #501 — the seventh sub-count, for a read that delivered bytes to a predicate
     # whose result the FAIL leg then threw away.
-    TAIL_DISCARDED_EXIT = ("unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                           "empty-range 0 discarded 1 (fail-leg-exit-nonzero) "
-                           "not-applicable 0")
+    TAIL_DISCARDED_EXIT = _cov_tail(discarded="1 (fail-leg-exit-nonzero)")
 
     def tail(self, stderr, ratios):
         """The whole sub-count tail after `ratios`, so a test cannot pass on a substring."""
@@ -5212,9 +5737,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.tail(out.stderr, "witness 0/1"),
-                         "unreached 0 not-reachable 0 ambiguous 0 "
-                         "wrong-name 1 (rangeless-grep-payload) empty-range 0 "
-                         "discarded 0 not-applicable 0")
+                         _cov_tail(**{"wrong-name": "1 (rangeless-grep-payload)"}))
 
     def test_a_withheld_ambiguous_item_is_billed_ambiguous_ONLY(self):
         """Disjointness, arm 2, and the reason `_bill_witness_billing` takes an explicit
@@ -5231,7 +5754,10 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
                "ran": "TRACE#1", "range_kind": None, "range_a": None, "range_b": None,
                "art": None, "pattern": None}
         cov = rv._Coverage(); cov.tier1_ok()
-        rv.tier2_witness(wit, [cited], [self.base, other], False, "PASS", cov)
+        rv.tier2_witness(
+            wit, [cited], [self.base, other], False, "PASS", cov,
+            cache=_cache_for(rv, {}, [cited], wit, "PASS", [self.base, other]),
+            verified={})
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual(cov.counts["empty-range"], 0)
@@ -5248,8 +5774,7 @@ class TestZeroDeliveredBytesIsBucketedAsEmptyRange(_InqBase):
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.tail(out.stderr, "witness 0/0"),
-                         "unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                         "empty-range 0 discarded 0 not-applicable 1 (lint-kind-unimplemented)")
+                         _cov_tail(**{"not-applicable": "1 (lint-kind-unimplemented)"}))
 
 
 class TestNotApplicableAndWrongNameAreDisjoint(_InqBase):
@@ -5379,19 +5904,22 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         trace = [{"n": 1, "verb": "WROTE", "args": f"{trace_spelling}  sha256:{h}"}]
         wit = rv.parse_witness(["grep:f.md  expect-fail=/fatal=[1-9]/  ran=TRACE#1"])
         opens = []
-        original = pathlib.Path.open
+        real_open = builtins.open
 
-        def spy(self, *a, **k):
-            if self.name == "f.md":
+        def spy(file, *a, **k):
+            if str(file).endswith("f.md"):
                 opens.append(1)
-            return original(self, *a, **k)
+            return real_open(file, *a, **k)
 
-        bodies = {}
-        with mock.patch.object(pathlib.Path, "open", spy):
-            rv.tier2_artifacts(arts, trace, [self.base], False, None, bodies)
+        cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
+        verified = {}
+        with mock.patch.object(builtins, "open", spy):
+            rv.tier2_artifacts(arts, trace, [self.base], False,
+                               cache=cache, verified=verified)
             after_artifacts = len(opens)
             with self.assertRaises(rv.LintError):
-                rv.tier2_witness(wit, trace, [self.base], False, "PASS", None, bodies)
+                rv.tier2_witness(wit, trace, [self.base], False, "PASS",
+                                 cache=cache, verified=verified)
         return after_artifacts, len(opens) - after_artifacts
 
     def test_a_dot_slash_spelling_still_hits_the_carry(self):
@@ -5404,11 +5932,12 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         self.assertEqual((artifacts_reads, witness_reads), (1, 0))
 
     def test_a_symlink_swap_between_the_legs_still_hits_the_carry(self):
-        """The direction a realpath-ONLY key would lose, and the reason the carry keeps
-        the declared name as well. Replacing the hashed regular file with a symlink to a
-        sanitised sibling MOVES the realpath, so a realpath-only lookup misses, the
-        predicate runs on the sanitised bytes, and a receipt the carry exists to reject is
-        accepted. That is a fail-open, so this pin is the security half of the pair."""
+        """The direction a realpath-ONLY key would lose. Under the identity-redesign the
+        carry is keyed on the resolved realpath + its ``(st_dev, st_ino)`` identity, so a
+        mid-lint symlink swap moves the file the witness leg resolves away from the bytes
+        the ARTIFACTS leg hashed. That disagreement is now a hard FAIL (identity changed
+        between the legs), never a silent evaluation of the sanitised bytes — the
+        fail-open this test exists to prevent."""
         rv = _import_rv()
         real = b"round-3 findings\nfatal=2\n"
         sanitised = b"round-3 findings\nfatal=0\n"
@@ -5419,14 +5948,17 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         arts = {"f.md": {"hash": h, "size": str(len(real))}}
         trace = [{"n": 1, "verb": "WROTE", "args": f"f.md  sha256:{h}"}]
         wit = rv.parse_witness(["grep:f.md  expect-fail=/fatal=[1-9]/  ran=TRACE#1"])
-        bodies = {}
-        rv.tier2_artifacts(arts, trace, [self.base], False, None, bodies)
+        cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
+        verified = {}
+        rv.tier2_artifacts(arts, trace, [self.base], False,
+                           cache=cache, verified=verified)
         # The mid-lint swap: same declared name, different realpath, sanitised bytes.
         f.unlink()
         f.symlink_to(self.base / "sanitised.md")
         with self.assertRaises(rv.LintError) as cm:
-            rv.tier2_witness(wit, trace, [self.base], False, "PASS", None, bodies)
-        self.assertIn("witness would have fired", str(cm.exception))
+            rv.tier2_witness(wit, trace, [self.base], False, "PASS",
+                             cache=cache, verified=verified)
+        self.assertIn("identity CHANGED between the legs", str(cm.exception))
 
 
 class TestSupersedesDiagnosticEscapesTheReceiptValue(_InqBase):
@@ -5515,18 +6047,28 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         the candidate list. An absolute name keeps its own candidate, but the refused
         toplevel is absent from `_allowed_bases`, so `_contained` rejects it and the name
         resolves nowhere. Recording refusals from `_resolve_base_one`'s relative branch
-        alone was tried and left exactly this shape silent."""
+        alone was tried and left exactly this shape silent.
+
+        #488 AC-2 re-authoring: the SUBJECT is unchanged — only the section carrying the
+        absolute name moves. An absolute `ARTIFACTS` name is now a Tier-1 `LintError`
+        (§3, *Lexical grammar*), which would fire before this Tier-2 branch ever ran, so
+        the name moves onto a RANGELESS `kind=grep` witness. A rangeless grep payload is
+        exempt from the #474/D6 ARTIFACTS-membership rule, so the absolute name still
+        reaches `resolve_base` through `tier2_witness` and hits the same refused-base
+        diagnosis through the same containment union."""
         repo, _ = self._repo()
-        h, size = self.plant(repo, "scripts/bar.py")
+        h, _ = self.plant(repo, "scripts/bar.py")
         absname = str((repo / "scripts" / "bar.py").resolve())
         p = repo / "work" / "abs.rcpt"
-        p.write_text(_receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
-                              artifacts=[(absname, h, size)],
-                              trace=[f"EXEC  `x`  exit=0  dur=1.0s  out={absname}#L1-L1"]))
+        p.write_text(_receipt(f"grep:{absname}  expect-fail=/BOOM/  ran=TRACE#1",
+                              artifacts=[],
+                              trace=[f"READ  {absname}  sha256:{h}"]))
         os.chmod(repo, 0o777)
         out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("world-writable git toplevel", out.stderr)
+        # Non-vacuity: the ABSOLUTE name is the one being diagnosed.
+        self.assertIn(absname, out.stderr)
 
     def test_a_non_world_writable_checkout_is_unaffected(self):
         """Non-vacuity: the refusal is driven by the mode bit, not by the layout. The
@@ -5554,7 +6096,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
 class TestCensusSubCountsAreDisjointOnTheAmbiguousPath(_InqBase):
     """C1-R1-S1 — `ambiguous` is bumped at RESOLUTION time and `_bill_witness_evaluation`'s
     `no_predicate` arm then cleared `wit_applicable` and bumped `not-applicable`, so ONE
-    item landed in two of the sub-counts return-convention.md:270 ships as normative
+    item landed in two of the sub-counts return-convention.md:271 ships as normative
     disjoint — on a line whose `witness 0/0` says the item is not in the applicable set
     at all, while `ambiguous` is defined as a sub-count OF that denominator.
 
@@ -5569,8 +6111,9 @@ class TestCensusSubCountsAreDisjointOnTheAmbiguousPath(_InqBase):
         self.plant(b, "dup.log", b"two\n")
         p = self.base / "r.rcpt"
         # Rangeless kind=grep with an EXIT-CLAUSE expect-fail: Tier-1-legal, derives no
-        # body predicate, so the `no_predicate` arm is the one that runs.
-        p.write_text(_receipt("grep:dup.log  expect-fail=exit!=0  ran=TRACE#1",
+        # body predicate, so the `no_predicate` arm is the one that runs. The payload is
+        # EMPTY (FATAL-12-1): a non-empty undeclared payload hard-fails before the census.
+        p.write_text(_receipt("grep:  expect-fail=exit!=0  ran=TRACE#1",
                               trace=["READ  dup.log"]))
         return a, b, p
 
@@ -5613,7 +6156,7 @@ class TestTheCensusTokenCannotBeForgedBySubstring(_InqBase):
     supposed to close."""
 
     FORGED = ("artifacts 1/1 witness 1/1 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
 
     def _run(self):
         a = self.base / "A"; a.mkdir()
@@ -5623,12 +6166,12 @@ class TestTheCensusTokenCannotBeForgedBySubstring(_InqBase):
         evil = a / "TIER2-COVERAGE: artifacts 1" / "1 witness 1"
         evil.mkdir(parents=True)
         target = evil / ("1 unreached 0 not-reachable 0 ambiguous 0 wrong-name 0 "
-                         "empty-range 0 discarded 0 not-applicable 0")
+                         "empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
         target.write_bytes(b"decoy\n")
         (a / "ev.log").symlink_to(target)
         self.plant(b, "ev.log", b"other\n")     # makes the name ambiguous -> paths render
         p = self.base / "r.rcpt"
-        p.write_text(_receipt("grep:ev.log  expect-fail=/BOOM/  ran=TRACE#1",
+        p.write_text(_receipt("grep:  expect-fail=/BOOM/  ran=TRACE#1",
                               trace=["READ  ev.log"]))
         return self.cli("--tier2", "--root", str(a), "--root", str(b), str(p))
 
@@ -5859,7 +6402,7 @@ class TestALintWitnessOverAnUnhashedFileIsCounted(_InqBase):
     exec/grep), and the `wrong-name` bump was gated on `kind == "grep"`. So swapping
     `grep:` for `lint:` moved the predicate onto an undeclared, never-hashed file cited
     through a `READ` entry — #412's deliberate non-gate — and billed it
-    `witness 1/1` with all six sub-counts at 0: a CLEANER census than the honest grep run
+    `witness 1/1` with every sub-count at 0: a CLEANER census than the honest grep run
     it replaced.
 
     The counter's meaning — "the predicate ran against a file the witness never names" —
@@ -5901,18 +6444,27 @@ class TestRangelessGrepReportsWhetherTheReadWasBound(_InqBase):
     code and not a second increment, because it describes the same item — plus a note on
     stderr, because a census with no consumer (#499) is not a channel on its own."""
 
-    def _run(self, declared):
+    def _run(self, declared, witness=None):
         h, size = self.plant(self.base, "note.log", b"quiet\n")
         artifacts = [("note.log", h, size)] if declared else []
         p = self.base / ("d.rcpt" if declared else "u.rcpt")
-        p.write_text(_receipt("grep:note.log  expect-fail=/zzz-absent/  ran=TRACE#1",
-                              artifacts=artifacts, trace=["READ  note.log"]))
+        p.write_text(_receipt(
+            witness if witness is not None else
+            "grep:note.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            artifacts=artifacts, trace=["READ  note.log"]))
         return self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
 
     def test_an_unbound_read_carries_the_disagreement_code(self):
-        out = self._run(declared=False)
+        # FATAL-12-1 — a non-empty, undeclared payload hard-fails before the census, so
+        # the surviving unbound shape is the EMPTY payload: the read is still never
+        # hash-verified, and the reason codes carry both that fact and the
+        # empty-payload fact.
+        out = self._run(declared=False,
+                        witness="grep:  expect-fail=/zzz-absent/  ran=TRACE#1")
         line = self.cov_line(out.stderr)
-        self.assertIn("wrong-name 1 (rangeless-grep-payload,unhashed-body)", line)
+        self.assertIn(
+            "wrong-name 1 (rangeless-grep-payload,stated-target-not-read,unhashed-body)",
+            line)
         self.assertIn("independent read", out.stderr)
 
     def test_a_bound_read_does_not(self):
@@ -6045,7 +6597,7 @@ class TestAV1HeaderSaysSoOnTheChannel(_InqBase):
     line, so an `RCPT v1` header written by the reviewed subagent opts the entire v1.1
     rule set out — the TRIPWIRE-`none` two-leg rule, the SUPERSEDES justification rule and
     the witness-evidence consequent — with no signal on any channel.
-    `return-convention.md:525` makes mixed-version runs LEGAL, so this is not a rejection;
+    `return-convention.md:565` makes mixed-version runs LEGAL, so this is not a rejection;
     what was missing is that the gate could not tell "the v1.1 rules passed" from "the
     v1.1 rules never ran" while quality-gate/SKILL.md:34,58 treat Layer 2 as enforced."""
 
@@ -6089,11 +6641,24 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
     PREFIX = "21a1b2c3d4e5"
 
     def _v11(self, plant_body, name):
+        """SIEGE-R2IT-2 — when the body IS planted it is also DECLARED, with its real
+        sha256. That is not incidental fixture tidying: the `evaluated` flag now
+        requires the predicate to have run against the ARTIFACTS leg's hashed-and-matched
+        buffer, so a receipt whose witness reads an undeclared file no longer retires its
+        peer. This helper's rc-0 arm exists to show the consequent stays SATISFIABLE, and
+        the shape that satisfies it is the honest one — an undeclared body was the
+        SIEGE-R2IT-2 exploit, and pinning it green here is what let that exploit sit
+        under a passing suite. The `plant_body is None` arm is untouched: nothing is
+        planted, nothing is declared, and the witness resolves nowhere exactly as
+        before."""
+        arts = ()
         if plant_body is not None:
-            self.plant(self.base, "evidence.log", plant_body)
+            h, size = self.plant(self.base, "evidence.log", plant_body)
+            arts = [("evidence.log", h, size)]
         body = _receipt(
             "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
             skill="build/21-implementer",
+            artifacts=arts,
             trace=["READ  evidence.log"],
             claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
         p = self.base / name
@@ -6128,19 +6693,36 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         return self.cli("--tier2", "--root", str(self.base), str(p))
 
     def test_the_consequent_does_not_hard_block_the_whole_fail_leg(self):
-        """C1-R3-S1 — `evaluated` is set only by verify_witness, and tier2_witness
-        returns before calling it whenever witness_art_name yields no name — which on the
-        FAIL leg is EVERY kind=grep witness, because that sourcing is PASS-only. Unscoped,
-        this rule admitted NO kind=grep witness a FAIL receipt could carry: not a narrow
-        one, not a well-chosen range. That is a structural BLOCK with no in-receipt remedy,
-        on the shape return-convention.md designates the DEFAULT for research/judge
-        dispatches with no shell — and a fix agent that closed some findings and not others
-        returns exactly this shape. lint_v11_local's declared over-approximation does not
-        cover it: that one is about the TRIGGER, and its measured 0-site cost is silent
-        here because no committed corpus holds a FAIL + non-`none` SUPERSEDES row."""
-        out = self._v11_verdict("FAIL", "failleg-supersedes.rcpt")
+        """C1-R3-S1, RE-AIMED BY SIEGE-S1 — the claim this test defends is unchanged
+        ("the FAIL leg must keep a satisfiable path to a supersession"), but the receipt
+        that demonstrates it moved, because the old one was the exploit.
+
+        The old form asserted a RANGELESS `kind=grep` FAIL receipt exits 0. When it was
+        written that was forced: witness_art_name's payload sourcing was PASS-only, so
+        NO kind=grep witness a FAIL receipt could carry was sourceable and the rule
+        would have hard-blocked the shape return-convention.md makes the default for
+        shell-less research/judge dispatches. GH #501 removed that constraint — the FAIL
+        leg now sources a ranged payload — and the test was not re-aimed, so it went on
+        pinning "rangeless grep + FAIL retires its predecessor" as EXPECTED, on a
+        receipt whose cited file need not exist at all. That is SIEGE-S1, pinned green.
+
+        The satisfiable path is now shown on the receipt an author would actually write:
+        the SAME witness with the `#<range>` #501 taught the leg to source. The rangeless
+        form is now gated, and test_siege_s1_* below is its pin."""
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "grep:evidence.log#L1-L1  expect-fail=/clean/  ran=TRACE#1",
+            verdict="FAIL", skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L1-L1"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "failleg-supersedes.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  verdict=FAIL\nSUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+        self.assertIn("witness 1/1", out.stderr)
 
     def test_a_sourced_but_unresolvable_fail_witness_is_still_gated(self):
         """C1-R3-S1 freeze-guard regression — ⚠ DEC-29 SHAPE. The first attempt keyed the
@@ -6306,22 +6888,440 @@ class TestSupersedesRequiresAnEvaluatedWitness(_InqBase):
         self.assertNotIn("EVALUATED at Tier-2", out.stderr)
         self.assertIn("witness 1/1", out.stderr)
 
-    def test_the_scoping_is_not_a_blanket_disable(self):
-        """Non-vacuity control: ONE receipt shape, body absent so no witness can evaluate,
-        run under each verdict. PASS still hard-BLOCKs — its rangeless grep witness falls
-        back to derive_art_name, which yields a name on that leg, so the witness IS sourced
-        and the rule keeps every case it can be satisfied in. FAIL exits 0 because
-        derive_art_name is EXEC-only there, so nothing is sourced at all.
+    def test_siege_s3_an_empty_body_cannot_grant_the_supersession(self):
+        """SIEGE-S3 — the PASS leg set `evaluated` on the mere PRESENCE of a derived
+        pattern, independently of whether the cited range delivered any bytes.
+        `re.search(p, "")` cannot match for ANY pattern, so an empty body means the
+        predicate structurally could not have decided anything — and the SUPERSEDES
+        consequent read the flag and retired the peer anyway, on a census line that said
+        `witness 0/1` on the very same run.
 
-        The verdicts differ here as a CONSEQUENCE of what gets sourced, not as the key —
-        see test_a_sourced_but_unresolvable_fail_witness_is_still_gated, which is the same
-        leg with a sourced witness and is still gated."""
-        self.assertEqual(
-            self._v11_verdict("PASS", "pl-unevaluated.rcpt", plant_body=None).returncode,
-            1)
-        self.assertEqual(
-            self._v11_verdict("FAIL", "fl-unevaluated.rcpt", plant_body=None).returncode,
-            0)
+        Two shapes, ONE receipt apart, both measured exit 0 on `ba482e2`:
+          * a past-EOF cited range (`#L50-L50` on a one-line file);
+          * a rangeless `grep:` over a declared, hash-verified 0-BYTE file, which needs
+            no out-of-range citation at all.
+        `_reject_empty_grep_body` covers NEITHER: it requires `kind=grep` AND a non-None
+        range, and these are `kind=exec` + past-EOF and rangeless `kind=grep`.
+
+        The IN-RANGE control (`#L1-L1`) is the non-vacuity half and is deliberately the
+        SAME receipt with one token changed: it must still reach the predicate, which
+        here MATCHES, so the leg rejects it for the ordinary reason. Without that arm
+        the fix is indistinguishable from never setting `evaluated` on this leg."""
+        h, size = self.plant(self.base, "evidence.log", b"BOOM\n")
+        eh, esize = self.plant(self.base, "empty.log", b"")
+        cases = (
+            ("in-range-control", [("evidence.log", h, size)],
+             ["EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L1-L1"],
+             "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+             "expect-fail regex"),
+            ("past-eof-range", [("evidence.log", h, size)],
+             ["EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#L50-L50"],
+             "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+             "EVALUATED at Tier-2"),
+            ("rangeless-grep-over-empty-file", [("empty.log", eh, esize)],
+             ["READ  empty.log"],
+             "grep:empty.log  expect-fail=/BOOM/  ran=TRACE#1",
+             "EVALUATED at Tier-2"),
+        )
+        for name, arts, trace, wit, expect in cases:
+            with self.subTest(shape=name):
+                body = _receipt(wit, verdict="PASS", skill="build/21-implementer",
+                                artifacts=arts, trace=trace,
+                                claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"s3-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn(expect, out.stderr)
+
+    def test_siege_r1_3_a_blank_cited_range_cannot_grant_the_supersession(self):
+        """SIEGE-R1-3 — SIEGE-S3's own fix, bypassed by re-spelling the identical
+        attack. That fix shipped `body != ""`, which is the narrowest possible spelling
+        of the argument it was written from: `re.search(p, "")` cannot match for ANY
+        pattern, so a range that delivered nothing decided nothing. A range landing on a
+        BLANK line or a WHITESPACE-ONLY one satisfies `!= ""` while carrying nothing a
+        Tier-1-admissible expect-fail pattern (>=4 chars, non-wildcard) can match — so
+        `evaluated` was set, the SUPERSEDES consequent retired the peer at exit 0, and
+        the census read `witness 1/1` with EVERY sub-count at zero. That is strictly
+        WORSE disclosed than the past-EOF case SIEGE-S3 closed, which at least bills
+        `empty-range 1 (past-eof)`.
+
+        ONE receipt, ONE file, ONE token apart across all five arms — the discriminator
+        is the cited range and nothing else. `#L4-L4` is the non-vacuity control that
+        `#L2`/`#L3` are measured against: it delivers real bytes that do NOT match, so
+        it must still bill `witness 1/1` and still retire the peer. Without it the fix
+        is indistinguishable from never setting `evaluated` on this leg. `#L1-L1`
+        (matches) and `#L50-L50` (SIEGE-S3's own pin) are the unchanged bounds on either
+        side.
+
+        Reverting `_delivered_signal` to `body != ""` turns the `#L2`/`#L3` arms RED."""
+        payload = b"BOOM here\n\n   \nmore text\n"
+        h, size = self.plant(self.base, "evidence.log", payload)
+        cases = (
+            ("in-range-match", "L1-L1", 1, "expect-fail regex", None),
+            ("blank-line", "L2-L2", 1, "EVALUATED at Tier-2",
+             "empty-range 1 (blank-range)"),
+            ("whitespace-only-line", "L3-L3", 1, "EVALUATED at Tier-2",
+             "empty-range 1 (blank-range)"),
+            ("real-bytes-no-match-control", "L4-L4", 0, "witness 1/1", None),
+            ("past-eof", "L50-L50", 1, "EVALUATED at Tier-2",
+             "empty-range 1 (past-eof)"),
+        )
+        for name, rng, rc, expect, counter in cases:
+            with self.subTest(shape=name):
+                body = _receipt(
+                    "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+                    verdict="PASS", skill="build/21-implementer",
+                    artifacts=[("evidence.log", h, size)],
+                    trace=[f"EXEC  `run`  exit=0  dur=1.0s  out=evidence.log#{rng}"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"r13-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                self.assertIn(expect, out.stderr)
+                if counter is not None:
+                    self.assertIn(counter, out.stderr)
+                else:
+                    # the two unchanged arms must not acquire the new code either
+                    self.assertNotIn("blank-", out.stderr)
+
+    def test_siege_r2it1_an_invisible_or_too_short_range_cannot_grant_it_either(self):
+        """SIEGE-R2IT-1 — SIEGE-S3's fix re-spelled for the SECOND time. SIEGE-R1-3
+        shipped `body.strip() != ""`, and `str.strip()` removes only codepoints for
+        which `str.isspace()` is True: it is an ASCII-shaped WHITESPACE blocklist that
+        says nothing about the zero-width/format categories and nothing at all about
+        LENGTH. Measured on `588a7e9` with the arms below: a lone U+200B, the mandated
+        findings-file separator `---`, and two U+FFFD (from an invalid-UTF-8 `#B` range
+        through `_slice`'s `errors="replace"`) each exited 0 with the predecessor
+        RETIRED and every counter at zero — billing nothing on any channel, and two of
+        the three invisible to a human reading the range the subagent itself authored.
+
+        The fence is no longer a blocklist. It is a CATEGORY rule (a codepoint counts
+        unless its Unicode general category starts with `C` or `Z`, which is closed over
+        all of Unicode rather than over a list someone maintains) plus a LENGTH floor of
+        `_SIGNAL_MIN_CHARS` = 4 — the tight bound for a `"literal"` signature, since
+        Tier-1 rejects a literal under 4 source characters and `re.escape`'s output
+        matches exactly its own source. The floor is DELIBERATELY CONSERVATIVE for the
+        `/regex/` form, whose tight bound is 1 (`/a|bb/` is 5 source characters and
+        matches one), and the `three-visible-chars` arm below pins that
+        under-crediting as intended behaviour rather than a bug: it costs a receipt an
+        `empty-range` sub-count, where over-crediting costs a retired peer finding.
+
+        `four-visible-chars` is the non-vacuity control the floor is measured against —
+        one codepoint more than the arm above it, and it must still bill `witness 1/1`
+        and still retire the peer. Reverting `_delivered_signal` to `.strip() != ""`
+        turns the zero-width, separator and short-content arms RED."""
+        cases = (
+            # (name, payload, range, expected rc, expected stderr fragment)
+            ("zero-width-space", "BOOM here\n\u200b\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("bom-u-feff", "BOOM here\n\ufeff\ufeff\ufeff\ufeff\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("word-joiner-u-2060",
+             "BOOM here\n\u2060\u2060\u2060\u2060\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("soft-hyphen-u-00ad",
+             "BOOM here\n\u00ad\u00ad\u00ad\u00ad\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("ideographic-space-u-3000",
+             "BOOM here\n\u3000\u3000\u3000\u3000\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("line-separator-u-2028",
+             "BOOM here\n\u2028\u2028\u2028\u2028\nmore text\n".encode(),
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("nul-bytes", b"BOOM here\n\x00\x00\x00\x00\nmore text\n",
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("findings-separator", b"BOOM here\n---\nmore text\n",
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("three-visible-chars", b"BOOM here\nabc\nmore text\n",
+             "L2-L2", 1, "EVALUATED at Tier-2"),
+            ("four-visible-chars", b"BOOM here\nabcd\nmore text\n",
+             "L2-L2", 0, "witness 1/1"),
+        )
+        for name, payload, rng, rc, expect in cases:
+            with self.subTest(shape=name):
+                h, size = self.plant(self.base, f"ev-{name}.log", payload)
+                body = _receipt(
+                    "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+                    verdict="PASS", skill="build/21-implementer",
+                    artifacts=[(f"ev-{name}.log", h, size)],
+                    trace=[f"EXEC  `run`  exit=0  dur=1.0s  "
+                           f"out=ev-{name}.log#{rng}"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"r2it1-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                self.assertIn(expect, out.stderr)
+
+    def test_siege_r2it1_the_replacement_character_range_cannot_grant_it(self):
+        """The third reported shape, which needs its own arm because it is reached
+        through a BYTE range over invalid UTF-8 rather than a line range: `_slice`
+        decodes with `errors="replace"`, so `b"\xff\xff"` arrives as two U+FFFD. Those
+        are category `So` — real, visible codepoints — so the CATEGORY half does not
+        withhold them and the LENGTH floor is what does. Its control is one byte-range
+        over, on the same file: four real characters must still be credited."""
+        payload = b"BOOM here\n\xff\xff\nabcd\n"
+        h, size = self.plant(self.base, "ffd.log", payload)
+        for name, rng, rc, expect in (
+                ("two-replacement-chars", "B11-B12", 1, "EVALUATED at Tier-2"),
+                ("four-real-chars-control", "B14-B17", 0, "witness 1/1")):
+            with self.subTest(shape=name):
+                body = _receipt(
+                    "exec:`run`  expect-fail=/BOOM/  ran=TRACE#1",
+                    verdict="PASS", skill="build/21-implementer",
+                    artifacts=[("ffd.log", h, size)],
+                    trace=[f"EXEC  `run`  exit=0  dur=1.0s  out=ffd.log#{rng}"],
+                    claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+                p = self.base / f"r2it1-b-{name}.rcpt"
+                p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                             + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                               f"SUPERSEDES: {self.PREFIX}\n")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                self.assertIn(expect, out.stderr)
+
+    def test_siege_r2it2_an_unhashed_body_cannot_grant_the_supersession(self):
+        """SIEGE-R2IT-2 — the question this gate never asked. Every earlier fix at the
+        `evaluated` site (SIEGE-S3, SIEGE-R1-3, SIEGE-R2IT-1) sharpened "did the cited
+        range deliver signal"; none of them asked WHERE the signal came from. The
+        linter computes that fact one frame up — `bound = carried is not None` — and the
+        census already bills it as the `wrong-name` reason code `unhashed-body`, but the
+        flag gating the SUPERSEDES consequent never received it.
+
+        The attack needs no symlink and no race: a rangeless `grep:` witness takes its
+        artifact from the cited TRACE entry's own path, which no ARTIFACTS-membership
+        rule covers (that rule binds ranged grep payloads and `EXEC out=` only). So a
+        subagent declares and hash-verifies the GENUINE, still-failing findings file and
+        points the witness at a decoy it wrote itself. Measured on `588a7e9`: the honest
+        citation exits 1 with the peer's finding standing, while `d/round-9-findings.md`
+        exits 0 with the peer RETIRED on a census reading `witness 1/1 … wrong-name 1
+        (rangeless-grep-payload,unhashed-body)` — the headline ratio saying VERIFIED on
+        the same line whose reason code says the bytes were never hashed. `ARTIFACTS
+        (none)` plus any READ is the same exit on a run that hashed nothing at all.
+
+        The last arm is the non-vacuity control and it isolates `bound` rather than the
+        citation SHAPE: the same rangeless grep over the DECLARED, hash-verified file,
+        whose body does not match, must still set `evaluated` and still retire the peer.
+        Without it the gate could be narrowed to "never credit a rangeless grep" and
+        every attack arm would still pass."""
+        genuine = b"# round 9 findings\nFATAL: unauthenticated write path\n"
+        decoy = b"# round 9 findings\nall clear, nothing outstanding\n"
+
+        def receipt_for(arts, trace, wit, name):
+            body = _receipt(wit, verdict="PASS", skill="build/21-implementer",
+                            artifacts=arts, trace=trace,
+                            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+            p = self.base / name
+            p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                         + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                           f"SUPERSEDES: {self.PREFIX}\n")
+            return p
+
+        gh, gsize = self.plant(self.base, "round-9-findings.md", genuine)
+        (self.base / "d").mkdir(exist_ok=True)
+        self.plant(self.base, "d/round-9-findings.md", decoy)
+        link = self.base / "link"
+        if not link.exists():
+            link.symlink_to("d")
+        self.plant(self.base, "anything.md", decoy)
+        ch, csize = self.plant(self.base, "clean-9.md", decoy)
+
+        cases = (
+            # (name, artifacts, trace, witness, expected bullet)
+            # FATAL-12-1 — a non-empty rangeless payload that is not the identical
+            # declared artifact the citation reads (or is undeclared at all) now
+            # hard-FAILs before `bound` is ever computed, which is a STRONGER form of
+            # the same "unhashed body cannot retire the peer" defence.
+            ("symlinked-decoy", [("round-9-findings.md", gh, gsize)],
+             ["READ link/round-9-findings.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1",
+             "does not name the same file"),
+            ("plain-subdir-decoy", [("round-9-findings.md", gh, gsize)],
+             ["READ d/round-9-findings.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1",
+             "does not name the same file"),
+            ("artifacts-none", [], ["READ anything.md"],
+             "grep:anything.md  expect-fail=/FATAL/  ran=TRACE#1",
+             "is not a declared ARTIFACTS entry"),
+            ("hash-verified-control", [("clean-9.md", ch, csize)],
+             ["READ clean-9.md"],
+             "grep:clean-9.md  expect-fail=/FATAL/  ran=TRACE#1", None),
+        )
+        for name, arts, trace, wit, bullet in cases:
+            with self.subTest(shape=name):
+                p = receipt_for(arts, trace, wit, f"r2it2-{name}.rcpt")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1 if bullet else 0, out.stderr)
+                if bullet:
+                    self.assertIn(bullet, out.stderr)
+                else:
+                    self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+                    self.assertIn("witness 1/1", out.stderr)
+
+    def test_siege_r31_a_declared_decoy_cannot_stand_in_for_the_named_artifact(self):
+        """SIEGE-R3-1 — `bound` asked whether the bytes were HASHED, never whether they
+        were the bytes of the file the WITNESS LINE ITSELF names, and the receipt author
+        writes both strings. SIEGE-R2IT-2's own exploit was therefore restored by ONE
+        extra ARTIFACTS line: declare the genuine still-failing findings file AND a
+        sanitised twin, hash-verify both honestly, put the genuine name on the WITNESS
+        payload and the twin on `ran=TRACE#N`. Every gate is satisfied by real hashes and
+        the peer is retired on a predicate that never touched the file the receipt names.
+
+        Measured on `1943055`: the `declared-decoy` arm exited 0 with the peer RETIRED,
+        and the `declared-decoy-top-level` arm did so with a census byte-identical to the
+        honest control's but for the ARTIFACTS denominator — no `unhashed-body` code, no
+        `UNVERIFIABLE` bullet, nothing on any channel.
+
+        The SPELLING arms are the non-vacuity half and they are what keep the fix an
+        IDENTITY test rather than a string test: §3.1's bare name and §3.2's MANDATED
+        absolute spelling name one file, and a receipt that mixes them must still retire
+        its peer. Narrowing the fix to raw string equality passes every attack arm here
+        and breaks those three."""
+        fatal = b"# round 9 findings\nFATAL: unauthenticated write path\n"
+        clean = b"# round 9 findings\nall clear, nothing outstanding\n"
+
+        def receipt_for(arts, trace, wit, name):
+            body = _receipt(wit, verdict="PASS", skill="build/21-implementer",
+                            artifacts=arts, trace=trace,
+                            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+            p = self.base / name
+            p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                         + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                           f"SUPERSEDES: {self.PREFIX}\n")
+            return p
+
+        fh, fsize = self.plant(self.base, "round-9-findings.md", fatal)
+        (self.base / "d").mkdir(exist_ok=True)
+        dh, dsize = self.plant(self.base, "d/round-9-findings.md", clean)
+        th, tsize = self.plant(self.base, "notes.md", clean)
+        gh, gsize = self.plant(self.base, "good-9.md", clean)
+        absolute = str(self.base / "good-9.md")
+
+        both = [("round-9-findings.md", fh, fsize), ("d/round-9-findings.md", dh, dsize)]
+        top = [("round-9-findings.md", fh, fsize), ("notes.md", th, tsize)]
+        one = [("good-9.md", gh, gsize)]
+        cases = (
+            # (name, artifacts, trace, witness, expected rc, expected bullet,
+            #  expect-unbound-note)
+            # ── the attack: both files honestly declared and hash-verified — now
+            #    hard-FAILed by the Tier-1-style stated-target membership rule
+            #    (FATAL-12-1) before `bound` is computed ──
+            ("declared-decoy", both, ["READ  d/round-9-findings.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1,
+             "does not name the same file", False),
+            ("declared-decoy-top-level", top, ["READ  notes.md"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1,
+             "does not name the same file", False),
+            ("declared-decoy-absolute-citation", both,
+             [f"READ  {self.base / 'd' / 'round-9-findings.md'}"],
+             "grep:round-9-findings.md  expect-fail=/FATAL/  ran=TRACE#1", 1,
+             "does not name the same file", False),
+            # normpath must not be a dodge: a payload that merely NORMALISES onto the
+            # genuine name is still not a string-declared ARTIFACTS entry.
+            ("declared-decoy-dotdot-payload", both, ["READ  d/round-9-findings.md"],
+             "grep:round-9-findings.md/../round-9-findings.md  "
+             "expect-fail=/FATAL/  ran=TRACE#1", 1,
+             "is not a declared ARTIFACTS entry", False),
+            # SELF-ADVERSARIAL — deleting the payload token must not buy back the
+            # exploit. An empty `grep:` payload names nothing, so `bound` fail-closes
+            # and the SUPERSEDES consequent refuses the retirement via the `not bound`
+            # disjunct (FATAL-B).
+            ("empty-payload", both, ["READ  d/round-9-findings.md"],
+             "grep:  expect-fail=/FATAL/  ran=TRACE#1", 1,
+             "stated-target-not-read", True),
+            # ── non-vacuity: honest receipts, every legitimate spelling ──
+            ("honest-same-spelling", one, ["READ  good-9.md"],
+             "grep:good-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0, None, False),
+            ("honest-mandated-absolute-trace", one, [f"READ  {absolute}"],
+             "grep:good-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0, None, False),
+            # MIN-14-6 — a spelling-variant payload (absolute spelling of a declared
+            # bare name) hard-FAILs under the plain string-membership rule even though
+            # it resolves identically: intentional, not a defect.
+            ("honest-absolute-payload", one, ["READ  good-9.md"],
+             f"grep:{absolute}  expect-fail=/FATAL/  ran=TRACE#1", 1,
+             "is not a declared ARTIFACTS entry", False),
+            ("honest-dot-slash-trace", one, ["READ  ./good-9.md"],
+             "grep:good-9.md  expect-fail=/FATAL/  ran=TRACE#1", 0, None, False),
+        )
+        for name, arts, trace, wit, rc, expect, unbound_note in cases:
+            with self.subTest(shape=name):
+                p = receipt_for(arts, trace, wit, f"r31-{name}.rcpt")
+                out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, rc, out.stderr)
+                if rc:
+                    self.assertIn(expect, out.stderr)
+                    if unbound_note:
+                        # The disclosure the empty-payload shape still reaches: a note on
+                        # stderr naming the unbound read, not merely an exit code.
+                        self.assertIn("UNVERIFIABLE: witness", out.stderr)
+                else:
+                    self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+                    self.assertIn("witness 1/1", out.stderr)
+
+    def test_siege_r31_the_other_witness_kinds_are_deliberately_untouched(self):
+        """The `_witness_stated_target` 3-way contract, carried over unchanged
+        (F2/S1). `kind=exec`'s payload is a shell command and `kind=lint`'s is a rule
+        name; neither is a filename under any spelling, so neither states a target. A
+        RANGED `grep:` payload is the source of the read (`from_payload`), so it cannot
+        disagree with itself. All three must yield None — no stated target."""
+        w_exec = {"kind": "exec", "payload": "`pytest -q`", "range_kind": None}
+        w_lint = {"kind": "lint", "payload": "no-todo", "range_kind": None}
+        w_ranged = {"kind": "grep", "payload": "f.md#L1-L2", "art": "f.md",
+                    "range_kind": "L"}
+        rv = _import_rv()
+        for w in (w_exec, w_lint, w_ranged):
+            self.assertIsNone(rv._witness_stated_target(w))
+
+    def test_siege_r2it2_the_exit_clause_arm_is_deliberately_untouched(self):
+        """The bound on the fix. The `kind=exec` exit-clause site compares the RECEIPT's
+        own `expect-fail` against the RECEIPT's own `TRACE exit=` and never consults
+        disk bytes at all, so "were these bytes hash-verified" is not a question about
+        it. That arm keeps setting `evaluated`, and the receipt still retires its peer —
+        gating it on `bound` would make the shape return-convention.md's own worked
+        example uses unsupersedable for no gain."""
+        h, size = self.plant(self.base, "exec-evidence.log", b"BOOM here\nmore text\n")
+        body = _receipt("exec:`run`  expect-fail=exit!=0  ran=TRACE#1",
+                        verdict="PASS", skill="build/21-implementer",
+                        artifacts=[("exec-evidence.log", h, size)],
+                        trace=["EXEC  `run`  exit=0  dur=1.0s  "
+                               "out=exec-evidence.log#L1-L2"],
+                        claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / "r2it2-exit-clause.rcpt"
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_siege_s1_a_rangeless_grep_cannot_buy_the_exemption_on_either_leg(self):
+        """SIEGE-S1 — the exploit, and the test that used to pin it green
+        (`test_the_scoping_is_not_a_blanket_disable`, which asserted `FAIL -> 0` here).
+
+        ONE receipt shape, cited body ABSENT from disk so no witness can possibly
+        evaluate, run under each verdict token. Before the fix these exited 1 / 0: the
+        FAIL leg retired its predecessor, its tripwires and its cairn invariant on a
+        witness naming a file that does not exist, selected by the author with nothing
+        but the VERDICT token and an omitted `#<range>`.
+
+        The verdicts must now agree, and for the reason the exemption's own antecedent
+        gives: a rangeless `kind=grep` payload is a CHOICE post-#501, not a structural
+        inability, so neither leg is exempt. Reverting the `_rangeable` conjunct in
+        tier2_witness turns the FAIL arm RED."""
+        for verdict, name in (("PASS", "pl-unevaluated.rcpt"),
+                              ("FAIL", "fl-unevaluated.rcpt")):
+            with self.subTest(verdict=verdict):
+                out = self._v11_verdict(verdict, name, plant_body=None)
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
 
     def test_tier1_only_runs_are_untouched(self):
         """The new leg is Tier-2's; the hook path (`--tier1`) keeps exactly the shape
@@ -6494,15 +7494,15 @@ class TestTheCensusTokenCannotBeForgedOnTheBulletChannel(_InqBase):
 
     So a receipt REJECTED at Tier-1, on a run where nothing whatsoever was verified,
     handed the documented consumer (`grep -m1 'TIER2-COVERAGE:'`, which takes the first
-    SUBSTRING match) a fully attacker-authored `artifacts 9/9 witness 9/9` with all six
-    sub-counts at zero, ahead of the honest `not-reached (tier1-reject)` line. The exit
+    SUBSTRING match) a fully attacker-authored `artifacts 9/9 witness 9/9` with every
+    sub-count at zero, ahead of the honest `not-reached (tier1-reject)` line. The exit
     code was never in danger (1 ⇒ structurally BLOCKED); the RECORD was, and
     quality-gate/SKILL.md captures this line verbatim into a durable per-dispatch file
     that #486's headline figure is measured from — "the failing run is exactly where the
     census earns its keep"."""
 
     FORGED = ("artifacts 9/9 witness 9/9 unreached 0 not-reachable 0 ambiguous 0 "
-              "wrong-name 0 empty-range 0 discarded 0 not-applicable 0")
+              "wrong-name 0 empty-range 0 discarded 0 resolved-by-walk 0 not-applicable 0")
 
     def _run(self, args):
         p = self.base / "r.rcpt"
@@ -6769,7 +7769,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
 
         self.rv.resolve_base = spy
         self.addCleanup(setattr, self.rv, "resolve_base", real)
-        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", self._cov(),
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertEqual(seen, ["f.txt"])
 
     def test_501_3_the_old_unreached_arm_is_retired(self):
@@ -6777,7 +7780,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         cannot survive the leg that sources. Its retirement is named at the arm."""
         wit, trace = self._ranged_grep()
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertNotIn("fail-leg-payload-not-sourced", cov.codes["unreached"])
         self.assertEqual(cov.counts["unreached"], 0)
 
@@ -6793,7 +7799,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         wit, trace = self._ranged_grep(body="BOOM\n")
         cov = self._cov()
         self.assertEqual(
-            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov), [])
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={}), [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertEqual(cov.counts["discarded"], 1)
         self.assertIn("fail-leg-no-exit-evidence", cov.codes["discarded"])
@@ -6809,7 +7818,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         # body matches expect-fail, so exit=0 + content_match -> no raise, and the
         # predicate demonstrably decided the outcome.
         self.assertEqual(
-            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov), [])
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={}), [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (1, 1))
         self.assertEqual(cov.counts["discarded"], 0)
 
@@ -6818,7 +7830,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         wit, trace = self._ranged_grep(
             verb="EXEC", cited_args="`x`  exit=0  out=f.txt#L1-L1", body="quiet\n")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", self._cov(),
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertIn("no evidence of failure", str(cm.exception))
 
     def test_501_7_exit_nonzero_fail_is_withheld_with_its_own_code(self):
@@ -6830,7 +7845,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
             verb="EXEC", cited_args="`x`  exit=3  out=f.txt#L1-L1", body="BOOM\n")
         cov = self._cov()
         self.assertEqual(
-            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov), [])
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={}), [])
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertIn("fail-leg-exit-nonzero", cov.codes["discarded"])
 
@@ -6840,7 +7858,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         wit, trace = self._ranged_grep(body="BOOM\n")
         cov = self._cov()
         with self.assertRaises(self.rv.LintError):
-            self.rv.tier2_witness(wit, trace, self.a, False, "PASS", cov)
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "PASS", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "PASS", self.a),
+            verified={})
         self.assertEqual(cov.counts["discarded"], 0)
 
     # --- disjointness of the new sub-count ------------------------------------
@@ -6851,7 +7872,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         not ALSO earn `discarded`, or :1175's sub-counts stop being disjoint."""
         wit, trace = self._ranged_grep(body="one\n", rng=("L", 9, 9))
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertEqual((cov.wit_verified, cov.wit_applicable), (0, 1))
         self.assertEqual(cov.counts["empty-range"], 1)
         self.assertEqual(cov.counts["discarded"], 0)
@@ -6861,7 +7885,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         applicability is finally known."""
         wit, trace = self._ranged_grep(where=("a", "b"), body="BOOM\n")
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, [self.a, self.b], False, "FAIL", cov)
+        self.rv.tier2_witness(
+            wit, trace, [self.a, self.b], False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", [self.a, self.b]),
+            verified={})
         self.assertEqual(cov.counts["ambiguous"], 1)
         self.assertEqual(cov.counts["discarded"], 0)
 
@@ -6871,8 +7898,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         This is one of the #486 behaviours the fix actually switches on."""
         wit, trace = self._ranged_grep(where=("a", "b"), body="BOOM\n")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(wit, trace, [self.a, self.b], True, "FAIL",
-                                  self._cov())
+            self.rv.tier2_witness(
+                wit, trace, [self.a, self.b], True, "FAIL", self._cov(),
+                cache=_cache_for(self.rv, {}, trace, wit, "FAIL", [self.a, self.b]),
+                verified={})
         self.assertIn("ambiguous", str(cm.exception).lower())
 
     # --- the `evaluated` narrowing, pinned at its own level -------------------
@@ -6893,8 +7922,11 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         confirmed against a deliberately-broken copy of the tree."""
         wit, trace = self._ranged_grep(body="BOOM\n")
         probe = {}
-        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov(),
-                              None, probe)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", self._cov(),
+            probe_out=probe, notes_out=[],
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertNotIn("evaluated", probe)
         self.assertEqual(probe.get("result_discarded"), "fail-leg-no-exit-evidence")
 
@@ -6916,7 +7948,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         wit, trace = self._ranged_grep(body=("x" * 60 + "\n") * 200,
                                        rng=("L", 1, 200))
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", self._cov(),
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertIn("exceeds 4 KiB actual bytes", str(cm.exception))
 
     def test_501_15_fail_leg_non_utf8_artifact_now_hard_FAILs(self):
@@ -6927,7 +7962,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         wit, trace = self._ranged_grep()
         (self.a / "f.txt").write_bytes(b"quiet \xff\n")
         with self.assertRaises(self.rv.LintError) as cm:
-            self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", self._cov())
+            self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", self._cov(),
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertIn("is not valid UTF-8", str(cm.exception))
 
     # --- the rangeless control (must NOT move) --------------------------------
@@ -6940,7 +7978,10 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
         wit, trace = self._ranged_grep()
         wit.update(payload="f.txt", range_kind=None, range_a=None, range_b=None)
         cov = self._cov()
-        self.rv.tier2_witness(wit, trace, self.a, False, "FAIL", cov)
+        self.rv.tier2_witness(
+            wit, trace, self.a, False, "FAIL", cov,
+            cache=_cache_for(self.rv, {}, trace, wit, "FAIL", self.a),
+            verified={})
         self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
         self.assertEqual(cov.counts["discarded"], 0)
 

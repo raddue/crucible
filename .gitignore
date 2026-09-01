@@ -4,7 +4,12 @@ node_modules/
 .claude/
 .envrc
 .mcp.json
-docs/plans/
+docs/plans/*
+# #488 c1 — the ONE plans file that is a permanent repo artifact: the name-space
+# ruling scripts/test_488_name_space.py reads (AC-1). A bare `!` exception cannot
+# re-include a file under an excluded DIRECTORY, so the directory pattern is
+# widened to `docs/plans/*` and this one path is negated.
+!docs/plans/2026-08-21-488-c1-name-space-reduced.md
 docs/prds/
 docs/compass.md
 # Transient compass lockdir (#408 F12: lock-beside-data); only present mid-write,
@@ -64,3 +69,8 @@ mcp-servers/**/__pycache__/
 # Agent-tool scratch state (opencode). Machine-local session bookkeeping, unrelated
 # to any skill or gate; committed by accident in 840994c and removed in this branch.
 .opencode/
+# #488 c1 — scripts/dec31_sweep.py moves a FAILING row's mutant tree here before
+# printing its path. Built under $TMPDIR, which scripts/run_tests.sh scopes per
+# invocation and rm -rf's from an EXIT trap, the printed path would already be
+# dangling. Cleared at the start of every sweep run; never committed.
+.dec31-keep/

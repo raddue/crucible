@@ -116,6 +116,18 @@ run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
+# --- #488 c1 receipt name-space acceptance tests ---
+run python3 scripts/test_488_name_space.py
+run python3 scripts/dec31_sweep.py          # AC-6 DEC-31 mutant sweep (#488 c1)
+run python3 scripts/test_dec31_sweep_harness.py   # the sweep HARNESS itself
+
+# --- #488 c1 warden-leg-2 (inquisitor) cross-component robustness pins ---
+run python3 scripts/test_488_wiring.py
+run python3 scripts/test_488_inquisitor_integration.py
+run python3 scripts/test_488_inquisitor_edge.py
+run python3 scripts/test_488_inquisitor_state.py
+run python3 scripts/test_488_regression_inquisitor.py
+
 # --- Calibration dispatch / Brier advisory ---
 run python3 scripts/check_calibration_dispatch.py --selftest
 run python3 scripts/check_calibration_dispatch.py

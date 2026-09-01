@@ -415,6 +415,14 @@ add("two-root-tampered-hash-second-root",
     + _SPLIT_NOTE)
 
 
+def _cache_for(artifacts, trace, witness, verdict, root):
+    cache = {}
+    rv._build_identity_cache(artifacts, trace,
+                             [witness] if witness is not None else [],
+                             verdict, root, cache)
+    return cache
+
+
 def verify_fixture(fx):
     """Run the committed fixture through rcpt_verify's Tier-2 exactly as --selftest will."""
     text = fx["receipt"]
@@ -432,10 +440,13 @@ def verify_fixture(fx):
         # it: the generator's self-verify runs the committed corpus through the BOUND
         # path the CLI takes, not a second unbound one that could green a row the
         # shipped reader rejects.
-        bodies = {}
-        rv.tier2_artifacts(artifacts, trace, root, strict, None, bodies)
+        cache = _cache_for(artifacts, trace, witness, verdict, root)
+        verified = {}
+        rv.tier2_artifacts(artifacts, trace, root, strict, None,
+                           cache=cache, verified=verified)
         if verdict in {"PASS", "FAIL"}:
-            rv.tier2_witness(witness, trace, root, strict, verdict, None, bodies)
+            rv.tier2_witness(witness, trace, root, strict, verdict, None,
+                             cache=cache, verified=verified)
     except rv.WitnessTimeout as e:
         # #486/Q8 — a wall-clock timeout is NOT a passing expect:"fail" fixture. Same
         # swallow shape rcpt_verify._selftest_run_fixture fixes, one directory away.
