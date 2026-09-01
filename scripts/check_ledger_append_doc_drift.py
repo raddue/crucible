@@ -13,19 +13,25 @@ the module changes underneath them (the exact #460 round-4 S4 bug: the
 `default_repo` copy was missing the #401 `os.path.realpath(top)` call and its
 comment). This check catches that class of drift mechanically.
 
-**Line-subset assertion, not exact-copy diff.** A reference block is allowed to
-be an abridged excerpt (`scripts/uuid7.py`'s copy drops its module/function
-docstring prose and its trailing `if __name__` block) — so this does not require
-the doc block to equal the module byte-for-byte. Instead it parses BOTH sides
-with `ast`, flattens each into an ordered list of statements (recursing into
-every compound statement's body/orelse/handlers/finalbody, generically — not a
-hardcoded per-node-type list — and dropping module/function/class docstrings,
-which are prose, not logic), and asserts the doc's statement list is a
-**subsequence** of the module's (every doc statement must appear in the module,
-in the same relative order; the module may have additional statements the doc
-omits). Comments are invisible to `ast` already, so cosmetic comment rewords
-never trigger a false positive; a real logic fork (a changed line, a missing
-line, a reordered line) has no match and is reported.
+**Exact statement match by default; subsequence only for declared abridgments.**
+Most reference blocks are full copies of their module and must match it
+**exactly**, statement-for-statement — a subsequence check alone cannot detect
+the module gaining a statement the doc copy doesn't have, which is precisely
+the #460 round-5 freeze-guard's finding (F1) and the mirror image of the S4 bug
+this checker was written for. Only modules listed in `ABRIDGED_MODULES` (today:
+just `scripts/uuid7.py`, whose doc copy legitimately drops its module/function
+docstring prose and its trailing `if __name__` block) get the looser
+**subsequence** rule (every doc statement must appear in the module, in the
+same relative order; the module may have additional statements the doc omits).
+Both modes parse BOTH sides with `ast` and flatten each into an ordered list of
+statements (recursing into every compound statement's
+body/orelse/handlers/finalbody, generically — not a hardcoded per-node-type
+list — and dropping module/function/class docstrings, which are prose, not
+logic). Comments are invisible to `ast` already, so cosmetic comment rewords
+never trigger a false positive in either mode; a real logic fork (a changed
+line, a missing line, an added line, or a reordered line) has no match and is
+reported — for a non-abridged block, in *either* direction (doc missing
+something the module has, or vice versa).
 
 **Discovery is generic, not hardcoded.** Every `## Reference Python —
 `scripts/<name>.py`` heading in the doc is found by regex and checked against
@@ -41,12 +47,18 @@ a per-block drift list otherwise. Stdlib only.
 from __future__ import annotations
 import ast
 import copy
+import difflib
 import pathlib
 import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOC_PATH = ROOT / "skills" / "shared" / "ledger-append.md"
+
+# Modules whose reference block is a deliberately-abridged excerpt, not a full
+# copy — these alone get the looser subsequence rule. Every other block must
+# match its module exactly, statement-for-statement (#460 round-5 F1).
+ABRIDGED_MODULES = {"uuid7.py"}
 
 _BLOCK_RE = re.compile(
     r"## Reference Python — `scripts/(?P<mod>[\w.]+\.py)`.*?```python\n(?P<code>.*?)\n```",
@@ -100,30 +112,64 @@ def _flatten_statements(nodes) -> list:
     return out
 
 
-def compare_sources(doc_src: str, module_src: str) -> list:
-    """Return a list of drift descriptions (empty == doc is a clean subsequence
-    of the module). Each doc statement must match some module statement at or
-    after the previous match's position, in order."""
+def _snippet(node, dump: str) -> str:
+    """Best-effort human-readable rendering of a flattened statement node for a
+    drift message; falls back to its `ast.dump` form if `unparse` can't handle
+    the shallow-copied (body-cleared) node."""
+    try:
+        return ast.unparse(node)
+    except Exception:  # noqa: BLE001 — unparse is best-effort for the message
+        return dump
+
+
+def compare_sources(doc_src: str, module_src: str, abridged: bool = False) -> list:
+    """Return a list of drift descriptions (empty == clean match).
+
+    `abridged=True` (declared excerpts only, see `ABRIDGED_MODULES`): the doc's
+    statement list must be a **subsequence** of the module's — every doc
+    statement must appear in the module, in the same relative order; the module
+    may have additional statements the doc omits.
+
+    `abridged=False` (the default, and every non-excerpted block): the doc's
+    statement list must **exactly** match the module's, statement-for-statement.
+    A subsequence check alone cannot see the module gaining a statement the doc
+    copy doesn't have — that direction of drift is exactly #460 round-5's
+    freeze-guard finding (F1)."""
     doc_flat = _flatten_statements(ast.parse(doc_src).body)
     mod_flat = _flatten_statements(ast.parse(module_src).body)
+    doc_dumps = [d for d, _ in doc_flat]
     mod_dumps = [d for d, _ in mod_flat]
 
-    drift = []
-    pos = 0
-    for dump, node in doc_flat:
-        try:
-            idx = mod_dumps.index(dump, pos)
-        except ValueError:
+    if abridged:
+        drift = []
+        pos = 0
+        for dump, node in doc_flat:
             try:
-                snippet = ast.unparse(node)
-            except Exception:  # noqa: BLE001 — unparse is best-effort for the message
-                snippet = dump
-            drift.append(
-                f"doc statement not found in module (searching from module "
-                f"position {pos}): {snippet}"
-            )
+                idx = mod_dumps.index(dump, pos)
+            except ValueError:
+                drift.append(
+                    f"doc statement not found in module (searching from module "
+                    f"position {pos}): {_snippet(node, dump)}"
+                )
+                continue
+            pos = idx + 1
+        return drift
+
+    if doc_dumps == mod_dumps:
+        return []
+    drift = []
+    matcher = difflib.SequenceMatcher(a=mod_dumps, b=doc_dumps, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
             continue
-        pos = idx + 1
+        if tag in ("replace", "delete"):
+            for dump, node in mod_flat[i1:i2]:
+                drift.append(f"module has a statement the doc copy is missing: "
+                             f"{_snippet(node, dump)}")
+        if tag in ("replace", "insert"):
+            for dump, node in doc_flat[j1:j2]:
+                drift.append(f"doc has a statement not present (or out of "
+                             f"order) in the module: {_snippet(node, dump)}")
     return drift
 
 
@@ -142,7 +188,7 @@ def main() -> int:
             skipped.append(mod_name)
             continue
         module_src = mod_path.read_text(encoding="utf-8")
-        for d in compare_sources(code, module_src):
+        for d in compare_sources(code, module_src, abridged=mod_name in ABRIDGED_MODULES):
             all_drift.append(f"scripts/{mod_name}: {d}")
 
     if all_drift:
@@ -156,8 +202,9 @@ def main() -> int:
         return 1
 
     print(f"OK — {len(blocks)} reference block(s) in {DOC_PATH.relative_to(ROOT)} "
-          f"are each a clean subsequence of their module "
-          f"({', '.join(sorted(blocks))})."
+          f"each match their module "
+          f"(exact: {', '.join(sorted(blocks.keys() - ABRIDGED_MODULES)) or '(none)'}; "
+          f"abridged/subsequence: {', '.join(sorted(blocks.keys() & ABRIDGED_MODULES)) or '(none)'})."
           + (f" Skipped (no module on disk): {', '.join(skipped)}."
              if skipped else ""))
     return 0
@@ -166,11 +213,15 @@ def main() -> int:
 def selftest() -> int:
     """Built-in logic tests, in-memory, against the real doc + modules.
 
-    Positive leg: every reference block currently in the doc is a clean
-    subsequence of its module (this is the steady-state the checker enforces).
-    Negative leg: reconstructs the exact #460 round-4 S4 bug — a `default_repo`
-    doc copy missing the #401 `os.path.realpath(top)` line — against the
-    CURRENT (post-#401) module, and asserts it is caught."""
+    Positive leg: every reference block currently in the doc cleanly matches
+    its module under its own mode (exact for non-abridged, subsequence for
+    `ABRIDGED_MODULES`) — this is the steady-state the checker enforces.
+    Negative legs: case-A reconstructs the exact #460 round-4 S4 bug — a
+    `default_repo` doc copy missing the #401 `os.path.realpath(top)` line —
+    against the CURRENT (post-#401) module. Case-C reconstructs the *mirror*
+    bug (#460 round-5 freeze-guard F1) — the module gaining a statement the
+    doc copy doesn't have — which a subsequence-only check cannot see; both
+    must be caught for a non-abridged block."""
     doc_text = DOC_PATH.read_text(encoding="utf-8")
     blocks = extract_reference_blocks(doc_text)
     failures = []
@@ -180,7 +231,7 @@ def selftest() -> int:
                          "(regex may be stale)")
     else:
         module_src = (ROOT / "scripts" / "ledger_append.py").read_text(encoding="utf-8")
-        drift = compare_sources(blocks["ledger_append.py"], module_src)
+        drift = compare_sources(blocks["ledger_append.py"], module_src, abridged=False)
         if drift:
             failures.append(f"positive: ledger_append.py block unexpectedly "
                              f"drifted: {drift}")
@@ -209,17 +260,36 @@ def selftest() -> int:
         )
         if stale == blocks["ledger_append.py"]:
             failures.append("case-A: #401 mutation anchor not found (test is vacuous)")
-        drift = compare_sources(stale, module_src)
+        drift = compare_sources(stale, module_src, abridged=False)
         if not drift:
             failures.append("case-A: reverting the #401 fix in the doc copy was "
                              "NOT caught against the current module")
+
+        # case-C: the doc copy is untouched but the MODULE gains a statement
+        # the doc doesn't have — a subsequence check can't see this direction
+        # at all (#460 round-5 freeze-guard F1). Insert a throwaway statement
+        # into a copy of the real module source and confirm the (unmodified,
+        # real) doc block is now flagged as drifted against it.
+        grown_module = module_src.replace(
+            "    base = start_dir or os.getcwd()\n",
+            "    base = start_dir or os.getcwd()\n"
+            "    _case_c_probe = True  # noqa: F841 — synthetic, selftest-only\n",
+        )
+        if grown_module == module_src:
+            failures.append("case-C: module-growth mutation anchor not found "
+                             "(test is vacuous)")
+        drift = compare_sources(blocks["ledger_append.py"], grown_module, abridged=False)
+        if not drift:
+            failures.append("case-C: the module gaining a statement the doc "
+                             "copy doesn't have was NOT caught (the exact "
+                             "hole a subsequence-only check leaves open)")
 
     if "uuid7.py" not in blocks:
         failures.append("positive: uuid7.py reference block not found "
                          "(regex may be stale)")
     else:
         module_src = (ROOT / "scripts" / "uuid7.py").read_text(encoding="utf-8")
-        drift = compare_sources(blocks["uuid7.py"], module_src)
+        drift = compare_sources(blocks["uuid7.py"], module_src, abridged=True)
         if drift:
             failures.append(f"positive: uuid7.py block (a legitimately abridged "
                              f"excerpt — comments/docstring/trailing __main__ "
@@ -231,7 +301,7 @@ def selftest() -> int:
             'b[6] = (b[6] & 0x0F) | 0x70', 'b[6] = (b[6] & 0x0F) | 0x90')
         if forked == blocks["uuid7.py"]:
             failures.append("case-B: uuid7 mutation anchor not found (test is vacuous)")
-        drift = compare_sources(forked, module_src)
+        drift = compare_sources(forked, module_src, abridged=True)
         if not drift:
             failures.append("case-B: a forked statement in the abridged uuid7.py "
                              "doc copy was NOT caught")
@@ -241,9 +311,11 @@ def selftest() -> int:
         for f in failures:
             print(f"  {f}")
         return 1
-    print("SELFTEST OK — both live reference blocks are clean subsequences of "
-          "their modules; a reverted #401 fix (case-A) and a forked statement "
-          "in the abridged uuid7.py excerpt (case-B) are both caught.")
+    print("SELFTEST OK — the non-abridged reference block matches its module "
+          "exactly and the abridged uuid7.py block is a clean subsequence of "
+          "its module; a reverted #401 fix (case-A), the module gaining an "
+          "unreflected statement (case-C), and a forked statement in the "
+          "abridged uuid7.py excerpt (case-B) are all caught.")
     return 0
 
 
