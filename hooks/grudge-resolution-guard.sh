@@ -125,9 +125,19 @@ declare -A SHA_GROUP SHA_FILES BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP
 # for an unresolvable checkpoint and for a `seeded_at` of 0), and a Stop that
 # then recomputes the same counter up from zero would read its own write back
 # as "progress" every single time. Non-numeric counters are ignored rather
-# than trusted; an absent, empty, unreadable or unparseable file yields an
-# empty baseline, which is the safe direction (0 can only be under-counted by
-# a real freeze, never over-counted).
+# than trusted. An empty baseline is trustworthy in exactly one case: there
+# was NO state file to read, i.e. a genuine first Stop, whose counters really
+# did start at 0. A file that EXISTS but yields no document is a different
+# state and must not be read as that one — its counters could say anything,
+# so calling the baseline 0 is not "the safe direction": it is precisely what
+# makes a frozen counter look like fresh progress on every Stop (truncate the
+# state file before each Stop and the guard blocks at (1/3) forever). Step 9's
+# `[ -f "$STATE_FILE" ]` already tells the two apart, so record which one this
+# is: not a baseline of 0, but NO MEASURABLE BASELINE, which step 14b refuses.
+BASELINE_READABLE=1
+if [ -f "$STATE_FILE" ] && ! jq -e 'type == "object"' "$STATE_FILE" >/dev/null 2>&1; then
+  BASELINE_READABLE=0
+fi
 while IFS=$'\t' read -r pk pv; do
   case "$pv" in ''|*[!0-9]*) continue ;; esac
   [ -n "$pk" ] && PRIOR_COUNTS["$pk"]="$pv"
@@ -420,9 +430,13 @@ _write_state() {
   fi
   return 0
 }
-# Best-effort writer: its return value is NOT the block gate. Whether anything
-# durable happened is settled below, by reading the file back off disk.
+# Best-effort writer. Its return value is NOT a gate on the block path as a
+# whole — the round-2 whole-predicate gate stays deleted, and whether this
+# Stop's counter is durable is still settled below by reading the file back off
+# disk. It is kept for exactly one job: the bound disjunct in step 14b, the one
+# place where reading back the value this Stop computed proves nothing.
 _write_state
+STATE_WRITTEN=$?
 
 # ── 14b. THE block predicate: DEMONSTRATED DURABLE PROGRESS ─────────────
 # MAX_BLOCKS bounds a block only if the counter it bounds actually moves. So a
@@ -431,8 +445,18 @@ _write_state
 #
 #   the counter this Stop computed for the group is the counter now on disk for
 #   it, AND that counter is strictly greater than the counter that was on disk
-#   for the same group before this Stop ran — or has reached MAX_BLOCKS, from
-#   which the very next Stop gives up.
+#   for the same group before this Stop ran — or has reached MAX_BLOCKS by a
+#   write that this Stop actually landed, from which the very next Stop gives
+#   up.
+#
+# The bound disjunct needs that durability evidence of its own, and cannot
+# borrow the read-back above. Step 12 deliberately LOWERS a counter (re-arm to
+# MAX_BLOCKS-1 for a joiner, the merge clamp), so a group can compute a value
+# equal to the one already stale on disk: re-arm to 2, increment to 3, the
+# write fails, and the unchanged on-disk 3 reads back as the 3 this Stop
+# computed. `now == want` then passes on a coincidence, not on a write. Without
+# `$STATE_WRITTEN` the bound disjunct waves that through and the counter, which
+# has not moved and never will, blocks at (3/3) forever.
 #
 # One predicate, and an OBSERVED one rather than a modelled one: a freeze just
 # IS "the durable counter did not move", so no mechanism can produce a freeze
@@ -471,11 +495,17 @@ _prior_block_count() {
 
 _progress_demonstrated() {
   local g want now
+  # Not a second gate: with no measurable baseline (a state file that exists
+  # but yields no document) the invariant below has no "before" term at all,
+  # so it cannot be evaluated, let alone satisfied.
+  [ "$BASELINE_READABLE" -eq 1 ] || return 1
   for g in "${BLOCKING[@]}"; do
     want="${BLOCK_COUNTS[$g]}"
     now="$(jq -r --arg g "$g" '(.block_counts // {})[$g] // empty | tostring' "$STATE_FILE" 2>/dev/null)"
     [ "$now" = "$want" ] || return 1
-    [ "$now" -gt "$(_prior_block_count "$g")" ] || [ "$now" -ge "$MAX_BLOCKS" ] || return 1
+    [ "$now" -gt "$(_prior_block_count "$g")" ] \
+      || { [ "$now" -ge "$MAX_BLOCKS" ] && [ "$STATE_WRITTEN" -eq 0 ]; } \
+      || return 1
   done
   return 0
 }

@@ -969,7 +969,7 @@ check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22
 # "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
 # check". They additionally support INV-C8's grep-checked degradation clause.
 # ========================================================================
-# contract:hook:inv-t23 checks=52
+# contract:hook:inv-t23 checks=74
 hook_case t23nongit
 mkdir -p "$HC_ROOT/notgit"
 HC_CWD="$HC_ROOT/notgit"
@@ -1241,6 +1241,134 @@ else
     "$(has "$ERR" "attempt (")"
   chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
 fi
+
+# C1‴. Step 12 is allowed to LOWER a counter — re-arm sets a joined,
+# already-exhausted group back to MAX_BLOCKS-1, and the merge clamp does the
+# same for a bridge. So this Stop can compute exactly the value that is already
+# stale on disk, and `now == want` then holds by coincidence rather than by a
+# write. (a) is the re-arm shape: a group at 3 on disk, a new SHA joining it,
+# and a dir that can no longer be written. Re-arm 3->2, increment 2->3, the
+# write fails, the untouched on-disk 3 reads back as "the 3 this Stop
+# computed" — and the bound disjunct waved it through, at (3/3), forever.
+hook_case t23rearm
+echo "A = 0" > "$HC_REPO/a.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "A = 1" > "$HC_REPO/a.py"; commit_all "$HC_REPO" "fix(core): repair a" "2026-05-02T09:00:00+00:00"
+run_hook s23rearm
+run_hook s23rearm true
+run_hook s23rearm true
+check 261 "premise: three Stops walk the group to (3/3) — contract:hook:inv-t23" yes "$(has "$ERR" "(3/3)")"
+check 262 "premise: the on-disk counter really reached MAX_BLOCKS — contract:hook:inv-t23" 3 \
+  "$(st "$HC_REPO" s23rearm '[.block_counts[]]|add')"
+echo "A = 2" > "$HC_REPO/a.py"; commit_all "$HC_REPO" "fix(core): repair a again" "2026-05-03T09:00:00+00:00"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: the re-arm-at-MAX_BLOCKS fixture needs a non-root uid"
+else
+  chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  run_hook s23rearm true
+  check 263 "a re-armed group on an unwritable dir allows — contract:hook:inv-t23" 0 "$RC"
+  check 264 "the re-armed Stop announces the failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "could not persist state")"
+  check 265 "it never blocks at a permanent (3/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+  run_hook s23rearm true
+  check 266 "the Stop after that allows too — no unbreakable (3/3) loop — contract:hook:inv-t23" 0 "$RC"
+  chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+fi
+
+# (b) the merge shape of the same coincidence, with no re-arm involved: two
+# DISTINCT groups both at MAX_BLOCKS on disk, bridged by one new SHA that
+# touches both their files, on a dir that can no longer be written. The clamp
+# collapses them to MAX_BLOCKS-1, the increment restores MAX_BLOCKS, and the
+# merged group's members carry an on-disk MAX_BLOCKS baseline of their own.
+hook_case t23mergemax
+echo "A = 0" > "$HC_REPO/a.py"; echo "B = 0" > "$HC_REPO/b.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "A = 1" > "$HC_REPO/a.py"; commit_all "$HC_REPO" "fix(a): repair a" "2026-05-02T09:00:00+00:00"
+echo "B = 1" > "$HC_REPO/b.py"; commit_all "$HC_REPO" "fix(b): repair b" "2026-05-03T09:00:00+00:00"
+run_hook s23mergemax
+run_hook s23mergemax true
+run_hook s23mergemax true
+check 267 "premise: two independent groups each reach MAX_BLOCKS — contract:hook:inv-t23" "3,3" \
+  "$(st "$HC_REPO" s23mergemax '[.block_counts[]]|sort|join(",")')"
+echo "A = 2" > "$HC_REPO/a.py"; echo "B = 2" > "$HC_REPO/b.py"
+commit_all "$HC_REPO" "fix(core): bridge a and b" "2026-05-04T09:00:00+00:00"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: the merge-at-MAX_BLOCKS fixture needs a non-root uid"
+else
+  chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  run_hook s23mergemax true
+  check 268 "a merge of exhausted groups on an unwritable dir allows — contract:hook:inv-t23" 0 "$RC"
+  check 269 "the merged Stop announces the failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "could not persist state")"
+  check 270 "it never blocks on the clamped-then-restored counter — contract:hook:inv-t23" no \
+    "$(has "$ERR" "attempt (")"
+  run_hook s23mergemax true
+  check 271 "the Stop after the merge allows too — contract:hook:inv-t23" 0 "$RC"
+  chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+fi
+
+# A state file that EXISTS but yields no document is not a genuine first Stop.
+# Truncated to empty before every Stop, each Stop re-scans from scratch,
+# computes 1, writes 1, reads 1 back — and against a baseline read as 0 that
+# looks like progress every time, so the guard blocks at (1/3) forever while
+# nothing durable ever survives. The baseline is not 0 here; it is unmeasurable.
+hook_case t23wiped
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23wiped
+check 272 "premise: Stop 1 blocks at (1/3) with a normal state file — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "(1/3)")"
+: > "$(guard_dir "$HC_REPO")/s23wiped.json"
+run_hook s23wiped true
+check 273 "a state file emptied before every Stop allows — contract:hook:inv-t23" 0 "$RC"
+check 274 "the unmeasurable-baseline Stop announces the failure — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "could not persist state")"
+check 275 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+: > "$(guard_dir "$HC_REPO")/s23wiped.json"
+run_hook s23wiped true
+check 276 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+
+# _prior_block_count has two halves and each is load-bearing on its own. Both
+# fixtures below use `seeded_at: 0`, which step 9's loader rejects, so the
+# in-memory counters start empty and this Stop legitimately computes 1 — while
+# a 1 is already durably on disk. Progress therefore hinges entirely on the
+# baseline lookup finding that 1.
+# (a) the DIRECT same-id lookup: the on-disk sha_group is empty, so no member
+#     walk can reach the counter; only PRIOR_COUNTS[$g] does.
+hook_case t23priordirect
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T23PD_FIX="$(sha_of "$HC_REPO" HEAD)"
+mkdir -p "$(guard_dir "$HC_REPO")"
+cat > "$(guard_dir "$HC_REPO")/s23priordirect.json" <<PRIORDIRECTJSON
+{"last_checked_sha":"$T23PD_FIX","seeded_at":0,
+ "sha_group":{},"sha_files":{},"block_counts":{"$T23PD_FIX":1}}
+PRIORDIRECTJSON
+run_hook s23priordirect true
+check 277 "a counter reachable only by the same-id lookup is still a baseline — contract:hook:inv-t23" 0 "$RC"
+check 278 "the same-id-baseline Stop announces the failure — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "could not persist state")"
+check 279 "it never re-blocks at (1/3) against its own stale counter — contract:hook:inv-t23" no \
+  "$(has "$ERR" "attempt (")"
+
+# (b) the MEMBER WALK: the counter is on disk under the group id the member
+#     carried THEN, which is not the id step 12 mints now, so the direct
+#     same-id lookup misses it and only following the member back reaches it.
+hook_case t23priorwalk
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T23PW_FIX="$(sha_of "$HC_REPO" HEAD)"
+mkdir -p "$(guard_dir "$HC_REPO")"
+cat > "$(guard_dir "$HC_REPO")/s23priorwalk.json" <<PRIORWALKJSON
+{"last_checked_sha":"$T23PW_FIX","seeded_at":0,
+ "sha_group":{"$T23PW_FIX":"oldgroupid"},"sha_files":{},
+ "block_counts":{"oldgroupid":1}}
+PRIORWALKJSON
+run_hook s23priorwalk true
+check 280 "a counter reachable only through the member walk is still a baseline — contract:hook:inv-t23" 0 "$RC"
+check 281 "the renamed-group-baseline Stop announces the failure — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "could not persist state")"
+check 282 "it never re-blocks at (1/3) against a renamed stale counter — contract:hook:inv-t23" no \
+  "$(has "$ERR" "attempt (")"
 
 # ========================================================================
 # INV-T24 — store-presence bootstrap across BOTH identity keys
@@ -1575,8 +1703,8 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=260
-ROOT_SKIPPED_CHECKS=21
+EXPECTED_CHECKS=282
+ROOT_SKIPPED_CHECKS=29
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
     echo "SKIPPED: $ROOT_SKIPPED_CHECKS of $EXPECTED_CHECKS checks did not run (root uid cannot exercise the unreadable-store paths)"
