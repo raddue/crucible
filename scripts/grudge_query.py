@@ -309,6 +309,22 @@ def cull(repo: str, repo_root: str, base_dir: Optional[str] = None) -> List[str]
 # distinct: a linked worktree shares the store of its checkout root but has    #
 # its own HEAD and its own on-disk files.                                     #
 # --------------------------------------------------------------------------- #
+# `git -C <dir>` only chdirs — it does NOT clear the repository-location
+# environment variables, which take precedence over discovery-from-cwd. An
+# inherited GIT_DIR (a Stop hook firing while a git hook is on the stack, or any
+# shell that exported it) would silently send every call below at a DIFFERENT
+# repository, and the resulting miss is indistinguishable from a genuine one.
+# Every git subprocess therefore runs with these dropped.
+_GIT_ENV_DROP = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+)
+
+
+def _git_env() -> Dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k not in _GIT_ENV_DROP}
+
+
 def _git(session_root: str, *args: str) -> Tuple[int, str]:
     """Run `git -C <session_root> <args>`; return (returncode, stripped stdout).
     A missing/failing git is a non-zero returncode, never a raised error."""
@@ -316,19 +332,57 @@ def _git(session_root: str, *args: str) -> Tuple[int, str]:
     try:
         proc = subprocess.run(
             ["git", "-C", session_root, *args],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, env=_git_env(),
         )
     except (OSError, ValueError):
         return (1, "")
     return (proc.returncode, proc.stdout.strip())
 
 
+def _fs_root(session_root: str) -> str:
+    """The checkout root `session_root` names, for the FILESYSTEM half of the
+    lookup. git resolves a repository from any subdirectory, but files_touched
+    are stored repo-relative, so joining them onto a session_root that is a
+    subdirectory makes every stored path "not exist" and every grudge look
+    0-survivor. --session-root defaults to cwd and a Stop hook's cwd is routinely
+    a subdirectory, so this is the default path, not an exotic argument.
+    A session_root that is not inside a repository at all falls back to itself —
+    an ordinary miss, never an internal error."""
+    rc, top = _git(session_root, "rev-parse", "--show-toplevel")
+    if rc != 0 or not top:
+        return session_root
+    return os.path.realpath(top)
+
+
+_HEX_TOKEN = _re.compile(r"^[0-9a-fA-F]{4,40}$")
+
+
 def _resolve_commit(session_root: str, sha: str) -> Optional[str]:
     """Full 40-char commit id for `sha`, or None when it is empty, unresolvable
-    or ambiguous. "Cannot resolve" is a miss, never an internal error."""
+    or ambiguous. "Cannot resolve" is a miss, never an internal error.
+
+    A hex-shaped token — exactly what fixed_in_commit stores — is disambiguated
+    into the OBJECT namespace first. `rev-parse --verify <s>^{commit}` prefers a
+    REF named <s> over the object whose abbreviation is <s> (announcing it only
+    as "refname is ambiguous" on stderr, which _git discards), so a repository
+    holding a tag or branch named like a short SHA would otherwise resolve a
+    stored abbreviation to a completely unrelated commit. Each candidate object
+    is still peeled through the contract's pinned
+    `rev-parse --verify <sha>^{commit}` form; a prefix that peels to more than
+    one commit is genuinely ambiguous and stays a miss."""
     s = (sha or "").strip()
     if not s:
         return None
+    if _HEX_TOKEN.match(s):
+        rc, out = _git(session_root, "rev-parse", f"--disambiguate={s}")
+        if rc != 0:
+            return None
+        commits = set()
+        for oid in out.split():
+            crc, cout = _git(session_root, "rev-parse", "--verify", f"{oid}^{{commit}}")
+            if crc == 0 and len(cout) == 40:
+                commits.add(cout)
+        return commits.pop() if len(commits) == 1 else None
     rc, out = _git(session_root, "rev-parse", "--verify", f"{s}^{{commit}}")
     if rc != 0 or len(out) != 40:
         return None
@@ -357,15 +411,21 @@ def _patch_id(session_root: str, sha: str, path: str) -> str:
     which differs by construction between a rewrite and its original."""
     import subprocess
     try:
+        # --root: without it `diff-tree -p` prints NOTHING for a parentless root
+        # commit, so _patch_id returns "" and _structural_match's bool() guard
+        # can never match one. Root commits are a real case here (orphan
+        # branches, fresh repos, squash-to-orphan); the flag is a no-op for a
+        # commit that has a parent.
         diff = subprocess.run(
-            ["git", "-C", session_root, "diff-tree", "-p", sha, "--", path],
-            capture_output=True, text=True, timeout=30,
+            ["git", "-C", session_root, "diff-tree", "--root", "-p", sha, "--", path],
+            capture_output=True, text=True, timeout=30, env=_git_env(),
         )
         if diff.returncode != 0 or not diff.stdout.strip():
             return ""
         pid = subprocess.run(
             ["git", "-C", session_root, "patch-id", "--stable"],
             input=diff.stdout, capture_output=True, text=True, timeout=30,
+            env=_git_env(),
         )
     except (OSError, ValueError):
         return ""
@@ -405,7 +465,11 @@ def find_by_files(
     subset of the candidate's files AND date_fixed not after the candidate's UTC
     author date; ==1 -> structural patch-id identity."""
     import datetime as _dt
-    cand = {normalize_path(f, session_root) for f in (files or []) if f and f.strip()}
+    # git resolves the repo from any subdirectory, but files_touched are stored
+    # repo-relative — so the FILESYSTEM half of this lookup must run against the
+    # checkout root, not against a session_root that may be below it.
+    fs_root = _fs_root(session_root)
+    cand = {normalize_path(f, fs_root) for f in (files or []) if f and f.strip()}
     cand_date = _dt.datetime.fromtimestamp(int(candidate_at), _dt.timezone.utc).date()
     for g in load_grudges(repo, store_repo_root):
         # parse_grudge's #408 F4 guard catches only a JSON decode error, so a
@@ -413,7 +477,7 @@ def find_by_files(
         # a list holding a non-string reaches survivors() and raises. A malformed
         # record is a silent miss, never the CLI's exit 3.
         try:
-            surv = survivors(g, session_root)
+            surv = survivors(g, fs_root)
         except (TypeError, AttributeError):
             _qwarn(f"unusable files_touched in {g.get('_path')}; grudge cannot match")
             continue
@@ -476,6 +540,11 @@ def _main(argv: List[str]) -> int:
             if args.by_commit is not None:
                 hit = find_by_commit(args.by_commit, repo, repo_root, session_root)
             else:
+                # KNOWN LIMITATION: --by-files is pinned by the contract as a
+                # comma-separated list, so a path that itself contains a comma
+                # (legal on POSIX) is split into two names — inventing candidate
+                # entries and destroying the real one. Changing the encoding
+                # would change the frozen CLI surface; carried deliberately.
                 hit = find_by_files(
                     [f for f in args.by_files.split(",") if f.strip()],
                     repo, repo_root, session_root,

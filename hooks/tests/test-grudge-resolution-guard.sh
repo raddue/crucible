@@ -100,12 +100,15 @@ print(p or "")
 }
 
 QUERY_TZ=""
+# Extra VAR=value words injected into the query's environment (word-split on
+# purpose). Used to prove an inherited GIT_DIR cannot override --session-root.
+QUERY_ENV=""
 run_query() {
   # run_query <store_base> <args...>; sets OUT / ERR / RC
   local store="$1"; shift
   set +e
   OUT="$(env HOME="$FAKE_HOME" CRUCIBLE_GRUDGE_DIR="$store" \
-    ${QUERY_TZ:+TZ="$QUERY_TZ"} \
+    ${QUERY_TZ:+TZ="$QUERY_TZ"} ${QUERY_ENV:-} \
     python3 "$QUERY" "$@" 2>"$TMPROOT/last-stderr.txt")"
   RC=$?
   set -e
@@ -562,6 +565,117 @@ run_query "$SN" --by-files "./a.py,$R9/b.py,c.py" --candidate-sha "$CN" --candid
 check 61 "./-prefixed and absolute candidate paths still subset-match, rc" 0 "$RC"
 check 62 "./-prefixed and absolute candidate paths still subset-match, stem" "$(stem_of "$PN")" "$OUT"
 
+# ========================================================================
+# git-environment isolation, session-root canonicalisation, ref/object
+# disambiguation, and root-commit patch-ids
+# ========================================================================
+# Untagged on purpose: these are robustness properties of the git seam itself,
+# not clauses of any tagged contract invariant. Each pair is control + attack,
+# so a fix that merely broke the control could not pass.
+
+# (a) `git -C <dir>` only chdirs — it does NOT clear GIT_DIR/GIT_WORK_TREE,
+#     which outrank discovery-from-cwd. A Stop hook firing while a git hook is
+#     on the stack inherits them, and every git call in the lookup would run
+#     against the WRONG repository, producing a miss indistinguishable from a
+#     genuine one.
+RA1="$TMPROOT/adv1a"; new_repo "$RA1"; RA1="$(cd "$RA1" && pwd -P)"
+echo "v0" > "$RA1/app.py"; commit_all "$RA1" "base" "2026-04-01T09:00:00+00:00"
+echo "v1" >> "$RA1/app.py"; commit_all "$RA1" "fix(app): repair app" "2026-06-01T12:00:00+00:00"
+CA1="$(sha_of "$RA1" HEAD)"
+RB1="$TMPROOT/adv1b"; new_repo "$RB1"; RB1="$(cd "$RB1" && pwd -P)"
+echo "unrelated" > "$RB1/other.py"; commit_all "$RB1" "base" "2026-04-01T09:00:00+00:00"
+SA1="$TMPROOT/storeadv1"
+PA1="$(append_grudge "$SA1" kadv1 "$RA1" "app regressed" "app.py" "$CA1" "2026-05-01")"
+
+QUERY_ENV=""
+run_query "$SA1" --by-commit "$CA1" --repo-root "$RA1" --repo kadv1 --session-root "$RA1"
+check 63 "git-env control: a clean environment matches" "$(stem_of "$PA1")" "$OUT"
+QUERY_ENV="GIT_DIR=$RB1/.git GIT_WORK_TREE=$RB1"
+run_query "$SA1" --by-commit "$CA1" --repo-root "$RA1" --repo kadv1 --session-root "$RA1"
+QUERY_ENV=""
+check 64 "an inherited GIT_DIR must not override --session-root" "$(stem_of "$PA1")" "$OUT"
+
+# (b) git resolves a repository from any subdirectory, so --by-commit keeps
+#     working from one; but files_touched are stored repo-relative, so joining
+#     them onto a subdirectory session_root makes every stored path "not exist"
+#     and the grudge look 0-survivor. --session-root DEFAULTS TO CWD and a Stop
+#     hook's cwd is routinely a subdirectory, so this is the default path.
+RV2="$TMPROOT/advsub"; new_repo "$RV2"; RV2="$(cd "$RV2" && pwd -P)"
+mkdir -p "$RV2/sub"
+for f in a.py b.py c.py; do echo "v0 # $f" > "$RV2/$f"; done
+echo keep > "$RV2/sub/keep.txt"
+commit_all "$RV2" "base" "2026-04-01T09:00:00+00:00"
+for f in a.py b.py c.py; do echo "v1 # $f" >> "$RV2/$f"; done
+commit_all "$RV2" "fix(core): repair a, b and c" "2026-06-01T12:00:00+00:00"
+CV2="$(sha_of "$RV2" HEAD)"; ATV2="$(at_of "$RV2" HEAD)"
+SV2="$TMPROOT/storeadvsub"
+PV2="$(append_grudge "$SV2" kadvsub "$RV2" "a and b regressed" "a.py,b.py" "" "2026-05-15")"
+
+run_query "$SV2" --by-files "a.py,b.py,c.py" --candidate-sha "$CV2" --candidate-at "$ATV2" \
+  --repo-root "$RV2" --repo kadvsub --session-root "$RV2"
+check 65 "session-root control: the checkout root matches" "$(stem_of "$PV2")" "$OUT"
+run_query "$SV2" --by-files "a.py,b.py,c.py" --candidate-sha "$CV2" --candidate-at "$ATV2" \
+  --repo-root "$RV2" --repo kadvsub --session-root "$RV2/sub"
+check 66 "a --session-root inside the checkout still matches" "$(stem_of "$PV2")" "$OUT"
+
+# (c) `rev-parse --verify <s>^{commit}` prefers a REF named <s> over the object
+#     whose abbreviation is <s>, announcing it only as "refname is ambiguous"
+#     on stderr — which _git discards. A tag named like a short SHA (release
+#     tooling and `git branch $(git rev-parse --short HEAD)` produce them) would
+#     otherwise give BOTH a false positive on the unrelated commit and a false
+#     negative on the real fix.
+RV3="$TMPROOT/advref"; new_repo "$RV3"; RV3="$(cd "$RV3" && pwd -P)"
+echo "v0" > "$RV3/app.py"; commit_all "$RV3" "the real fix" "2026-04-01T09:00:00+00:00"
+AV3="$(sha_of "$RV3" HEAD)"
+AV3S="$(git -C "$RV3" rev-parse --short=7 "$AV3")"
+echo "v1" >> "$RV3/app.py"; commit_all "$RV3" "an unrelated later commit" "2026-06-01T12:00:00+00:00"
+BV3="$(sha_of "$RV3" HEAD)"
+git -C "$RV3" tag "$AV3S" "$BV3"          # a tag NAMED like AV3's abbreviation
+SV3="$TMPROOT/storeadvref"
+PV3="$(append_grudge "$SV3" kadvref "$RV3" "app regressed" "app.py" "$AV3S" "2026-05-01")"
+
+run_query "$SV3" --by-commit "$BV3" --repo-root "$RV3" --repo kadvref --session-root "$RV3"
+check 67 "an ambiguous ref name must not match an unrelated commit" "" "$OUT"
+run_query "$SV3" --by-commit "$AV3" --repo-root "$RV3" --repo kadvref --session-root "$RV3"
+check 68 "the stored abbreviation still matches its own commit" "$(stem_of "$PV3")" "$OUT"
+
+# (d) `diff-tree -p <root-commit>` prints nothing without --root, so _patch_id
+#     returns "" and _structural_match's bool() guard can never match a
+#     parentless fix — precisely the case the checkpoint sentinel exists for.
+#     The non-root twin carries the identical patch and matches already, so the
+#     miss is the absent flag, not a different patch.
+RV4="$TMPROOT/advroot"; new_repo "$RV4"; RV4="$(cd "$RV4" && pwd -P)"
+echo readme > "$RV4/README"; commit_all "$RV4" "base" "2026-04-01T09:00:00+00:00"
+git -C "$RV4" checkout -q --orphan fixbranch
+git -C "$RV4" rm -q -rf . >/dev/null 2>&1 || true
+printf 'the fix\n' > "$RV4/feat.py"; git -C "$RV4" add feat.py
+GIT_AUTHOR_DATE="2026-05-02T09:00:00+00:00" GIT_COMMITTER_DATE="2026-05-02T09:00:00+00:00" \
+  git -C "$RV4" commit -q -m "fix(feat): the real fix, as a root commit"
+FIXV4="$(sha_of "$RV4" HEAD)"
+git -C "$RV4" checkout -q main
+printf 'the fix\n' > "$RV4/feat.py"; git -C "$RV4" add feat.py
+GIT_AUTHOR_DATE="2026-06-01T12:00:00+00:00" GIT_COMMITTER_DATE="2026-06-01T12:00:00+00:00" \
+  git -C "$RV4" commit -q -m "fix(feat): re-landed on main"
+CV4="$(sha_of "$RV4" HEAD)"; ATV4="$(at_of "$RV4" HEAD)"
+# non-root twin of FIXV4: same patch, also off HEAD
+git -C "$RV4" checkout -q -b twin main~1
+printf 'the fix\n' > "$RV4/feat.py"; git -C "$RV4" add feat.py
+GIT_AUTHOR_DATE="2026-05-02T09:00:00+00:00" GIT_COMMITTER_DATE="2026-05-02T09:00:00+00:00" \
+  git -C "$RV4" commit -q -m "fix(feat): non-root twin"
+TWINV4="$(sha_of "$RV4" HEAD)"
+git -C "$RV4" checkout -q main
+
+SV4T="$TMPROOT/storeadvroottwin"
+PV4T="$(append_grudge "$SV4T" kadvroott "$RV4" "feat regressed" "feat.py" "$TWINV4" "2026-05-02")"
+run_query "$SV4T" --by-files "feat.py" --candidate-sha "$CV4" --candidate-at "$ATV4" \
+  --repo-root "$RV4" --repo kadvroott --session-root "$RV4"
+check 69 "root-commit control: a non-root fix with the same patch matches" "$(stem_of "$PV4T")" "$OUT"
+SV4="$TMPROOT/storeadvroot"
+PV4="$(append_grudge "$SV4" kadvroot "$RV4" "feat regressed" "feat.py" "$FIXV4" "2026-05-02")"
+run_query "$SV4" --by-files "feat.py" --candidate-sha "$CV4" --candidate-at "$ATV4" \
+  --repo-root "$RV4" --repo kadvroot --session-root "$RV4"
+check 70 "a root commit as the stored fix still matches by patch-id" "$(stem_of "$PV4")" "$OUT"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -569,7 +683,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # TOTAL accumulates per `check`, so a skipped scenario shrinks the denominator
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the two chmod-000 fixtures), and even then it is announced.
-EXPECTED_CHECKS=62
+EXPECTED_CHECKS=70
 ROOT_SKIPPED_CHECKS=6
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
