@@ -86,6 +86,9 @@ run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
+run python3 scripts/check_qg_second_pass_score.py --selftest
+run python3 scripts/check_qg_second_pass_score.py
+run python3 scripts/run_second_pass_evals.py
 run python3 scripts/check_qg_fan_out.py --selftest
 run python3 scripts/check_qg_fan_out.py
 run python3 scripts/check_crossref.py --selftest
@@ -167,6 +170,7 @@ run python3 scripts/check_ledger_write_path.py --selftest
 run python3 scripts/check_ledger_write_path.py
 
 # --- #366 red-team <-> quality-gate receipt contract ---
+run python3 scripts/check_rt_receipt_contract.py --selftest
 run python3 scripts/check_rt_receipt_contract.py
 
 # --- Inquisitor eval harness (#424) ---
