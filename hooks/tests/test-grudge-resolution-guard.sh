@@ -796,7 +796,7 @@ check 86 "give-up prefill names the candidate SHA — contract:hook:inv-t12" yes
 # ========================================================================
 # INV-T13 — FATAL-C: candidacy uses the AUTHOR date, not the committer date
 # ========================================================================
-# contract:hook:inv-t13 checks=4
+# contract:hook:inv-t13 checks=6
 hook_case t13ctl
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
@@ -818,11 +818,23 @@ run_hook s13
 check 89 "author date before seeded_at is not a candidate — contract:hook:inv-t13" 0 "$RC"
 check 90 "the rebased commit is never named — contract:hook:inv-t13" no "$(has "$ERR" "$T13_FIX")"
 
+# Filter (b) is `%at >= seeded_at`, so a fix commit landing EXACTLY on the
+# session's first transcript timestamp is INSIDE the window. Every other
+# fixture puts months between the two, where `>=` and `>` agree.
+hook_case t13edge
+echo "V = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline" "2025-12-01T09:00:00+00:00"
+echo "V = 1" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "fix(widget): repair on the boundary" "2026-01-01T00:00:00+00:00"
+T13EDGE="$(sha_of "$HC_REPO" HEAD)"
+run_hook s13edge
+check 283 "a fix commit dated exactly at seeded_at is in scope — contract:hook:inv-t13" 2 "$RC"
+check 284 "the boundary candidate is named — contract:hook:inv-t13" yes "$(has "$ERR" "$T13EDGE")"
+
 # ========================================================================
 # INV-T14 — trigger shapes: .md-only, non-.md, `fix:` colon form, merges,
 # and a parentless ROOT fix commit
 # ========================================================================
-# contract:hook:inv-t14 checks=12
+# contract:hook:inv-t14 checks=22
 hook_case t14md
 echo "# notes" > "$HC_REPO/notes.md"; echo "VALUE = 0" > "$HC_REPO/app.py"
 commit_all "$HC_REPO" "chore: baseline"
@@ -873,6 +885,73 @@ check 100 "root-commit Stop 1 reports (1/3) — contract:hook:inv-t14" yes "$(ha
 run_hook s14root true
 check 101 "root-commit Stop 2 re-blocks — contract:hook:inv-t14" 2 "$RC"
 check 102 "root-commit Stop 2 reports (2/3), not (1/3) — contract:hook:inv-t14" yes "$(has "$ERR" "(2/3)")"
+
+# Filter (c) must test the PATH, not git's rendering of it. `diff-tree
+# --name-only` C-quotes any path holding a non-ASCII byte, a `"` or a `\`
+# (core.quotePath defaults on), and a quoted line ends `.md"` — so read as a
+# display string these three documentation-only commits all look like they
+# touch a non-.md path, and all three BLOCK, against this invariant's first
+# clause. Every other .md fixture here is named `notes.md`, which cannot tell.
+hook_case t14mdutf8
+mkdir -p "$HC_REPO/docs"; echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+printf 'prose\n' > "$HC_REPO/docs/café.md"
+commit_all "$HC_REPO" "fix(docs): non-ASCII note name"
+T14U="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14mdutf8
+check 285 "an all-.md fix commit with a non-ASCII name never blocks — contract:hook:inv-t14" 0 "$RC"
+check 286 "the non-ASCII .md commit is never named — contract:hook:inv-t14" no "$(has "$ERR" "$T14U")"
+
+hook_case t14mdquote
+mkdir -p "$HC_REPO/docs"; echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+printf 'prose\n' > "$HC_REPO/docs/no\"te.md"
+commit_all "$HC_REPO" "fix(docs): note name with a double quote"
+T14Q="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14mdquote
+check 287 "an all-.md fix commit whose name holds a quote never blocks — contract:hook:inv-t14" 0 "$RC"
+check 288 "the quote-named .md commit is never named — contract:hook:inv-t14" no "$(has "$ERR" "$T14Q")"
+
+# The same path beside a code path IS a candidate, and what lands in sha_files
+# is the raw path — which is what the --by-files clearance lookup and the
+# Step-15 prefill are then handed. Stop 2 re-derives candidacy from that stored
+# value, so filter (c)'s persisted branch is pinned here too.
+hook_case t14mdmixed
+mkdir -p "$HC_REPO/docs"; echo "VALUE = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; printf 'prose\n' > "$HC_REPO/docs/café.md"
+commit_all "$HC_REPO" "fix(widget): code plus a non-ASCII note"
+T14X="$(sha_of "$HC_REPO" HEAD)"
+run_hook s14mdmixed
+check 289 "a non-ASCII .md beside a code path still blocks — contract:hook:inv-t14" 2 "$RC"
+check 290 "sha_files stores the raw path, not git's quoted form — contract:hook:inv-t14" true \
+  "$(st "$HC_REPO" s14mdmixed "(.sha_files[\"$T14X\"] | index(\"docs/café.md\")) != null")"
+run_hook s14mdmixed true
+check 291 "the persisted-sha_files branch agrees on Stop 2 — contract:hook:inv-t14" yes "$(has "$ERR" "(2/3)")"
+
+# Filter (a) is `^fix[(:]`: anchored, and the character right after `fix`
+# decides. Only near-miss subjects can tell it from a bare `^fix` or from an
+# unanchored `fix[(:]` — every subject above is a well-formed positive.
+hook_case t14fixup
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fixup! chore: baseline"
+run_hook s14fixup
+check 292 "a fixup! subject is not a fix( subject — contract:hook:inv-t14" 0 "$RC"
+
+hook_case t14hotfix
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "hotfix(core): tighten the bound"
+run_hook s14hotfix
+check 293 "the ^ anchor keeps hotfix(core): out of the trigger set — contract:hook:inv-t14" 0 "$RC"
+
+# The subject is EVERYTHING after the SECOND `|` of the --format line. A greedy
+# strip would leave `b pipeline` here and the commit would silently stop being
+# a candidate — the case the parser calls out by name.
+hook_case t14pipe
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the a|b pipeline"
+run_hook s14pipe
+check 294 "a | inside the subject cannot truncate it — contract:hook:inv-t14" 2 "$RC"
 
 # ========================================================================
 # INV-T18 — skips.log clears by SHA, tolerantly
@@ -928,7 +1007,7 @@ check 234 "an unterminated LAST line among several still clears — contract:ski
 # ========================================================================
 # INV-T22 — first-Stop seeding
 # ========================================================================
-# contract:hook:inv-t22 checks=10
+# contract:hook:inv-t22 checks=12
 hook_case t22
 echo "VALUE = 0" > "$HC_REPO/app.py"; echo "# notes" > "$HC_REPO/notes.md"
 commit_all "$HC_REPO" "chore: baseline"
@@ -960,6 +1039,22 @@ check 116 "a candidate-free first Stop seeds last_checked_sha to HEAD — contra
 check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22" \
   number "$(st "$HC_REPO" s22empty '.seeded_at|type')"
 
+# seeded_at is the transcript's EARLIEST timestamp — not its last record and
+# not its first line. Every other fixture's two records are five seconds apart
+# while every commit date is months away, so earliest-vs-latest cannot move a
+# verdict there. Here the LATER record is written first and the fix commit
+# falls between the two.
+hook_case t22earliest
+{ echo '{"type":"user","timestamp":"2026-06-01T00:00:00.000Z"}'
+  echo '{"type":"assistant","timestamp":"2026-05-01T00:00:00.000Z"}'; } > "$HC_TRANSCRIPT"
+echo "V = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline" "2026-04-01T09:00:00+00:00"
+echo "V = 1" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "fix(widget): mid-window repair" "2026-05-15T09:00:00+00:00"
+run_hook s22earliest
+check 295 "the session window opens at the transcript's earliest record — contract:hook:inv-t22" 2 "$RC"
+check 296 "seeded_at is that earliest record's epoch — contract:hook:inv-t22" \
+  "$(date -u -d "2026-05-01T00:00:00Z" +%s)" "$(st "$HC_REPO" s22earliest '.seeded_at')"
+
 # ========================================================================
 # INV-T23 — graceful degradation + the .last-run evidence trail.
 # The kill-switch and malformed-JSON cases live INSIDE this scenario's block
@@ -969,7 +1064,7 @@ check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22
 # "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
 # check". They additionally support INV-C8's grep-checked degradation clause.
 # ========================================================================
-# contract:hook:inv-t23 checks=74
+# contract:hook:inv-t23 checks=85
 hook_case t23nongit
 mkdir -p "$HC_ROOT/notgit"
 HC_CWD="$HC_ROOT/notgit"
@@ -1111,6 +1206,40 @@ HOOK_ENV=""
 check 224 "an inherited GIT_DIR cannot redirect the hook git calls — contract:hook:inv-t23" 2 "$RC"
 check 225 "the session repo own candidate is still named — contract:hook:inv-t23" yes \
   "$(has "$ERR" "$T23GE_FIX")"
+
+# The other half of the same scrub: git's CONFIGURATION environment. These do
+# not retarget the repo, they change what git REPORTS about it — and each of
+# the three channels below silently turned this exact fixture into an allow,
+# with nothing at all on stderr. GIT_CONFIG_KEY_n is INDEXED, so no literal
+# drop list can ever be complete; the wrapper runs `env -i` with an allowlist
+# instead, and one check per channel pins that.
+_t23cfg_case() {
+  hook_case "$1"
+  echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+  echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+  T23CFG_FIX="$(sha_of "$HC_REPO" HEAD)"
+}
+
+_t23cfg_case t23cfgidx
+HOOK_ENV="GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=i18n.logOutputEncoding GIT_CONFIG_VALUE_0=UTF-16"
+run_hook s23cfgidx
+HOOK_ENV=""
+check 320 "an inherited GIT_CONFIG_COUNT/KEY/VALUE cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
+check 321 "the candidate survives the indexed config channel — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "$T23CFG_FIX")"
+
+_t23cfg_case t23cfgglobal
+printf '[i18n]\n\tlogOutputEncoding = UTF-16\n' > "$HC_ROOT/attacker.gitconfig"
+HOOK_ENV="GIT_CONFIG_GLOBAL=$HC_ROOT/attacker.gitconfig GIT_CONFIG_SYSTEM=/dev/null"
+run_hook s23cfgglobal
+HOOK_ENV=""
+check 322 "an inherited GIT_CONFIG_GLOBAL cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
+
+_t23cfg_case t23cfgparams
+HOOK_ENV="GIT_CONFIG_PARAMETERS='i18n.logoutputencoding=UTF-16'"
+run_hook s23cfgparams
+HOOK_ENV=""
+check 323 "an inherited GIT_CONFIG_PARAMETERS cannot disable enforcement — contract:hook:inv-t23" 2 "$RC"
 
 # C1′. `test -s "$STATE_FILE"` is NOT the durability predicate the termination
 # argument needs: a non-empty file left by an EARLIER successful persist
@@ -1370,10 +1499,51 @@ check 281 "the renamed-group-baseline Stop announces the failure — contract:ho
 check 282 "it never re-blocks at (1/3) against a renamed stale counter — contract:hook:inv-t23" no \
   "$(has "$ERR" "attempt (")"
 
+# session_id is untrusted payload text used as a state-file NAME. Nothing else
+# in this file pins where a PRESENT one may write — inv-t23 covers only a
+# missing one. `../../../../settings` resolves out of the state dir and into
+# $HC_HOME/.claude/, i.e. onto a file the user owns.
+hook_case t23sid
+mkdir -p "$HC_HOME/.claude"
+printf '{"model":"opus"}\n' > "$HC_HOME/.claude/settings.json"
+echo "V = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook "../../../../settings"
+check 297 "a traversing session_id degrades to an allow — contract:hook:inv-t23" 0 "$RC"
+check 298 "a traversing session_id writes nothing outside the state dir — contract:hook:inv-t23" \
+  '{"model":"opus"}' "$(cat "$HC_HOME/.claude/settings.json")"
+check 299 "the refused session_id is announced loudly — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "not a plain identifier")"
+
+# A transcript with records but NO .timestamp seeds from wall-clock now and
+# says so. No other fixture omits the field, so the fallback branch and its
+# pinned warning are otherwise never executed at all; wall-clock now is far
+# later than the fixture's commit dates, so the Stop allows.
+hook_case t23nots
+{ echo '{"type":"user"}'; echo '{"type":"assistant"}'; } > "$HC_TRANSCRIPT"
+echo "V = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23nots
+check 300 "a transcript carrying no timestamp allows — contract:hook:inv-t23" 0 "$RC"
+check 301 "the wall-clock fallback warns loudly — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "no timestamped record")"
+
+# An unreadable transcript is an infra failure, not an empty session window:
+# exit 0 BEFORE any state is written, so the next Stop still gets a real first
+# scan. Reading it as "no timestamps" instead would seed and persist state.
+hook_case t23notr
+echo "V = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+HC_TRANSCRIPT="$HC_ROOT/transcript-that-does-not-exist.jsonl"
+run_hook s23notr
+check 302 "an unreadable transcript allows — contract:hook:inv-t23" 0 "$RC"
+check 303 "an unreadable transcript writes no state — contract:hook:inv-t23" no \
+  "$(exists "$(guard_dir "$HC_REPO")/s23notr.json")"
+
 # ========================================================================
 # INV-T24 — store-presence bootstrap across BOTH identity keys
 # ========================================================================
-# contract:hook:inv-t24 checks=7
+# contract:hook:inv-t24 checks=11
 # (a) the linked-worktree shape: the worktree's own basename key has no store
 #     dir, but the shared-clone key does — enforcement must still run.
 hook_case t24wt
@@ -1408,11 +1578,53 @@ run_hook s24none
 check 141 "both store keys absent allows — contract:hook:inv-t24" 0 "$RC"
 check 142 "both store keys absent says so — contract:hook:inv-t24" yes "$(has "$ERR" "no grudge store")"
 
+# (c) The clearance LOOKUP's identity pair, not just the prefill's. The design
+#     pins BOTH to the shared-clone pair with no conditional branch, and a
+#     linked worktree is the only shape where the worktree pair and the
+#     shared-clone pair differ — so it is the only shape that can tell them
+#     apart. A grudge recorded under the shared-clone identity must clear a
+#     candidate seen from inside the worktree: the round trip the design's
+#     worktree-identity closure claims, exercised end to end.
+hook_case t24wtc
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbrc
+T24C_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T24C_WT" wtbrc
+T24C_WT="$(cd "$T24C_WT" && pwd -P)"
+echo "VALUE = 1" > "$T24C_WT/app.py"; echo "L = 1" > "$T24C_WT/lib.py"
+commit_all "$T24C_WT" "fix(widget): repair from inside the linked worktree"
+T24C_FIX="$(sha_of "$T24C_WT" HEAD)"
+HC_CWD="$T24C_WT"
+run_hook s24wtc
+check 304 "premise: the worktree candidate blocks with an empty store — contract:hook:inv-t24" 2 "$RC"
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "the widget regressed" "app.py" "$T24C_FIX" "2026-04-01" >/dev/null
+run_hook s24wtc true
+check 305 "a shared-clone grudge clears a worktree candidate by commit — contract:hook:inv-t24" 0 "$RC"
+
+# (d) the same round trip through the --by-files lookup: this grudge records no
+#     commit, so --by-commit misses and the file-set branch has to carry it.
+hook_case t24wtf
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbrf
+T24F_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T24F_WT" wtbrf
+T24F_WT="$(cd "$T24F_WT" && pwd -P)"
+echo "VALUE = 1" > "$T24F_WT/app.py"; echo "L = 1" > "$T24F_WT/lib.py"
+commit_all "$T24F_WT" "fix(widget): repair from inside the linked worktree"
+HC_CWD="$T24F_WT"
+run_hook s24wtf
+check 306 "premise: the by-files candidate blocks with an empty store — contract:hook:inv-t24" 2 "$RC"
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "app and lib regressed" "app.py,lib.py" "" "2026-04-01" >/dev/null
+run_hook s24wtf true
+check 307 "a shared-clone grudge clears a worktree candidate by files — contract:hook:inv-t24" 0 "$RC"
+
 # ========================================================================
 # INV-T19 — grouping by changed-file overlap, one increment per group per
 # Stop, and the clearance counter reset
 # ========================================================================
-# contract:group:inv-t19 checks=49
+# contract:group:inv-t19 checks=51
 # (a) two candidates sharing NO files -> two independent one-member groups
 hook_case t19a
 echo "A = 0" > "$HC_REPO/a.py"; echo "B = 0" > "$HC_REPO/b.py"
@@ -1570,6 +1782,23 @@ append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "p and q regressed together" "p.p
 run_hook s19g true
 check 229 "a commit-less grudge clears via the file-set match — contract:group:inv-t19" 0 "$RC"
 
+# (h) group_id is frozen at the group's OLDEST member — the first commit the
+#     guard ever saw — not at whichever member the grouping loop reaches first.
+#     Every other group-identity assertion in this file is relational
+#     (`A == B`, `unique|length`), and a newest-first walk satisfies all of them
+#     while naming the group after the wrong commit.
+hook_case t19h
+echo "S = 0" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "S = 1" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "fix(c): first touch of shared"
+T19H_C="$(sha_of "$HC_REPO" HEAD)"
+echo "S = 2" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "fix(d): second touch of shared"
+T19H_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s19h
+check 308 "the group id is the OLDEST member's own SHA — contract:group:inv-t19" "$T19H_C" \
+  "$(st "$HC_REPO" s19h ".sha_group[\"$T19H_C\"]")"
+check 309 "the later member carries that same frozen id — contract:group:inv-t19" "$T19H_C" \
+  "$(st "$HC_REPO" s19h ".sha_group[\"$T19H_D\"]")"
+
 # ========================================================================
 # INV-T20 — clearance is scoped to THIS Stop's in-scope set (round-14 Fatal 1)
 # ========================================================================
@@ -1612,7 +1841,7 @@ check 230 "a grudge naming the joiner clears the persisted group — contract:gr
 # ========================================================================
 # INV-T21 — join / merge re-arm
 # ========================================================================
-# contract:group:inv-t21 checks=22
+# contract:group:inv-t21 checks=32
 # (a) two disjoint count-1 groups bridged by a NEW candidate: merged count is
 #     max(1,1)=1, plus this Stop's single increment -> persisted 2. A summing
 #     implementation persists 3; a no-increment one persists 1.
@@ -1691,6 +1920,49 @@ check 218 "min(max(3,3),2)=2 plus one increment persists 3 — contract:group:in
 run_hook s21c true
 check 219 "the Stop after the equal-count merge allows — contract:group:inv-t21" 0 "$RC"
 
+# (d) UNEQUAL counts — the only shape that can tell the merge's max() from a
+#     min(). (a) merges 1 with 1 and (c) merges 3 with 3, and on equal inputs
+#     max, min, first-wins and last-wins are the same function. Here C's group
+#     stands at 2 and D's at 1 when E bridges them: max(2,1), clamped to
+#     MAX_BLOCKS-1, is 2, plus this Stop's single increment — so the merge Stop
+#     blocks at (3/3) and the NEXT Stop gives up. A min-taking merge persists 2,
+#     reports (2/3), and inverts block-vs-allow on the Stop after.
+hook_case t21d
+for f in x y z; do echo "V = 0" > "$HC_REPO/$f.py"; done
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/x.py"; echo "V = 1" > "$HC_REPO/y.py"
+commit_all "$HC_REPO" "fix(c): x and y"
+T21D_C="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21d
+check 310 "the older group blocks on its own first Stop — contract:group:inv-t21" 2 "$RC"
+echo "V = 1" > "$HC_REPO/z.py"; commit_all "$HC_REPO" "fix(d): z only"
+T21D_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21d true
+check 311 "the younger candidate arrives as a second counter — contract:group:inv-t21" 2 \
+  "$(st "$HC_REPO" s21d '.block_counts|length')"
+check 312 "the older counter stands at 2 before the merge — contract:group:inv-t21" 2 \
+  "$(st "$HC_REPO" s21d ".block_counts[.sha_group[\"$T21D_C\"]]")"
+check 313 "the younger counter stands at 1 before the merge — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21d ".block_counts[.sha_group[\"$T21D_D\"]]")"
+echo "V = 2" > "$HC_REPO/y.py"; echo "V = 2" > "$HC_REPO/z.py"
+commit_all "$HC_REPO" "fix(e): y and z bridge"
+T21D_E="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21d true
+check 314 "the unequal-count merge blocks on the merge Stop — contract:group:inv-t21" 2 "$RC"
+check 315 "the unequal merge reports (3/3), not (2/3) — contract:group:inv-t21" yes "$(has "$ERR" "(3/3)")"
+check 316 "the unequal merge collapses to one counter — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21d '.block_counts|length')"
+check 317 "min(max(2,1),2)=2 plus one increment persists 3 — contract:group:inv-t21" 3 \
+  "$(st "$HC_REPO" s21d ".block_counts[.sha_group[\"$T21D_E\"]]")"
+# The canonical id of a merged group is the lexicographically LOWER of the ids
+# it merged, asserted CONCRETELY: every other id assertion here is relational,
+# and a higher-wins rule satisfies all of them.
+check 318 "the merged group takes the lexicographically lower id — contract:group:inv-t21" \
+  "$(printf '%s\n%s\n' "$T21D_C" "$T21D_D" | LC_ALL=C sort | head -1)" \
+  "$(st "$HC_REPO" s21d ".sha_group[\"$T21D_E\"]")"
+run_hook s21d true
+check 319 "the Stop after the unequal-count merge gives up — contract:group:inv-t21" 0 "$RC"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -1703,7 +1975,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=282
+EXPECTED_CHECKS=323
 ROOT_SKIPPED_CHECKS=29
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

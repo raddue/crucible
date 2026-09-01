@@ -20,17 +20,30 @@ set +e
 
 MAX_BLOCKS=3
 
-# `git -C <dir>` ONLY chdirs — it does not clear GIT_DIR / GIT_WORK_TREE, which
-# outrank discovery-from-cwd. A Stop hook fires in exactly the environments
-# where those variables live, so every git call runs with a scrubbed
-# environment or it silently targets a different repository and the wrong
-# answer is indistinguishable from a right one.
+# `git -C <dir>` ONLY chdirs — it does not clear the environment, and git obeys
+# TWO families of inherited variable that outrank anything this hook says:
+#   * repository LOCATION — GIT_DIR, GIT_WORK_TREE, … — which outrank
+#     discovery-from-cwd and silently retarget every query at another repo;
+#   * repository CONFIGURATION — GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM,
+#     GIT_CONFIG_PARAMETERS (git's own `-c` transport, which git EXPORTS to
+#     every hook it spawns), and the INDEXED
+#     GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n triple — which leave
+#     the repo alone and change what git REPORTS about it
+#     (`i18n.logOutputEncoding`, `log.showSignature`, `core.quotePath` …).
+# A Stop hook fires in exactly the environments where both families live, and
+# either one turns a correct block into a silent allow: the wrong answer is
+# indistinguishable from a right one.
+#
+# This is therefore an ALLOWLIST, not a denylist — `env -i` plus the two
+# variables the hook genuinely needs: PATH (git must be findable at all) and
+# HOME (git's per-user config, where a legitimate `safe.directory` lives). A
+# denylist CANNOT be complete here even in principle: GIT_CONFIG_KEY_n is
+# INDEXED, so the set of names to drop is unbounded and no literal `env -u`
+# list can name them all. Everything git needs about the repository it is
+# being asked about arrives as an argument.
 _git() {
   local d="$1"; shift
-  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
-      -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_NAMESPACE \
-      -u GIT_CEILING_DIRECTORIES \
-      git -C "$d" "$@" 2>/dev/null
+  env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@" 2>/dev/null
 }
 
 # ── 1. Read stdin ───────────────────────────────────────────────────────
@@ -80,6 +93,25 @@ fi
 SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 if [ -z "$SESSION_ID" ]; then
   exit 0   # no session identity -> no state file is written
+fi
+# SESSION_ID is untrusted stdin and is used below as a PATH COMPONENT
+# ($STATE_DIR/$SESSION_ID.json, and the tmp name that `mv -f` lands on it), so
+# a payload of `../../../../settings` writes guard state on top of a file the
+# user owns. A Claude Code session id is a UUID-shaped token, so the id is
+# checked against a strict ALLOWLIST rather than by blocklisting `..` or `/`:
+# a blocklist has to anticipate every escape, an allowlist only has to name
+# what a real id contains. Rejection degrades to a LOUD ALLOW, per this hook's
+# own never-fail-closed contract (header, lines 10-11) — never a block, and
+# never a fallback to a shared default path, which a second session would then
+# collide with. The offending value is never echoed back: it is
+# attacker-shaped text on its way to a terminal.
+_reject_session_id() {
+  echo "grudge-resolution-guard: refusing a session_id that is not a plain identifier (allowed: A-Za-z0-9_-, at most 128 characters) — it names this session's state file and could otherwise be written outside $STATE_DIR. Allowing Stop; grudge compliance is NOT enforced." >&2
+  exit 0
+}
+case "$SESSION_ID" in *[!A-Za-z0-9_-]*) _reject_session_id ;; esac
+if [ "${#SESSION_ID}" -gt 128 ]; then
+  _reject_session_id
 fi
 TRANSCRIPT_PATH="$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)"
 # stop_hook_active is read ONLY to word the block message below; it never
@@ -209,6 +241,13 @@ SCAN_HEAD="$(_git "$SESSION_ROOT" rev-parse HEAD)"
 # (a) subject matches ^fix[(:]  (b) %at >= seeded_at  (c) >=1 non-.md path.
 # The subject is EVERYTHING after the second `|`, so an embedded `|` cannot
 # truncate it. --root so a parentless root commit still lists its paths.
+_has_non_md() {
+  # $1 = newline-separated RAW paths. BOTH branches of filter (c) — the fresh
+  # diff-tree and the persisted sha_files — call THIS one predicate, so the two
+  # can never disagree about the same commit.
+  printf '%s\n' "$1" | grep -qvE '\.md$'
+}
+
 IS_SHA=(); IS_AT=(); IS_FILES=()
 while IFS= read -r line; do
   [ -z "$line" ] && continue
@@ -222,13 +261,22 @@ while IFS= read -r line; do
   [ "$c_at" -ge "$SEEDED_AT" ] || continue
   c_files="${SHA_FILES[$c_sha]}"
   if [ -z "$c_files" ]; then
-    c_raw="$(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r "$c_sha")"
+    # `-z` (NUL-delimited RAW paths) is load-bearing, not a style choice.
+    # Without it `diff-tree --name-only` prints git's DISPLAY form, which
+    # C-quotes any path holding a non-ASCII byte, a `"` or a `\`
+    # (`"docs/caf\303\251.md"`) — and a quoted line ends in `.md"`, not `.md`,
+    # so the docs-only exclusion below reads it as a non-.md path and a
+    # DOCUMENTATION-ONLY fix(*) commit becomes a candidate and blocks, against
+    # INV-T14. The predicate must see the path, not its rendering. The raw form
+    # is also what gets persisted into sha_files, and therefore what the
+    # `--by-files` clearance lookup and the Step-15 prefill go on to use.
+    c_raw="$(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$c_sha" | tr '\0' '\n')"
     [ -z "$c_raw" ] && continue
-    printf '%s\n' "$c_raw" | grep -qvE '\.md$' || continue
+    _has_non_md "$c_raw" || continue
     c_files="$(printf '%s' "$c_raw" | tr '\n' ',')"
     c_files="${c_files%,}"
   else
-    printf '%s\n' "${c_files//,/$'\n'}" | grep -qvE '\.md$' || continue
+    _has_non_md "${c_files//,/$'\n'}" || continue
   fi
   IS_SHA+=("$c_sha"); IS_AT+=("$c_at"); IS_FILES+=("$c_files")
 done < <(printf '%s\n' "$LOG")
@@ -321,6 +369,21 @@ _lookup() {
   LOOKUP_OUT="$(python3 "$QUERY_SCRIPT" "$@" 2>/dev/null)"
   LOOKUP_RC=$?
 }
+_lookup_ok() {
+  # One lookup, and the ONE place the SIG-3 per-candidate degradation note is
+  # worded. Returns non-zero (caller `continue`s, leaving the candidate
+  # unresolved) iff the lookup could not be believed. Both lookups route
+  # through here on purpose: with a copy of this branch per lookup the two
+  # copies MASKED each other — deleting either one, or rewording the by-files
+  # one, turned no test red, because no fixture can fail the second lookup
+  # without failing the first. Reads the enclosing loop's $k_sha.
+  _lookup "$@"
+  if [ "$LOOKUP_RC" -ne 0 ]; then
+    echo "grudge-resolution-guard: clearance lookup failed for $k_sha (exit $LOOKUP_RC) — treating as unresolved" >&2
+    return 1
+  fi
+  return 0
+}
 for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   k_sha="${IS_SHA[$ci]}"
   k_at="${IS_AT[$ci]}"
@@ -330,22 +393,14 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
     GROUP_CLEARED["$k_gid"]=1
     continue
   fi
-  _lookup --by-commit "$k_sha" --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" \
-          --session-root "$SESSION_ROOT"
-  if [ "$LOOKUP_RC" -ne 0 ]; then
-    echo "grudge-resolution-guard: clearance lookup failed for $k_sha (exit $LOOKUP_RC) — treating as unresolved" >&2
-    continue
-  fi
+  _lookup_ok --by-commit "$k_sha" --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" \
+             --session-root "$SESSION_ROOT" || continue
   if [ -n "$LOOKUP_OUT" ]; then
     GROUP_CLEARED["$k_gid"]=1
     continue
   fi
-  _lookup --by-files "${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
-          --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" --session-root "$SESSION_ROOT"
-  if [ "$LOOKUP_RC" -ne 0 ]; then
-    echo "grudge-resolution-guard: clearance lookup failed for $k_sha (exit $LOOKUP_RC) — treating as unresolved" >&2
-    continue
-  fi
+  _lookup_ok --by-files "${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+             --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
   [ -n "$LOOKUP_OUT" ] && GROUP_CLEARED["$k_gid"]=1
 done
 # Clearance is a pure counter reset: sha_group / sha_files stay persisted.
