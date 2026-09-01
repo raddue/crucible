@@ -194,7 +194,6 @@ When (and only when) running standalone, emit ONE **Tier B STUB** JSONL line to 
 - The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — a missing emit must **never block** the skill.
 - Populate ONLY meaningful values: `schema_version: 2`, `run_id`, `skill: "test-coverage"`, `tier: "B"`, `verdict` (all affected tests pass post-alignment with no coincidence flags and no fix failures → `PASS`; coincidence tests flagged or fix failures needing caller judgment → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the audited test files, repo-relative), `artifact_type: "code"`.
 - Set ALL calibration fields EXPLICITLY null per "Tier-B null semantics": `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0`, `comment: null`, `backfilled: false`, `falsified: null`, `falsified_by: null`.
-- **No advisory wiring.** test-coverage emits PASS/FAIL but no probability, so Brier is not viable and no `brier_advisory` is read here by design.
 
 ## Guardrails
 

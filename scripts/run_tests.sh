@@ -130,18 +130,11 @@ run python3 scripts/test_488_inquisitor_integration.py
 run python3 scripts/test_488_inquisitor_edge.py
 run python3 scripts/test_488_inquisitor_state.py
 run python3 scripts/test_488_regression_inquisitor.py
-
-# --- Calibration dispatch / Brier advisory ---
-run python3 scripts/check_calibration_dispatch.py --selftest
-run python3 scripts/check_calibration_dispatch.py
-run python3 scripts/test_brier_advise.py
-run python3 scripts/test_calibrate_tolerance.py
-
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
 
-# --- Ledger GIT layer: falsification discovery (#439 / #441) ---
-run python3 scripts/test_reconcile_git.py
+# --- Central-store path resolution + emit CLI (#270; restored ex-eval, #460) ---
+run python3 scripts/test_central_store.py
 
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
@@ -152,13 +145,10 @@ run python3 scripts/test_qg_fix_pin.py
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
 
-# --- ledger weekly render core (#408 F16b) ---
-run python3 scripts/test_render_ledger.py
-
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
-# --- Central-store mutators: grudge / render_ledger / backfill (#398 Phase 3) ---
+# --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
 
 # --- Model-pin guardrail ---
@@ -168,6 +158,10 @@ run python3 scripts/check_model_pins.py
 # --- Ledger write-path guard ---
 run python3 scripts/check_ledger_write_path.py --selftest
 run python3 scripts/check_ledger_write_path.py
+
+# --- ledger-append.md reference-block drift (#460 round-4 S4) ---
+run python3 scripts/check_ledger_append_doc_drift.py --selftest
+run python3 scripts/check_ledger_append_doc_drift.py
 
 # --- #366 red-team <-> quality-gate receipt contract ---
 run python3 scripts/check_rt_receipt_contract.py --selftest

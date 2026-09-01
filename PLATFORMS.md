@@ -64,8 +64,6 @@ These skills require features specific to Claude Code. They will not work on oth
 | cartographer-skill | Persistent memory (`~/.claude/projects/<hash>/memory/cartographer/`) | Codebase maps must persist across sessions to accumulate knowledge |
 | project-init | Persistent cartographer memory + subagent scan | Onboarding output must persist across sessions, like cartographer's |
 | grudge | Machine-local per-repo persistent memory (regression graveyard) | Regression memory must persist across sessions to guard future edits |
-| ledger | Machine-local calibration ledger (`~/.claude/crucible/ledger/`) | Calibration history must persist to be meaningful |
-| calibration-reconcile | Machine-local ledger + git branch walkback | Falsification needs the persisted verdict history |
 | recall | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
 | consensus | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |

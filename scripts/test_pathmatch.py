@@ -2,10 +2,12 @@
 """Tests for scripts/pathmatch.py — the single source of truth for path-aware
 glob, extracted from the verbatim `_glob_match` duplication (#401).
 
-Pins both the matching contract AND the no-drift guarantee: reconcile_ledger
-and grudge_query must reference the SAME function object, so a future edit to
-one cannot silently diverge the other (the exact hazard #401 flagged — wrong
-glob semantics silently flip a Brier `actual`)."""
+Pins both the matching contract and the no-drift guarantee: grudge_query must
+reference the SAME function object as this module's `glob_match`, so a future
+edit to one cannot silently diverge the other (the exact hazard #401 flagged —
+wrong glob semantics silently flip a Brier `actual`). reconcile_ledger's
+counterpart identity check moved with reconcile_ledger.py to
+raddue/crucible-eval (#460)."""
 import os
 import sys
 import unittest
@@ -45,12 +47,12 @@ class GlobMatchContractTest(unittest.TestCase):
 
 
 class NoDriftIdentityTest(unittest.TestCase):
-    """#401 anti-drift: the two former copies are now the SAME object."""
+    """#401 anti-drift: grudge_query's copy is the canonical implementation,
+    not a forked duplicate. (reconcile_ledger's counterpart identity check
+    moved with reconcile_ledger.py to raddue/crucible-eval — #460.)"""
 
-    def test_reconcile_and_grudge_share_one_implementation(self):
-        from scripts import reconcile_ledger as rl
+    def test_grudge_uses_canonical_implementation(self):
         from scripts import grudge_query as gq
-        self.assertIs(rl._glob_match, glob_match)
         self.assertIs(gq._glob_match, glob_match)
 
 

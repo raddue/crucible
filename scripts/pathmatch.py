@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Path-aware glob matching — the single source of truth (#401).
 
-Extracted from the verbatim-duplicated `_glob_match` that lived in BOTH
-`reconcile_ledger.py` and `grudge_query.py` (PR #340). Both copies feed the
-central calibration ledger / grudge store, and reconcile's copy carries the
-warning that wrong semantics silently flip a Brier `actual` value — so a fix
+Extracted from the verbatim-duplicated `_glob_match` that had lived in BOTH
+`reconcile_ledger.py` and `grudge_query.py` (PR #340) — the two copies fed the
+central calibration ledger / grudge store, and reconcile's copy carried a
+warning that wrong semantics silently flip a Brier `actual` value, so a fix
 landing in one copy while the other drifted was a correctness hazard. There is
-now one implementation; `test_pathmatch.py` pins its contract.
+one implementation; `grudge_query.py` is its sole surviving caller in this
+repo (`reconcile_ledger.py` moved to raddue/crucible-eval, #460).
+`test_pathmatch.py` pins its contract.
 
 Pure stdlib. No third-party deps.
 """
