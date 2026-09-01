@@ -115,7 +115,26 @@ fi
 QUERY_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_query.py"
 APPEND_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_append.py"
 
-declare -A SHA_GROUP SHA_FILES BLOCK_COUNTS
+declare -A SHA_GROUP SHA_FILES BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP
+
+# ── The durable baseline the block predicate (step 14b) measures against ─
+# What was ON DISK for this session when this Stop began, read with NO
+# acceptance gate of any kind — not step 9/10's `seeded_at`/checkpoint test,
+# not any other. A baseline taken after that gate cannot detect a freeze: the
+# gate is free to discard the very counters termination depends on (it does,
+# for an unresolvable checkpoint and for a `seeded_at` of 0), and a Stop that
+# then recomputes the same counter up from zero would read its own write back
+# as "progress" every single time. Non-numeric counters are ignored rather
+# than trusted; an absent, empty, unreadable or unparseable file yields an
+# empty baseline, which is the safe direction (0 can only be under-counted by
+# a real freeze, never over-counted).
+while IFS=$'\t' read -r pk pv; do
+  case "$pv" in ''|*[!0-9]*) continue ;; esac
+  [ -n "$pk" ] && PRIOR_COUNTS["$pk"]="$pv"
+done < <(jq -r '(.block_counts // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
+while IFS=$'\t' read -r pk pv; do
+  [ -n "$pk" ] && [ -n "$pv" ] && PRIOR_GROUP["$pk"]="$pv"
+done < <(jq -r '(.sha_group // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
 
 _load_maps() {
   while IFS=$'\t' read -r k v; do
@@ -399,40 +418,70 @@ _write_state() {
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
-  # READ BACK — the one predicate the whole termination argument rests on.
-  # `mv` reporting success is not proof the intended document is now at
-  # $STATE_FILE (a DIRECTORY there swallows the tmp and still exits 0), and a
-  # write truncated mid-flight lands non-empty invalid JSON. So compare what
-  # this Stop meant to persist — its checkpoint AND every counter it just
-  # computed — against what actually reads back. This subsumes a bare
-  # `jq -e . "$STATE_FILE"` parse gate: unparseable input makes jq exit
-  # non-zero, `got` empty, and the comparison fail. Kept as ONE predicate on
-  # purpose; a separate parse gate would be untestable dead redundancy.
-  local want got
-  want="$( { printf 'L\t%s\n' "$LAST_NEW"
-             for s in "${!BLOCK_COUNTS[@]}"; do printf 'B\t%s\t%s\n' "$s" "${BLOCK_COUNTS[$s]}"; done
-           } | LC_ALL=C sort )"
-  got="$(jq -r '"L\t\(.last_checked_sha // "")", ((.block_counts // {}) | to_entries[] | "B\t\(.key)\t\(.value)")' \
-           "$STATE_FILE" 2>/dev/null | LC_ALL=C sort)"
-  [ "$want" = "$got" ] || return 1
   return 0
 }
+# Best-effort writer: its return value is NOT the block gate. Whether anything
+# durable happened is settled below, by reading the file back off disk.
 _write_state
-STATE_WRITTEN=$?
 
-# A block is only safe once THIS Stop's own counter is durable. The predicate is
-# "did this write land", verified by reading it back — NOT "is there a non-empty
-# file here": a stale file from an earlier successful persist satisfies
-# file-existence while the counter inside it is frozen, and the block then never
-# reaches MAX_BLOCKS. With a frozen or absent counter every Stop is a fresh
-# first Stop, the loop is unbreakable, and both escape hatches (skips.log and
-# the sentinel kill-switch) live under this same unwritable directory. Degrade
-# to allow, loudly, exactly like every other infra failure in this hook.
-# Corollary the block message below depends on: reaching this point proves a
-# file of ours landed in $STATE_DIR, so the `>> skips.log` remedy it prescribes
-# is writable — the hook never prints a hatch it has not just proven usable.
-if [ "$STATE_WRITTEN" -ne 0 ] || [ ! -s "$STATE_FILE" ]; then
-  echo "grudge-resolution-guard: could not persist state to $STATE_FILE — the write did not land or did not read back intact. Without a durable counter every Stop restarts at 1 and the block would never end. Allowing Stop; grudge compliance is NOT enforced. Check that $PROJECT_MEMORY exists, is writable, and has free space." >&2
+# ── 14b. THE block predicate: DEMONSTRATED DURABLE PROGRESS ─────────────
+# MAX_BLOCKS bounds a block only if the counter it bounds actually moves. So a
+# Stop may block only once it can SHOW, from disk, that every group it is about
+# to block got closer to the give-up bound:
+#
+#   the counter this Stop computed for the group is the counter now on disk for
+#   it, AND that counter is strictly greater than the counter that was on disk
+#   for the same group before this Stop ran — or has reached MAX_BLOCKS, from
+#   which the very next Stop gives up.
+#
+# One predicate, and an OBSERVED one rather than a modelled one: a freeze just
+# IS "the durable counter did not move", so no mechanism can produce a freeze
+# this misses — not an absent, unwritable, full, truncated, externally
+# clobbered or directory-shaped state path, not a `seeded_at`/checkpoint the
+# next Stop's own loader will reject, not a renamed group key, not a clock that
+# moved, not one nobody has enumerated. It therefore SUBSUMES, and replaces,
+# both earlier per-mechanism gates: a write that did not land cannot read back
+# as the value this Stop computed (the old `_write_state` read-back), and an
+# empty/absent/directory state path yields no counter at all (the old
+# `test -s "$STATE_FILE"` clause). Anything short of that is degraded to a loud
+# allow, exactly like every other infra failure in this hook — never a block,
+# because with a frozen counter the loop is unbreakable and both escape hatches
+# (skips.log and the sentinel kill-switch) live under that same directory.
+# Corollary the block message below depends on: passing this predicate proves
+# the document this Stop wrote is on disk in $STATE_DIR, so the `>> skips.log`
+# remedy it prescribes is writable — the hook never prints a hatch it has not
+# just proven usable.
+_prior_block_count() {
+  # The highest counter that was DURABLY ON DISK for the group now called $1.
+  # Group ids are not stable names — step 12 re-canonicalises them on merge,
+  # and a discarded state file makes step 12 mint them afresh — so the lookup
+  # follows the group's MEMBERS back to the ids they carried on disk and takes
+  # the maximum. Max is the conservative direction: too high a baseline can
+  # only cost an extra degraded allow, never a block that cannot terminate.
+  local g="$1" best="${PRIOR_COUNTS[$g]:-0}" s p c
+  for s in "${!SHA_GROUP[@]}"; do
+    [ "${SHA_GROUP[$s]}" = "$g" ] || continue
+    p="${PRIOR_GROUP[$s]}"
+    [ -n "$p" ] || continue
+    c="${PRIOR_COUNTS[$p]:-0}"
+    [ "$c" -gt "$best" ] && best="$c"
+  done
+  printf '%s' "$best"
+}
+
+_progress_demonstrated() {
+  local g want now
+  for g in "${BLOCKING[@]}"; do
+    want="${BLOCK_COUNTS[$g]}"
+    now="$(jq -r --arg g "$g" '(.block_counts // {})[$g] // empty | tostring' "$STATE_FILE" 2>/dev/null)"
+    [ "$now" = "$want" ] || return 1
+    [ "$now" -gt "$(_prior_block_count "$g")" ] || [ "$now" -ge "$MAX_BLOCKS" ] || return 1
+  done
+  return 0
+}
+
+if [ "${#BLOCKING[@]}" -gt 0 ] && ! _progress_demonstrated; then
+  echo "grudge-resolution-guard: could not persist state to $STATE_FILE — this Stop cannot demonstrate that its block counter advanced on disk, so blocking could never reach the give-up bound and the loop would be unbreakable. Allowing Stop; grudge compliance is NOT enforced. Check that $PROJECT_MEMORY exists, is writable, and has free space." >&2
   exit 0
 fi
 

@@ -969,7 +969,7 @@ check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22
 # "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
 # check". They additionally support INV-C8's grep-checked degradation clause.
 # ========================================================================
-# contract:hook:inv-t23 checks=42
+# contract:hook:inv-t23 checks=52
 hook_case t23nongit
 mkdir -p "$HC_ROOT/notgit"
 HC_CWD="$HC_ROOT/notgit"
@@ -1183,6 +1183,64 @@ check 248 "a write that cannot be read back allows — contract:hook:inv-t23" 0 
 check 249 "the unreadable-back Stop announces the failure — contract:hook:inv-t23" yes \
   "$(has "$ERR" "could not persist state")"
 check 250 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+
+# C1". The third mechanism of the same class, and the one that shows why the
+# gate has to be PROGRESS and not landing: the hook writes, ITSELF, a state
+# file with `seeded_at: 0` (the transcript's earliest timestamp is the unix
+# epoch, so step 10's own derivation yields 0). That document lands perfectly
+# and reads back byte-for-byte — and is then REJECTED by the next Stop's own
+# loader at line 159, which throws `block_counts` away with it. Against any
+# landing-only gate every Stop is a fresh first Stop at (1/3), forever, with no
+# degradation note at all. Only comparing the counter now on disk against the
+# counter that was on disk BEFORE the Stop catches it. Needs no special uid and
+# no external tampering.
+hook_case t23seed0
+printf '{"type":"user","timestamp":"1970-01-01T00:00:00.000Z"}\n' > "$HC_TRANSCRIPT"
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23seed0
+check 251 "premise: the epoch-transcript Stop 1 blocks — contract:hook:inv-t23" 2 "$RC"
+check 252 "premise: the hook derived seeded_at 0 itself — contract:hook:inv-t23" 0 \
+  "$(st "$HC_REPO" s23seed0 '.seeded_at')"
+check 253 "premise: that write did persist a counter of 1 — contract:hook:inv-t23" 1 \
+  "$(st "$HC_REPO" s23seed0 '[.block_counts[]]|add')"
+run_hook s23seed0 true
+check 254 "a counter its own loader discards is never blocked on — contract:hook:inv-t23" 0 "$RC"
+check 255 "the un-advanced-counter Stop announces the failure — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "could not persist state")"
+check 256 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+run_hook s23seed0 true
+check 257 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+
+# The one state where "the counter on disk reached MAX_BLOCKS" is NOT this
+# Stop's own achievement: a stale on-disk counter already at MAX_BLOCKS, under
+# a state file the loader rejects (`seeded_at: 0`), on a dir where no write can
+# ever land. This Stop legitimately computes 1 — but 3 is what is on disk, and
+# a progress test that read the disk value without also demanding it be the
+# value THIS Stop computed would see "3 >= MAX_BLOCKS" and block, forever. The
+# durability half of the predicate is what refuses it.
+hook_case t23stalemax
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T23SM_FIX="$(sha_of "$HC_REPO" HEAD)"
+mkdir -p "$(guard_dir "$HC_REPO")"
+cat > "$(guard_dir "$HC_REPO")/s23stalemax.json" <<STALEMAXJSON
+{"last_checked_sha":"$T23SM_FIX","seeded_at":0,
+ "sha_group":{"$T23SM_FIX":"$T23SM_FIX"},"sha_files":{"$T23SM_FIX":["app.py"]},
+ "block_counts":{"$T23SM_FIX":3}}
+STALEMAXJSON
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: the stale-at-MAX_BLOCKS fixture needs a non-root uid"
+else
+  chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  run_hook s23stalemax true
+  check 258 "a stale counter already at MAX_BLOCKS is not this Stop's progress — contract:hook:inv-t23" 0 "$RC"
+  check 259 "the stale-at-MAX_BLOCKS Stop announces the failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "could not persist state")"
+  check 260 "it never blocks on a counter it did not write — contract:hook:inv-t23" no \
+    "$(has "$ERR" "attempt (")"
+  chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+fi
 
 # ========================================================================
 # INV-T24 — store-presence bootstrap across BOTH identity keys
@@ -1517,8 +1575,8 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=250
-ROOT_SKIPPED_CHECKS=18
+EXPECTED_CHECKS=260
+ROOT_SKIPPED_CHECKS=21
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
     echo "SKIPPED: $ROOT_SKIPPED_CHECKS of $EXPECTED_CHECKS checks did not run (root uid cannot exercise the unreadable-store paths)"
