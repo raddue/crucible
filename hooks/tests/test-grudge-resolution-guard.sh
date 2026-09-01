@@ -952,7 +952,7 @@ check 117 "seeded_at is an integer epoch, not a string — contract:hook:inv-t22
 # "first-ever invocation mkdir -p's grudge-guard/ before any kill-switch
 # check". They additionally support INV-C8's grep-checked degradation clause.
 # ========================================================================
-# contract:hook:inv-t23 checks=20
+# contract:hook:inv-t23 checks=26
 hook_case t23nongit
 mkdir -p "$HC_ROOT/notgit"
 HC_CWD="$HC_ROOT/notgit"
@@ -1055,10 +1055,50 @@ echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair
 run_hook_raw "{ this is not json"
 check 137 "a malformed JSON payload allows — contract:hook:inv-t23" 0 "$RC"
 
+# An unpersistable state file must degrade to ALLOW: with no durable state every
+# Stop is a fresh first Stop, the counter restarts at (1/3), MAX_BLOCKS is never
+# reached — and both escape hatches (skips.log and the sentinel) live under that
+# same directory, so the loop would be unbreakable. `memory` is created as a
+# regular FILE, so `mkdir -p .../memory/grudge-guard` fails with ENOTDIR for
+# every uid, root included.
+hook_case t23nostate
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+run_hook s23nostate
+check 220 "premise: this fixture blocks while the state file IS writable — contract:hook:inv-t23" 2 "$RC"
+rm -rf "$(mem_dir "$HC_REPO")"
+mkdir -p "$(dirname "$(mem_dir "$HC_REPO")")"
+: > "$(mem_dir "$HC_REPO")"
+run_hook s23nostate true
+check 221 "an unpersistable state file allows instead of blocking — contract:hook:inv-t23" 0 "$RC"
+check 222 "the degraded Stop says the state could not be persisted — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "could not persist state")"
+run_hook s23nostate true
+check 223 "the next Stop allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+
+# `git -C` only chdirs: an inherited GIT_DIR/GIT_WORK_TREE still outranks it, so
+# without the hook's `env -u` scrub every git call would silently resolve the
+# OTHER repo and the guard would degrade into a silent, stderr-free allow.
+hook_case t23gitenv
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+T23GE_FIX="$(sha_of "$HC_REPO" HEAD)"
+T23GE_OTHER="$HC_ROOT/otherrepo"
+new_repo "$T23GE_OTHER"
+T23GE_OTHER="$(cd "$T23GE_OTHER" && pwd -P)"
+echo "OTHER = 0" > "$T23GE_OTHER/other.py"
+commit_all "$T23GE_OTHER" "chore: unrelated baseline"
+HOOK_ENV="GIT_DIR=$T23GE_OTHER/.git GIT_WORK_TREE=$T23GE_OTHER"
+run_hook s23gitenv
+HOOK_ENV=""
+check 224 "an inherited GIT_DIR cannot redirect the hook git calls — contract:hook:inv-t23" 2 "$RC"
+check 225 "the session repo own candidate is still named — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "$T23GE_FIX")"
+
 # ========================================================================
 # INV-T24 — store-presence bootstrap across BOTH identity keys
 # ========================================================================
-# contract:hook:inv-t24 checks=5
+# contract:hook:inv-t24 checks=7
 # (a) the linked-worktree shape: the worktree's own basename key has no store
 #     dir, but the shared-clone key does — enforcement must still run.
 hook_case t24wt
@@ -1076,6 +1116,13 @@ check 138 "fixture: the worktree key really differs from the shared key — cont
 run_hook s24wt
 check 139 "shared-clone store present blocks from a linked worktree — contract:hook:inv-t24" 2 "$RC"
 check 140 "the worktree candidate is named — contract:hook:inv-t24" yes "$(has "$ERR" "$T24_FIX")"
+# The prefill's identity pair is UNCONDITIONALLY the shared clone's. This is the
+# only fixture where that is discriminating: here the worktree pair
+# (linked/, "linked") and the shared-clone pair ($HC_REPO, "$HC_KEY") differ.
+check 231 "prefill uses the shared-clone --repo-root, not the worktree's — contract:hook:inv-t24" yes \
+  "$(has "$ERR" "--repo-root \"$HC_REPO\"")"
+check 232 "prefill uses the shared-clone --repo key, not the worktree key — contract:hook:inv-t24" yes \
+  "$(has "$ERR" "--repo \"$HC_KEY\"")"
 
 # (b) neither key has a store dir -> allow once, loudly.
 hook_case t24none
@@ -1090,7 +1137,7 @@ check 142 "both store keys absent says so — contract:hook:inv-t24" yes "$(has 
 # INV-T19 — grouping by changed-file overlap, one increment per group per
 # Stop, and the clearance counter reset
 # ========================================================================
-# contract:group:inv-t19 checks=45
+# contract:group:inv-t19 checks=49
 # (a) two candidates sharing NO files -> two independent one-member groups
 hook_case t19a
 echo "A = 0" > "$HC_REPO/a.py"; echo "B = 0" > "$HC_REPO/b.py"
@@ -1216,13 +1263,45 @@ check 186 "the joiner re-blocks at (2/3) — contract:group:inv-t19" yes "$(has 
 run_hook s19e true
 check 187 "the joiner re-blocks at (3/3) — contract:group:inv-t19" yes "$(has "$ERR" "(3/3)")"
 
+# (f) the GRUDGE half of the clearance clause: one recorded grudge naming ONE
+#     member of a shared-file group clears the whole group (exact-commit match).
+#     The grudge names the OLDER member and carries a fixed_in_commit that is
+#     reachable from HEAD, so the file-set branch cannot match it.
+hook_case t19f
+echo "S = 0" > "$HC_REPO/shared.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "S = 1" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "fix(shared): part one"
+T19F_A="$(sha_of "$HC_REPO" HEAD)"
+echo "S = 2" > "$HC_REPO/shared.py"; commit_all "$HC_REPO" "fix(shared): part two"
+run_hook s19f
+check 226 "premise: the un-grudged pair blocks — contract:group:inv-t19" 2 "$RC"
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "shared.py regressed" "shared.py" \
+  "$T19F_A" "2026-05-01" >/dev/null
+run_hook s19f true
+check 227 "one grudge naming either same-Stop member clears both — contract:group:inv-t19" 0 "$RC"
+
+# (g) the file-set half: a grudge with NO fixed_in_commit, two surviving files
+#     that are a subset of the candidate's, and date_fixed on or before the
+#     candidate's UTC author date, clears it with no commit id involved.
+hook_case t19g
+echo "P = 0" > "$HC_REPO/p.py"; echo "Q = 0" > "$HC_REPO/q.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "P = 1" > "$HC_REPO/p.py"; echo "Q = 1" > "$HC_REPO/q.py"
+commit_all "$HC_REPO" "fix(pq): repair p and q"
+run_hook s19g
+check 228 "premise: the un-grudged candidate blocks — contract:group:inv-t19" 2 "$RC"
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "p and q regressed together" "p.py,q.py" \
+  "" "2026-04-01" >/dev/null
+run_hook s19g true
+check 229 "a commit-less grudge clears via the file-set match — contract:group:inv-t19" 0 "$RC"
+
 # ========================================================================
 # INV-T20 — clearance is scoped to THIS Stop's in-scope set (round-14 Fatal 1)
 # ========================================================================
 # The complementary fixture — asserting C2 is ALLOWED unblocked on the join
 # Stop — must FAIL against the implementation; that is the regression this
 # scenario exists to catch.
-# contract:group:inv-t20 checks=10
+# contract:group:inv-t20 checks=11
 hook_case t20
 echo "H = 0" > "$HC_REPO/hub.py"
 commit_all "$HC_REPO" "chore: baseline"
@@ -1248,6 +1327,12 @@ check 195 "C2 is named in the block message — contract:group:inv-t20" yes "$(h
 check 196 "C1's old skip confers nothing on C2 — contract:group:inv-t20" yes "$(has "$ERR" "(1/3)")"
 check 197 "C2 really did join C1's persisted group — contract:group:inv-t20" true \
   "$(st "$HC_REPO" s20 ".sha_group[\"$T20_C2\"] == .sha_group[\"$T20_C1\"]")"
+# The grudge half of the same clause: a recorded grudge naming the joiner does
+# clear the persisted group on the next Stop.
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "hub.py regressed again" "hub.py" \
+  "$T20_C2" "2026-05-01" >/dev/null
+run_hook s20 true
+check 230 "a grudge naming the joiner clears the persisted group — contract:group:inv-t20" 0 "$RC"
 
 # ========================================================================
 # INV-T21 — join / merge re-arm
@@ -1335,10 +1420,13 @@ check 219 "the Stop after the equal-count merge allows — contract:group:inv-t2
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
 
+# Checks 220+ are round-1 review additions, numbered from the end on purpose:
+# they sit inside their own scenario blocks, so renumbering in place would have
+# rewritten every later check id and broken the mutation report's citations.
 # TOTAL accumulates per `check`, so a skipped scenario shrinks the denominator
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the three chmod-000 fixtures), and even then it is announced.
-EXPECTED_CHECKS=219
+EXPECTED_CHECKS=232
 ROOT_SKIPPED_CHECKS=10
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

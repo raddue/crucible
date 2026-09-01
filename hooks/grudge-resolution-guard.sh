@@ -8,7 +8,8 @@
 #
 # Exit 0 = allow, exit 2 = block (Claude Code's Stop contract only blocks on 2).
 # Every infra failure — missing jq/git, malformed payload, unreadable
-# transcript, non-git cwd, absent grudge store — allows. Never fail closed.
+# transcript, non-git cwd, absent grudge store, unwritable state dir — allows.
+# Never fail closed.
 #
 # Configured in .claude/settings.json:
 #   "hooks": { "Stop": [{ "matcher": "*", "hooks": [{ "type": "command",
@@ -394,6 +395,16 @@ _write_state() {
   fi
 }
 _write_state
+
+# A block is only safe once its counter is durable. With no state file every
+# Stop is a fresh first Stop: the counter restarts at 1, MAX_BLOCKS is never
+# reached, and the loop is unbreakable — and both escape hatches (skips.log and
+# the sentinel kill-switch) live under this same unwritable directory. Degrade
+# to allow, loudly, exactly like every other infra failure in this hook.
+if [ ! -s "$STATE_FILE" ]; then
+  echo "grudge-resolution-guard: could not persist state to $STATE_FILE — without it every Stop restarts the counter at 1 and the block would never end. Allowing Stop; grudge compliance is NOT enforced. Check that $PROJECT_MEMORY exists and is writable." >&2
+  exit 0
+fi
 
 # ── 15. Messages ────────────────────────────────────────────────────────
 _prefill() {
