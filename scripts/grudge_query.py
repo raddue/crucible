@@ -309,20 +309,35 @@ def cull(repo: str, repo_root: str, base_dir: Optional[str] = None) -> List[str]
 # distinct: a linked worktree shares the store of its checkout root but has    #
 # its own HEAD and its own on-disk files.                                     #
 # --------------------------------------------------------------------------- #
-# `git -C <dir>` only chdirs — it does NOT clear the repository-location
-# environment variables, which take precedence over discovery-from-cwd. An
-# inherited GIT_DIR (a Stop hook firing while a git hook is on the stack, or any
-# shell that exported it) would silently send every call below at a DIFFERENT
-# repository, and the resulting miss is indistinguishable from a genuine one.
-# Every git subprocess therefore runs with these dropped.
-_GIT_ENV_DROP = (
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
-)
+# `git -C <dir>` only chdirs — it does NOT clear the inherited environment, and
+# two families of variables there outrank everything on the command line:
+#   * repository LOCATION — GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, … — which
+#     take precedence over discovery-from-cwd, so an inherited GIT_DIR (a Stop
+#     hook firing while a git hook is on the stack, or any shell that exported
+#     it) silently sends every call below at a DIFFERENT repository;
+#   * git CONFIG — GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n,
+#     GIT_CONFIG_GLOBAL and GIT_CONFIG_PARAMETERS (`git -c`'s own transport).
+#     A single bad key in any of them turns EVERY call here into
+#     `fatal: unable to parse command-line config` (rc=128), which this module
+#     reads as an ordinary miss — measured: with `GIT_CONFIG_COUNT=1` inherited,
+#     a --by-commit lookup that answers `matched=1` answers `matched=0` instead,
+#     so the Stop hook's step-13 clearance flips from cleared to blocked with
+#     nothing in its output to say why.
+# Either way the wrong answer is indistinguishable from a right one.
+#
+# This is therefore an ALLOWLIST, not a denylist, mirroring the Stop hook's own
+# `env -i PATH HOME git` (hooks/grudge-resolution-guard.sh). A denylist CANNOT
+# be complete here even in principle: GIT_CONFIG_KEY_n is INDEXED, so the set of
+# names to drop is unbounded and no literal tuple can name them all. git is
+# handed only what it genuinely needs — PATH (git must be findable at all) and
+# HOME (git's per-user config, where a legitimate `safe.directory` lives).
+# Everything git needs about the repository it is being asked about arrives as
+# an argument, which covers the repository-location family for free.
+_GIT_ENV_KEEP = ("PATH", "HOME")
 
 
 def _git_env() -> Dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k not in _GIT_ENV_DROP}
+    return {k: os.environ[k] for k in _GIT_ENV_KEEP if k in os.environ}
 
 
 def _git(session_root: str, *args: str) -> Tuple[int, str]:

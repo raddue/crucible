@@ -996,5 +996,117 @@ class TestIsoParserUnified(unittest.TestCase):
         self.assertIs(rl._parse_iso, rc._parse_iso)
 
 
+class GitEnvAllowlistTest(unittest.TestCase):
+    """#559: grudge_query's git subprocesses must be immune to the inherited
+    environment. The Stop hook shells out to this script for its step-13
+    clearance decision, so any variable that changes an answer here changes a
+    clearance verdict — silently, and indistinguishably from a genuine miss.
+
+    `_git_env` is an ALLOWLIST for a reason a denylist cannot satisfy:
+    GIT_CONFIG_KEY_n is INDEXED, so the set of names to drop is unbounded."""
+
+    # The seven repository-location variables the original denylist named.
+    # Task 6's highest-consequence finding — an allowlist must still exclude
+    # every one of them.
+    LOCATION_VARS = (
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.bad_cfg = os.path.join(self.tmp, "bad.cfg")
+        with open(self.bad_cfg, "w") as fh:
+            fh.write("bad [ line\n")
+        self.repo = os.path.join(self.tmp, "repo")
+        self.store = os.path.join(self.tmp, "store")
+        os.makedirs(self.repo)
+        os.makedirs(os.path.join(self.store, "probe", "grudges"))
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
+        subprocess.run(["git", "-C", self.repo, "init", "-q"], check=True,
+                       capture_output=True)
+        with open(os.path.join(self.repo, "f.txt"), "w") as fh:
+            fh.write("a\n")
+        subprocess.run(["git", "-C", self.repo, "add", "f.txt"], check=True,
+                       capture_output=True)
+        subprocess.run(["git", "-C", self.repo, "commit", "-q", "-m", "fix"],
+                       check=True, capture_output=True, env=env)
+        self.repo_root = os.path.realpath(self.repo)
+        self.sha = subprocess.run(
+            ["git", "-C", self.repo, "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True).stdout.strip()
+        with open(os.path.join(self.store, "probe", "grudges", "g1.md"), "w") as fh:
+            fh.write("---\nschema: 1\nhash: h\nrepo: probe\n"
+                     f"repo_root: {self.repo_root}\n"
+                     f"fixed_in_commit: {self.sha[:7]}\n"
+                     'symptom: s\nroot_cause: r\nfiles_touched: ["f.txt"]\n'
+                     'anti_pattern_signature: ""\ndate_fixed: 2026-01-01\n'
+                     "---\nbody\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _channels(self):
+        """The four inherited-config transports, each on its own. Every one of
+        them alone makes git exit 128 on EVERY invocation."""
+        return {
+            "GIT_CONFIG_COUNT": {"GIT_CONFIG_COUNT": "1"},
+            "GIT_CONFIG_KEY_n": {"GIT_CONFIG_COUNT": "10",
+                                 "GIT_CONFIG_KEY_9": "nosection",
+                                 "GIT_CONFIG_VALUE_9": "x"},
+            "GIT_CONFIG_PARAMETERS": {"GIT_CONFIG_PARAMETERS": "'nosection=x'"},
+            "GIT_CONFIG_GLOBAL": {"GIT_CONFIG_GLOBAL": self.bad_cfg},
+        }
+
+    def test_env_handed_to_git_is_an_allowlist_not_a_denylist(self):
+        # Whatever is in the ambient environment, git sees at most PATH+HOME.
+        # A denylist can only ever grow; this is the check that closes the class.
+        poison = {"GIT_CONFIG_COUNT": "10", "GIT_CONFIG_KEY_9": "nosection",
+                  "GIT_CONFIG_VALUE_9": "x", "GIT_CONFIG_GLOBAL": self.bad_cfg,
+                  "GIT_CONFIG_PARAMETERS": "'nosection=x'",
+                  "GIT_DIR": "/nope.git", "GIT_WORK_TREE": "/nope",
+                  "SOMETHING_ELSE": "1"}
+        with mock.patch.dict(os.environ, poison):
+            keys = set(gq._git_env())
+        self.assertTrue(keys <= {"PATH", "HOME"},
+                        f"_git_env must be an allowlist; leaked {sorted(keys - {'PATH', 'HOME'})}")
+
+    def test_seven_repository_location_vars_still_excluded(self):
+        # Task 6's env-scrub lesson must not regress: an inherited GIT_DIR &co
+        # outrank `git -C` and silently retarget every call at another repo.
+        with mock.patch.dict(os.environ, {v: "/nope" for v in self.LOCATION_VARS}):
+            keys = set(gq._git_env())
+        for v in self.LOCATION_VARS:
+            self.assertNotIn(v, keys)
+
+    def test_poison_channels_are_potent_against_raw_git(self):
+        # Guards the behavioural test below against going vacuous: if a future
+        # git ignored these variables, the test would "pass" while proving
+        # nothing. Each channel must actually break a raw git call.
+        for name, poison in self._channels().items():
+            with self.subTest(channel=name):
+                proc = subprocess.run(
+                    ["git", "-C", self.repo, "rev-parse", "--verify",
+                     self.sha + "^{commit}"],
+                    capture_output=True, text=True,
+                    env=dict(os.environ, **poison))
+                self.assertNotEqual(proc.returncode, 0)
+
+    def test_inherited_git_config_cannot_change_a_clearance_answer(self):
+        # The discriminating check: the SAME lookup, with and without each
+        # config channel inherited, must give the SAME answer. Before the
+        # allowlist this returned the grudge on a clean env and None under
+        # every one of these — a clearance flipped by the environment alone.
+        for name, poison in self._channels().items():
+            with self.subTest(channel=name):
+                env = dict(poison, CRUCIBLE_GRUDGE_DIR=self.store)
+                with mock.patch.dict(os.environ, env):
+                    hit = gq.find_by_commit(self.sha, "probe", self.repo_root,
+                                            self.repo_root)
+                self.assertIsNotNone(hit, f"{name} silently emptied the lookup")
+                self.assertTrue(hit["_path"].endswith("g1.md"))
+
+
 if __name__ == "__main__":
     unittest.main()
