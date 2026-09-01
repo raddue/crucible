@@ -122,7 +122,7 @@ nonempty() { if [ -n "$1" ]; then echo "yes"; else echo "no"; fi; }
 # ========================================================================
 # INV-T15 — exact fixed_in_commit match via --by-commit
 # ========================================================================
-# contract:match:inv-t15 checks=4
+# contract:match:inv-t15 checks=6
 R1="$TMPROOT/r15"; new_repo "$R1"; R1="$(cd "$R1" && pwd -P)"
 echo "print('v0')" > "$R1/app.py"
 commit_all "$R1" "base"
@@ -144,6 +144,16 @@ run_query "$S15B" --by-commit "$C15" --repo-root "$R1" --repo k15b --session-roo
 check 3 "unresolvable stored SHA is a miss not an error, rc — contract:match:inv-t15" 0 "$RC"
 check 4 "unresolvable stored SHA is a miss not an error, stdout — contract:match:inv-t15" "" "$OUT"
 
+# The same unresolvable 40-char token on BOTH sides. A _resolve_commit that
+# passed its argument through instead of returning None would compare the two
+# raw strings, find them equal, and report a false match.
+S15C="$TMPROOT/store15c"
+BOGUS15="cafebabe11111111111111111111111111111111"
+append_grudge "$S15C" k15c "$R1" "both sides unresolvable" "app.py" "$BOGUS15" "2026-05-01" >/dev/null
+run_query "$S15C" --by-commit "$BOGUS15" --repo-root "$R1" --repo k15c --session-root "$R1"
+check 5 "identical unresolvable SHAs on both sides are a miss, rc — contract:match:inv-t15" 0 "$RC"
+check 6 "identical unresolvable SHAs on both sides are a miss, stdout — contract:match:inv-t15" "" "$OUT"
+
 # ========================================================================
 # INV-T16 — >=2-survivor subset + UTC date monotonicity
 # ========================================================================
@@ -161,32 +171,32 @@ S16A="$TMPROOT/store16a"
 P16A="$(append_grudge "$S16A" k16a "$R2" "a and b regressed together" "a.py,b.py" "" "2026-05-15")"
 run_query "$S16A" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16a --session-root "$R2"
-check 5 "2-file subset with earlier date_fixed matches, rc — contract:match:inv-t16" 0 "$RC"
-check 6 "2-file subset with earlier date_fixed matches, stem — contract:match:inv-t16" "$(stem_of "$P16A")" "$OUT"
+check 7 "2-file subset with earlier date_fixed matches, rc — contract:match:inv-t16" 0 "$RC"
+check 8 "2-file subset with earlier date_fixed matches, stem — contract:match:inv-t16" "$(stem_of "$P16A")" "$OUT"
 
 # (b) 30+ days old, still date_fixed-before the candidate -> STILL matches
 S16B="$TMPROOT/store16b"
 P16B="$(append_grudge "$S16B" k16b "$R2" "ancient a/b regression" "a.py,b.py" "" "2026-01-05")"
 run_query "$S16B" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16b --session-root "$R2"
-check 7 "grudge 5 months old is not time-bounded, rc — contract:match:inv-t16" 0 "$RC"
-check 8 "grudge 5 months old is not time-bounded, stem — contract:match:inv-t16" "$(stem_of "$P16B")" "$OUT"
+check 9 "grudge 5 months old is not time-bounded, rc — contract:match:inv-t16" 0 "$RC"
+check 10 "grudge 5 months old is not time-bounded, stem — contract:match:inv-t16" "$(stem_of "$P16B")" "$OUT"
 
 # (c) partial overlap (grudge names zz.py, untouched by the candidate) -> no match
 S16C="$TMPROOT/store16c"
 append_grudge "$S16C" k16c "$R2" "a and zz regressed together" "a.py,zz.py" "" "2026-05-15" >/dev/null
 run_query "$S16C" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16c --session-root "$R2"
-check 9 "intersection without subset does not match, rc — contract:match:inv-t16" 0 "$RC"
-check 10 "intersection without subset does not match, stdout — contract:match:inv-t16" "" "$OUT"
+check 11 "intersection without subset does not match, rc — contract:match:inv-t16" 0 "$RC"
+check 12 "intersection without subset does not match, stdout — contract:match:inv-t16" "" "$OUT"
 
 # (d) date_fixed AFTER the candidate author date -> no match
 S16D="$TMPROOT/store16d"
 append_grudge "$S16D" k16d "$R2" "a and b fixed after the candidate" "a.py,b.py" "" "2026-06-02" >/dev/null
 run_query "$S16D" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16d --session-root "$R2"
-check 11 "date_fixed after candidate does not match, rc — contract:match:inv-t16" 0 "$RC"
-check 12 "date_fixed after candidate does not match, stdout — contract:match:inv-t16" "" "$OUT"
+check 13 "date_fixed after candidate does not match, rc — contract:match:inv-t16" 0 "$RC"
+check 14 "date_fixed after candidate does not match, stdout — contract:match:inv-t16" "" "$OUT"
 
 # (e) late-evening commit in a negative UTC offset: local 06-29, UTC 06-30.
 #     Run under a non-UTC TZ so a regression to local rendering is discriminated
@@ -201,8 +211,8 @@ QUERY_TZ="America/Los_Angeles"
 run_query "$S16E" --by-files "a.py,b.py" --candidate-sha "$C16E" --candidate-at "$AT16E" \
   --repo-root "$R2" --repo k16e --session-root "$R2"
 QUERY_TZ=""
-check 13 "author date compared in UTC not local time, rc — contract:match:inv-t16" 0 "$RC"
-check 14 "author date compared in UTC not local time, stem — contract:match:inv-t16" "$(stem_of "$P16E")" "$OUT"
+check 15 "author date compared in UTC not local time, rc — contract:match:inv-t16" 0 "$RC"
+check 16 "author date compared in UTC not local time, stem — contract:match:inv-t16" "$(stem_of "$P16E")" "$OUT"
 
 # (f) three malformed hand-written records that MUST be reached before the valid
 #     one: each carries a realpath-matching repo_root (else load_grudges drops it
@@ -267,9 +277,9 @@ date_fixed: 2026-05-15
 EOF
 run_query "$S16F" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16f --session-root "$R2"
-check 15 "malformed records are silent misses not exit 3, rc — contract:match:inv-t16" 0 "$RC"
-check 16 "malformed records are silent misses not exit 3, stem — contract:match:inv-t16" "$(stem_of "$P16F")" "$OUT"
-check 17 "all four records actually loaded (scanned=4) — contract:match:inv-t16" yes "$(has "$ERR" "scanned=4")"
+check 17 "malformed records are silent misses not exit 3, rc — contract:match:inv-t16" 0 "$RC"
+check 18 "malformed records are silent misses not exit 3, stem — contract:match:inv-t16" "$(stem_of "$P16F")" "$OUT"
+check 19 "all four records actually loaded (scanned=4) — contract:match:inv-t16" yes "$(has "$ERR" "scanned=4")"
 
 # ========================================================================
 # INV-T17 — ==1-survivor structural (patch-id) match
@@ -297,20 +307,20 @@ S17A="$TMPROOT/store17a"
 P17A="$(append_grudge "$S17A" k17a "$R3" "feat broke on launch" "feat.py" "$S17" "2026-05-02")"
 run_query "$S17A" --by-files "feat.py" --candidate-sha "$C17" --candidate-at "$AT17" \
   --repo-root "$R3" --repo k17a --session-root "$R3"
-check 18 "squashed rewrite matches by patch-id, rc — contract:match:inv-t17" 0 "$RC"
-check 19 "squashed rewrite matches by patch-id, stem — contract:match:inv-t17" "$(stem_of "$P17A")" "$OUT"
+check 20 "squashed rewrite matches by patch-id, rc — contract:match:inv-t17" 0 "$RC"
+check 21 "squashed rewrite matches by patch-id, stem — contract:match:inv-t17" "$(stem_of "$P17A")" "$OUT"
 
 S17B="$TMPROOT/store17b"
 append_grudge "$S17B" k17b "$R3" "coincidental filename only" "feat.py" "$D17" "2026-05-03" >/dev/null
 run_query "$S17B" --by-files "feat.py" --candidate-sha "$C17" --candidate-at "$AT17" \
   --repo-root "$R3" --repo k17b --session-root "$R3"
-check 20 "same filename with a different patch does not match, rc — contract:match:inv-t17" 0 "$RC"
-check 21 "same filename with a different patch does not match, stdout — contract:match:inv-t17" "" "$OUT"
+check 22 "same filename with a different patch does not match, rc — contract:match:inv-t17" 0 "$RC"
+check 23 "same filename with a different patch does not match, stdout — contract:match:inv-t17" "" "$OUT"
 
 # ========================================================================
 # INV-T25 — store-root / session-root split
 # ========================================================================
-# contract:worktree:inv-t25 checks=16
+# contract:worktree:inv-t25 checks=20
 R4="$TMPROOT/r25"; new_repo "$R4"; R4="$(cd "$R4" && pwd -P)"
 for f in x.py y.py z.py; do echo "v0 # $f" > "$R4/$f"; done
 commit_all "$R4" "base" "2026-04-01T09:00:00+00:00"
@@ -323,9 +333,9 @@ append_grudge "$S25" k25 "$R4" "y regressed" "y.py" "" "2026-05-01" >/dev/null
 append_grudge "$S25" k25 "$R4" "z regressed" "z.py" "" "2026-05-01" >/dev/null
 
 run_query "$S25" --by-commit "$C25" --repo-root "$R4/.git" --repo k25 --session-root "$R4"
-check 22 ".git dir as store root filters every record out — contract:worktree:inv-t25" yes "$(has "$ERR" "scanned=0 matched=0")"
+check 24 ".git dir as store root filters every record out — contract:worktree:inv-t25" yes "$(has "$ERR" "scanned=0 matched=0")"
 run_query "$S25" --by-commit "$C25" --repo-root "$R4" --repo k25 --session-root "$R4"
-check 23 "dirname'd checkout root sees all three records — contract:worktree:inv-t25" yes "$(has "$ERR" "scanned=3 matched=1")"
+check 25 "dirname'd checkout root sees all three records — contract:worktree:inv-t25" yes "$(has "$ERR" "scanned=3 matched=1")"
 
 R5="$TMPROOT/r25wt"; new_repo "$R5"; R5="$(cd "$R5" && pwd -P)"
 echo "v0" > "$R5/feat.py"
@@ -351,12 +361,12 @@ P25B="$(append_grudge "$S25B" k25b "$R5" "feat regressed in the worktree" "feat.
 
 run_query "$S25B" --by-files "feat.py" --candidate-sha "$C25WT" --candidate-at "$AT25WT" \
   --repo-root "$R5" --repo k25b --session-root "$W25"
-check 24 "session-root worktree resolves HEAD for the match, rc — contract:worktree:inv-t25" 0 "$RC"
-check 25 "session-root worktree resolves HEAD for the match, stem — contract:worktree:inv-t25" "$(stem_of "$P25B")" "$OUT"
+check 26 "session-root worktree resolves HEAD for the match, rc — contract:worktree:inv-t25" 0 "$RC"
+check 27 "session-root worktree resolves HEAD for the match, stem — contract:worktree:inv-t25" "$(stem_of "$P25B")" "$OUT"
 run_query "$S25B" --by-files "feat.py" --candidate-sha "$C25WT" --candidate-at "$AT25WT" \
   --repo-root "$R5" --repo k25b --session-root "$R5"
-check 26 "other worktree's HEAD makes the stored fix an ancestor, rc — contract:worktree:inv-t25" 0 "$RC"
-check 27 "other worktree's HEAD makes the stored fix an ancestor, stdout — contract:worktree:inv-t25" "" "$OUT"
+check 28 "other worktree's HEAD makes the stored fix an ancestor, rc — contract:worktree:inv-t25" 0 "$RC"
+check 29 "other worktree's HEAD makes the stored fix an ancestor, stdout — contract:worktree:inv-t25" "" "$OUT"
 
 # (c) survivors() binds to --session-root, not to --repo-root. wt-only.py exists
 #     ONLY in the linked worktree, so the same grudge has 2 survivors under
@@ -373,12 +383,12 @@ P25C="$(append_grudge "$S25C" k25c "$R5" "feat and the worktree-only file regres
 
 run_query "$S25C" --by-files "feat.py,wt-only.py" --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
   --repo-root "$R5" --repo k25c --session-root "$W25"
-check 28 "survivors() sees the worktree-only file (>=2 subset branch), rc — contract:worktree:inv-t25" 0 "$RC"
-check 29 "survivors() sees the worktree-only file (>=2 subset branch), stem — contract:worktree:inv-t25" "$(stem_of "$P25C")" "$OUT"
+check 30 "survivors() sees the worktree-only file (>=2 subset branch), rc — contract:worktree:inv-t25" 0 "$RC"
+check 31 "survivors() sees the worktree-only file (>=2 subset branch), stem — contract:worktree:inv-t25" "$(stem_of "$P25C")" "$OUT"
 run_query "$S25C" --by-files "feat.py,wt-only.py" --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
   --repo-root "$R5" --repo k25c --session-root "$R5"
-check 30 "checkout root sees one survivor so the structural branch runs, rc — contract:worktree:inv-t25" 0 "$RC"
-check 31 "checkout root sees one survivor so the structural branch runs, stdout — contract:worktree:inv-t25" "" "$OUT"
+check 32 "checkout root sees one survivor so the structural branch runs, rc — contract:worktree:inv-t25" 0 "$RC"
+check 33 "checkout root sees one survivor so the structural branch runs, stdout — contract:worktree:inv-t25" "" "$OUT"
 
 # (d) find_by_commit resolves BOTH SHAs against --session-root. The fix commit
 #     lives in $R1 only while the store is keyed to $R2, so resolving either
@@ -388,11 +398,11 @@ check 31 "checkout root sees one survivor so the structural branch runs, stdout 
 S25D="$TMPROOT/store25d"
 P25D="$(append_grudge "$S25D" k25d "$R2" "widget exploded in the other checkout" "a.py" "$C15_SHORT" "2026-05-01")"
 run_query "$S25D" --by-commit "$C15" --repo-root "$R2" --repo k25d --session-root "$R1"
-check 32 "--by-commit resolves both SHAs against --session-root, rc — contract:worktree:inv-t25" 0 "$RC"
-check 33 "--by-commit resolves both SHAs against --session-root, stem — contract:worktree:inv-t25" "$(stem_of "$P25D")" "$OUT"
+check 34 "--by-commit resolves both SHAs against --session-root, rc — contract:worktree:inv-t25" 0 "$RC"
+check 35 "--by-commit resolves both SHAs against --session-root, stem — contract:worktree:inv-t25" "$(stem_of "$P25D")" "$OUT"
 run_query "$S25D" --by-commit "$C15" --repo-root "$R2" --repo k25d --session-root "$R2"
-check 34 "a session root that cannot resolve the SHA is a miss, rc — contract:worktree:inv-t25" 0 "$RC"
-check 35 "a session root that cannot resolve the SHA is a miss, stdout — contract:worktree:inv-t25" "" "$OUT"
+check 36 "a session root that cannot resolve the SHA is a miss, rc — contract:worktree:inv-t25" 0 "$RC"
+check 37 "a session root that cannot resolve the SHA is a miss, stdout — contract:worktree:inv-t25" "" "$OUT"
 
 # (e) --session-root is consumed by the two lookups ONLY. The ordinary query
 #     path must be byte-identical with and without it, even when it names an
@@ -400,8 +410,44 @@ check 35 "a session root that cannot resolve the SHA is a miss, stdout — contr
 run_query "$S25" x.py --repo-root "$R4" --repo k25
 Q25_OUT="$OUT"
 run_query "$S25" x.py --repo-root "$R4" --repo k25 --session-root "$R2"
-check 36 "ordinary query path ignores --session-root — contract:worktree:inv-t25" "$Q25_OUT" "$OUT"
-check 37 "the ordinary query probe is non-vacuous — contract:worktree:inv-t25" yes "$(nonempty "$Q25_OUT")"
+check 38 "ordinary query path ignores --session-root — contract:worktree:inv-t25" "$Q25_OUT" "$OUT"
+check 39 "the ordinary query probe is non-vacuous — contract:worktree:inv-t25" yes "$(nonempty "$Q25_OUT")"
+
+# (f) the same "consumed only by the two lookups" clause for the remaining
+#     non-lookup paths: --stats and --cull. Both must behave identically with
+#     and without --session-root.
+S25F="$TMPROOT/store25f"
+append_grudge "$S25F" k25f "$R4" "x regressed" "x.py" "$C25" "2026-05-01" >/dev/null
+append_grudge "$S25F" k25f "$R4" "y regressed" "y.py" "" "2026-05-01" >/dev/null
+append_grudge "$S25F" k25f "$R4" "z regressed" "z.py" "" "2026-05-01" >/dev/null
+
+run_query "$S25F" --stats --repo-root "$R4" --repo k25f
+ST25_OUT="$OUT"
+run_query "$S25F" --stats --repo-root "$R4" --repo k25f --session-root "$R2"
+check 40 "--stats path ignores --session-root — contract:worktree:inv-t25" "$ST25_OUT" "$OUT"
+check 41 "the --stats probe is non-vacuous — contract:worktree:inv-t25" yes "$(has "$ST25_OUT" "3 held for k25f")"
+
+# --cull must still cull. The record is keyed to $R25CR, where both its files
+# have been deleted, while $R25CS is a SECOND checkout that still holds files of
+# the same names. A --session-root that reached load_grudges would filter the
+# record out (its repo_root is $R25CR) and cull nothing; one that reached
+# survivors() would find both files alive in $R25CS and also cull nothing. The
+# expected `culled 1` therefore discriminates BOTH leak shapes; asserting `--cull
+# 0` against a healthy store would discriminate neither.
+R25CR="$TMPROOT/r25cull"; new_repo "$R25CR"; R25CR="$(cd "$R25CR" && pwd -P)"
+for f in gone-a.py gone-b.py keep.py; do echo "v0 # $f" > "$R25CR/$f"; done
+commit_all "$R25CR" "base" "2026-04-01T09:00:00+00:00"
+R25CS="$TMPROOT/r25cull-session"; new_repo "$R25CS"; R25CS="$(cd "$R25CS" && pwd -P)"
+for f in gone-a.py gone-b.py; do echo "v0 # $f" > "$R25CS/$f"; done
+commit_all "$R25CS" "base" "2026-04-01T09:00:00+00:00"
+S25G="$TMPROOT/store25g"
+append_grudge "$S25G" k25g "$R25CR" "both files later deleted" "gone-a.py,gone-b.py" "" "2026-05-01" >/dev/null
+rm -f "$R25CR/gone-a.py" "$R25CR/gone-b.py"
+
+run_query "$S25G" --cull --repo-root "$R25CR" --repo k25g --session-root "$R25CS"
+check 42 "--cull judges staleness against --repo-root not --session-root — contract:worktree:inv-t25" yes "$(has "$ERR" "culled 1 settled")"
+run_query "$S25G" --stats --repo-root "$R25CR" --repo k25g
+check 43 "the culled record is really gone from the store — contract:worktree:inv-t25" yes "$(has "$OUT" "0 held for k25g")"
 
 # ========================================================================
 # INV-T26 — --by-commit exit-code contract (three outcomes)
@@ -418,20 +464,20 @@ S26="$TMPROOT/store26"
 P26="$(append_grudge "$S26" k26 "$R6" "app regressed" "app.py" "$C26" "2026-05-01")"
 
 run_query "$S26" --by-commit "$C26" --repo-root "$R6" --repo k26 --session-root "$R6"
-check 38 "match exits 0 — contract:cli:inv-t26" 0 "$RC"
-check 39 "match prints the record stem, not fixed_in_commit — contract:cli:inv-t26" "$(stem_of "$P26")" "$OUT"
+check 44 "match exits 0 — contract:cli:inv-t26" 0 "$RC"
+check 45 "match prints the record stem, not fixed_in_commit — contract:cli:inv-t26" "$(stem_of "$P26")" "$OUT"
 run_query "$S26" --by-commit "$B26" --repo-root "$R6" --repo k26 --session-root "$R6"
-check 40 "resolvable but unmatched SHA exits 0 — contract:cli:inv-t26" 0 "$RC"
-check 41 "resolvable but unmatched SHA prints nothing — contract:cli:inv-t26" "" "$OUT"
+check 46 "resolvable but unmatched SHA exits 0 — contract:cli:inv-t26" 0 "$RC"
+check 47 "resolvable but unmatched SHA prints nothing — contract:cli:inv-t26" "" "$OUT"
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: unreadable-store fixture (--by-commit) needs a non-root uid"
 else
   chmod 000 "$S26/k26/grudges"
   run_query "$S26" --by-commit "$C26" --repo-root "$R6" --repo k26 --session-root "$R6"
-  check 42 "unreadable store exits 3 — contract:cli:inv-t26" 3 "$RC"
-  check 43 "unreadable store writes a stderr diagnostic — contract:cli:inv-t26" yes "$(nonempty "$ERR")"
-  check 44 "unreadable store prints nothing on stdout — contract:cli:inv-t26" "" "$OUT"
+  check 48 "unreadable store exits 3 — contract:cli:inv-t26" 3 "$RC"
+  check 49 "unreadable store writes a stderr diagnostic — contract:cli:inv-t26" yes "$(nonempty "$ERR")"
+  check 50 "unreadable store prints nothing on stdout — contract:cli:inv-t26" "" "$OUT"
 fi
 
 # ========================================================================
@@ -450,12 +496,12 @@ P27="$(append_grudge "$S27" k27 "$R7" "p and q regressed" "p.py,q.py" "" "2026-0
 
 run_query "$S27" --by-files "p.py,q.py,r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
   --repo-root "$R7" --repo k27 --session-root "$R7"
-check 45 "subset match exits 0 — contract:cli:inv-t27" 0 "$RC"
-check 46 "subset match prints the record stem — contract:cli:inv-t27" "$(stem_of "$P27")" "$OUT"
+check 51 "subset match exits 0 — contract:cli:inv-t27" 0 "$RC"
+check 52 "subset match prints the record stem — contract:cli:inv-t27" "$(stem_of "$P27")" "$OUT"
 run_query "$S27" --by-files "r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
   --repo-root "$R7" --repo k27 --session-root "$R7"
-check 47 "clean miss exits 0 — contract:cli:inv-t27" 0 "$RC"
-check 48 "clean miss prints nothing — contract:cli:inv-t27" "" "$OUT"
+check 53 "clean miss exits 0 — contract:cli:inv-t27" 0 "$RC"
+check 54 "clean miss prints nothing — contract:cli:inv-t27" "" "$OUT"
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: unreadable-store fixture (--by-files) needs a non-root uid"
@@ -463,10 +509,58 @@ else
   chmod 000 "$S27/k27/grudges"
   run_query "$S27" --by-files "p.py,q.py,r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
     --repo-root "$R7" --repo k27 --session-root "$R7"
-  check 49 "unreadable store exits 3 — contract:cli:inv-t27" 3 "$RC"
-  check 50 "unreadable store writes a stderr diagnostic — contract:cli:inv-t27" yes "$(nonempty "$ERR")"
-  check 51 "unreadable store prints nothing on stdout — contract:cli:inv-t27" "" "$OUT"
+  check 55 "unreadable store exits 3 — contract:cli:inv-t27" 3 "$RC"
+  check 56 "unreadable store writes a stderr diagnostic — contract:cli:inv-t27" yes "$(nonempty "$ERR")"
+  check 57 "unreadable store prints nothing on stdout — contract:cli:inv-t27" "" "$OUT"
 fi
+
+# ========================================================================
+# 0 survivors -> no match
+# ========================================================================
+# Untagged on purpose: the contract states this clause in find_by_files'
+# api_surface description, which carries no test_tag, and it is neither
+# inv-t16's >=2-survivor branch nor inv-t17's ==1-survivor branch.
+R8="$TMPROOT/r0surv"; new_repo "$R8"; R8="$(cd "$R8" && pwd -P)"
+for f in gone1.py gone2.py kept.py; do echo "v0 # $f" > "$R8/$f"; done
+commit_all "$R8" "base" "2026-04-01T09:00:00+00:00"
+echo "v1 # kept" >> "$R8/kept.py"
+commit_all "$R8" "fix(kept): repair kept" "2026-06-01T12:00:00+00:00"
+C0S="$(sha_of "$R8" HEAD)"
+AT0S="$(at_of "$R8" HEAD)"
+S0S="$TMPROOT/store0surv"
+append_grudge "$S0S" k0s "$R8" "both named files were deleted later" "gone1.py,gone2.py" "" "2026-05-01" >/dev/null
+# Deleted AFTER the record is written, so survivors() returns [] at query time.
+# Without `if not surv: continue` the ==1 branch indexes surv[0], raises
+# IndexError, and the outer handler turns a contract-mandated miss into exit 3.
+rm -f "$R8/gone1.py" "$R8/gone2.py"
+run_query "$S0S" --by-files "kept.py" --candidate-sha "$C0S" --candidate-at "$AT0S" \
+  --repo-root "$R8" --repo k0s --session-root "$R8"
+check 58 "a 0-survivor grudge is a miss not an IndexError, rc" 0 "$RC"
+check 59 "a 0-survivor grudge is a miss, stdout" "" "$OUT"
+check 60 "the 0-survivor record was actually loaded (scanned=1 matched=0)" yes "$(has "$ERR" "scanned=1 matched=0")"
+
+# ========================================================================
+# candidate paths are normalized before the subset test
+# ========================================================================
+# Untagged on purpose: the normalization is find_by_files' own, not a clause of
+# any tagged invariant. Every other fixture passes already-normalized
+# repo-relative POSIX paths, so the normalize_path call is never discriminated.
+R9="$TMPROOT/rnorm"; new_repo "$R9"; R9="$(cd "$R9" && pwd -P)"
+for f in a.py b.py c.py; do echo "v0 # $f" > "$R9/$f"; done
+commit_all "$R9" "base" "2026-04-01T09:00:00+00:00"
+for f in a.py b.py c.py; do echo "v1 # $f" >> "$R9/$f"; done
+commit_all "$R9" "fix(core): repair a, b and c" "2026-06-01T12:00:00+00:00"
+CN="$(sha_of "$R9" HEAD)"
+ATN="$(at_of "$R9" HEAD)"
+SN="$TMPROOT/storenorm"
+PN="$(append_grudge "$SN" knorm "$R9" "a and b regressed together" "a.py,b.py" "" "2026-05-15")"
+# survivors() are stored repo-relative; this candidate list mixes ./-prefixed,
+# absolute and bare forms, so the subset test holds only if the candidate side
+# is normalized against --session-root first.
+run_query "$SN" --by-files "./a.py,$R9/b.py,c.py" --candidate-sha "$CN" --candidate-at "$ATN" \
+  --repo-root "$R9" --repo knorm --session-root "$R9"
+check 61 "./-prefixed and absolute candidate paths still subset-match, rc" 0 "$RC"
+check 62 "./-prefixed and absolute candidate paths still subset-match, stem" "$(stem_of "$PN")" "$OUT"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
@@ -475,7 +569,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # TOTAL accumulates per `check`, so a skipped scenario shrinks the denominator
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the two chmod-000 fixtures), and even then it is announced.
-EXPECTED_CHECKS=51
+EXPECTED_CHECKS=62
 ROOT_SKIPPED_CHECKS=6
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
