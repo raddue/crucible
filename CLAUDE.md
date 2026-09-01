@@ -40,8 +40,9 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 - **The calibration ledger is the epistemic backbone.** Tier-A gate verdicts
   append to the machine-local central store `~/.claude/crucible/ledger/runs.jsonl`
   (never committed — this repo is public; not to be confused with the deliberate
-  11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl`, which is
-  intentional — keep it). The `CRUCIBLE_CALIBRATION_DISABLED=1`
+  11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl` — as of
+  #460 it has no in-repo reader (its former readers moved to `raddue/crucible-eval`),
+  retained as a schema/corpus reference — keep it). The `CRUCIBLE_CALIBRATION_DISABLED=1`
   kill-switch is fixture-only — never silence production verdicts.
 - **Eval before you publish.** A skill change ships with its evals run; prefer
   anti-rationalization tables + stagnation detection over trusting the model to

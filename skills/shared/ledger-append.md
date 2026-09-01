@@ -31,7 +31,8 @@ in arbitrary repos (any project on the machine, …); they all aggregate here so
 `raddue/crucible-eval`'s `/ledger` (moved there — #460) can render one honest
 cross-repo headline with a per-repo breakdown.
 `scripts.ledger_append.default_ledger_path()` is the single source of truth for
-this path; the renderer imports it too.
+this path; the weekly renderer (now in `raddue/crucible-eval`, #460) imports
+it too.
 
 ## How to emit — `emit` CLI by absolute path (cwd-independent)
 
@@ -94,7 +95,8 @@ backward-compatible: v1 rows (no `repo`, `schema_version: 1`) read fine and
 bucket under `repo: "unknown"` in the renderer. The `emit` CLI fills `repo`
 when absent and forces `schema_version: 2` (it is always a current-schema
 forward capture); the legacy positional `append` form leaves `schema_version`
-caller-set, so direct callers like the v1 backfill stay v1.
+caller-set, so direct callers like the v1 backfill (moved to
+`raddue/crucible-eval`, #460) stay v1.
 
 ```json
 {
@@ -254,7 +256,8 @@ Uniqueness is on `(run_id, skill)` regardless of `run_id` format.
   `backfill-<pr_number>-quality-gate` (or `<skill>` for non-QG backfills).
 
 Dedup remains `(run_id, skill)` across both shapes. Idempotent re-runs of the
-backfill script produce the same backfill IDs and skip on re-encounter.
+backfill script (moved to `raddue/crucible-eval`, #460) produce the same
+backfill IDs and skip on re-encounter.
 
 ## L-8 truncation rules + sidecar protocol
 
@@ -360,7 +363,18 @@ body as of #460; that module has moved to `raddue/crucible-eval` and no longer
 exists in this repo). **Transcribe this exactly — the `except OSError`
 guard, the `isinstance(obj, dict)` guard, and the `skipped`/`_warn` corruption
 surfacing are all #400 fixes, and an implementation missing any of them is a
-regression, not a simplification:**
+regression, not a simplification.**
+
+**No drift checker covers this block.** `scripts/check_ledger_append_doc_drift.py`
+diffs each `## Reference Python — `scripts/<name>.py`` block below against its
+live module — but there is deliberately no such module for this block:
+`ledger_reduce.py` was deleted when it moved to `raddue/crucible-eval` (#460),
+so this heading is intentionally worded differently (no `scripts/<name>.py`
+in the heading) precisely so the checker's regex does NOT pick it up and fail
+looking for a module that no longer exists. A future checker author extending
+that script should NOT assume every Python block in this file has a
+corresponding on-disk module to check against — this one never will again
+unless the module is re-vendored into this repo.
 
 ```python
 import json
@@ -410,7 +424,8 @@ def reduce(falsification_path: str) -> Dict[str, dict]:
         if not isinstance(obj, dict):
             # #400: a valid-JSON-but-non-object line (e.g. `[1,2,3]`, `42`) has
             # no `.get` — the obj.get below would AttributeError. Count it as
-            # corruption, same as render_ledger.load_runs.
+            # corruption, same as render_ledger.load_runs (moved to
+            # raddue/crucible-eval, #460).
             skipped += 1
             continue
         key = obj.get("ledger_entry_hash")
@@ -435,8 +450,9 @@ def reduce(falsification_path: str) -> Dict[str, dict]:
 | L-8 | 16 KiB line cap + truncation + sidecar | `_truncate_payload` + line-bytes check |
 | L-9 | Latest-entry-wins reduction (file-position) | Defined inline above ("L-9 latest-entry-wins reduction"); `raddue/crucible-eval` carries the executable copy (#460) |
 
-L-5 (backfill exclusion from headline) and L-10 (Brier polarity) are encoded
-in design/contract; no runtime call-sites in Phase 1.
+L-5 (backfill exclusion from headline; backfill script moved to
+`raddue/crucible-eval`, #460) and L-10 (Brier polarity) are encoded in
+design/contract; no runtime call-sites in Phase 1.
 
 Cross-link: see `docs/plans/2026-05-18-epistemics-stack-v1-design.md`
 §"Invariants" for the canonical definitions.
@@ -472,12 +488,15 @@ def uuid7() -> str:
 
 Protocol-as-spec lives in skills/shared/ledger-append.md. This module is the
 importable, executable single source of truth used by T-1 subprocesses, by Tier A
-emit call-sites, and by the Phase 3 backfill script.
+emit call-sites, and by the Phase 3 backfill script (moved to
+raddue/crucible-eval, #460).
 
 Invariants enforced here:
 - L-1 append-only (O_APPEND, never rewrite a line)
 - L-6 kill-switch (CRUCIBLE_CALIBRATION_DISABLED=1 → no-op return BEFORE any lock)
 - L-8 16 KiB line cap + gated_files truncation at 500 + highest_finding cap at 256 chars
+- #402 identity gate: refuse an entry lacking a non-empty string run_id AND skill
+  (the (run_id, skill) join key must never collapse to the shared "unknown" bucket)
 - Crash-window recovery (>60s stale lockdir with branch A live/dead, branch B malformed)
 
 Pure stdlib. No third-party deps.
@@ -512,9 +531,9 @@ def _kill_switch_active() -> bool:
 # The live ledger is machine-local and aggregates EVERY repo's gating runs    #
 # into one place — never inside any git repo, because entries carry private   #
 # file paths and verbatim finding quotes and crucible is a public repo.       #
-# These helpers are the single source of truth for the path; the weekly      #
+# These helpers are the single source of truth for the path; the weekly       #
 # renderer (now in raddue/crucible-eval, #460) imports them. default_repo()   #
-# shells to git and is therefore CLI-only —                                  #
+# shells to git and is therefore CLI-only —                                   #
 # append() stays free of git/subprocess side effects (INV-2).                 #
 # --------------------------------------------------------------------------- #
 SCHEMA_VERSION = 2
@@ -548,14 +567,39 @@ def default_repo(start_dir: Optional[str] = None) -> str:
         )
         top = proc.stdout.strip()
         if proc.returncode == 0 and top:
-            return os.path.basename(top.rstrip("/")) or top
+            # #401: realpath for parity with grudge_append.resolve_repo. On the
+            # git path this is effectively a no-op — `git rev-parse --show-toplevel`
+            # already returns a canonicalized path — but it keeps the two
+            # resolvers textually aligned. The non-git fallback below is where the
+            # symlink-resolution drift actually mattered.
+            root = os.path.realpath(top)
+            return os.path.basename(root.rstrip("/")) or root
     except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
         pass
-    return os.path.basename(os.path.abspath(base)) or "unknown"
+    # #401: realpath the fallback base so a non-git dir reached via a symlinked
+    # parent yields the SAME basename label the grudge store derives. The return
+    # SHAPE stays a bare basename (callers want a label, not the root tuple).
+    return os.path.basename(os.path.realpath(os.path.abspath(base))) or "unknown"
 
 
 def _warn(msg: str) -> None:
     print(f"[ledger_append WARN] {msg}", file=sys.stderr)
+
+
+def _valid_identity(value) -> bool:
+    """True iff `value` is a non-empty, non-whitespace string — the requirement
+    for either half of the (run_id, skill) ledger join key (#402). A missing,
+    empty, whitespace-only, or non-string value has no stable identity."""
+    return isinstance(value, str) and value.strip() != ""
+
+
+def valid_ledger_identity(entry: dict) -> bool:
+    """True iff a ledger `entry` carries a valid (run_id, skill) join identity
+    (#402). Factors the `_valid_identity(run_id) AND _valid_identity(skill)`
+    guard that was inlined verbatim ×5 across reconcile_ledger / render_ledger
+    (moved to raddue/crucible-eval, #460) (#408 F9) into one source, so the
+    #402 read-side contract cannot drift."""
+    return _valid_identity(entry.get("run_id")) and _valid_identity(entry.get("skill"))
 
 
 def _truncate_payload(entry: dict, max_gated_files: int,
@@ -591,6 +635,8 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
     """
     if not os.path.exists(ledger_path):
         return False
+    found = False
+    skipped = 0  # #400: count corrupt lines instead of silently weakening dedup
     try:
         with open(ledger_path, "rb") as f:
             for raw_line in f:
@@ -600,12 +646,22 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
                 try:
                     obj = json.loads(line)
                 except (json.JSONDecodeError, UnicodeDecodeError):
+                    skipped += 1
+                    continue
+                if not isinstance(obj, dict):
+                    # #400/L-9: a valid-JSON-but-non-object line (e.g. `[1,2,3]`)
+                    # has no `.get` — treat it as corruption, same as the L-9
+                    # reduction contract in skills/shared/ledger-append.md.
+                    skipped += 1
                     continue
                 if obj.get("run_id") == run_id and obj.get("skill") == skill:
-                    return True
+                    found = True
+                    break
     except OSError:
         return False
-    return False
+    if skipped:
+        _warn(f"caller_dedup: skipped {skipped} corrupt/unusable line(s) in {ledger_path}")
+    return found
 
 
 def _try_stale_recovery(lockdir: str) -> bool:
@@ -721,8 +777,37 @@ def append(
     if _kill_switch_active():
         return False
 
-    run_id = entry.get("run_id", "unknown")
-    skill = entry.get("skill", "unknown")
+    # #402 identity gate. append() serves BOTH central stores, which carry
+    # different join keys:
+    #   - runs.jsonl  → (run_id, skill)        (reconcile_ledger.ledger_entry_hash,
+    #     moved to raddue/crucible-eval, #460)
+    #   - falsification log → ledger_entry_hash (the walkback / predicate rows)
+    # An entry carrying NEITHER key collapses to the shared "unknown" bucket —
+    # silently merging unrelated runs across every repo in the machine-local
+    # central store, where caller_dedup drops the second as a "duplicate" and
+    # compute_brier mis-buckets them. Require at least one valid join key.
+    # The OR-rule's soundness depends on ledger_entry_hash appearing ONLY on
+    # falsification-log rows (never on a runs-ledger row); the consumer-side
+    # "unknown" fallback in reconcile_ledger.compute_brier (moved to
+    # raddue/crucible-eval, #460) is a known residual deliberately deferred to
+    # the read-path follow-up PR.
+    run_id = entry.get("run_id")
+    skill = entry.get("skill")
+    entry_hash = entry.get("ledger_entry_hash")
+    has_runs_identity = _valid_identity(run_id) and _valid_identity(skill)
+    if not (has_runs_identity or _valid_identity(entry_hash)):
+        _warn(
+            f"identity-less entry rejected (run_id={run_id!r} skill={skill!r} "
+            f"ledger_entry_hash={entry_hash!r}); a non-empty string (run_id AND "
+            "skill) or ledger_entry_hash is required (#402)"
+        )
+        return False
+    # Lock-holder identity + diagnostics prefer (run_id, skill); a falsification
+    # row carries no run_id/skill, so fall back to its ledger_entry_hash key.
+    if not _valid_identity(run_id):
+        run_id = entry_hash
+    if not _valid_identity(skill):
+        skill = "falsification"
 
     if overflow_dir is None:
         overflow_dir = os.path.join(os.path.dirname(ledger_path) or ".", "overflow")
@@ -859,5 +944,6 @@ if __name__ == "__main__":
 
 The canonical importable module is at `scripts/ledger_append.py` (also
 `scripts.ledger_append` for Python import). T-1 subprocesses, the Phase 3
-backfill script, and Tier A emit call-sites import and invoke `append()`
-directly. The block above is the prompt-side reference copy.
+backfill script (moved to `raddue/crucible-eval`, #460), and Tier A emit
+call-sites import and invoke `append()` directly. The block above is the
+prompt-side reference copy.

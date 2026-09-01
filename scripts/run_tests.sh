@@ -119,6 +119,9 @@ run bash hooks/tests/test-rcpt-verify-hook.sh
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
 
+# --- Central-store path resolution + emit CLI (#270; restored ex-eval, #460) ---
+run python3 scripts/test_central_store.py
+
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
 
@@ -141,6 +144,10 @@ run python3 scripts/check_model_pins.py
 # --- Ledger write-path guard ---
 run python3 scripts/check_ledger_write_path.py --selftest
 run python3 scripts/check_ledger_write_path.py
+
+# --- ledger-append.md reference-block drift (#460 round-4 S4) ---
+run python3 scripts/check_ledger_append_doc_drift.py --selftest
+run python3 scripts/check_ledger_append_doc_drift.py
 
 # --- #366 red-team <-> quality-gate receipt contract ---
 run python3 scripts/check_rt_receipt_contract.py

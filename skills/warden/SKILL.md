@@ -222,11 +222,14 @@ Per leg:
   leg that can block forever.
 
 **M-c note (`fix:` subject vs reconcile's candidate walk — resolved).**
-calibration-reconcile walks merged `fix`/`hotfix` commits as falsification
-candidates, so a `fix:`-prefixed intra-gate commit that reached a **merged branch
-un-squashed** could be picked up as a candidate falsifying a *prior* verdict over
-the same files. To make correctness independent of the downstream repo's merge
-strategy, **every warden-owned per-leg residual commit — temper, delve, the red-team
+calibration-reconcile (moved to raddue/crucible-eval, #460 — the mandate below is
+now defended across a repo boundary: crucible-eval owns the actual candidate-walk
+code, so warden's non-`fix:` subject discipline is what keeps this repo's commits
+safe against a walker it no longer contains) walks merged `fix`/`hotfix` commits as
+falsification candidates, so a `fix:`-prefixed intra-gate commit that reached a
+**merged branch un-squashed** could be picked up as a candidate falsifying a
+*prior* verdict over the same files. To make correctness independent of the
+downstream repo's merge strategy, **every warden-owned per-leg residual commit — temper, delve, the red-team
 leg, and any other leg whose residual warden commits — must use a non-`fix:` subject**
 (`chore(warden): temper fixes <run-id>`, `chore(warden): delve fixes <run-id>`,
 `chore(warden): red-team fixes <run-id>`) — **mandated, not optional**. Each is a

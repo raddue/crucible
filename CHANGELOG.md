@@ -28,19 +28,34 @@ maintainer-side repo that reads the same store. Two slash commands ship no more.
   behavior changes. (#460; retires #372)
 - **Reporting-side scripts and their suites** — `reconcile_ledger.py`,
   `render_ledger.py`, `ledger_reduce.py`, `calibrate_tolerance.py`,
-  `backfill-ledger.py`, `ledger_doctor.py`, `shared/ledger-reduce.md`,
-  `eval/calibration-ledger/`, and the test files covering them. Six `run` lines
-  leave `scripts/run_tests.sh`. (#460)
+  `backfill-ledger.py`, `ledger_doctor.py`, `shared/ledger-reduce.md` (its L-9
+  spec was relocated and reconciled against the module — the old doc's copy
+  predated the #400 guards — into `skills/shared/ledger-append.md`, not
+  deleted), `eval/calibration-ledger/`, and the test files covering them. Not
+  all of that test coverage was dropped: four of those tests' useful
+  assertions were restored into `scripts/` rather than lost —
+  `test_central_store.py`, and the `LedgerContentionTest`,
+  `TierNullSemanticsTest`, and `Uuid7Test` classes added to
+  `scripts/test_locks.py` / `scripts/test_ledger_core.py`. Net effect on
+  `scripts/run_tests.sh`: 6 `run` lines leave, 3 arrive (the restored
+  `test_central_store.py`, plus the new `check_ledger_append_doc_drift.py`
+  doc-drift checker's two lines) — 85 → 82, not a flat −6. (#460)
 
 ### Migration
 
 The ledger's on-disk schema is unchanged and skills are Markdown — there is **no
 data migration**, and no emitted verdict is lost. Behavioral notes:
 
-- **The central store is untouched.** `~/.claude/crucible/ledger/` (override
-  `$CRUCIBLE_LEDGER_DIR`) keeps receiving Tier-A verdicts exactly as before;
-  `scripts/ledger_append.py` and the L-1..L-9 invariants in
-  `skills/shared/ledger-append.md` are unchanged. Only the *reader* side leaves.
+- **The central store is untouched — no data migration.** `~/.claude/crucible/ledger/`
+  (override `$CRUCIBLE_LEDGER_DIR`) keeps receiving Tier-A verdicts exactly as
+  before. Only the *reader* side leaves. `scripts/ledger_append.py` did gain a
+  `#400` fix in this window — `caller_dedup` now guards against non-dict JSON
+  lines instead of raising — and `skills/shared/ledger-append.md` absorbed
+  `shared/ledger-reduce.md`'s L-9 spec verbatim. `raddue/crucible-eval` vendors
+  these emission-side helpers by content hash (see `docs/architecture.md`), so
+  any change to one needs a manual re-sync there — this window that's
+  `ledger_append.py`, `pathmatch.py`, and `grudge_query.py`, all three changed
+  in this diff.
 - **There is no in-repo replacement for the two commands.** Reporting is run by
   the maintainer from a separate repo. If you were running `/ledger` or
   `/calibration-reconcile` against your own store, say so on #460 — a public home

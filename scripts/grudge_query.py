@@ -21,10 +21,11 @@ import re as _re
 import sys
 from typing import Dict, List, Optional, Tuple
 
-# #401: root the package at the repo (`scripts.X`), matching reconcile_ledger /
-# render_ledger / brier_advisory / backfill-ledger — was the lone sibling using
+# #401: root the package at the repo (`scripts.X`) instead of
 # `sys.path.insert(0, HERE)` + bare `from grudge_append import …`, which forced
 # every caller to keep BOTH roots on sys.path for the grudge path to resolve.
+# (This file was the last script still using that older pattern; the other
+# scripts that shared it were removed under #460, moved to raddue/crucible-eval.)
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 if REPO_ROOT not in sys.path:
