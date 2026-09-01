@@ -310,7 +310,7 @@ check 21 "same filename with a different patch does not match, stdout — contra
 # ========================================================================
 # INV-T25 — store-root / session-root split
 # ========================================================================
-# contract:worktree:inv-t25 checks=6
+# contract:worktree:inv-t25 checks=16
 R4="$TMPROOT/r25"; new_repo "$R4"; R4="$(cd "$R4" && pwd -P)"
 for f in x.py y.py z.py; do echo "v0 # $f" > "$R4/$f"; done
 commit_all "$R4" "base" "2026-04-01T09:00:00+00:00"
@@ -358,6 +358,51 @@ run_query "$S25B" --by-files "feat.py" --candidate-sha "$C25WT" --candidate-at "
 check 26 "other worktree's HEAD makes the stored fix an ancestor, rc — contract:worktree:inv-t25" 0 "$RC"
 check 27 "other worktree's HEAD makes the stored fix an ancestor, stdout — contract:worktree:inv-t25" "" "$OUT"
 
+# (c) survivors() binds to --session-root, not to --repo-root. wt-only.py exists
+#     ONLY in the linked worktree, so the same grudge has 2 survivors under
+#     $W25 (-> the >=2 subset branch, which matches) and 1 under $R5 (-> the
+#     structural branch). fixed_in_commit is empty, so the structural branch can
+#     never match: a survivors() bound to --repo-root takes it under $W25 too
+#     and loses the match.
+echo "v0 # wt-only" > "$W25/wt-only.py"
+commit_all "$W25" "feat(wt): a file only the linked worktree has" "2026-06-02T12:00:00+00:00"
+C25WTO="$(sha_of "$W25" HEAD)"
+AT25WTO="$(at_of "$W25" HEAD)"
+S25C="$TMPROOT/store25c"
+P25C="$(append_grudge "$S25C" k25c "$R5" "feat and the worktree-only file regressed" "feat.py,wt-only.py" "" "2026-05-02")"
+
+run_query "$S25C" --by-files "feat.py,wt-only.py" --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
+  --repo-root "$R5" --repo k25c --session-root "$W25"
+check 28 "survivors() sees the worktree-only file (>=2 subset branch), rc — contract:worktree:inv-t25" 0 "$RC"
+check 29 "survivors() sees the worktree-only file (>=2 subset branch), stem — contract:worktree:inv-t25" "$(stem_of "$P25C")" "$OUT"
+run_query "$S25C" --by-files "feat.py,wt-only.py" --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
+  --repo-root "$R5" --repo k25c --session-root "$R5"
+check 30 "checkout root sees one survivor so the structural branch runs, rc — contract:worktree:inv-t25" 0 "$RC"
+check 31 "checkout root sees one survivor so the structural branch runs, stdout — contract:worktree:inv-t25" "" "$OUT"
+
+# (d) find_by_commit resolves BOTH SHAs against --session-root. The fix commit
+#     lives in $R1 only while the store is keyed to $R2, so resolving either
+#     side against --repo-root loses the match. A linked worktree cannot
+#     discriminate this: it shares its checkout's object store and refs, so a
+#     worktree-only commit rev-parses identically from either root (measured).
+S25D="$TMPROOT/store25d"
+P25D="$(append_grudge "$S25D" k25d "$R2" "widget exploded in the other checkout" "a.py" "$C15_SHORT" "2026-05-01")"
+run_query "$S25D" --by-commit "$C15" --repo-root "$R2" --repo k25d --session-root "$R1"
+check 32 "--by-commit resolves both SHAs against --session-root, rc — contract:worktree:inv-t25" 0 "$RC"
+check 33 "--by-commit resolves both SHAs against --session-root, stem — contract:worktree:inv-t25" "$(stem_of "$P25D")" "$OUT"
+run_query "$S25D" --by-commit "$C15" --repo-root "$R2" --repo k25d --session-root "$R2"
+check 34 "a session root that cannot resolve the SHA is a miss, rc — contract:worktree:inv-t25" 0 "$RC"
+check 35 "a session root that cannot resolve the SHA is a miss, stdout — contract:worktree:inv-t25" "" "$OUT"
+
+# (e) --session-root is consumed by the two lookups ONLY. The ordinary query
+#     path must be byte-identical with and without it, even when it names an
+#     unrelated checkout ($R2, whose store key holds none of $R4's records).
+run_query "$S25" x.py --repo-root "$R4" --repo k25
+Q25_OUT="$OUT"
+run_query "$S25" x.py --repo-root "$R4" --repo k25 --session-root "$R2"
+check 36 "ordinary query path ignores --session-root — contract:worktree:inv-t25" "$Q25_OUT" "$OUT"
+check 37 "the ordinary query probe is non-vacuous — contract:worktree:inv-t25" yes "$(nonempty "$Q25_OUT")"
+
 # ========================================================================
 # INV-T26 — --by-commit exit-code contract (three outcomes)
 # ========================================================================
@@ -373,20 +418,20 @@ S26="$TMPROOT/store26"
 P26="$(append_grudge "$S26" k26 "$R6" "app regressed" "app.py" "$C26" "2026-05-01")"
 
 run_query "$S26" --by-commit "$C26" --repo-root "$R6" --repo k26 --session-root "$R6"
-check 28 "match exits 0 — contract:cli:inv-t26" 0 "$RC"
-check 29 "match prints the record stem, not fixed_in_commit — contract:cli:inv-t26" "$(stem_of "$P26")" "$OUT"
+check 38 "match exits 0 — contract:cli:inv-t26" 0 "$RC"
+check 39 "match prints the record stem, not fixed_in_commit — contract:cli:inv-t26" "$(stem_of "$P26")" "$OUT"
 run_query "$S26" --by-commit "$B26" --repo-root "$R6" --repo k26 --session-root "$R6"
-check 30 "resolvable but unmatched SHA exits 0 — contract:cli:inv-t26" 0 "$RC"
-check 31 "resolvable but unmatched SHA prints nothing — contract:cli:inv-t26" "" "$OUT"
+check 40 "resolvable but unmatched SHA exits 0 — contract:cli:inv-t26" 0 "$RC"
+check 41 "resolvable but unmatched SHA prints nothing — contract:cli:inv-t26" "" "$OUT"
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: unreadable-store fixture (--by-commit) needs a non-root uid"
 else
   chmod 000 "$S26/k26/grudges"
   run_query "$S26" --by-commit "$C26" --repo-root "$R6" --repo k26 --session-root "$R6"
-  check 32 "unreadable store exits 3 — contract:cli:inv-t26" 3 "$RC"
-  check 33 "unreadable store writes a stderr diagnostic — contract:cli:inv-t26" yes "$(nonempty "$ERR")"
-  check 34 "unreadable store prints nothing on stdout — contract:cli:inv-t26" "" "$OUT"
+  check 42 "unreadable store exits 3 — contract:cli:inv-t26" 3 "$RC"
+  check 43 "unreadable store writes a stderr diagnostic — contract:cli:inv-t26" yes "$(nonempty "$ERR")"
+  check 44 "unreadable store prints nothing on stdout — contract:cli:inv-t26" "" "$OUT"
 fi
 
 # ========================================================================
@@ -405,12 +450,12 @@ P27="$(append_grudge "$S27" k27 "$R7" "p and q regressed" "p.py,q.py" "" "2026-0
 
 run_query "$S27" --by-files "p.py,q.py,r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
   --repo-root "$R7" --repo k27 --session-root "$R7"
-check 35 "subset match exits 0 — contract:cli:inv-t27" 0 "$RC"
-check 36 "subset match prints the record stem — contract:cli:inv-t27" "$(stem_of "$P27")" "$OUT"
+check 45 "subset match exits 0 — contract:cli:inv-t27" 0 "$RC"
+check 46 "subset match prints the record stem — contract:cli:inv-t27" "$(stem_of "$P27")" "$OUT"
 run_query "$S27" --by-files "r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
   --repo-root "$R7" --repo k27 --session-root "$R7"
-check 37 "clean miss exits 0 — contract:cli:inv-t27" 0 "$RC"
-check 38 "clean miss prints nothing — contract:cli:inv-t27" "" "$OUT"
+check 47 "clean miss exits 0 — contract:cli:inv-t27" 0 "$RC"
+check 48 "clean miss prints nothing — contract:cli:inv-t27" "" "$OUT"
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: unreadable-store fixture (--by-files) needs a non-root uid"
@@ -418,14 +463,28 @@ else
   chmod 000 "$S27/k27/grudges"
   run_query "$S27" --by-files "p.py,q.py,r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
     --repo-root "$R7" --repo k27 --session-root "$R7"
-  check 39 "unreadable store exits 3 — contract:cli:inv-t27" 3 "$RC"
-  check 40 "unreadable store writes a stderr diagnostic — contract:cli:inv-t27" yes "$(nonempty "$ERR")"
-  check 41 "unreadable store prints nothing on stdout — contract:cli:inv-t27" "" "$OUT"
+  check 49 "unreadable store exits 3 — contract:cli:inv-t27" 3 "$RC"
+  check 50 "unreadable store writes a stderr diagnostic — contract:cli:inv-t27" yes "$(nonempty "$ERR")"
+  check 51 "unreadable store prints nothing on stdout — contract:cli:inv-t27" "" "$OUT"
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
+
+# TOTAL accumulates per `check`, so a skipped scenario shrinks the denominator
+# instead of failing. Pin the expected count so the loss is loud: only a root
+# uid may run fewer (the two chmod-000 fixtures), and even then it is announced.
+EXPECTED_CHECKS=51
+ROOT_SKIPPED_CHECKS=6
+if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
+  if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
+    echo "SKIPPED: $ROOT_SKIPPED_CHECKS of $EXPECTED_CHECKS checks did not run (root uid cannot exercise the unreadable-store paths)"
+  else
+    echo "ERROR: expected $EXPECTED_CHECKS checks, ran $TOTAL — a scenario was skipped or dropped"
+    exit 1
+  fi
+fi
 
 if [ "$FAILED" -gt 0 ]; then
   exit 1
