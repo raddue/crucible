@@ -14,7 +14,8 @@ tree looked perfectly correct. This asserts, mechanically:
 
   1. `.claude/settings.json` exists,
   2. it parses as JSON,
-  3. some `hooks.Stop[].hooks[].command` names
+  3. some `hooks.Stop[].hooks[].command` — on a nested hook that also declares
+     `"type": "command"`, both halves of the hooks/README.md rule — names
      `hooks/grudge-resolution-guard.sh` (substring, so the
      `$CLAUDE_PROJECT_DIR`-prefixed form counts),
   4. `.gitignore` carries the literal line `.claude/*`,
@@ -147,7 +148,11 @@ def stop_hook_commands(doc: object) -> list[str]:
     Defensive at every level on purpose: a flat `{"command": ...}` Stop entry
     with no nested `hooks` array parses as JSON but Claude Code silently
     ignores it (see hooks/README.md), so it must yield NO commands here and
-    fail assertion 3 rather than pass on a technicality.
+    fail assertion 3 rather than pass on a technicality. The SAME README line
+    states the other half of the rule — a nested hook must declare
+    `"type": "command"` — and a nested entry that drops or misspells `type` is
+    ignored just as silently, so it too must yield no commands rather than be
+    accepted on the strength of its `command` string alone.
     """
     commands: list[str] = []
     if not isinstance(doc, dict):
@@ -165,7 +170,11 @@ def stop_hook_commands(doc: object) -> list[str]:
         if not isinstance(inner, list):
             continue
         for hook in inner:
-            if isinstance(hook, dict) and isinstance(hook.get("command"), str):
+            if (
+                isinstance(hook, dict)
+                and hook.get("type") == "command"
+                and isinstance(hook.get("command"), str)
+            ):
                 commands.append(hook["command"])
     return commands
 
@@ -192,7 +201,16 @@ def check_settings(root: pathlib.Path) -> list[str]:
 
 def check_gitignore(root: pathlib.Path) -> list[str]:
     """Assertions 4-6. All three are reported together: they are independent
-    edits to the same file and a maintainer wants the whole list at once."""
+    edits to the same file and a maintainer wants the whole list at once.
+
+    The three literal-line tests are DIAGNOSTICS — they name the exact edit a
+    maintainer has to make. They are not the oracle: they cover one spelling of
+    the failure (`.claude/`) and fail open on every other one (`.claude`,
+    `/.claude`, `**/.claude/`, a `.gitignore` in a parent directory), each of
+    which keeps this function silent while `git add .claude/settings.json`
+    actually refuses. So the question is also put to git itself, which is the
+    only thing whose answer is definitionally right.
+    """
     path = root / GITIGNORE_REL
     if not path.is_file():
         return [f"{GITIGNORE_REL} does not exist"]
@@ -206,7 +224,85 @@ def check_gitignore(root: pathlib.Path) -> list[str]:
             f"{GITIGNORE_REL} still carries a bare `{GITIGNORE_FORBIDDEN_LINE}` line — "
             f"it re-ignores {SETTINGS_REL} and undoes the re-include"
         )
-    return errs
+    return errs + _check_not_ignored(root)
+
+
+def _is_repo_gitignore(root: pathlib.Path, source: str) -> bool:
+    """True iff `source` (a `git check-ignore -v` match source, as git printed
+    it, i.e. relative to `root` for in-repo files) is a `.gitignore` file this
+    repo tracks — the only kind of exclude source a maintainer can fix here."""
+    if pathlib.PurePosixPath(source).name != GITIGNORE_REL:
+        return False
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", source],
+            cwd=str(root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:  # git absent / not executable — see check_tracked
+        return False
+    return proc.returncode == 0
+
+
+def _check_not_ignored(root: pathlib.Path) -> list[str]:
+    """Assertion 6's real oracle: `git check-ignore`, asked directly.
+
+    `--no-index` is MANDATORY, not a tidiness flag. Without it git answers for
+    the path as the index already holds it, and `.claude/settings.json` IS
+    tracked here (assertion 7 requires exactly that), so a plain
+    `git check-ignore` reports "not ignored" for every possible `.gitignore`
+    and the check is a no-op on the one repo it has to gate. Measured both
+    ways on a fixture carrying `**/.claude/`: `--no-index` exits 0 (ignored),
+    plain exits 1.
+
+    But git answers for ALL exclude sources, and only the in-repo ones are this
+    gate's business. `git check-ignore` also honours `$GIT_DIR/info/exclude` and
+    the developer's `core.excludesFile` — and `.claude/` in a personal global
+    gitignore is a COMMON setting, since that is the directory Claude Code
+    writes local state into. Source-blind (`-q`) this check therefore failed the
+    bare gating run on a completely correct tree, and blamed `.gitignore`,
+    where no edit could fix it. So the match SOURCE is inspected (`-v`, machine-
+    parseable via `--stdin -z`: `source NUL linenum NUL pattern NUL pathname`)
+    by a SECOND call, and only a `.gitignore` the repo tracks is a failure.
+
+    A missing or broken git is tolerated the way `check_tracked` tolerates it
+    upward — an unavailable oracle must not manufacture a failure, and rc 128
+    (git's fatal, e.g. not a repository) is not an answer of "ignored".
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", SETTINGS_REL],
+            cwd=str(root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if proc.returncode != 0:  # 1 = not ignored (good), 128 = git gave up
+            return []
+        # The verdict above is `-q`'s and stays `-q`'s: adding `-v` CHANGES the
+        # exit status (a path matched by a negative pattern — exactly this
+        # repo's `!.claude/settings.json` — is reported, and rc becomes 0), so
+        # the second call is asked only WHICH source won, never whether.
+        verbose = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-v", "-z", "--stdin"],
+            cwd=str(root),
+            input=(SETTINGS_REL + "\0").encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:  # git absent / not executable — see check_tracked
+        return []
+    source = verbose.stdout.decode("utf-8", "replace").split("\0")[0]
+    if not _is_repo_gitignore(root, source):
+        return []  # a global/`info/exclude` rule — not this repo's to fix
+    return [
+        f"git ignores {SETTINGS_REL} (`git check-ignore --no-index` says so, "
+        f"matched by `{source}`) — the Stop hook registration cannot be "
+        f"committed; some rule reachable from {GITIGNORE_REL} still excludes it"
+    ]
 
 
 def check_tracked(root: pathlib.Path) -> list[str]:
@@ -389,6 +485,15 @@ def _make_fixture(
         ["git", "init", "-q"], cwd=str(root),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
     )
+    if gitignore_text is not None:
+        # Staged because `_check_not_ignored` believes a `check-ignore` match
+        # only when it comes from a `.gitignore` the repo TRACKS — a real repo
+        # tracks its own, and an untracked one is indistinguishable from a
+        # developer's machine-local excludes, which this gate must not blame.
+        subprocess.run(
+            ["git", "add", "-f", GITIGNORE_REL], cwd=str(root),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+        )
     if track and settings_text is not None:
         subprocess.run(
             ["git", "add", "-f", SETTINGS_REL], cwd=str(root),
@@ -527,6 +632,14 @@ def _selftest_assertions(tmp: pathlib.Path) -> int:
                 {"type": "command",
                  "command": 'bash "$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh"'}]}})),
          "no Stop commands at all"),
+        # 3d. nested entry with a `command` but no `"type": "command"` — the
+        # other half of the hooks/README.md rule; Claude Code ignores it too.
+        ("hook named", _make_fixture(
+            tmp, "typeless-entry",
+            settings_text=json.dumps({"hooks": {"Stop": [{"hooks": [
+                {"command":
+                 'bash "$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh"'}]}]}})),
+         "no Stop commands at all"),
         # 4. `.claude/*` missing
         ("gitignore .claude/*", _make_fixture(
             tmp, "no-star",
@@ -542,6 +655,15 @@ def _selftest_assertions(tmp: pathlib.Path) -> int:
             tmp, "bare-claude",
             gitignore_text=_GOOD_GITIGNORE_TEXT + ".claude/\n"),
          "still carries a bare `.claude/` line"),
+        # 6b. a spelling the literal-line tests cannot see: all three of them
+        # still pass here (no bare `.claude/` line), and only the git oracle
+        # notices that `**/.claude/` excludes the directory outright, which no
+        # later re-include can undo. `_make_fixture` stages the file with
+        # `git add -f`, so this is also the case that pins `--no-index`.
+        ("gitignore glob", _make_fixture(
+            tmp, "glob-claude",
+            gitignore_text=_GOOD_GITIGNORE_TEXT + "**/.claude/\n"),
+         f"git ignores {SETTINGS_REL}"),
         # 7. present and correct, but never staged
         ("git-tracked", _make_fixture(tmp, "untracked", track=False), "is not git-tracked"),
         # 8. registered, but the script it names was deleted/renamed
@@ -557,6 +679,32 @@ def _selftest_assertions(tmp: pathlib.Path) -> int:
         _require("CHECK FAILED" in out and needle in out,
                  f"the {label!r} failure must be PRINTED, not just counted; got: {out!r}")
         exercised += 1
+
+    # A rule from OUTSIDE the repo is not this gate's business. `.claude/` in a
+    # developer's personal `core.excludesFile` is a common setting, and
+    # `git check-ignore` honours it — so a source-blind `-q` oracle failed the
+    # bare gating run on a correct tree and blamed `.gitignore`, where no edit
+    # could fix it. Pins that only an in-repo, tracked `.gitignore` counts.
+    global_ignored = _make_fixture(tmp, "global-excludes")
+    global_excludes = tmp / "global-excludes-file"
+    global_excludes.write_text(".claude/\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "config", "core.excludesFile", str(global_excludes)],
+        cwd=str(global_ignored),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+    )
+    _require(
+        subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", SETTINGS_REL],
+            cwd=str(global_ignored),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        ).returncode == 0,
+        "the global-excludes fixture must actually be `check-ignore`d by the "
+        "source-BLIND oracle, or it does not discriminate the two forms")
+    _require(collect_errors(global_ignored) == [],
+             f"a repo ignored only by the developer's global excludes must pass, "
+             f"got: {collect_errors(global_ignored)}")
+    exercised += 1
 
     # A `.gitignore` that is missing entirely is its own distinct failure.
     none_gi = _make_fixture(tmp, "no-gitignore", gitignore_text=None)
@@ -912,8 +1060,8 @@ def selftest(spawn_children: bool = True) -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = pathlib.Path(td)
         exercised = _selftest_assertions(tmp)
-        _require(exercised == 21,
-                 f"the fixture battery must exercise 21 fixtures, ran {exercised} — "
+        _require(exercised == 24,
+                 f"the fixture battery must exercise 24 fixtures, ran {exercised} — "
                  f"a skipped battery is a silent green")
         dispatch_cases = _selftest_dispatch()
         _require(dispatch_cases == 7,

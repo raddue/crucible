@@ -423,10 +423,11 @@ _lookup() {
 }
 _lookup_ok() {
   # One lookup, and the ONE place the SIG-3 per-candidate degradation note is
-  # worded. Returns non-zero (caller `continue`s, leaving the candidate
-  # unresolved) iff the lookup could not be believed. Both lookups route
-  # through here on purpose: with a copy of this branch per lookup the two
-  # copies MASKED each other — deleting either one, or rewording the by-files
+  # worded. Returns non-zero (leaving the candidate unresolved: a PRIMARY
+  # caller `continue`s, a FALLBACK caller merely declines to clear — see step
+  # 13's ordering note) iff the lookup could not be believed. All four lookups (each
+  # of --by-commit / --by-files under each identity key) route through here on
+  # purpose: with a copy of this branch per lookup the copies MASKED each other — deleting either one, or rewording the by-files
   # one, turned no test red, because no fixture can fail the second lookup
   # without failing the first. Reads the enclosing loop's $k_sha.
   _lookup "$@"
@@ -435,6 +436,27 @@ _lookup_ok() {
     return 1
   fi
   return 0
+}
+_worktree_fallback() {
+  # True when a SECOND, worktree-keyed identity is worth asking about.
+  #
+  # Step 7 arms this guard when EITHER identity key has a store dir, but the
+  # shared-clone key is the only one the lookups below pass. The two differ
+  # exactly inside a linked worktree — and that is where the records land:
+  # `scripts/grudge_append.py`'s `resolve_repo()` keys a record by
+  # `git rev-parse --show-toplevel`, i.e. the WORKTREE, whenever no
+  # `--repo`/`--repo-root` is given, which is how both `skills/grudge/SKILL.md`
+  # write mode and `skills/merge-pr/SKILL.md` Step 7.5 call it. So a correctly
+  # recorded grudge was invisible to step 13 and the candidate blocked anyway,
+  # to MAX_BLOCKS and then to an unenforced give-up. Querying the identities
+  # step 7 arms on restores that invariant.
+  #
+  # Armed on PATH IDENTITY, not on `$WORKTREE_KEY != $SHARED_KEY`: those are
+  # basenames, and `git worktree add ~/wt/proj` off `~/src/proj` makes them
+  # equal while the two roots are still different directories — which left the
+  # fallback disarmed in exactly the shape it exists for. `-ef` compares
+  # device+inode, so it also sees through symlinks and `..`.
+  [ ! "$SESSION_ROOT" -ef "$STORE_REPO_ROOT" ] && [ -d "$GRUDGE_ROOT/$WORKTREE_KEY" ]
 }
 for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   k_sha="${IS_SHA[$ci]}"
@@ -445,6 +467,16 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
     GROUP_CLEARED["$k_gid"]=1
     continue
   fi
+  # ORDER IS LOAD-BEARING: BOTH PRIMARY (shared-key) lookups run before EITHER
+  # worktree fallback, and only a primary may abandon the candidate.
+  # Interleaving them put a fallback's `|| continue` in front of the shared
+  # `--by-files` lookup, so a merely DEGRADED secondary store — an unreadable
+  # `$GRUDGE_ROOT/$WORKTREE_KEY/grudges` (mode 000, foreign uid after a
+  # sudo/container run, a stale NFS mount) — suppressed a clearance the primary
+  # would have granted, blocking a resolved candidate to MAX_BLOCKS. A failed
+  # FALLBACK therefore leaves the candidate unresolved WITHOUT `continue`ing:
+  # the primaries have already answered, and an unbelievable extra opinion must
+  # not retract them.
   _lookup_ok --by-commit "$k_sha" --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" \
              --session-root "$SESSION_ROOT" || continue
   if [ -n "$LOOKUP_OUT" ]; then
@@ -453,7 +485,22 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   fi
   _lookup_ok --by-files "${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
              --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
-  [ -n "$LOOKUP_OUT" ] && GROUP_CLEARED["$k_gid"]=1
+  if [ -n "$LOOKUP_OUT" ]; then
+    GROUP_CLEARED["$k_gid"]=1
+    continue
+  fi
+  if _worktree_fallback; then
+    if _lookup_ok --by-commit "$k_sha" --repo-root "$SESSION_ROOT" --repo "$WORKTREE_KEY" \
+                  --session-root "$SESSION_ROOT" && [ -n "$LOOKUP_OUT" ]; then
+      GROUP_CLEARED["$k_gid"]=1
+      continue
+    fi
+    if _lookup_ok --by-files "${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+                  --repo-root "$SESSION_ROOT" --repo "$WORKTREE_KEY" --session-root "$SESSION_ROOT" \
+       && [ -n "$LOOKUP_OUT" ]; then
+      GROUP_CLEARED["$k_gid"]=1
+    fi
+  fi
 done
 # Clearance is a pure counter reset: sha_group / sha_files stay persisted.
 for g in "${!GROUP_CLEARED[@]}"; do

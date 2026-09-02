@@ -1612,7 +1612,7 @@ check 303 "an unreadable transcript writes no state — contract:hook:inv-t23" n
 # ========================================================================
 # INV-T24 — store-presence bootstrap across BOTH identity keys
 # ========================================================================
-# contract:hook:inv-t24 checks=11
+# contract:hook:inv-t24 checks=22
 # (a) the linked-worktree shape: the worktree's own basename key has no store
 #     dir, but the shared-clone key does — enforcement must still run.
 hook_case t24wt
@@ -1688,6 +1688,115 @@ check 306 "premise: the by-files candidate blocks with an empty store — contra
 append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "app and lib regressed" "app.py,lib.py" "" "2026-04-01" >/dev/null
 run_hook s24wtf true
 check 307 "a shared-clone grudge clears a worktree candidate by files — contract:hook:inv-t24" 0 "$RC"
+
+# (e) the same round trip through the OTHER identity — the one the writers
+#     actually use. `grudge_append.resolve_repo()` keys a record by
+#     `git rev-parse --show-toplevel`, i.e. the WORKTREE, whenever no
+#     --repo/--repo-root is passed, and neither skills/grudge nor merge-pr
+#     Step 7.5 passes them. Step 7 arms on either key, so step 13 must query
+#     either key: a worktree-keyed grudge has to clear a worktree candidate.
+hook_case t24wtown
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbrown
+T24O_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T24O_WT" wtbrown
+T24O_WT="$(cd "$T24O_WT" && pwd -P)"
+echo "VALUE = 1" > "$T24O_WT/app.py"; echo "L = 1" > "$T24O_WT/lib.py"
+commit_all "$T24O_WT" "fix(widget): repair from inside the linked worktree"
+T24O_FIX="$(sha_of "$T24O_WT" HEAD)"
+HC_CWD="$T24O_WT"
+run_hook s24wtown
+check 333 "premise: no worktree-keyed grudge yet, so the candidate blocks — contract:hook:inv-t24" 2 "$RC"
+append_grudge "$HC_STORE" "$(basename "$T24O_WT")" "$T24O_WT" "the widget regressed" \
+  "app.py" "$T24O_FIX" "2026-04-01" >/dev/null
+run_hook s24wtown true
+check 334 "a worktree-keyed grudge clears a worktree candidate — contract:hook:inv-t24" 0 "$RC"
+
+# (f) and through the --by-files lookup, which is a SECOND fallback site: this
+#     grudge records no commit, so the by-commit fallback misses too and only
+#     the file-set one can carry it. Without its own fixture that branch is
+#     deletable with every other check still green.
+hook_case t24wtownf
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbrownf
+T24OF_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T24OF_WT" wtbrownf
+T24OF_WT="$(cd "$T24OF_WT" && pwd -P)"
+echo "VALUE = 1" > "$T24OF_WT/app.py"; echo "L = 1" > "$T24OF_WT/lib.py"
+commit_all "$T24OF_WT" "fix(widget): repair from inside the linked worktree"
+HC_CWD="$T24OF_WT"
+run_hook s24wtownf
+check 335 "premise: the by-files worktree candidate blocks first — contract:hook:inv-t24" 2 "$RC"
+append_grudge "$HC_STORE" "$(basename "$T24OF_WT")" "$T24OF_WT" "app and lib regressed" \
+  "app.py,lib.py" "" "2026-04-01" >/dev/null
+run_hook s24wtownf true
+check 336 "a worktree-keyed grudge clears a worktree candidate by files — contract:hook:inv-t24" 0 "$RC"
+
+# (g) LOOKUP ORDER. Both PRIMARY (shared-key) lookups must run before EITHER
+#     worktree fallback, and a degraded FALLBACK must not abandon the
+#     candidate. Interleaved the other way, a worktree store that merely cannot
+#     be READ — mode 000, a foreign uid after a sudo/container run, a stale NFS
+#     mount — made the fallback's `|| continue` swallow a clearance the shared
+#     `--by-files` primary would have granted, blocking a resolved candidate to
+#     MAX_BLOCKS and then to the unenforced give-up.
+hook_case t24order
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbrord
+T24R_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T24R_WT" wtbrord
+T24R_WT="$(cd "$T24R_WT" && pwd -P)"
+echo "VALUE = 1" > "$T24R_WT/app.py"; echo "L = 1" > "$T24R_WT/lib.py"
+commit_all "$T24R_WT" "fix(widget): repair from inside the linked worktree"
+HC_CWD="$T24R_WT"
+run_hook s24order
+check 337 "premise: the ordering fixture's candidate blocks with an empty store — contract:hook:inv-t24" 2 "$RC"
+# The worktree store DIR has to exist for the fallback to arm at all; only its
+# `grudges/` payload is made unreadable, so `-d` still sees it.
+T24R_STORE="$HC_STORE/$(basename "$T24R_WT")/grudges"
+mkdir -p "$T24R_STORE"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: the unreadable-worktree-store ordering fixture needs a non-root uid"
+else
+  chmod 000 "$T24R_STORE"
+  run_hook s24order true
+  check 338 "premise: the unreadable worktree store really degrades a lookup — contract:hook:inv-t24" yes \
+    "$(has "$ERR" "clearance lookup failed")"
+  check 339 "premise: it still blocks while nothing has cleared it — contract:hook:inv-t24" 2 "$RC"
+  append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "app and lib regressed" \
+    "app.py,lib.py" "" "2026-04-01" >/dev/null
+  run_hook s24order true
+  check 340 "a degraded worktree fallback cannot suppress the shared by-files clearance — contract:hook:inv-t24" 0 "$RC"
+  chmod 700 "$T24R_STORE"
+fi
+
+# (h) The fallback arms on PATH IDENTITY, not on basename inequality.
+#     `git worktree add ~/wt/proj` off `~/src/proj` gives both roots the SAME
+#     basename, so a `$WORKTREE_KEY != $SHARED_KEY` guard disarms in exactly
+#     the shape the fallback exists for, and the worktree-keyed grudge (e)/(f)
+#     show the writers produce goes unseen all over again.
+hook_case t24eqbase
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbreq
+mkdir -p "$HC_ROOT/elsewhere"
+T24E_WT="$HC_ROOT/elsewhere/$HC_KEY"
+git -C "$HC_REPO" worktree add -q "$T24E_WT" wtbreq
+T24E_WT="$(cd "$T24E_WT" && pwd -P)"
+check 341 "fixture: the worktree basename EQUALS the shared key — contract:hook:inv-t24" yes \
+  "$(has "$(basename "$T24E_WT")" "$HC_KEY")"
+echo "VALUE = 1" > "$T24E_WT/app.py"; echo "L = 1" > "$T24E_WT/lib.py"
+commit_all "$T24E_WT" "fix(widget): repair from the equal-basename worktree"
+T24E_FIX="$(sha_of "$T24E_WT" HEAD)"
+HC_CWD="$T24E_WT"
+run_hook s24eqbase
+check 342 "premise: the equal-basename worktree candidate blocks — contract:hook:inv-t24" 2 "$RC"
+append_grudge "$HC_STORE" "$(basename "$T24E_WT")" "$T24E_WT" "the widget regressed" \
+  "app.py" "$T24E_FIX" "2026-04-01" >/dev/null
+run_hook s24eqbase true
+check 343 "a worktree-keyed grudge clears when the basenames collide — contract:hook:inv-t24" 0 "$RC"
 
 # ========================================================================
 # INV-T19 — grouping by changed-file overlap, one increment per group per
@@ -2079,8 +2188,8 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=332
-ROOT_SKIPPED_CHECKS=29
+EXPECTED_CHECKS=343
+ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
     echo "SKIPPED: $ROOT_SKIPPED_CHECKS of $EXPECTED_CHECKS checks did not run (root uid cannot exercise the unreadable-store paths)"
