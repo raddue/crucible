@@ -19,7 +19,7 @@ version: 1
 Before a skill fans out reviewers, it asks the calibration store *where to look
 harder this run* and passes that hint into each reviewer's dispatch context. The
 hint is the **`DispatchAdvice`** block — a small, bounded set of scrutiny lines
-merged from three independent signals:
+merged from four independent signals:
 
 - **Brier scrutiny (skill-level)** — "my last N verdicts had a Brier of X; treat
   my outputs with extra scrutiny." Reuses `advisory_line` verbatim.
@@ -27,6 +27,9 @@ merged from three independent signals:
   verdict was later proven wrong* by `/calibration-reconcile`.
 - **Grudge file-hits (file-level)** — files carrying past *bugs* recorded in the
   Book of Grudges (`#271`).
+- **Complexity hits (function-level)** — the most cyclomatically complex
+  functions among the in-scope files (`#558`); the only signal that names a
+  *function*, not just a file.
 
 `DispatchAdvice` shape (header + ≤4 signal lines + footer; omit any silent
 signal; all silent ⇒ no output at all):
@@ -36,7 +39,8 @@ signal; all silent ⇒ no output at all):
 - scrutiny: <advisory_line text>                  # Brier, omitted if silent
 - past wrong verdicts touched: a.py (2), b.py (1)  # falsification, omitted if none
 - past regressions on file: c.py (3), d.py (1)     # grudge, omitted if none
-- suggested weighting: give the named files extra reviewer attention this run.
+- high complexity: e.py::f (CC 22), g.py::h (CC 17) # complexity, omitted if none
+- suggested weighting: give the named files/functions extra reviewer attention this run.
 ```
 
 **Bounds (the block can never balloon):** each file list is capped at the top
@@ -70,6 +74,8 @@ python3 scripts/brier_advisory.py advise <skill> [file ...]
   non-backfilled falsified entry's `gated_files` intersect `[file ...]`.
 - **Grudge:** silent when the grudge store is empty/absent or no grudge matches
   `[file ...]`.
+- **Complexity:** silent when no in-scope function reaches the complexity floor
+  (or none of `[file ...]` is a parseable regular file).
 
 **Invariants (load-bearing):**
 

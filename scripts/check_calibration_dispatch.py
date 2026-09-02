@@ -5,6 +5,12 @@ Invocation (from repo root):
     python3 scripts/check_calibration_dispatch.py            # check the tree
     python3 scripts/check_calibration_dispatch.py --selftest # built-in logic tests
 
+Also asserts the canonical doc's pinned DispatchAdvice footer is still
+byte-identical to the one `brier_advisory._render_advice` actually emits — the
+doc is the spec five SKILL.md files link to instead of copying, so a silent
+producer/spec drift there is exactly the failure "link, never copy" exists to
+prevent.
+
 For each of the five consumer skills (siege, quality-gate, inquisitor, delve,
 audit), asserts THREE things:
   1. the `<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->` marker is
@@ -27,6 +33,8 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 SKILLS = ROOT / "skills"
 CONVENTION_REL = "shared/calibration-weighted-dispatch.md"
 CONVENTION = SKILLS / "shared" / "calibration-weighted-dispatch.md"
@@ -56,6 +64,21 @@ NO_COPY_ANCHORS = [
 ]
 
 
+def rendered_footer() -> str:
+    """The literal footer line `_render_advice` emits (always its last line)."""
+    from scripts.brier_advisory import _render_advice
+    return _render_advice("any-skill", "any advisory line", {}, {}).splitlines()[-1]
+
+
+def check_footer_pin(doc_text: str, footer: str) -> list[str]:
+    """Return failures (empty == OK) for the doc's pinned footer literal."""
+    if footer in doc_text:
+        return []
+    return [f"{CONVENTION_REL}: pinned DispatchAdvice footer has drifted from "
+            f"brier_advisory._render_advice — the doc must contain the literal "
+            f"{footer!r}"]
+
+
 def invocation_token(key: str) -> str:
     return f"advise {key}"
 
@@ -82,6 +105,8 @@ def main() -> int:
     if not CONVENTION.is_file():
         print(f"MISSING CONVENTION DOC: {CONVENTION.relative_to(ROOT)}")
         return 1
+    errs.extend(check_footer_pin(CONVENTION.read_text(encoding="utf-8"),
+                                 rendered_footer()))
     for name, key in CONSUMERS.items():
         path = SKILLS / name / "SKILL.md"
         try:
@@ -95,7 +120,8 @@ def main() -> int:
         for e in errs:
             print(f"  {e}")
         return 1
-    print("OK — all 5 consumers carry the marker + invocation, no copied prose.")
+    print("OK — all 5 consumers carry the marker + invocation, no copied prose; "
+          "doc footer matches _render_advice.")
     return 0
 
 
@@ -120,6 +146,12 @@ def selftest() -> int:
     # wrong key (audit invocation in siege file) must miss `advise siege`
     if not check_consumer("siege", "siege", MARKER + "\nadvise audit\n"):
         failures.append("wrong-key invocation should fail but passed")
+    # footer pin: the real doc must carry the real footer; a drifted doc must fail
+    real_footer = rendered_footer()
+    if check_footer_pin(CONVENTION.read_text(encoding="utf-8"), real_footer):
+        failures.append("live doc should carry _render_advice's footer but did not")
+    if not check_footer_pin("- suggested weighting: something else.\n", real_footer):
+        failures.append("drifted footer should fail but passed")
     if failures:
         print("SELFTEST FAILED:")
         for f in failures:
