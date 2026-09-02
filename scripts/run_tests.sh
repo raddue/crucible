@@ -97,6 +97,9 @@ run python3 scripts/check_dispatch_graphify_consult.py
 # --- handoff hard-stop structural check (#556) ---
 run python3 scripts/check_handoff_stop_contract.py --selftest
 run python3 scripts/check_handoff_stop_contract.py
+# --- .claude/settings.json registration (#559) ---
+run python3 scripts/check_claude_settings.py --selftest
+run python3 scripts/check_claude_settings.py
 
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
@@ -119,6 +122,11 @@ run python3 scripts/check_calibration_dispatch.py --selftest
 run python3 scripts/check_calibration_dispatch.py
 run python3 scripts/test_brier_advise.py
 run python3 scripts/test_calibrate_tolerance.py
+# --- Complexity-ranked dispatch signal (#558) ---
+run python3 scripts/test_complexity_index.py
+run python3 scripts/complexity_index.py --selftest
+run python3 scripts/check_stdlib_only.py
+run python3 scripts/check_stdlib_only.py --selftest
 
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
@@ -221,6 +229,14 @@ run python3 scripts/test_catalog.py
 run bash hooks/tests/test-build-routing-advisor.sh
 run bash hooks/tests/test-gate-ledger-guard.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
+run bash hooks/tests/test-grudge-resolution-guard.sh
+
+# --- Grudge eval suite (first eval/ wirings; #559) ---
+run python3 eval/grudge/test-grudge-core.py
+run python3 eval/grudge/test-grudge-match-stale.py
+run python3 eval/grudge/test-grudge-privacy-isolation.py
+run python3 eval/grudge/test-grudge-regressions.py
+run python3 eval/grudge/test-grudge-wiring.py
 
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
