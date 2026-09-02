@@ -125,6 +125,7 @@ run python3 scripts/test_calibrate_tolerance.py
 # --- Complexity-ranked dispatch signal (#558) ---
 run python3 scripts/test_complexity_index.py
 run python3 scripts/complexity_index.py --selftest
+run python3 scripts/test_complexity_index_adversarial.py
 run python3 scripts/check_stdlib_only.py
 run python3 scripts/check_stdlib_only.py --selftest
 
