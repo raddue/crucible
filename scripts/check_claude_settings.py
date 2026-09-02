@@ -22,6 +22,12 @@ tree looked perfectly correct. This asserts, mechanically:
   5. `.gitignore` carries the literal line `!.claude/settings.json`,
   6. `.gitignore` carries NO bare `.claude/` line (which would re-ignore the
      settings file and undo 4+5),
+  6b. a NESTED `.claude/` directory is still ignored. 4's `.claude/*` has an
+     interior separator, so per gitignore(5) it is anchored to the repo root,
+     whereas the bare `.claude/` that 6 forbids matched at ANY depth. Without
+     a third rule the swap 6 requires silently un-ignores every nested
+     `.claude/` — machine-local session state, in a public repo — while 4-6
+     all still read as satisfied,
   7. `.claude/settings.json` is git-tracked
      (`git ls-files --error-unmatch` exits 0) — an untracked file registers the
      hook for exactly one working copy and for nobody else,
@@ -94,6 +100,10 @@ HOOK_COMMAND_SUBSTRING = "hooks/grudge-resolution-guard.sh"
 
 GITIGNORE_REQUIRED_LINES = (".claude/*", "!.claude/settings.json")
 GITIGNORE_FORBIDDEN_LINE = ".claude/"
+# Assertion 6b's probe. Any nested path does; this one is a real subtree.
+# NOT `--no-index`d against a spelling of the settings file: the root
+# re-include is deliberately un-ignored, and a nested one must not be.
+NESTED_CLAUDE_REL = "eval/grudge/.claude/settings.json"
 
 USAGE = "usage: check_claude_settings.py [--selftest]"
 
@@ -224,7 +234,46 @@ def check_gitignore(root: pathlib.Path) -> list[str]:
             f"{GITIGNORE_REL} still carries a bare `{GITIGNORE_FORBIDDEN_LINE}` line — "
             f"it re-ignores {SETTINGS_REL} and undoes the re-include"
         )
-    return errs + _check_not_ignored(root)
+    return errs + _check_not_ignored(root) + _check_nested_ignored(root)
+
+
+def _check_nested_ignored(root: pathlib.Path) -> list[str]:
+    """Assertion 6b's oracle: git again, asked about a NESTED `.claude/`.
+
+    The literal-line tests cannot see this. `.claude/*` and
+    `!.claude/settings.json` both being present says nothing about depth, and
+    the bare `.claude/` line assertion 6 forbids is exactly the rule that used
+    to provide the nested coverage — so satisfying 4, 5 and 6 is what removes
+    it. Only git can answer, and it is asked directly.
+
+    Same tolerances as `_check_not_ignored`: an absent or fatal git is not an
+    answer, and a rule from a source this repo does not track (a developer's
+    `core.excludesFile`, `$GIT_DIR/info/exclude`) is not this gate's to blame —
+    which here means it does not COUNT as coverage either, so the source is
+    checked on the ignored path rather than the un-ignored one.
+    """
+    try:
+        verbose = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-v", "-z", "--stdin"],
+            cwd=str(root),
+            input=(NESTED_CLAUDE_REL + "\0").encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:  # git absent / not executable — see check_tracked
+        return []
+    if verbose.returncode == 128:  # git gave up; not an answer
+        return []
+    source = verbose.stdout.decode("utf-8", "replace").split("\0")[0]
+    if source and _is_repo_gitignore(root, source):
+        return []
+    return [
+        f"git does NOT ignore the nested {NESTED_CLAUDE_REL} via a tracked "
+        f"{GITIGNORE_REL} — `.claude/*` is root-anchored by its interior "
+        f"separator, so nested machine-local Claude state is committable; add "
+        f"a depth-covering rule (e.g. `**/*/.claude/`)"
+    ]
 
 
 def _is_repo_gitignore(root: pathlib.Path, source: str) -> bool:
@@ -457,7 +506,8 @@ _GOOD_SETTINGS_TEXT = json.dumps(
     indent=2,
 )
 
-_GOOD_GITIGNORE_TEXT = "node_modules/\n.claude/*\n!.claude/settings.json\n.envrc\n"
+_GOOD_GITIGNORE_TEXT = ("node_modules/\n.claude/*\n!.claude/settings.json\n"
+                        "**/*/.claude/\n.envrc\n")
 
 
 def _make_fixture(
@@ -664,6 +714,12 @@ def _selftest_assertions(tmp: pathlib.Path) -> int:
             tmp, "glob-claude",
             gitignore_text=_GOOD_GITIGNORE_TEXT + "**/.claude/\n"),
          f"git ignores {SETTINGS_REL}"),
+        # 6b. 4, 5 and 6 all satisfied, and nested `.claude/` un-ignored anyway:
+        # the coverage the forbidden bare line used to provide, dropped with it.
+        ("gitignore nested depth", _make_fixture(
+            tmp, "nested-claude",
+            gitignore_text=_GOOD_GITIGNORE_TEXT.replace("**/*/.claude/\n", "")),
+         f"does NOT ignore the nested {NESTED_CLAUDE_REL}"),
         # 7. present and correct, but never staged
         ("git-tracked", _make_fixture(tmp, "untracked", track=False), "is not git-tracked"),
         # 8. registered, but the script it names was deleted/renamed
@@ -1060,8 +1116,8 @@ def selftest(spawn_children: bool = True) -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = pathlib.Path(td)
         exercised = _selftest_assertions(tmp)
-        _require(exercised == 24,
-                 f"the fixture battery must exercise 24 fixtures, ran {exercised} — "
+        _require(exercised == 25,
+                 f"the fixture battery must exercise 25 fixtures, ran {exercised} — "
                  f"a skipped battery is a silent green")
         dispatch_cases = _selftest_dispatch()
         _require(dispatch_cases == 7,
@@ -1088,7 +1144,7 @@ def selftest(spawn_children: bool = True) -> int:
     print(
         "selftest OK — 8 repo assertions (settings exists / valid JSON / Stop command "
         "names the hook / .gitignore has `.claude/*` / has `!.claude/settings.json` / "
-        "has no bare `.claude/` / file is git-tracked / the named hook script exists) "
+        "has no bare `.claude/`, and a nested `.claude/` is still ignored / file is git-tracked / the named hook script exists) "
         "each verified in their PASS and FAIL shape against real git fixtures, run() "
         "exits 1 and PRINTS every failure; the 9th (main()'s argv dispatch) has a FAIL "
         "fixture per routing rule and is re-asserted by the bare gating run; the 10th "
