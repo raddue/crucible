@@ -182,6 +182,18 @@ class CountingRulesTest(unittest.TestCase):
                         return 0
         """)), 3, "match: 2 concrete cases +2; bare unguarded case _ +0")
 
+        self.assertEqual(cc(_func_node("""
+            def f(cmd, flag):
+                match cmd:
+                    case "start":
+                        return 1
+                    case _ if flag:
+                        return 2
+                    case _:
+                        return 0
+        """)), 3, "a GUARDED wildcard (case _ if flag:) is a concrete case +1; "
+                  "ONLY the bare unguarded case _ is +0")
+
 
 class TopFunctionsTest(unittest.TestCase):
     # contract:floor:inv-t2
@@ -333,6 +345,46 @@ class TopFunctionsTest(unittest.TestCase):
                 "nested function present",
             )
 
+        # INV-C2 covers four excluded subtree kinds; the witness above exercises
+        # only the plain `def`. One fixture per remaining kind, each asserting
+        # the enclosing function keeps its own base score of 1.
+        self.assertEqual(
+            ci.cyclomatic_complexity(_func_node("""
+                def f(xs):
+                    g = lambda x: (1 if x else 2) if x else (3 if x else 4)
+                    return g
+            """)), 1,
+            "INV-C2: a lambda's branches belong to the lambda, not to the "
+            "enclosing function",
+        )
+        self.assertEqual(
+            ci.cyclomatic_complexity(_func_node("""
+                def f(a):
+                    class Inner:
+                        if a:
+                            X = 1
+                        else:
+                            X = 2
+                        Y = [i for i in range(3) if i]
+                    return Inner
+            """)), 1,
+            "INV-C2: a nested class body's branches never reach the enclosing "
+            "function's score",
+        )
+        self.assertEqual(
+            ci.cyclomatic_complexity(_func_node("""
+                def f():
+                    async def helper(x):
+                        if x == 1:
+                            return 1
+                        if x == 2:
+                            return 2
+                        return 0
+                    return helper
+            """)), 1,
+            "INV-C2: a nested async def is excluded exactly like a nested def",
+        )
+
         with tempfile.TemporaryDirectory() as root:
             class_src = textwrap.dedent("""
                 class Widget:
@@ -387,6 +439,36 @@ class TopFunctionsTest(unittest.TestCase):
                 {"shim": 3, "carrier": 2, "carrier.hidden": 2},
                 "a def inside an if block is still found; qualname reflects "
                 "its lexical parent",
+            )
+
+        with tempfile.TemporaryDirectory() as root:
+            branch_src = textwrap.dedent("""
+                def outer(a):
+                    try:
+                        a += 1
+                    except ValueError:
+                        def in_handler(b):
+                            if b:
+                                return 1
+                            return 0
+                        return in_handler(a)
+                    match a:
+                        case 1:
+                            def in_case(c):
+                                if c:
+                                    return 1
+                                return 0
+                            return in_case(a)
+                    return a
+            """)
+            _write(os.path.join(root, "branches.py"), branch_src)
+            entries = ci.top_functions(["branches.py"], root, limit=0,
+                                       min_complexity=1)
+            self.assertEqual(
+                {e["qualname"]: e["complexity"] for e in entries},
+                {"outer": 3, "outer.in_handler": 2, "outer.in_case": 2},
+                "the traversal descends into except-handler bodies and match "
+                "case bodies, not only body/orelse/finalbody",
             )
 
     # contract:qualname:inv-t3
@@ -446,6 +528,36 @@ class TopFunctionsTest(unittest.TestCase):
                 [(e["path"], e["qualname"]) for e in entries],
                 [("mod.py", "big_a")],
                 "only the intersecting function surfaces",
+            )
+
+            changed = {"mod.py": {ranges["big_a"][1]}}
+            entries = ci.top_functions(["mod.py", "other.py"], root, limit=0,
+                                       changed_lines=changed)
+            self.assertEqual(
+                [(e["path"], e["qualname"]) for e in entries],
+                [("mod.py", "big_a")],
+                "a change on the function's LAST line intersects — the range "
+                "is inclusive of end_lineno",
+            )
+
+            changed = {"mod.py": {ranges["big_b"][0]}}
+            entries = ci.top_functions(["mod.py", "other.py"], root, limit=0,
+                                       changed_lines=changed)
+            self.assertEqual(
+                [(e["path"], e["qualname"]) for e in entries],
+                [("mod.py", "big_b")],
+                "a change on the function's FIRST line intersects — the range "
+                "is inclusive of lineno; big_b's def is NOT line 1, so this "
+                "cannot pass by accident",
+            )
+
+            changed = {"mod.py": {ranges["big_a"][1] + 1}}
+            entries = ci.top_functions(["mod.py", "other.py"], root, limit=0,
+                                       changed_lines=changed)
+            self.assertEqual(
+                entries, [],
+                "one line PAST end_lineno does not intersect — the range is "
+                "bounded, not open-ended",
             )
 
             entries = ci.top_functions(["mod.py", "other.py"], root, limit=0,
@@ -622,5 +734,39 @@ class CliTest(unittest.TestCase):
         self.assertIn("OK", r.stdout)
 
 
+# Executed-test-count guard — the Python counterpart of the bash carrier's
+# EXPECTED_CHECKS pin (hooks/tests/test-grudge-resolution-guard.sh). `unittest`
+# exits 0 on a fully skipped suite, so a return code alone cannot distinguish
+# "every contract test passed" from "every contract test was skipped, dropped
+# or renamed away". Assert how many tests actually EXECUTED: collected, minus
+# skips, minus expected-failures/unexpected-successes (all three keep a test in
+# testsRun while neutering its assertions). Bump this when adding a test.
+EXPECTED_TESTS = 13
+
+
+def _run_with_count_guard():
+    """Run the suite; fail loudly if fewer than EXPECTED_TESTS actually ran."""
+    result = unittest.main(exit=False, verbosity=2).result
+    rc = 0 if result.wasSuccessful() else 1
+    if len(sys.argv) > 1:
+        # argv selects a subset (single test, -k, --failfast): the total is not
+        # comparable, so report the exemption instead of asserting a wrong count.
+        print("NOTE: executed-count guard not applied — argv selects a subset: "
+              + " ".join(sys.argv[1:]), file=sys.stderr)
+        return rc
+    inert = (list(result.skipped) + list(result.expectedFailures)
+             + [(t, "unexpected success") for t in result.unexpectedSuccesses])
+    executed = result.testsRun - len(inert)
+    if executed != EXPECTED_TESTS:
+        print(f"ERROR: expected {EXPECTED_TESTS} contract tests to execute, "
+              f"ran {executed} ({result.testsRun} collected, {len(inert)} "
+              f"skipped/expected-failed) — a test was skipped, dropped or "
+              f"renamed", file=sys.stderr)
+        for case, reason in inert:
+            print(f"  did not execute: {case} ({reason})", file=sys.stderr)
+        rc = 1
+    return rc
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    sys.exit(_run_with_count_guard())

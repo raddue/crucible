@@ -575,5 +575,39 @@ class ComplexitySignalE2ETest(unittest.TestCase):
                         os.environ[k] = v
 
 
+# Executed-test-count guard — the Python counterpart of the bash carrier's
+# EXPECTED_CHECKS pin (hooks/tests/test-grudge-resolution-guard.sh). `unittest`
+# exits 0 on a fully skipped suite, so a return code alone cannot distinguish
+# "every contract test passed" from "every contract test was skipped, dropped
+# or renamed away". Assert how many tests actually EXECUTED: collected, minus
+# skips, minus expected-failures/unexpected-successes (all three keep a test in
+# testsRun while neutering its assertions). Bump this when adding a test.
+EXPECTED_TESTS = 29
+
+
+def _run_with_count_guard():
+    """Run the suite; fail loudly if fewer than EXPECTED_TESTS actually ran."""
+    result = unittest.main(exit=False).result
+    rc = 0 if result.wasSuccessful() else 1
+    if len(sys.argv) > 1:
+        # argv selects a subset (single test, -k, --failfast): the total is not
+        # comparable, so report the exemption instead of asserting a wrong count.
+        print("NOTE: executed-count guard not applied — argv selects a subset: "
+              + " ".join(sys.argv[1:]), file=sys.stderr)
+        return rc
+    inert = (list(result.skipped) + list(result.expectedFailures)
+             + [(t, "unexpected success") for t in result.unexpectedSuccesses])
+    executed = result.testsRun - len(inert)
+    if executed != EXPECTED_TESTS:
+        print(f"ERROR: expected {EXPECTED_TESTS} contract tests to execute, "
+              f"ran {executed} ({result.testsRun} collected, {len(inert)} "
+              f"skipped/expected-failed) — a test was skipped, dropped or "
+              f"renamed", file=sys.stderr)
+        for case, reason in inert:
+            print(f"  did not execute: {case} ({reason})", file=sys.stderr)
+        rc = 1
+    return rc
+
+
 if __name__ == "__main__":
-    unittest.main()
+    sys.exit(_run_with_count_guard())
