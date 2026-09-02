@@ -612,12 +612,11 @@ class CliTest(unittest.TestCase):
             self.assertIn("hot_path", r.stdout)
             self.assertNotIn("cold_path", r.stdout)
 
-    # contract:diffscope:inv-t8
     def test_cli_selftest(self):
-        """contract:diffscope:inv-t8 — --selftest CLI exits 0; per the build
-        dispatch this tag rides the selftest CLI here (its substantive
-        _complexity_hits key-normalization fixture belongs to the
-        brier_advisory wiring task)."""
+        """--selftest CLI exits 0 and reports OK. (The INV-T8 tag moved to
+        scripts/test_brier_advise.py's
+        test_complexity_hits_normalizes_changed_lines_keys, which actually
+        asserts _complexity_hits key normalization.)"""
         r = _run_cli(["--selftest"], cwd=REPO_ROOT)
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
         self.assertIn("OK", r.stdout)

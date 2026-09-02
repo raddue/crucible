@@ -313,11 +313,13 @@ class ComplexityHitsTest(unittest.TestCase):
         # file_c.py: nothing clears MIN_COMPLEXITY.
         self._write("file_c.py", "def trivial(a):\n    return a\n")
 
+    # contract:qualname:inv-t3
     def test_complexity_hits_groups_by_file(self):
-        """Multi-file, multi-class batch in the full-file case
-        (changed_lines=None): EVERY file with >=1 function clearing the floor
-        yields exactly one entry — that file's first (highest-CC) function —
-        and Class.method qualnames carry their own independent score."""
+        """contract:qualname:inv-t3 — Multi-file, multi-class batch in the
+        full-file case (changed_lines=None): EVERY file with >=1 function
+        clearing the floor yields exactly one entry — that file's first
+        (highest-CC) function — and Class.method qualnames carry their own
+        independent score."""
         self._fixture_batch()
         hits = ba._complexity_hits(["file_a.py", "file_b.py", "file_c.py"])
         self.assertEqual(hits, {
@@ -338,11 +340,13 @@ class ComplexityHitsTest(unittest.TestCase):
                                 changed_lines={"file_a.py": set()}),
             {})
 
+    # contract:diffscope:inv-t8
     def test_complexity_hits_normalizes_changed_lines_keys(self):
-        """Un-normalized changed_lines keys (./-prefixed AND absolute) still
-        intersect a repo-relative file list, and the file list itself is
-        normalized the same way. A _complexity_hits that skipped key
-        normalization would score zero intersections on this fixture."""
+        """contract:diffscope:inv-t8 — Un-normalized changed_lines keys
+        (./-prefixed AND absolute) still intersect a repo-relative file list,
+        and the file list itself is normalized the same way. A
+        _complexity_hits that skipped key normalization would score zero
+        intersections on this fixture."""
         self._fixture_batch()
         changed = {
             "./file_a.py": {2},
