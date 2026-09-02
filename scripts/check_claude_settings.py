@@ -60,12 +60,14 @@ cannot swallow them; and they are raised through `_require`, not `assert`, so
 `python3 -O` cannot strip them.
 
 The subprocess battery needs its children not to spawn children of their own, so
-`--selftest` takes a private companion spelling, `--selftest-inner`, which runs
-every in-process battery and skips only the subprocess one. It is passed by THIS
-file's `_run_child` as argv. Argv is chosen deliberately over an environment
-variable: an inherited env var is a zero-edit off switch for whatever it gates,
-and this battery is the mechanism that pins `sys.exit(main())`. No environment
-variable is consulted anywhere in this file.
+`selftest` takes a `spawn_children` parameter and `_run_child` launches those
+children as a MODULE CALL (`python3 -c "... import <this module>;
+sys.exit(m.selftest(spawn_children=False))"`), never through the CLI. So the
+accepted argv surface stays exactly `[--selftest]`, as the contract pins it:
+there is no private second flag, and no environment variable is consulted
+anywhere in this file. Neither an inherited env var nor a forgeable argv can
+switch off the battery that pins `sys.exit(main())` — the parent assembles the
+whole child command itself.
 """
 from __future__ import annotations
 
@@ -94,12 +96,17 @@ GITIGNORE_FORBIDDEN_LINE = ".claude/"
 
 USAGE = "usage: check_claude_settings.py [--selftest]"
 
-# `--selftest` minus the subprocess battery. Passed as argv by `_run_child` so a
-# child cannot spawn grandchildren. Not advertised in USAGE: it runs a strict
-# subset of `--selftest` and exists for this file's own recursion, not for
-# callers. Its routing needs no separate guard — every subprocess case below
-# invokes it, so losing the route turns those children red.
-INNER_FLAG = "--selftest-inner"
+# `--selftest` minus the subprocess battery, as a `python3 -c` program rather
+# than a CLI flag: the contract pins the accepted argv to `[--selftest]`, and a
+# private second spelling would widen that surface. argv[1] is the directory to
+# import from, argv[2] the module name. Importing (rather than running) the copy
+# leaves `__name__ != "__main__"`, so the child cannot spawn grandchildren. This
+# route needs no separate guard — every inner subprocess case below goes through
+# it, so breaking it turns those children red.
+_INNER_PROGRAM = (
+    "import sys; sys.path.insert(0, sys.argv[1]); "
+    "sys.exit(__import__(sys.argv[2]).selftest(spawn_children=False))"
+)
 
 # Assertion 10's subject, as source the AST must contain. `sys.exit(selftest())`
 # -> `sys.exit(0)` silences the whole suite and leaves BARE working, so the bare
@@ -109,6 +116,11 @@ INNER_FLAG = "--selftest-inner"
 # Each of the two entry lines is pinned by the mode the other mutant spares.
 _ENTRY_MARKER = 'if __name__ == "__main__":'
 _ENTRY_REQUIRED = ("sys.exit(selftest())", "sys.exit(main())")
+
+# `_child_timeout_errors`'s subject: the child spawner, and the keyword whose
+# absence would wedge rather than fail the gating suite.
+_CHILD_SPAWNER = "_run_child"
+_TIMEOUT_KWARG = "timeout"
 
 # A child that outlives this is a failure, not a pass: 14 children finish in
 # well under a second, and an unbounded wait would wedge the gating suite.
@@ -412,6 +424,49 @@ def _mutate_entry_line(text: str, call: str) -> str:
     return mutated
 
 
+def _drop_code_line(text: str, line: str) -> str:
+    """Delete the one CODE line whose stripped form is exactly `line`.
+
+    Line-indexed, never `str.replace`: this file quotes its own source in prose,
+    and a textual delete would hit the commentary instead and return a false
+    green — the trap `_mutate_entry_line` exists for.
+    """
+    lines = text.splitlines(keepends=True)
+    hits = [i for i, ln in enumerate(lines) if ln.strip() == line]
+    _require(len(hits) == 1,
+             f"line-drop mutant for {line!r}: expected exactly one code line, found {hits}")
+    return "".join(lines[:hits[0]] + lines[hits[0] + 1:])
+
+
+def _child_timeout_errors(text: str) -> list[str]:
+    """Every `subprocess.run` inside `_run_child` must pass `timeout=`.
+
+    Deleting that keyword is the one regression in this file that does not make
+    a run go red — it makes it HANG, and a wedged gating suite reports nothing
+    at all. So the bound is pinned structurally, over the parsed source, the
+    same way assertion 10 is and for the same reason: this file discusses
+    `timeout` in its own prose and a text search would be satisfied by a comment.
+    """
+    try:
+        module = ast.parse(text)
+    except (SyntaxError, ValueError) as exc:
+        return [f"{SCRIPT_REL} does not parse as Python: {exc}"]
+    spawners = [n for n in ast.walk(module)
+                if isinstance(n, ast.FunctionDef) and n.name == _CHILD_SPAWNER]
+    if not spawners:
+        return [f"{SCRIPT_REL} has no `{_CHILD_SPAWNER}` — nothing spawns the children"]
+    runs = [n for fn in spawners for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and ast.unparse(n.func) == "subprocess.run"]
+    if not runs:
+        return [f"`{_CHILD_SPAWNER}` no longer calls `subprocess.run` at all"]
+    return [
+        f"`{_CHILD_SPAWNER}`'s `subprocess.run` no longer passes `{_TIMEOUT_KWARG}=` — "
+        f"a wedged child would hang the gating suite instead of failing it"
+        for call in runs
+        if not any(kw.arg == _TIMEOUT_KWARG for kw in call.keywords)
+    ]
+
+
 def _selftest_assertions(tmp: pathlib.Path) -> int:
     """PASS and FAIL shape for assertions 1-8. Returns the number of fixtures
     it actually exercised, so `selftest` can pin that this ran at all."""
@@ -543,6 +598,19 @@ def _selftest_assertions(tmp: pathlib.Path) -> int:
              "a source file with no `__main__` block at all must be flagged")
     exercised += 1
 
+    # ---- the child spawner's timeout bound: PASS and FAIL over real source --
+    _require(_child_timeout_errors(entry_src) == [],
+             f"the real `{_CHILD_SPAWNER}` must pass the timeout pin, "
+             f"got: {_child_timeout_errors(entry_src)}")
+    exercised += 1
+    unbounded = _drop_code_line(entry_src, "timeout=_CHILD_TIMEOUT_S,")
+    _require(_child_timeout_errors(unbounded) != [],
+             "a `subprocess.run` that no longer passes `timeout=` must be flagged")
+    _require(_TIMEOUT_KWARG in unbounded,
+             "the unbounded mutant should still quote `timeout` in prose, or this "
+             "case does not discriminate a text pin from an AST pin")
+    exercised += 1
+
     return exercised
 
 
@@ -583,7 +651,8 @@ def _probe_dispatch(main_fn) -> list[str]:
             after_self = list(seen)
 
             for bad_argv in (["--bogus"], ["--self-test"], ["--selftest", "extra"],
-                             ["selftest"], ["--Selftest"], ["-h"], ["--help"], ["foo"]):
+                             ["selftest"], ["--Selftest"], ["-h"], ["--help"], ["foo"],
+                             ["--selftest-inner"]):
                 rc_bad = main_fn(bad_argv)
                 if rc_bad != 1:
                     errs.append(f"unknown argv {bad_argv} must exit 1, got {rc_bad}")
@@ -679,7 +748,9 @@ def _install_copy(root: pathlib.Path, text: str) -> pathlib.Path:
     return path
 
 
-def _run_child(script: pathlib.Path, args: list[str]) -> subprocess.CompletedProcess:
+def _run_child(script: pathlib.Path, args: list[str] | None) -> subprocess.CompletedProcess:
+    """Run `script` as a child. `args` is its argv; `args is None` selects the
+    recursion-free inner mode, routed as a module call the parent assembles."""
     cmd = [sys.executable]
     # Keep the child in the same -O regime as the parent, so the `-O` column of
     # a mutation battery measures the child too, not just this process.
@@ -687,13 +758,17 @@ def _run_child(script: pathlib.Path, args: list[str]) -> subprocess.CompletedPro
         cmd.append("-O")
     elif sys.flags.optimize >= 2:
         cmd.append("-OO")
-    cmd += [str(script), *args]
+    if args is None:
+        cmd += ["-c", _INNER_PROGRAM, str(script.parent), script.stem]
+    else:
+        cmd += [str(script), *args]
     # No `env=` override: this file reads no environment variable, so there is
     # nothing to set — and nothing an ambient one could switch off.
     try:
         return subprocess.run(
             cmd, capture_output=True, text=True, cwd=str(script.parent.parent),
-            timeout=_CHILD_TIMEOUT_S, check=False,
+            timeout=_CHILD_TIMEOUT_S,
+            check=False,
         )
     except subprocess.TimeoutExpired as exc:
         # A wedged child is a FAILURE, not a pass. Raised (not returned) and not
@@ -728,12 +803,13 @@ def _selftest_children(tmp: pathlib.Path) -> int:
     cases = 0
     source = pathlib.Path(__file__).resolve().read_text(encoding="utf-8")
 
-    def expect(name: str, script: pathlib.Path, args: list[str], want_rc: int,
+    def expect(name: str, script: pathlib.Path, args: list[str] | None, want_rc: int,
                want_out: str = "", want_err: str = "") -> None:
         nonlocal cases
         proc = _run_child(script, args)
+        shown = args if args is not None else "(inner module call)"
         _require(proc.returncode == want_rc,
-                 f"{name}: child argv {args} exited {proc.returncode}, expected {want_rc} "
+                 f"{name}: child argv {shown} exited {proc.returncode}, expected {want_rc} "
                  f"(stdout {proc.stdout.strip()!r}, stderr {proc.stderr.strip()!r})")
         _require(want_out in proc.stdout,
                  f"{name}: child stdout missing {want_out!r}; got {proc.stdout.strip()!r}")
@@ -745,7 +821,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
     good = _make_fixture(tmp, "child-good")
     good_script = _install_copy(good, source)
     expect("child-bare-pass", good_script, [], 0, want_out="OK —")
-    expect("child-selftest", good_script, [INNER_FLAG], 0, want_out="selftest OK")
+    expect("child-selftest", good_script, None, 0, want_out="selftest OK")
 
     bad = _make_fixture(tmp, "child-bad", settings_text=None)
     bad_script = _install_copy(bad, source)
@@ -779,7 +855,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
     noop_script = _install_copy(noop, _mutate_source(
         source, "\n    return run(ROOT)\n", "\n    return 0  # bare check disabled\n",
         "bare-route mutant"))
-    expect("child-broken-bare-route-selftest", noop_script, [INNER_FLAG], 1)
+    expect("child-broken-bare-route-selftest", noop_script, None, 1)
 
     # -- a copy whose ENTRY POINT no longer runs the selftest ---------------- #
     # `sys.exit(selftest())` -> `sys.exit(0)` makes `--selftest` a silent green
@@ -800,7 +876,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
         source, "\n    path = root / SETTINGS_REL\n",
         "\n    return []\n    path = root / SETTINGS_REL\n",
         "assertion-1-3 mutant"))
-    expect("child-dead-settings-check-selftest", check_script, [INNER_FLAG], 1)
+    expect("child-dead-settings-check-selftest", check_script, None, 1)
 
     # -- a copy with one _probe_dispatch rule neutered ----------------------- #
     # Pins from outside that the dispatch battery still runs: only
@@ -810,16 +886,18 @@ def _selftest_children(tmp: pathlib.Path) -> int:
         source, "\n            if seen != [ROOT]:\n",
         "\n            if False:  # bare-ran-once rule removed\n",
         "probe-weakening mutant"))
-    expect("child-weakened-probe-selftest", weak_script, [INNER_FLAG], 1)
+    expect("child-weakened-probe-selftest", weak_script, None, 1)
 
     return cases
 
 
 def selftest(spawn_children: bool = True) -> int:
-    """`spawn_children=False` is the `--selftest-inner` mode: every in-process
+    """`spawn_children=False` is the recursion-free inner mode: every in-process
     battery, minus the subprocess one, so a child cannot spawn grandchildren.
-    It is selected by ARGV, from the parent — never by the environment, which a
-    caller's caller could set and thereby switch the battery off at zero cost.
+    It is reachable only as a MODULE CALL the parent assembles — never from argv
+    (the contract pins that to `[--selftest]`) and never from the environment,
+    which a caller's caller could set and thereby switch the battery off at zero
+    cost.
     """
     # `_require` is the mechanism every check below runs through, so the guard
     # chain terminates here: prove the helper still bites, with a raw `raise`
@@ -834,8 +912,8 @@ def selftest(spawn_children: bool = True) -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = pathlib.Path(td)
         exercised = _selftest_assertions(tmp)
-        _require(exercised == 19,
-                 f"the fixture battery must exercise 19 fixtures, ran {exercised} — "
+        _require(exercised == 21,
+                 f"the fixture battery must exercise 21 fixtures, ran {exercised} — "
                  f"a skipped battery is a silent green")
         dispatch_cases = _selftest_dispatch()
         _require(dispatch_cases == 7,
@@ -855,8 +933,9 @@ def selftest(spawn_children: bool = True) -> int:
         f"and {child_cases} subprocess runs of this file pin the child's exit code "
         "per mode, five of them mutated copies that must go red"
         if spawn_children else
-        f"and the subprocess battery did NOT run ({child_cases} children): this is "
-        f"`{INNER_FLAG}`, the recursion-free mode `--selftest` spawns its children in"
+        f"and the subprocess battery did NOT run ({child_cases} children): this is the "
+        f"recursion-free inner mode, reachable only as the module call `--selftest` "
+        f"spawns its children through"
     )
     print(
         "selftest OK — 8 repo assertions (settings exists / valid JSON / Stop command "
@@ -866,7 +945,8 @@ def selftest(spawn_children: bool = True) -> int:
         "exits 1 and PRINTS every failure; the 9th (main()'s argv dispatch) has a FAIL "
         "fixture per routing rule and is re-asserted by the bare gating run; the 10th "
         "(the `__main__` block still consuming each mode's verdict) has PASS and FAIL "
-        f"fixtures over the parsed entry block, mutated one code line at a time; "
+        f"fixtures over the parsed entry block, mutated one code line at a time, and "
+        f"the child spawner's `timeout=` bound is pinned over that same AST; "
         f"{children}. Raised, not returned, and via _require, so neither `sys.exit(0)` "
         "nor `python3 -O` can silence it."
     )
@@ -880,8 +960,6 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args == ["--selftest"]:
         return selftest()
-    if args == [INNER_FLAG]:
-        return selftest(spawn_children=False)
     if args:
         print(f"unknown argument(s): {' '.join(args)}", file=sys.stderr)
         print(USAGE, file=sys.stderr)
