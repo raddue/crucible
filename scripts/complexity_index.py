@@ -19,6 +19,11 @@ import re
 import sys
 
 MIN_COMPLEXITY = 15
+# Ceiling on a single hunk's line count. The count comes straight from
+# untrusted `@@ ... +b,COUNT @@` diff text, and `range(start, start + count)`
+# materialises one int per line: `+1,2000000000` asks for ~120 GB and is an
+# OOM kill no `except` can catch. No real file has this many lines.
+MAX_HUNK_LINES = 2_000_000
 
 _EXCLUDED_SUBTREES = (
     ast.FunctionDef,
@@ -125,12 +130,19 @@ def top_functions(paths: list[str], repo_root: str, limit: int, min_complexity: 
     With changed_lines supplied, only functions whose [lineno, end_lineno]
     range intersects that file's changed-line set surface. Per-file error
     isolation: one unparseable/missing file is swallowed, the rest still
-    contribute. Duplicate input paths are collapsed (first occurrence wins)
+    contribute; a non-regular path (FIFO, socket, device) is skipped without
+    being opened, so it cannot block. Duplicate input paths are collapsed (first occurrence wins)
     so a repeated file does not double-report.
     """
     entries = []
     for p in dict.fromkeys(paths):
         full = p if os.path.isabs(p) else os.path.join(repo_root, p)
+        # REGULAR FILES ONLY, checked BEFORE the open. `open()` on a FIFO,
+        # socket or device blocks indefinitely, and a blocking open raises
+        # nothing, so the `except Exception: continue` below cannot isolate it —
+        # the whole advisory (and every orchestrator waiting on it) hangs.
+        if not os.path.isfile(full):
+            continue
         try:
             with open(full, "r", encoding="utf-8-sig") as fh:
                 source = fh.read()
@@ -155,6 +167,7 @@ def parse_diff_hunks(diff_text: str) -> dict[str, set[int]]:
     excluded, not mis-attributed. Hunk headers via the pinned regex
     ^@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,(\\d+))? @@: missing count defaults to
     1; new-file range is c..c+count-1; count=0 yields an empty range.
+    count is clamped to MAX_HUNK_LINES before the range is built.
     """
     hunks = {}
     current = None
@@ -167,6 +180,7 @@ def parse_diff_hunks(diff_text: str) -> dict[str, set[int]]:
         if m and current is not None:
             start = int(m.group(1))
             count = int(m.group(2)) if m.group(2) is not None else 1
+            count = min(count, MAX_HUNK_LINES)
             lines = hunks.setdefault(current, set())
             lines.update(range(start, start + count))
     return hunks

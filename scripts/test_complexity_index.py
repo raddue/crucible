@@ -11,6 +11,7 @@ Run:  python3 scripts/test_complexity_index.py
 """
 import ast
 import glob
+import json
 import os
 import subprocess
 import sys
@@ -668,6 +669,50 @@ class TopFunctionsTest(unittest.TestCase):
             )
 
 
+
+    def test_non_regular_paths_are_skipped_without_being_opened(self):
+        """contract:isolation:inv-t10 — a FIFO/socket/device must be skipped
+        BEFORE the open. `open()` on one blocks indefinitely, and a blocking
+        open raises nothing, so `except Exception: continue` cannot isolate it:
+        the advisory (and every orchestrator awaiting it, with no timeout)
+        hangs. Run in a child process under a wall-clock deadline, because a
+        regression here does not fail — it never returns."""
+        with tempfile.TemporaryDirectory() as root:
+            _write(os.path.join(root, "good.py"), _branchy("fn_a", 16) + "\n")
+            os.mkfifo(os.path.join(root, "pipe.py"))
+            os.mkdir(os.path.join(root, "adir.py"))
+            prog = textwrap.dedent("""
+                import json, sys
+                sys.path.insert(0, sys.argv[1])
+                from scripts import complexity_index as ci
+                entries = ci.top_functions(
+                    ["pipe.py", "adir.py", "good.py", "gone.py"],
+                    sys.argv[2], limit=0)
+                print(json.dumps([[e["path"], e["qualname"]] for e in entries]))
+            """)
+            proc = subprocess.run(
+                [sys.executable, "-c", prog, REPO_ROOT, root],
+                capture_output=True, text=True, timeout=20)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            # the good file still contributes: the guard skips, never aborts
+            self.assertEqual(json.loads(proc.stdout), [["good.py", "fn_a"]])
+
+    def test_hunk_count_is_clamped_to_a_ceiling(self):
+        """contract:diff:inv-c3 — the hunk COUNT is untrusted diff text and
+        `range(start, start + count)` materialises one int per line, so an
+        unbounded count is an OOM kill no `except` can catch. The clamp must
+        bound the set without disturbing any real-sized hunk."""
+        huge = "+++ b/f.py\n@@ -1 +1,2000000000 @@\n"
+        self.assertEqual(len(ci.parse_diff_hunks(huge)["f.py"]),
+                         ci.MAX_HUNK_LINES)
+        # a hunk at the ceiling is untouched; one just over is clamped
+        at_cap = f"+++ b/f.py\n@@ -1 +1,{ci.MAX_HUNK_LINES} @@\n"
+        self.assertEqual(len(ci.parse_diff_hunks(at_cap)["f.py"]),
+                         ci.MAX_HUNK_LINES)
+        # ordinary diffs are entirely unaffected
+        small = "+++ b/f.py\n@@ -1 +10,3 @@\n"
+        self.assertEqual(ci.parse_diff_hunks(small), {"f.py": {10, 11, 12}})
+
 class CliTest(unittest.TestCase):
     def test_cli_score_orders_and_floors(self):
         with tempfile.TemporaryDirectory() as root:
@@ -741,7 +786,7 @@ class CliTest(unittest.TestCase):
 # or renamed away". Assert how many tests actually EXECUTED: collected, minus
 # skips, minus expected-failures/unexpected-successes (all three keep a test in
 # testsRun while neutering its assertions). Bump this when adding a test.
-EXPECTED_TESTS = 13
+EXPECTED_TESTS = 15
 
 
 def _run_with_count_guard():
