@@ -33,7 +33,11 @@ and, as self-guards, 9. `main`'s own argv dispatch still routes the bare,
 10. the `__main__` block still consumes the verdict each mode computes (see
 `check_entrypoint`) — replacing either `sys.exit(...)` line with a constant
 does not make an assertion vacuous, it stops the interpreter from reaching
-one, which is why that guard is made of source text.
+one, which is why that guard reads the file back off disk. It reads it as an
+AST, not as text: this file quotes both of those lines many times over in its
+own commentary and exactly once each as code, so any substring test over it is
+satisfied by a comment and pins nothing. (No count is written down here: this
+sentence would be part of it.)
 
 Style mirrors `scripts/check_handoff_stop_contract.py` /
 `scripts/check_calibration_dispatch.py`: ROOT-from-`__file__`, error
@@ -54,13 +58,21 @@ as a subprocess — the only vantage point from which `sys.exit(main())` and the
 all. Selftest failures are raised, never returned, so a mutated `sys.exit(0)`
 cannot swallow them; and they are raised through `_require`, not `assert`, so
 `python3 -O` cannot strip them.
+
+The subprocess battery needs its children not to spawn children of their own, so
+`--selftest` takes a private companion spelling, `--selftest-inner`, which runs
+every in-process battery and skips only the subprocess one. It is passed by THIS
+file's `_run_child` as argv. Argv is chosen deliberately over an environment
+variable: an inherited env var is a zero-edit off switch for whatever it gates,
+and this battery is the mechanism that pins `sys.exit(main())`. No environment
+variable is consulted anywhere in this file.
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -82,17 +94,25 @@ GITIGNORE_FORBIDDEN_LINE = ".claude/"
 
 USAGE = "usage: check_claude_settings.py [--selftest]"
 
-# Assertion 10's subject. `sys.exit(selftest())` -> `sys.exit(0)` silences the
-# whole suite and leaves BARE working, so the bare gating run is the vantage
-# point that catches it; `sys.exit(main())` -> `sys.exit(0)` silences bare and
-# leaves `--selftest` working, so the subprocess battery catches that one.
+# `--selftest` minus the subprocess battery. Passed as argv by `_run_child` so a
+# child cannot spawn grandchildren. Not advertised in USAGE: it runs a strict
+# subset of `--selftest` and exists for this file's own recursion, not for
+# callers. Its routing needs no separate guard — every subprocess case below
+# invokes it, so losing the route turns those children red.
+INNER_FLAG = "--selftest-inner"
+
+# Assertion 10's subject, as source the AST must contain. `sys.exit(selftest())`
+# -> `sys.exit(0)` silences the whole suite and leaves BARE working, so the bare
+# gating run is the vantage point that catches it; `sys.exit(main())` ->
+# `sys.exit(0)` silences bare and leaves `--selftest` working, so the subprocess
+# battery catches that one (via the child that must print `OK —`).
 # Each of the two entry lines is pinned by the mode the other mutant spares.
 _ENTRY_MARKER = 'if __name__ == "__main__":'
 _ENTRY_REQUIRED = ("sys.exit(selftest())", "sys.exit(main())")
 
-# Set on children this file spawns from `--selftest`, so a child does not
-# re-run the subprocess battery and fork-bomb the suite.
-_CHILD_ENV = "CHECK_CLAUDE_SETTINGS_SELFTEST_CHILD"
+# A child that outlives this is a failure, not a pass: 14 children finish in
+# well under a second, and an unbounded wait would wedge the gating suite.
+_CHILD_TIMEOUT_S = 60.0
 
 
 def _require(condition: object, message: str) -> None:
@@ -219,17 +239,49 @@ def check_hook_script(root: pathlib.Path) -> list[str]:
     return []
 
 
+def _is_main_guard(test: ast.expr) -> bool:
+    """`__name__ == "__main__"`, as an AST test."""
+    return (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and test.left.id == "__name__"
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Eq)
+        and len(test.comparators) == 1
+        and isinstance(test.comparators[0], ast.Constant)
+        and test.comparators[0].value == "__main__"
+    )
+
+
 def _entrypoint_errors(text: str) -> list[str]:
-    """Assertion 10, as a pure function over source text so it can have real
-    PASS and FAIL fixtures instead of being asserted only about itself."""
-    _head, sep, tail = text.rpartition(_ENTRY_MARKER)
-    if not sep:
+    """Assertion 10, as a pure function over the PARSED source so it can have
+    real PASS and FAIL fixtures instead of being asserted only about itself.
+
+    Deliberately not a substring test. This file discusses `sys.exit(main())`
+    in its own prose, so a text search over it is satisfied by a comment and
+    the pin it is supposed to carry becomes vacuous — measured: mutating only
+    the real code line left the old substring version green. A comment cannot
+    appear in an AST, so the pin here is over the calls actually compiled into
+    the `__main__` block.
+    """
+    try:
+        module = ast.parse(text)
+    except (SyntaxError, ValueError) as exc:
+        return [f"{SCRIPT_REL} does not parse as Python: {exc}"]
+    blocks = [n for n in module.body if isinstance(n, ast.If) and _is_main_guard(n.test)]
+    if not blocks:
         return [f"{SCRIPT_REL} has no `{_ENTRY_MARKER}` block — nothing runs at all"]
+    calls = {
+        ast.unparse(node)
+        for block in blocks
+        for node in ast.walk(block)
+        if isinstance(node, ast.Call)
+    }
     return [
-        f"{SCRIPT_REL}'s `{_ENTRY_MARKER}` block no longer carries `{needed}` — "
+        f"{SCRIPT_REL}'s `{_ENTRY_MARKER}` block no longer calls `{needed}` — "
         f"the mode it dispatches computes a verdict that nothing consumes"
         for needed in _ENTRY_REQUIRED
-        if needed not in tail
+        if needed not in calls
     ]
 
 
@@ -338,6 +390,26 @@ def _quiet_run(root: pathlib.Path) -> tuple[int, str]:
     with contextlib.redirect_stdout(buf):
         rc = run(root)
     return rc, buf.getvalue()
+
+
+def _mutate_entry_line(text: str, call: str) -> str:
+    """Replace the one CODE line that is exactly `call` with `sys.exit(0)`.
+
+    Located by line index, never by first textual match: `call` also occurs in
+    this file's prose, and a textual replace would rewrite the commentary and
+    return a false green (it did — see `_entrypoint_errors`). Requires exactly
+    one such code line, so a fixture that silently mutates nothing is an error
+    rather than a pass.
+    """
+    lines = text.splitlines(keepends=True)
+    hits = [i for i, ln in enumerate(lines) if ln.strip() == call]
+    _require(len(hits) == 1,
+             f"entry-line mutant for {call!r}: expected exactly one code line, found {hits}")
+    idx = max(hits)
+    indent = lines[idx][: len(lines[idx]) - len(lines[idx].lstrip())]
+    mutated = "".join(lines[:idx] + [f"{indent}sys.exit(0)\n"] + lines[idx + 1:])
+    _require(mutated != text, f"entry-line mutant for {call!r} changed nothing")
+    return mutated
 
 
 def _selftest_assertions(tmp: pathlib.Path) -> int:
@@ -452,11 +524,20 @@ def _selftest_assertions(tmp: pathlib.Path) -> int:
              f"the real entry point must pass assertion 10, got: {_entrypoint_errors(entry_src)}")
     exercised += 1
     for dead in _ENTRY_REQUIRED:
-        maimed = entry_src.replace(dead, "sys.exit(0)")
-        _require(maimed != entry_src, f"assertion-10 fixture for {dead!r} changed nothing")
+        # SINGLE-SITE and LINE-INDEXED on purpose. An unbounded `.replace(dead,
+        # ...)` also rewrites every place this file quotes `dead` in prose,
+        # which makes the fixture pass for a reason no real regression
+        # reproduces — that is exactly how the previous substring pin shipped
+        # green while pinning nothing.
+        maimed = _mutate_entry_line(entry_src, dead)
         _require(any(dead in e for e in _entrypoint_errors(maimed)),
                  f"a `__main__` block missing `{dead}` must be flagged, "
                  f"got: {_entrypoint_errors(maimed)}")
+        # ...and the prose must be irrelevant: the mutant still MENTIONS `dead`
+        # in its comments, so a flagged mutant proves the pin is not textual.
+        _require(dead in maimed,
+                 f"the {dead!r} mutant should still quote it in prose, or this "
+                 f"case does not discriminate a text pin from an AST pin")
         exercised += 1
     _require(_entrypoint_errors("x = 1\n") != [],
              "a source file with no `__main__` block at all must be flagged")
@@ -607,10 +688,20 @@ def _run_child(script: pathlib.Path, args: list[str]) -> subprocess.CompletedPro
     elif sys.flags.optimize >= 2:
         cmd.append("-OO")
     cmd += [str(script), *args]
-    return subprocess.run(
-        cmd, capture_output=True, text=True, cwd=str(script.parent.parent),
-        env={**os.environ, _CHILD_ENV: "1"}, check=False,
-    )
+    # No `env=` override: this file reads no environment variable, so there is
+    # nothing to set — and nothing an ambient one could switch off.
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, cwd=str(script.parent.parent),
+            timeout=_CHILD_TIMEOUT_S, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # A wedged child is a FAILURE, not a pass. Raised (not returned) and not
+        # via `assert`, so neither `sys.exit(0)` nor `-O` can swallow it.
+        raise AssertionError(
+            f"child {cmd} did not finish within {_CHILD_TIMEOUT_S}s — "
+            f"treating a hung child as a selftest failure, not as a pass"
+        ) from exc
 
 
 def _mutate_source(text: str, old: str, new: str, label: str) -> str:
@@ -654,7 +745,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
     good = _make_fixture(tmp, "child-good")
     good_script = _install_copy(good, source)
     expect("child-bare-pass", good_script, [], 0, want_out="OK —")
-    expect("child-selftest", good_script, ["--selftest"], 0, want_out="selftest OK")
+    expect("child-selftest", good_script, [INNER_FLAG], 0, want_out="selftest OK")
 
     bad = _make_fixture(tmp, "child-bad", settings_text=None)
     bad_script = _install_copy(bad, source)
@@ -688,7 +779,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
     noop_script = _install_copy(noop, _mutate_source(
         source, "\n    return run(ROOT)\n", "\n    return 0  # bare check disabled\n",
         "bare-route mutant"))
-    expect("child-broken-bare-route-selftest", noop_script, ["--selftest"], 1)
+    expect("child-broken-bare-route-selftest", noop_script, [INNER_FLAG], 1)
 
     # -- a copy whose ENTRY POINT no longer runs the selftest ---------------- #
     # `sys.exit(selftest())` -> `sys.exit(0)` makes `--selftest` a silent green
@@ -699,7 +790,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
         source, "\n        sys.exit(selftest())\n", "\n        sys.exit(0)\n",
         "dead-selftest-entry mutant"))
     expect("child-dead-selftest-entry-bare", dead_script, [], 1,
-           want_out="no longer carries")
+           want_out="no longer calls")
 
     # -- a copy with a REPO assertion neutered ------------------------------- #
     # Pins from outside that the fixture battery still runs: skip it (and fake
@@ -709,7 +800,7 @@ def _selftest_children(tmp: pathlib.Path) -> int:
         source, "\n    path = root / SETTINGS_REL\n",
         "\n    return []\n    path = root / SETTINGS_REL\n",
         "assertion-1-3 mutant"))
-    expect("child-dead-settings-check-selftest", check_script, ["--selftest"], 1)
+    expect("child-dead-settings-check-selftest", check_script, [INNER_FLAG], 1)
 
     # -- a copy with one _probe_dispatch rule neutered ----------------------- #
     # Pins from outside that the dispatch battery still runs: only
@@ -719,12 +810,17 @@ def _selftest_children(tmp: pathlib.Path) -> int:
         source, "\n            if seen != [ROOT]:\n",
         "\n            if False:  # bare-ran-once rule removed\n",
         "probe-weakening mutant"))
-    expect("child-weakened-probe-selftest", weak_script, ["--selftest"], 1)
+    expect("child-weakened-probe-selftest", weak_script, [INNER_FLAG], 1)
 
     return cases
 
 
-def selftest() -> int:
+def selftest(spawn_children: bool = True) -> int:
+    """`spawn_children=False` is the `--selftest-inner` mode: every in-process
+    battery, minus the subprocess one, so a child cannot spawn grandchildren.
+    It is selected by ARGV, from the parent — never by the environment, which a
+    caller's caller could set and thereby switch the battery off at zero cost.
+    """
     # `_require` is the mechanism every check below runs through, so the guard
     # chain terminates here: prove the helper still bites, with a raw `raise`
     # that does not itself go through `_require`. Neuter `_require` and every
@@ -744,15 +840,24 @@ def selftest() -> int:
         dispatch_cases = _selftest_dispatch()
         _require(dispatch_cases == 7,
                  f"the dispatch battery must exercise 7 broken mains, ran {dispatch_cases}")
-        if os.environ.get(_CHILD_ENV):
-            child_cases = -1
-            print("(child process: subprocess battery skipped)")
-        else:
-            child_cases = _selftest_children(tmp)
-            _require(child_cases == 14,
-                     f"the subprocess battery must exercise 14 children, ran {child_cases}")
+        # The count guard sits OUTSIDE the branch on purpose: a guard inside the
+        # arm it guards is skipped together with the thing it guards, and the
+        # unrun count then flows into a success banner. Both modes must now
+        # prove their child count, and the banner only ever prints the measured
+        # one.
+        child_cases = _selftest_children(tmp) if spawn_children else 0
+        _require(child_cases == (14 if spawn_children else 0),
+                 f"the subprocess battery must exercise "
+                 f"{14 if spawn_children else 0} children, ran {child_cases}")
     dispatch_errs = check_dispatch()
     _require(dispatch_errs == [], f"dispatch contract broken: {dispatch_errs}")
+    children = (
+        f"and {child_cases} subprocess runs of this file pin the child's exit code "
+        "per mode, five of them mutated copies that must go red"
+        if spawn_children else
+        f"and the subprocess battery did NOT run ({child_cases} children): this is "
+        f"`{INNER_FLAG}`, the recursion-free mode `--selftest` spawns its children in"
+    )
     print(
         "selftest OK — 8 repo assertions (settings exists / valid JSON / Stop command "
         "names the hook / .gitignore has `.claude/*` / has `!.claude/settings.json` / "
@@ -761,10 +866,9 @@ def selftest() -> int:
         "exits 1 and PRINTS every failure; the 9th (main()'s argv dispatch) has a FAIL "
         "fixture per routing rule and is re-asserted by the bare gating run; the 10th "
         "(the `__main__` block still consuming each mode's verdict) has PASS and FAIL "
-        f"fixtures over real source text; and {child_cases} subprocess runs of this "
-        "file pin the child's exit code per mode, five of them mutated copies that must "
-        "go red. Raised, not returned, and via _require, so neither `sys.exit(0)` nor "
-        "`python3 -O` can silence it."
+        f"fixtures over the parsed entry block, mutated one code line at a time; "
+        f"{children}. Raised, not returned, and via _require, so neither `sys.exit(0)` "
+        "nor `python3 -O` can silence it."
     )
     return 0
 
@@ -776,6 +880,8 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args == ["--selftest"]:
         return selftest()
+    if args == [INNER_FLAG]:
+        return selftest(spawn_children=False)
     if args:
         print(f"unknown argument(s): {' '.join(args)}", file=sys.stderr)
         print(USAGE, file=sys.stderr)
@@ -791,8 +897,9 @@ if __name__ == "__main__":
     # the assertion-carrying mode past that line is what makes the mutant
     # visible — `--selftest` still runs, and its subprocess battery sees the
     # now-dead bare mode. `main` still routes `--selftest` itself and
-    # `check_dispatch` pins that, so the two cannot drift apart; and assertion
-    # 10 pins that BOTH of these two lines are still here.
+    # `check_dispatch` pins that, so the two cannot drift apart. Assertion 10
+    # pins both of the two calls below over the AST, so neither is satisfied by
+    # this comment quoting them.
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
     sys.exit(main())
