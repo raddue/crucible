@@ -385,7 +385,7 @@ Scope is deliberately repo-scoped, the one stated exception to this file's user-
 
 #### Migration for existing checkouts
 
-A checkout that predates this change may already have a **personal, untracked** `.claude/settings.json` (previously the whole `.claude/` tree was gitignored). Merging a branch that adds the tracked file into such a checkout leaves git refusing to overwrite an untracked file. Before merging: move your personal keys into `.claude/settings.local.json` (still gitignored, still loaded by Claude Code), then delete the untracked `.claude/settings.json`. This is a one-time, per-checkout step, not a runtime concern — a fresh clone has nothing to migrate.
+A checkout that predates this change may already have a **personal, untracked** `.claude/settings.json` (previously the whole `.claude/` tree was gitignored). **Back it up before you pull or merge — git will not stop you.** Git's untracked-file protection does not apply to a file that is *ignored* at the time of the operation, and on the pre-branch side the bare `.claude/` rule ignores exactly this file, so a pull or merge that adds the tracked version overwrites your local one silently, rc=0, with no prompt. So, *first*: move your personal keys into `.claude/settings.local.json` (still gitignored, still loaded by Claude Code) and delete the untracked `.claude/settings.json`; *then* merge. This is a one-time, per-checkout step, not a runtime concern — a fresh clone has nothing to migrate.
 
 ### How It Works
 
