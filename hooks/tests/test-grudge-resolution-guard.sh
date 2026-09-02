@@ -779,8 +779,11 @@ check 73 "Stop 1 names the unresolved candidate — contract:hook:inv-t12" yes "
 check 74 "docs-only fix is never named — contract:hook:inv-t12" no "$(has "$ERR" "$T12_DOCS")"
 check 75 "Stop 1 prefills grudge_append.py — contract:hook:inv-t12" yes "$(has "$ERR" "grudge_append.py")"
 check 76 "prefill carries the shared-clone --repo-root — contract:hook:inv-t12" yes "$(has "$ERR" "--repo-root \"$HC_REPO\"")"
-check 77 "prefill carries the shared-clone --repo key — contract:hook:inv-t12" yes "$(has "$ERR" "--repo \"$HC_KEY\"")"
-check 78 "prefill carries the candidate's sha_files — contract:hook:inv-t12" yes "$(has "$ERR" "--files \"app.py\"")"
+# `=`-joined, not space-separated: a `--repo`/`--files` VALUE that begins
+# with `-` (a legal POSIX path, and git sorts it first) is read by argparse as
+# a stray option, so the printed remedy would not run. See inv-t23 below.
+check 77 "prefill carries the shared-clone --repo key — contract:hook:inv-t12" yes "$(has "$ERR" "--repo=\"$HC_KEY\"")"
+check 78 "prefill carries the candidate's sha_files — contract:hook:inv-t12" yes "$(has "$ERR" "--files=\"app.py\"")"
 run_hook s12 true
 check 79 "Stop 2 re-blocks — contract:hook:inv-t12" 2 "$RC"
 check 80 "Stop 2 carries the (2/3) counter — contract:hook:inv-t12" yes "$(has "$ERR" "(2/3)")"
@@ -1636,7 +1639,7 @@ check 140 "the worktree candidate is named — contract:hook:inv-t24" yes "$(has
 check 231 "prefill uses the shared-clone --repo-root, not the worktree's — contract:hook:inv-t24" yes \
   "$(has "$ERR" "--repo-root \"$HC_REPO\"")"
 check 232 "prefill uses the shared-clone --repo key, not the worktree key — contract:hook:inv-t24" yes \
-  "$(has "$ERR" "--repo \"$HC_KEY\"")"
+  "$(has "$ERR" "--repo=\"$HC_KEY\"")"
 
 # (b) neither key has a store dir -> allow once, loudly.
 hook_case t24none
@@ -2176,6 +2179,88 @@ check 318 "the merged group takes the lexicographically lower id — contract:gr
 run_hook s21d true
 check 319 "the Stop after the unequal-count merge gives up — contract:group:inv-t21" 0 "$RC"
 
+# ========================================================================
+# INV-T22 (extension) — the checkpoint may only ever hold a real object id
+#
+# A bare `git rev-parse HEAD` on an UNBORN HEAD (a repo with zero commits)
+# prints the literal string `HEAD` on stdout and exits 128, and `_git`
+# swallows the stderr. Persisting that string as `last_checked_sha` is silent
+# non-enforcement forever: on the NEXT Stop `cat-file -e HEAD^{commit}` DOES
+# resolve (HEAD is a valid symbolic ref by then), so step 9 takes the
+# incremental branch and scans `HEAD..HEAD` — always empty. No block, no
+# give-up message, no trace. Both halves are asserted: step 10 must not write
+# the string, and step 9 must not believe it if some other writer does.
+# ========================================================================
+# contract:hook:inv-t22 checks=4
+hook_case t22unborn
+run_hook s22u            # repo has ZERO commits: HEAD is unborn
+check 320 "an unborn HEAD allows — contract:hook:inv-t22" 0 "$RC"
+check 321 "an unborn HEAD never persists the literal string HEAD — contract:hook:inv-t22" \
+  no "$(st "$HC_REPO" s22u '.last_checked_sha' | grep -qx 'HEAD' && echo yes || echo no)"
+echo "V = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "fix(widget): repair the widget"
+T22U_FIX="$(sha_of "$HC_REPO" HEAD)"
+run_hook s22u true
+check 322 "a fix(*) after an unborn-HEAD Stop is still seen — contract:hook:inv-t22" 2 "$RC"
+check 323 "the post-unborn candidate is named — contract:hook:inv-t22" yes "$(has "$ERR" "$T22U_FIX")"
+
+# Defence in depth: `cat-file -e` cannot tell an object id from a symbolic ref
+# that happens to resolve, so step 9 gates on SHAPE first. Poison the stored
+# checkpoint with `HEAD` directly — a shape-blind step 9 scans HEAD..HEAD and
+# allows; a shape-checked one discards the checkpoint and re-scans in full.
+# contract:hook:inv-t22 checks=3
+hook_case t22symref
+echo "V = 0" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/app.py"
+commit_all "$HC_REPO" "fix(widget): repair the widget"
+T22S_FIX="$(sha_of "$HC_REPO" HEAD)"
+T22S_DIR="$(guard_dir "$HC_REPO")"
+mkdir -p "$T22S_DIR"
+printf '{"session_id":"s22s","seeded_at":1767225600,"last_checked_sha":"HEAD","block_counts":{},"sha_group":{},"sha_files":{}}' \
+  > "$T22S_DIR/s22s.json"
+run_hook s22s true
+check 324 "a symbolic-ref checkpoint is not believed — contract:hook:inv-t22" 2 "$RC"
+check 325 "the candidate hidden behind HEAD..HEAD is named — contract:hook:inv-t22" \
+  yes "$(has "$ERR" "$T22S_FIX")"
+check 326 "the poisoned checkpoint is replaced by a real object id — contract:hook:inv-t22" \
+  yes "$(st "$HC_REPO" s22s '.last_checked_sha' | grep -Eqx '[0-9a-fA-F]{40}|[0-9a-fA-F]{64}' && echo yes || echo no)"
+
+# ========================================================================
+# INV-T23 (extension) — a leading-dash path must not make clearance
+# unreachable, and must not be MISREPORTED as a transient degradation
+#
+# `-` is a legal first byte of a POSIX path and git sorts it first, so step
+# 11's comma-joined path list can BEGIN with `-`. Passed as a separate option
+# value (`--by-files "$CSV"`) argparse rejects it as a stray option and
+# grudge_query.py exits 2 — permanently, for every session, no matter what
+# grudge is recorded. The `=`-joined single-argv form cannot be mistaken for
+# an option. The step-15 prefill has the same argv boundary (`--files`), so
+# the printed remedy must be runnable for such a commit too.
+# ========================================================================
+# contract:hook:inv-t23 checks=5
+hook_case t23dash
+echo "V = 0" > "$HC_REPO/-dash.py"; echo "V = 0" > "$HC_REPO/other.py"
+commit_all "$HC_REPO" "chore: baseline"
+T23D_BASE="$(sha_of "$HC_REPO" HEAD)"
+echo "V = 1" > "$HC_REPO/-dash.py"; echo "V = 1" > "$HC_REPO/other.py"
+commit_all "$HC_REPO" "fix(widget): repair the widget"
+check 327 "fixture: the leading-dash path is really in the candidate — contract:hook:inv-t23" \
+  yes "$(has "$(git -C "$HC_REPO" diff-tree --no-commit-id --name-only -r HEAD)" "-dash.py")"
+run_hook s23d
+check 328 "with no grudge recorded the dash candidate blocks — contract:hook:inv-t23" 2 "$RC"
+check 329 "the prefilled remedy uses the =-joined --files form — contract:hook:inv-t23" \
+  yes "$(has "$ERR" '--files="-dash.py')"
+# fixed_in_commit names the unrelated baseline, so ONLY --by-files can clear.
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "dash path regression" \
+  "-dash.py,other.py" "$T23D_BASE" "2026-05-01" >/dev/null
+run_hook s23dclear
+check 330 "a by-files grudge clears a leading-dash candidate — contract:hook:inv-t23" 0 "$RC"
+check 331 "no clearance-lookup note is printed for a dash path — contract:hook:inv-t23" \
+  no "$(has "$ERR" "clearance lookup")"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2188,7 +2273,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=343
+EXPECTED_CHECKS=355
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

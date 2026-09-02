@@ -208,7 +208,14 @@ if [ -f "$STATE_FILE" ]; then
       FIRST_SCAN=0
       _load_maps
       LOG="$(_git "$SESSION_ROOT" log --no-merges --max-count=500 --format='%H|%at|%s' HEAD)"
-    elif _git "$SESSION_ROOT" cat-file -e "${LAST_SHA}^{commit}"; then
+    # SHAPE FIRST, THEN EXISTENCE. `cat-file -e` resolves any revision
+    # expression, so a stored SYMBOLIC ref — e.g. the literal `HEAD` — passes
+    # it and the range below becomes `HEAD..HEAD`, i.e. permanently empty:
+    # silent non-enforcement with no give-up message. Only a full object id
+    # (40 hex for sha1, 64 for sha256) or the `ROOT` sentinel above is ever
+    # written by step 16, so anything else is a corrupt checkpoint.
+    elif [[ "$LAST_SHA" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] \
+         && _git "$SESSION_ROOT" cat-file -e "${LAST_SHA}^{commit}"; then
       SEEDED_AT="$STORED_AT"
       FIRST_SCAN=0
       _load_maps
@@ -235,7 +242,12 @@ if [ "$FIRST_SCAN" = "1" ]; then
   LOG="$(_git "$SESSION_ROOT" log --no-merges --max-count=500 --format='%H|%at|%s' HEAD)"
 fi
 
-SCAN_HEAD="$(_git "$SESSION_ROOT" rev-parse HEAD)"
+# `--verify --quiet` + the `^{commit}` peel, NOT a bare `rev-parse HEAD`: on an
+# UNBORN HEAD (a repo with zero commits) the bare form prints the literal string
+# `HEAD` on stdout and exits 128, and that string would then be persisted as
+# `last_checked_sha`. This form prints nothing, so `LAST_NEW` persists as "" and
+# step 9's `[ -n "$LAST_SHA" ]` guard routes the next Stop into a full scan.
+SCAN_HEAD="$(_git "$SESSION_ROOT" rev-parse --verify --quiet "HEAD^{commit}")"
 
 # ── 11. Candidate filter -> THIS Stop's IN-SCOPE SET ────────────────────
 # (a) subject matches ^fix[(:]  (b) %at >= seeded_at  (c) >=1 non-.md path.
@@ -431,6 +443,16 @@ _lookup_ok() {
   # one, turned no test red, because no fixture can fail the second lookup
   # without failing the first. Reads the enclosing loop's $k_sha.
   _lookup "$@"
+  if [ "$LOOKUP_RC" -eq 2 ]; then
+    # grudge_query.py reserves 2 for argparse's own bad-argument exit and 3 for
+    # an internal error, so the two are distinguishable — and they need very
+    # different words. Exit 2 is a PERMANENT argv-shape bug in this hook, not a
+    # transient store degradation: no retry, no later session, and no correctly
+    # recorded grudge can ever clear this candidate. Saying "lookup failed …
+    # treating as unresolved" here reports a bug as weather.
+    echo "grudge-resolution-guard: clearance lookup for $k_sha was REJECTED as a malformed command line (exit 2) — this is a permanent defect in the hook's argument construction, not a degraded store: no grudge record can clear this commit until it is fixed. Treating as unresolved; use the skips.log escape hatch below." >&2
+    return 1
+  fi
   if [ "$LOOKUP_RC" -ne 0 ]; then
     echo "grudge-resolution-guard: clearance lookup failed for $k_sha (exit $LOOKUP_RC) — treating as unresolved" >&2
     return 1
@@ -477,26 +499,26 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   # FALLBACK therefore leaves the candidate unresolved WITHOUT `continue`ing:
   # the primaries have already answered, and an unbelievable extra opinion must
   # not retract them.
-  _lookup_ok --by-commit "$k_sha" --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" \
+  _lookup_ok --by-commit "$k_sha" --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" \
              --session-root "$SESSION_ROOT" || continue
   if [ -n "$LOOKUP_OUT" ]; then
     GROUP_CLEARED["$k_gid"]=1
     continue
   fi
-  _lookup_ok --by-files "${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
-             --repo-root "$STORE_REPO_ROOT" --repo "$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
+  _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+             --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
   if [ -n "$LOOKUP_OUT" ]; then
     GROUP_CLEARED["$k_gid"]=1
     continue
   fi
   if _worktree_fallback; then
-    if _lookup_ok --by-commit "$k_sha" --repo-root "$SESSION_ROOT" --repo "$WORKTREE_KEY" \
+    if _lookup_ok --by-commit "$k_sha" --repo-root "$SESSION_ROOT" "--repo=$WORKTREE_KEY" \
                   --session-root "$SESSION_ROOT" && [ -n "$LOOKUP_OUT" ]; then
       GROUP_CLEARED["$k_gid"]=1
       continue
     fi
-    if _lookup_ok --by-files "${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
-                  --repo-root "$SESSION_ROOT" --repo "$WORKTREE_KEY" --session-root "$SESSION_ROOT" \
+    if _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+                  --repo-root "$SESSION_ROOT" "--repo=$WORKTREE_KEY" --session-root "$SESSION_ROOT" \
        && [ -n "$LOOKUP_OUT" ]; then
       GROUP_CLEARED["$k_gid"]=1
     fi
@@ -675,7 +697,7 @@ _prefill() {
   # unresolved candidate SHA. --repo-root/--repo are UNCONDITIONALLY the
   # shared-clone pair — exactly the identity step 13's lookup queries — so the
   # recorded grudge clears the very next Stop from ANY worktree of the clone.
-  printf '    python3 "%s" --symptom "<one line: what broke>" --files "%s" --commit "%s" --repo-root "%s" --repo "%s"\n' \
+  printf '    python3 "%s" --symptom "<one line: what broke>" --files="%s" --commit "%s" --repo-root "%s" --repo="%s"\n' \
     "$APPEND_SCRIPT" "${SHA_FILES[$1]}" "$1" "$STORE_REPO_ROOT" "$SHARED_KEY" >&2
 }
 
