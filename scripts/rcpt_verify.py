@@ -1344,46 +1344,69 @@ def _legacy_supersedes_claim(text):
          might contain is ever treated as a line boundary before this function
          gets to look at it — the round-3-first-attempt (b) residual.
       2. Within EACH such line, build an ASCII SKELETON by keeping only
-         `[A-Za-z0-9:]` (`re.sub(r"[^A-Za-z0-9:]", "", raw_line)`) and discarding
-         every other codepoint outright — `C*`/`Z*`, `Lo`/`So`/`Mn`, anything
-         assigned in a future Unicode version, ALL of it, uniformly, because none
-         of those codepoints can ever be part of a well-formed `SUPERSEDES:`
-         keyword or a well-formed body under the confirmed grammar. This closes
-         the round-3-first-attempt (a) residual (an `Lo`/`So`/`Mn` codepoint
-         inside `SUPER<..>SEDES:` is simply gone, and the keyword's own ASCII
-         letters re-join into one contiguous run) together with everything the
-         first attempt already closed (interior and leading insertion of any
-         `C*`/`Z*` codepoint) — in one pass, with no per-category reasoning at
-         all.
+         `[A-Za-z0-9:]` (unchanged since round 3) and discarding every other
+         codepoint outright — `C*`/`Z*`, `Lo`/`So`/`Mn`, ordinary ASCII
+         punctuation and space, anything assigned in a future Unicode version,
+         ALL of it, uniformly — while also recording, for each surviving
+         skeleton character, the INDEX in `raw_line` it came from (round-4 fix,
+         below, is the first consumer of that positional record; steps 2-3 keep
+         closing the keyword-insertion class exactly as round 3 left it).
       3. Search the resulting skeleton for the literal `SUPERSEDES:` substring —
          not anchored to column 0, so nothing that could not survive step 2's
          allowlist (i.e. nothing) can sit between the start of the line and the
          keyword and still defeat detection.
-      4. Validate the remainder of the skeleton after the keyword against the
-         CONFIRMED GRAMMAR for a `SUPERSEDES:` value — `none` or a bare 12-hex
-         receipt-hash prefix (`return-convention.md`; the same shape
-         `resolve_base`-adjacent code checks via `re.fullmatch(r"[0-9a-f]{12}",
-         name)` at :2434) — anchored, full-string, no partial match. Anything
-         else is a malformed/non-`none` claim BY CONSTRUCTION: anything not
-         exactly `none` is `!= "none"`, which is what the caller's `not in (None,
-         "none")` gate already treats as "claims a supersession" (fail-CLOSED —
-         see above).
+      4. Validate the value as the LEADING token of the skeleton's remainder
+         after the keyword — `re.match(r"none|[0-9a-f]{12}", remainder)` — not
+         the whole remainder fullmatched to end of line (round-4 fix, below).
+         What comes after that leading token, if anything, is judged by a
+         POSITIONAL GAP in `raw_line`, using step 2's recorded indices: if the
+         skeleton's very next surviving character sits at `raw_line_index + 1`
+         relative to the value's last character — i.e. NOTHING was stripped
+         between them — the value runs directly into more of the same alphabet
+         with no separator at all (`a1b2c3d4e5f6f00d`, `noneisnotreallynone`)
+         and the whole match is malformed BY CONSTRUCTION, exactly as a
+         fullmatch would have rejected it. If instead there is a gap (one or
+         more discarded — i.e. insubstantial-per-step-2 — codepoints sat
+         between them in `raw_line`) or there IS no next character at all, the
+         leading token stands as the value: whatever produced that gap can only
+         be whitespace, punctuation or an invisible codepoint, none of which
+         can be part of `none`/a hex prefix under the confirmed grammar, so it
+         is real separation, not part of the claim. Anything that isn't a
+         clean `none`/12-hex leading token, by either test, is a malformed/
+         non-`none` claim: anything not exactly `none` is `!= "none"`, which is
+         what the caller's `not in (None, "none")` gate already treats as
+         "claims a supersession" (fail-CLOSED — see above).
 
-    `_is_format_or_separator` is deliberately NOT reused here even though it
-    remains correct for its own call site (`_substantive_len`'s "did a predicate
-    see real content" question, a different question from "does this line spell
-    a specific 11-character keyword"): a keyword-detector's allowlist is bounded
-    by the keyword's own alphabet, which is a strictly smaller and simpler claim
-    than any Unicode-category enumeration, and this fix's own testing is what
-    demonstrated the category-based version does not stay bounded in every
-    position. No enumerated codepoint list and no category list backs this
-    version for the INSERTION class of attack (a codepoint added somewhere in the
-    line) — that class has no known further gap. It does NOT close every class:
-    SUBSTITUTION (replacing one of the keyword's own ASCII letters with a
-    visually-identical non-ASCII homoglyph, which this allowlist's strip step
-    deletes rather than preserves) and the separate tail-only SCAN-SCOPE gap
-    (a claim placed before `NEXT` is never scanned at all) are open — see the
-    KNOWN GAP paragraph above and GH #567.
+    ROUND-4 FIX (code-review #583 finding #2) — round 3's own value check
+    fullmatched the ENTIRE remainder of the (fully-collapsed) skeleton against
+    the grammar. Once punctuation and whitespace are stripped alongside every
+    invisible codepoint, NOTHING in the skeleton distinguishes "a value with an
+    ordinary trailing aside on the same line" from "a value directly extended by
+    more of the same alphabet" — both glue onto the value with zero separator
+    left standing, so free text such as `SUPERSEDES: none, as this is a
+    net-new addition` or `SUPERSEDES: none -- see #567 for context` — an
+    entirely ordinary plain-English aside explaining why nothing is being
+    superseded — fullmatch-failed and was misclassified as `malformed`, i.e. AS
+    a claim, on receipts making none. Measured on the CLI before this fix: both
+    examples above returned `"malformed"`; after it, both return `"none"`.
+    Fixed NOT by loosening what step 2 strips (that reopens the round-2/round-3
+    keyword-fragmentation classes the KNOWN-RESIDUE codepoints exploit — proven
+    by this fix's own mandated re-verification catching exactly that regression
+    on `_substantive_len`'s three named residue codepoints before shipping) but
+    by keeping step 2 exactly as round 3 left it and using the positional
+    record it already computes to tell the two cases apart from `raw_line`
+    itself, where the real separator (if any) still exists even though the
+    skeleton discarded it. `a1b2c3d4e5f6f00d` (16 hex digits, no separator
+    anywhere) and `noneisnotreallynone` are rejected exactly as round 3
+    rejected them — the positional gap is zero at their boundary — so nothing
+    that used to be treated as a claim now silently isn't.
+
+    Neither this fix nor round 3's closes every class: SUBSTITUTION (replacing
+    one of the keyword's own ASCII letters with a visually-identical non-ASCII
+    homoglyph, which this allowlist's strip step deletes rather than preserves)
+    and the separate tail-only SCAN-SCOPE gap (a claim placed before `NEXT` is
+    never scanned at all) are open — see the KNOWN GAP paragraph above and GH
+    #567.
 
     ROUND-3 FIX-OF-A-FIX (found by this fix's own mandated scoped re-temper,
     before shipping) — step 1 (`split("\\n")`, not `splitlines()`) was applied
@@ -1410,11 +1433,27 @@ def _legacy_supersedes_claim(text):
     tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
     claim = None
     for raw_line in (l for l in tail.split("\n") if l.strip()):
-        skeleton = re.sub(r"[^A-Za-z0-9:]", "", raw_line)
+        # positions[i] is raw_line's index of skeleton[i] — the round-4 fix's own
+        # record, so a value's right boundary can be judged against what `raw_line`
+        # actually had there (a real separator, or nothing) after the skeleton has
+        # already discarded it.
+        skeleton_chars = []
+        positions = []
+        for i, ch in enumerate(raw_line):
+            if re.match(r"[A-Za-z0-9:]", ch):
+                skeleton_chars.append(ch)
+                positions.append(i)
+        skeleton = "".join(skeleton_chars)
         idx = skeleton.find("SUPERSEDES:")
         if idx != -1:
-            body = skeleton[idx + len("SUPERSEDES:"):]
-            if not re.fullmatch(r"none|[0-9a-f]{12}", body):
+            value_start = idx + len("SUPERSEDES:")
+            m = re.match(r"none|[0-9a-f]{12}", skeleton[value_start:])
+            if m:
+                value_end = value_start + m.end()
+                glued = (value_end < len(positions)
+                         and positions[value_end] == positions[value_end - 1] + 1)
+                body = "malformed" if glued else m.group()
+            else:
                 body = "malformed"
             if claim is None or claim == "none":
                 claim = body
@@ -2070,8 +2109,8 @@ def resolve_base(name: str, root, found=None, refused=None):
     return first
 
 
-def _witness_stat_dev_ino(path, include_nlink=False):
-    """SIEGE-R4IT-3 / F1 — a single `os.stat` sample of a resolved realpath's identity.
+def _witness_stat_dev_ino(path=None, *, fd=None, st=None, include_nlink=False):
+    """SIEGE-R4IT-3 / F1 — a single stat sample of a resolved realpath's identity.
 
     Returns `(st_dev, st_ino)` on success when `include_nlink` is False; appends
     `st_nlink` when True. On any `OSError` returns the caught exception instance itself
@@ -2079,21 +2118,31 @@ def _witness_stat_dev_ino(path, include_nlink=False):
     "no change" a caller could misread as success — callers split the three states with
     `isinstance(result, OSError)` (SIG-7-2).
 
-    Exactly ONE `os.stat` call regardless of `include_nlink`: `st_nlink` comes from the
-    same `os.stat_result` the 2-tuple already produces (FATAL-11-1), so the
-    `include_nlink=True` form adds zero syscalls. F1 STRUCTURAL FIX — `_resolve_once`
-    used to be the one caller that passed `include_nlink=True`; it now takes its T-1
-    sample from the fd `_open_nofollow_walk` hands it (see there), so no production
-    caller currently passes `include_nlink=True` — every T0/T1 identity re-stat site
-    (tier2_witness's F5/SIG-7-2, the stated-target axis's FATAL-9-1) uses the default
-    and gets the original 2-tuple back untouched. Kept as a parameter rather than
-    removed: it is this function's own documented zero-extra-syscall contract, not
-    dead code this fix orphaned.
-    """
-    try:
-        st = os.stat(path)
-    except OSError as e:
-        return e
+    Exactly ONE stat call regardless of `include_nlink`: `st_nlink` comes from the same
+    `os.stat_result` the 2-tuple already produces (FATAL-11-1), so the
+    `include_nlink=True` form adds zero syscalls.
+
+    Exactly one of `path` (stats by NAME, `os.stat`), `fd` (stats an ALREADY-OPEN
+    descriptor, `os.fstat` — fd-pinned, no re-resolution) or `st` (an ALREADY-FETCHED
+    `os.stat_result`, e.g. from a caller that also needs a field this function doesn't
+    return, like `S_ISREG` off `st_mode`) is the caller's contract; `st` skips the
+    syscall entirely and shares only the tuple-shaping below.
+
+    code-review #583 finding #6 — `_resolve_once` and `_read_from_fd` each used to
+    inline their own `os.fstat` → `(dev, ino[, nlink])` extraction instead of reusing
+    this helper, the `fd`/`st` forms above exist so both do now: `_resolve_once` calls
+    the `fd=` form (it wants this function's OSError-as-sentinel contract, not a raise,
+    for the SAME reason the pre-F1 code already did — see its own history); `_read_from_fd`
+    calls the `st=` form, because it must `os.fstat` its own copy anyway (for `S_ISREG`,
+    which this function does not expose) and its contract is RAISE-on-`OSError`, not a
+    sentinel — reusing this function's stat call there would silently swallow the
+    exception `_read_from_fd`'s own `except BaseException: os.close(fd); raise` is
+    written to catch and re-raise."""
+    if st is None:
+        try:
+            st = os.fstat(fd) if fd is not None else os.stat(path)
+        except OSError as e:
+            return e
     if include_nlink:
         return (st.st_dev, st.st_ino, st.st_nlink)
     return (st.st_dev, st.st_ino)
@@ -2244,24 +2293,39 @@ def _resolve_once(name, root, cache):
             rec["resolve_stat_failed"] = True
         else:
             # temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
-            # `os.fstat(fd)` needs its OWN guard: a bare call here left an `OSError`
-            # from THIS step (e.g. ESTALE on a network `--root` whose file vanishes
-            # between the walk's open and this fstat) propagating uncaught out of
-            # `_resolve_once`/`_build_identity_cache` — a raw traceback instead of the
+            # the fstat below needs its OWN guard: a bare `os.fstat(fd)` here left an
+            # `OSError` from THIS step (e.g. ESTALE on a network `--root` whose file
+            # vanishes between the walk's open and this fstat) propagating uncaught out
+            # of `_resolve_once`/`_build_identity_cache` — a raw traceback instead of the
             # fail-closed `resolve_stat_failed` disposition every other failure on this
-            # path produces — AND leaked `fd` (never stored, never closed). The
-            # pre-fix code never had this gap: `_witness_stat_dev_ino` wrapped its own
-            # `os.stat` in `try/except OSError: return e`, so a stat failure there was
-            # always a sentinel, never a raise.
-            try:
-                st = os.fstat(fd)
-            except OSError:
+            # path produces — AND leaked `fd` (never stored, never closed). The pre-fix
+            # code never had this gap: `_witness_stat_dev_ino` wrapped its own `os.stat`
+            # in `try/except OSError: return e`, so a stat failure there was always a
+            # sentinel, never a raise — code-review #583 finding #6 is what restores
+            # that same sentinel contract here, via `_witness_stat_dev_ino`'s `fd=` form,
+            # instead of the inline try/except this round originally added.
+            #
+            # code-review #583 finding #1 — storing `fd` into `rec["fd"]` in the `else:`
+            # arm below (only AFTER the fstat succeeds) leaves a window between
+            # `_open_nofollow_walk` returning `fd` and that assignment where `fd` lives
+            # ONLY in this local variable, invisible to `_close_identity_cache_fds`
+            # (which walks `cache`, not this frame). `WitnessTimeout`'s SIGALRM can fire
+            # during the fstat itself — it is not an `OSError`, so `_witness_stat_dev_ino`
+            # never gets the chance to return its sentinel — and unwind out of this
+            # function with the fd still open and now unreachable from anywhere: leaked.
+            # Fixed by making the store the FIRST side effect after the walk returns,
+            # before the fstat that can be interrupted, so the fd is already reachable
+            # via `cache` (and thus via `_close_identity_cache_fds`'s `finally:`) for the
+            # whole window a timeout could land in, not just the portion after success.
+            rec["fd"] = fd
+            st = _witness_stat_dev_ino(fd=fd, include_nlink=True)
+            if isinstance(st, OSError):
+                rec["fd"] = None
                 os.close(fd)
                 rec["resolve_stat_failed"] = True
             else:
-                rec["fd"] = fd
-                rec["dev_ino_at_resolve"] = (st.st_dev, st.st_ino)
-                rec["nlink_at_resolve"] = st.st_nlink
+                rec["dev_ino_at_resolve"] = (st[0], st[1])
+                rec["nlink_at_resolve"] = st[2]
     return rec["realpath"]
 
 
@@ -2293,6 +2357,26 @@ def _close_identity_cache_fds(cache):
                 os.close(fd)
             except OSError:
                 pass
+
+
+@contextlib.contextmanager
+def _identity_cache():
+    """Code-review #583 finding #7 — the one structural mechanism for the
+    create-cache / close-its-fds-on-every-exit shape every `_build_identity_cache`
+    call site needs. Before this, `_verify_single`, `_selftest_run_fixture` and
+    `_selftest_crosscheck` each hand-wrote their own `cache = {}` plus a `finally:
+    _close_identity_cache_fds(cache)` around a differently-shaped surrounding
+    try/except — three independently-maintained copies of the same two-line
+    contract, one `cache = None`-guarded because its cache is built conditionally.
+    `yield`s a fresh `{}` for the caller to pass into `_build_identity_cache` (and
+    on to `tier2_artifacts`/`tier2_witness`); the `finally:` here runs on every exit
+    from the `with` block — a normal return, a caught `LintError`/`WitnessTimeout`,
+    or an unclassified escape — exactly as each hand-written copy did."""
+    cache = {}
+    try:
+        yield cache
+    finally:
+        _close_identity_cache_fds(cache)
 
 
 def _contained(child: pathlib.Path, base: pathlib.Path) -> bool:
@@ -2742,7 +2826,12 @@ def _read_from_fd(fd, budget, label):
         raise LintError(
             f"Tier-2: {label} exceeds the Tier-2 read budget "
             f"({budget} B remaining of {ARTIFACT_READ_CAP} B; not read)")
-    return ((st.st_dev, st.st_ino), raw)
+    # code-review #583 finding #6 — `_witness_stat_dev_ino`'s `st=` form shares the
+    # (dev, ino) tuple-shaping with every other caller without a second `os.fstat`:
+    # `st` above is already fetched (needed for the `S_ISREG` check, which
+    # `_witness_stat_dev_ino` does not expose), so this passes that SAME stat_result
+    # through rather than re-stating the fd.
+    return (_witness_stat_dev_ino(st=st), raw)
 
 
 def _read_and_fstat_artifact(realpath, budget, label):
@@ -5826,10 +5915,11 @@ def _selftest_run_fixture(fx, root) -> str:
         witness = parse_witness(sections["WITNESS"])
         # #488 c1 leg-3 — build the one shared identity cache + verified buffer (INV-5),
         # so the committed corpus keeps exercising the BOUND identity-binding path the
-        # CLI takes rather than a second, unbound one.
-        cache = {}
+        # CLI takes rather than a second, unbound one. `_identity_cache()` (code-review
+        # #583 finding #7) closes every held fd on every exit, including the two
+        # excepts below.
         verified = {}
-        try:
+        with _identity_cache() as cache:
             _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
             tier2_artifacts(artifacts, trace, root, fx["strict"], None,
                             cache=cache, verified=verified)
@@ -5838,10 +5928,6 @@ def _selftest_run_fixture(fx, root) -> str:
                 tier2_witness(witness, trace, root, fx["strict"], verdict, None,
                               cache=cache, verified=verified)
             return "pass"
-        finally:
-            # F1 STRUCTURAL FIX — close every held fd this fixture's identity cache
-            # still owns, on every exit including the two excepts below.
-            _close_identity_cache_fds(cache)
     except WitnessTimeout:
         return "error"        # #486/Q8 — a timeout is NOT a passing expect:fail fixture
     except LintError:
@@ -5947,8 +6033,9 @@ def _selftest_crosscheck(rec, bodies):
         # deliberately do not match its bodies, and this crosscheck never calls
         # tier2_artifacts (MIN-14-1), so nothing has the single-writer right to
         # populate verified here.
-        cache = {}
-        try:
+        # `_identity_cache()` (code-review #583 finding #7) closes every held fd this
+        # crosscheck's identity cache still owns, on every exit.
+        with _identity_cache() as cache:
             try:
                 _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
             except WitnessTimeout as e:
@@ -5968,10 +6055,6 @@ def _selftest_crosscheck(rec, bodies):
                     problems.append(f"crosscheck {did}: witness evaluation timed out ({e})")
                 except LintError:
                     disk_disp = "LINT-FAIL"
-        finally:
-            # F1 STRUCTURAL FIX — close every held fd this crosscheck's identity
-            # cache still owns, on every exit.
-            _close_identity_cache_fds(cache)
     if disk_disp != inline_disp:
         problems.append(f"crosscheck {did}: inline={inline_disp} != disk={disk_disp}")
     return problems
@@ -6246,11 +6329,6 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
     # tier2 branch) so the LintError handler can consult it on every exit without a
     # NameError on the paths that raise before the tier2 block is reached.
     cache_timeout = None
-    # F1 STRUCTURAL FIX — bound here for the same reason: the outer `finally:` below
-    # closes every not-yet-consumed held fd `_resolve_once`'s walk opened for this
-    # receipt's identity cache, on every exit including a raise before the tier2
-    # branch assigns the real dict (where it stays None and the close is skipped).
-    cache = None
     try:
         try:
             verdict = lint_receipt(text)
@@ -6303,64 +6381,64 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # #488 c1 leg-3 — the one shared identity cache and verified buffer
                 # (INV-5), built before the ARTIFACTS leg so the identity binding the two
                 # legs share is established once per receipt.
-                cache = {}
-                verified = {}
-                try:
-                    _build_identity_cache(artifacts, trace, [witness], verdict,
-                                          root, cache, cov)
-                except WitnessTimeout as e:
-                    # FATAL-9-2 — a truncated resolve phase must not land on a clean
-                    # exit 0 (the mandated bare-basename shape reaches a non-raising
-                    # UNVERIFIABLE arm); remember it so EVERY exit hard-fails naming
-                    # the resolve phase, not as an ordinary Tier-2 failure.
-                    cache_timeout = (
-                        "Tier-2: the resolve phase exceeded its budget while "
-                        f"establishing artifact identities ({e}); refusing to report "
-                        "a verdict that a truncated identity resolution could have "
-                        "faked")
-                # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
-                # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
-                # witness-evidence consequent), and nothing said so on any channel.
-                # `return-convention.md:603` makes mixed-version runs legal, so this is
-                # NOT a rejection and there is no `--require-v11` flag to invent here —
-                # what was missing is that the gate could not tell "the v1.1 rules passed"
-                # from "the v1.1 rules never ran", while quality-gate/SKILL.md:34,58 state
-                # that every QG subagent emits v1.1 and treat Layer 2 as enforced.
-                # Advisory, on the notes channel, exit code unmoved.
-                v11 = parse_v11_sections(text)
-                notes += ([] if v11 is not None else
-                          ["UNVERIFIABLE: v1.1 Layer-2 rules not evaluated "
-                           "(receipt declares RCPT v1)"])
-                # #488 / T2 — `notes` is passed AS the out-param, not collected into a
-                # second list: every drain site emits `notes + wit_notes`, so mirroring
-                # into `notes` directly is what makes the PROVENANCE-ONLY lines reach
-                # stderr on the LintError exits too.
-                notes += tier2_artifacts(artifacts, trace, root, strict, cov, notes,
-                                         cache=cache, verified=verified)
-                _finalize_identity_degenerate(cache, verified)
-                wit_probe = {}
-                if verdict in {"PASS", "FAIL"}:
-                    # #486 / D7 — the bound now lives in tier2_witness, so a direct
-                    # importer is bounded too and there is exactly ONE arm on this path.
-                    # C1-R3-S2 — the RETURN VALUE IS DELIBERATELY DISCARDED. `wit_notes`
-                    # is the single channel for this leg's notes: mirroring into it AND
-                    # adding the return would print every witness note twice on any run
-                    # where tier2_witness succeeds and a LATER leg raises (the handler
-                    # drains `notes + wit_notes`, and both would hold them). Measured on
-                    # exactly that shape — clean witness, then a --ledger mismatch — before
-                    # this line stopped accumulating. tier2_witness mirrors at every one of
-                    # its exits, so nothing is lost by ignoring the return here; other
-                    # callers (--selftest, the direct-call tests) still use it.
-                    tier2_witness(witness, trace, root, strict, verdict, cov,
-                                  wit_probe, wit_notes, cache=cache, verified=verified)
-                else:
-                    # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
-                    # leg, so the collector would hear nothing from it and the line would
-                    # read a bare `witness 0/0`. Every receipt carries a mandatory WITNESS
-                    # line (return-convention.md:123), so a witness check ALWAYS exists
-                    # and an unannotated 0/0 says one did not — indistinguishable from a
-                    # PASS receipt with a structurally-absent witness.
-                    cov.bump("not-applicable", "verdict-not-pass-fail")
+                with _identity_cache() as cache:
+                    verified = {}
+                    try:
+                        _build_identity_cache(artifacts, trace, [witness], verdict,
+                                              root, cache, cov)
+                    except WitnessTimeout as e:
+                        # FATAL-9-2 — a truncated resolve phase must not land on a clean
+                        # exit 0 (the mandated bare-basename shape reaches a non-raising
+                        # UNVERIFIABLE arm); remember it so EVERY exit hard-fails naming
+                        # the resolve phase, not as an ordinary Tier-2 failure.
+                        cache_timeout = (
+                            "Tier-2: the resolve phase exceeded its budget while "
+                            f"establishing artifact identities ({e}); refusing to report "
+                            "a verdict that a truncated identity resolution could have "
+                            "faked")
+                    # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
+                    # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
+                    # witness-evidence consequent), and nothing said so on any channel.
+                    # `return-convention.md:605` makes mixed-version runs legal, so this is
+                    # NOT a rejection and there is no `--require-v11` flag to invent here —
+                    # what was missing is that the gate could not tell "the v1.1 rules passed"
+                    # from "the v1.1 rules never ran", while quality-gate/SKILL.md:34,58 state
+                    # that every QG subagent emits v1.1 and treat Layer 2 as enforced.
+                    # Advisory, on the notes channel, exit code unmoved.
+                    v11 = parse_v11_sections(text)
+                    notes += ([] if v11 is not None else
+                              ["UNVERIFIABLE: v1.1 Layer-2 rules not evaluated "
+                               "(receipt declares RCPT v1)"])
+                    # #488 / T2 — `notes` is passed AS the out-param, not collected into a
+                    # second list: every drain site emits `notes + wit_notes`, so mirroring
+                    # into `notes` directly is what makes the PROVENANCE-ONLY lines reach
+                    # stderr on the LintError exits too.
+                    notes += tier2_artifacts(artifacts, trace, root, strict, cov, notes,
+                                             cache=cache, verified=verified)
+                    _finalize_identity_degenerate(cache, verified)
+                    wit_probe = {}
+                    if verdict in {"PASS", "FAIL"}:
+                        # #486 / D7 — the bound now lives in tier2_witness, so a direct
+                        # importer is bounded too and there is exactly ONE arm on this path.
+                        # C1-R3-S2 — the RETURN VALUE IS DELIBERATELY DISCARDED. `wit_notes`
+                        # is the single channel for this leg's notes: mirroring into it AND
+                        # adding the return would print every witness note twice on any run
+                        # where tier2_witness succeeds and a LATER leg raises (the handler
+                        # drains `notes + wit_notes`, and both would hold them). Measured on
+                        # exactly that shape — clean witness, then a --ledger mismatch — before
+                        # this line stopped accumulating. tier2_witness mirrors at every one of
+                        # its exits, so nothing is lost by ignoring the return here; other
+                        # callers (--selftest, the direct-call tests) still use it.
+                        tier2_witness(witness, trace, root, strict, verdict, cov,
+                                      wit_probe, wit_notes, cache=cache, verified=verified)
+                    else:
+                        # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
+                        # leg, so the collector would hear nothing from it and the line would
+                        # read a bare `witness 0/0`. Every receipt carries a mandatory WITNESS
+                        # line (return-convention.md:123), so a witness check ALWAYS exists
+                        # and an unannotated 0/0 says one did not — indistinguishable from a
+                        # PASS receipt with a structurally-absent witness.
+                        cov.bump("not-applicable", "verdict-not-pass-fail")
                 # #488 inquisitor/AV1 — LIFTED OUT of the `verdict in {PASS, FAIL}` arm,
                 # which is where it used to sit. The witness LEG stays verdict-gated (D8.2
                 # sub-decision 5 above, unchanged); the CONSEQUENT does not, because the
@@ -6402,7 +6480,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 #
                 # This is the advisory-narrows-to-a-gate move `_IDENTITY_DEGENERATE`'s
                 # own additions make: the advisory STAYS (mixed-version runs remain legal
-                # per return-convention.md:603, and a v1 receipt with no supersession
+                # per return-convention.md:605, and a v1 receipt with no supersession
                 # claim still exits 0 with the note, unmoved), and it is narrowed to a
                 # hard FAIL on the one shape where "the v1.1 rules never ran" is not a
                 # disclosure problem but a bypass. Sited HERE rather than beside the
@@ -6640,11 +6718,11 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
         # hooks/rcpt-verify-hook.sh:76 runs.
         if mode == "tier2":
             sys.stderr.write(cov.render() + "\n")
-        # F1 STRUCTURAL FIX — close every held fd this receipt's identity cache still
-        # owns, on every exit including an unclassified escape. `cache` stays None on
-        # any raise before the tier2 branch assigns it (nothing was ever opened).
-        if cache is not None:
-            _close_identity_cache_fds(cache)
+        # code-review #583 finding #7 — `cache` is now scoped entirely inside the
+        # `with _identity_cache():` block in the tier2 branch below, which closes
+        # every held fd on every exit from that block itself (including an
+        # unclassified escape); nothing is left to close here on the --tier1 path,
+        # where `cache` is never created at all.
 
 
 def main(argv=None) -> int:

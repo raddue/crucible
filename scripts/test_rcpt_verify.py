@@ -376,6 +376,55 @@ class TestResolveToReadWindow(unittest.TestCase):
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
 
+    def test_a_witness_timeout_mid_fstat_does_not_leak_the_walked_fd(self):
+        """Code-review #583 finding #1 — `rec["fd"] = fd` used to run in the `else:`
+        arm below `os.fstat(fd)`, i.e. only AFTER the fstat succeeds. `WitnessTimeout`
+        (raised via SIGALRM, `_witness_bound`) is not an `OSError`, so it is not caught
+        by the `except OSError:` arm guarding that fstat — it propagates straight out
+        of `_resolve_once`/`_build_identity_cache` with `fd` still open and reachable
+        ONLY from a local variable in a frame that is unwinding, invisible to
+        `_close_identity_cache_fds` (which walks `cache`, not stack frames): leaked.
+        Fixed by storing `fd` into `rec["fd"]` as the FIRST side effect after the walk
+        returns, before the fstat that can be interrupted, so it is already reachable
+        via `cache` for the whole window a timeout could land in."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = self._art("f.md", b"REAL")
+            real_walk = rv._open_nofollow_walk
+            real_fstat = rv.os.fstat
+            walked_fd = []
+
+            def walk_spy(path):
+                fd = real_walk(path)
+                walked_fd.append(fd)
+                return fd
+
+            def fstat_timeout_spy(fd, *a, **k):
+                if walked_fd and fd == walked_fd[-1]:
+                    raise rv.WitnessTimeout("simulated SIGALRM mid-fstat")
+                return real_fstat(fd, *a, **k)
+
+            cache = {}
+            with mock.patch.object(rv, "_open_nofollow_walk", walk_spy), \
+                    mock.patch.object(rv.os, "fstat", fstat_timeout_spy):
+                with self.assertRaises(rv.WitnessTimeout):
+                    rv._build_identity_cache(arts, [], [], "PASS", root, cache)
+
+            # The fd must already be reachable from `cache` BEFORE any cleanup runs —
+            # this is the exact fix: stored as the walk's first side effect, not only
+            # after a successful fstat.
+            self.assertEqual(cache["f.md"]["fd"], walked_fd[-1])
+
+            # The call sites all run `_close_identity_cache_fds(cache)` in a `finally:`
+            # over exactly this kind of raise; simulate that here and prove the fd is
+            # ACTUALLY closed at the OS level afterward, not merely dropped.
+            rv._close_identity_cache_fds(cache)
+            self.assertIsNone(cache["f.md"]["fd"])
+            with self.assertRaises(OSError):
+                os.close(walked_fd[-1])
+
     def test_a_degenerate_identity_filesystem_hard_fails_instead_of_trusting_the_toctou_check(self):
         """#563 — `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`) means every file on the
         filesystem shares one identity, so `dev_ino_at_resolve != st_dev_ino` is trivially
@@ -443,6 +492,55 @@ class TestResolveToReadWindow(unittest.TestCase):
         rv._finalize_identity_degenerate(cache, verified)
         self.assertNotIn(rv._IDENTITY_UNVERIFIABLE_COLLISION, cache)
         self.assertNotIn(rv._IDENTITY_DEGENERATE, cache)
+
+
+class TestAncestorOpenFlagsWithoutOPath(unittest.TestCase):
+    """Code-review #583 finding #4 — `_ANCESTOR_OPEN_FLAGS = os.O_DIRECTORY |
+    os.O_NOFOLLOW | getattr(os, "O_PATH", 0)` had no test exercising the `getattr`
+    fallback: `os.O_PATH` is Linux-only, and CPython does not define the attribute
+    at all on a platform whose libc lacks it, so the fallback exists to avoid an
+    `AttributeError` at MODULE IMPORT TIME on such a platform. `os` is a singleton
+    via `sys.modules`, so deleting `O_PATH` from the real module before importing a
+    FRESH copy of rcpt_verify (`_import_rv` always re-execs the file rather than
+    reusing a cached module) makes that fresh copy's own `getattr(os, "O_PATH", 0)`
+    see it genuinely absent, exactly as it would on such a platform."""
+
+    def test_ancestor_open_flags_degrades_to_pre_fix_permission_floor(self):
+        had_o_path = hasattr(os, "O_PATH")
+        real_o_path = getattr(os, "O_PATH", None)
+        if had_o_path:
+            del os.O_PATH
+        try:
+            rv = _import_rv()
+            # Degrades — ORs in 0, a no-op — rather than raising AttributeError at
+            # import time, and to EXACTLY the pre-`O_PATH` flags (no silent
+            # corruption: no bit beyond O_DIRECTORY | O_NOFOLLOW is present).
+            self.assertEqual(rv._ANCESTOR_OPEN_FLAGS, os.O_DIRECTORY | os.O_NOFOLLOW)
+            # The walk itself must still work end-to-end on the degraded flags — the
+            # documented consequence is a higher (read, not just search) permission
+            # requirement on ancestor directories, not a broken walk on an ordinary
+            # tree with default permissions.
+            with tempfile.TemporaryDirectory() as td:
+                nested = pathlib.Path(td) / "a" / "b"
+                nested.mkdir(parents=True)
+                (nested / "f.md").write_bytes(b"hello")
+                fd = rv._open_nofollow_walk(str(nested / "f.md"))
+                try:
+                    self.assertEqual(os.fstat(fd).st_size, 5)
+                finally:
+                    os.close(fd)
+        finally:
+            if had_o_path:
+                os.O_PATH = real_o_path
+
+    def test_ancestor_open_flags_includes_o_path_when_available(self):
+        """Non-vacuity for the fix above: on THIS platform (Linux, where the test
+        suite runs), `os.O_PATH` is defined, and the ordinary import must still OR
+        it in — the fallback must not mask a real `O_PATH` that IS available."""
+        self.assertTrue(hasattr(os, "O_PATH"))
+        rv = _import_rv()
+        self.assertEqual(rv._ANCESTOR_OPEN_FLAGS,
+                         os.O_DIRECTORY | os.O_NOFOLLOW | os.O_PATH)
 
 
 class TestVerifyWitness(unittest.TestCase):
@@ -6814,7 +6912,7 @@ class TestAV1HeaderSaysSoOnTheChannel(_InqBase):
     line, so an `RCPT v1` header written by the reviewed subagent opts the entire v1.1
     rule set out — the TRIPWIRE-`none` two-leg rule, the SUPERSEDES justification rule and
     the witness-evidence consequent — with no signal on any channel.
-    `return-convention.md:603` makes mixed-version runs LEGAL, so this is not a rejection;
+    `return-convention.md:605` makes mixed-version runs LEGAL, so this is not a rejection;
     what was missing is that the gate could not tell "the v1.1 rules passed" from "the
     v1.1 rules never ran" while quality-gate/SKILL.md:34,58 treat Layer 2 as enforced."""
 
@@ -8624,12 +8722,30 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
         self.assertIn("RCPT v1", legacy.stderr)     # the cause is NAMED, not generic
 
     def test_a_v1_receipt_claiming_no_supersession_is_untouched(self):
-        """The bound. `return-convention.md:603` makes mixed-version runs legal, so the
+        """The bound. `return-convention.md:605` makes mixed-version runs legal, so the
         gate is narrowed to the one shape where the version dispatch is a BYPASS — the
         advisory keeps carrying every other v1 receipt at exit 0."""
         out = self._run("none", False, "v1-none.rcpt")
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("UNVERIFIABLE: v1.1 Layer-2 rules not evaluated", out.stderr)
+
+    def test_free_text_trailing_a_none_supersedes_does_not_misfire_as_a_claim(self):
+        """Code-review #583 finding #2 — round 3's ASCII skeleton (`[A-Za-z0-9:]`)
+        stripped every space alongside every invisible codepoint, then required the
+        WHOLE remainder of the line to fullmatch the value grammar. A v1 receipt's
+        `SUPERSEDES: none` line naturally carries a trailing plain-English aside on
+        real receipts (explaining WHY nothing is superseded), and that aside glued
+        onto `none` and failed the fullmatch — misclassifying an ordinary none-claim
+        as `malformed`, i.e. AS a claim, and wrongly hard-failing a v1 receipt that
+        made no claim at all. Measured before the round-4 fix: this exact receipt
+        exited 1 with `EVALUATED at Tier-2`; after it, 0."""
+        p = self.base / "v1-none-trailing-prose.rcpt"
+        p.write_text(self._receipt_text(
+            "none, as this is a net-new addition with no prior work to replace",
+            False))
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
 
     def test_a_trailing_non_none_supersedes_wins_over_a_leading_none(self):
         """`parse_v11_sections` rejects a duplicated section outright and the legacy
