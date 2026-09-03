@@ -3,7 +3,8 @@
 
 Protocol-as-spec lives in skills/shared/ledger-append.md. This module is the
 importable, executable single source of truth used by T-1 subprocesses, by Tier A
-emit call-sites, and by the Phase 3 backfill script.
+emit call-sites, and by the Phase 3 backfill script (moved to
+raddue/crucible-eval, #460).
 
 Invariants enforced here:
 - L-1 append-only (O_APPEND, never rewrite a line)
@@ -45,8 +46,9 @@ def _kill_switch_active() -> bool:
 # The live ledger is machine-local and aggregates EVERY repo's gating runs    #
 # into one place — never inside any git repo, because entries carry private   #
 # file paths and verbatim finding quotes and crucible is a public repo.       #
-# These helpers are the single source of truth for the path; render_ledger    #
-# imports them. default_repo() shells to git and is therefore CLI-only —      #
+# These helpers are the single source of truth for the path; the weekly       #
+# renderer (now in raddue/crucible-eval, #460) imports them. default_repo()   #
+# shells to git and is therefore CLI-only —                                   #
 # append() stays free of git/subprocess side effects (INV-2).                 #
 # --------------------------------------------------------------------------- #
 SCHEMA_VERSION = 2
@@ -110,7 +112,8 @@ def valid_ledger_identity(entry: dict) -> bool:
     """True iff a ledger `entry` carries a valid (run_id, skill) join identity
     (#402). Factors the `_valid_identity(run_id) AND _valid_identity(skill)`
     guard that was inlined verbatim ×5 across reconcile_ledger / render_ledger
-    (#408 F9) into one source, so the #402 read-side contract cannot drift."""
+    (moved to raddue/crucible-eval, #460) (#408 F9) into one source, so the
+    #402 read-side contract cannot drift."""
     return _valid_identity(entry.get("run_id")) and _valid_identity(entry.get("skill"))
 
 
@@ -160,13 +163,19 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     skipped += 1
                     continue
+                if not isinstance(obj, dict):
+                    # #400/L-9: a valid-JSON-but-non-object line (e.g. `[1,2,3]`)
+                    # has no `.get` — treat it as corruption, same as the L-9
+                    # reduction contract in skills/shared/ledger-append.md.
+                    skipped += 1
+                    continue
                 if obj.get("run_id") == run_id and obj.get("skill") == skill:
                     found = True
                     break
     except OSError:
         return False
     if skipped:
-        _warn(f"caller_dedup: skipped {skipped} unparseable line(s) in {ledger_path}")
+        _warn(f"caller_dedup: skipped {skipped} corrupt/unusable line(s) in {ledger_path}")
     return found
 
 
@@ -285,7 +294,8 @@ def append(
 
     # #402 identity gate. append() serves BOTH central stores, which carry
     # different join keys:
-    #   - runs.jsonl  → (run_id, skill)        (reconcile_ledger.ledger_entry_hash)
+    #   - runs.jsonl  → (run_id, skill)        (reconcile_ledger.ledger_entry_hash,
+    #     moved to raddue/crucible-eval, #460)
     #   - falsification log → ledger_entry_hash (the walkback / predicate rows)
     # An entry carrying NEITHER key collapses to the shared "unknown" bucket —
     # silently merging unrelated runs across every repo in the machine-local
@@ -293,8 +303,9 @@ def append(
     # compute_brier mis-buckets them. Require at least one valid join key.
     # The OR-rule's soundness depends on ledger_entry_hash appearing ONLY on
     # falsification-log rows (never on a runs-ledger row); the consumer-side
-    # "unknown" fallback in reconcile_ledger.compute_brier is a known residual
-    # deliberately deferred to the read-path follow-up PR.
+    # "unknown" fallback in reconcile_ledger.compute_brier (moved to
+    # raddue/crucible-eval, #460) is a known residual deliberately deferred to
+    # the read-path follow-up PR.
     run_id = entry.get("run_id")
     skill = entry.get("skill")
     entry_hash = entry.get("ledger_entry_hash")

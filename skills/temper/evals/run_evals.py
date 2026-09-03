@@ -103,8 +103,9 @@ _HISTORY_CAP = 50
 
 # Task 2 (#290 S1): empirical-tolerance calibration artifact path. The header
 # schema is enforced by `test_calibration_json_schema`. Mutations land via
-# `scripts/calibrate_tolerance.py` after k=3 baseline runs through the post-#297
-# 3-step protocol (NOT via `claude -p` — see feedback_no_claude_p).
+# raddue/crucible-eval's `scripts/calibrate_tolerance.py` (moved there — #460)
+# after k=3 baseline runs through the post-#297 3-step protocol (NOT via
+# `claude -p` — see feedback_no_claude_p).
 _CALIBRATION_PATH = _EVALS_DIR / "calibration.json"
 
 _FIXTURE_CONTENT_HEADER = (
@@ -914,8 +915,9 @@ _CALIBRATION_PLACEHOLDER = {
     ),
     "note": (
         "Placeholder header written by `score --write-calibration`. "
-        "Run scripts/calibrate_tolerance.py after k=3 baseline runs for "
-        "the real empirical artifact."
+        "Run raddue/crucible-eval's scripts/calibrate_tolerance.py "
+        "(moved there — #460) after k=3 baseline runs for the real "
+        "empirical artifact."
     ),
 }
 
@@ -926,10 +928,10 @@ def _write_calibration_placeholder() -> bool:
     Returns True if a file was written, False if one already exists.
 
     Computing real empirical sigmas requires the 3-step protocol
-    (stage / /temper-eval-collect / score, k=3) — see
-    scripts/calibrate_tolerance.py for the full flow. This helper exists
-    so the `--write-calibration` CLI flag has a coherent no-op when the
-    artifact is missing in CI / clean checkouts.
+    (stage / /temper-eval-collect / score, k=3) — see raddue/crucible-eval's
+    scripts/calibrate_tolerance.py (moved there — #460) for the full flow.
+    This helper exists so the `--write-calibration` CLI flag has a coherent
+    no-op when the artifact is missing in CI / clean checkouts.
     """
     if _CALIBRATION_PATH.exists():
         return False
@@ -1585,12 +1587,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     # Task 2 (#290 S1): writes a placeholder calibration.json header in-place
     # if missing. Actually computing empirical sigmas requires the 3-step
     # protocol (stage / /temper-eval-collect / score, k=3) followed by running
-    # `scripts/calibrate_tolerance.py` against the k last_run.json artifacts.
-    # See scripts/calibrate_tolerance.py for the full reproducible flow.
+    # raddue/crucible-eval's `scripts/calibrate_tolerance.py` (moved there —
+    # #460) against the k last_run.json artifacts.
     sp_score.add_argument("--write-calibration", action="store_true",
         help="(#290 S1) emit a placeholder calibration.json header if absent. "
-             "Full calibration is computed by scripts/calibrate_tolerance.py "
-             "after k=3 baseline runs via the 3-step protocol.")
+             "Full calibration is computed by raddue/crucible-eval's "
+             "scripts/calibrate_tolerance.py after k=3 baseline runs via the "
+             "3-step protocol.")
 
     # #333: the per-lens `report` subcommand is removed with the lens model.
 

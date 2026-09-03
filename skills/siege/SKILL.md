@@ -181,8 +181,6 @@ The anchor protects against external changes to the branch, not internal fix com
 
 Before dispatching any agents, the orchestrator pre-fetches live intelligence. This runs once per Siege invocation, not per agent.
 
-**Calibration advisory (print-only, at entry).** First, resolve `scripts/brier_advisory.py` by absolute path from the plugin root (same resolution as the ledger emit at terminal verdict) and run `python3 <script> advisory siege`. If it prints a line, surface that line verbatim before recon begins; if it prints nothing, say nothing. The script reads the central store (`~/.claude/crucible/ledger/brier-rolling.json` + `falsification.jsonl`, override `CRUCIBLE_LEDGER_DIR`) and is silent unless siege has ≥5 falsifiable verdicts with a Brier > 0.25 over trustworthy (≤30-day-old) reconciliation data. It honors `CRUCIBLE_CALIBRATION_DISABLED=1` as a graceful skip. If the script can't be resolved, skip silently — a missing advisory must never block the gate. No behavior change; advisory print only.
-
 **What is fetched:**
 
 | Source | Method | Content | Fallback |
@@ -316,9 +314,6 @@ Pass relevant sections to agents as "prior threat context" (budget: 30 lines max
 ## Phase 2: Dispatch Architecture (6 Agents)
 
 All 6 agents are dispatched in parallel using `Task tool (general-purpose, model: opus)`. Fallback if parallel dispatch fails: sequential dispatch with user notification.
-
-<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
-**Calibration-weighted dispatch (advisory).** Before fanning out the 6 attacker agents, resolve `scripts/brier_advisory.py` by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/brier_advisory.py" advise siege <manifest files…>` over the finalized manifest (post attack-surface-gap additions). If it prints a DispatchAdvice block, add it verbatim to the Tier 1 overview every agent receives, as scrutiny hints (NOT as findings, NOT scored). Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
 
 ### Context Management (Tier 1 / Tier 2)
 

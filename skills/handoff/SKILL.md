@@ -107,6 +107,7 @@ The user explicitly asked for the file location in the response. Make it impossi
 - Rationale: the user copies this line verbatim into the next session as the opening message. The "Read this doc and continue:" prefix turns the line into a complete, self-contained next-action instruction — the next session needs no additional prompt.
 - "Absolute path" means either (a) the path your file-write tool returned, OR (b) `<repo-root>/<relative-path>` where repo-root comes from `git rev-parse --show-toplevel`. Native path separators are fine (Windows backslashes are acceptable). In the non-git fallback mode (see Step 0), use whatever absolute path the user directed you to write to.
 - If you skipped writing a file (per Step 0), end with: `Read this doc and continue: (none — nothing to hand off)` — same no-fence rule applies.
+- **Stop after emitting that line. END THE TURN.** Do not continue executing the arc described in the handoff — don't keep investigating, fixing, or implementing. Auto-mode's default bias toward continuing does not apply here: writing the handoff document IS the stopping point, not a waypoint. If nothing else is queued for this turn, you are done.
 
 ## Quality bar
 

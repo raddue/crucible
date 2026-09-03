@@ -266,6 +266,64 @@ class LedgerShortWriteTest(unittest.TestCase):
             self.assertTrue(f.read().endswith(b"\n"))
 
 
+_LEDGER_CONTENTION_WORKER = """
+import sys
+from scripts.ledger_append import append
+
+ledger_path, skill, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+ok = 0
+for i in range(n):
+    entry = {
+        "schema_version": 2, "run_id": f"{skill}-{i}", "skill": skill,
+        "tier": "A", "artifact_type": "code", "verdict": "PASS",
+        "confidence": 0.5, "would_have_shipped_without_gate": False,
+        "rounds": 1,
+        "severity_histogram": {"fatal": 0, "significant": 0, "minor": 0, "nit": 0},
+    }
+    if append(ledger_path, entry):
+        ok += 1
+sys.exit(0 if ok == n else 1)
+"""
+
+
+class LedgerContentionTest(unittest.TestCase):
+    """Restored from eval/calibration-ledger/test-concurrency-t1.py groups 1-4
+    (moved to raddue/crucible-eval, #460) — the only executable proof that the
+    mkdir-lock actually serializes concurrent writers on one runs.jsonl. The
+    other Ledger*Test classes above cover the lock's state machine (dead/alive/
+    malformed holder), never two real writers on one file."""
+
+    def _spawn(self, ledger_path, skill, n):
+        env = dict(os.environ)
+        env.pop("CRUCIBLE_CALIBRATION_DISABLED", None)
+        env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+        return subprocess.Popen(
+            [sys.executable, "-c", _LEDGER_CONTENTION_WORKER,
+             ledger_path, skill, str(n)],
+            env=env,
+        )
+
+    def test_two_writers_serialize_no_interleaving(self):
+        tmp = tempfile.mkdtemp(prefix="lc-")
+        try:
+            ledger = os.path.join(tmp, "runs.jsonl")
+            n = 25
+            procs = [self._spawn(ledger, skill, n)
+                     for skill in ("quality-gate", "siege")]
+            for p in procs:
+                self.assertEqual(p.wait(timeout=60), 0)
+            with open(ledger, "rb") as f:
+                raw = f.read()
+            lines = raw.split(b"\n")
+            if lines and lines[-1] == b"":
+                lines = lines[:-1]
+            self.assertEqual(len(lines), 2 * n)  # no dropped/merged lines
+            for ln in lines:
+                json.loads(ln)  # every line valid JSON => no interleaving/partials
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------- #
 # compass — _holder_alive                                                       #
 # --------------------------------------------------------------------------- #
