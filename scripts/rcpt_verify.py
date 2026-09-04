@@ -1046,6 +1046,13 @@ def lint_receipt(text):
             raise LintError(
                 f"WITNESS grep artifact not in ARTIFACTS: {_show_path(witness['art'])}")
     # EXEC out= artifact must exist; range bound
+    # SIEGE-BA-1 (PR #583 warden gate): the artifact-hash set used to be
+    # rebuilt from `artifacts.values()` on EVERY EDIT/WROTE entry, making this
+    # loop O(artifacts x trace-entries) — a receipt with N declared artifacts
+    # and N matching EDIT lines burned 9.5s CPU at N=16000 (2.9MB) with no
+    # timer on this path, reachable through the unbounded SubagentStop hook.
+    # Hoisted out of the loop: built once, O(artifacts + trace-entries) total.
+    _artifact_hashes = {a["hash"] for a in artifacts.values()}
     for entry in trace:
         if entry["verb"] == "EXEC":
             check_exec_range_bound(entry["args"])
@@ -1057,7 +1064,7 @@ def lint_receipt(text):
             m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
             if not m:
                 raise LintError(f"{entry['verb']} missing sha256: {entry['args']}")
-            if m.group(1) not in {a["hash"] for a in artifacts.values()}:
+            if m.group(1) not in _artifact_hashes:
                 # DELIBERATE NON-GATE (#412 / BS1), NOT a TODO: the EDIT/WROTE hash is
                 # provenance, not a verified claim. It is intentionally NOT required to
                 # appear in ARTIFACTS — 0000…0 placeholders are the norm, and the dominant
