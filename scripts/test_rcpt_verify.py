@@ -8984,5 +8984,76 @@ class TestResolvePhaseNameCeiling(unittest.TestCase):
                 self.assertIsNotNone(cache[nm]["realpath"], nm)
 
 
+class TestSupersedesReferentialIntegrity(_InqBase):
+    """#584 (SIEGE-IT-1, warden gate on PR #583) — the SUPERSEDES witness-evidence rule
+    (TestSupersedesRequiresAnEvaluatedWitness) proves properties of the CITING receipt's
+    own witness; it proves nothing about whether the predecessor it retires ever
+    existed. Before this fix, a fabricated, nonexistent 12-hex prefix with an otherwise-
+    conformant witness passed the mandated `--tier2 --strict --ledger` command line
+    cleanly, retiring a predecessor that was never real."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _v11_receipt(self, name, supersedes=PREFIX):
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={supersedes}#L1-L10"])
+        p = self.base / name
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + "TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {supersedes}\n")
+        return p
+
+    def _ledger_file(self, entries):
+        p = self.base / "receipt-ledger.jsonl"
+        p.write_text("".join(json.dumps(e) + "\n" for e in entries))
+        return p
+
+    def test_fabricated_prefix_is_rejected_when_ledger_supplied(self):
+        p = self._v11_receipt("fab.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "unrelated-1", "phase": "p", "rcpt_sha256": "ab" * 32,
+             "verdict": "PASS"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("SUPERSEDES cites unknown prefix", out.stderr)
+
+    def test_real_prefix_still_passes_when_ledger_supplied(self):
+        p = self._v11_receipt("real.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "unrelated-1", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "0" * (64 - len(self.PREFIX)),
+             "verdict": "FAIL"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_ambiguous_prefix_is_rejected(self):
+        p = self._v11_receipt("ambig.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "d1", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "1" * (64 - len(self.PREFIX)), "verdict": "FAIL"},
+            {"dispatch_id": "d2", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "2" * (64 - len(self.PREFIX)), "verdict": "FAIL"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("SUPERSEDES prefix ambiguous", out.stderr)
+
+    def test_no_ledger_is_advisory_not_fatal(self):
+        """Absent --ledger stays advisory (mirrors the DISPATCHED-binding precedent) so
+        the pre-existing witness-evidence test corpus, which deliberately runs `--tier2`
+        with no `--ledger` to isolate that dimension, is unaffected by this fix."""
+        p = self._v11_receipt("noledger.rcpt")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("UNVERIFIABLE: SUPERSEDES referential-integrity", out.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
