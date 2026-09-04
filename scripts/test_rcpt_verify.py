@@ -9087,5 +9087,42 @@ class TestSupersedesReferentialIntegrity(_InqBase):
         self.assertIn("UNVERIFIABLE: SUPERSEDES referential-integrity", out.stderr)
 
 
+class TestSupersedesExistenceCheckIsLinear(unittest.TestCase):
+    """SIEGE-BA-2 (PR #583 warden gate): `tier2_supersedes_existence` (added by #584 /
+    SIEGE-IT-1, this same gate run) used to rescan the WHOLE ledger from scratch for
+    EVERY SUPERSEDES prefix — O(prefixes x ledger-entries), with both dimensions
+    receipt/ledger-controlled (a receipt's comma-separated SUPERSEDES list is unbounded;
+    the ledger grows over a project's lifetime), reachable through the same unbounded
+    SubagentStop path as SIEGE-BA-1. Measured before this fix: 0.55s / 2.1s / 8.1s at
+    (prefixes=500,ledger=20000) / (1000,40000) / (2000,80000) — a clean 4x-per-doubling
+    curve. Pins near-linear wall time at a size that would be seconds under the old
+    quadratic behavior."""
+
+    def test_many_prefixes_against_large_ledger_completes_quickly(self):
+        rv = _import_rv()
+        n_ledger = 40000
+        n_prefixes = 1000
+        hashes = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(n_ledger)]
+        with tempfile.NamedTemporaryFile(
+                "w", suffix=".jsonl", delete=False) as f:
+            for h in hashes:
+                f.write(json.dumps({"rcpt_sha256": h}) + "\n")
+            ledger_path = f.name
+        try:
+            supersedes = ",".join(hashes[i][:12] for i in range(n_prefixes))
+            started = time.monotonic()
+            rv.tier2_supersedes_existence(supersedes, ledger_path)
+            elapsed = time.monotonic() - started
+        finally:
+            os.unlink(ledger_path)
+        # O(ledger log ledger + prefixes) at this size completes in well under a
+        # second (measured ~0.2s); the old O(prefixes x ledger) behavior measured
+        # ~2.1s at this exact (prefixes, ledger) pair — 1.5s is a bound the fix
+        # clears comfortably and the regression reliably trips.
+        self.assertLess(elapsed, 1.5,
+                         "tier2_supersedes_existence took too long — the ledger "
+                         "sha256 set may have regressed to being rescanned per prefix")
+
+
 if __name__ == "__main__":
     unittest.main()
