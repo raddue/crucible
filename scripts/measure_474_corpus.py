@@ -65,6 +65,17 @@ def disposition(rv, text, root, strict):
     # `_build_identity_cache` (which mutates it in place per name as it resolves) —
     # so this frame's `cache` variable already points at the same dict object, with
     # whatever it holds so far, even when the build call raises partway through.
+    #
+    # #583 inquisitor Regression finding — this ONE helper drives BOTH modules: this
+    # tree's `rcpt_verify.py` AND whatever older copy `--baseline` names. #488
+    # re-signatured the Tier-2 entry points (`bodies=` → keyword-only `cache=`/
+    # `verified=`) and added the three identity-cache helpers, so a helper pinned to the
+    # post-#488 shape raises `AttributeError: no attribute '_close_identity_cache_fds'`
+    # on any pre-#488 baseline — disabling the exact leg this tool exists to run. So
+    # introspect the module in hand rather than assume one shape; the legacy branch below
+    # is byte-for-byte the pre-#488 call sequence this file itself used (which never
+    # passed `bodies`, so nothing is lost by not passing it).
+    identity_cache = hasattr(rv, "_build_identity_cache")
     cache = {}
     try:
         verdict = rv.lint_receipt(text)
@@ -72,27 +83,29 @@ def disposition(rv, text, root, strict):
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
-        rv._build_identity_cache(artifacts, trace,
-                                 [witness] if witness is not None else [],
-                                 verdict, root, cache)
-        verified = {}
-        notes = rv.tier2_artifacts(artifacts, trace, root, strict,
-                                   cache=cache, verified=verified)
+        tier2_kw = {}
+        if identity_cache:
+            rv._build_identity_cache(artifacts, trace,
+                                     [witness] if witness is not None else [],
+                                     verdict, root, cache)
+            tier2_kw = {"cache": cache, "verified": {}}
+        notes = rv.tier2_artifacts(artifacts, trace, root, strict, **tier2_kw)
         # #563 inquisitor finding — the real `--tier2` CLI runs this between the
         # ARTIFACTS and WITNESS legs (rcpt_verify.py's _verify_single); omitting it here
         # left tier2_witness reading a cache whose _IDENTITY_DEGENERATE /
         # _IDENTITY_UNVERIFIABLE_COLLISION sentinels were never finalized, diverging from
         # what "exactly as --tier2 does" (this function's own docstring) promises.
-        rv._finalize_identity_degenerate(cache, verified)
+        if identity_cache:
+            rv._finalize_identity_degenerate(cache, tier2_kw["verified"])
         if verdict in {"PASS", "FAIL"}:
             notes = notes + rv.tier2_witness(witness, trace, root, strict,
-                                             verdict, cache=cache,
-                                             verified=verified)
+                                             verdict, **tier2_kw)
         return "clean", "; ".join(notes)
     except rv.LintError as e:
         return "BLOCKED", str(e)
     finally:
-        rv._close_identity_cache_fds(cache)
+        if identity_cache:
+            rv._close_identity_cache_fds(cache)
 
 
 def body_source(rv, text, verdict_override=None):
