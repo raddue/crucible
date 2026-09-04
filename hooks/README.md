@@ -336,7 +336,7 @@ not block, edit, or record anything).
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "bash hooks/rcpt-verify-hook.sh", "timeout": 500 }
+          { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/rcpt-verify-hook.sh", "timeout": 500 }
         ]
       }
     ]
@@ -353,10 +353,13 @@ not block, edit, or record anything).
    blocks). Unrecognized shape / parse error / no text → `exit 0` silently.
 3. Gate: if the text contains no `RCPT v1` token → `exit 0` silently. Otherwise extracts
    from the first column-0 `RCPT v1 ` line to end-of-message.
-4. Resolves the repo via `git rev-parse --show-toplevel` and gates on
-   `[ -f "$REPO/scripts/rcpt_verify.py" ]` — so a SubagentStop in a **non-crucible repo**
-   exits 0 silently with no spurious advisory (the existence gate; never-fatal holds
-   regardless).
+4. Resolves the linter from **this hook script's own installed location**
+   (`$(dirname "$0")/../scripts/rcpt_verify.py`) — NOT from `git rev-parse
+   --show-toplevel` on the session's cwd, which would pick up whatever repo
+   the session happens to be visiting (SIEGE-CA-4/IP-1: a repo containing an
+   unrelated file at that path would get it executed with the agent's full
+   privileges). Gates on `[ -f "$LINTER" ]`, so a SubagentStop still exits 0
+   silently with no spurious advisory if the install is broken.
 5. Pipes the receipt block to `--tier1 -`. On non-zero, prints the `[rcpt-verify]`
    advisory (first stderr bullet) and **still exits 0**.
 

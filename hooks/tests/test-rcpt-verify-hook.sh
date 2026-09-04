@@ -2,8 +2,11 @@
 # hooks/tests/test-rcpt-verify-hook.sh
 # Test suite for the rcpt-verify-hook.sh SubagentStop hook (#369).
 # Proves the never-fatal + pure-observer contract: exit 0 in EVERY branch, advisory
-# only on a genuinely-malformed receipt, the M2 script-absent gate suppresses the
-# false advisory, and the hook makes no writes.
+# only on a genuinely-malformed receipt, the linter resolves from this hook's own
+# installed location regardless of cwd (SIEGE-CA-4/IP-1 — never a same-named
+# script from whatever repo the session happens to be visiting), the own-install-
+# absent gate suppresses the false advisory when the hook itself is misinstalled,
+# and the hook makes no writes.
 
 set -euo pipefail
 
@@ -132,18 +135,43 @@ for t in cat bash; do ln -sf "$(command -v $t)" "$FAKEBIN/"; done
 run_hook "$REPO_ROOT" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")" "$FAKEBIN"
 check "missing jq → silent" 0 0
 
-# (c) cwd outside any git repo → \$REPO empty → silent (even on a malformed receipt)
+# (c) SIEGE-CA-4/IP-1: cwd outside any git repo → the linter is resolved from
+# THIS HOOK's own installed location (dirname "$0"), never from cwd, so a
+# malformed receipt still produces an advisory even when cwd has no repo at
+# all. (Old behavior — silent because `git rev-parse --show-toplevel` on cwd
+# came up empty — was itself the bug class: linting availability should never
+# depend on what directory the session happens to be in.)
 NONREPO="$TMPDIR_BASE/nonrepo"
 mkdir -p "$NONREPO"
 run_hook "$NONREPO" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")"
-check "cwd outside any repo → silent" 0 0
+check "cwd outside any repo → linter still resolves, advisory fires" 0 1
 
-# (c/M2) \$REPO resolves to a repo with NO scripts/rcpt_verify.py → silent, NO advisory
+# (c/M2) cwd is a repo with NO scripts/rcpt_verify.py of its own → the hook
+# still uses ITS OWN installed linter (not cwd's), so the advisory still fires.
 NONCRUCIBLE="$TMPDIR_BASE/noncrucible"
 mkdir -p "$NONCRUCIBLE"
 git -C "$NONCRUCIBLE" init -q
 run_hook "$NONCRUCIBLE" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")"
-check "non-crucible repo (M2 script-absent gate) → silent" 0 0
+check "repo w/o its own rcpt_verify.py → hook's own linter still used, advisory fires" 0 1
+
+# (c/CA4) SIEGE-CA-4/IP-1 direct regression: cwd is a POISONED repo whose OWN
+# scripts/rcpt_verify.py would leave a marker file if executed. The hook must
+# NEVER run it — only the real, installed linter — regardless of cwd.
+POISONED="$TMPDIR_BASE/poisoned"
+mkdir -p "$POISONED/scripts"
+git -C "$POISONED" init -q
+MARKER="$TMPDIR_BASE/pwned-marker"
+rm -f "$MARKER"
+printf 'import sys,pathlib\npathlib.Path(%s).write_text("pwned")\nsys.exit(0)\n' "\"$MARKER\"" \
+  > "$POISONED/scripts/rcpt_verify.py"
+run_hook "$POISONED" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")"
+if [ ! -e "$MARKER" ]; then
+  echo "PASS: poisoned cwd script never executed (no marker written)"
+  PASSED=$((PASSED + 1))
+else
+  echo "FAIL: poisoned cwd script WAS executed — marker file present at $MARKER"
+  FAILED=$((FAILED + 1))
+fi
 
 # (9) pure observer — no writes. Stand up a fake repo WITH a copy of rcpt_verify.py
 # so the advisory path actually runs, then assert the cwd file-set is unchanged.
