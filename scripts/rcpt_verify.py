@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, errno, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
+import bisect, contextlib, errno, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
 import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -5830,10 +5830,30 @@ def tier2_supersedes_existence(supersedes, ledger_path):
     except (OSError, ValueError, MemoryError, RecursionError) as ex:
         raise LintError(
             f"Tier-2 --ledger: cannot parse receipt-ledger {_show_path(ledger_path)}: {ex}")
+    # SIEGE-BA-2 (PR #583 warden gate): this used to rescan the WHOLE ledger
+    # from scratch for EVERY SUPERSEDES prefix (`{e... for e in ledger if
+    # ...startswith(prefix)}` inside the `for prefix in prefixes:` loop),
+    # making this O(prefixes x ledger-entries) -- both dimensions are
+    # receipt/ledger controlled (a receipt's comma-separated SUPERSEDES list
+    # is unbounded, and the ledger grows over a project's lifetime), reached
+    # through the same unbounded SubagentStop path as SIEGE-BA-1. Measured
+    # before this fix: 0.55s / 2.1s / 8.1s at
+    # (prefixes=500,ledger=20000) / (1000,40000) / (2000,80000) -- a clean
+    # 4x-per-doubling curve. Fixed the same way as BA-1: build the expensive
+    # structure once outside the loop. Prefix length is receipt-controlled
+    # (no fixed-length validation upstream), so this sorts the DISTINCT
+    # rcpt_sha256 values once (O(L log L)) and locates each prefix's matching
+    # range via bisect (O(log L) + O(matches) per prefix) instead of a full
+    # O(L) linear rescan per prefix.
+    sha256_values = sorted({e.get("rcpt_sha256") for e in ledger
+                             if isinstance(e.get("rcpt_sha256"), str)})
     for prefix in prefixes:
-        matches = {e.get("rcpt_sha256") for e in ledger
-                   if isinstance(e.get("rcpt_sha256"), str)
-                   and e.get("rcpt_sha256").startswith(prefix)}
+        lo = bisect.bisect_left(sha256_values, prefix)
+        matches = set()
+        for v in sha256_values[lo:]:
+            if not v.startswith(prefix):
+                break
+            matches.add(v)
         if not matches:
             raise LintError(
                 f"SUPERSEDES cites unknown prefix (referential-integrity requirement, "
