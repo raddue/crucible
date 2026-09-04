@@ -53,6 +53,19 @@ WITNESS_TIMEOUT_MSG = (f"witness evaluation exceeded {WITNESS_TIMEOUT_S}s "
 RESOLVE_PER_NAME_BUDGET_S = 0.05
 RESOLVE_PHASE_CEILING_S = 2 * WITNESS_TIMEOUT_S
 
+# #583 inquisitor / State & Lifecycle AV1 — n_names (above) is receipt-controlled and
+# uncapped in COUNT as well as in time: _build_identity_cache holds one fd open per
+# distinct name for the whole resolve phase (F1 structural fix), so a receipt
+# declaring enough names exhausts RLIMIT_NOFILE (~1020 on Linux, ~252 on macOS
+# defaults) before the timing budget above ever intervenes. Maintainer's chosen
+# remedy: reject up front, before any fd is opened, rather than bounding-and-rewalking
+# the resolve loop — a rewalk would reopen a resolve-to-read gap in the exact
+# mechanism that took 3 prior fix attempts to close (see F1's docstring at
+# _resolve_once). 200 is comfortably below the more restrictive platform's default
+# ceiling, leaving headroom for the process's own already-open fds (stdio, git
+# plumbing, etc.) while accommodating any realistic receipt.
+MAX_RESOLVE_NAMES = 200
+
 # SIG-9-3 / round-9 — sentinel keys for the identity cache. Plain object() so they can
 # never collide with a receipt-controlled name: every genuine cache record is keyed on
 # str(name) (SIG-7-3), so a non-str sentinel is structurally distinguishable.
@@ -2953,6 +2966,13 @@ def _build_identity_cache(artifacts, trace, witnesses, verdict, root, cache_out,
     declared_map = {nm: nm in declared_names for nm in names}
 
     n_names = len(names)
+    if n_names > MAX_RESOLVE_NAMES:
+        # #583 — reject before the resolve loop opens a single fd (F1 holds one per
+        # name for the whole resolve phase). See MAX_RESOLVE_NAMES for the tradeoff.
+        raise LintError(
+            f"Tier-2: {n_names} distinct artifact/witness names exceeds the resolve "
+            f"phase's ceiling of {MAX_RESOLVE_NAMES} (RLIMIT_NOFILE exhaustion "
+            "mitigation); refusing to begin resolution")
     budget = min(RESOLVE_PHASE_CEILING_S,
                  max(WITNESS_TIMEOUT_S, RESOLVE_PER_NAME_BUDGET_S * n_names))
     try:

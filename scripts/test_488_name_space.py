@@ -45,6 +45,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "rcpt_verify.py"
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -1629,6 +1630,14 @@ class TestTheTruncationPartitionHoldsAtScale(_RootCase):
     def setUp(self):
         super().setUp()
         self.rv = _import_rv()
+        # #583 — MAX_RESOLVE_NAMES (a real-world RLIMIT_NOFILE ceiling) would
+        # otherwise reject this receipt before the resolve loop this test exercises
+        # even starts. Almost none of the N declared names below resolve to a real
+        # file (only 4 are planted on disk), so this test never holds anywhere near
+        # N fds — the "2000 entries" is a bookkeeping-at-scale scenario, orthogonal
+        # to the fd-exhaustion the ceiling defends against. Patch it out for this
+        # test only; the ceiling's own coverage lives in test_rcpt_verify.py.
+        self.enterContext(mock.patch.object(self.rv, "MAX_RESOLVE_NAMES", self.N + 10))
         body = "ok\n"
         h = hashlib.sha256(body.encode()).hexdigest()
         art = {}

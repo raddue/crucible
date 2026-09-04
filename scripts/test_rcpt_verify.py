@@ -8947,5 +8947,42 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
         self.assertNotIn("declares `RCPT v1`", out.stderr)
 
 
+class TestResolvePhaseNameCeiling(unittest.TestCase):
+    """#583 inquisitor / State & Lifecycle AV1 — MAX_RESOLVE_NAMES rejects a receipt
+    declaring too many distinct artifact/witness names before the resolve loop opens
+    a single fd, closing the RLIMIT_NOFILE DoS gap without touching F1's fd-holding
+    mechanism itself."""
+
+    def test_over_ceiling_rejected_before_any_resolve(self):
+        rv = _import_rv()
+        artifacts = {
+            f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
+            for i in range(rv.MAX_RESOLVE_NAMES + 1)
+        }
+        # `root` is never consulted — the ceiling check raises before resolve_base is
+        # ever called for any name, so a nonexistent root proves no fd was opened.
+        with self.assertRaises(rv.LintError) as ctx:
+            rv._build_identity_cache(artifacts, [], [], "PASS",
+                                      pathlib.Path("/nonexistent-root"), {})
+        self.assertIn(str(rv.MAX_RESOLVE_NAMES), str(ctx.exception))
+
+    def test_at_ceiling_resolves_normally(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            _plant_git_dir(repo)
+            names = [f"f{i}.txt" for i in range(rv.MAX_RESOLVE_NAMES)]
+            for nm in names:
+                (repo / nm).write_text("x")
+            artifacts = {
+                nm: {"hash": "sha256:" + "0" * 64, "size": 1, "meta": ""}
+                for nm in names
+            }
+            cache = {}
+            rv._build_identity_cache(artifacts, [], [], "PASS", repo, cache)
+            for nm in names:
+                self.assertIsNotNone(cache[nm]["realpath"], nm)
+
+
 if __name__ == "__main__":
     unittest.main()
