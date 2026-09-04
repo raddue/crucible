@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
+import contextlib, errno, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
 import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -2234,8 +2234,8 @@ def _resolve_once(name, root, cache):
     """SIG-7-3 — resolve `name` exactly once per distinct `str(name)`, memoized in `cache`.
 
     The value is a record, not a bare `Path | None` (FATAL-12-1): `{"realpath",
-    "found", "refused", "dev_ino_at_resolve", "resolve_stat_failed", "dev_ino",
-    "nlink_at_resolve", "declared", "fd"}`. First call for a key runs the real
+    "found", "refused", "dev_ino_at_resolve", "resolve_stat_failed", "resolve_errno",
+    "dev_ino", "nlink_at_resolve", "declared", "fd"}`. First call for a key runs the real
     `resolve_base` and, immediately after it returns a non-None realpath, F1
     STRUCTURAL FIX: `_open_nofollow_walk` opens the realpath end-to-end via a
     component-by-component, `O_NOFOLLOW`-at-every-step walk (see there) and the
@@ -2279,6 +2279,7 @@ def _resolve_once(name, root, cache):
         "refused": refused,
         "dev_ino_at_resolve": None,
         "resolve_stat_failed": False,
+        "resolve_errno": None,
         "dev_ino": None,
         "nlink_at_resolve": None,
         "declared": False,
@@ -2289,7 +2290,14 @@ def _resolve_once(name, root, cache):
     if rec["realpath"] is not None:
         try:
             fd = _open_nofollow_walk(rec["realpath"])
-        except OSError:
+        except OSError as e:
+            # #583 inquisitor AV1b — retain the errno so the consumer can tell a
+            # RESOURCE failure (EMFILE/ENFILE: this process ran out of descriptors
+            # while walking, which is O(distinct declared names) here) apart from a
+            # genuine resolve/read race. Both fail closed identically; only the
+            # diagnostic differs, because an operator shown race-shaped wording on an
+            # fd-exhaustion event hunts a race that never happened.
+            rec["resolve_errno"] = e.errno
             rec["resolve_stat_failed"] = True
         else:
             # temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
@@ -2333,10 +2341,14 @@ def _close_identity_cache_fds(cache):
     """F1 STRUCTURAL FIX — close every held fd `_resolve_once`'s walk opened for
     `cache` that no read ever consumed.
 
-    A record's `fd` is set to `None` the MOMENT a reader (`tier2_artifacts`,
-    `tier2_witness`) takes ownership of it (see `_read_from_fd`, which closes it on
-    every exit, success or exception) — so what remains here on the paths this
-    function is actually reached from is exactly the set that was never read: a
+    A record's `fd` is set to `None` at the MOMENT ownership of it passes to a reader
+    — by `_read_from_fd` itself, via the `owner=rec` its `tier2_artifacts` /
+    `tier2_witness` callers pass (#583 inquisitor AV4), at the two points that
+    function has taken ownership and will close it on every exit, success or
+    exception. Neither caller clears it earlier: doing so left a window in which the
+    descriptor was unreachable from `cache` and so invisible here. What remains here
+    on the paths this function is actually reached from is exactly the set that was
+    never read: a
     second spelling of an already-read realpath (the S3 dedup reuses the FIRST
     spelling's bytes and never touches the second one's fd), a name whose resolve
     raised before any read was attempted (e.g. a `--strict` ambiguity raise), or a
@@ -2780,7 +2792,7 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
     return raw
 
 
-def _read_from_fd(fd, budget, label):
+def _read_from_fd(fd, budget, label, owner=None):
     """S17-8 / S2, generalised for F1 — classify and read an ALREADY-OPEN fd, capturing
     `(st_dev, st_ino)` from that SAME descriptor, race-free.
 
@@ -2812,14 +2824,29 @@ def _read_from_fd(fd, budget, label):
     be re-resolved. `_read_and_fstat_artifact` below is the thin, name-opening sibling
     kept for the one caller (`_read_jsonl`'s `--ledger` read) that has no earlier resolve
     step to hold a descriptor across."""
+    # #583 inquisitor AV4 — the ownership HANDOFF, mirroring code-review #583 finding
+    # #1 on the consuming side. `owner` is the `_resolve_once` record `fd` is still
+    # registered in; callers must leave `owner["fd"]` populated across the call rather
+    # than clearing it before it, so the descriptor stays reachable from the cache (and
+    # thus reclaimable by `_close_identity_cache_fds`) for the whole window an async
+    # exception — KeyboardInterrupt, or `_witness_bound`'s SIGALRM `WitnessTimeout` —
+    # could land in. This function clears it at exactly the two points it has taken
+    # ownership: the `except BaseException` arm that closes `fd` itself, and after
+    # `os.fdopen` has handed the descriptor to `fh` (whose `with` block closes it on
+    # every exit). Clearing it in either place is what keeps `_close_identity_cache_fds`
+    # from double-closing an fd number the OS may already have recycled.
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise LintError(f"Tier-2: {label} is not a regular file (not read)")
         fh = os.fdopen(fd, "rb")
     except BaseException:
+        if owner is not None:
+            owner["fd"] = None
         os.close(fd)
         raise
+    if owner is not None:
+        owner["fd"] = None
     with fh:
         raw = fh.read(budget + 1)
     if len(raw) > budget:
@@ -3720,13 +3747,19 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
                 # when that walk did not produce a trustworthy identity
                 # (`resolve_stat_failed`), which the `dev_ino_at_resolve is None` raise
                 # just below already covers — there is no read to attempt in that case.
+                # #583 inquisitor AV4 — `rec["fd"]` is deliberately NOT cleared here.
+                # Clearing it before the call left the descriptor reachable only from
+                # this frame until `_read_from_fd` established its own guard, so an
+                # async exception in that gap leaked it (`_close_identity_cache_fds`
+                # walks the cache, not stack frames). `owner=rec` hands the clearing to
+                # `_read_from_fd`, which does it at the moment it actually takes
+                # ownership — see there.
                 fd = rec["fd"]
-                rec["fd"] = None    # ownership transferred; _read_from_fd closes it either way
                 if fd is not None:
                     try:
                         # S3 — the dedup is scoped to fstat/read only; the first
                         # spelling of a realpath reads once, later spellings reuse.
-                        st_dev_ino, raw = _read_from_fd(fd, budget, label)
+                        st_dev_ino, raw = _read_from_fd(fd, budget, label, owner=rec)
                     except LintError:
                         # Over-cap: bytes NOT read, hash NOT recomputed, remaining
                         # entries and the witness leg uncounted. Fails CLOSED — never a
@@ -3751,6 +3784,18 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
             if dev_ino_at_resolve is None:
                 if cov is not None:
                     cov.partial = True
+                # #583 inquisitor AV1b — descriptor exhaustion during the resolve walk
+                # is a RESOURCE limit of this process, not evidence of a path swap. It
+                # fails closed exactly as every other unsampled identity does; only the
+                # wording differs, so an operator is not sent hunting a race that never
+                # happened. The resolve phase holds one fd per distinct declared name,
+                # so a large receipt can reach RLIMIT_NOFILE on its own.
+                resolve_errno = rec.get("resolve_errno")
+                if resolve_errno in (errno.EMFILE, errno.ENFILE):
+                    raise LintError(
+                        f"Tier-2: {label}'s identity could not be sampled: "
+                        f"file-descriptor limit reached during resolution "
+                        f"(errno={errno.errorcode[resolve_errno]})")
                 raise LintError(
                     f"Tier-2: {label}'s identity could not be sampled at "
                     f"resolution time")
@@ -5323,13 +5368,22 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
                 # a self-contained, zero-gap resolve-then-open with no separate
                 # by-name stat to race against — and fails exactly as closed when
                 # the underlying walk failure is still live.
+                #
+                # #583 inquisitor AV4 — `rec["fd"]` stays populated across the call
+                # (see `_read_from_fd`'s `owner`), and a FRESHLY-walked fd is stored
+                # INTO `rec["fd"]` as the first side effect after the walk returns —
+                # the same principle code-review #583 finding #1 applied inside
+                # `_resolve_once`. Both keep the descriptor reachable from the cache,
+                # and therefore reclaimable by `_close_identity_cache_fds`, for the
+                # whole window this leg's own SIGALRM `WitnessTimeout` could land in.
                 fd = rec["fd"]
-                rec["fd"] = None    # ownership transferred either way
                 try:
                     if fd is None:
                         fd = _open_nofollow_walk(art_realpath)
+                        rec["fd"] = fd
                     st_dev_ino, raw = _read_from_fd(
-                        fd, ARTIFACT_READ_CAP, f"witness {_show_path(art_name)}")
+                        fd, ARTIFACT_READ_CAP, f"witness {_show_path(art_name)}",
+                        owner=rec)
                 except LintError:
                     if cov is not None:
                         cov.partial = True
