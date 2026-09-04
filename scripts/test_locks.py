@@ -5,7 +5,9 @@ bespoke mkdir-lock protocols guarding the machine-local stores.
 Both protocols are mkdir-as-mutex + a `holder` file + stale-recovery, but they
 are SEPARATE implementations with different holder formats and recovery rules:
   - `ledger_append.py` (`_try_stale_recovery`/`_acquire_lock`) guards runs.jsonl
-    appends. Holder: `run_id:skill:pid:iso`. Recovery keys on os.kill(pid,0)
+    appends. Holder: JSON `{"run_id","skill","pid","acquired_ts"}` (SIEGE-FA-1/
+    CA-5 — not a colon-delimited line, so a ':' in a caller-supplied run_id/
+    skill can't shift the pid field). Recovery keys on os.kill(pid,0)
     liveness; a >60s lockdir age admits recovery.
   - `compass.py` (`_try_recover_stale`/`_acquire_lock`) guards docs/compass.md.
     Holder: `pid@epoch`. Recovery keys on liveness AND a 30s mtime TTL (an
@@ -60,6 +62,13 @@ COMPASS_SCRIPT = os.path.join(HERE, "compass.py")
 DEAD_PID = 0x7FFFFFFF
 
 
+def _holder_json(pid, run_id="r1", skill="siege", ts="2026-01-01T00:00:00Z"):
+    """SIEGE-FA-1/CA-5: the holder file is JSON, not `run_id:skill:pid:iso` —
+    a colon-delimited line let a ':' inside a caller-supplied run_id/skill
+    shift which token got parsed as pid. Build the same shape append() writes."""
+    return json.dumps({"run_id": run_id, "skill": skill, "pid": pid, "acquired_ts": ts})
+
+
 def _dead_pid():
     """Return a PID that is not currently alive (best-effort, deterministic)."""
     p = DEAD_PID
@@ -97,26 +106,36 @@ class LedgerStaleRecoveryTest(unittest.TestCase):
 
     def test_dead_pid_holder_recovers(self):
         # Branch A, dead PID (ESRCH) → unlink holder + rmdir + signal retry.
-        self._write_holder(f"r1:siege:{_dead_pid()}:2026-01-01T00:00:00Z")
+        self._write_holder(_holder_json(_dead_pid()))
         self.assertTrue(la._try_stale_recovery(self.lockdir))
         self.assertFalse(os.path.exists(self.lockdir))   # lockdir freed
 
     def test_alive_pid_holder_does_not_recover(self):
         # Branch A, our own (alive) PID → keep waiting, do NOT rmdir.
-        self._write_holder(f"r1:siege:{os.getpid()}:2026-01-01T00:00:00Z")
+        self._write_holder(_holder_json(os.getpid()))
         self.assertFalse(la._try_stale_recovery(self.lockdir))
         self.assertTrue(os.path.exists(self.lockdir))    # lockdir intact
 
-    def test_malformed_holder_too_few_fields_recovers(self):
-        # Branch B: holder present but unparseable (<4 colon fields) → crashed
+    def test_colon_in_identity_does_not_shift_pid_field_SIEGE_FA1(self):
+        # SIEGE-FA-1/CA-5 regression: a run_id/skill containing ':' must NOT
+        # be able to shift which value is read as pid. Under the old
+        # colon-delimited format, run_id="r:x" made an alive pid parse as a
+        # dead one (or vice versa); JSON has no such ambiguity.
+        self._write_holder(_holder_json(os.getpid(), run_id="r:x:y", skill="qg:fix"))
+        self.assertFalse(la._try_stale_recovery(self.lockdir))
+        self.assertTrue(os.path.exists(self.lockdir))    # alive holder — must NOT be evicted
+
+    def test_malformed_holder_not_json_recovers(self):
+        # Branch B: holder present but unparseable (not valid JSON) → crashed
         # mid-acquire → rmdir.
         self._write_holder("garbage-no-colons")
         self.assertTrue(la._try_stale_recovery(self.lockdir))
         self.assertFalse(os.path.exists(self.lockdir))
 
     def test_non_integer_pid_recovers(self):
-        # Branch B: 4 fields but pid is non-integer → ValueError → rmdir.
-        self._write_holder("r1:siege:notapid:2026-01-01T00:00:00Z")
+        # Branch B: valid JSON but pid is not an int → ValueError → rmdir.
+        self._write_holder(json.dumps({"run_id": "r1", "skill": "siege",
+                                        "pid": "notapid", "acquired_ts": "2026-01-01T00:00:00Z"}))
         self.assertTrue(la._try_stale_recovery(self.lockdir))
         self.assertFalse(os.path.exists(self.lockdir))
 
@@ -162,7 +181,7 @@ class LedgerAcquireLockTest(unittest.TestCase):
         la.STALE_THRESHOLD_S = 0.0    # any existing lockdir is immediately "stale-eligible"
         os.mkdir(self.lockdir)
         with open(os.path.join(self.lockdir, la.HOLDER_FILENAME), "w") as f:
-            f.write(f"r1:siege:{_dead_pid()}:2026-01-01T00:00:00Z")
+            f.write(_holder_json(_dead_pid()))
         self.assertTrue(la._acquire_lock(self.lockdir))
         self.assertTrue(os.path.isdir(self.lockdir))
 
@@ -182,7 +201,7 @@ class LedgerAcquireLockTest(unittest.TestCase):
         la.STALE_THRESHOLD_S = 1000.0   # fresh lockdir never enters stale-recovery
         os.mkdir(self.lockdir)
         with open(os.path.join(self.lockdir, la.HOLDER_FILENAME), "w") as f:
-            f.write(f"r1:siege:{os.getpid()}:2026-01-01T00:00:00Z")  # alive holder
+            f.write(_holder_json(os.getpid()))  # alive holder
         t0 = time.monotonic()
         acquired = la._acquire_lock(self.lockdir)
         elapsed = time.monotonic() - t0
@@ -213,7 +232,7 @@ class LedgerAcquireLockTest(unittest.TestCase):
         la.STALE_THRESHOLD_S = 0.0    # existing lockdir is immediately stale-eligible
         os.mkdir(self.lockdir)
         with open(os.path.join(self.lockdir, la.HOLDER_FILENAME), "w") as f:
-            f.write(f"r1:siege:{os.getpid()}:2026-01-01T00:00:00Z")  # ALIVE holder
+            f.write(_holder_json(os.getpid()))  # ALIVE holder
         t0 = time.monotonic()
         acquired = la._acquire_lock(self.lockdir)
         elapsed = time.monotonic() - t0

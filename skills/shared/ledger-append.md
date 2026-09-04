@@ -295,7 +295,13 @@ across all supported filesystems and IS the mutex.
    - If stale recovery applies (step 5), invoke before spinning further.
 
 2. **Write identity:** open `~/.claude/crucible/ledger/.lock-runs-jsonl/holder`,
-   write `<run_id>:<skill>:<pid>:<acquired_ts_iso>`, close.
+   write one JSON object `{"run_id": ..., "skill": ..., "pid": ..., "acquired_ts": ...}`,
+   close. (JSON, not a `:`-delimited line — SIEGE-FA-1/CA-5: `run_id`/`skill`
+   are caller-supplied and unconstrained in character set, e.g. ISO-timestamp-
+   shaped run ids this repo's own skills use; a delimited line lets a `:` in
+   either field shift which token `pid` is parsed from, either wedging the
+   lock permanently against a live holder or destroying a live holder's lock.
+   A JSON encoding cannot be shifted this way regardless of field content.)
 
 3. **Append:** open `runs.jsonl` with `O_APPEND | O_CREAT`; write one JSONL
    line (including trailing `\n`) **as a single `write()` syscall**; fsync;
@@ -626,16 +632,17 @@ def _truncate_payload(entry: dict, max_gated_files: int,
     return out, overflow
 
 
-def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
-    """L-2 caller-side dedup. Returns True if (run_id, skill) already in ledger.
+def _find_existing_entry(ledger_path: str, run_id: str, skill: str) -> Optional[dict]:
+    """Scan `ledger_path` for the first row matching `(run_id, skill)`.
 
-    Callers MUST invoke this BEFORE append() to honor invariant L-2. The append
-    helper does not scan for prior entries. Full-scan; bounded by current ledger
-    size (acceptable while ledger is sub-MB; future rotation lands in v1.1).
+    Returns the parsed entry dict, or None if no match / file absent /
+    unreadable. Shared implementation behind `caller_dedup` (bool) and the
+    SIEGE-IT-3 divergence check in `_cli_emit`, which needs the matched
+    row's *content* to tell an idempotent retry from a colliding forged one.
     """
     if not os.path.exists(ledger_path):
-        return False
-    found = False
+        return None
+    match: Optional[dict] = None
     skipped = 0  # #400: count corrupt lines instead of silently weakening dedup
     try:
         with open(ledger_path, "rb") as f:
@@ -655,13 +662,23 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
                     skipped += 1
                     continue
                 if obj.get("run_id") == run_id and obj.get("skill") == skill:
-                    found = True
+                    match = obj
                     break
     except OSError:
-        return False
+        return None
     if skipped:
         _warn(f"caller_dedup: skipped {skipped} corrupt/unusable line(s) in {ledger_path}")
-    return found
+    return match
+
+
+def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
+    """L-2 caller-side dedup. Returns True if (run_id, skill) already in ledger.
+
+    Callers MUST invoke this BEFORE append() to honor invariant L-2. The append
+    helper does not scan for prior entries. Full-scan; bounded by current ledger
+    size (acceptable while ledger is sub-MB; future rotation lands in v1.1).
+    """
+    return _find_existing_entry(ledger_path, run_id, skill) is not None
 
 
 def _try_stale_recovery(lockdir: str) -> bool:
@@ -677,12 +694,18 @@ def _try_stale_recovery(lockdir: str) -> bool:
     try:
         with open(holder, "r", encoding="utf-8") as f:
             line = f.read().strip()
-        # holder format: <run_id>:<skill>:<pid>:<iso_ts>
-        parts = line.split(":")
-        if len(parts) < 4:
+        # SIEGE-FA-1/CA-5: holder is JSON, not a `:`-delimited line — run_id/
+        # skill are caller-supplied and may contain ':' (e.g. ISO-timestamp-
+        # shaped run ids), which shifted the pid field under the old
+        # delimited format (wedging the lock against a live holder, or
+        # destroying a live holder's lock). JSON has no such ambiguity.
+        obj = json.loads(line)
+        if not isinstance(obj, dict):
             raise ValueError("malformed holder")
-        pid = int(parts[2])
-    except (OSError, ValueError):
+        pid = obj["pid"]
+        if not isinstance(pid, int):
+            raise ValueError("malformed holder")
+    except (OSError, ValueError, json.JSONDecodeError, KeyError):
         # Branch B: missing or malformed holder
         try:
             try:
@@ -840,9 +863,13 @@ def append(
 
     holder_path = os.path.join(lockdir, HOLDER_FILENAME)
     try:
-        # Step 2: write identity inside the lockdir
+        # Step 2: write identity inside the lockdir (JSON — see
+        # _try_stale_recovery for why not a `:`-delimited line, SIEGE-FA-1/CA-5)
         with open(holder_path, "w", encoding="utf-8") as hf:
-            hf.write(f"{run_id}:{skill}:{os.getpid()}:{_now_iso()}")
+            hf.write(json.dumps({
+                "run_id": run_id, "skill": skill,
+                "pid": os.getpid(), "acquired_ts": _now_iso(),
+            }))
 
         # L-8 sidecar: write only AFTER the size check passed, inside the lock.
         # Avoids orphan-sidecar leaks when the ledger append itself is rejected.
@@ -918,9 +945,36 @@ def _cli_emit(ledger_arg: str, entry: dict) -> int:
 
     run_id = entry.get("run_id", "unknown")
     skill = entry.get("skill", "unknown")
-    if caller_dedup(ledger_path, run_id, skill):
-        print(f"[ledger_append] duplicate (run_id={run_id} skill={skill}); "
-              f"emit skipped", file=sys.stderr)
+    existing = _find_existing_entry(ledger_path, run_id, skill)
+    if existing is not None:
+        # SIEGE-IT-3: the (run_id, skill) join key is self-asserted by the
+        # caller, with no ownership/authentication behind it — any local
+        # process can emit under an identity it does not own. append() is
+        # O_APPEND-only, so a genuine second emitter under a squatted key can
+        # never land its own row. We cannot safely accept a second row here
+        # (every downstream reader — Brier scoring, the falsification
+        # walkback — assumes (run_id, skill) uniqueness; relaxing that is a
+        # ledger-schema decision, not a mechanical fix), so this remains a
+        # graceful no-op per L-2/INV-9. What changes: a content MISMATCH
+        # (this emit's verdict differs from the row already on disk) is
+        # surfaced as a loud, distinctly-labeled warning instead of the
+        # routine "duplicate" message, so a genuine collision is at least
+        # visible on the diagnostic channel rather than silently absorbed.
+        # This is a detection improvement, not a fix for the underlying
+        # unauthenticated-identity gap — closing that needs real ownership/
+        # authentication infrastructure this ledger does not have today.
+        if existing.get("verdict") != entry.get("verdict"):
+            print(
+                f"[ledger_append] IDENTITY COLLISION (run_id={run_id} skill={skill}): "
+                f"an entry already on disk has verdict={existing.get('verdict')!r}, "
+                f"this emit's verdict is {entry.get('verdict')!r} — one of these did "
+                f"not originate from the process that owns this (run_id, skill); "
+                f"emit skipped, ledger keeps the FIRST row (append-only, L-2)",
+                file=sys.stderr,
+            )
+        else:
+            print(f"[ledger_append] duplicate (run_id={run_id} skill={skill}); "
+                  f"emit skipped", file=sys.stderr)
         return 0
 
     return 0 if append(ledger_path, entry) else 1
