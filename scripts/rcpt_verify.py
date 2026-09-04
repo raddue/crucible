@@ -5786,6 +5786,61 @@ def tier2_ledger(trace, ledger_path):
     return []
 
 
+def tier2_supersedes_existence(supersedes, ledger_path):
+    """#584 (SIEGE-IT-1) — SUPERSEDES referential-integrity: a cited prefix must name a
+    receipt that actually exists, not just satisfy this receipt's OWN witness-evidence
+    rule (`lint_v11_local` / the witness-evidence block in `_verify_single`, both of
+    which only check properties of the CITING receipt — never that the cited PREDECESSOR
+    is real). Before this, `SUPERSEDES: <any fabricated 12-hex prefix>` passed both
+    tiers cleanly under the mandated `--tier2 --strict --ledger` command line, retiring a
+    predecessor that never existed. return-convention.md § "The Sweep" step 3 documents
+    "uniqueness" as one of the four checks Tier-1 defers to a manifest-holding layer
+    (`lint_v11_local`'s own docstring says so explicitly) — this is that layer, for the
+    production path, mirroring `eval/ledger-return-protocol/tripwire/sweep.py`'s
+    `lint_v11` (the eval-only reference that has implemented existence + uniqueness
+    checking against ITS manifest all along; this is the same check ported onto the
+    production ledger's row shape).
+
+    Existence: at least one ledger row's `rcpt_sha256` must start with the prefix.
+    Uniqueness: at most one DISTINCT `rcpt_sha256` value may match the prefix (two
+    ledger rows sharing one `rcpt_sha256` — e.g. the same child receipt recorded on a
+    retry — are not a collision; two rows with DIFFERENT `rcpt_sha256` values that both
+    start with the prefix are).
+
+    NOT closed here, disclosed rather than silently omitted: "no-already-superseded"
+    (return-convention.md's fourth manifest-relative check) has no ledger field to test
+    against — the `{dispatch_id, phase, rcpt_sha256, verdict}` schema (#383) records
+    DISPATCHED bindings, not supersession history — so a double-supersede of the same
+    predecessor is not caught by this leg. Closing it needs a ledger schema addition
+    (a `superseded_by` write-back, mirroring sweep.py's manifest), which is a separate,
+    larger change than the existence gap this closes.
+
+    Raises LintError on a prefix with zero or with >1 distinct matching `rcpt_sha256`.
+    Returns []."""
+    prefixes = [s.strip() for s in supersedes.split(",")]
+    try:
+        ledger = [e for e in _read_jsonl(ledger_path) if isinstance(e, dict)]
+    except (OSError, ValueError, MemoryError, RecursionError) as ex:
+        raise LintError(
+            f"Tier-2 --ledger: cannot parse receipt-ledger {_show_path(ledger_path)}: {ex}")
+    for prefix in prefixes:
+        matches = {e.get("rcpt_sha256") for e in ledger
+                   if isinstance(e.get("rcpt_sha256"), str)
+                   and e.get("rcpt_sha256").startswith(prefix)}
+        if not matches:
+            raise LintError(
+                f"SUPERSEDES cites unknown prefix (referential-integrity requirement, "
+                f"#584): {prefix} matches no receipt-ledger entry — a SUPERSEDES claim "
+                f"must name a real predecessor, not just satisfy this receipt's own "
+                f"witness-evidence rule")
+        if len(matches) > 1:
+            raise LintError(
+                f"SUPERSEDES prefix ambiguous (referential-integrity requirement, "
+                f"#584): {prefix} matches {len(matches)} distinct receipt-ledger "
+                f"entries")
+    return []
+
+
 def _read_jsonl(path):
     """siege S-1 — the ONE Tier-2 read the SIEGE-R2BA-2 bounding sweep missed.
 
@@ -6720,6 +6775,26 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                         "EVALUATED at Tier-2 (witness-evidence requirement: the "
                         "witness resolved to no evaluated predicate, so it "
                         "demonstrates nothing about the predecessor it retires)")
+                # #584 (SIEGE-IT-1) — SUPERSEDES referential-integrity, sited BEFORE the
+                # Part-3 DISPATCHED-binding block below on purpose (same leg family).
+                # Mirrors DISPATCHED's own absent-ledger posture deliberately, rather
+                # than inventing a stricter one: a real ledger mismatch is a hard FAIL
+                # (strict-independent), absent --ledger is advisory UNVERIFIABLE. This
+                # keeps the huge existing SUPERSEDES witness-evidence test corpus (which
+                # deliberately runs `--tier2` with no `--ledger` to isolate THAT
+                # dimension) unaffected, while still closing the real gap under the
+                # MANDATED production command line (quality-gate/SKILL.md:30,
+                # siege/SKILL.md:52 — every consuming skill always supplies --ledger).
+                # Fires whenever this receipt claims a supersession, independent of the
+                # witness-evidence outcome above (existence of the predecessor is a
+                # SEPARATE requirement from evidence about it — see
+                # tier2_supersedes_existence).
+                if v11 is not None and v11["supersedes"] != "none":
+                    if ledger is not None:
+                        tier2_supersedes_existence(v11["supersedes"], ledger)
+                    else:
+                        wit_notes.append(
+                            "UNVERIFIABLE: SUPERSEDES referential-integrity (no --ledger)")
                 # Part-3 receipt-ledger binding: only with an orchestrator-supplied
                 # --ledger (no default-path synthesis). A mismatch is a hard FAIL
                 # (strict-independent); absent --ledger is advisory UNVERIFIABLE, and
