@@ -111,5 +111,60 @@ class TestUnicodeWhitespaceTitlesAreDistinctEntries(unittest.TestCase):
         self.assertEqual(sps._norm("  Fatal Thing  "), sps._norm("Fatal Thing"))
 
 
+class TestDashBoundaryRequiresWhitespace(unittest.TestCase):
+    """SIEGE-FA-2 (PR #583 warden gate): both prose homes
+    (quality-gate/SKILL.md:324, red-team-prompt.md:156) state explicitly that
+    the severity-token dash boundary requires whitespace before the dash — "a
+    spaced dash counts; an unspaced one does not" — unlike the punctuation
+    boundary (`(`, `[`, `,`, `.`, `:`, `;`), which allows optional whitespace.
+    The #583 Edge Cases AV4 change widened the dash arm to optional
+    whitespace on the theory that requiring it was an oversight; it was not —
+    the spec's own worked examples are pinned here directly, with zero prior
+    regression coverage before this test (FA-4)."""
+
+    def test_spaced_hyphen_recognises(self):
+        # Spec worked example: "Fatal - blocks the release" recognises as Fatal.
+        token, annotated = sps.parse_severity_token("Fatal - blocks the release")
+        self.assertEqual(token, "Fatal")
+        self.assertTrue(annotated)
+
+    def test_spaced_em_dash_recognises(self):
+        token, annotated = sps.parse_severity_token("Fatal — blocks the release")
+        self.assertEqual(token, "Fatal")
+        self.assertTrue(annotated)
+
+    def test_unspaced_em_dash_does_not_recognise(self):
+        # Spec: an unspaced dash does NOT count — falls through to the
+        # fail-loud malformed default (caller scores this Significant).
+        token, annotated = sps.parse_severity_token("Fatal—rationale")
+        self.assertIsNone(token)
+
+    def test_minor_to_significant_hedge_does_not_recognise_as_minor(self):
+        # The spec's own named counter-example: "Minor-to-Significant" begins
+        # with "Minor" but has no whitespace before its hyphen — must NOT
+        # recognise as Minor (which would wrongly exclude it from the
+        # weighted score as non-gating).
+        token, annotated = sps.parse_severity_token("Minor-to-Significant")
+        self.assertIsNone(token)
+
+    def test_minor_to_significant_entry_scores_significant_not_minor(self):
+        # End-to-end: an entry declaring this hedge must count toward the
+        # weighted score as Significant (fail-loud default), not be silently
+        # excluded as a non-gating Minor.
+        text = (
+            "### Second Pass Findings\n\n"
+            "#### Ambiguous severity hedge\n"
+            "**Finding:** the reviewer would not commit to a severity.\n"
+            "**Best Defense:** none.\n"
+            "**Why The Defense Fails:** it fails.\n"
+            "**Severity:** Minor-to-Significant\n"
+            "**Proposed Fix:** state the real severity.\n"
+        )
+        result = sps.score(text)
+        self.assertEqual(result.significant_count, 1)
+        self.assertEqual(result.minor_count, 0)
+        self.assertNotEqual(result.route, "clean-pass")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
