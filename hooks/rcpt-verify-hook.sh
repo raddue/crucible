@@ -55,12 +55,12 @@ case "$TEXT" in
   *) exit 0 ;;
 esac
 
-# Extract from the first column-0 `RCPT v1 ` line to end-of-message (trailing prose
-# lands harmlessly in the NEXT body; leading prose is excluded).
-# NOTE: the `RCPT v1 ` trailing-space anchor matches v1 receipts ONLY — `RCPT v1.1`
-# receipts are not extracted by this hook (v1.1 is out of scope for #369). This is
-# advisory-only, so a dropped v1.1 receipt simply yields no advisory.
-RCPT_BLOCK="$(printf '%s\n' "$TEXT" | awk '/^RCPT v1 /{p=1} p')"
+# Extract from the first column-0 `RCPT v1 ` / `RCPT v1.N ` line to end-of-message
+# (trailing prose lands harmlessly in the NEXT body; leading prose is excluded).
+# The optional `.N` group covers `RCPT v1.1` — the version every current skill emits —
+# as well as bare `RCPT v1` and any future v1 minor. `scripts/rcpt_verify.py` already
+# version-dispatches on the header, so both shapes lint correctly.
+RCPT_BLOCK="$(printf '%s\n' "$TEXT" | awk '/^RCPT v1(\.[0-9]+)? /{p=1} p')"
 [ -z "$RCPT_BLOCK" ] && exit 0
 
 # ── 6. Resolve repo root + the existence gate (M2) ────────────────────
