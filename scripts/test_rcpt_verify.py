@@ -1209,6 +1209,38 @@ class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
 
 
+class TestEditWroteHashCheckIsLinear(unittest.TestCase):
+    """SIEGE-BA-1 (PR #583 warden gate): the EDIT/WROTE hash membership check
+    used to rebuild `{a["hash"] for a in artifacts.values()}` INSIDE the
+    `for entry in trace:` loop — O(artifacts x trace-entries). A receipt
+    declaring N artifacts and N matching EDIT lines was measured at 9.5s CPU
+    for a 2.9MB receipt (N=16000), reachable through the unbounded
+    SubagentStop hook (hooks/rcpt-verify-hook.sh feeds --tier1 - directly).
+    Pins linear-ish wall time at a size that would be seconds under the old
+    quadratic behavior."""
+
+    def test_many_declared_artifacts_and_matching_edits_completes_quickly(self):
+        rv = _import_rv()
+        n = 10000
+        hashes = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(n)]
+        text = _receipt(
+            "grep:a0.md  expect-fail=/boom/  ran=UNRUNNABLE:tooling-absent",
+            verdict="BLOCKED",
+            artifacts=[(f"a{i}.md", h, "10") for i, h in enumerate(hashes)],
+            trace=[f"EDIT  a{i}.md  sha256:{h}" for i, h in enumerate(hashes)],
+        )
+        started = time.monotonic()
+        rv.lint_receipt(text)  # verdict/exceptions irrelevant — timing is the assertion
+        elapsed = time.monotonic() - started
+        # O(n) at n=10000 completes in well under a second (measured ~0.05s);
+        # the old O(n^2) behavior measured ~1.5s at n=6000, so n=10000 scales
+        # to ~4s under the regression — 2.0s is a bound the fix clears
+        # comfortably and the regression reliably trips.
+        self.assertLess(elapsed, 2.0,
+                         "lint_receipt took too long — the artifact-hash set "
+                         "may have regressed to being rebuilt per trace entry")
+
+
 class TestTraceRefGuard(unittest.TestCase):
     """#440: a malformed `TRACE#<non-digits>` reference (attacker-influenced
     receipt text) must lint-FAIL cleanly (LintError), NOT raise a raw ValueError
