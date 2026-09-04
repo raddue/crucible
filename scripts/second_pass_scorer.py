@@ -71,8 +71,12 @@ _DECLARED_RE = re.compile(
 # Boundary-rule punctuation set: token immediately followed by end-of-line, or
 # by one of these chars with optional whitespace before it.
 _BOUNDARY_PUNCT_RE = re.compile(r"^\s*[(\[,.:;]")
-# ...or by whitespace (required, not optional) followed by a dash.
-_BOUNDARY_DASH_RE = re.compile(r"^\s+[-–—]")
+# ...or by a dash, with the SAME optional-whitespace convention as the
+# punctuation set above (#583 Edge Cases AV4: the dash arm required leading
+# whitespace while the punctuation arm did not, so `Fatal—rationale` — the
+# spelling LLM prose produces most often — fell through to the malformed
+# default and silently scored Significant).
+_BOUNDARY_DASH_RE = re.compile(r"^\s*[-–—]")
 
 _WRAP_MARKERS = ("**", "__", "*", "_", "`")
 
@@ -269,33 +273,6 @@ def _count_minor_bullets(
     return count
 
 
-def _count_heading4_titles(
-    lines: list[str], fence_before: list[bool], start: int, end: int, fence_disabled: bool = False
-) -> list[str]:
-    titles = []
-    for i in range(start + 1, end):
-        line = lines[i]
-        fenced = False if fence_disabled else fence_before[i]
-        blockquoted = _is_blockquoted(line)
-        if _is_heading4(line, fenced, blockquoted):
-            m = _HEADING4_RE.match(line)
-            titles.append(m.group(2))
-    return titles
-
-
-def _dedupe_titles(span_title_lists: list[list[str]]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for titles in span_title_lists:
-        for t in titles:
-            key = _norm(t)
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(t)
-    return result
-
-
 @dataclass
 class Entry:
     start: int
@@ -371,12 +348,61 @@ def _parse_entries_in_span(
     return entries
 
 
+def _parse_headline_entries_in_span(
+    lines: list[str], fence_before: list[bool], start: int, end: int, fence_disabled: bool = False
+) -> list[Entry]:
+    """Entries under `### Fatal Challenges` / `### Significant Challenges`.
+
+    The SAME line-initial-marker entry rule `### Second Pass Findings` uses
+    (`_parse_entries_in_span`), UNIONED with the heading-derived entries a bare
+    `#### <title>` carrying no marker line of its own still produces.
+
+    #583 Integration AV1/AV5: these two sections used to be counted by `####`
+    sub-heading ALONE, which contradicts the rule's own stated reason for being
+    marker-based ("a `#### <title>` heading is recommended formatting for
+    readability; it is never itself what makes text an entry, precisely so a
+    missing heading cannot zero out an otherwise-labelled Fatal"). The
+    Steel-Man-Then-Kill block `red-team/red-team-prompt.md` MANDATES for every
+    Fatal/Significant finding is five `**Finding:**`/`**Best Defense:**`/`**Why
+    The Defense Fails:**`/`**Severity:**`/`**Proposed Fix:**` lines with NO
+    `####` heading, so a findings file written exactly to spec scored
+    `fatal=0 significant=0`, read as clean, and routed
+    `escalate-empty-work-order` instead of the fix loop. The union keeps the
+    converse safe too: a heading-only entry with no marker line still counts.
+    """
+    entries = _parse_entries_in_span(lines, fence_before, start, end, fence_disabled=fence_disabled)
+    claimed = {_norm(e.title) for e in entries if e.title}
+    for i in range(start + 1, end):
+        line = lines[i]
+        fenced = False if fence_disabled else fence_before[i]
+        if not _is_heading4(line, fenced, _is_blockquoted(line)):
+            continue
+        title = _HEADING4_RE.match(line).group(2)
+        if _norm(title) in claimed:
+            continue
+        claimed.add(_norm(title))
+        entries.append(
+            Entry(start=i, end=i + 1, title=title, severity_raw=None, has_finding=False)
+        )
+    return entries
+
+
 def _dedupe_entries(span_entry_lists: list[list[Entry]]) -> list[Entry]:
-    seen: set[str] = set()
+    """De-duplicate entries across a section's spans.
+
+    A titled entry is identified by its normalized title; an untitled one only
+    by its position. #583 Edge Cases AV2: those two identities are DIFFERENT
+    NAMESPACES and the key is a tuple so they cannot collide by construction —
+    the previous flat `f"__pos_{e.start}"` string sentinel shared one namespace
+    with `_norm(title)`, so a crafted `#### __POS_5` heading normalised onto
+    the sentinel of a genuine untitled entry at line 5 and silently DELETED it
+    (observed: a Second-Pass Fatal vanished and the run routed clean-pass).
+    """
+    seen: set[tuple[str, object]] = set()
     result: list[Entry] = []
     for entries in span_entry_lists:
         for e in entries:
-            key = _norm(e.title) if e.title else f"__pos_{e.start}"
+            key: tuple[str, object] = ("title", _norm(e.title)) if e.title else ("pos", e.start)
             if key in seen:
                 continue
             seen.add(key)
@@ -393,14 +419,27 @@ def _entry_severity(entry: Entry) -> tuple[str, bool, str | None]:
 
 
 def _parse_declared(first_line: str) -> dict | None:
+    """Parse the mandated `SEVERITY-COUNTS:` first line, or None if malformed.
+
+    #583 Edge Cases AV1: `_DECLARED_RE` admits an arbitrarily long digit run,
+    and CPython's `int()` refuses a string conversion past
+    `sys.get_int_max_str_digits()` (4300 by default). The findings file this
+    reads is written by the reviewed subagent, so an over-long digit run is a
+    receipt-authored malformation, not an impossible input — it means "no
+    declared counts", the same disposition every other malformed shape here
+    already gets, never an uncaught ValueError out of `score()`.
+    """
     m = _DECLARED_RE.match(first_line.strip())
     if not m:
         return None
-    return {
-        "fatal": int(m.group(1)),
-        "significant": int(m.group(2)),
-        "minor": int(m.group(3)),
-    }
+    try:
+        return {
+            "fatal": int(m.group(1)),
+            "significant": int(m.group(2)),
+            "minor": int(m.group(3)),
+        }
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -436,18 +475,23 @@ def score(text: str) -> ScoreResult:
             flags.add("malformed-second-pass-fencing")
         return d
 
-    fatal_titles = _dedupe_titles(
-        [
-            _count_heading4_titles(lines, fence_before, s, e, fence_disabled=_disabled((s, e)))
-            for s, e in sections["Fatal Challenges"].spans
-        ]
-    )
-    sig_titles = _dedupe_titles(
-        [
-            _count_heading4_titles(lines, fence_before, s, e, fence_disabled=_disabled((s, e)))
-            for s, e in sections["Significant Challenges"].spans
-        ]
-    )
+    def _headline_entries(name: str) -> list[Entry]:
+        return _dedupe_entries(
+            [
+                _parse_headline_entries_in_span(
+                    lines, fence_before, s, e, fence_disabled=_disabled((s, e))
+                )
+                for s, e in sections[name].spans
+            ]
+        )
+
+    # Severity in these two sections is heading-derived (SKILL.md's de-dup
+    # clause: "regardless of whether a given severity is heading-derived (the
+    # two original sections) or line-derived"), so an entry here needs no
+    # `**Severity:**` line of its own and never raises
+    # `malformed-second-pass-entry`.
+    fatal_entries = _headline_entries("Fatal Challenges")
+    sig_entries = _headline_entries("Significant Challenges")
 
     sp_entries = _dedupe_entries(
         [
@@ -476,9 +520,9 @@ def score(text: str) -> ScoreResult:
     # entry that restates an already-counted Fatal/Significant Challenges
     # entry counts ONCE, at the higher of the two severities. Matched by
     # normalized `#### <title>` text (the identity basis worked evals use).
-    fatal_norm = {_norm(t) for t in fatal_titles}
-    sig_norm_remaining = list(sig_titles)
-    sig_norm_set = {_norm(t) for t in sig_norm_remaining}
+    fatal_norm = {_norm(e.title) for e in fatal_entries if e.title}
+    sig_remaining = list(sig_entries)
+    sig_norm_set = {_norm(e.title) for e in sig_entries if e.title}
 
     extra_fatal = []
     for e in sp_fatal:
@@ -487,7 +531,7 @@ def score(text: str) -> ScoreResult:
             continue
         if key and key in sig_norm_set:
             sig_norm_set.discard(key)
-            sig_norm_remaining = [t for t in sig_norm_remaining if _norm(t) != key]
+            sig_remaining = [x for x in sig_remaining if not (x.title and _norm(x.title) == key)]
             flags.add("second-pass-cross-section-dedup")
         extra_fatal.append(e)
 
@@ -498,8 +542,8 @@ def score(text: str) -> ScoreResult:
             continue
         extra_sig.append(e)
 
-    fatal_count = len(fatal_titles) + len(extra_fatal)
-    significant_count = len(sig_norm_remaining) + len(extra_sig)
+    fatal_count = len(fatal_entries) + len(extra_fatal)
+    significant_count = len(sig_remaining) + len(extra_sig)
     minor_count = minor_obs_count + len(sp_minor)
 
     weighted_score = fatal_count * 3 + significant_count * 1
