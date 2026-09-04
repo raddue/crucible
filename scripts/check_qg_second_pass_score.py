@@ -183,7 +183,13 @@ _NEGATION_TOKENS = r"(?:not|never|excluding|except|ignor\w*)"
 
 
 def _negates(anchor: str, scope: str) -> bool:
-    return re.search(rf"(?i)\b{_NEGATION_TOKENS}\b[^.]{{0,40}}{re.escape(anchor)}", scope) is not None
+    """#561 fresh round 12 S3: a negation token immediately followed by a
+    hyphen is part of a compound term (e.g. "NOT-SATISFIABLE"), not a
+    negation of whatever follows it in prose — without the `(?!-)` guard,
+    the literal state name "NOT-SATISFIABLE" false-positives every polarity
+    check on an anchor phrase appearing anywhere in the same clause after
+    it (mirrors check_rt_receipt_contract.py's own `_negates()` guard)."""
+    return re.search(rf"(?i)\b{_NEGATION_TOKENS}\b(?!-)[^.]{{0,40}}{re.escape(anchor)}", scope) is not None
 
 
 # Anchors that must each occur EXACTLY ONCE in the Section-location clause —
