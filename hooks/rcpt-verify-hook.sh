@@ -63,17 +63,21 @@ esac
 RCPT_BLOCK="$(printf '%s\n' "$TEXT" | awk '/^RCPT v1(\.[0-9]+)? /{p=1} p')"
 [ -z "$RCPT_BLOCK" ] && exit 0
 
-# ── 6. Resolve repo root + the existence gate (M2) ────────────────────
-# Without this gate a SubagentStop in a non-crucible repo (these gating skills run
-# in other repos too) would `python3 <nonexistent>` → exit 2 → a
-# misleading "structural lint failed" advisory on every receipt. Never-fatal holds
-# regardless; the gate prevents the spurious advisory.
-REPO="$(git rev-parse --show-toplevel 2>/dev/null)"
-[ -z "$REPO" ] && exit 0
-[ -f "$REPO/scripts/rcpt_verify.py" ] || exit 0
+# ── 6. Resolve the linter from THIS hook's own installed location ─────
+# SIEGE-CA-4/IP-1: resolving via `git rev-parse --show-toplevel` picked up
+# whatever repo the SESSION's cwd happened to be in — these gating skills
+# run in other repos too (worktrees, cloned PR branches, eval fixture
+# trees), so a checkout containing an unrelated file at scripts/rcpt_verify.py
+# got THAT file executed as the user, with the agent's full privileges, on
+# every SubagentStop. The linter is fixed tooling belonging to THIS crucible
+# install, not something that should vary with cwd — resolve it from where
+# this hook script itself lives (immune to cwd) instead.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+LINTER="$HOOK_DIR/../scripts/rcpt_verify.py"
+[ -f "$LINTER" ] || exit 0
 
 # ── 7. Run the Tier-1 structural lint (advisory only) ─────────────────
-ERR="$(printf '%s\n' "$RCPT_BLOCK" | python3 "$REPO/scripts/rcpt_verify.py" --tier1 - 2>&1 1>/dev/null)"
+ERR="$(printf '%s\n' "$RCPT_BLOCK" | python3 "$LINTER" --tier1 - 2>&1 1>/dev/null)"
 RC=$?
 if [ "$RC" -ne 0 ]; then
   FIRST_BULLET="$(printf '%s\n' "$ERR" | head -n 1)"
