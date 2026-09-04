@@ -6188,7 +6188,7 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         reads = []
         real_read_from_fd = rv._read_from_fd
 
-        def spy(fd, budget, label):
+        def spy(fd, budget, label, owner=None):
             # F1 STRUCTURAL FIX — every name's fd now opens during the RESOLVE phase
             # (via `_open_nofollow_walk`, one `os.open` per DISTINCT NAME STRING,
             # whether or not that name's bytes ever get consumed), so counting
@@ -6200,8 +6200,13 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
             # the witness leg's fallback read when the carry does NOT apply), so
             # counting calls to it is the direct measurement of "did this leg
             # actually read the file", independent of how many names resolved to it.
+            #
+            # #583 inquisitor AV4 — `owner` must be forwarded, not dropped: it is how
+            # `_read_from_fd` clears the caller's `rec["fd"]` at the moment it takes
+            # ownership, and a spy that swallowed it would leave the record pointing at
+            # an fd this call already closed (a double close at cache disposal).
             reads.append(label)
-            return real_read_from_fd(fd, budget, label)
+            return real_read_from_fd(fd, budget, label, owner=owner)
 
         cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         verified = {}
