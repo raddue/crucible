@@ -71,12 +71,20 @@ _DECLARED_RE = re.compile(
 # Boundary-rule punctuation set: token immediately followed by end-of-line, or
 # by one of these chars with optional whitespace before it.
 _BOUNDARY_PUNCT_RE = re.compile(r"^\s*[(\[,.:;]")
-# ...or by a dash, with the SAME optional-whitespace convention as the
-# punctuation set above (#583 Edge Cases AV4: the dash arm required leading
-# whitespace while the punctuation arm did not, so `Fatal—rationale` — the
-# spelling LLM prose produces most often — fell through to the malformed
-# default and silently scored Significant).
-_BOUNDARY_DASH_RE = re.compile(r"^\s*[-–—]")
+# ...or by a dash, REQUIRING at least one whitespace char before it — this is
+# NOT the same optional-whitespace convention as the punctuation set above.
+# Both prose homes (quality-gate/SKILL.md:324, red-team-prompt.md:156) state
+# this asymmetry explicitly and deliberately: "whitespace followed by a dash
+# (-, –, or — — a spaced dash counts, an unspaced one does not)". SIEGE-FA-2
+# (PR #583 warden gate): the #583 Edge Cases AV4 change widened this to `\s*`
+# on the theory that requiring whitespace was an oversight (so `Fatal—rationale`
+# would recognise) — but per the spec text an unspaced dash is SUPPOSED to
+# fall through to the fail-loud malformed default, and the widened regex
+# instead let a hedge like `Minor-to-Significant` (no whitespace before its
+# hyphen) wrongly recognise as `Minor`, inflating a Significant-by-default
+# finding down to non-gating. Reverted to the spec-correct mandatory-whitespace
+# form.
+_BOUNDARY_DASH_RE = re.compile(r"^\s+[-–—]")
 
 _WRAP_MARKERS = ("**", "__", "*", "_", "`")
 
