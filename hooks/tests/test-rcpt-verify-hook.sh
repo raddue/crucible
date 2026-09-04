@@ -22,6 +22,16 @@ trap cleanup EXIT
 GOOD_RCPT="$(python3 -c "import json;print(json.loads(open('$REPO_ROOT/eval/ledger-return-protocol/sample-corpus/receipts.jsonl').readline())['receipt'])")"
 BAD_RCPT="$(printf 'RCPT v1 build/x\nVERDICT  PASS  conf=0.90\nARTIFACTS\n  (none)\nTRACE\n  1  READ  a\n')"
 
+# A structurally-broken v1.1 receipt: the first v1.1 corpus row with its mandatory
+# `TRIPWIRE:` line stripped. Regression guard for the `RCPT v1 ` trailing-space
+# extraction anchor, which used to exclude `RCPT v1.1` — the version every current
+# skill emits — leaving the hook silently inert in practice.
+BAD_V11_RCPT="$(python3 -c "
+import json
+r = json.loads(open('$REPO_ROOT/eval/ledger-return-protocol/v11-corpus/receipts.jsonl').readline())['receipt']
+print('\n'.join(l for l in r.splitlines() if not l.startswith('TRIPWIRE:')))
+")"
+
 # write_transcript <file> <content-mode> ...
 # Builds a JSONL transcript whose last assistant message carries the given text.
 mk_transcript() {  # $1=path  $2=text
@@ -71,6 +81,11 @@ check "valid receipt → silent" 0 0
 mk_transcript "$TMPDIR_BASE/bad.jsonl" "$BAD_RCPT"
 run_hook "$REPO_ROOT" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")"
 check "malformed receipt → advisory" 0 1
+
+# malformed v1.1 receipt → advisory + exit 0 (v1.1 is the dominant emitted version)
+mk_transcript "$TMPDIR_BASE/bad-v11.jsonl" "$BAD_V11_RCPT"
+run_hook "$REPO_ROOT" "$(printf '{"transcript_path":"%s/bad-v11.jsonl"}' "$TMPDIR_BASE")"
+check "malformed v1.1 receipt → advisory" 0 1
 
 # (8) true-positive: prose-wrapped malformed receipt + a trailing tool_use turn
 python3 - "$TMPDIR_BASE/wrapped.jsonl" "$BAD_RCPT" <<'PY'
