@@ -8980,23 +8980,50 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
 
 
 class TestResolvePhaseNameCeiling(unittest.TestCase):
-    """#583 inquisitor / State & Lifecycle AV1 — MAX_RESOLVE_NAMES rejects a receipt
-    declaring too many distinct artifact/witness names before the resolve loop opens
-    a single fd, closing the RLIMIT_NOFILE DoS gap without touching F1's fd-holding
-    mechanism itself."""
+    """#583 inquisitor / State & Lifecycle AV1, refined by SIEGE finding S11 (PR #583
+    warden gate) — MAX_RESOLVE_NAMES bounds the ACTUAL open-fd count during the
+    resolve loop (checked dynamically per name), not the raw declared-name count.
+    A name that fails to resolve opens zero fds and so no longer counts against the
+    ceiling; MAX_DECLARED_NAMES is a separate, much higher, coarse backstop against a
+    pathological declared count regardless of fd cost. Neither check touches F1's
+    fd-holding mechanism itself."""
 
-    def test_over_ceiling_rejected_before_any_resolve(self):
+    def test_unresolvable_names_do_not_trip_the_fd_ceiling(self):
         rv = _import_rv()
+        # 3x MAX_RESOLVE_NAMES declared names, none of which resolve (nonexistent
+        # root) — S11's fix: since an unresolvable name opens zero fds, this must
+        # succeed cleanly even though it would have tripped the old declared-count
+        # ceiling by a wide margin.
+        n = rv.MAX_RESOLVE_NAMES * 3
         artifacts = {
             f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
-            for i in range(rv.MAX_RESOLVE_NAMES + 1)
+            for i in range(n)
         }
-        # `root` is never consulted — the ceiling check raises before resolve_base is
-        # ever called for any name, so a nonexistent root proves no fd was opened.
-        with self.assertRaises(rv.LintError) as ctx:
-            rv._build_identity_cache(artifacts, [], [], "PASS",
-                                      pathlib.Path("/nonexistent-root"), {})
-        self.assertIn(str(rv.MAX_RESOLVE_NAMES), str(ctx.exception))
+        cache = {}
+        rv._build_identity_cache(artifacts, [], [], "PASS",
+                                  pathlib.Path("/nonexistent-root"), cache)
+        self.assertEqual(len(cache) - 3, n)  # -3 for the sentinel keys
+        for i in range(n):
+            self.assertIsNone(cache[f"f{i}.txt"]["realpath"])
+            self.assertIsNone(cache[f"f{i}.txt"]["fd"])
+
+    def test_resolvable_names_over_fd_ceiling_rejected(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            _plant_git_dir(repo)
+            n = rv.MAX_RESOLVE_NAMES + 1
+            names = [f"f{i}.txt" for i in range(n)]
+            for nm in names:
+                (repo / nm).write_text("x")
+            artifacts = {
+                nm: {"hash": "sha256:" + "0" * 64, "size": 1, "meta": ""}
+                for nm in names
+            }
+            with self.assertRaises(rv.LintError) as ctx:
+                rv._build_identity_cache(artifacts, [], [], "PASS", repo, {})
+            self.assertIn(str(rv.MAX_RESOLVE_NAMES), str(ctx.exception))
+            self.assertIn("file descriptors", str(ctx.exception))
 
     def test_at_ceiling_resolves_normally(self):
         rv = _import_rv()
@@ -9014,6 +9041,20 @@ class TestResolvePhaseNameCeiling(unittest.TestCase):
             rv._build_identity_cache(artifacts, [], [], "PASS", repo, cache)
             for nm in names:
                 self.assertIsNotNone(cache[nm]["realpath"], nm)
+                self.assertIsNotNone(cache[nm]["fd"], nm)
+
+    def test_declared_name_ceiling_still_rejects_pathological_count(self):
+        rv = _import_rv()
+        artifacts = {
+            f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
+            for i in range(rv.MAX_DECLARED_NAMES + 1)
+        }
+        # `root` is never consulted — the coarse declared-count check raises before
+        # resolve_base is ever called for any name.
+        with self.assertRaises(rv.LintError) as ctx:
+            rv._build_identity_cache(artifacts, [], [], "PASS",
+                                      pathlib.Path("/nonexistent-root"), {})
+        self.assertIn(str(rv.MAX_DECLARED_NAMES), str(ctx.exception))
 
 
 class TestSupersedesReferentialIntegrity(_InqBase):
