@@ -84,7 +84,16 @@ _SEVERITY_TOKENS = ("Fatal", "Significant", "Minor")
 
 
 def _norm(title: str) -> str:
-    return re.sub(r"\s+", " ", title.strip().lower())
+    """Case-fold and fold only *ASCII* horizontal-whitespace runs (space,
+    tab) to a single space. Deliberately narrower than a Unicode-mode
+    `\\s+`: folding non-ASCII whitespace-class code points (NBSP U+00A0,
+    U+2007, U+202F, U+3000, ...) into an ASCII space would let a title using
+    one of those collide with an otherwise-distinct title that uses plain
+    ASCII spaces, and `_dedupe_entries` treats a colliding key as "the same
+    finding" and drops one — silently swallowing a Fatal (#583 Edge Cases
+    AV3). Leaving non-ASCII whitespace un-folded keeps such titles
+    byte-distinct, so they can never collide via this key."""
+    return re.sub(r"[ \t]+", " ", title.strip(" \t\r\n")).lower()
 
 
 def _fence_state_before(lines: list[str]) -> list[bool]:
