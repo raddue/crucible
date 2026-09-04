@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # hooks/gate-ledger-guard.sh
 # PreToolUse hook for Write/Edit — blocks unauthorized PASS writes to build-gate-ledger.md.
-# Receives JSON on stdin: {"tool":"Write","input":{"file_path":"/path","content":"..."}}
-#   or for Edit: {"tool":"Edit","input":{"file_path":"/path","old_string":"...","new_string":"..."}}
+# Receives JSON on stdin: {"tool_name":"Write","tool_input":{"file_path":"/path","content":"..."}}
+#   or for Edit: {"tool_name":"Edit","tool_input":{"file_path":"/path","old_string":"...","new_string":"..."}}
+# (legacy .tool/.input fallback accepted — see build-routing-advisor.sh's T1 finding)
 # Exit 0 = allow, non-zero = block (reason on stderr).
 #
 # Configured in .claude/settings.json:
@@ -24,7 +25,9 @@ if ! command -v jq &>/dev/null; then
 fi
 
 # ── Extract tool name ───────────────────────────────────────────────────
-TOOL="$(echo "$INPUT" | jq -r '.tool // empty' 2>/dev/null)"
+# SIEGE-CA-1: canonical field is .tool_name (.tool is a legacy fallback —
+# same drift class build-routing-advisor.sh's T1 finding already fixed).
+TOOL="$(echo "$INPUT" | jq -r '.tool_name // .tool // empty' 2>/dev/null)"
 if [ -z "$TOOL" ]; then
   exit 0
 fi
@@ -38,7 +41,7 @@ elif [ "$TOOL" != "Write" ]; then
 fi
 
 # ── Extract file_path and content ───────────────────────────────────────
-FILE_PATH="$(echo "$INPUT" | jq -r '.input.file_path // empty' 2>/dev/null)"
+FILE_PATH="$(echo "$INPUT" | jq -r '.tool_input.file_path // .input.file_path // empty' 2>/dev/null)"
 
 if [ -z "$FILE_PATH" ]; then
   exit 0
@@ -46,8 +49,8 @@ fi
 
 if [ "$IS_EDIT" = "true" ]; then
   # Edit tool: check if new_string introduces "Status: PASS" where old_string didn't have it
-  EDIT_OLD="$(echo "$INPUT" | jq -r '.input.old_string // empty' 2>/dev/null)"
-  EDIT_NEW="$(echo "$INPUT" | jq -r '.input.new_string // empty' 2>/dev/null)"
+  EDIT_OLD="$(echo "$INPUT" | jq -r '.tool_input.old_string // .input.old_string // empty' 2>/dev/null)"
+  EDIT_NEW="$(echo "$INPUT" | jq -r '.tool_input.new_string // .input.new_string // empty' 2>/dev/null)"
   if [ -z "$EDIT_NEW" ]; then
     exit 0
   fi
@@ -96,7 +99,7 @@ if [ "$IS_EDIT" = "true" ]; then
     CONTENT="$EDIT_NEW"
   fi
 else
-  CONTENT="$(echo "$INPUT" | jq -r '.input.content // empty' 2>/dev/null)"
+  CONTENT="$(echo "$INPUT" | jq -r '.tool_input.content // .input.content // empty' 2>/dev/null)"
   if [ -z "$CONTENT" ]; then
     exit 0
   fi

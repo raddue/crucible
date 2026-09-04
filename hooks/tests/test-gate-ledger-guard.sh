@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=20
+TOTAL=22
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -80,10 +80,15 @@ EOF
 }
 
 # ── Helper: build Write JSON ────────────────────────────────────────────
+# SIEGE-CA-1: canonical field names (tool_name/tool_input) — this is the
+# actual shape Claude Code sends. The suite used to build every fixture in
+# the legacy .tool/.input shape, which certified the hook green while the
+# canonical shape it never rejects any live payload. Test 21 below covers
+# the legacy fallback explicitly.
 make_json() {
   local file_path="$1"
   local content="$2"
-  jq -nc --arg fp "$file_path" --arg c "$content" '{"tool":"Write","input":{"file_path":$fp,"content":$c}}'
+  jq -nc --arg fp "$file_path" --arg c "$content" '{"tool_name":"Write","tool_input":{"file_path":$fp,"content":$c}}'
 }
 
 # ── Helper: build Edit JSON ────────────────────────────────────────────
@@ -92,7 +97,14 @@ make_edit_json() {
   local old_string="$2"
   local new_string="$3"
   jq -nc --arg fp "$file_path" --arg os "$old_string" --arg ns "$new_string" \
-    '{"tool":"Edit","input":{"file_path":$fp,"old_string":$os,"new_string":$ns}}'
+    '{"tool_name":"Edit","tool_input":{"file_path":$fp,"old_string":$os,"new_string":$ns}}'
+}
+
+# ── Helper: build LEGACY-shape Write JSON (.tool/.input) ────────────────
+make_legacy_json() {
+  local file_path="$1"
+  local content="$2"
+  jq -nc --arg fp "$file_path" --arg c "$content" '{"tool":"Write","input":{"file_path":$fp,"content":$c}}'
 }
 
 # ── Helper: create verdict marker ──────────────────────────────────────
@@ -421,7 +433,7 @@ Status: PASS" \
 
 ## Phase 2: Plan
 Status: PASS" \
-  '{"tool":"Edit","input":{"file_path":$fp,"old_string":$old,"new_string":$new}}')"
+  '{"tool_name":"Edit","tool_input":{"file_path":$fp,"old_string":$old,"new_string":$new}}')"
 set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
 check 19 "Edit multi-phase old_string PASS masking blocked" 2 "$RC"
 
@@ -453,6 +465,29 @@ Status: NOT_STARTED"
 JSON="$(make_json "$LEDGER_PATH" "$INDENTED_CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 20 "Indented Status line blocked" 2 "$RC"
+
+# ========================================================================
+# Test 21: LEGACY-shape (.tool/.input) PASS write with no verdict marker
+# still blocked — SIEGE-CA-1 fallback-preservation check (exit 2)
+# ========================================================================
+reset_state
+EXISTING="$(make_ledger "build-test-021" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+mkdir -p "$VERDICT_DIR"
+CONTENT="$(make_ledger "build-test-021" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_legacy_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 21 "Legacy .tool/.input PASS write with no verdict marker blocked" 2 "$RC"
+
+# ========================================================================
+# Test 22: LEGACY-shape (.tool/.input) non-PASS write still allowed —
+# proves the fallback isn't a blanket-block, it genuinely parses (exit 0)
+# ========================================================================
+reset_state
+CONTENT="$(make_ledger "build-test-022" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_legacy_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 22 "Legacy .tool/.input non-PASS write allowed" 0 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
