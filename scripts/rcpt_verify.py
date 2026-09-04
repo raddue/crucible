@@ -53,18 +53,38 @@ WITNESS_TIMEOUT_MSG = (f"witness evaluation exceeded {WITNESS_TIMEOUT_S}s "
 RESOLVE_PER_NAME_BUDGET_S = 0.05
 RESOLVE_PHASE_CEILING_S = 2 * WITNESS_TIMEOUT_S
 
-# #583 inquisitor / State & Lifecycle AV1 — n_names (above) is receipt-controlled and
-# uncapped in COUNT as well as in time: _build_identity_cache holds one fd open per
-# distinct name for the whole resolve phase (F1 structural fix), so a receipt
-# declaring enough names exhausts RLIMIT_NOFILE (~1020 on Linux, ~252 on macOS
-# defaults) before the timing budget above ever intervenes. Maintainer's chosen
-# remedy: reject up front, before any fd is opened, rather than bounding-and-rewalking
-# the resolve loop — a rewalk would reopen a resolve-to-read gap in the exact
-# mechanism that took 3 prior fix attempts to close (see F1's docstring at
-# _resolve_once). 200 is comfortably below the more restrictive platform's default
-# ceiling, leaving headroom for the process's own already-open fds (stdio, git
-# plumbing, etc.) while accommodating any realistic receipt.
+# #583 inquisitor / State & Lifecycle AV1, refined by SIEGE finding S11 (PR #583
+# warden gate) — _build_identity_cache holds one fd open per distinct name that
+# ACTUALLY RESOLVES, for the whole resolve phase (F1 structural fix); a name that
+# fails to resolve (resolve_base returns None) never reaches _open_nofollow_walk and
+# opens ZERO fds. The original mitigation keyed its ceiling on raw DECLARED-name
+# count, not actual fd-open count — an ordinary, non-adversarial receipt with many
+# legitimately-unresolvable cited names (a common shape, not a crafted one) could hit
+# a ceiling at roughly 1/5 of the platform's real fd headroom despite opening far
+# fewer fds than that. S11's fix: MAX_RESOLVE_NAMES now bounds the ACTUAL open-fd
+# count, checked dynamically after each name resolves in the loop below (never
+# pre-computed from declared count, since whether a name opens an fd is unknowable
+# before resolving it — the same reason the original design rejected
+# bound-and-rewalk: doing so would require re-opening/re-checking already-resolved
+# names, reopening the resolve-to-read gap F1 took 3 attempts to close). 200 is
+# comfortably below the more restrictive platform's default ceiling (~252 on macOS),
+# leaving headroom for the process's own already-open fds (stdio, git plumbing,
+# etc.). This is a per-fd-open check, not a per-name check — checking it in the loop
+# does not delay any individual name's resolution or touch F1's fd-holding
+# guarantee; it only decides whether resolution CONTINUES to the next name once the
+# actual fd budget is exhausted, closing every already-opened fd via the same
+# _close_identity_cache_fds finally-based cleanup every other exit path already uses.
 MAX_RESOLVE_NAMES = 200
+
+# S11 companion — a coarse, generous pre-check against a pathologically large
+# DECLARED name count, independent of how many will actually resolve. This guards
+# the resolve loop's own per-name iteration cost (each _resolve_once call does a
+# real resolve_base() stat walk even for a name that never opens an fd) rather than
+# fd exhaustion, which MAX_RESOLVE_NAMES (above) now bounds directly and separately.
+# Set high enough that no realistic receipt — even one citing hundreds of
+# never-resolving names alongside a fd-bounded resolving set — trips it by declared
+# count alone.
+MAX_DECLARED_NAMES = 5000
 
 # SIG-9-3 / round-9 — sentinel keys for the identity cache. Plain object() so they can
 # never collide with a receipt-controlled name: every genuine cache record is keyed on
@@ -2973,20 +2993,36 @@ def _build_identity_cache(artifacts, trace, witnesses, verdict, root, cache_out,
     declared_map = {nm: nm in declared_names for nm in names}
 
     n_names = len(names)
-    if n_names > MAX_RESOLVE_NAMES:
-        # #583 — reject before the resolve loop opens a single fd (F1 holds one per
-        # name for the whole resolve phase). See MAX_RESOLVE_NAMES for the tradeoff.
+    if n_names > MAX_DECLARED_NAMES:
+        # S11 (PR #583 warden gate) — coarse guard against a pathological declared
+        # count, independent of fd cost. See MAX_DECLARED_NAMES for the rationale.
         raise LintError(
             f"Tier-2: {n_names} distinct artifact/witness names exceeds the resolve "
-            f"phase's ceiling of {MAX_RESOLVE_NAMES} (RLIMIT_NOFILE exhaustion "
-            "mitigation); refusing to begin resolution")
+            f"phase's declared-name ceiling of {MAX_DECLARED_NAMES}; refusing to "
+            "begin resolution")
     budget = min(RESOLVE_PHASE_CEILING_S,
                  max(WITNESS_TIMEOUT_S, RESOLVE_PER_NAME_BUDGET_S * n_names))
+    open_fd_count = 0
     try:
         with _witness_bound(seconds=budget, what="the resolve phase"):
             for nm in names:
                 _resolve_once(nm, root, cache_out)
                 cache_out[nm]["declared"] = declared_map[nm]
+                if cache_out[nm]["fd"] is not None:
+                    open_fd_count += 1
+                    if open_fd_count > MAX_RESOLVE_NAMES:
+                        # S11 — reject once the ACTUAL open-fd count (not declared
+                        # name count) crosses the fd-safety ceiling. Every fd opened
+                        # so far, including this name's, is reclaimed by
+                        # _close_identity_cache_fds at the caller's finally: (see
+                        # MAX_RESOLVE_NAMES); this raise only stops resolving
+                        # further names, it does not touch F1's fd-holding guarantee
+                        # for names already resolved.
+                        raise LintError(
+                            f"Tier-2: resolve phase opened {open_fd_count} file "
+                            f"descriptors, exceeding the fd-safety ceiling of "
+                            f"{MAX_RESOLVE_NAMES} (RLIMIT_NOFILE exhaustion "
+                            "mitigation); refusing to resolve further names")
                 dev_ino = cache_out[nm]["dev_ino_at_resolve"]
                 if dev_ino is not None and dev_ino[1] == 0:
                     cache_out[_IDENTITY_DEGENERATE] = True
