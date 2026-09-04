@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, io, json, os, posixpath, re, signal, sys, hashlib, pathlib, typing
+import contextlib, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
 import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -59,6 +59,10 @@ RESOLVE_PHASE_CEILING_S = 2 * WITNESS_TIMEOUT_S
 _IDENTITY_DEGENERATE = object()
 _IDENTITY_COLLISION_CANDIDATES = object()
 _IDENTITY_UNVERIFIABLE_COLLISION = object()
+# #563 inquisitor finding — `_finalize_identity_degenerate`'s `verified.get(..., default)`
+# needs a default that can never collide with a real (possibly falsy/empty-bytes) hashed
+# body, so a missing entry is distinguishable from a genuinely-verified empty read.
+_UNVERIFIED = object()
 
 
 class WitnessTimeout(LintError):
@@ -1239,6 +1243,223 @@ def parse_v11_sections(text):
             "supersedes": supersedes, "trip_child": trip_child}
 
 
+def _legacy_supersedes_claim(text):
+    """SIEGE-R4BA-5 — the `SUPERSEDES:` body of a receipt `parse_v11_sections` REFUSED.
+
+    KNOWN GAP (tracked on GH #567, deferred pending a design decision — NOT closed by
+    the fix below). This detector remains bypassable by two mechanisms distinct from
+    the invisible-character / mid-token-insertion class this fix round closes: (1)
+    homoglyph substitution — replacing an ASCII letter of the `SUPERSEDES:` keyword
+    itself with a visually identical non-ASCII codepoint (e.g. U+0405 CYRILLIC CAPITAL
+    LETTER DZE for Latin "S") causes the ASCII-only stripping step below to DELETE that
+    letter rather than preserve it, so the keyword search misses a line that renders
+    identically to a human or an LLM orchestrator; (2) the scan is scoped to the tail
+    AFTER `NEXT` only, so a plain-ASCII `SUPERSEDES:` line placed BEFORE `NEXT` is
+    invisible to this function even though `parse_receipt` accepts it and the
+    orchestrator's Sweep step (`return-convention.md` § The Sweep) reads a
+    `SUPERSEDES:` line wherever it appears, with no positional constraint. Two design
+    options are open (TR39-style confusables/skeleton normalization vs. restricting
+    receipts to ASCII-printable outright) — see GH #567 for the full writeup (six
+    distinct bypass mechanisms found this round, the two real design options, and the
+    separate scan-scope bug).
+
+    Same post-NEXT tail scan `parse_v11_sections` runs, with the version dispatch and
+    every v1.1 STRUCTURE rule (TRIPWIRE presence, TRIPWIRE-CHILD-when-DISPATCHED,
+    duplicate detection) left out: this is not a second parser for the v1.1 grammar and
+    must not become one. It answers exactly one question — does this receipt CLAIM a
+    supersession — for the one caller that needs the answer on a header the v1.1 parser
+    version-dispatched away.
+
+    Returns None when no `SUPERSEDES:` line is present at all. Otherwise the STRONGEST
+    claim on the receipt: `parse_v11_sections` rejects a duplicated section outright and
+    this scan cannot, so a first-hit-wins read would let `SUPERSEDES: none` followed by
+    `SUPERSEDES: <prefix>` answer "none" — an appender's shape, and the exact
+    first-vs-trailing asymmetry the `pattern=` clause rules already record. Any non-`none`
+    body therefore wins over `none`, which is the fail-CLOSED direction: the cost of
+    over-reading a claim is a receipt told to declare `RCPT v1.1`.
+
+    CHAIN-1 — the column-0 `startswith` this mirrored from `parse_v11_sections` is safe
+    THERE because an indented `SUPERSEDES:` line on a v1.1 receipt still hard-FAILs (the
+    section reads as ABSENT, and absence is itself a required-section error) — indenting
+    buys the attacker nothing. On a legacy `RCPT v1` header this scan is the ONLY reader
+    of the tail, so the same indent instead buys total invisibility: `line.startswith`
+    matched nothing, `claim` stayed `None`, and the caller's gate never fired. Matched on
+    the line with leading whitespace stripped so the same indent buys nothing here
+    either — `parse_v11_sections` is left as-is (its column-0 check fails closed via the
+    ABSENT-section path already, so tolerating indentation there is a no-op, not a fix).
+
+    CHAIN-1 residual (round 1) — the FIRST fix here was `raw_line.lstrip()`, an
+    ASCII-whitespace blocklist verbatim the class `_substantive_len`'s docstring
+    already names: it closes an indent built from ordinary spaces/tabs and nothing
+    else, because `str.lstrip()` removes only codepoints for which `str.isspace()`
+    is true. A line prefixed with U+200B ZERO WIDTH SPACE, U+FEFF BOM, U+2060 WORD
+    JOINER, U+200C ZWNJ, U+00AD SOFT HYPHEN or U+180E MONGOLIAN VOWEL SEPARATOR is
+    invisible in a rendered receipt but `str.isspace()` is False for every one of
+    them, so `.lstrip()` left the prefix in place and the bypass reopened one
+    Unicode codepoint later.
+
+    CHAIN-1 residual (round 2) — the SECOND fix stripped a LEADING run of
+    `_is_format_or_separator`-true codepoints instead of an ASCII-whitespace-true
+    one: closed over Unicode category rather than an enumerated list, but still
+    positional. `SUPER<U+200B>SEDES:` (an insubstantial codepoint INSIDE the
+    keyword, not before it) renders identically to `SUPERSEDES:` in any viewer, but
+    `line.startswith("SUPERSEDES:")` — unchanged since round 1 — does not match a
+    string whose 6th character is U+200B, so `claim` stayed `None` regardless of
+    which category rule stripped the leading run. Separately, `_substantive_len`'s
+    own docstring records KNOWN RESIDUE — assigned codepoints that render blank but
+    sit outside categories `C*`/`Z*` (U+3164 HANGUL FILLER is `Lo`, U+2800 BRAILLE
+    PATTERN BLANK is `So`, bare combining marks are `Mn`) — as an accepted tradeoff
+    THERE, because that call site only needs "did a predicate see real codepoints".
+    That residue does not transfer to a keyword-detector: a LEADING `ㅤ` renders
+    blank and is invisible to a human/LLM/`grep '^SUPERSEDES:'` alike, and round 2's
+    `_is_format_or_separator` filter (`C*`/`Z*` only) does not strip it, so
+    `line.startswith` failed on that prefix too. Two independent round-3 fresh-eyes
+    reviews confirmed both mechanisms live via the actual CLI before this fix.
+
+    CHAIN-1 fix (round 3, ALLOWLIST — not another instance of the denylist pattern
+    that has now failed repeatedly: ASCII blocklist, then a Unicode-whitespace
+    blocklist, then a positional/leading-only category strip, then (round-3's own
+    FIRST attempt, caught by this fix's own mandated re-verification before
+    shipping) a full-line `C*`/`Z*` strip + substring search — defeated by (a)
+    `_substantive_len`'s KNOWN-RESIDUE categories (`Lo`/`So`/`Mn`) placed INSIDE
+    the keyword, which `_is_format_or_separator` does not strip and which
+    therefore still fragment `SUPERSEDES:` into two non-adjacent pieces even
+    under a substring search, and (b) `str.splitlines()` itself treating
+    additional codepoints (U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR,
+    U+0085 NEL, several `Cc` controls) as line breaks BEFORE any per-character
+    filtering runs, splitting the keyword across two `raw_line` strings that
+    never get concatenated. Both are documented here because a category-based
+    strip — whichever category set backs it — is structurally the same shape as
+    a codepoint blocklist: it has an edge wherever a codepoint outside the
+    enumerated categories still fragments the parse in some position, and
+    round-3's own first attempt found that edge.
+
+    This is why the ACTUAL closing move drops category reasoning entirely and
+    goes ASCII-STRUCTURAL instead — a genuine allowlist ("list everything a
+    legitimate `SUPERSEDES:` line can be made of"), not a broader or better
+    denylist:
+
+      1. Split the tail on the LITERAL `\\n` byte only (`str.split("\\n")`, never
+         `str.splitlines()`), so no Unicode line-break codepoint the receipt body
+         might contain is ever treated as a line boundary before this function
+         gets to look at it — the round-3-first-attempt (b) residual.
+      2. Within EACH such line, build an ASCII SKELETON by keeping only
+         `[A-Za-z0-9:]` (unchanged since round 3) and discarding every other
+         codepoint outright — `C*`/`Z*`, `Lo`/`So`/`Mn`, ordinary ASCII
+         punctuation and space, anything assigned in a future Unicode version,
+         ALL of it, uniformly — while also recording, for each surviving
+         skeleton character, the INDEX in `raw_line` it came from (round-4 fix,
+         below, is the first consumer of that positional record; steps 2-3 keep
+         closing the keyword-insertion class exactly as round 3 left it).
+      3. Search the resulting skeleton for the literal `SUPERSEDES:` substring —
+         not anchored to column 0, so nothing that could not survive step 2's
+         allowlist (i.e. nothing) can sit between the start of the line and the
+         keyword and still defeat detection.
+      4. Validate the value as the LEADING token of the skeleton's remainder
+         after the keyword — `re.match(r"none|[0-9a-f]{12}", remainder)` — not
+         the whole remainder fullmatched to end of line (round-4 fix, below).
+         What comes after that leading token, if anything, is judged by a
+         POSITIONAL GAP in `raw_line`, using step 2's recorded indices: if the
+         skeleton's very next surviving character sits at `raw_line_index + 1`
+         relative to the value's last character — i.e. NOTHING was stripped
+         between them — the value runs directly into more of the same alphabet
+         with no separator at all (`a1b2c3d4e5f6f00d`, `noneisnotreallynone`)
+         and the whole match is malformed BY CONSTRUCTION, exactly as a
+         fullmatch would have rejected it. If instead there is a gap (one or
+         more discarded — i.e. insubstantial-per-step-2 — codepoints sat
+         between them in `raw_line`) or there IS no next character at all, the
+         leading token stands as the value: whatever produced that gap can only
+         be whitespace, punctuation or an invisible codepoint, none of which
+         can be part of `none`/a hex prefix under the confirmed grammar, so it
+         is real separation, not part of the claim. Anything that isn't a
+         clean `none`/12-hex leading token, by either test, is a malformed/
+         non-`none` claim: anything not exactly `none` is `!= "none"`, which is
+         what the caller's `not in (None, "none")` gate already treats as
+         "claims a supersession" (fail-CLOSED — see above).
+
+    ROUND-4 FIX (code-review #583 finding #2) — round 3's own value check
+    fullmatched the ENTIRE remainder of the (fully-collapsed) skeleton against
+    the grammar. Once punctuation and whitespace are stripped alongside every
+    invisible codepoint, NOTHING in the skeleton distinguishes "a value with an
+    ordinary trailing aside on the same line" from "a value directly extended by
+    more of the same alphabet" — both glue onto the value with zero separator
+    left standing, so free text such as `SUPERSEDES: none, as this is a
+    net-new addition` or `SUPERSEDES: none -- see #567 for context` — an
+    entirely ordinary plain-English aside explaining why nothing is being
+    superseded — fullmatch-failed and was misclassified as `malformed`, i.e. AS
+    a claim, on receipts making none. Measured on the CLI before this fix: both
+    examples above returned `"malformed"`; after it, both return `"none"`.
+    Fixed NOT by loosening what step 2 strips (that reopens the round-2/round-3
+    keyword-fragmentation classes the KNOWN-RESIDUE codepoints exploit — proven
+    by this fix's own mandated re-verification catching exactly that regression
+    on `_substantive_len`'s three named residue codepoints before shipping) but
+    by keeping step 2 exactly as round 3 left it and using the positional
+    record it already computes to tell the two cases apart from `raw_line`
+    itself, where the real separator (if any) still exists even though the
+    skeleton discarded it. `a1b2c3d4e5f6f00d` (16 hex digits, no separator
+    anywhere) and `noneisnotreallynone` are rejected exactly as round 3
+    rejected them — the positional gap is zero at their boundary — so nothing
+    that used to be treated as a claim now silently isn't.
+
+    Neither this fix nor round 3's closes every class: SUBSTITUTION (replacing
+    one of the keyword's own ASCII letters with a visually-identical non-ASCII
+    homoglyph, which this allowlist's strip step deletes rather than preserves)
+    and the separate tail-only SCAN-SCOPE gap (a claim placed before `NEXT` is
+    never scanned at all) are open — see the KNOWN GAP paragraph above and GH
+    #567.
+
+    ROUND-3 FIX-OF-A-FIX (found by this fix's own mandated scoped re-temper,
+    before shipping) — step 1 (`split("\\n")`, not `splitlines()`) was applied
+    without revisiting the `[1:]` slice immediately below, which used to be safe
+    ONLY because `splitlines()` guaranteed `tail.splitlines()[0]` was EXACTLY the
+    residue of the `NEXT` line and nothing past it: `splitlines()` recognizes
+    U+2028/U+2029/several `Cc` controls as line breaks too, so ANY of those
+    between the `NEXT` residue and a following `SUPERSEDES:` line still produced
+    two separate elements under the OLD split, with `[1:]` discarding only the
+    first. Switching to a literal `\\n`-only split without also revisiting `[1:]`
+    reopened exactly this: one of those codepoints placed where a `\\n` would
+    normally sit now leaves the `NEXT` residue and the `SUPERSEDES:` line FUSED
+    into one `split("\\n")` element, and `[1:]` discarded that whole fused
+    element — the claim, gone, `None`, before the ASCII-skeleton step even runs.
+    Confirmed live via the CLI before fixing (byte-identical `v1`/`v1.1` receipts
+    again disagreed on exit code, same shape as the original SIEGE-R4BA-5
+    finding). Fixed by dropping the `[1:]` skip entirely: it was never
+    correctness-load-bearing, only a "don't bother scanning a fragment we know is
+    irrelevant" tidiness step — the `NEXT` residue cannot itself match the
+    `SUPERSEDES:` substring search under the confirmed grammar any more than any
+    other non-matching line can, so scanning every element (including whatever a
+    crafted separator fuses into the first one) costs nothing and leaves no
+    element unscanned for any adversarial choice of separator."""
+    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
+    claim = None
+    for raw_line in (l for l in tail.split("\n") if l.strip()):
+        # positions[i] is raw_line's index of skeleton[i] — the round-4 fix's own
+        # record, so a value's right boundary can be judged against what `raw_line`
+        # actually had there (a real separator, or nothing) after the skeleton has
+        # already discarded it.
+        skeleton_chars = []
+        positions = []
+        for i, ch in enumerate(raw_line):
+            if re.match(r"[A-Za-z0-9:]", ch):
+                skeleton_chars.append(ch)
+                positions.append(i)
+        skeleton = "".join(skeleton_chars)
+        idx = skeleton.find("SUPERSEDES:")
+        if idx != -1:
+            value_start = idx + len("SUPERSEDES:")
+            m = re.match(r"none|[0-9a-f]{12}", skeleton[value_start:])
+            if m:
+                value_end = value_start + m.end()
+                glued = (value_end < len(positions)
+                         and positions[value_end] == positions[value_end - 1] + 1)
+                body = "malformed" if glued else m.group()
+            else:
+                body = "malformed"
+            if claim is None or claim == "none":
+                claim = body
+    return claim
+
+
 def lint_v11_local(parsed):
     """Receipt-local v1.1 value checks: TRIPWIRE: none two-leg rule; predicate
     vocabulary + glob-subset cap (TRIPWIRE and TRIPWIRE-CHILD); SUPERSEDES
@@ -1888,8 +2109,8 @@ def resolve_base(name: str, root, found=None, refused=None):
     return first
 
 
-def _witness_stat_dev_ino(path, include_nlink=False):
-    """SIEGE-R4IT-3 / F1 — a single `os.stat` sample of a resolved realpath's identity.
+def _witness_stat_dev_ino(path=None, *, fd=None, st=None, include_nlink=False):
+    """SIEGE-R4IT-3 / F1 — a single stat sample of a resolved realpath's identity.
 
     Returns `(st_dev, st_ino)` on success when `include_nlink` is False; appends
     `st_nlink` when True. On any `OSError` returns the caught exception instance itself
@@ -1897,20 +2118,116 @@ def _witness_stat_dev_ino(path, include_nlink=False):
     "no change" a caller could misread as success — callers split the three states with
     `isinstance(result, OSError)` (SIG-7-2).
 
-    Exactly ONE `os.stat` call regardless of `include_nlink`: `st_nlink` comes from the
-    same `os.stat_result` the 2-tuple already produces (FATAL-11-1), so the
-    `include_nlink=True` form adds zero syscalls. `_resolve_once` is the only caller
-    that passes `include_nlink=True`; every T0/T1 identity re-stat site (tier2_witness's
-    F5/SIG-7-2, the stated-target axis's FATAL-9-1) uses the default and gets the
-    original 2-tuple back untouched.
-    """
-    try:
-        st = os.stat(path)
-    except OSError as e:
-        return e
+    Exactly ONE stat call regardless of `include_nlink`: `st_nlink` comes from the same
+    `os.stat_result` the 2-tuple already produces (FATAL-11-1), so the
+    `include_nlink=True` form adds zero syscalls.
+
+    Exactly one of `path` (stats by NAME, `os.stat`), `fd` (stats an ALREADY-OPEN
+    descriptor, `os.fstat` — fd-pinned, no re-resolution) or `st` (an ALREADY-FETCHED
+    `os.stat_result`, e.g. from a caller that also needs a field this function doesn't
+    return, like `S_ISREG` off `st_mode`) is the caller's contract; `st` skips the
+    syscall entirely and shares only the tuple-shaping below.
+
+    code-review #583 finding #6 — `_resolve_once` and `_read_from_fd` each used to
+    inline their own `os.fstat` → `(dev, ino[, nlink])` extraction instead of reusing
+    this helper, the `fd`/`st` forms above exist so both do now: `_resolve_once` calls
+    the `fd=` form (it wants this function's OSError-as-sentinel contract, not a raise,
+    for the SAME reason the pre-F1 code already did — see its own history); `_read_from_fd`
+    calls the `st=` form, because it must `os.fstat` its own copy anyway (for `S_ISREG`,
+    which this function does not expose) and its contract is RAISE-on-`OSError`, not a
+    sentinel — reusing this function's stat call there would silently swallow the
+    exception `_read_from_fd`'s own `except BaseException: os.close(fd); raise` is
+    written to catch and re-raise."""
+    if st is None:
+        try:
+            st = os.fstat(fd) if fd is not None else os.stat(path)
+        except OSError as e:
+            return e
     if include_nlink:
         return (st.st_dev, st.st_ino, st.st_nlink)
     return (st.st_dev, st.st_ino)
+
+
+# warden 2026-08-31T-563-warden-r3 — `os.O_PATH` is Linux-only (CPython does not
+# define the attribute at all on a platform whose libc lacks it, e.g. macOS); a bare
+# `os.O_PATH` reference below would raise `AttributeError` — NOT `OSError` — on import
+# of this module on such a platform, escaping `_resolve_once`'s `except OSError` guard
+# as an uncaught traceback instead of the fail-closed `resolve_stat_failed` disposition
+# every other failure on this path produces (the file's own `_witness_bound` docstring,
+# :176, already names this exact hazard class for `signal.setitimer`/`SIGALRM` and
+# guards it the same way). `getattr(..., 0)` degrades to the pre-fix ancestor-open
+# flags on a platform without `O_PATH` (ORing in 0 is a no-op) rather than crashing —
+# restoring the read-permission requirement there, which is what that platform already
+# required before this fix, not a new regression on it.
+_ANCESTOR_OPEN_FLAGS = os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_PATH", 0)
+
+
+def _open_nofollow_walk(path):
+    """F1 STRUCTURAL FIX — open `path` end-to-end via one `os.open` PER PATH COMPONENT,
+    each relative to the previous component's already-open directory file descriptor
+    (`dir_fd=`) and each with `O_NOFOLLOW`, so no component of the path — leaf OR
+    intermediate — is ever resolved by NAME more than once, and none may be a symlink.
+
+    SIEGE-R4BA-1's residual — a single `os.open(path, ... | O_NOFOLLOW)` still hands the
+    KERNEL the whole path string, and the kernel resolves every component except the
+    LAST one by following symlinks as normal: `O_NOFOLLOW` refuses a symlink only at the
+    final component. A reviewed subagent that owns an INTERMEDIATE directory can replace
+    it with a symlink to an out-of-root tree between the moment this path was proven
+    resolved-and-contained and the moment a name-based open runs, and the leaf reached
+    through that symlink is still an ordinary regular file — `O_NOFOLLOW` never sees a
+    symlink at all, because the substitution happened one level up. Measured live: 2.0%
+    win rate against a leaf-only `O_NOFOLLOW` open for a leaf-symlink swap, and the
+    directory-component variant is not narrowed by that flag at all.
+
+    Opening component-by-component against a HELD PARENT `dir_fd` closes both: each step
+    is `os.open(component, O_DIRECTORY | O_NOFOLLOW, dir_fd=parent_fd)` (the last
+    component instead takes the caller's own leaf-open flags), so a component that has
+    BECOME a symlink anywhere in the chain fails that one open with `ELOOP` instead of
+    being transparently followed. There is no name left to re-resolve afterward: the
+    fd this returns is the SAME descriptor `_resolve_once` samples identity from and the
+    one the eventual read consumes (see `_read_from_fd`), so nothing between "resolved"
+    and "read" ever looks any path component up by name again — eliminating the window
+    rather than adding a flag to narrow it.
+
+    `path` must be the already-fully-resolved (symlink-free AT THIS INSTANT) absolute
+    path `resolve_base` returned; the walk starts at `/` and independently re-proves
+    every component of it. Raises `OSError` (`ELOOP`, `ENOENT`, `ENOTDIR`, `EACCES`,
+    ...) on any failure — the caller's existing `OSError` handling maps that onto the
+    same fail-closed disposition a name-based race already produced.
+
+    ANCESTOR COMPONENTS OPEN `O_PATH` (warden 2026-08-31T-563-warden-r3 fix). The
+    pre-fix walk opened every ancestor with plain `O_DIRECTORY | O_NOFOLLOW`, which
+    defaults to `O_RDONLY` and therefore demands READ permission on each ancestor
+    directory — pre-fix (`os.stat`/a single name-based `os.open` on the realpath)
+    only ever needed EXECUTE (traverse) permission, so a search-only ancestor
+    (`0o111`, `0o311`, ...) that verified cleanly before this fix started hard-
+    failing resolution afterward: a false-rejection regression, not a security
+    weakening. `O_PATH` obtains a usable `dir_fd` (valid as the `dir_fd=` of a later
+    `openat`-backed `os.open`, since Linux 2.6.39) while requiring only search
+    permission on the directories traversed to reach it, matching pre-fix's
+    permission floor. `O_NOFOLLOW` still refuses a symlink at that component — an
+    `O_PATH` fd support of an unfollowed symlink is a separate, deliberately-unused
+    capability of the flag; combined with `O_DIRECTORY` and `O_NOFOLLOW` here the
+    open still fails (measured: `ENOTDIR`, both before and after this fix — the
+    unfollowed symlink is never itself a directory) exactly as before if the
+    component is a symlink. `_ANCESTOR_OPEN_FLAGS` (module level, above) degrades
+    to the pre-`O_PATH` flags on a platform without `os.O_PATH` rather than
+    raising `AttributeError` at the reference site. The LEAF keeps its original
+    read-intent flags (`O_RDONLY | O_NONBLOCK | O_NOFOLLOW`) unchanged — it is the
+    fd `_read_from_fd` actually reads from, so it must remain a real readable
+    open, not `O_PATH`."""
+    parts = pathlib.Path(path).parts
+    dir_fd = os.open(parts[0], _ANCESTOR_OPEN_FLAGS)
+    try:
+        for component in parts[1:-1]:
+            next_fd = os.open(component, _ANCESTOR_OPEN_FLAGS,
+                              dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = next_fd
+        return os.open(parts[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                       dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def _resolve_once(name, root, cache):
@@ -1918,21 +2235,38 @@ def _resolve_once(name, root, cache):
 
     The value is a record, not a bare `Path | None` (FATAL-12-1): `{"realpath",
     "found", "refused", "dev_ino_at_resolve", "resolve_stat_failed", "dev_ino",
-    "nlink_at_resolve", "declared"}`. First call for a key runs the real `resolve_base`
-    and, immediately after it returns a non-None realpath, ONE `_witness_stat_dev_ino`
-    call with `include_nlink=True` filling `dev_ino_at_resolve`/`nlink_at_resolve`
-    (FATAL-7-1 / FATAL-11-1); every later call is a dict lookup. A stat that raises
-    `OSError` after a successful resolve leaves `realpath` set but records
-    `resolve_stat_failed=True` with both identity fields None — the "no realpath to
-    stat" and "stat failed with a realpath in hand" causes stay distinguishable in the
-    record (FATAL-8-2).
+    "nlink_at_resolve", "declared", "fd"}`. First call for a key runs the real
+    `resolve_base` and, immediately after it returns a non-None realpath, F1
+    STRUCTURAL FIX: `_open_nofollow_walk` opens the realpath end-to-end via a
+    component-by-component, `O_NOFOLLOW`-at-every-step walk (see there) and the
+    resulting fd is HELD in `rec["fd"]` — not merely stat'd and discarded — so every
+    later consumer (`tier2_artifacts`, `tier2_witness`) reads THIS SAME descriptor
+    instead of re-opening `realpath` by name. `dev_ino_at_resolve`/`nlink_at_resolve`
+    (FATAL-7-1 / FATAL-11-1) come from one `os.fstat` on that fd, so identity is
+    sampled from the exact bytes this run will eventually read, never from a separate
+    by-name stat that a later re-resolution could disagree with. Every later call for
+    the same key is a dict lookup.
+
+    An `OSError` from the walk (a component that is, or has become, a symlink; a
+    permission failure; ENOENT) after a successful `resolve_base` leaves `realpath`
+    set but records `resolve_stat_failed=True` with `fd`/both identity fields left
+    None — the "no realpath to stat" and "stat failed with a realpath in hand" causes
+    stay distinguishable in the record (FATAL-8-2). SIEGE-R4BA-1 and its residual are
+    both closed by this walk (see `_open_nofollow_walk`'s docstring): there is no
+    separate re-proof step here any more, because the walk IS the proof — a
+    resolve/stat-gap swap on ANY component, leaf or intermediate, fails the walk
+    itself with `ELOOP` rather than producing a sample to distrust after the fact.
 
     `declared` and `dev_ino` are never set to a meaningful value here: `declared`
     defaults False and is set once during gather (_build_identity_cache); `dev_ino`
     defaults None and is filled by tier2_artifacts at first open (FATAL-12-1 /
     FATAL-7-1). Not module-level and not `lru_cache`-backed — `cache` is constructed
     once per _verify_single / _selftest_run_fixture / _selftest_crosscheck invocation
-    (SIG-6-5).
+    (SIG-6-5). A held `fd` that is opened here and never consumed by a later read
+    (a name whose realpath duplicates an already-read one, a run that raises before
+    reaching the read, a mid-resolve `WitnessTimeout`) is closed by
+    `_close_identity_cache_fds`, which every one of those three call sites now runs
+    in a `finally:` over the cache's whole lifetime — see there.
     """
     key = str(name)
     if key in cache:
@@ -1948,17 +2282,101 @@ def _resolve_once(name, root, cache):
         "dev_ino": None,
         "nlink_at_resolve": None,
         "declared": False,
+        "fd": None,
     }
     cache[key] = rec
     rec["realpath"] = resolve_base(name, root, found, refused)
     if rec["realpath"] is not None:
-        st = _witness_stat_dev_ino(rec["realpath"], include_nlink=True)
-        if isinstance(st, OSError):
+        try:
+            fd = _open_nofollow_walk(rec["realpath"])
+        except OSError:
             rec["resolve_stat_failed"] = True
         else:
-            rec["dev_ino_at_resolve"] = (st[0], st[1])
-            rec["nlink_at_resolve"] = st[2]
+            # temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
+            # the fstat below needs its OWN guard: a bare `os.fstat(fd)` here left an
+            # `OSError` from THIS step (e.g. ESTALE on a network `--root` whose file
+            # vanishes between the walk's open and this fstat) propagating uncaught out
+            # of `_resolve_once`/`_build_identity_cache` — a raw traceback instead of the
+            # fail-closed `resolve_stat_failed` disposition every other failure on this
+            # path produces — AND leaked `fd` (never stored, never closed). The pre-fix
+            # code never had this gap: `_witness_stat_dev_ino` wrapped its own `os.stat`
+            # in `try/except OSError: return e`, so a stat failure there was always a
+            # sentinel, never a raise — code-review #583 finding #6 is what restores
+            # that same sentinel contract here, via `_witness_stat_dev_ino`'s `fd=` form,
+            # instead of the inline try/except this round originally added.
+            #
+            # code-review #583 finding #1 — storing `fd` into `rec["fd"]` in the `else:`
+            # arm below (only AFTER the fstat succeeds) leaves a window between
+            # `_open_nofollow_walk` returning `fd` and that assignment where `fd` lives
+            # ONLY in this local variable, invisible to `_close_identity_cache_fds`
+            # (which walks `cache`, not this frame). `WitnessTimeout`'s SIGALRM can fire
+            # during the fstat itself — it is not an `OSError`, so `_witness_stat_dev_ino`
+            # never gets the chance to return its sentinel — and unwind out of this
+            # function with the fd still open and now unreachable from anywhere: leaked.
+            # Fixed by making the store the FIRST side effect after the walk returns,
+            # before the fstat that can be interrupted, so the fd is already reachable
+            # via `cache` (and thus via `_close_identity_cache_fds`'s `finally:`) for the
+            # whole window a timeout could land in, not just the portion after success.
+            rec["fd"] = fd
+            st = _witness_stat_dev_ino(fd=fd, include_nlink=True)
+            if isinstance(st, OSError):
+                rec["fd"] = None
+                os.close(fd)
+                rec["resolve_stat_failed"] = True
+            else:
+                rec["dev_ino_at_resolve"] = (st[0], st[1])
+                rec["nlink_at_resolve"] = st[2]
     return rec["realpath"]
+
+
+def _close_identity_cache_fds(cache):
+    """F1 STRUCTURAL FIX — close every held fd `_resolve_once`'s walk opened for
+    `cache` that no read ever consumed.
+
+    A record's `fd` is set to `None` the MOMENT a reader (`tier2_artifacts`,
+    `tier2_witness`) takes ownership of it (see `_read_from_fd`, which closes it on
+    every exit, success or exception) — so what remains here on the paths this
+    function is actually reached from is exactly the set that was never read: a
+    second spelling of an already-read realpath (the S3 dedup reuses the FIRST
+    spelling's bytes and never touches the second one's fd), a name whose resolve
+    raised before any read was attempted (e.g. a `--strict` ambiguity raise), or a
+    name a mid-resolve `WitnessTimeout` left with a fd but no further processing.
+
+    Never raises: a close failure here must not replace or mask whatever verdict or
+    exception the caller's `finally:` is already unwinding with. `cache` may hold
+    non-string sentinel keys (`_IDENTITY_DEGENERATE` and friends) whose values are
+    not record dicts — `isinstance(v, dict)` skips those the same way the reverse-
+    index build in `tier2_artifacts` does."""
+    for v in cache.values():
+        if not isinstance(v, dict):
+            continue
+        fd = v.get("fd")
+        if fd is not None:
+            v["fd"] = None
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+@contextlib.contextmanager
+def _identity_cache():
+    """Code-review #583 finding #7 — the one structural mechanism for the
+    create-cache / close-its-fds-on-every-exit shape every `_build_identity_cache`
+    call site needs. Before this, `_verify_single`, `_selftest_run_fixture` and
+    `_selftest_crosscheck` each hand-wrote their own `cache = {}` plus a `finally:
+    _close_identity_cache_fds(cache)` around a differently-shaped surrounding
+    try/except — three independently-maintained copies of the same two-line
+    contract, one `cache = None`-guarded because its cache is built conditionally.
+    `yield`s a fresh `{}` for the caller to pass into `_build_identity_cache` (and
+    on to `tier2_artifacts`/`tier2_witness`); the `finally:` here runs on every exit
+    from the `with` block — a normal return, a caught `LintError`/`WitnessTimeout`,
+    or an unclassified escape — exactly as each hand-written copy did."""
+    cache = {}
+    try:
+        yield cache
+    finally:
+        _close_identity_cache_fds(cache)
 
 
 def _contained(child: pathlib.Path, base: pathlib.Path) -> bool:
@@ -2098,7 +2516,7 @@ def _is_world_writable(d: pathlib.Path) -> bool:
 # literal two-character escape, so an ordinary path renders BYTE-IDENTICALLY to what it
 # did before and only a hostile one changes. Deliberately NOT applied to the census line
 # itself, which carries no paths at all — that machine-independence is pinned by
-# return-convention.md:271.
+# return-convention.md:280.
 #
 # SIEGE-R2BA-4 — the class was `[\\\x00-\x1f\x7f]`, which is the class for a `grep`
 # consumer and NOT the class for the consumers this channel actually has:
@@ -2362,32 +2780,103 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
     return raw
 
 
-def _read_and_fstat_artifact(realpath, budget, label):
-    """S17-8 / S2 — open a realpath, capture `(st_dev, st_ino)` from the FILE DESCRIPTOR,
-    and read the bytes from that same fd, race-free.
+def _read_from_fd(fd, budget, label):
+    """S17-8 / S2, generalised for F1 — classify and read an ALREADY-OPEN fd, capturing
+    `(st_dev, st_ino)` from that SAME descriptor, race-free.
 
-    `open(realpath, "rb")` → `os.fstat(fh.fileno())` (the T0 identity sample) →
-    `fh.read(budget + 1)` on that same descriptor, closed in the `with` block's finally.
-    Capturing from the open fd — not a fresh path stat — pins the identity sample to the
-    exact file this read opens (SIG-8-4's fd-pinned comparison; see tier2_artifacts step
-    (1b)). If the first read already yields more than `budget` bytes, raise the SAME
-    over-cap LintError `_read_capped` raises, with `label` in place and the "; not read"
-    semantics.
+    `os.fstat(fd)` (the T0 identity sample) → `fh.read(budget + 1)` on that same
+    descriptor, closed in the `with` block's finally. Capturing from the open fd — not a
+    fresh path stat — pins the identity sample to the exact file this read opens (SIG-8-4's
+    fd-pinned comparison; see tier2_artifacts step (1b)). If the read already yields more
+    than `budget` bytes, raise the SAME over-cap LintError `_read_capped` raises, with
+    `label` in place and the "; not read" semantics.
 
     `OSError`/`MemoryError` propagate unchanged — the caller classifies both (SIEGE-R2BA-2 /
-    SIG-10-3), so tier2_artifacts keeps BOTH of its adjacent handler arms around this
-    call (SIG-11-2). No `st_size` pre-test: the file can grow between stat and read, and
-    a `budget + 1` read holds the ceiling however it grows — the same argument that
-    closes `_read_capped`'s window (SIEGE-R2BA-2).
-    """
-    with open(realpath, "rb") as fh:
-        st = os.fstat(fh.fileno())
+    SIG-10-3), so tier2_artifacts and tier2_witness keep BOTH of their adjacent handler
+    arms around this call (SIG-11-2). No `st_size` pre-test: the file can grow between
+    stat and read, and a `budget + 1` read holds the ceiling however it grows — the same
+    argument that closes `_read_capped`'s window (SIEGE-R2BA-2).
+
+    TAKES OWNERSHIP OF `fd` UNCONDITIONALLY: closed on every exit, success or exception
+    (`os.fdopen`'s `with` block on success; the `except BaseException` arm on every
+    reject/raise path, including the `LintError` below it and any
+    KeyboardInterrupt/WitnessTimeout in between). The classification is `os.fstat` on
+    the fd — `S_ISREG`, never a name-based `is_file()` — so what is classified is exactly
+    what was opened, and it is also the identity sample the resolve-time sample this
+    fd's opener took (`_resolve_once`) is compared against (SIG-8-4). `O_NONBLOCK`, set
+    by whichever opener produced `fd`, is left as-is: harmless once confirmed `S_ISREG`.
+
+    F1 STRUCTURAL FIX — `_resolve_once` is now the ONLY opener on the ARTIFACTS/witness
+    path (via `_open_nofollow_walk`, held across the whole resolve-to-read window), so
+    this function never itself calls `os.open`: there is no path left here for a name to
+    be re-resolved. `_read_and_fstat_artifact` below is the thin, name-opening sibling
+    kept for the one caller (`_read_jsonl`'s `--ledger` read) that has no earlier resolve
+    step to hold a descriptor across."""
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise LintError(f"Tier-2: {label} is not a regular file (not read)")
+        fh = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with fh:
         raw = fh.read(budget + 1)
     if len(raw) > budget:
         raise LintError(
             f"Tier-2: {label} exceeds the Tier-2 read budget "
             f"({budget} B remaining of {ARTIFACT_READ_CAP} B; not read)")
-    return ((st.st_dev, st.st_ino), raw)
+    # code-review #583 finding #6 — `_witness_stat_dev_ino`'s `st=` form shares the
+    # (dev, ino) tuple-shaping with every other caller without a second `os.fstat`:
+    # `st` above is already fetched (needed for the `S_ISREG` check, which
+    # `_witness_stat_dev_ino` does not expose), so this passes that SAME stat_result
+    # through rather than re-stating the fd.
+    return (_witness_stat_dev_ino(st=st), raw)
+
+
+def _read_and_fstat_artifact(realpath, budget, label):
+    """The name-opening sibling of `_read_from_fd`, kept for `_read_jsonl`'s
+    `--ledger PATH` read — an operator-supplied CLI argument with no earlier `resolve`
+    step whose result this open could race against, so there is no resolve-to-read
+    window here to close and nothing to hold a descriptor across.
+
+    #563 inquisitor finding / SIEGE-R4BA-2 — `os.open(..., O_RDONLY | O_NONBLOCK)`
+    (never `is_file()` then a separate open — that check-then-open race is exactly what
+    let a target swap from a regular file at the stat to a FIFO at the open and hang
+    past 20-45 s with zero bytes on stdout or stderr, the same unclassifiable EXIT=124
+    shape siege S-1 exists to eliminate) never blocks: on a regular file the flag is
+    inert, and on a FIFO with no writer a read-only non-blocking open returns
+    immediately (POSIX). `_read_from_fd` does the fstat-classify-and-read from there.
+
+    Deliberately NO `O_NOFOLLOW`: a `--ledger` path is read once, directly, with no
+    separate earlier resolution to keep faith with, so refusing a legitimate symlinked
+    ledger path (a symlinked dispatch root, common in orchestrator setups) bought no
+    safety and was a real regression when this function was still shared with the
+    ARTIFACTS/witness path's TOCTOU-sensitive reads. Those reads now go through
+    `_read_from_fd` directly on a fd `_open_nofollow_walk` already produced and never
+    call this function at all — see `_read_from_fd`'s docstring.
+
+    DISCLOSED RESIDUAL (temper R1, scoped re-temper, warden 2026-08-31T-563-warden-r2)
+    — `_read_jsonl`'s own docstring notes the mandated `--ledger` path sits INSIDE the
+    directory the reviewed subagent owns, so a subagent that can plant a symlink there
+    (rather than a real file) can redirect this read to bytes it did not directly write
+    at that name. Two things bound this, rather than closing it outright: (1) `--ledger`
+    has never been containment-checked against `--root` (unlike ARTIFACTS/TRACE names,
+    which resolve through `resolve_base`) — that is a pre-existing, separate gap this
+    fix does not touch, not something this change introduces or narrows; closing it
+    would mean resolving `--ledger` the same way ARTIFACTS names are, a materially
+    larger change out of scope here. (2) `tier2_ledger`'s binding still requires an
+    EXACT `(dispatch_id, rcpt_sha256, verdict)` match against what the SAME subagent's
+    OWN receipt claims in its DISPATCHED line, so redirecting to an attacker-owned file
+    buys nothing beyond writing that file's content directly (already possible without
+    any symlink); redirecting to a genuinely independent, already-existing ledger
+    (e.g. a sibling dispatch's) only succeeds if that ledger happens to already contain
+    the exact triple the attacker is trying to fabricate — binding to someone else's
+    real, already-verified work, not forging new trust. Accepted as a narrow, disclosed
+    tradeoff in favor of restoring the legitimate-symlink case; a full fix (containment
+    enforcement for `--ledger`) is a separate, larger change."""
+    fd = os.open(realpath, os.O_RDONLY | os.O_NONBLOCK)
+    return _read_from_fd(fd, budget, label)
 
 
 def _build_identity_cache(artifacts, trace, witnesses, verdict, root, cache_out, cov=None):
@@ -2466,6 +2955,7 @@ def _build_identity_cache(artifacts, trace, witnesses, verdict, root, cache_out,
                 "dev_ino": None,
                 "nlink_at_resolve": None,
                 "declared": declared_map[nm],
+                "fd": None,
             }
         raise
 
@@ -2518,11 +3008,21 @@ def _finalize_identity_degenerate(cache, verified):
     For each pair: if EITHER member is undeclared, the undeclared member's realpath is
     added to `_IDENTITY_UNVERIFIABLE_COLLISION` by a REBINDING assignment (never an
     in-place `.add()` — SIG-14-3) and `_IDENTITY_DEGENERATE` is left untouched
-    (SIG-13-2's citation-axis case). Otherwise both members are declared and necessarily
-    hash-verified: both `nlink_at_resolve == 1` is degenerate immediately (POSIX rules
-    out a hard link, FATAL-11-1); else the pair is degenerate iff the two `verified`
-    buffers DISAGREE — compared raw, never re-hashed (SIG-14-1) — else benign. Every
-    write is an assignment to True, never a clearing of a probe-(1) `True`.
+    (SIG-13-2's citation-axis case). Otherwise both members are declared; on the
+    production `--tier2` path a declared member is necessarily hash-verified into
+    `verified` before this runs (`tier2_artifacts` raises before returning on any
+    unmatched declared entry). A caller that swallows `tier2_artifacts`'s per-entry
+    `LintError` and calls this finalize anyway (#563 inquisitor finding — e.g. a corpus
+    measurement tool counting mismatches instead of aborting) can reach this with a
+    declared member absent from `verified`; that case is treated the same as an
+    undeclared member (§ above) — the pair cannot be disambiguated, so it goes in the
+    "cannot answer" bucket via `.get()`, never a bare subscript (this defensiveness is
+    what the docstring's SIG-13-4 rule already mandates for `cache`; the same rule now
+    applies to `verified`). Otherwise: both `nlink_at_resolve == 1` is degenerate
+    immediately (POSIX rules out a hard link, FATAL-11-1); else the pair is degenerate
+    iff the two `verified` buffers DISAGREE — compared raw, never re-hashed (SIG-14-1) —
+    else benign. Every write is an assignment to True, never a clearing of a probe-(1)
+    `True`.
     """
     candidates = cache.get(_IDENTITY_COLLISION_CANDIDATES, ())
     for cand in candidates:
@@ -2536,15 +3036,25 @@ def _finalize_identity_degenerate(cache, verified):
                 cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
                     cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp2})
             continue
+        b1 = verified.get((rp1, dev_ino), _UNVERIFIED)
+        b2 = verified.get((rp2, dev_ino), _UNVERIFIED)
+        if b1 is _UNVERIFIED or b2 is _UNVERIFIED:
+            if b1 is _UNVERIFIED:
+                cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
+                    cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp1})
+            if b2 is _UNVERIFIED:
+                cache[_IDENTITY_UNVERIFIABLE_COLLISION] = (
+                    cache.get(_IDENTITY_UNVERIFIABLE_COLLISION, frozenset()) | {rp2})
+            continue
         if nl1 == 1 and nl2 == 1:
             cache[_IDENTITY_DEGENERATE] = True
-        elif verified[(rp1, dev_ino)] != verified[(rp2, dev_ino)]:
+        elif b1 != b2:
             cache[_IDENTITY_DEGENERATE] = True
 
 
 # #488 inquisitor/AV4 (edge) — a KNOWN, DELIBERATELY OUT-OF-SCOPE GAP, recorded here so
 # it is not "fixed" by accident. `parse_trace` admits SEVEN verbs; this set holds three.
-# `return-convention.md:84` defines `CONSULTED <reference>` as covering "web/doc/
+# `return-convention.md:85` defines `CONSULTED <reference>` as covering "web/doc/
 # prior-artifact lookup", and a cited PRIOR ARTIFACT is exactly the population §3.4's
 # silence rule ranges over — so a `CONSULTED` citation of an undeclared, unverified file
 # gets no PROVENANCE-ONLY advisory at all, on an ORDINARY receipt and not only under
@@ -3202,25 +3712,37 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
             pair = opened.get(resolved)
             reused = pair is not None
             if pair is None:
-                try:
-                    # S3 — the dedup is scoped to open/fstat/read only; the first spelling
-                    # of a realpath opens, fd-fstats and reads once, later spellings reuse.
-                    st_dev_ino, raw = _read_and_fstat_artifact(
-                        resolved, budget, label)
-                except LintError:
-                    # Over-cap: bytes NOT read, hash NOT recomputed, remaining entries and
-                    # the witness leg uncounted. Fails CLOSED — never a silent skip.
-                    if cov is not None:
-                        cov.partial = True
-                    raise
-                except (OSError, MemoryError) as e:
-                    # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an OSError, so
-                    # under `ulimit -v` it escaped this guard and printed a Traceback AFTER
-                    # the census. `_strerror` via getattr because only the OSError leg has one.
-                    if cov is not None:
-                        cov.partial = True
-                    raise LintError(f"Tier-2: {label} unreadable ({_strerror(e)})")
-                opened[resolved] = (st_dev_ino, raw)
+                # F1 STRUCTURAL FIX — consume the fd `_resolve_once`'s walk already
+                # opened and fstat'd for THIS name, held since the resolve phase,
+                # rather than re-opening `resolved` by name: this read never looks any
+                # component of the path up by name again, closing the window a by-name
+                # reopen would still leave (leaf OR intermediate). `fd` is None exactly
+                # when that walk did not produce a trustworthy identity
+                # (`resolve_stat_failed`), which the `dev_ino_at_resolve is None` raise
+                # just below already covers — there is no read to attempt in that case.
+                fd = rec["fd"]
+                rec["fd"] = None    # ownership transferred; _read_from_fd closes it either way
+                if fd is not None:
+                    try:
+                        # S3 — the dedup is scoped to fstat/read only; the first
+                        # spelling of a realpath reads once, later spellings reuse.
+                        st_dev_ino, raw = _read_from_fd(fd, budget, label)
+                    except LintError:
+                        # Over-cap: bytes NOT read, hash NOT recomputed, remaining
+                        # entries and the witness leg uncounted. Fails CLOSED — never a
+                        # silent skip.
+                        if cov is not None:
+                            cov.partial = True
+                        raise
+                    except (OSError, MemoryError) as e:
+                        # SIEGE-R2BA-2 — MemoryError beside OSError. It is NOT an
+                        # OSError, so under `ulimit -v` it escaped this guard and
+                        # printed a Traceback AFTER the census. `_strerror` via getattr
+                        # because only the OSError leg has one.
+                        if cov is not None:
+                            cov.partial = True
+                        raise LintError(f"Tier-2: {label} unreadable ({_strerror(e)})")
+                    opened[resolved] = (st_dev_ino, raw)
             else:
                 st_dev_ino, raw = pair
             # FATAL-7-1 / FATAL-8-2 / SIG-11-7 — on EVERY entry (first-opened or reused)
@@ -3954,6 +4476,24 @@ def _slice(path: pathlib.Path, kind, a, b, meter=None, raw=None):
 _SIGNAL_MIN_CHARS = 4
 
 
+def _is_format_or_separator(ch):
+    """The category rule `_substantive_len` established, factored out so every caller
+    that needs to tell visible/meaningful content apart from invisible codepoints
+    shares ONE test rather than growing its own character list.
+
+    True for Unicode GENERAL CATEGORY `C*` (Cc control, Cf format, Cs surrogate, Co
+    private-use, Cn unassigned) or `Z*` (Zs/Zl/Zp separator) — see `_substantive_len`
+    for why a category rule, closed over all of Unicode, is what a blocklist of
+    specific invisible characters (ASCII `.strip()`, an enumerated codepoint list)
+    cannot be: it also covers codepoints assigned after this was written, and every
+    future zero-width/format character joins it for free instead of being the next
+    bypass to discover and patch. CHAIN-1 — `_legacy_supersedes_claim`'s own ASCII
+    `.lstrip()` was exactly that next bypass, closed by reusing this rule rather than
+    adding U+200B/U+FEFF/U+2060/U+200C/U+00AD/U+180E (or any other specific list) to
+    it."""
+    return unicodedata.category(ch)[0] in ("C", "Z")
+
+
 def _substantive_len(body_text):
     """How many of `body_text`'s codepoints could carry signal, capped at the floor.
 
@@ -3980,11 +4520,28 @@ def _substantive_len(body_text):
     Counting STOPS at the floor: the caller only ever asks a >= question, and a 4 KiB
     body should not be walked to answer it.
 
+    U+FFFD IS EXCLUDED, AND IT IS NOT AN EXCEPTION TO THE "NO CHARACTER LISTS" RULE — it
+    is the one codepoint in the count that the DECODER manufactures rather than the file
+    supplying (SIEGE-R4BA-4). `_slice` decodes with `errors="replace"`, which emits one
+    REPLACEMENT CHARACTER per undecodable byte sequence; its category is `So`, so the
+    category rule counts it, and FOUR non-UTF-8 bytes — the minimum a `#B` range can
+    cite — manufacture exactly `_SIGNAL_MIN_CHARS` apparent codepoints. Measured: a `#B`
+    range over 4 undecodable bytes billed `witness 1/1` and carried a `SUPERSEDES`
+    through at exit 0, on a range where NONE of the receipt-cited bytes decoded at all.
+    The category rule is closed over Unicode CONTENT and that is what makes it sound;
+    U+FFFD is not content, it is the decoder reporting that there was none, so counting
+    it lets a decode FAILURE manufacture the very signal this function measures. Nothing
+    else here is a blocklist entry, and this arm cannot be walked around by finding one
+    more invisible character — a receipt wanting credit for real bytes must supply bytes
+    that decode.
+
     MUST NOT RAISE — `unicodedata.category` is total over `str`, and the caller's
     contract forbids raising anyway."""
     n = 0
     for ch in body_text:
-        if unicodedata.category(ch)[0] in ("C", "Z"):
+        if ch == "�":
+            continue
+        if _is_format_or_separator(ch):
             continue
         n += 1
         if n >= _SIGNAL_MIN_CHARS:
@@ -4169,7 +4726,7 @@ def _bill_witness_evaluation(cov, probe, body_text, ambiguous):
         # the author who wrote it did not reach. `ambiguous` is bumped at RESOLUTION time,
         # before applicability is finally known; this arm then cleared `wit_applicable`
         # and bumped `not-applicable`, so ONE item landed in two of the sub-counts
-        # `return-convention.md:271` ships as normative disjoint ("An item that already
+        # `return-convention.md:280` ships as normative disjoint ("An item that already
         # earns `ambiguous` or `wrong-name` is reported only there") — on a line whose
         # `witness 0/0` says the item is not in the applicable set at all, while
         # `ambiguous` is defined as a sub-count OF that denominator.
@@ -4748,12 +5305,31 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
             if probe_out is not None:
                 probe_out["bound"] = bound
             # FATAL-10-3 — the unbound read must re-check containment against the T-1
-            # sample via the fd _read_and_fstat_artifact actually opens.
+            # sample via the fd this leg now reads from directly.
             if not identity_verified and raw is None and art_realpath is not None:
+                # F1 STRUCTURAL FIX — never re-open art_realpath with a bare
+                # os.open() (that is exactly the by-name reopen this fix closes).
+                # Reuse the fd _resolve_once's walk already opened and fstat'd for
+                # this name when it is still available (the common case: an
+                # undeclared witness-only citation, whose fd no earlier leg has
+                # touched). It can be None here for two different reasons — that
+                # walk failed (`resolve_stat_failed`), or a DECLARED name's fd was
+                # already consumed by the ARTIFACTS leg's OWN read of it (reached
+                # here because that read did not land `identity_verified` — e.g. a
+                # hash mismatch — so this leg still needs its own independent
+                # bytes). Either way, opening a FRESH descriptor via the SAME
+                # `_open_nofollow_walk` rather than a bare name-based open keeps
+                # this read exactly as safe as the one `_resolve_once` performed —
+                # a self-contained, zero-gap resolve-then-open with no separate
+                # by-name stat to race against — and fails exactly as closed when
+                # the underlying walk failure is still live.
+                fd = rec["fd"]
+                rec["fd"] = None    # ownership transferred either way
                 try:
-                    st_dev_ino, raw = _read_and_fstat_artifact(
-                        art_realpath, ARTIFACT_READ_CAP,
-                        f"witness {_show_path(art_name)}")
+                    if fd is None:
+                        fd = _open_nofollow_walk(art_realpath)
+                    st_dev_ino, raw = _read_from_fd(
+                        fd, ARTIFACT_READ_CAP, f"witness {_show_path(art_name)}")
                 except LintError:
                     if cov is not None:
                         cov.partial = True
@@ -4764,6 +5340,21 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
                     raise LintError(
                         f"Tier-2: witness {_show_path(art_name)} unreadable "
                         f"({_strerror(e)})")
+                # #563 gate-fix — the sibling tier2_artifacts TOCTOU check (line ~3242)
+                # was hardened against SIG-9-3's degenerate-identity signature
+                # (`st_ino == 0`, e.g. `sshfs -o noino`), which makes dev_ino a CONSTANT
+                # across every file on the filesystem: the equality check below is then
+                # trivially satisfied by a resolve-time/read-time swap instead of
+                # catching it. This independent-read fallback needs the same gate, or a
+                # swap on a degenerate filesystem slips through unnoticed here too.
+                if identity_degenerate:
+                    if cov is not None:
+                        cov.partial = True
+                    raise LintError(
+                        f"Tier-2: witness {_show_path(art_name)}'s identity cannot be "
+                        f"checked across the resolve/read gap (this filesystem does not "
+                        f"produce unique file identities); a path swap between "
+                        f"resolution and the witness read cannot be ruled out")
                 if (rec["dev_ino_at_resolve"] is None
                         or rec["dev_ino_at_resolve"] != st_dev_ino):
                     if cov is not None:
@@ -5135,21 +5726,34 @@ def _read_jsonl(path):
     fallback, which performs zero disk verification. A 4 GiB sparse ledger drove 8.4 GB
     RSS on the same path.
 
-    `is_file()` FIRST and it is what closes the hang: it stats, it does not open, so a
-    FIFO/device/directory is classified without blocking. Then `_read_capped` — the same
-    race-free ceiling every other reader on this leg already took, and for the same
-    reason (the file lives where the reviewed party can grow it between the check and the
-    read). A LintError, so `tier2_ledger`'s caller renders one bullet plus the census and
-    exits 1.
+    SIEGE-R4BA-2 — `is_file()` FIRST, then a separate `_read_capped` open, was the shape
+    of that fix, and it closes only the case where the target is a FIFO for the WHOLE
+    run: `is_file()` stats a NAME and the open RESOLVES THAT NAME AGAIN, so a target that
+    is a regular file at the stat and a FIFO at the open passes the gate and hangs
+    anyway. Identical bug class, identical directory-ownership premise, one function away
+    from `_read_and_fstat_artifact`, which is why the fix is that function rather than a
+    second local spelling of it: ONE descriptor from open to read, classified by
+    `os.fstat` on that same fd. It carries the same `ARTIFACT_READ_CAP` ceiling
+    `_read_capped` did (`budget + 1`, race-free however the file GROWS) and the identity
+    half of its return is simply unused here. A LintError, so `tier2_ledger`'s caller
+    renders one bullet plus the census and exits 1.
+
+    An `OSError`/`ValueError` from the open maps onto that SAME LintError rather than
+    propagating, because that is what the retired `is_file()` did: `Path.is_file()`
+    swallows both and returns False, so a missing, unsearchable, permission-denied or
+    NUL-bearing `--ledger` path already rendered "is not a regular file (not read)" and
+    nothing downstream is prepared for a raw traceback here.
 
     The corpus callers in `run_selftest` read committed, in-repo files well under the
     ceiling, so they are unaffected — but they are covered by the same guard rather than
     routed around it, because a second reader is how this one got missed."""
     p = pathlib.Path(path)
-    if not p.is_file():
+    try:
+        _, raw = _read_and_fstat_artifact(p, ARTIFACT_READ_CAP,
+                                          f"JSONL {_show_path(p)}")
+    except (OSError, ValueError):
         raise LintError(
             f"Tier-2: {_show_path(p)} is not a regular file (not read)")
-    raw = _read_capped(p, ARTIFACT_READ_CAP, f"JSONL {_show_path(p)}")
     try:
         text = raw.decode()
     except UnicodeDecodeError as e:
@@ -5311,17 +5915,19 @@ def _selftest_run_fixture(fx, root) -> str:
         witness = parse_witness(sections["WITNESS"])
         # #488 c1 leg-3 — build the one shared identity cache + verified buffer (INV-5),
         # so the committed corpus keeps exercising the BOUND identity-binding path the
-        # CLI takes rather than a second, unbound one.
-        cache = {}
+        # CLI takes rather than a second, unbound one. `_identity_cache()` (code-review
+        # #583 finding #7) closes every held fd on every exit, including the two
+        # excepts below.
         verified = {}
-        _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
-        tier2_artifacts(artifacts, trace, root, fx["strict"], None,
-                        cache=cache, verified=verified)
-        _finalize_identity_degenerate(cache, verified)
-        if verdict in {"PASS", "FAIL"}:
-            tier2_witness(witness, trace, root, fx["strict"], verdict, None,
-                          cache=cache, verified=verified)
-        return "pass"
+        with _identity_cache() as cache:
+            _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
+            tier2_artifacts(artifacts, trace, root, fx["strict"], None,
+                            cache=cache, verified=verified)
+            _finalize_identity_degenerate(cache, verified)
+            if verdict in {"PASS", "FAIL"}:
+                tier2_witness(witness, trace, root, fx["strict"], verdict, None,
+                              cache=cache, verified=verified)
+            return "pass"
     except WitnessTimeout:
         return "error"        # #486/Q8 — a timeout is NOT a passing expect:fail fixture
     except LintError:
@@ -5427,26 +6033,28 @@ def _selftest_crosscheck(rec, bodies):
         # deliberately do not match its bodies, and this crosscheck never calls
         # tier2_artifacts (MIN-14-1), so nothing has the single-writer right to
         # populate verified here.
-        cache = {}
-        try:
-            _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
-        except WitnessTimeout as e:
-            # SIG-6-5 — a resolve-phase timeout is a distinct raise site from the
-            # tier2_witness-arm timeout below; record it as a problem, not a swallow.
-            disk_disp = "TIMEOUT"
-            problems.append(f"crosscheck {did}: identity-cache resolve timed out ({e})")
-        else:
+        # `_identity_cache()` (code-review #583 finding #7) closes every held fd this
+        # crosscheck's identity cache still owns, on every exit.
+        with _identity_cache() as cache:
             try:
-                tier2_witness(witness, trace, root, False, verdict,
-                              cache=cache, verified={})
-                disk_disp = "LINT-PASS"
+                _build_identity_cache(artifacts, trace, [witness], verdict, root, cache)
             except WitnessTimeout as e:
-                # #486/Q8 — recording "LINT-FAIL" here AGREES with an inline LINT-FAIL and
-                # so reports no problem: the swallow this crosscheck exists to prevent.
+                # SIG-6-5 — a resolve-phase timeout is a distinct raise site from the
+                # tier2_witness-arm timeout below; record it as a problem, not a swallow.
                 disk_disp = "TIMEOUT"
-                problems.append(f"crosscheck {did}: witness evaluation timed out ({e})")
-            except LintError:
-                disk_disp = "LINT-FAIL"
+                problems.append(f"crosscheck {did}: identity-cache resolve timed out ({e})")
+            else:
+                try:
+                    tier2_witness(witness, trace, root, False, verdict,
+                                  cache=cache, verified={})
+                    disk_disp = "LINT-PASS"
+                except WitnessTimeout as e:
+                    # #486/Q8 — recording "LINT-FAIL" here AGREES with an inline LINT-FAIL and
+                    # so reports no problem: the swallow this crosscheck exists to prevent.
+                    disk_disp = "TIMEOUT"
+                    problems.append(f"crosscheck {did}: witness evaluation timed out ({e})")
+                except LintError:
+                    disk_disp = "LINT-FAIL"
     if disk_disp != inline_disp:
         problems.append(f"crosscheck {did}: inline={inline_disp} != disk={disk_disp}")
     return problems
@@ -5568,7 +6176,7 @@ _COV_COUNTERS = ("unreached", "not-reachable", "ambiguous", "wrong-name", "empty
 # the mandating paragraphs' only remedy for a non-working tool is the in-context
 # pseudocode fallback, which does zero disk verification. Carries no path: the offending
 # root is named on its OWN bullet, because this line's "no paths, no roots"
-# machine-independence is pinned by return-convention.md:271.
+# machine-independence is pinned by return-convention.md:280.
 #
 # SIEGE-R2BA-5 — C4 established the rule and applied it to ONE exit-2 path. FIVE others
 # stayed silent, one of them (`two-positionals`) CREATED by SIEGE-C15 one commit after
@@ -5763,7 +6371,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # the census is pinned "no paths, no roots". An operator debugging a
                 # surprising `ambiguous 0` had literally nothing to read. Its OWN line,
                 # deliberately not the census line, whose machine-independence is pinned
-                # by return-convention.md:271.
+                # by return-convention.md:280.
                 sys.stderr.write(
                     "ROOTS: " + ", ".join(_show_path(r) for r in _as_roots(root)) + "\n")
                 sections = parse_receipt(text)
@@ -5773,64 +6381,64 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # #488 c1 leg-3 — the one shared identity cache and verified buffer
                 # (INV-5), built before the ARTIFACTS leg so the identity binding the two
                 # legs share is established once per receipt.
-                cache = {}
-                verified = {}
-                try:
-                    _build_identity_cache(artifacts, trace, [witness], verdict,
-                                          root, cache, cov)
-                except WitnessTimeout as e:
-                    # FATAL-9-2 — a truncated resolve phase must not land on a clean
-                    # exit 0 (the mandated bare-basename shape reaches a non-raising
-                    # UNVERIFIABLE arm); remember it so EVERY exit hard-fails naming
-                    # the resolve phase, not as an ordinary Tier-2 failure.
-                    cache_timeout = (
-                        "Tier-2: the resolve phase exceeded its budget while "
-                        f"establishing artifact identities ({e}); refusing to report "
-                        "a verdict that a truncated identity resolution could have "
-                        "faked")
-                # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
-                # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
-                # witness-evidence consequent), and nothing said so on any channel.
-                # `return-convention.md:565` makes mixed-version runs legal, so this is
-                # NOT a rejection and there is no `--require-v11` flag to invent here —
-                # what was missing is that the gate could not tell "the v1.1 rules passed"
-                # from "the v1.1 rules never ran", while quality-gate/SKILL.md:34,58 state
-                # that every QG subagent emits v1.1 and treat Layer 2 as enforced.
-                # Advisory, on the notes channel, exit code unmoved.
-                v11 = parse_v11_sections(text)
-                notes += ([] if v11 is not None else
-                          ["UNVERIFIABLE: v1.1 Layer-2 rules not evaluated "
-                           "(receipt declares RCPT v1)"])
-                # #488 / T2 — `notes` is passed AS the out-param, not collected into a
-                # second list: every drain site emits `notes + wit_notes`, so mirroring
-                # into `notes` directly is what makes the PROVENANCE-ONLY lines reach
-                # stderr on the LintError exits too.
-                notes += tier2_artifacts(artifacts, trace, root, strict, cov, notes,
-                                         cache=cache, verified=verified)
-                _finalize_identity_degenerate(cache, verified)
-                wit_probe = {}
-                if verdict in {"PASS", "FAIL"}:
-                    # #486 / D7 — the bound now lives in tier2_witness, so a direct
-                    # importer is bounded too and there is exactly ONE arm on this path.
-                    # C1-R3-S2 — the RETURN VALUE IS DELIBERATELY DISCARDED. `wit_notes`
-                    # is the single channel for this leg's notes: mirroring into it AND
-                    # adding the return would print every witness note twice on any run
-                    # where tier2_witness succeeds and a LATER leg raises (the handler
-                    # drains `notes + wit_notes`, and both would hold them). Measured on
-                    # exactly that shape — clean witness, then a --ledger mismatch — before
-                    # this line stopped accumulating. tier2_witness mirrors at every one of
-                    # its exits, so nothing is lost by ignoring the return here; other
-                    # callers (--selftest, the direct-call tests) still use it.
-                    tier2_witness(witness, trace, root, strict, verdict, cov,
-                                  wit_probe, wit_notes, cache=cache, verified=verified)
-                else:
-                    # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
-                    # leg, so the collector would hear nothing from it and the line would
-                    # read a bare `witness 0/0`. Every receipt carries a mandatory WITNESS
-                    # line (return-convention.md:122), so a witness check ALWAYS exists
-                    # and an unannotated 0/0 says one did not — indistinguishable from a
-                    # PASS receipt with a structurally-absent witness.
-                    cov.bump("not-applicable", "verdict-not-pass-fail")
+                with _identity_cache() as cache:
+                    verified = {}
+                    try:
+                        _build_identity_cache(artifacts, trace, [witness], verdict,
+                                              root, cache, cov)
+                    except WitnessTimeout as e:
+                        # FATAL-9-2 — a truncated resolve phase must not land on a clean
+                        # exit 0 (the mandated bare-basename shape reaches a non-raising
+                        # UNVERIFIABLE arm); remember it so EVERY exit hard-fails naming
+                        # the resolve phase, not as an ordinary Tier-2 failure.
+                        cache_timeout = (
+                            "Tier-2: the resolve phase exceeded its budget while "
+                            f"establishing artifact identities ({e}); refusing to report "
+                            "a verdict that a truncated identity resolution could have "
+                            "faked")
+                    # siege S-6 — an `RCPT v1` first line version-dispatches the ENTIRE v1.1
+                    # rule set off (TRIPWIRE-`none`, the SUPERSEDES justification rule, the
+                    # witness-evidence consequent), and nothing said so on any channel.
+                    # `return-convention.md:605` makes mixed-version runs legal, so this is
+                    # NOT a rejection and there is no `--require-v11` flag to invent here —
+                    # what was missing is that the gate could not tell "the v1.1 rules passed"
+                    # from "the v1.1 rules never ran", while quality-gate/SKILL.md:34,58 state
+                    # that every QG subagent emits v1.1 and treat Layer 2 as enforced.
+                    # Advisory, on the notes channel, exit code unmoved.
+                    v11 = parse_v11_sections(text)
+                    notes += ([] if v11 is not None else
+                              ["UNVERIFIABLE: v1.1 Layer-2 rules not evaluated "
+                               "(receipt declares RCPT v1)"])
+                    # #488 / T2 — `notes` is passed AS the out-param, not collected into a
+                    # second list: every drain site emits `notes + wit_notes`, so mirroring
+                    # into `notes` directly is what makes the PROVENANCE-ONLY lines reach
+                    # stderr on the LintError exits too.
+                    notes += tier2_artifacts(artifacts, trace, root, strict, cov, notes,
+                                             cache=cache, verified=verified)
+                    _finalize_identity_degenerate(cache, verified)
+                    wit_probe = {}
+                    if verdict in {"PASS", "FAIL"}:
+                        # #486 / D7 — the bound now lives in tier2_witness, so a direct
+                        # importer is bounded too and there is exactly ONE arm on this path.
+                        # C1-R3-S2 — the RETURN VALUE IS DELIBERATELY DISCARDED. `wit_notes`
+                        # is the single channel for this leg's notes: mirroring into it AND
+                        # adding the return would print every witness note twice on any run
+                        # where tier2_witness succeeds and a LATER leg raises (the handler
+                        # drains `notes + wit_notes`, and both would hold them). Measured on
+                        # exactly that shape — clean witness, then a --ledger mismatch — before
+                        # this line stopped accumulating. tier2_witness mirrors at every one of
+                        # its exits, so nothing is lost by ignoring the return here; other
+                        # callers (--selftest, the direct-call tests) still use it.
+                        tier2_witness(witness, trace, root, strict, verdict, cov,
+                                      wit_probe, wit_notes, cache=cache, verified=verified)
+                    else:
+                        # D8.2 sub-decision 5 — a BLOCKED receipt never enters the witness
+                        # leg, so the collector would hear nothing from it and the line would
+                        # read a bare `witness 0/0`. Every receipt carries a mandatory WITNESS
+                        # line (return-convention.md:123), so a witness check ALWAYS exists
+                        # and an unannotated 0/0 says one did not — indistinguishable from a
+                        # PASS receipt with a structurally-absent witness.
+                        cov.bump("not-applicable", "verdict-not-pass-fail")
                 # #488 inquisitor/AV1 — LIFTED OUT of the `verdict in {PASS, FAIL}` arm,
                 # which is where it used to sit. The witness LEG stays verdict-gated (D8.2
                 # sub-decision 5 above, unchanged); the CONSEQUENT does not, because the
@@ -5857,6 +6465,35 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                 # peer's finding. That is the intended disposition, not a side effect —
                 # the remedy is in the author's hands (return the SUPERSEDES as `none`,
                 # or finish the work and return PASS/FAIL with a witness that resolves).
+                # SIEGE-R4BA-5 — THE ADVISORY ABOVE WAS THE WHOLE CONSEQUENCE, and on a
+                # receipt CLAIMING A SUPERSESSION that is not enough. `RCPT v1` makes
+                # `parse_v11_sections` return None, the `if v11 is not None` guard below
+                # skips the ENTIRE witness-evidence consequent, and the only remaining
+                # signal is an UNVERIFIABLE note on the notes channel — which moves no
+                # counter and no exit code. Measured: one receipt, bogus `SUPERSEDES:`,
+                # witness naming a file that does not exist — exit 1 under `RCPT v1.1`
+                # (correctly rejected), exit 0 under `RCPT v1`. The OLDER, LESS-CHECKED
+                # HEADER FORMAT WAS A WAY TO SKIP A NEWER SAFETY RULE, chosen by the
+                # reviewed subagent that writes the header, and `return-convention.md`
+                # § The Sweep step 3 tells the orchestrator to process SUPERSEDES with no
+                # check of its own precisely because Tier-2 is supposed to have done it.
+                #
+                # This is the advisory-narrows-to-a-gate move `_IDENTITY_DEGENERATE`'s
+                # own additions make: the advisory STAYS (mixed-version runs remain legal
+                # per return-convention.md:605, and a v1 receipt with no supersession
+                # claim still exits 0 with the note, unmoved), and it is narrowed to a
+                # hard FAIL on the one shape where "the v1.1 rules never ran" is not a
+                # disclosure problem but a bypass. Sited HERE rather than beside the
+                # advisory so a v1 claim and a v1.1 claim fail at the same point in the
+                # run and render the same census.
+                if v11 is None and _legacy_supersedes_claim(text) not in (None, "none"):
+                    raise LintError(
+                        "SUPERSEDES requires witness ran=TRACE#N whose predicate was "
+                        "EVALUATED at Tier-2 (witness-evidence requirement: this receipt "
+                        "declares `RCPT v1`, so the v1.1 Layer-2 rules — including this "
+                        "one — were not evaluated, and a supersession cannot be granted "
+                        "by the header format that opts out of checking it; declare "
+                        "`RCPT v1.1` and satisfy the rule, or return `SUPERSEDES: none`)")
                 if v11 is not None and v11["supersedes"] != "none" \
                         and not wit_probe.get("unsourced") \
                         and (not wit_probe.get("evaluated")
@@ -6081,6 +6718,11 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
         # hooks/rcpt-verify-hook.sh:76 runs.
         if mode == "tier2":
             sys.stderr.write(cov.render() + "\n")
+        # code-review #583 finding #7 — `cache` is now scoped entirely inside the
+        # `with _identity_cache():` block in the tier2 branch below, which closes
+        # every held fd on every exit from that block itself (including an
+        # unclassified escape); nothing is left to close here on the --tier1 path,
+        # where `cache` is never created at all.
 
 
 def main(argv=None) -> int:
@@ -6129,7 +6771,7 @@ def main(argv=None) -> int:
             #
             # The diagnostic deliberately does NOT go on the TIER2-COVERAGE: line — that
             # line's "no paths, no roots" machine-independence is pinned by
-            # return-convention.md:271 — and the empty-string test is on the RAW token,
+            # return-convention.md:280 — and the empty-string test is on the RAW token,
             # because Path("") is already Path(".") and would pass is_dir().
             #
             # Scoped to roots the caller actually passed: the no-`--root` default below

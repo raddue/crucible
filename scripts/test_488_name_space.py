@@ -4281,7 +4281,7 @@ class TestOneNameDeclaredTwiceIsNotSilentlyCollapsed(_RootCase):
 class TestTheAdvisoryScopeIsDeliberatelyNarrowerThanTheTraceVerbSet(_RootCase):
     """§3.4's advisory covers READ/EDIT/WROTE and NOT the other four verbs
     `parse_trace` admits — `CONSULTED` most consequentially, since
-    `return-convention.md:84` defines it as covering "web/doc/prior-artifact
+    `return-convention.md:85` defines it as covering "web/doc/prior-artifact
     lookup" and a cited PRIOR ARTIFACT is exactly the population the silence rule
     ranges over. So a `CONSULTED` citation of an undeclared, unverified file gets
     no advisory at all.

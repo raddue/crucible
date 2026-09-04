@@ -262,10 +262,23 @@ class TestResolveToReadWindow(unittest.TestCase):
         return {name: {"hash": hashlib.sha256(data).hexdigest(), "size": str(len(data))}}
 
     def test_fatal_7_1_path_replaced_between_resolution_and_read_hard_fails(self):
-        """A path that resolves (T-1) then is swapped for an out-of-tree file before the
-        ARTIFACTS leg opens it (T0) must hard-FAIL on identity mismatch — never hash the
-        outside file's bytes into `verified` (the bytes match on purpose, so identity is
-        the only thing that can catch the swap)."""
+        """F1 STRUCTURAL FIX — a path that resolves (T-1) and is then swapped for an
+        out-of-tree file before the ARTIFACTS leg reads it must never let the swap's
+        bytes reach `verified` under the RESOLVED name's identity. `_resolve_once` now
+        HOLDS the fd `_open_nofollow_walk` opened at resolve time and the ARTIFACTS leg
+        reads from that SAME descriptor rather than re-opening `f.md` by name — so the
+        swap performed in the window below never affects what gets read at all: the fd
+        already refers to the ORIGINAL file's inode, immune to the name later pointing
+        elsewhere (POSIX: unlinking/replacing a directory entry does not invalidate an
+        fd already open on the inode it named). This is STRONGER than the prior round's
+        `ELOOP` outcome (which detected the race and failed closed) — there is no race
+        left to detect, because the read was never going to touch the swapped-in name
+        again. The declared hash is deliberately the ORIGINAL content's, and the decoy
+        carries DIFFERENT bytes: if a regression reopened `f.md` by name instead of
+        using the held fd, it would read the decoy's bytes and hash-mismatch, not
+        ELOOP — so this test distinguishes "read the original via the held fd" from
+        both of the two things that could go wrong (silently trusting the decoy, or
+        reopening it at all)."""
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             outer = pathlib.Path(td)
@@ -273,43 +286,39 @@ class TestResolveToReadWindow(unittest.TestCase):
             root.mkdir()
             (root / "f.md").write_bytes(b"REAL")
             outside = outer / "outside.md"
-            outside.write_bytes(b"REAL")   # same bytes, different identity — outside root
+            outside.write_bytes(b"DECOY-DIFFERENT-BYTES")   # different identity AND content
             arts = self._art("f.md", b"REAL")
-            cache = _cache_for(rv, arts, [], None, "PASS", root)   # T-1 sample taken here
-            # The window: after resolution, before tier2_artifacts opens it.
+            cache = _cache_for(rv, arts, [], None, "PASS", root)   # fd opened+held here
+            original_dev_ino = cache["f.md"]["dev_ino_at_resolve"]
+            # The window: after resolution, before tier2_artifacts reads it.
             (root / "f.md").unlink()
             (root / "f.md").symlink_to(outside)
             cov = rv._Coverage()
             verified = {}
-            with self.assertRaises(rv.LintError) as cm:
-                rv.tier2_artifacts(arts, [], root, True, cov,
-                                   cache=cache, verified=verified)
-            self.assertIn("the path was replaced between resolution and read",
-                          str(cm.exception))
-            self.assertTrue(cov.partial)
-            self.assertEqual(verified, {})
+            notes = rv.tier2_artifacts(arts, [], root, True, cov,
+                                       cache=cache, verified=verified)
+            self.assertEqual(notes, [])
+            self.assertFalse(cov.partial)
+            self.assertEqual(verified, {(cache["f.md"]["realpath"], original_dev_ino):
+                                        b"REAL"})
 
     def test_fatal_8_2_t1_stat_failure_hard_fails(self):
         """A T-1 sample that FAILS (dev_ino_at_resolve is None) is a raising disposition,
         not a skipped comparison: the ARTIFACTS leg must hard-FAIL, never hash the file's
-        bytes into `verified`. Only the `include_nlink=True` call (the T-1 sample) is made
-        to fail; the default include_nlink=False form is left unmocked."""
+        bytes into `verified`. F1 STRUCTURAL FIX — the T-1 sample now comes from
+        `_open_nofollow_walk`'s fd rather than a separate `_witness_stat_dev_ino` call,
+        so the failure is injected there instead."""
         rv = _import_rv()
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             (root / "f.md").write_bytes(b"REAL")
             arts = self._art("f.md", b"REAL")
-            real_stat = rv._witness_stat_dev_ino
 
-            def _t1_stat_fails(path, include_nlink=False):
-                if include_nlink:
-                    return OSError("simulated T-1 stat failure")
-                return real_stat(path, include_nlink=include_nlink)
-
-            with mock.patch.object(rv, "_witness_stat_dev_ino",
-                                   side_effect=_t1_stat_fails):
+            with mock.patch.object(rv, "_open_nofollow_walk",
+                                   side_effect=OSError("simulated T-1 open failure")):
                 cache = _cache_for(rv, arts, [], None, "PASS", root)
             self.assertTrue(cache["f.md"]["resolve_stat_failed"])
+            self.assertIsNone(cache["f.md"]["fd"])
             cov = rv._Coverage()
             verified = {}
             with self.assertRaises(rv.LintError) as cm:
@@ -319,6 +328,102 @@ class TestResolveToReadWindow(unittest.TestCase):
                           str(cm.exception))
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
+
+    def test_an_fstat_failure_on_the_walked_fd_fails_closed_not_uncaught(self):
+        """temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
+        `_resolve_once`'s `os.fstat(fd)` on the fd `_open_nofollow_walk` just handed
+        back used to sit OUTSIDE any exception guard: an `OSError` from THIS specific
+        step (not the walk itself) propagated uncaught out of `_resolve_once` — a raw
+        traceback, and the fd was never closed nor stored. Fixed by wrapping the fstat
+        in its own try/except that closes the fd and lands on the same
+        `resolve_stat_failed` disposition every other failure on this path uses."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = self._art("f.md", b"REAL")
+            real_walk = rv._open_nofollow_walk
+            real_fstat = rv.os.fstat
+            walked_fd = []
+
+            def walk_spy(path):
+                fd = real_walk(path)
+                walked_fd.append(fd)
+                return fd
+
+            def fstat_spy(fd, *a, **k):
+                if walked_fd and fd == walked_fd[-1]:
+                    raise OSError("simulated fstat failure on the walked fd")
+                return real_fstat(fd, *a, **k)
+
+            with mock.patch.object(rv, "_open_nofollow_walk", walk_spy), \
+                    mock.patch.object(rv.os, "fstat", fstat_spy):
+                cache = _cache_for(rv, arts, [], None, "PASS", root)
+            self.assertTrue(cache["f.md"]["resolve_stat_failed"])
+            self.assertIsNone(cache["f.md"]["fd"])
+            self.assertIsNone(cache["f.md"]["dev_ino_at_resolve"])
+            # The fd must have been closed, not merely dropped: a second close on the
+            # same (now-invalid) fd number raises EBADF, proving it isn't still open.
+            with self.assertRaises(OSError):
+                os.close(walked_fd[-1])
+            cov = rv._Coverage()
+            verified = {}
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_artifacts(arts, [], root, True, cov,
+                                   cache=cache, verified=verified)
+            self.assertIn("identity could not be sampled at resolution time",
+                          str(cm.exception))
+            self.assertTrue(cov.partial)
+            self.assertEqual(verified, {})
+
+    def test_a_witness_timeout_mid_fstat_does_not_leak_the_walked_fd(self):
+        """Code-review #583 finding #1 — `rec["fd"] = fd` used to run in the `else:`
+        arm below `os.fstat(fd)`, i.e. only AFTER the fstat succeeds. `WitnessTimeout`
+        (raised via SIGALRM, `_witness_bound`) is not an `OSError`, so it is not caught
+        by the `except OSError:` arm guarding that fstat — it propagates straight out
+        of `_resolve_once`/`_build_identity_cache` with `fd` still open and reachable
+        ONLY from a local variable in a frame that is unwinding, invisible to
+        `_close_identity_cache_fds` (which walks `cache`, not stack frames): leaked.
+        Fixed by storing `fd` into `rec["fd"]` as the FIRST side effect after the walk
+        returns, before the fstat that can be interrupted, so it is already reachable
+        via `cache` for the whole window a timeout could land in."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.md").write_bytes(b"REAL")
+            arts = self._art("f.md", b"REAL")
+            real_walk = rv._open_nofollow_walk
+            real_fstat = rv.os.fstat
+            walked_fd = []
+
+            def walk_spy(path):
+                fd = real_walk(path)
+                walked_fd.append(fd)
+                return fd
+
+            def fstat_timeout_spy(fd, *a, **k):
+                if walked_fd and fd == walked_fd[-1]:
+                    raise rv.WitnessTimeout("simulated SIGALRM mid-fstat")
+                return real_fstat(fd, *a, **k)
+
+            cache = {}
+            with mock.patch.object(rv, "_open_nofollow_walk", walk_spy), \
+                    mock.patch.object(rv.os, "fstat", fstat_timeout_spy):
+                with self.assertRaises(rv.WitnessTimeout):
+                    rv._build_identity_cache(arts, [], [], "PASS", root, cache)
+
+            # The fd must already be reachable from `cache` BEFORE any cleanup runs —
+            # this is the exact fix: stored as the walk's first side effect, not only
+            # after a successful fstat.
+            self.assertEqual(cache["f.md"]["fd"], walked_fd[-1])
+
+            # The call sites all run `_close_identity_cache_fds(cache)` in a `finally:`
+            # over exactly this kind of raise; simulate that here and prove the fd is
+            # ACTUALLY closed at the OS level afterward, not merely dropped.
+            rv._close_identity_cache_fds(cache)
+            self.assertIsNone(cache["f.md"]["fd"])
+            with self.assertRaises(OSError):
+                os.close(walked_fd[-1])
 
     def test_a_degenerate_identity_filesystem_hard_fails_instead_of_trusting_the_toctou_check(self):
         """#563 — `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`) means every file on the
@@ -343,6 +448,99 @@ class TestResolveToReadWindow(unittest.TestCase):
                           str(cm.exception))
             self.assertTrue(cov.partial)
             self.assertEqual(verified, {})
+
+    def test_a_declared_collision_member_absent_from_verified_does_not_crash_finalize(self):
+        """#563 inquisitor finding — `_finalize_identity_degenerate`'s comparison of two
+        declared collision members used to be a bare `verified[(rp, dev_ino)]` subscript.
+        On the production `--tier2` path a declared member is always hash-verified before
+        finalize runs (`tier2_artifacts` raises on any mismatch/missing member first), but
+        a caller that swallows that per-entry LintError and calls finalize anyway (e.g. a
+        corpus-measurement tool counting mismatches instead of aborting — exactly
+        `measure_486_corpus.py`'s shape) can reach finalize with a declared member never
+        entered into `verified`, and the bare subscript raised `KeyError` instead of a
+        classified disposition. The fix routes an unverified member into
+        `_IDENTITY_UNVERIFIABLE_COLLISION` (the same bucket an undeclared member takes)
+        via `.get(..., _UNVERIFIED)`, never a bare subscript."""
+        rv = _import_rv()
+        cache = {
+            rv._IDENTITY_COLLISION_CANDIDATES: [
+                {"dev_ino": (7, 42),
+                 "members": [("a.md", True, 2), ("b.md", True, 2)]},
+            ],
+        }
+        # b.md is declared but was never hash-verified into `verified` — the shape a
+        # caller reaches only by swallowing tier2_artifacts's per-entry LintError.
+        verified = {("a.md", (7, 42)): b"REAL"}
+        rv._finalize_identity_degenerate(cache, verified)  # must not raise KeyError
+        self.assertEqual(
+            cache.get(rv._IDENTITY_UNVERIFIABLE_COLLISION, frozenset()), {"b.md"})
+        self.assertNotIn(rv._IDENTITY_DEGENERATE, cache)
+
+    def test_both_members_verified_and_agreeing_is_still_benign(self):
+        """Non-vacuity for the fix above: the common case (both declared members ARE
+        hash-verified and their bytes agree) must still resolve exactly as before —
+        neither sentinel set — proving the `.get()` rewrite changed nothing for the path
+        `tier2_artifacts` actually exercises today."""
+        rv = _import_rv()
+        cache = {
+            rv._IDENTITY_COLLISION_CANDIDATES: [
+                {"dev_ino": (7, 42),
+                 "members": [("a.md", True, 2), ("b.md", True, 2)]},
+            ],
+        }
+        verified = {("a.md", (7, 42)): b"REAL", ("b.md", (7, 42)): b"REAL"}
+        rv._finalize_identity_degenerate(cache, verified)
+        self.assertNotIn(rv._IDENTITY_UNVERIFIABLE_COLLISION, cache)
+        self.assertNotIn(rv._IDENTITY_DEGENERATE, cache)
+
+
+class TestAncestorOpenFlagsWithoutOPath(unittest.TestCase):
+    """Code-review #583 finding #4 — `_ANCESTOR_OPEN_FLAGS = os.O_DIRECTORY |
+    os.O_NOFOLLOW | getattr(os, "O_PATH", 0)` had no test exercising the `getattr`
+    fallback: `os.O_PATH` is Linux-only, and CPython does not define the attribute
+    at all on a platform whose libc lacks it, so the fallback exists to avoid an
+    `AttributeError` at MODULE IMPORT TIME on such a platform. `os` is a singleton
+    via `sys.modules`, so deleting `O_PATH` from the real module before importing a
+    FRESH copy of rcpt_verify (`_import_rv` always re-execs the file rather than
+    reusing a cached module) makes that fresh copy's own `getattr(os, "O_PATH", 0)`
+    see it genuinely absent, exactly as it would on such a platform."""
+
+    def test_ancestor_open_flags_degrades_to_pre_fix_permission_floor(self):
+        had_o_path = hasattr(os, "O_PATH")
+        real_o_path = getattr(os, "O_PATH", None)
+        if had_o_path:
+            del os.O_PATH
+        try:
+            rv = _import_rv()
+            # Degrades — ORs in 0, a no-op — rather than raising AttributeError at
+            # import time, and to EXACTLY the pre-`O_PATH` flags (no silent
+            # corruption: no bit beyond O_DIRECTORY | O_NOFOLLOW is present).
+            self.assertEqual(rv._ANCESTOR_OPEN_FLAGS, os.O_DIRECTORY | os.O_NOFOLLOW)
+            # The walk itself must still work end-to-end on the degraded flags — the
+            # documented consequence is a higher (read, not just search) permission
+            # requirement on ancestor directories, not a broken walk on an ordinary
+            # tree with default permissions.
+            with tempfile.TemporaryDirectory() as td:
+                nested = pathlib.Path(td) / "a" / "b"
+                nested.mkdir(parents=True)
+                (nested / "f.md").write_bytes(b"hello")
+                fd = rv._open_nofollow_walk(str(nested / "f.md"))
+                try:
+                    self.assertEqual(os.fstat(fd).st_size, 5)
+                finally:
+                    os.close(fd)
+        finally:
+            if had_o_path:
+                os.O_PATH = real_o_path
+
+    def test_ancestor_open_flags_includes_o_path_when_available(self):
+        """Non-vacuity for the fix above: on THIS platform (Linux, where the test
+        suite runs), `os.O_PATH` is defined, and the ordinary import must still OR
+        it in — the fallback must not mask a real `O_PATH` that IS available."""
+        self.assertTrue(hasattr(os, "O_PATH"))
+        rv = _import_rv()
+        self.assertEqual(rv._ANCESTOR_OPEN_FLAGS,
+                         os.O_DIRECTORY | os.O_NOFOLLOW | os.O_PATH)
 
 
 class TestVerifyWitness(unittest.TestCase):
@@ -508,6 +706,36 @@ class TestTier2Witness(unittest.TestCase):
                     self._w("/x/"), trace, root, True, "PASS",
                     cache=_cache_for(rv, {}, trace, self._w("/x/"), "PASS", root),
                     verified={})
+
+    def test_a_degenerate_identity_filesystem_hard_fails_the_unbound_independent_read_too(self):
+        """warden gate (#563 leg-3 follow-up) — `tier2_artifacts`'s own TOCTOU check was
+        hardened against `_IDENTITY_DEGENERATE` (SIG-9-3, `st_ino == 0`, e.g.
+        `sshfs -o noino`) so a resolve-time/read-time swap can't hide behind a trivially-
+        satisfied equality. `tier2_witness`'s independent-read fallback (FATAL-10-3, taken
+        whenever a rangeless-grep-cited name was never hash-verified by the ARTIFACTS leg)
+        runs the identical `dev_ino_at_resolve != st_dev_ino` comparison but had no such
+        gate — the one other read site this PR added. On a degenerate filesystem every
+        file shares one identity, so the comparison is trivially satisfied by a swap
+        instead of catching it. This must now hard-fail closed instead of trusting the
+        equality, exactly like the sibling leg."""
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / "f.txt").write_text("quiet\n")
+            # No ARTIFACTS declared → never hash-verified → identity_verified is False →
+            # falls into the unbound independent-read fallback (FATAL-10-3).
+            cited = {"n": 1, "verb": "WROTE", "args": f"f.txt  sha256:{'0' * 64}"}
+            trace = [cited]
+            wit = {"kind": "grep", "payload": "", "expect_fail": "/BOOM/",
+                   "ran": "TRACE#1", "range_kind": None, "range_a": None,
+                   "range_b": None, "art": "f.txt", "pattern": None}
+            cache = _cache_for(rv, {}, trace, wit, "PASS", root)
+            cache[rv._IDENTITY_DEGENERATE] = True
+            with self.assertRaises(rv.LintError) as cm:
+                rv.tier2_witness(wit, trace, root, False, "PASS",
+                                 cache=cache, verified={})
+            self.assertIn("identity cannot be checked across the resolve/read gap",
+                          str(cm.exception))
 
 
 class TestCliDispatch(unittest.TestCase):
@@ -3432,7 +3660,7 @@ class TestCoverageWitnessLeg(unittest.TestCase):
         self.assertTrue(cov.partial)
 
     def test_an_empty_resolved_body_is_NOT_verified_and_IS_partial(self):
-        """return-convention.md:253's own reason — an empty body `can never fire, so it
+        """return-convention.md:262's own reason — an empty body `can never fire, so it
         is indistinguishable from a skipped check`. Counting it VERIFIED would assert
         the opposite of the rule that rejects it."""
         (self.a / "f.txt").write_text("one line\n")
@@ -3578,7 +3806,7 @@ class TestCoverageEmission(unittest.TestCase):
 
     def test_blocked_receipt_is_not_applicable_not_a_bare_0_0(self):
         """D8.2 sub-decision 5 — every receipt carries a mandatory WITNESS line
-        (return-convention.md:122), so a witness check ALWAYS exists and an unannotated
+        (return-convention.md:123), so a witness check ALWAYS exists and an unannotated
         `witness 0/0` says one did not. BLOCKED is not hypothetical: SKILL.md:32 lints
         them, red-team-prompt.md:227 instructs one, sample-corpus carries one."""
         h, size = self._artifact()
@@ -4076,6 +4304,12 @@ class TestReadFailuresAreClassified(_InqBase):
     """
 
     def test_an_unreadable_resolved_artifact_is_a_bullet_not_a_traceback(self):
+        """F1 STRUCTURAL FIX moved the open earlier: `_resolve_once`'s
+        `_open_nofollow_walk` now opens the leaf (with real read-permission
+        requirements) at RESOLVE time, so a mode-000 file fails the WALK, not the
+        later read — `resolve_stat_failed` lands True and the ARTIFACTS leg raises the
+        "identity could not be sampled" bullet instead of "unreadable". Still one
+        clean bullet, never a traceback, and `partial` still set."""
         if os.geteuid() == 0:
             self.skipTest("running as root — mode 000 does not deny")
         h, size = self.plant(self.base, "out.log")
@@ -4086,7 +4320,8 @@ class TestReadFailuresAreClassified(_InqBase):
                       ["EXEC  `x`  exit=0  dur=1.0s  out=out.log#L1-L1"])
         out = self.cli("--tier2", "--strict", "--root", str(self.base), str(r))
         self.assertNotIn("Traceback (most recent call last)", out.stderr)
-        self.assertIn("Tier-2: ARTIFACTS out.log unreadable", out.stderr)
+        self.assertIn("Tier-2: ARTIFACTS out.log's identity could not be sampled at "
+                      "resolution time", out.stderr)
         self.assertEqual(out.returncode, 1, out.stderr)
         self.assertIn("partial", self.cov_line(out.stderr))
 
@@ -4205,7 +4440,7 @@ class TestAmbiguityThresholdIsDistinctRealpaths(_InqBase):
 
     `fix-verifier-prompt.md:89` states the trigger outright ("two or more distinct
     realpaths … so one file reached from two roots via a link is not it") and
-    `return-convention.md:257` says a name held at both homes of the SAME root resolves
+    `return-convention.md:266` says a name held at both homes of the SAME root resolves
     silently. Neither shape had a test: `test_trailing_slash_and_symlink_are_the_same_
     root` links the ROOT, not the FILE, and every ambiguity test plants two real files.
     A false ambiguity is a hard `--strict` FAIL, i.e. per quality-gate/SKILL.md:32 a
@@ -5442,6 +5677,49 @@ class TestArtifactReadsAreBounded(_InqBase):
                     verified={}),
                 [])
 
+    def test_a_fifo_swapped_in_after_resolve_reads_the_held_fd_not_the_fifo(self):
+        """F1 STRUCTURAL FIX — a FIFO named directly in ARTIFACTS is refused at resolve
+        time (`_resolve_base_one`'s own `is_file()`), so the reachable shape is a
+        resolve-time REGULAR file swapped to a FIFO before this leg's read. Before the
+        structural fix, `_read_and_fstat_artifact` re-opened `f.md` BY NAME at read
+        time and hit the FIFO (the hang siege S-1 / SIEGE-R4BA-2 exist to police, closed
+        with `O_NONBLOCK` + fd-based classification). Now `_resolve_once` holds the fd
+        `_open_nofollow_walk` opened AT RESOLVE TIME — before the swap — and the
+        ARTIFACTS leg reads from that same descriptor, which still refers to the
+        ORIGINAL regular file's inode regardless of what gets created at that name
+        afterward (POSIX: unlinking/replacing a directory entry does not touch an
+        fd already open on the inode it named). There is no name left to hit the FIFO
+        with, so there is nothing left to hang on OR to misclassify — this is a
+        stronger outcome than the prior round's fail-closed detection, not a weaker
+        one. Run on a worker thread with a bounded join regardless, as a regression
+        backstop: if a future change reintroduces a by-name reopen here, this test
+        still catches the hang rather than stalling the suite."""
+        rv = _import_rv()
+        h, size = self.plant(self.base, "f.md", b"REAL")
+        arts = {"f.md": {"hash": h, "size": size}}
+        cache = _cache_for(rv, arts, [], None, "PASS", [self.base])
+        (self.base / "f.md").unlink()
+        os.mkfifo(self.base / "f.md")
+        self.addCleanup(lambda: (self.base / "f.md").unlink(missing_ok=True))
+        result = {}
+        verified = {}
+
+        def _run():
+            try:
+                result["notes"] = rv.tier2_artifacts(arts, [], [self.base], False,
+                                                      cache=cache, verified=verified)
+            except rv.LintError as e:
+                result["error"] = str(e)
+            except BaseException as e:              # pragma: no cover - diagnostic only
+                result["error"] = f"{type(e).__name__}: {e}"
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=5.0)
+        self.assertFalse(t.is_alive(), "tier2_artifacts hung reading a swapped-in FIFO")
+        self.assertNotIn("error", result)
+        self.assertEqual(list(verified.values()), [b"REAL"])
+
     def test_a_second_spelling_of_an_already_read_realpath_does_not_double_charge_budget(self):
         """#563 — the S3 dedup (:3201-3223) reuses the bytes already read for a realpath's
         first spelling, but the budget decrement ran a second time regardless, charging the
@@ -5467,12 +5745,16 @@ class TestArtifactReadsAreBounded(_InqBase):
 
     def test_a_memory_error_is_classified_not_an_unwind(self):
         """MemoryError is NOT an OSError. Under `ulimit -v` it went straight past the
-        read guard and out of the CLI as a Traceback printed after the census."""
+        read guard and out of the CLI as a Traceback printed after the census.
+        F1 STRUCTURAL FIX — the ARTIFACTS leg now reads via `_read_from_fd` on the fd
+        `_resolve_once` already opened, not via `_read_and_fstat_artifact` (that
+        function is now the `--ledger`-only, name-opening sibling — see its
+        docstring), so the guard under test here is `_read_from_fd`'s."""
         rv = _import_rv()
         h, size = self.plant(self.base, "out.log")
         arts = {"out.log": {"hash": h, "size": size}}
         cov = rv._Coverage()
-        with mock.patch.object(rv, "_read_and_fstat_artifact", side_effect=MemoryError()):
+        with mock.patch.object(rv, "_read_from_fd", side_effect=MemoryError()):
             with self.assertRaises(rv.LintError) as cm:
                 rv.tier2_artifacts(
                     arts, [], [self.base], False, cov,
@@ -5903,24 +6185,34 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         arts = {"f.md": {"hash": h, "size": str(len(body))}}
         trace = [{"n": 1, "verb": "WROTE", "args": f"{trace_spelling}  sha256:{h}"}]
         wit = rv.parse_witness(["grep:f.md  expect-fail=/fatal=[1-9]/  ran=TRACE#1"])
-        opens = []
-        real_open = builtins.open
+        reads = []
+        real_read_from_fd = rv._read_from_fd
 
-        def spy(file, *a, **k):
-            if str(file).endswith("f.md"):
-                opens.append(1)
-            return real_open(file, *a, **k)
+        def spy(fd, budget, label):
+            # F1 STRUCTURAL FIX — every name's fd now opens during the RESOLVE phase
+            # (via `_open_nofollow_walk`, one `os.open` per DISTINCT NAME STRING,
+            # whether or not that name's bytes ever get consumed), so counting
+            # `os.open`/`builtins.open` calls no longer measures "did this leg
+            # actually READ the file" — it measures "how many name spellings needed
+            # resolving", which both legs may do regardless of the carry. The carry's
+            # own claim is about BYTE consumption: `_read_from_fd` is the one function
+            # every actual read funnels through (ARTIFACTS' first-spelling read, and
+            # the witness leg's fallback read when the carry does NOT apply), so
+            # counting calls to it is the direct measurement of "did this leg
+            # actually read the file", independent of how many names resolved to it.
+            reads.append(label)
+            return real_read_from_fd(fd, budget, label)
 
         cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         verified = {}
-        with mock.patch.object(builtins, "open", spy):
+        with mock.patch.object(rv, "_read_from_fd", spy):
             rv.tier2_artifacts(arts, trace, [self.base], False,
                                cache=cache, verified=verified)
-            after_artifacts = len(opens)
+            after_artifacts = len(reads)
             with self.assertRaises(rv.LintError):
                 rv.tier2_witness(wit, trace, [self.base], False, "PASS",
                                  cache=cache, verified=verified)
-        return after_artifacts, len(opens) - after_artifacts
+        return after_artifacts, len(reads) - after_artifacts
 
     def test_a_dot_slash_spelling_still_hits_the_carry(self):
         artifacts_reads, witness_reads = self._run("./f.md")
@@ -6096,7 +6388,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
 class TestCensusSubCountsAreDisjointOnTheAmbiguousPath(_InqBase):
     """C1-R1-S1 — `ambiguous` is bumped at RESOLUTION time and `_bill_witness_evaluation`'s
     `no_predicate` arm then cleared `wit_applicable` and bumped `not-applicable`, so ONE
-    item landed in two of the sub-counts return-convention.md:271 ships as normative
+    item landed in two of the sub-counts return-convention.md:280 ships as normative
     disjoint — on a line whose `witness 0/0` says the item is not in the applicable set
     at all, while `ambiguous` is defined as a sub-count OF that denominator.
 
@@ -6394,6 +6686,29 @@ class TestTheLedgerAndReceiptReadsAreBounded(_InqBase):
                                 str(self._receipt_with_dispatch()))
         self.assertEqual(out.returncode, 0, out.stderr)
 
+    def test_a_symlinked_ledger_path_still_binds(self):
+        """warden 2026-08-31T-563-warden round-2 — regression flagged in the prior
+        round: `_read_and_fstat_artifact` picked up `O_NOFOLLOW` when it was still the
+        SHARED opener for both the ARTIFACTS/witness TOCTOU-sensitive path and
+        `_read_jsonl`'s `--ledger` read, and a `--ledger` path is routinely a symlink
+        in ordinary orchestrator use (a symlinked dispatch root, a test harness that
+        stages the ledger elsewhere and links it in) — that legitimate use started
+        hard-failing with `ELOOP` even though a `--ledger` read has no earlier resolve
+        step for a symlink swap to race against. F1's fix moves the ARTIFACTS/witness
+        reads onto `_resolve_once`'s own held fd entirely, leaving
+        `_read_and_fstat_artifact` — and therefore `_read_jsonl` — as a plain
+        `O_RDONLY | O_NONBLOCK` open with no `O_NOFOLLOW` again; this pins that a
+        symlinked ledger path keeps working."""
+        real_led = self.base / "real-receipt-ledger.jsonl"
+        real_led.write_text(json.dumps({"dispatch_id": "24-child", "phase": "code",
+                                        "rcpt_sha256": self.HASH, "verdict": "PASS"}) + "\n")
+        linked = self.base / "linked-receipt-ledger.jsonl"
+        linked.symlink_to(real_led)
+        out = self._cli_bounded("--tier2", "--root", str(self.base), "--ledger", str(linked),
+                                str(self._receipt_with_dispatch()))
+        self.assertNotIn("Too many levels of symbolic links", out.stderr)
+        self.assertEqual(out.returncode, 0, out.stderr)
+
 
 class TestALintWitnessOverAnUnhashedFileIsCounted(_InqBase):
     """siege S-2 — REGRESSION of SIEGE-C3's property. `kind=lint` is unconstrained on
@@ -6597,7 +6912,7 @@ class TestAV1HeaderSaysSoOnTheChannel(_InqBase):
     line, so an `RCPT v1` header written by the reviewed subagent opts the entire v1.1
     rule set out — the TRIPWIRE-`none` two-leg rule, the SUPERSEDES justification rule and
     the witness-evidence consequent — with no signal on any channel.
-    `return-convention.md:565` makes mixed-version runs LEGAL, so this is not a rejection;
+    `return-convention.md:605` makes mixed-version runs LEGAL, so this is not a rejection;
     what was missing is that the gate could not tell "the v1.1 rules passed" from "the
     v1.1 rules never ran" while quality-gate/SKILL.md:34,58 treat Layer 2 as enforced."""
 
@@ -7758,7 +8073,16 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
     def test_501_2_the_fail_leg_reaches_resolve_base(self):
         """The behavioural half of test_501_1 — `found` is populated only if
         resolve_base actually ran, which is the thing #486 built and the FAIL leg
-        never used."""
+        never used.
+
+        ONE call, not two: SIEGE-R4BA-1's original fix re-proved containment with a
+        SECOND `resolve_base` call immediately after sampling the resolve-time
+        identity, but the F1 structural fix (warden 2026-08-31T-563-warden round-2)
+        retires that re-proof entirely — `_resolve_once` now opens the realpath via
+        `_open_nofollow_walk`, a component-by-component `O_NOFOLLOW` walk that IS its
+        own proof, so there is no second by-name resolution left to make. The count is
+        still pinned rather than relaxed to a membership test so this still goes RED
+        if the leg stops resolving altogether, which is what the test is for."""
         wit, trace = self._ranged_grep()
         seen = []
         real = self.rv.resolve_base
@@ -7984,6 +8308,638 @@ class TestFailLegPayloadSourcing(unittest.TestCase):
             verified={})
         self.assertIn("fail-leg-no-range", cov.codes["not-applicable"])
         self.assertEqual(cov.counts["discarded"], 0)
+
+
+class TestSiegeR4BA1ResolveTimeIdentityIsContainmentChecked(_InqBase):
+    """SIEGE-R4BA-1 and its F1 structural fix — the resolve-time identity sample used
+    to be taken AFTER the containment proof, not atomically with it, and re-opening
+    the realpath BY NAME a second time at read time reopened the same class of gap
+    one step later (the leaf-`O_NOFOLLOW` residual, then the intermediate-directory
+    residual this warden round closes — see `TestF1DirectoryComponentRace` below).
+
+    `_resolve_base_one` returns a path string once `real.is_file()` and `_contained()`
+    both hold; `_resolve_once` now opens that string via `_open_nofollow_walk` (a
+    component-by-component, `O_NOFOLLOW`-at-every-step walk) and HOLDS the resulting
+    fd rather than merely stat'ing and discarding it. A reviewed subagent that owns
+    the directory swaps the name in the gap between `resolve_base` returning and this
+    walk running — a regular file replaced by a symlink pointing outside every
+    `--root` — and the walk's own leaf `os.open` now refuses to follow it (`ELOOP`),
+    deterministically, before any identity is ever sampled from the decoy. Pre-fix,
+    the corrupted sample was exactly what tier2_artifacts' own TOCTOU re-check
+    compared its fd identity against, so the check compared the decoy with itself and
+    agreed: a silent false PASS over out-of-root content, reproduced 4/120 times
+    against the real CLI.
+
+    THE RACE IS INJECTED, NOT RUN. A 4-in-120 wall-clock race is not a regression pin —
+    it is a flaky one. The swap is performed inside a patched `os.open`, triggered on
+    the walk's OWN leaf-open call — precisely the gap's far end under the new
+    mechanism — so the linter sees byte-for-byte the state an attacker who WINS the
+    race produces, deterministically and on every run."""
+
+    def _swap_at_open(self, rv, outside_real):
+        """Replace `base/f.md` with a symlink to an out-of-root decoy right as
+        `_open_nofollow_walk`'s leaf `os.open` call is about to resolve it — the
+        walk's own choke point under the F1 structural fix (see class docstring)."""
+        real_open = rv.os.open
+        done = []
+
+        def spy(path, flags, *args, **kwargs):
+            if not done and path == "f.md":
+                done.append(1)
+                (self.base / "f.md").unlink()
+                (self.base / "f.md").symlink_to(outside_real)
+            return real_open(path, flags, *args, **kwargs)
+
+        return mock.patch.object(rv.os, "open", spy)
+
+    def _setup(self, rv):
+        outside = pathlib.Path(self._td.name).resolve().parent / (
+            "r4ba1-outside-" + os.path.basename(self._td.name))
+        outside.mkdir()
+        self.addCleanup(shutil.rmtree, outside, True)
+        decoy = outside / "decoy.md"
+        decoy.write_bytes(b"OUT-OF-ROOT DECOY CONTENT\n")
+        (self.base / "f.md").write_bytes(b"honest in-root content\n")
+        # The receipt DECLARES the decoy's hash: an attacker who wins the race wants the
+        # linter to hash-verify the file it must never have been allowed to read.
+        h = hashlib.sha256(decoy.read_bytes()).hexdigest()
+        arts = {"f.md": {"hash": h, "size": str(decoy.stat().st_size)}}
+        return decoy, arts
+
+    def test_a_swap_in_the_resolve_open_gap_is_not_sampled_as_valid(self):
+        rv = _import_rv()
+        decoy, arts = self._setup(rv)
+        cache = {}
+        with self._swap_at_open(rv, decoy):
+            rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        rec = cache["f.md"]
+        # Pre-F1-fix this held the DECOY's (st_dev, st_ino) — an identity for a file
+        # outside every root, recorded as if containment had been proven for it.
+        self.assertIsNone(rec["dev_ino_at_resolve"])
+        self.assertTrue(rec["resolve_stat_failed"])
+        self.assertIsNone(rec["fd"])
+
+    def test_the_leg_hard_fails_instead_of_hashing_out_of_root_content(self):
+        """The end-to-end consequence, which is the finding: pre-fix the ARTIFACTS leg
+        read the decoy, matched the declared hash, compared the fd identity against the
+        decoy identity it had already sampled, agreed with itself, and exited clean.
+
+        F1 STRUCTURAL FIX — `_swap_at_open` leaves the swapped-in symlink in place, and
+        the walk's own leaf `os.open` (not a later name-based reopen) is what refuses
+        to follow it, `ELOOP`, before `tier2_artifacts` is even reached with a
+        readable identity. The failure surfaces at the earliest possible point, one
+        step before this test's PRIOR round even ran, and stays a hard fail either
+        way: `verified` is never touched."""
+        rv = _import_rv()
+        decoy, arts = self._setup(rv)
+        cache = {}
+        with self._swap_at_open(rv, decoy):
+            rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        verified = {}
+        with self.assertRaises(rv.LintError) as cm:
+            rv.tier2_artifacts(arts, [], [self.base], False,
+                               cache=cache, verified=verified)
+        self.assertIn("identity could not be sampled at resolution time", str(cm.exception))
+        self.assertEqual(verified, {})
+
+    def test_an_unswapped_name_still_resolves_and_verifies(self):
+        """Non-vacuity — the re-proof must not reject the honest case."""
+        rv = _import_rv()
+        body = b"honest in-root content\n"
+        (self.base / "f.md").write_bytes(body)
+        arts = {"f.md": {"hash": hashlib.sha256(body).hexdigest(),
+                         "size": str(len(body))}}
+        cache = {}
+        rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        self.assertIsNotNone(cache["f.md"]["dev_ino_at_resolve"])
+        self.assertFalse(cache["f.md"]["resolve_stat_failed"])
+        rv.tier2_artifacts(arts, [], [self.base], False, cache=cache, verified={})
+
+
+class TestF1DirectoryComponentRace(_InqBase):
+    """warden 2026-08-31T-563-warden round-2 — the residual SIEGE-R4BA-1 left open.
+
+    A single whole-path `os.open(realpath, ... | O_NOFOLLOW)` hands the KERNEL the
+    entire path string, and the kernel follows a symlink at every component except
+    the LAST one: `O_NOFOLLOW` never sees a symlink substituted one level ABOVE the
+    leaf. A reviewed subagent that owns an INTERMEDIATE directory (not just the leaf's
+    immediate parent) can replace it with a symlink into an out-of-root tree between
+    resolve time and read time, and the leaf reached through that symlink is still an
+    ordinary regular file — the leaf-only flag passes it clean. `_open_nofollow_walk`
+    is supposed to close this too, by opening every component against a HELD parent
+    `dir_fd` with its OWN `O_NOFOLLOW`, not only the final one; this class proves it
+    does, racing the INTERMEDIATE component specifically rather than the leaf.
+
+    THE RACE IS INJECTED, NOT RUN, for the same reason `TestSiegeR4BA1...` injects
+    its leaf race: deterministic on every run, rather than a wall-clock race that
+    would be flaky. The swap is performed inside a patched `os.open`, triggered on
+    the walk's call for the INTERMEDIATE component's name."""
+
+    def _swap_intermediate_at_open(self, rv, component_name, real_dir, evil_dir):
+        """Replace `real_dir` (an intermediate PATH COMPONENT, not the leaf) with a
+        symlink to `evil_dir` right as `_open_nofollow_walk` is about to open that
+        component by name."""
+        real_open = rv.os.open
+        done = []
+
+        def spy(path, flags, *args, **kwargs):
+            if not done and path == component_name:
+                done.append(1)
+                shutil.rmtree(real_dir)
+                real_dir.symlink_to(evil_dir)
+            return real_open(path, flags, *args, **kwargs)
+
+        return mock.patch.object(rv.os, "open", spy)
+
+    def test_an_intermediate_directory_swapped_to_a_symlink_fails_the_walk_closed(self):
+        rv = _import_rv()
+        root = self.base / "root"
+        (root / "subdir").mkdir(parents=True)
+        (root / "subdir" / "f.md").write_bytes(b"honest in-root content\n")
+        evil = self.base / "evil"
+        evil.mkdir()
+        # Same leaf NAME, different identity AND content — a directory-component swap
+        # never needs the leaf itself to be a symlink to reach an out-of-root file.
+        decoy = evil / "f.md"
+        decoy.write_bytes(b"OUT-OF-ROOT DECOY CONTENT, DIFFERENT LENGTH TOO\n")
+        h = hashlib.sha256(decoy.read_bytes()).hexdigest()
+        arts = {"subdir/f.md": {"hash": h, "size": str(decoy.stat().st_size)}}
+
+        cache = {}
+        with self._swap_intermediate_at_open(rv, "subdir", root / "subdir", evil):
+            rv._build_identity_cache(arts, [], [], "PASS", [root], cache)
+        rec = cache["subdir/f.md"]
+        # The walk's leaf-open never ran at all: `subdir` itself failed to open
+        # (ELOOP) one component before the leaf, so there is no identity to sample.
+        self.assertIsNone(rec["dev_ino_at_resolve"])
+        self.assertTrue(rec["resolve_stat_failed"])
+        self.assertIsNone(rec["fd"])
+
+        verified = {}
+        with self.assertRaises(rv.LintError) as cm:
+            rv.tier2_artifacts(arts, [], [root], False, cache=cache, verified=verified)
+        self.assertIn("identity could not be sampled at resolution time", str(cm.exception))
+        self.assertEqual(verified, {},
+                         "the decoy's declared hash must never be credited")
+
+    def test_an_unswapped_intermediate_directory_still_resolves_and_verifies(self):
+        """Non-vacuity — walking every component must not reject the honest case."""
+        rv = _import_rv()
+        root = self.base / "root"
+        (root / "subdir").mkdir(parents=True)
+        body = b"honest in-root content\n"
+        (root / "subdir" / "f.md").write_bytes(body)
+        arts = {"subdir/f.md": {"hash": hashlib.sha256(body).hexdigest(),
+                                "size": str(len(body))}}
+        cache = {}
+        rv._build_identity_cache(arts, [], [], "PASS", [root], cache)
+        self.assertIsNotNone(cache["subdir/f.md"]["dev_ino_at_resolve"])
+        self.assertFalse(cache["subdir/f.md"]["resolve_stat_failed"])
+        notes = rv.tier2_artifacts(arts, [], [root], False, cache=cache, verified={})
+        self.assertEqual(notes, [])
+
+    def test_two_names_of_one_realpath_disagreeing_on_identity_still_hard_fails(self):
+        """The `dev_ino_at_resolve != st_dev_ino` cross-check in the S3 dedup's REUSED
+        branch (:tier2_artifacts) — the one comparison the F1 structural fix leaves
+        genuinely reachable, since a SINGLE name's own fresh read now always agrees
+        with its own resolve-time sample by construction (same held fd, same inode,
+        both ends of the comparison). Two DIFFERENT declared names that resolve to the
+        same realpath STRING each walk and hold their OWN fd independently; if the
+        file at that path is replaced (new inode) between the first name's walk and
+        the second's, the two fds disagree even though `resolved` — the dedup key — is
+        the same string both times. This is the honest replacement for the old
+        dev_ino-comparison pin the prior warden round flagged as no longer live (it
+        had been superseded by an earlier ELOOP on the SAME name's own re-resolution,
+        which F1 replaces with a held fd — see `TestSiegeR4BA1...`); this test
+        exercises the comparison that is still actually reachable after the fix."""
+        rv = _import_rv()
+        shared = self.base / "shared.md"
+        body = b"original content\n"
+        shared.write_bytes(body)
+        (self.base / "a.md").symlink_to(shared)
+        (self.base / "b.md").symlink_to(shared)
+        h = hashlib.sha256(body).hexdigest()
+        # Both names declare the ORIGINAL content's hash — "a.md" is read first (its
+        # bytes are what get hash-verified and cached under the shared realpath); the
+        # swap below only needs to change IDENTITY, not content, to trip the check.
+        arts = {"a.md": {"hash": h, "size": str(len(body))},
+               "b.md": {"hash": h, "size": str(len(body))}}
+
+        real_walk = rv._open_nofollow_walk
+        calls = []
+
+        def spy(path):
+            calls.append(path)
+            if len(calls) == 2:
+                # Between "a.md"'s walk and "b.md"'s walk: replace shared.md with a
+                # NEW inode carrying byte-identical content, so only IDENTITY moved.
+                shared.unlink()
+                shared.write_bytes(body)
+            return real_walk(path)
+
+        cache = {}
+        with mock.patch.object(rv, "_open_nofollow_walk", spy):
+            rv._build_identity_cache(arts, [], [], "PASS", [self.base], cache)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(cache["a.md"]["realpath"], cache["b.md"]["realpath"])
+        self.assertNotEqual(cache["a.md"]["dev_ino_at_resolve"],
+                            cache["b.md"]["dev_ino_at_resolve"])
+
+        verified = {}
+        with self.assertRaises(rv.LintError) as cm:
+            rv.tier2_artifacts(arts, [], [self.base], False,
+                               cache=cache, verified=verified)
+        self.assertIn("the path was replaced between resolution and read",
+                      str(cm.exception))
+
+
+class TestSiegeR4BA2CheckThenOpenRace(_InqBase):
+    """SIEGE-R4BA-2 — `is_file()` then a separate `open()` is a check-then-open WINDOW,
+    not a fix for the FIFO hang.
+
+    The #563 fix put `is_file()` in front of `_read_and_fstat_artifact`'s open and siege
+    S-1 put it in front of `_read_jsonl`'s. Both close only "the target is a FIFO for the
+    whole run": `is_file()` stats a NAME and the open resolves THAT NAME AGAIN, so a
+    target that is a regular file at the stat and a FIFO at the open passes the gate and
+    blocks forever — on the one leg with no timeout, in a directory the reviewed subagent
+    owns, with zero bytes on stdout AND stderr and no exit code at all. That is not
+    merely DoS: the documented remedy for a linter that does not work is the in-context
+    pseudocode fallback, which performs zero disk verification.
+
+    THE RACE IS INJECTED. `pathlib.Path.is_file` is forced True for the duration of the
+    call — byte-for-byte the state an attacker who wins the race produces — while the
+    object on disk is a FIFO with no writer. Post-fix there is no `is_file()` on either
+    path at all, so the patch is inert and the fd's own `S_ISREG` classifies it; pre-fix
+    both calls hang until the join timeout expires."""
+
+    def _run_bounded(self, fn):
+        """Call `fn` on a daemon thread with a join deadline — the defect under test is
+        an unbounded hang, so an unguarded call would hang the SUITE rather than fail
+        it."""
+        result = {}
+
+        def _go():
+            try:
+                result["value"] = fn()
+            except BaseException as e:                # pragma: no cover - diagnostic
+                result["error"] = f"{type(e).__name__}: {e}"
+
+        t = threading.Thread(target=_go, daemon=True)
+        t.start()
+        t.join(timeout=5.0)
+        return t.is_alive(), result
+
+    def test_artifact_read_classifies_from_the_fd_not_a_prior_name_stat(self):
+        rv = _import_rv()
+        fifo = self.base / "swapped.log"
+        os.mkfifo(fifo)
+        self.addCleanup(fifo.unlink)
+        with mock.patch.object(pathlib.Path, "is_file", lambda self: True):
+            alive, result = self._run_bounded(
+                lambda: rv._read_and_fstat_artifact(
+                    fifo, rv.ARTIFACT_READ_CAP, "ARTIFACTS swapped.log"))
+        self.assertFalse(alive, "_read_and_fstat_artifact hung on a FIFO that passed "
+                                "the is_file() check")
+        self.assertIn("is not a regular file", result.get("error", ""))
+
+    def test_read_jsonl_classifies_from_the_fd_too(self):
+        """The IDENTICAL pre-existing pattern one function away — same bug class, same
+        file, same directory-ownership premise. `--ledger` is mandated by
+        `quality-gate/SKILL.md` to point INSIDE the dispatch root."""
+        rv = _import_rv()
+        fifo = self.base / "receipt-ledger.jsonl"
+        os.mkfifo(fifo)
+        self.addCleanup(fifo.unlink)
+        with mock.patch.object(pathlib.Path, "is_file", lambda self: True):
+            alive, result = self._run_bounded(lambda: rv._read_jsonl(fifo))
+        self.assertFalse(alive, "_read_jsonl hung on a FIFO that passed the is_file() "
+                                "check")
+        self.assertIn("is not a regular file", result.get("error", ""))
+
+    def test_a_real_regular_file_is_still_read_by_both(self):
+        """Non-vacuity for the descriptor rewrite — the ordinary path is unchanged."""
+        rv = _import_rv()
+        art = self.base / "ok.log"
+        art.write_bytes(b"hello\n")
+        dev_ino, raw = rv._read_and_fstat_artifact(art, rv.ARTIFACT_READ_CAP, "L")
+        self.assertEqual(raw, b"hello\n")
+        st = os.stat(art)
+        self.assertEqual(dev_ino, (st.st_dev, st.st_ino))
+        led = self.base / "l.jsonl"
+        led.write_text('{"a": 1}\n\n{"a": 2}\n')
+        self.assertEqual(rv._read_jsonl(led), [{"a": 1}, {"a": 2}])
+
+
+class TestSiegeR4BA4ReplacementCharactersAreNotSignal(_InqBase):
+    """SIEGE-R4BA-4 — U+FFFD is manufactured by the DECODER, and it was counting as
+    "substantive content delivered".
+
+    `_slice` decodes with `errors="replace"`, so every undecodable byte sequence becomes
+    one U+FFFD; its general category is `So`, which `_substantive_len`'s C/Z filter
+    counts. Four undecodable bytes — the minimum a `#B` range can cite — therefore reach
+    `_SIGNAL_MIN_CHARS` and register as delivered signal, on a range where NONE of the
+    receipt-cited bytes decoded at all. `#B` ranges seek and slice raw bytes, so they do
+    not pass the `_read_text_lossless` UTF-8 gate that would otherwise reject them."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def test_the_helper_does_not_count_replacement_characters(self):
+        rv = _import_rv()
+        self.assertEqual(rv._substantive_len("����"), 0)
+        self.assertFalse(rv._delivered_signal("����"))
+        # The bound: real characters beside them still count, and four of THEM still do.
+        self.assertTrue(rv._delivered_signal("�BOOM�"))
+
+    def _b_range_receipt(self, raw, name):
+        h, size = self.plant(self.base, "evidence.log", raw)
+        body = _receipt(
+            "grep:evidence.log#B1-B4  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        p = self.base / name
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {self.PREFIX}\n")
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    def test_a_range_over_undecodable_bytes_cannot_retire_a_predecessor(self):
+        """Pre-fix: `witness 1/1`, exit 0, predecessor retired — over four bytes that
+        did not decode to anything."""
+        out = self._b_range_receipt(b"\xff\xfe\xff\xfe\ntail text\n", "fffd.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_range_over_decodable_bytes_still_does(self):
+        """Non-vacuity — four REAL characters in the same position still deliver."""
+        out = self._b_range_receipt(b"BOOM\ntail text\n", "decodable.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("witness 1/1", out.stderr)
+
+
+class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
+    """SIEGE-R4BA-5 — an `RCPT v1` header skipped the ENTIRE SUPERSEDES
+    witness-evidence consequent.
+
+    `parse_v11_sections` returns None on a v1 header, and the consequent is gated on
+    `if v11 is not None`. The only remaining signal was the soft `UNVERIFIABLE: v1.1
+    Layer-2 rules not evaluated` note — a channel this file's own docstrings call
+    order-unstable, which moves no counter and no exit code. So the receipt's own author
+    chose, with one token in its first line, whether a newer safety rule applied to it,
+    while `return-convention.md` § The Sweep step 3 tells the orchestrator to process
+    SUPERSEDES with no check of its own because Tier-2 is supposed to have done it.
+
+    The advisory is NOT replaced: mixed-version runs stay legal, and a v1 receipt
+    claiming no supersession still exits 0 carrying the note."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _receipt_text(self, supersedes, v11):
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],          # evidence.log is never planted
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        if v11:
+            body = body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+        return (body + f"TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {supersedes}\n")
+
+    def _run(self, supersedes, v11, name):
+        p = self.base / name
+        p.write_text(self._receipt_text(supersedes, v11))
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    def test_the_two_header_spellings_agree_on_a_bogus_supersedes(self):
+        """The finding verbatim: byte-identical receipts differing ONLY in the header
+        token exited 1 (v1.1, correctly rejected) and 0 (v1, silently accepted)."""
+        v11 = self._run(self.PREFIX, True, "v11.rcpt")
+        legacy = self._run(self.PREFIX, False, "v1.rcpt")
+        self.assertEqual(v11.returncode, 1, v11.stderr)
+        self.assertEqual(legacy.returncode, 1, legacy.stderr)
+        self.assertIn("EVALUATED at Tier-2", legacy.stderr)
+        self.assertIn("RCPT v1", legacy.stderr)     # the cause is NAMED, not generic
+
+    def test_a_v1_receipt_claiming_no_supersession_is_untouched(self):
+        """The bound. `return-convention.md:605` makes mixed-version runs legal, so the
+        gate is narrowed to the one shape where the version dispatch is a BYPASS — the
+        advisory keeps carrying every other v1 receipt at exit 0."""
+        out = self._run("none", False, "v1-none.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("UNVERIFIABLE: v1.1 Layer-2 rules not evaluated", out.stderr)
+
+    def test_free_text_trailing_a_none_supersedes_does_not_misfire_as_a_claim(self):
+        """Code-review #583 finding #2 — round 3's ASCII skeleton (`[A-Za-z0-9:]`)
+        stripped every space alongside every invisible codepoint, then required the
+        WHOLE remainder of the line to fullmatch the value grammar. A v1 receipt's
+        `SUPERSEDES: none` line naturally carries a trailing plain-English aside on
+        real receipts (explaining WHY nothing is superseded), and that aside glued
+        onto `none` and failed the fullmatch — misclassifying an ordinary none-claim
+        as `malformed`, i.e. AS a claim, and wrongly hard-failing a v1 receipt that
+        made no claim at all. Measured before the round-4 fix: this exact receipt
+        exited 1 with `EVALUATED at Tier-2`; after it, 0."""
+        p = self.base / "v1-none-trailing-prose.rcpt"
+        p.write_text(self._receipt_text(
+            "none, as this is a net-new addition with no prior work to replace",
+            False))
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_trailing_non_none_supersedes_wins_over_a_leading_none(self):
+        """`parse_v11_sections` rejects a duplicated section outright and the legacy
+        tail scan cannot, so a first-hit-wins read would let `SUPERSEDES: none` followed
+        by a real claim answer "none" — the appender's shape the `pattern=` clause rules
+        already record. Fail-CLOSED: any non-`none` body wins."""
+        p = self.base / "v1-dup.rcpt"
+        p.write_text(self._receipt_text("none", False)
+                     + f"SUPERSEDES: {self.PREFIX}\n")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_an_indented_supersedes_line_does_not_disarm_the_legacy_gate(self):
+        """CHAIN-1 (siege Phase 4, round 1 on this fix) — `_legacy_supersedes_claim`
+        mirrored `parse_v11_sections`'s column-0 `line.startswith("SUPERSEDES:")`, which
+        is safe on a v1.1 receipt (an indented section reads as ABSENT and the receipt
+        still hard-FAILs on a missing required section) but is the ONLY reader of the
+        tail on a legacy `RCPT v1` header — indenting the line by one space made the
+        claim invisible to this scan entirely, `claim` stayed `None`, and the gate never
+        fired. Measured live: byte-identical column-0 and indented receipts exited 1 and
+        0 respectively before this fix."""
+        p = self.base / "v1-indent.rcpt"
+        p.write_text(self._receipt_text(self.PREFIX, False).replace(
+            f"SUPERSEDES: {self.PREFIX}", f"  SUPERSEDES: {self.PREFIX}"))
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    # CHAIN-1 residual — warden 2026-08-31T-563-warden round-2. The FIRST fix above
+    # was `raw_line.lstrip()`, an ASCII-whitespace blocklist: `str.lstrip()` removes
+    # only codepoints for which `str.isspace()` is true, and every one of these six
+    # is False under `str.isspace()`, so each defeats `.lstrip()` exactly as an
+    # ordinary space did before this class's own indent test above. `_is_format_or_
+    # separator` (Unicode category `C*`/`Z*`) is a superset of `str.isspace()`'s
+    # notion and closes all six with the SAME test the ASCII case uses — proving the
+    # fix is class-based (a category rule), not the next entry in an enumeration.
+    ZERO_WIDTH_CODEPOINTS = {
+        "u200b_zero_width_space": chr(0x200B),
+        "ufeff_bom": chr(0xFEFF),
+        "u2060_word_joiner": chr(0x2060),
+        "u200c_zwnj": chr(0x200C),
+        "u00ad_soft_hyphen": chr(0x00AD),
+        "u180e_mongolian_vowel_separator": chr(0x180E),
+        # Beyond the six named in the finding — a broader Cf sample, not more
+        # enumeration: none of these are `str.isspace()`-true either (`.lstrip()`
+        # would have missed them just as it missed the six above), and the category
+        # rule closes all of them with the same test.
+        "u200d_zwj": chr(0x200D),                   # zero width joiner
+        "u061c_arabic_letter_mark": chr(0x061C),    # bidi format control
+        "u200e_left_to_right_mark": chr(0x200E),    # bidi format control
+        "u2061_function_application": chr(0x2061),  # invisible math operator
+    }
+
+    def test_an_invisible_unicode_prefixed_supersedes_line_does_not_disarm_the_gate(self):
+        for label, cp in self.ZERO_WIDTH_CODEPOINTS.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    f"SUPERSEDES: {self.PREFIX}", f"{cp}SUPERSEDES: {self.PREFIX}"))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    # CHAIN-1 residual — warden 2026-08-31T-563-warden round-3. The SECOND fix
+    # (round-2, above) stripped a LEADING run of `_is_format_or_separator`-true
+    # codepoints, still positional: `SUPER<U+200B>SEDES:` (the codepoint INSIDE
+    # the keyword, not before it) survived because `line.startswith("SUPERSEDES:")`
+    # never matched a string whose 6th character is a zero-width space, regardless
+    # of what got stripped from the front. Two independent fresh-eyes reviews
+    # confirmed this live via the CLI before this fix. The round-3 fix drops
+    # category reasoning (`_is_format_or_separator`) entirely for this function and
+    # keeps only an ASCII skeleton (`[A-Za-z0-9:]`) before the keyword search —
+    # closing interior insertion of ANY codepoint outside that skeleton, not one
+    # more category.
+    INTERIOR_CODEPOINTS = {
+        "u200b_zero_width_space": chr(0x200B),
+        "ufeff_bom": chr(0xFEFF),
+        "u200d_zwj": chr(0x200D),
+        # KNOWN-RESIDUE categories (Lo/So/Mn) `_substantive_len` documents as an
+        # accepted tradeoff THERE — `_is_format_or_separator` (C*/Z* only) does
+        # NOT strip these, so a round-2-style category strip still fragments the
+        # keyword on these three specifically; the ASCII skeleton does not care
+        # what category a non-allowlisted codepoint carries.
+        "u3164_hangul_filler": chr(0x3164),
+        "u2800_braille_blank": chr(0x2800),
+        "u0301_combining_acute": chr(0x0301),
+    }
+
+    def test_an_interior_codepoint_inside_the_keyword_does_not_disarm_the_gate(self):
+        for label, cp in self.INTERIOR_CODEPOINTS.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-interior-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    "SUPERSEDES:", f"SUPER{cp}SEDES:", 1))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_known_residue_codepoint_leading_the_line_does_not_disarm_the_gate(self):
+        """Round-2's category strip did not cover `Lo`/`So`/`Mn` at all — a LEADING
+        one defeated `line.startswith` regardless of what else got stripped. The
+        round-3 ASCII skeleton drops it (it isn't `[A-Za-z0-9:]`) before the search
+        even runs, so position no longer matters."""
+        for label, cp in {"u3164": chr(0x3164), "u2800": chr(0x2800),
+                          "u0301": chr(0x0301)}.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-leading-residue-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    f"SUPERSEDES: {self.PREFIX}", f"{cp}SUPERSEDES: {self.PREFIX}"))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_line_separator_right_after_next_does_not_lose_the_claim(self):
+        """Round-3 fix-of-a-fix (found by this fix's own mandated scoped re-temper,
+        before shipping) — switching the outer split from `str.splitlines()` to a
+        literal `\\n`-only split, without also dropping the `[1:]` skip that used to
+        rely on `splitlines()`'s broader line-break set, let a `splitlines()`-special
+        separator placed WHERE the `\\n` after `NEXT` would normally sit fuse the
+        `NEXT` residue and the `SUPERSEDES:` line into one `split("\\n")` element —
+        which `[1:]` then discarded whole, losing the claim entirely (`None`,
+        exit 0) rather than merely failing to strip a codepoint inside the keyword.
+        Fixed by dropping `[1:]`: it was never correctness-load-bearing.
+
+        DISCRIMINATION NOTE: `SUPERSEDES:` must be the line FUSED to `NEXT`'s own
+        residue — with a real `\\n`-delimited `TRIPWIRE:` line still in between (as
+        `_receipt_text` normally emits), `[1:]` only discards the NEXT+TRIPWIRE
+        fusion and `SUPERSEDES:` survives as its own element regardless of this
+        bug, so this test builds the tail directly rather than via
+        `_receipt_text`."""
+        base_body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        for label, cp in {"u2028_line_sep": chr(0x2028),
+                          "u2029_para_sep": chr(0x2029),
+                          "u0085_nel": chr(0x0085),
+                          "u001e_rs": chr(0x001E)}.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-nextfuse-{label}.rcpt"
+                text = base_body.replace(
+                    "NEXT       (none)\n",
+                    f"NEXT       (none){cp}SUPERSEDES: {self.PREFIX}\n", 1)
+                p.write_text(text)
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_unicode_line_separator_does_not_split_the_keyword_past_detection(self):
+        """`str.splitlines()` treats U+2028/U+2029 (and several `Cc` controls) as
+        line breaks in addition to `\\n` — a round-3-first-attempt residual that
+        split `SUPER<U+2028>SEDES:` into two `raw_line` strings before any
+        per-character filtering ran, so neither fragment matched. Fixed by
+        splitting on the literal `\\n` byte only."""
+        for label, cp in {"u2028_line_sep": chr(0x2028),
+                          "u2029_para_sep": chr(0x2029)}.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-linesep-{label}.rcpt"
+                p.write_text(self._receipt_text(self.PREFIX, False).replace(
+                    "SUPERSEDES:", f"SUPER{cp}SEDES:", 1))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_malformed_supersedes_body_is_treated_as_a_claim_not_as_none(self):
+        """The confirmed grammar (`return-convention.md`) is `none` or a bare
+        12-hex prefix — anchored, full-string. A body that matches neither is a
+        claim BY CONSTRUCTION (never silently coerced to `none`), so it still
+        fails closed via the caller's `not in (None, "none")` gate."""
+        for label, body in {
+            "garbage_text": "not-a-valid-hash",
+            "uppercase_hex": "21A1B2C3D4E5",
+            "short_hex": "21a1b2c3",
+            "hex_plus_trailing_junk": "21a1b2c3d4e5extra",
+        }.items():
+            with self.subTest(label=label):
+                p = self.base / f"v1-malformed-{label}.rcpt"
+                p.write_text(self._receipt_text(body, False))
+                out = self.cli("--tier2", "--root", str(self.base), str(p))
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_a_legitimate_valid_prefix_still_supersedes_correctly_under_v11(self):
+        """Discriminator for the whole class: the allowlist/grammar redesign must
+        not turn INTO a denylist of its own by rejecting well-formed claims. A
+        genuine 12-hex prefix declared under `RCPT v1.1` (where the real Layer-2
+        rules run) is unaffected by this legacy-header-only detector."""
+        out = self._run(self.PREFIX, True, "v11-valid.rcpt")
+        # Rejected for the SAME reason every valid-shaped SUPERSEDES claim in this
+        # class is (the witness-evidence requirement, not this detector) — the
+        # point is it is NOT rejected via the legacy-header path this class tests.
+        self.assertNotIn("declares `RCPT v1`", out.stderr)
 
 
 if __name__ == "__main__":

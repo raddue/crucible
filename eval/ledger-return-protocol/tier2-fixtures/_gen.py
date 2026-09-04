@@ -415,14 +415,6 @@ add("two-root-tampered-hash-second-root",
     + _SPLIT_NOTE)
 
 
-def _cache_for(artifacts, trace, witness, verdict, root):
-    cache = {}
-    rv._build_identity_cache(artifacts, trace,
-                             [witness] if witness is not None else [],
-                             verdict, root, cache)
-    return cache
-
-
 def verify_fixture(fx):
     """Run the committed fixture through rcpt_verify's Tier-2 exactly as --selftest will."""
     text = fx["receipt"]
@@ -430,6 +422,16 @@ def verify_fixture(fx):
     strict = fx["strict"]
     raised = None
     got = None
+    # code-review #583 finding #3 — mirrors scripts/measure_474_corpus.py's
+    # `disposition()`: `cache = {}` is created HERE, before the call, and passed BY
+    # REFERENCE into `_build_identity_cache` (which mutates it in place per name as it
+    # resolves), so this frame's `cache` already holds whatever `_build_identity_cache`
+    # opened even if it raises partway through (e.g. a `--strict` ambiguity, a
+    # `WitnessTimeout`). `_close_identity_cache_fds(cache)` in the `finally:` below
+    # closes every fd `_resolve_once`'s walk opened for this fixture that no read ever
+    # consumed — this generator's self-verify loop previously had no equivalent and
+    # leaked one fd per fixture on every raising disposition.
+    cache = {}
     try:
         verdict = rv.lint_receipt(text)
         sections = rv.parse_receipt(text)
@@ -440,10 +442,18 @@ def verify_fixture(fx):
         # it: the generator's self-verify runs the committed corpus through the BOUND
         # path the CLI takes, not a second unbound one that could green a row the
         # shipped reader rejects.
-        cache = _cache_for(artifacts, trace, witness, verdict, root)
+        rv._build_identity_cache(artifacts, trace,
+                                 [witness] if witness is not None else [],
+                                 verdict, root, cache)
         verified = {}
         rv.tier2_artifacts(artifacts, trace, root, strict, None,
                            cache=cache, verified=verified)
+        # #563 inquisitor finding — the real --selftest/--tier2 path runs this between
+        # the ARTIFACTS and WITNESS legs; omitting it here reopened the exact unbound
+        # gap the SIEGE-R2BA-1 comment above says this generator's self-verify exists to
+        # close (tier2_witness would read never-finalized _IDENTITY_DEGENERATE /
+        # _IDENTITY_UNVERIFIABLE_COLLISION sentinels, diverging from the shipped reader).
+        rv._finalize_identity_degenerate(cache, verified)
         if verdict in {"PASS", "FAIL"}:
             rv.tier2_witness(witness, trace, root, strict, verdict, None,
                              cache=cache, verified=verified)
@@ -454,6 +464,8 @@ def verify_fixture(fx):
         got = "error"        # never compares equal to expect ('pass'|'fail' only)
     except rv.LintError as e:
         raised = str(e)
+    finally:
+        rv._close_identity_cache_fds(cache)
     # `got` may already be set by the timeout handler above — do not overwrite it, or
     # the swallow is reinstated while looking fixed.
     got = got or ("fail" if raised else "pass")

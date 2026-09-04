@@ -79,7 +79,7 @@ Namespace CLAIM-key discriminators as `quality-gate:<key>` (e.g. `quality-gate:s
 
 **Sweep (dispatch-loop clause):** The orchestrator MAY NOT dispatch the next round until it has: (1) linted; (2) appended; (3) processed SUPERSEDES; (4) evaluated self-checks; (5) evaluated forward-checks against every active prior entry (TRIPWIRE ∪ TRIPWIRE-CHILD); (6) Read each firing M's full receipt and narrated the re-read; (7) then dispatch.
 
-**Fix-agent supersession.** A QG fix-agent supersedes the prior FAIL red-team receipt. `SUPERSEDES: <fail-prefix>` + cited CLAIM + `exec`/`grep` witness with `ran=TRACE#N`. Tier-2 re-runs the witness against the fix — only survives if clean.
+**Fix-agent supersession.** A QG fix-agent supersedes the prior FAIL red-team receipt. `SUPERSEDES: <fail-prefix>` + cited CLAIM + `exec`/`grep` witness with `ran=TRACE#N`. Tier-2 re-runs the witness against the fix — only survives if clean. **Except on a `BLOCKED` verdict** — see *Four new hard-FAIL surfaces* above (the third surface): the convention hard-FAILs any non-`none` `SUPERSEDES:` on `BLOCKED` unconditionally, so a fix agent that cannot finish its own work returns `SUPERSEDES: none` instead.
 
 **Fix-agent superseding-witness by artifact class (#366).** Because the red-team FAIL receipt is now a real supersession anchor, the convention's witness-evidence requirement (a FAIL / `SUSPICION ≥ 0.30` predecessor demands the superseding `WITNESS` be `kind ∈ {exec, grep}` + `ran=TRACE#N`) is live on the fix-agent's superseding receipt:
 
