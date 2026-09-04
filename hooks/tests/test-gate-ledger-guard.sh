@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=22
+TOTAL=25
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -488,6 +488,104 @@ CONTENT="$(make_ledger "build-test-022" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED
 JSON="$(make_legacy_json "$LEDGER_PATH" "$CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 22 "Legacy .tool/.input non-PASS write allowed" 0 "$RC"
+
+# ========================================================================
+# Test 23: CHAIN-N1 (PR #583 warden gate) — Edit old_string is an INDENTED
+# partial line (the ordinary real-world Edit shape), introducing a new PASS
+# with no verdict marker. The prior whole-line-equality awk matcher failed
+# to match this shape, silently reverted CONTENT to the pre-edit file, and
+# allowed the write (exit 0) even though it introduces an unverified PASS.
+# Must now be BLOCKED (exit 2).
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+EXISTING="$(make_ledger "build-test-023" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+EDIT_JSON="$(make_edit_json "$LEDGER_PATH" "  Status: IN_PROGRESS" "  Status: PASS")"
+# Rewrite the ledger to have an indented Status line under Phase 1 so the
+# indented old_string is present and unique in the file.
+printf '%s\n' "# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-023
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+  Status: IN_PROGRESS
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED" > "$LEDGER_PATH"
+set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
+check 23 "CHAIN-N1: indented old_string PASS-introducing edit blocked" 2 "$RC"
+
+# ========================================================================
+# Test 24: R2BA-1 (PR #583 warden gate) — Edit old_string contains a
+# backslash. The prior `-v`-assigned awk matcher underwent awk's own
+# escape-sequence processing on the value, silently failing to match any
+# old_string containing a backslash and allowing the write (exit 0). Must
+# now be BLOCKED (exit 2).
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+printf '%s\n' "# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-024
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: IN_PROGRESS \\ (pending review)
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED" > "$LEDGER_PATH"
+EDIT_JSON="$(make_edit_json "$LEDGER_PATH" 'Status: IN_PROGRESS \ (pending review)' "Status: PASS")"
+set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
+check 24 "R2BA-1: backslash-containing old_string PASS-introducing edit blocked" 2 "$RC"
+
+# ========================================================================
+# Test 25: R2BA-3 (PR #583 warden gate) — phase header with a DOUBLE space
+# (`## Phase  4`) introducing a new PASS with no verdict marker. The prior
+# exact-single-space regex silently failed to recognize the phase header at
+# all, so INCOMING_PHASES stayed empty and the write was allowed (exit 0)
+# even though a human/LLM reader sees it as a normal Phase 4 PASS. Must now
+# be BLOCKED (exit 2).
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+EXISTING="$(make_ledger "build-test-025" "PASS" "PASS" "COMPLETE" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+DOUBLE_SPACE_CONTENT="# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-025
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: PASS
+
+## Phase 2: Plan
+Status: PASS
+
+## Phase 3: Execute
+Status: COMPLETE
+
+## Phase  4: Completion
+Status: PASS"
+JSON="$(make_json "$LEDGER_PATH" "$DOUBLE_SPACE_CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 25 "R2BA-3: double-space phase header PASS-introducing write blocked" 2 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
