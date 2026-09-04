@@ -6,8 +6,9 @@
 # (legacy .tool/.input fallback accepted — see build-routing-advisor.sh's T1 finding)
 # Exit 0 = allow, non-zero = block (reason on stderr).
 #
-# Configured in .claude/settings.json:
-#   "hooks": { "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash hooks/gate-ledger-guard.sh", "timeout": 500 }] }] }
+# Configured in ~/.claude/settings.json with an ABSOLUTE path (S1/CHAIN-N5, PR
+# #583 warden gate: a relative path here is cwd-dependent):
+#   "hooks": { "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash /absolute/path/to/crucible/hooks/gate-ledger-guard.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally
 set +e
@@ -65,32 +66,30 @@ if [ "$IS_EDIT" = "true" ]; then
   RESOLVED_EDIT_PATH="${FILE_PATH/#\~/$HOME}"
   if [ -f "$RESOLVED_EDIT_PATH" ]; then
     CONTENT="$(cat "$RESOLVED_EDIT_PATH" 2>/dev/null)" || true
-    # Simulate the edit result: replace old_string with new_string
-    # Use awk for literal string replacement (no regex interpretation)
-    CONTENT="$(awk -v old="$EDIT_OLD" -v new="$EDIT_NEW" '
-      BEGIN { found=0; split(old, old_lines, "\n"); n=length(old_lines) }
-      {
-        lines[NR] = $0
+    # Simulate the edit result: replace old_string with new_string.
+    # CHAIN-N1/R2BA-1 (PR #583 warden gate): the prior line-array matcher required
+    # WHOLE-LINE equality (so an indented/partial-line old_string — the ordinary
+    # Edit shape — silently failed to match and the edit was dropped) and passed
+    # old/new via `-v`, which undergoes awk's own backslash escape-sequence
+    # processing (so any old_string containing a backslash also silently failed to
+    # match). Both fail OPEN: a missed match means CONTENT reverts to the pre-edit
+    # file, the phase-diff below finds no new PASS, and the write is allowed
+    # unchecked. Fixed by doing a literal substring search/replace over the WHOLE
+    # joined file content (matching Edit's actual semantics — old_string need not
+    # be a full line) and reading old/new via ENVIRON, which does NOT undergo
+    # awk's -v escape processing.
+    CONTENT="$(OLD_STRING="$EDIT_OLD" NEW_STRING="$EDIT_NEW" awk '
+      BEGIN {
+        old = ENVIRON["OLD_STRING"]
+        new = ENVIRON["NEW_STRING"]
       }
+      { full = (NR > 1) ? full "\n" $0 : $0 }
       END {
-        for (i=1; i<=NR; i++) {
-          if (found == 0 && lines[i] == old_lines[1]) {
-            match_all = 1
-            for (j=2; j<=n; j++) {
-              if (i+j-1 > NR || lines[i+j-1] != old_lines[j]) {
-                match_all = 0
-                break
-              }
-            }
-            if (match_all) {
-              printf "%s", new
-              if (i+n-1 < NR) printf "\n"
-              i = i + n - 1
-              found = 1
-              continue
-            }
-          }
-          print lines[i]
+        pos = (old == "") ? 0 : index(full, old)
+        if (pos > 0) {
+          printf "%s%s%s", substr(full, 1, pos - 1), new, substr(full, pos + length(old))
+        } else {
+          printf "%s", full
         }
       }
     ' "$RESOLVED_EDIT_PATH")"
@@ -116,12 +115,14 @@ esac
 parse_phase_statuses() {
   local text="$1"
   echo "$text" | awk '
-    /^## Phase [0-9]+/ {
+    /^## Phase[ \t]+[0-9]+/ {
       # Extract just the phase number — robust against malformed headers
-      # like "## Phase 4:Completion" (no space after colon).
+      # like "## Phase 4:Completion" (no space after colon) and, per
+      # R2BA-3 (PR #583 warden gate), "## Phase  4" (extra spaces) or a
+      # tab, which the prior exact-single-space regex silently missed.
       # Uses sub() to isolate the number (portable across awk versions).
       line = $0
-      sub(/^## Phase /, "", line)
+      sub(/^## Phase[ \t]+/, "", line)
       sub(/[^0-9].*/, "", line)
       phase = line
     }

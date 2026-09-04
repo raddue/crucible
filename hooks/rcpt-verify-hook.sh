@@ -8,9 +8,12 @@
 # structural lint emits a 2-line ADVISORY on stderr. The hook ALWAYS exits 0 and
 # performs NO writes (find-and-report; it does not block, edit, or record anything).
 #
-# OPT-IN — not auto-enabled. Configure in .claude/settings.json:
+# OPT-IN — not auto-enabled. Configure in ~/.claude/settings.json with an
+# ABSOLUTE path (S1/CHAIN-N5, PR #583 warden gate: a relative path here is
+# cwd-dependent — the same class of bug the CA-4/IP-1 fix closed in this
+# script's own linter-resolution logic, see below):
 #   "hooks": { "SubagentStop": [{ "matcher": "*", "hooks": [
-#     { "type": "command", "command": "bash hooks/rcpt-verify-hook.sh", "timeout": 500 }
+#     { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/rcpt-verify-hook.sh", "timeout": 500 }
 #   ]}]}
 #
 # Mirrors gate-ledger-guard.sh's never-fatal skeleton + build-routing-advisor.sh's
