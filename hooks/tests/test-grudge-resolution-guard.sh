@@ -2057,7 +2057,7 @@ check 332 "the never-before-seen candidate still blocks at (1/3) — contract:gr
 # ========================================================================
 # INV-T21 — join / merge re-arm
 # ========================================================================
-# contract:group:inv-t21 checks=32
+# contract:group:inv-t21 checks=45
 # (a) two disjoint count-1 groups bridged by a NEW candidate: merged count is
 #     max(1,1)=1, plus this Stop's single increment -> persisted 2. A summing
 #     implementation persists 3; a no-increment one persists 1.
@@ -2179,6 +2179,86 @@ check 318 "the merged group takes the lexicographically lower id — contract:gr
 run_hook s21d true
 check 319 "the Stop after the unequal-count merge gives up — contract:group:inv-t21" 0 "$RC"
 
+# (e) THREE groups merging on ONE bridging SHA. (a)-(d) all merge exactly two,
+#     and at arity 2 a wrong n-ary reduction is right by construction: a fold
+#     that unsets only one loser, or that canonicalises by visit order rather
+#     than by id, cannot be told from the real thing. Here C's group stands at
+#     2 and D's and E's at 1 when F bridges all three: max(2,1,1) clamped to
+#     MAX_BLOCKS-1 is 2, plus this Stop's single increment — so the merge Stop
+#     blocks at (3/3) and the NEXT Stop gives up.
+#
+#     Why (2,1,1) and not three PAIRWISE-distinct counts: the merge clamps to
+#     MAX_BLOCKS-1 = 2, so 2 and 3 are indistinguishable in the persisted
+#     result, and a (3,2,1) staging would let a rule that happened to pick the
+#     count-2 group pass as if it were max(). With a UNIQUE maximum and both
+#     other groups at 1, "take the canonical group's count", "take the min"
+#     and "take the last group visited" each persist 2 where max() persists 3.
+#
+#     Why the canonical id is the MIDDLE one in the merge's visit order: the
+#     merge walks the bridged groups in the hook's own iteration order (C, D,
+#     E for these SHAs) and the lowest id, D, sits second — so a canonical
+#     rule of "take the first visited" picks C and "take the last visited"
+#     picks E, and both fail check 352. One rival cannot be separated here:
+#     the maximum sits on the FIRST group visited, so "take the first
+#     visited group's count" coincides with max(). Moving the maximum to the
+#     middle to kill that one would put the lowest id first or last and
+#     revive one of the two canonical rules — the middle slot buys exactly
+#     one of the two, and the id rules are the ones arity 2 cannot reach at
+#     all.
+hook_case t21e
+for f in x y z; do echo "V = 0" > "$HC_REPO/$f.py"; done
+commit_all "$HC_REPO" "chore: baseline"
+echo "V = 1" > "$HC_REPO/x.py"; commit_all "$HC_REPO" "fix(c): older x fix"
+T21E_C="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21e
+check 344 "the oldest of the three groups blocks on its own first Stop — contract:group:inv-t21" 2 "$RC"
+echo "V = 1" > "$HC_REPO/y.py"; commit_all "$HC_REPO" "fix(d): y only"
+T21E_D="$(sha_of "$HC_REPO" HEAD)"
+echo "V = 1" > "$HC_REPO/z.py"; commit_all "$HC_REPO" "fix(e): z only"
+T21E_E="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21e true
+T21E_CANON="$(printf '%s\n%s\n%s\n' "$T21E_C" "$T21E_D" "$T21E_E" | LC_ALL=C sort | head -1)"
+# Fixture premise, asserted as a hard abort rather than a `check` so the tag
+# arithmetic is unchanged: the group holding the MAXIMUM count must not also be
+# the lowest-id one, or "take the canonical group's count" coincides with
+# max() and the whole point of this fixture is gone. `commit_all` pins the
+# author and committer dates, so these three SHAs — and therefore this
+# ordering — are reproducible; if a reworded message ever shifts them the
+# fixture must be re-staged, not quietly kept.
+if [ "$T21E_CANON" = "$T21E_C" ]; then
+  echo "FIXTURE ERROR: t21e's max-count group is also the canonical (lowest) id" >&2
+  exit 1
+fi
+check 345 "three distinct groups exist before the merge — contract:group:inv-t21" 3 \
+  "$(st "$HC_REPO" s21e '.block_counts|length')"
+check 346 "the oldest group holds the unique maximum, 2 — contract:group:inv-t21" 2 \
+  "$(st "$HC_REPO" s21e ".block_counts[.sha_group[\"$T21E_C\"]]")"
+check 347 "the middle group stands at 1 before the merge — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21e ".block_counts[.sha_group[\"$T21E_D\"]]")"
+check 348 "the youngest group stands at 1 before the merge — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21e ".block_counts[.sha_group[\"$T21E_E\"]]")"
+echo "V = 2" > "$HC_REPO/x.py"; echo "V = 2" > "$HC_REPO/y.py"; echo "V = 2" > "$HC_REPO/z.py"
+commit_all "$HC_REPO" "fix(f): x, y and z bridge"
+T21E_F="$(sha_of "$HC_REPO" HEAD)"
+run_hook s21e true
+check 349 "the three-group merge blocks on the merge Stop — contract:group:inv-t21" 2 "$RC"
+check 350 "the three-group merge reports (3/3), not (2/3) — contract:group:inv-t21" yes "$(has "$ERR" "(3/3)")"
+check 351 "the three-group merge collapses to one counter — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21e '.block_counts|length')"
+# 351 says ONE counter is left; this says WHICH, concretely. A merge that
+# canonicalises by visit order rather than by id still collapses to exactly one
+# counter — just the wrong one — and a fold that drops only one of the two
+# losers leaves the surviving loser's id in this key list as well.
+check 352 "the sole surviving counter is the lexicographically lowest of all THREE ids — contract:group:inv-t21" \
+  "$T21E_CANON" "$(st "$HC_REPO" s21e '.block_counts|keys|join(",")')"
+check 353 "min(max(2,1,1),2)=2 plus one increment persists 3 — contract:group:inv-t21" 3 \
+  "$(st "$HC_REPO" s21e ".block_counts[.sha_group[\"$T21E_F\"]]")"
+check 354 "all four bridged SHAs share the canonical id — contract:group:inv-t21" 1 \
+  "$(st "$HC_REPO" s21e '[.sha_group[]]|unique|length')"
+check 355 "the bridging SHA is named on the merge Stop — contract:group:inv-t21" yes "$(has "$ERR" "$T21E_F")"
+run_hook s21e true
+check 356 "the Stop after the three-group merge gives up — contract:group:inv-t21" 0 "$RC"
+
 # ========================================================================
 # INV-T22 (extension) — the checkpoint may only ever hold a real object id
 #
@@ -2273,7 +2353,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=355
+EXPECTED_CHECKS=368
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
