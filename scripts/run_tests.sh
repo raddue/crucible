@@ -277,7 +277,7 @@ run python3 eval/grudge/test-grudge-wiring.py
 # --- #558/#559 acceptance oracle (#579) ---
 run python3 scripts/test_558_559_acceptance.py
 
-# --- #558/#559 contract-tag coverage sweep (#577, #566) ---
+# --- #558/#559 contract-tag coverage sweep + INV-C10 (#577, #566, #578) ---
 # Was a shell fence pasted out of the plan doc's Step 12.3, five of whose
 # assertions could not fail. run_expect, not run: a bare `run` would accept a
 # future mutation that exits 0 without asserting anything, which is the exact

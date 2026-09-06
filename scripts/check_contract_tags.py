@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codified Step 12.3 contract-coverage sweep (#577, #566).
+"""Codified Step 12.3 contract-coverage sweep (#577, #566, #578).
 
 Invocation (from repo root):
     python3 scripts/check_contract_tags.py            # gate the real repo
@@ -16,6 +16,7 @@ pre-existing multi-marker break did not mask anything:
   * rename a carrier file (grep contributes zero matches)            -> fence rc 0
   * add a `contract:foo:inv-t99` tag the contract never declared     -> fence rc 0
   * delete a `test_tag:` from the contract YAML                      -> fence rc 0
+  * make `3193271` unresolvable (shallow clone)                      -> fence rc 0
 
 Each of those is a mutant this script turns red. What it checks:
 
@@ -49,6 +50,8 @@ Each of those is a mutant this script turns red. What it checks:
      being counted; the inline annotations must sum to it and disagreement in
      either direction is an error. Lowering coverage now requires a deliberate
      edit to the map.
+  6. **INV-C10** (#578) — see `check_no_merge_grudge_writer` and
+     `check_merge_pr_untouched` below.
 
 ### Scope limit on "the test really pins its invariant" (read this)
 
@@ -92,6 +95,7 @@ import contextlib
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -99,6 +103,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 CONTRACT_YAML = "docs/plans/2026-08-28-558-559-crap-grudge-contract.yaml"
+
+# The one Path-A-adjacent artifact INV-C10 names by path, plus the commit the
+# merge-pr/SKILL.md Step 7.5 fence must be unchanged since.
+MERGE_PR_SKILL = "skills/merge-pr/SKILL.md"
+INV_C10_BASE_SHA = "3193271"
 
 TAG_RE = re.compile(r"contract:[a-z]+:inv-t[0-9]+")
 ANNOT_RE = re.compile(r"(contract:[a-z]+:inv-t[0-9]+)[ \t]+checks=([0-9]+)")
@@ -549,10 +558,209 @@ def check_python_carrier(root: Path, rel: str, coverage_map: dict, errors: list[
             )
 
 
+# --- 6. INV-C10 (#578) ------------------------------------------------------
+#
+# INV-C10: "Path A stays cut: no hooks/grudge-merge-writer.sh exists;
+# merge-pr/SKILL.md Step 7.5 remains exactly its existing templated bash fence
+# (plugin_root=... + placeholder-valued grudge_append.py), untouched and not
+# further automated."
+#
+# The fence checked this with `test ! -e hooks/grudge-merge-writer.sh` (one
+# filename, not the content it stands for) plus a `git diff … | grep` pipeline
+# whose exit status is grep's and whose output nothing reads.
+
+# The Step 7.5 fence, pinned verbatim. Clone-independent: this half of the
+# INV-C10 check runs in a shallow clone, a tarball, anywhere.
+EXPECTED_STEP_75_FENCE = '''# only for fix(*) PRs
+plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+python3 "$plugin_root/scripts/grudge_append.py" \\
+  --symptom "<PR title minus the fix() prefix>" \\
+  --root-cause "<from PR body, if stated>" \\
+  --files "<comma-separated files the PR changed>" \\
+  --commit "<squash/merge SHA>" \\
+  --why "<from PR body, if stated>"'''
+
+# The only change INV-C10 permits since INV_C10_BASE_SHA: the one added
+# paragraph (plus the blank line separating it). Measured from the real diff.
+EXPECTED_ADDED_LINES = [
+    "If this step is skipped or fails, Path B's Stop hook "
+    "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
+    "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
+    "",
+]
+
+# Command words that may precede the real command word in a simple command.
+_BASH_PREFIXES = {
+    "if", "then", "else", "elif", "do", "while", "until", "!", "exec", "eval",
+    "command", "sudo", "env", "time", "nohup",
+}
+_PY_RUNNERS = {"python", "python3", "python3.12", "uv", "poetry"}
+
+
+def _executes_grudge_append(text: str) -> list[str]:
+    """Lines of a shell script that EXECUTE the grudge writer, if any.
+
+    INV-C10 is about Path A staying cut, not about one filename, so the
+    predicate is content-based: does any hook script *run* `grudge_append.py`?
+    Deliberately not "does any hook mention it" — `hooks/grudge-resolution-guard.sh`
+    legitimately names the script twice (an `APPEND_SCRIPT=` assignment and a
+    `printf` that prints a copy-pasteable command for the human), and a
+    mention-based predicate would fail on the Path B hook INV-C10 exists to
+    protect, and on any unrelated future hook that merely documents the path.
+
+    Detection: backslash continuations are joined first (so the `printf … \\`
+    + `"$APPEND_SCRIPT" args` pair reads as the one `printf` command it is),
+    comment lines are dropped, variables assigned a grudge_append path become
+    aliases, and a hit requires the script (or an alias) in COMMAND position —
+    the first word of a simple command, optionally behind a python runner.
+    """
+    joined = re.sub(r"\\\n[ \t]*", " ", text)
+    lines = [ln for ln in joined.splitlines() if not ln.lstrip().startswith("#")]
+
+    aliases = set()
+    for line in lines:
+        for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)=[^\s;]*grudge_append", line):
+            aliases.add(m.group(1))
+
+    def _is_writer(token: str) -> bool:
+        bare = token.strip("\"'")
+        if bare.endswith("grudge_append.py") or bare.endswith("grudge_append"):
+            return True
+        m = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", bare)
+        return bool(m and m.group(1) in aliases)
+
+    hits: list[str] = []
+    for line in lines:
+        for segment in re.split(r"(?:\|\||&&|[;|&()]|\bthen\b|\bdo\b|\belse\b)", line):
+            words = segment.split()
+            # `VAR=…` prefixes and bare assignments are not commands: the Path B
+            # hook's own `APPEND_SCRIPT="…/grudge_append.py"` must not count.
+            while words and (words[0] in _BASH_PREFIXES or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0])):
+                words.pop(0)
+            if not words:
+                continue
+            if words[0].strip("\"'") in _PY_RUNNERS:
+                words.pop(0)
+                while words and words and words[0].startswith("-"):
+                    words.pop(0)
+            if words and _is_writer(words[0]):
+                hits.append(line.strip())
+                break
+    return hits
+
+
+def check_no_merge_grudge_writer(root: Path, errors: list[str]) -> None:
+    """No hook writes grudges — however the file is named (INV-C10, #578)."""
+    legacy = root / "hooks" / "grudge-merge-writer.sh"
+    if legacy.exists():
+        errors.append("INV-C10: hooks/grudge-merge-writer.sh exists — Path A was uncut")
+
+    hooks_dir = root / "hooks"
+    if not hooks_dir.is_dir():
+        return
+    for path in sorted(hooks_dir.glob("*.sh")):
+        rel = path.relative_to(root).as_posix()
+        hits = _executes_grudge_append(path.read_text(encoding="utf-8"))
+        if hits:
+            errors.append(
+                f"INV-C10: {rel} executes the grudge writer ({hits[0]!r}) — Path A is "
+                f"'a hook records the grudge', and it stays cut regardless of the hook's name"
+            )
+
+
+def check_merge_pr_untouched(root: Path, base_sha: str, errors: list[str]) -> None:
+    """merge-pr/SKILL.md Step 7.5 is unchanged since `base_sha` (INV-C10, #578).
+
+    Two independent halves, because each covers the other's blind spot:
+
+    * a clone-independent content pin of the Step 7.5 fence in the working tree
+      (works in a shallow clone, a tarball, an export);
+    * the historical diff, asserted rather than printed — and guarded, so an
+      unresolvable `base_sha` is a LOUD failure instead of the silent no-op the
+      original pipeline degraded to. CI clones shallow by default
+      (`actions/checkout@v4` without `fetch-depth`), which is exactly why the
+      original check was vacuous there; `.github/workflows/ci.yml` now sets
+      `fetch-depth: 0` so this assertion is real in CI too.
+    """
+    skill = root / MERGE_PR_SKILL
+    if not skill.is_file():
+        errors.append(f"INV-C10: {MERGE_PR_SKILL} is missing")
+        return
+
+    text = skill.read_text(encoding="utf-8")
+    m = re.search(r"^### Step 7\.5:.*?^```bash\n(.*?)^```", text, re.S | re.M)
+    if not m:
+        errors.append(
+            f"INV-C10: could not locate the Step 7.5 ```bash fence in {MERGE_PR_SKILL} — "
+            f"the step was renamed, reformatted, or removed"
+        )
+    elif m.group(1).rstrip("\n") != EXPECTED_STEP_75_FENCE:
+        errors.append(
+            f"INV-C10: {MERGE_PR_SKILL} Step 7.5's bash fence differs from the pinned "
+            f"templated form. INV-C10 requires it untouched and not further automated.\n"
+            f"    measured: {m.group(1).rstrip()!r}"
+        )
+
+    git_dir = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--git-dir"],
+        capture_output=True, text=True,
+    )
+    if git_dir.returncode != 0:
+        errors.append(
+            f"INV-C10: {root} is not a git checkout, so the Step 7.5 history assertion "
+            f"cannot run. This is a failure, not a skip — the check that voids quietly is "
+            f"the defect #578 was filed for."
+        )
+        return
+
+    present = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-e", f"{base_sha}^{{commit}}"],
+        capture_output=True, text=True,
+    )
+    if present.returncode != 0:
+        errors.append(
+            f"INV-C10: base commit {base_sha} is not present in this clone, so the "
+            f"Step 7.5 history assertion cannot run. This is a LOUD failure, not a skip "
+            f"(#578): a shallow clone previously made it a silent no-op. "
+            f"Fix with `git fetch --unshallow` (CI sets fetch-depth: 0)."
+        )
+        return
+
+    diff = subprocess.run(
+        ["git", "-C", str(root), "diff", f"{base_sha}..HEAD", "--", MERGE_PR_SKILL],
+        capture_output=True, text=True,
+    )
+    if diff.returncode != 0:
+        errors.append(f"INV-C10: `git diff {base_sha}..HEAD -- {MERGE_PR_SKILL}` failed: {diff.stderr.strip()}")
+        return
+
+    added, removed = [], []
+    for line in diff.stdout.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added.append(line[1:])
+        elif line.startswith("-"):
+            removed.append(line[1:])
+
+    if removed:
+        errors.append(
+            f"INV-C10: {MERGE_PR_SKILL} has {len(removed)} REMOVED line(s) since {base_sha}; "
+            f"INV-C10 permits none. First: {removed[0]!r}"
+        )
+    if added != EXPECTED_ADDED_LINES:
+        errors.append(
+            f"INV-C10: {MERGE_PR_SKILL} added lines since {base_sha} are not the one "
+            f"permitted paragraph.\n    expected: {EXPECTED_ADDED_LINES!r}\n"
+            f"    measured: {added!r}"
+        )
+
+
 # --- orchestration ----------------------------------------------------------
 
 
 def run_checks(root: Path, coverage_map: dict = COVERAGE_MAP, contract_rel: str = CONTRACT_YAML,
+               base_sha: str = INV_C10_BASE_SHA, git_checks: bool = True,
                notes: list[str] | None = None) -> list[str]:
     errors: list[str] = []
     if notes is None:
@@ -576,6 +784,9 @@ def run_checks(root: Path, coverage_map: dict = COVERAGE_MAP, contract_rel: str 
         if "python" in kinds:
             check_python_carrier(root, rel, coverage_map, errors)
 
+    check_no_merge_grudge_writer(root, errors)
+    if git_checks:
+        check_merge_pr_untouched(root, base_sha, errors)
     return errors
 
 
@@ -652,7 +863,33 @@ def _make_fixture(tmp: Path, yaml_text: str = _FIX_YAML, bash_text: str = _FIX_B
 
 
 def _fixture_errors(root: Path, coverage_map: dict = None) -> list[str]:
-    return run_checks(root, coverage_map or _FIX_MAP, "docs/plans/c.yaml")
+    return run_checks(root, coverage_map or _FIX_MAP, "docs/plans/c.yaml", git_checks=False)
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+
+
+def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
+    """A repo whose merge-pr/SKILL.md gained exactly the permitted paragraph."""
+    root = Path(tempfile.mkdtemp(dir=tmp))
+    (root / "skills" / "merge-pr").mkdir(parents=True)
+    skill = root / MERGE_PR_SKILL
+    head = "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n" + EXPECTED_STEP_75_FENCE + "\n```\n"
+    skill.write_text(head + "\nNon-`fix(*)` PRs record nothing.\n", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD").stdout.strip()
+    skill.write_text(
+        head + "\n" + EXPECTED_ADDED_LINES[0] + "\n\nNon-`fix(*)` PRs record nothing.\n",
+        encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "add paragraph")
+    return root, base
 
 
 def selftest() -> int:
@@ -743,7 +980,7 @@ def selftest() -> int:
         root = _make_fixture(tmp)
         (root / "docs" / "plans" / "c.yaml").unlink()
         notes: list[str] = []
-        errs = run_checks(root, _FIX_MAP, "docs/plans/c.yaml", notes=notes)
+        errs = run_checks(root, _FIX_MAP, "docs/plans/c.yaml", git_checks=False, notes=notes)
         expect_clean("contract YAML absent", errs)
         if not any("upstream test_tag cross-check did not run" in n for n in notes):
             failures.append(f"contract YAML absent: expected a stand-down NOTE, got {notes}")
@@ -762,6 +999,70 @@ def selftest() -> int:
         root = _make_fixture(tmp, yaml_text=_FIX_YAML.replace(
             '      test_tag: "contract:aa:inv-t1"', "      test_tag: contract:aa:inv-t1"))
         expect_error("unparseable test_tag", _fixture_errors(root), "unparseable test_tag line")
+
+        # --- INV-C10: the merge-writer predicate ---------------------------
+        prints_only = (
+            'APPEND_SCRIPT="$ROOT/scripts/grudge_append.py"\n'
+            "_prefill() {\n"
+            '  printf \'    python3 "%s" --symptom "<x>"\\n\' \\\n'
+            '    "$APPEND_SCRIPT" >&2\n'
+            "}\n"
+        )
+        if _executes_grudge_append(prints_only):
+            failures.append("merge-writer predicate: fired on a hook that only PRINTS the writer")
+        executes_direct = 'python3 "$ROOT/scripts/grudge_append.py" --symptom "x"\n'
+        if not _executes_grudge_append(executes_direct):
+            failures.append("merge-writer predicate: missed a direct `python3 …/grudge_append.py` call")
+        executes_alias = (
+            'W="$ROOT/scripts/grudge_append.py"\n'
+            'if [ -n "$SHA" ]; then "$W" --symptom "x"; fi\n'
+        )
+        if not _executes_grudge_append(executes_alias):
+            failures.append("merge-writer predicate: missed a variable-indirected invocation")
+
+        root = _make_fixture(tmp)
+        (root / "hooks").mkdir()
+        errs: list[str] = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_clean("no-merge-writer, clean", errs)
+        (root / "hooks" / "grudge-merge-writer.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        errs = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_error("legacy path present", errs, "hooks/grudge-merge-writer.sh exists")
+        (root / "hooks" / "grudge-merge-writer.sh").unlink()
+        (root / "hooks" / "totally-innocent-name.sh").write_text(
+            "#!/bin/sh\n" + executes_direct, encoding="utf-8")
+        errs = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_error("renamed merge writer", errs, "executes the grudge writer")
+
+        # --- INV-C10: the Step 7.5 history assertion -----------------------
+        root, base = _make_git_fixture(tmp)
+        errs = []
+        check_merge_pr_untouched(root, base, errs)
+        expect_clean("merge-pr untouched", errs)
+
+        errs = []
+        check_merge_pr_untouched(root, "0" * 40, errs)
+        expect_error("shallow clone / missing base", errs, "is not present in this clone")
+        expect_error("shallow clone / missing base", errs, "LOUD failure")
+
+        skill = root / MERGE_PR_SKILL
+        original = skill.read_text(encoding="utf-8")
+        skill.write_text(original + "\nAn extra automation paragraph.\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-qm", "extra")
+        errs = []
+        check_merge_pr_untouched(root, base, errs)
+        expect_error("merge-pr gained a line", errs, "are not the one permitted paragraph")
+
+        skill.write_text(original.replace('  --why "<from PR body, if stated>"\n', ""), encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-qm", "drop a fence line")
+        errs = []
+        check_merge_pr_untouched(root, base, errs)
+        expect_error("fence line removed", errs, "REMOVED line(s)")
+        expect_error("fence line removed", errs, "differs from the pinned templated form")
 
         # --- main()'s own argv dispatch ------------------------------------
         # stderr is swallowed so the usage line does not read as a failure in
