@@ -1,0 +1,786 @@
+#!/usr/bin/env python3
+"""Codified Step 12.3 contract-coverage sweep (#577, #566).
+
+Invocation (from repo root):
+    python3 scripts/check_contract_tags.py            # gate the real repo
+    python3 scripts/check_contract_tags.py --selftest # fixture-driven logic test
+
+Until this script existed the sweep was a shell fence pasted out of
+`docs/plans/2026-08-28-558-559-crap-grudge-implementation-plan.md` ("Step 12.3:
+Contract coverage sweep"). It ran only when a human remembered to paste it, and
+five of its assertions could not fail. Measured against the tree at the time of
+writing, with the fence's `1 + checks` loop generalised in its favour so the
+pre-existing multi-marker break did not mask anything:
+
+  * delete a `check` call AND decrement its inline `checks=` marker  -> fence rc 0
+  * rename a carrier file (grep contributes zero matches)            -> fence rc 0
+  * add a `contract:foo:inv-t99` tag the contract never declared     -> fence rc 0
+  * delete a `test_tag:` from the contract YAML                      -> fence rc 0
+
+Each of those is a mutant this script turns red. What it checks:
+
+  1. **Carrier existence.** Every path in `COVERAGE_MAP` must exist as a regular
+     file BEFORE anything is counted. The fence grepped a hardcoded list, so a
+     renamed carrier contributed zero matches and the sweep stayed green.
+  2. **Three-way tag-set identity.** The set of `test_tag:` values declared by
+     the contract YAML, the set of tags actually carried by the carrier files,
+     and the set of tags pinned in `COVERAGE_MAP` must be identical. Both
+     directions of every difference are reported separately: *declared but never
+     carried* (an invariant with no test) and *carried but never declared* (a
+     typo that today silently counts toward coverage). The headline count is
+     asserted against `len(COVERAGE_MAP)`, not printed as a comment.
+     `docs/plans/` is gitignored, so the contract YAML is machine-local: where
+     it is absent the map-vs-carriers half still runs in full and the stand-down
+     of the upstream half is printed as a NOTE. See `declared_tags`.
+  3. **Stray tags.** A `contract:*:inv-t*` tag anywhere under the code trees
+     that is NOT in a declared carrier is an error — a tag moved to a file the
+     sweep does not read is coverage that silently stopped being measured.
+  4. **The `n_markers + sum(checks)` arithmetic** the fence encoded as
+     `1 + checks`, generalised: `contract:hook:inv-t22` and `contract:hook:inv-t23`
+     legitimately carry more than one annotated scenario, and the fence's literal
+     one-marker loop mis-fires on them (verified: it reports
+     `MISMATCH: contract:hook:inv-t22 expected 13 got 22` against a clean tree).
+     Also preserved: the absence assertion — every distinct bash tag must carry a
+     `checks=` annotation, so an unannotated scenario fails loudly instead of
+     matching nothing.
+  5. **The authoritative map (#566).** `checks=N` lives inline next to the checks
+     it counts, so deleting a check and decrementing the annotation in the same
+     edit passes. `COVERAGE_MAP` pins the expected count per tag OUTSIDE the file
+     being counted; the inline annotations must sum to it and disagreement in
+     either direction is an error. Lowering coverage now requires a deliberate
+     edit to the map.
+
+### Scope limit on "the test really pins its invariant" (read this)
+
+Requirement 5 of this sweep is **assertion presence, not assertion efficacy**.
+Task 12's mutation pass found four tagged invariants — INV-T1, INV-T6, INV-T7,
+INV-C2 — whose tests survived mutation of the very behaviour they claimed to
+pin. This script does NOT catch those and cannot: proving statically that an
+assertion constrains a particular behaviour is the halting problem wearing a
+hat. What it does check is the weaker, decidable property that a tag is backed
+by at least one real assertion construct rather than by a comment and a
+docstring token alone:
+
+  * bash: at least one line whose command is `check` and which names the tag;
+  * python: at least one `assert` statement or `self.assert*` call inside every
+    test function whose docstring carries the tag.
+
+Of the four, only three are even in scope: INV-C2 is declared
+`check_method: code-inspection` with no `test_tag`, so it is not part of the tag
+set at all and no tag-based sweep can reach it. The other three do carry real
+assertions and pass this check. **Read a green run as "every declared invariant
+has a tagged test that asserts something", never as "every declared invariant is
+pinned".** Mutation testing is the instrument for the stronger claim.
+
+Style mirrors `scripts/check_claude_settings.py` / `scripts/check_stdlib_only.py`:
+ROOT-from-`__file__`, error accumulation, `sys.exit(main())`, stdlib only (the
+contract YAML is parsed for the one construct this needs — `test_tag:` scalars —
+rather than pulling in PyYAML), no argparse. Exit codes are `0` (ok) or `1` (any
+failure, including unknown argv). Every checker takes an explicit `root` and an
+explicit map, so `--selftest` drives the SAME code paths the bare run does
+against throwaway fixture trees, covering the PASS and the FAIL shape of each.
+
+No temp file is used for the tag counts: the fence's fixed `/tmp/qg-tagcounts.txt`
+(a shared path a co-tenant can pre-create) is replaced by an in-process dict.
+`--selftest` builds its fixture trees with `tempfile.mkdtemp()`.
+"""
+
+from __future__ import annotations
+
+import ast
+import contextlib
+import os
+import re
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+CONTRACT_YAML = "docs/plans/2026-08-28-558-559-crap-grudge-contract.yaml"
+
+TAG_RE = re.compile(r"contract:[a-z]+:inv-t[0-9]+")
+ANNOT_RE = re.compile(r"(contract:[a-z]+:inv-t[0-9]+)[ \t]+checks=([0-9]+)")
+MARKER_RE = re.compile(r"^[ \t]*#[ \t]*(contract:[a-z]+:inv-t[0-9]+)\b")
+TEST_TAG_RE = re.compile(r'^\s*test_tag:\s*"(contract:[a-z]+:inv-t[0-9]+)"\s*$')
+
+# --- The Contract Coverage Map (#566) --------------------------------------
+# THE AUTHORITATIVE SIDE. `checks` is the expected total number of tagged
+# `check` calls for a bash tag; `tests` is the expected number of tagged test
+# functions for a python tag. Both live here, deliberately outside the file
+# being counted, so that lowering coverage requires editing this map and not
+# just nudging an inline annotation. Numbers were MEASURED against the tree,
+# never copied out of the plan document.
+COVERAGE_MAP: dict[str, dict] = {
+    # --- python carriers (#558 complexity signal) ---
+    "contract:cc:inv-t1": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:floor:inv-t2": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:qualname:inv-t3": {
+        "kind": "python",
+        "carriers": ["scripts/test_brier_advise.py", "scripts/test_complexity_index.py"],
+        "tests": 2,
+    },
+    "contract:paths:inv-t4": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:order:inv-t5": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:nesting:inv-t6": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:diffscope:inv-t7": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:diffscope:inv-t8": {"kind": "python", "carriers": ["scripts/test_brier_advise.py"], "tests": 1},
+    "contract:calibration:inv-t9": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
+    "contract:isolation:inv-t10": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 2},
+    "contract:cli:inv-t11": {"kind": "python", "carriers": ["scripts/test_brier_advise.py"], "tests": 1},
+    # --- bash carrier (#559 Stop-hook seam suite) ---
+    "contract:hook:inv-t12": {"kind": "bash", "carriers": [_G := "hooks/tests/test-grudge-resolution-guard.sh"], "checks": 16},
+    "contract:hook:inv-t13": {"kind": "bash", "carriers": [_G], "checks": 6},
+    "contract:hook:inv-t14": {"kind": "bash", "carriers": [_G], "checks": 26},
+    "contract:match:inv-t15": {"kind": "bash", "carriers": [_G], "checks": 6},
+    "contract:match:inv-t16": {"kind": "bash", "carriers": [_G], "checks": 13},
+    "contract:match:inv-t17": {"kind": "bash", "carriers": [_G], "checks": 4},
+    "contract:skip:inv-t18": {"kind": "bash", "carriers": [_G], "checks": 7},
+    "contract:group:inv-t19": {"kind": "bash", "carriers": [_G], "checks": 51},
+    "contract:group:inv-t20": {"kind": "bash", "carriers": [_G], "checks": 13},
+    "contract:group:inv-t21": {"kind": "bash", "carriers": [_G], "checks": 45},
+    "contract:hook:inv-t22": {"kind": "bash", "carriers": [_G], "checks": 19},
+    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 93},
+    "contract:hook:inv-t24": {"kind": "bash", "carriers": [_G], "checks": 22},
+    "contract:worktree:inv-t25": {"kind": "bash", "carriers": [_G], "checks": 20},
+    "contract:cli:inv-t26": {"kind": "bash", "carriers": [_G], "checks": 7},
+    "contract:cli:inv-t27": {"kind": "bash", "carriers": [_G], "checks": 7},
+}
+del _G
+
+# Code trees swept for stray tags. `docs/` is excluded on purpose: the plan and
+# the contract quote these tags as prose. This file is excluded because its map
+# IS the authority — it names every tag by construction.
+STRAY_SCAN_DIRS = ("scripts", "hooks", "eval", "skills", "agents", "mcp-servers")
+STRAY_SELF = "scripts/check_contract_tags.py"
+
+
+def carrier_paths(coverage_map: dict) -> list[str]:
+    """Every carrier named by the map, deduplicated, in stable order."""
+    seen: list[str] = []
+    for spec in coverage_map.values():
+        for path in spec["carriers"]:
+            if path not in seen:
+                seen.append(path)
+    return sorted(seen)
+
+
+# --- 1. carrier existence ---------------------------------------------------
+
+
+def check_carriers_exist(root: Path, coverage_map: dict, errors: list[str]) -> bool:
+    """Every carrier must exist as a regular file before anything is counted.
+
+    The fence grepped a hardcoded list; a renamed carrier made grep contribute
+    zero matches to every downstream count and the sweep still passed.
+    """
+    ok = True
+    for rel in carrier_paths(coverage_map):
+        path = root / rel
+        if not path.is_file():
+            errors.append(
+                f"carrier file missing or renamed: {rel} — the coverage map names it, "
+                f"but no regular file exists at that path. Update COVERAGE_MAP's "
+                f"'carriers' if the rename was deliberate."
+            )
+            ok = False
+    return ok
+
+
+# --- 2. the three tag sets --------------------------------------------------
+
+
+def declared_tags(
+    root: Path, contract_rel: str, errors: list[str], notes: list[str]
+) -> tuple[set[str], bool]:
+    """(`test_tag:` scalars declared by the contract YAML, whether it was present).
+
+    Parsed with a line regex rather than a YAML library: `scripts/check_stdlib_only.py`
+    gates parts of this tree to the stdlib and the construct needed here is a
+    flat quoted scalar. A `test_tag:` line the regex cannot read is reported,
+    so a reformat cannot silently shrink the declared set.
+
+    `docs/plans/` is gitignored in this repo, so the contract YAML is a
+    machine-local artifact: it is present where the plan was authored and absent
+    in CI and in every fresh clone. Its absence is therefore REPORTED (a NOTE on
+    stdout naming the path) and the upstream cross-check stands down — it is not
+    an error, because the file is not supposed to be there. This does not
+    reintroduce the vacuity #577 was filed for: `COVERAGE_MAP` is the committed
+    projection of that YAML and the map-vs-carriers identity is enforced
+    unconditionally, everywhere. What degrades without the YAML is only the
+    redundant check that the committed projection still matches its upstream.
+    A YAML that IS present but yields no `test_tag:` at all is an error, so a
+    truncated or reformatted file cannot masquerade as a satisfied cross-check.
+    """
+    path = root / contract_rel
+    if not path.is_file():
+        notes.append(
+            f"contract YAML not present ({contract_rel}) — `docs/plans/` is gitignored, so "
+            f"the upstream test_tag cross-check did not run. COVERAGE_MAP vs carriers was "
+            f"still enforced in full."
+        )
+        return set(), False
+    tags: set[str] = set()
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if "test_tag:" not in line:
+            continue
+        m = TEST_TAG_RE.match(line)
+        if not m:
+            errors.append(
+                f"{contract_rel}:{lineno}: unparseable test_tag line — expected "
+                f'`test_tag: "contract:<category>:<id>"`, got: {line.strip()}'
+            )
+            continue
+        tags.add(m.group(1))
+    if not tags:
+        errors.append(
+            f"{contract_rel}: exists but declares no parseable `test_tag:` at all — a present "
+            f"contract must not read as a satisfied cross-check by being empty"
+        )
+    return tags, True
+
+
+def carried_tags(root: Path, coverage_map: dict) -> dict[str, dict[str, int]]:
+    """{tag: {carrier_rel: occurrence_count}} across the declared carriers."""
+    found: dict[str, dict[str, int]] = {}
+    for rel in carrier_paths(coverage_map):
+        path = root / rel
+        if not path.is_file():
+            continue
+        for tag in TAG_RE.findall(path.read_text(encoding="utf-8")):
+            found.setdefault(tag, {}).setdefault(rel, 0)
+            found[tag][rel] += 1
+    return found
+
+
+def check_tag_sets(
+    declared: set[str], declared_available: bool, carried: set[str],
+    coverage_map: dict, errors: list[str],
+) -> None:
+    """Declared, carried and mapped tag sets must be identical.
+
+    Both directions are reported separately and both must be empty. Counting
+    occurrences (what the fence did) cannot see either failure.
+
+    map-vs-carriers runs always. The two comparisons that need the contract YAML
+    run only when it is present — see `declared_tags` for why that is a reported
+    stand-down and not a silent skip.
+    """
+    mapped = set(coverage_map)
+    for tag in sorted(mapped - carried):
+        errors.append(
+            f"tag-set mismatch: {tag} is pinned in COVERAGE_MAP but no carrier file "
+            f"carries it — removing coverage is a deliberate edit to the map (#566)"
+        )
+    for tag in sorted(carried - mapped):
+        errors.append(
+            f"tag-set mismatch: {tag} appears in the carrier files but COVERAGE_MAP does "
+            f"not pin it — an unpinned tag counts toward coverage while asserting nothing "
+            f"anyone declared (usually a typo)"
+        )
+    if not declared_available:
+        return
+    for label, missing_from, extra in (
+        ("contract YAML", "no test carries it", sorted(declared - carried)),
+        ("carrier files", "the contract YAML does not declare it", sorted(carried - declared)),
+    ):
+        for tag in extra:
+            errors.append(f"tag-set mismatch: {tag} appears in the {label} but {missing_from}")
+    for tag in sorted(declared - mapped):
+        errors.append(
+            f"coverage-map gap: {tag} is declared by the contract YAML but is not pinned "
+            f"in COVERAGE_MAP — add it (adding coverage must be as deliberate as removing it)"
+        )
+    for tag in sorted(mapped - declared):
+        errors.append(
+            f"coverage-map stale: {tag} is pinned in COVERAGE_MAP but the contract YAML "
+            f"no longer declares it"
+        )
+
+
+def check_carrier_placement(
+    carried: dict[str, dict[str, int]], coverage_map: dict, errors: list[str]
+) -> None:
+    """Each tag must appear in exactly the carriers its map entry names."""
+    for tag, spec in sorted(coverage_map.items()):
+        want = set(spec["carriers"])
+        got = set(carried.get(tag, {}))
+        for rel in sorted(want - got):
+            errors.append(f"{tag}: COVERAGE_MAP names carrier {rel}, but the tag does not appear there")
+        for rel in sorted(got - want):
+            errors.append(f"{tag}: appears in {rel}, which COVERAGE_MAP does not name as a carrier")
+
+
+# --- 3. stray tags outside the declared carriers ----------------------------
+
+
+def check_no_stray_tags(root: Path, coverage_map: dict, errors: list[str]) -> None:
+    """A contract tag in a code file that is not a declared carrier is an error."""
+    carriers = set(carrier_paths(coverage_map))
+    for top in STRAY_SCAN_DIRS:
+        base = root / top
+        if not base.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d not in (".git", "__pycache__")]
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                rel = path.relative_to(root).as_posix()
+                if rel in carriers or rel == STRAY_SELF:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                strays = sorted(set(TAG_RE.findall(text)))
+                if strays:
+                    errors.append(
+                        f"{rel}: carries contract tag(s) {', '.join(strays)} but is not a "
+                        f"declared carrier — coverage measured there is invisible to this sweep"
+                    )
+
+
+# --- 4/5. bash arithmetic, the absence assertion, and the authoritative map --
+
+
+def _marker_lines(text: str) -> list[tuple[int, str, int | None]]:
+    """(lineno, tag, checks_or_None) for every `# contract:...` comment marker."""
+    out: list[tuple[int, str, int | None]] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        m = MARKER_RE.match(line)
+        if not m:
+            continue
+        annot = ANNOT_RE.search(line)
+        out.append((lineno, m.group(1), int(annot.group(2)) if annot else None))
+    return out
+
+
+def _bash_check_lines(text: str) -> list[tuple[int, str, list[str]]]:
+    """(lineno, line, tags) for every line whose command word is `check`."""
+    out: list[tuple[int, str, list[str]]] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if re.match(r"^[ \t]*check[ \t]", line):
+            out.append((lineno, line, TAG_RE.findall(line)))
+    return out
+
+
+def check_bash_carrier(root: Path, rel: str, coverage_map: dict, errors: list[str]) -> None:
+    """Preserve the fence's arithmetic, then pin it against COVERAGE_MAP.
+
+    * occurrences == markers + tagged `check` calls, per tag (the fence's
+      `1 + checks`, generalised to the multi-marker tags it mis-fires on);
+    * every distinct bash tag carries at least one `checks=` annotation and
+      EVERY marker for it does (the fence's absence assertion);
+    * the inline annotations sum to COVERAGE_MAP's pinned count (#566) — the
+      half the fence structurally cannot have, since its expectation sat in the
+      file it was measuring;
+    * at least one tagged `check` call exists (assertion presence — see the
+      module docstring's scope limit).
+    """
+    text = (root / rel).read_text(encoding="utf-8")
+    bash_tags = {t for t, s in coverage_map.items() if s["kind"] == "bash" and rel in s["carriers"]}
+
+    markers = _marker_lines(text)
+    checks = _bash_check_lines(text)
+
+    occurrences: dict[str, int] = {}
+    for tag in TAG_RE.findall(text):
+        occurrences[tag] = occurrences.get(tag, 0) + 1
+
+    for tag in sorted(bash_tags):
+        tag_markers = [m for m in markers if m[1] == tag]
+        tag_checks = [c for c in checks if tag in c[2]]
+        annotated = [m for m in tag_markers if m[2] is not None]
+
+        if not tag_markers:
+            errors.append(f"{rel}: {tag} has no `# {tag} checks=N` comment marker")
+            continue
+        # The absence assertion: an unannotated scenario must fail loudly rather
+        # than match nothing and pass.
+        for lineno, _tag, ann in tag_markers:
+            if ann is None:
+                errors.append(
+                    f"{rel}:{lineno}: marker for {tag} has no `checks=` annotation — "
+                    f"an unannotated scenario contributes nothing to the arithmetic"
+                )
+        if not annotated:
+            continue
+
+        if not tag_checks:
+            errors.append(
+                f"{rel}: {tag} is tagged but no `check` call names it — a comment marker "
+                f"alone asserts nothing"
+            )
+
+        want_total = len(tag_markers) + sum(m[2] for m in annotated) + sum(
+            0 for m in tag_markers if m[2] is None
+        )
+        got_total = occurrences.get(tag, 0)
+        if got_total != want_total:
+            errors.append(
+                f"{rel}: {tag} occurrence arithmetic — expected "
+                f"{len(tag_markers)} marker(s) + {sum(m[2] for m in annotated)} annotated check(s) "
+                f"= {want_total}, measured {got_total}. Either a `check` call lost or gained the "
+                f"tag, or the tag is named outside a `check` call."
+            )
+
+        inline_sum = sum(m[2] for m in annotated)
+        if len(tag_checks) != inline_sum:
+            errors.append(
+                f"{rel}: {tag} — inline annotations sum to {inline_sum} but "
+                f"{len(tag_checks)} `check` call(s) name the tag"
+            )
+
+        pinned = coverage_map[tag]["checks"]
+        if inline_sum != pinned:
+            errors.append(
+                f"{rel}: {tag} — COVERAGE_MAP pins checks={pinned} but the inline "
+                f"annotation(s) sum to {inline_sum}. Lowering coverage is a deliberate "
+                f"edit to COVERAGE_MAP, not an inline tweak (#566)."
+            )
+
+    # Any bash tag in the file the map does not know about (caught set-wise too,
+    # but reported here with its file for a usable message).
+    for tag in sorted(set(occurrences) - bash_tags):
+        if coverage_map.get(tag, {}).get("kind") != "python":
+            errors.append(f"{rel}: carries {tag}, which COVERAGE_MAP does not pin as a bash tag here")
+
+
+# --- python carriers: tagged tests must contain a real assertion ------------
+
+
+def _has_assertion(node: ast.AST) -> bool:
+    """True iff the function body contains an `assert` or a `self.assert*` call."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Assert):
+            return True
+        if isinstance(sub, ast.Call):
+            func = sub.func
+            if isinstance(func, ast.Attribute) and func.attr.startswith("assert"):
+                return True
+            if isinstance(func, ast.Name) and func.id.startswith("assert"):
+                return True
+    return False
+
+
+def check_python_carrier(root: Path, rel: str, coverage_map: dict, errors: list[str]) -> None:
+    """Arithmetic + assertion presence for a python carrier.
+
+    Python has no `checks=` annotation; its shape is a `# tag` comment marker
+    directly above a test whose docstring repeats the tag. So:
+    occurrences == markers + tagged test functions, the tagged-test count is
+    pinned by COVERAGE_MAP's `tests`, and every tagged test must contain at
+    least one assertion construct (see the docstring's scope limit).
+    """
+    path = root / rel
+    text = path.read_text(encoding="utf-8")
+    py_tags = {t for t, s in coverage_map.items() if s["kind"] == "python" and rel in s["carriers"]}
+
+    try:
+        tree = ast.parse(text, filename=rel)
+    except SyntaxError as exc:
+        errors.append(f"{rel}: does not parse as python ({exc})")
+        return
+
+    docstring_carriers: dict[str, list[ast.AST]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        doc = ast.get_docstring(node) or ""
+        for tag in set(TAG_RE.findall(doc)):
+            docstring_carriers.setdefault(tag, []).append(node)
+
+    markers = _marker_lines(text)
+    occurrences: dict[str, int] = {}
+    for tag in TAG_RE.findall(text):
+        occurrences[tag] = occurrences.get(tag, 0) + 1
+
+    for tag in sorted(py_tags):
+        tag_markers = [m for m in markers if m[1] == tag]
+        tests = docstring_carriers.get(tag, [])
+
+        if not tests:
+            errors.append(
+                f"{rel}: {tag} has no test function whose docstring carries it — a comment "
+                f"marker alone is not a carrier"
+            )
+            continue
+
+        want_total = len(tag_markers) + len(tests)
+        got_total = occurrences.get(tag, 0)
+        if got_total != want_total:
+            errors.append(
+                f"{rel}: {tag} occurrence arithmetic — expected {len(tag_markers)} marker(s) "
+                f"+ {len(tests)} tagged test(s) = {want_total}, measured {got_total}"
+            )
+
+        for node in tests:
+            if not _has_assertion(node):
+                errors.append(
+                    f"{rel}:{node.lineno}: {tag} is carried by {node.name}, which contains no "
+                    f"assert / self.assert* — a docstring token is not an assertion"
+                )
+
+    # Tagged-test totals are pinned across all carriers, so compare once, in the
+    # first carrier the map lists for the tag.
+    for tag in sorted(py_tags):
+        spec = coverage_map[tag]
+        if spec["carriers"][0] != rel:
+            continue
+        total = 0
+        for other in spec["carriers"]:
+            other_path = root / other
+            if not other_path.is_file():
+                continue
+            try:
+                other_tree = ast.parse(other_path.read_text(encoding="utf-8"), filename=other)
+            except SyntaxError:
+                continue
+            for node in ast.walk(other_tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and TAG_RE.findall(
+                    ast.get_docstring(node) or ""
+                ).count(tag):
+                    total += 1
+        if total != spec["tests"]:
+            errors.append(
+                f"{tag}: COVERAGE_MAP pins tests={spec['tests']} but {total} tagged test "
+                f"function(s) carry it. Lowering coverage is a deliberate edit to COVERAGE_MAP (#566)."
+            )
+
+
+# --- orchestration ----------------------------------------------------------
+
+
+def run_checks(root: Path, coverage_map: dict = COVERAGE_MAP, contract_rel: str = CONTRACT_YAML,
+               notes: list[str] | None = None) -> list[str]:
+    errors: list[str] = []
+    if notes is None:
+        notes = []
+
+    if not check_carriers_exist(root, coverage_map, errors):
+        # Counting against a tree with a missing carrier produces a cascade of
+        # meaningless arithmetic errors; the missing path IS the finding.
+        return errors
+
+    declared, declared_available = declared_tags(root, contract_rel, errors, notes)
+    carried = carried_tags(root, coverage_map)
+    check_tag_sets(declared, declared_available, set(carried), coverage_map, errors)
+    check_carrier_placement(carried, coverage_map, errors)
+    check_no_stray_tags(root, coverage_map, errors)
+
+    for rel in carrier_paths(coverage_map):
+        kinds = {s["kind"] for t, s in coverage_map.items() if rel in s["carriers"]}
+        if "bash" in kinds:
+            check_bash_carrier(root, rel, coverage_map, errors)
+        if "python" in kinds:
+            check_python_carrier(root, rel, coverage_map, errors)
+
+    return errors
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) > 1 and argv[1] == "--selftest":
+        return selftest()
+    if len(argv) > 1:
+        print(f"usage: {Path(argv[0]).name} [--selftest]", file=sys.stderr)
+        return 1
+
+    notes: list[str] = []
+    errors = run_checks(ROOT, notes=notes)
+    for note in notes:
+        print(f"NOTE: {note}")
+    if errors:
+        print(f"FAIL — {len(errors)} contract-coverage problem(s):", file=sys.stderr)
+        for err in errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 1
+    print(f"OK — contract coverage: {len(COVERAGE_MAP)} tags, all carried and pinned")
+    return 0
+
+
+# --- selftest ---------------------------------------------------------------
+#
+# Fixture-driven. Every assertion above gets both a PASS and a FAIL fixture, so
+# no enforcement branch can be mutated into a no-op without a failure here. The
+# fixtures are the mutants from #577/#566/#578, frozen.
+
+_FIX_YAML = """\
+  testable:
+    - id: "INV-T1"
+      description: "d"
+      test_tag: "contract:aa:inv-t1"
+    - id: "INV-T2"
+      description: "d"
+      test_tag: "contract:bb:inv-t2"
+"""
+
+_FIX_BASH = """\
+#!/usr/bin/env bash
+check() { :; }
+
+# contract:aa:inv-t1 checks=2
+check 1 "one — contract:aa:inv-t1" a a
+check 2 "two — contract:aa:inv-t1" b b
+"""
+
+_FIX_PY = '''\
+import unittest
+
+
+class T(unittest.TestCase):
+    # contract:bb:inv-t2
+    def test_two(self):
+        """contract:bb:inv-t2 — a real assertion lives here."""
+        self.assertEqual(1, 1)
+'''
+
+_FIX_MAP = {
+    "contract:aa:inv-t1": {"kind": "bash", "carriers": ["t.sh"], "checks": 2},
+    "contract:bb:inv-t2": {"kind": "python", "carriers": ["t.py"], "tests": 1},
+}
+
+
+def _make_fixture(tmp: Path, yaml_text: str = _FIX_YAML, bash_text: str = _FIX_BASH,
+                  py_text: str = _FIX_PY) -> Path:
+    root = Path(tempfile.mkdtemp(dir=tmp))
+    (root / "docs" / "plans").mkdir(parents=True)
+    (root / "docs" / "plans" / "c.yaml").write_text(yaml_text, encoding="utf-8")
+    (root / "t.sh").write_text(bash_text, encoding="utf-8")
+    (root / "t.py").write_text(py_text, encoding="utf-8")
+    return root
+
+
+def _fixture_errors(root: Path, coverage_map: dict = None) -> list[str]:
+    return run_checks(root, coverage_map or _FIX_MAP, "docs/plans/c.yaml")
+
+
+def selftest() -> int:
+    failures: list[str] = []
+
+    def expect_clean(label: str, errs: list[str]) -> None:
+        if errs:
+            failures.append(f"{label}: expected no errors, got {errs}")
+
+    def expect_error(label: str, errs: list[str], needle: str) -> None:
+        if not any(needle in e for e in errs):
+            failures.append(f"{label}: expected an error containing {needle!r}, got {errs}")
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        # --- baseline: a clean fixture tree is green -----------------------
+        expect_clean("clean fixture", _fixture_errors(_make_fixture(tmp)))
+
+        # --- MUTANT: delete a `check` call, leave the annotation -----------
+        root = _make_fixture(tmp, bash_text=_FIX_BASH.replace(
+            'check 2 "two — contract:aa:inv-t1" b b\n', ""))
+        expect_error("check deleted, annotation kept", _fixture_errors(root), "occurrence arithmetic")
+
+        # --- MUTANT: delete a `check` AND decrement the annotation (#566) --
+        root = _make_fixture(tmp, bash_text=_FIX_BASH
+                             .replace('check 2 "two — contract:aa:inv-t1" b b\n', "")
+                             .replace("checks=2", "checks=1"))
+        errs = _fixture_errors(root)
+        expect_error("check deleted + annotation decremented", errs, "COVERAGE_MAP pins checks=2")
+        if any("occurrence arithmetic" in e for e in errs):
+            failures.append("check deleted + annotation decremented: arithmetic should be self-consistent "
+                            "— only the map should catch this")
+
+        # --- MUTANT: raise the annotation without adding checks ------------
+        root = _make_fixture(tmp, bash_text=_FIX_BASH.replace("checks=2", "checks=3"))
+        expect_error("annotation raised", _fixture_errors(root), "COVERAGE_MAP pins checks=2")
+
+        # --- MUTANT: the absence assertion (marker with no checks=) --------
+        root = _make_fixture(tmp, bash_text=_FIX_BASH.replace(
+            "# contract:aa:inv-t1 checks=2", "# contract:aa:inv-t1"))
+        expect_error("unannotated marker", _fixture_errors(root), "has no `checks=` annotation")
+
+        # --- MUTANT: rename a carrier --------------------------------------
+        root = _make_fixture(tmp)
+        (root / "t.sh").rename(root / "t-renamed.sh")
+        expect_error("carrier renamed", _fixture_errors(root), "carrier file missing or renamed")
+
+        # --- MUTANT: a tag the contract never declared ---------------------
+        root = _make_fixture(tmp, bash_text=_FIX_BASH + (
+            "\n# contract:foo:inv-t99 checks=1\ncheck 3 \"x — contract:foo:inv-t99\" a a\n"))
+        errs = _fixture_errors(root)
+        expect_error("undeclared tag", errs, "contract:foo:inv-t99")
+        expect_error("undeclared tag", errs, "the contract YAML does not declare it")
+
+        # --- MUTANT: test_tag removed from the contract while tests remain -
+        root = _make_fixture(tmp, yaml_text=_FIX_YAML.replace(
+            '      test_tag: "contract:aa:inv-t1"\n', ""))
+        errs = _fixture_errors(root)
+        expect_error("test_tag removed", errs, "the contract YAML does not declare it")
+        expect_error("test_tag removed", errs, "COVERAGE_MAP but the contract YAML")
+
+        # --- MUTANT: declared but never carried ----------------------------
+        root = _make_fixture(tmp, bash_text=_FIX_BASH.replace("contract:aa:inv-t1", "contract:aa:inv-t7"))
+        expect_error("declared but uncarried", _fixture_errors(root),
+                     "contract:aa:inv-t1 appears in the contract YAML but no test carries it")
+
+        # --- MUTANT: a python tag whose test has no assertion --------------
+        root = _make_fixture(tmp, py_text=_FIX_PY.replace("self.assertEqual(1, 1)", "pass"))
+        expect_error("assertionless python test", _fixture_errors(root),
+                     "contains no assert / self.assert*")
+
+        # --- MUTANT: a python tag carried by a comment marker only ---------
+        root = _make_fixture(tmp, py_text=_FIX_PY.replace(
+            '"""contract:bb:inv-t2 — a real assertion lives here."""', '"""nothing."""'))
+        expect_error("python docstring token removed", _fixture_errors(root),
+                     "has no test function whose docstring carries it")
+
+        # --- MUTANT: a stray tag in a non-carrier code file ----------------
+        root = _make_fixture(tmp)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "stray.py").write_text("# contract:aa:inv-t1\n", encoding="utf-8")
+        expect_error("stray tag", _fixture_errors(root), "is not a declared carrier")
+
+        # --- contract YAML absent (the CI / fresh-clone shape) -------------
+        # The upstream cross-check stands down with a NOTE, and the map-vs-carriers
+        # half must still be enforced in full — otherwise a gitignored contract
+        # would have reintroduced exactly the vacuity #577 was filed for.
+        root = _make_fixture(tmp)
+        (root / "docs" / "plans" / "c.yaml").unlink()
+        notes: list[str] = []
+        errs = run_checks(root, _FIX_MAP, "docs/plans/c.yaml", notes=notes)
+        expect_clean("contract YAML absent", errs)
+        if not any("upstream test_tag cross-check did not run" in n for n in notes):
+            failures.append(f"contract YAML absent: expected a stand-down NOTE, got {notes}")
+
+        root = _make_fixture(tmp, bash_text=_FIX_BASH.replace("contract:aa:inv-t1", "contract:aa:inv-t7"))
+        (root / "docs" / "plans" / "c.yaml").unlink()
+        expect_error("contract YAML absent + carrier drift", _fixture_errors(root),
+                     "contract:aa:inv-t1 is pinned in COVERAGE_MAP but no carrier file carries it")
+
+        # --- MUTANT: contract YAML present but empty -----------------------
+        root = _make_fixture(tmp, yaml_text="  testable: []\n")
+        expect_error("empty contract YAML", _fixture_errors(root),
+                     "declares no parseable `test_tag:` at all")
+
+        # --- MUTANT: an unparseable test_tag line --------------------------
+        root = _make_fixture(tmp, yaml_text=_FIX_YAML.replace(
+            '      test_tag: "contract:aa:inv-t1"', "      test_tag: contract:aa:inv-t1"))
+        expect_error("unparseable test_tag", _fixture_errors(root), "unparseable test_tag line")
+
+        # --- main()'s own argv dispatch ------------------------------------
+        # stderr is swallowed so the usage line does not read as a failure in
+        # the suite log; the exit code is what is being asserted.
+        with open(os.devnull, "w") as devnull, contextlib.redirect_stderr(devnull):
+            rc = main([__file__, "--nonsense"])
+        if rc != 1:
+            failures.append("main: unknown argv should exit 1")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    if failures:
+        print(f"selftest FAILED — {len(failures)} case(s):", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
+        return 1
+    print("selftest OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

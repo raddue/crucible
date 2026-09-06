@@ -277,6 +277,14 @@ run python3 eval/grudge/test-grudge-wiring.py
 # --- #558/#559 acceptance oracle (#579) ---
 run python3 scripts/test_558_559_acceptance.py
 
+# --- #558/#559 contract-tag coverage sweep (#577, #566) ---
+# Was a shell fence pasted out of the plan doc's Step 12.3, five of whose
+# assertions could not fail. run_expect, not run: a bare `run` would accept a
+# future mutation that exits 0 without asserting anything, which is the exact
+# failure mode this script was written to end.
+run_expect "selftest OK" python3 scripts/check_contract_tags.py --selftest
+run_expect "OK — contract coverage" python3 scripts/check_contract_tags.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo
