@@ -13,7 +13,8 @@ invariants (contract:*:inv-tN) get fine-grained unit tests during
 implementation. Every test here drives the real scripts/hook through
 subprocesses against tmp git repos and tmp stores — the machine's real state
 is never touched (HOME / CRUCIBLE_GRUDGE_DIR / CRUCIBLE_LEDGER_DIR are all
-redirected into tmp dirs). Not wired into run_tests.sh by design.
+redirected into tmp dirs). Wired into scripts/run_tests.sh (#579), so a later
+regression in the feature it pins is caught by the gating suite.
 
 Pure stdlib `unittest`:  python3 scripts/test_558_559_acceptance.py
 """
@@ -393,5 +394,39 @@ class StopHookDegradationTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
 
 
+# Executed-test-count guard (#579) — mirrors the pin in
+# scripts/test_complexity_index.py. `unittest` exits 0 on a suite whose tests
+# were dropped, renamed or skipped, so a return code alone cannot distinguish
+# "every acceptance test passed" from "every acceptance test vanished". Assert
+# how many tests actually EXECUTED: collected, minus skips, minus
+# expected-failures/unexpected-successes (all three keep a test in testsRun
+# while neutering its assertions). Bump this when adding a test.
+EXPECTED_TESTS = 11
+
+
+def _run_with_count_guard():
+    """Run the suite; fail loudly if fewer than EXPECTED_TESTS actually ran."""
+    result = unittest.main(exit=False, verbosity=2).result
+    rc = 0 if result.wasSuccessful() else 1
+    if len(sys.argv) > 1:
+        # argv selects a subset (single test, -k, --failfast): the total is not
+        # comparable, so report the exemption instead of asserting a wrong count.
+        print("NOTE: executed-count guard not applied — argv selects a subset: "
+              + " ".join(sys.argv[1:]), file=sys.stderr)
+        return rc
+    inert = (list(result.skipped) + list(result.expectedFailures)
+             + [(t, "unexpected success") for t in result.unexpectedSuccesses])
+    executed = result.testsRun - len(inert)
+    if executed != EXPECTED_TESTS:
+        print(f"ERROR: expected {EXPECTED_TESTS} acceptance tests to execute, "
+              f"ran {executed} ({result.testsRun} collected, {len(inert)} "
+              f"skipped/expected-failed) — a test was skipped, dropped or "
+              f"renamed", file=sys.stderr)
+        for case, reason in inert:
+            print(f"  did not execute: {case} ({reason})", file=sys.stderr)
+        rc = 1
+    return rc
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    sys.exit(_run_with_count_guard())

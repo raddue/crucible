@@ -239,6 +239,9 @@ run python3 eval/grudge/test-grudge-privacy-isolation.py
 run python3 eval/grudge/test-grudge-regressions.py
 run python3 eval/grudge/test-grudge-wiring.py
 
+# --- #558/#559 acceptance oracle (#579) ---
+run python3 scripts/test_558_559_acceptance.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo
