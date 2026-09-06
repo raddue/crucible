@@ -43,6 +43,15 @@ def _clean_env(**extra):
                 "CRUCIBLE_DISABLE_GRUDGE_RESOLUTION_GUARD",
                 "GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
         env.pop(key, None)
+    # The developer's own git config is not part of the fixture. `_git` runs
+    # with check=True and the hook shells out to git too, so an ambient
+    # `commit.gpgsign = true` (or `color.ui`, `diff.external`, `core.hooksPath`,
+    # a commit template…) turned this gating suite red for reasons unrelated to
+    # #558/#559 — 10 of 11 tests errored. Neutralising both config layers closes
+    # the class; `hooks/tests/test-grudge-resolution-guard.sh` does the narrower
+    # per-repo `git config commit.gpgsign false`. Callers may still override.
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
     env.update(extra)
     return env
 
@@ -394,6 +403,39 @@ class StopHookDegradationTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, f"stderr={r.stderr!r}")
 
 
+class GitEnvIsolationTest(unittest.TestCase):
+    """The suite's own git calls must not read the developer's git config.
+
+    `_git` runs with `check=True`, so any ambient global/system setting that
+    makes a fixture command fail turns the whole suite red for a reason that has
+    nothing to do with #558/#559: `commit.gpgsign = true` with no usable key
+    errored 10 of the 11 tests here. This suite is gating (#579), so that is a
+    gating failure. Asserted behaviourally — stage a hostile global config, then
+    drive the suite's own helpers through it — rather than by inspecting the env
+    dict, so it stays true of whatever mechanism provides the isolation.
+    """
+
+    def test_fixture_git_survives_a_hostile_global_gitconfig(self):
+        with tempfile.TemporaryDirectory() as root:
+            cfg = os.path.join(root, "hostile.gitconfig")
+            _write(cfg, "[commit]\n\tgpgsign = true\n"
+                        "[gpg]\n\tprogram = /bin/false\n"
+                        "[color]\n\tui = always\n")
+            saved = os.environ.get("GIT_CONFIG_GLOBAL")
+            os.environ["GIT_CONFIG_GLOBAL"] = cfg
+            try:
+                repo = _init_repo(root, name="hostile-repo")
+                _write(os.path.join(repo, "f.py"), "V = 0\n")
+                _git(repo, "add", "-A")
+                _git(repo, "commit", "-qm", "chore: baseline")
+                self.assertRegex(_git_sha(repo), r"^[0-9a-f]{40}$")
+            finally:
+                if saved is None:
+                    os.environ.pop("GIT_CONFIG_GLOBAL", None)
+                else:
+                    os.environ["GIT_CONFIG_GLOBAL"] = saved
+
+
 # Executed-test-count guard (#579) — mirrors the pin in
 # scripts/test_complexity_index.py. `unittest` exits 0 on a suite whose tests
 # were dropped, renamed or skipped, so a return code alone cannot distinguish
@@ -401,7 +443,7 @@ class StopHookDegradationTest(unittest.TestCase):
 # how many tests actually EXECUTED: collected, minus skips, minus
 # expected-failures/unexpected-successes (all three keep a test in testsRun
 # while neutering its assertions). Bump this when adding a test.
-EXPECTED_TESTS = 11
+EXPECTED_TESTS = 12
 
 
 def _run_with_count_guard():
