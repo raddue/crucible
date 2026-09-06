@@ -76,6 +76,21 @@ Target length ~110-140 lines — peer range for a doc of this scope
    | By file group | Separate changes for groups needing different reviewers | Cross-cutting concerns |
    | Horizontal | Shared code/stubs first, then consumers | Layered architecture |
    | Vertical | Smaller full-stack slices of the feature | Feature work |
+   **Grounded in this repo's existing machinery** (innovate, partial accept —
+   see §11). The four strategies are not abstractions here; `/planning` already
+   produces three of them under other names, and naming the correspondence is
+   what makes "split it" actionable rather than aspirational:
+   - **Stack** ≡ a sequential `Dependencies` chain across plan tasks.
+   - **By file group** ≡ planning's **Consumer Migration Fan-Out**
+     (`skills/planning/SKILL.md:132-140`), which already fans independent
+     consumer migrations into parallel tasks — that *is* By-file-group, unnamed.
+   - **Horizontal** ≡ planning's shared-code-first task ordering.
+   - **Vertical** ≡ full-stack slices.
+   - §2's "one change, system still functional after" ≡ planning's existing
+     `safe-partial: true` annotation.
+
+   This is doc content only. It adds no consumer, no link, and no hook to
+   `/planning`.
 5. **When a large change is acceptable.** Complete file deletions; mechanical or
    automated refactors where the reviewer verifies intent, not every line;
    generated files. **This escape valve is load-bearing** — without it the
@@ -244,3 +259,61 @@ trigger.)
 | §8's non-adoption table re-introduces the forbidden vocabulary by quoting it | The tokens appear only inside a table whose column header is "Source prefix" and whose stated purpose is refusal; I4 pins that they appear nowhere else |
 | The general link checker later false-FAILs on a legitimately new comment form | The match rule and its four excluded decoys are documented in the checker docstring; loosening the regex is a deliberate edit, not a silent one |
 | A future skill adds a fourth `change-sizing.md` consumer and I3's set-equality fails | Intended — the failure is the signal to update the pin deliberately. Documented in the checker docstring. |
+| §4's grounding lines name `/planning` machinery without `/planning` linking back, so a planning edit could silently invalidate them | The named anchors (`Consumer Migration Fan-Out`, `safe-partial`) are stable section/field names, not line numbers; a rename would surface at the next stocktake. Accepted as low-severity doc drift, not defended by a checker. |
+
+## 11. Innovate disposition (partial accept)
+
+Innovate proposed adding **`planning` as a fourth consumer**, with a CANONICAL
+link and a `**Change shape:**` field in planning's plan-document header.
+
+**Accepted:** the strategy-grounding content, folded into §4 above. Its core
+argument is correct and sharp — this doc's own anti-pattern is "split before
+submitting, not after," yet all three named consumers observe a *finished* diff
+(temper and delve review one; finish is at the merge). As designed, the doc only
+ever speaks at moments where acting on its main advice costs a rebase. Naming the
+correspondence between the four strategies and planning's existing machinery is
+the cheapest way to make the advice reach plan time, and it costs ~10 lines of
+doc content with no new consumer, link, hook, or gating path.
+
+**Declined:** the fourth consumer and the `**Change shape:**` header field, on
+three grounds.
+
+1. **It opens a gating path the other three do not.** `/planning` routes into
+   `/quality-gate`, which *does* gate. A red-teamer reading `change-sizing.md`
+   through a planning link could raise a sizing finding that blocks a plan —
+   directly against §3's advisory-everywhere rule. Innovate identified this risk
+   itself and proposed to manage it with pointer wording; a constraint defended
+   only by prose in the very document a red-teamer is reading is not defended.
+2. **A plan has nothing to measure.** Every hook in §5 sits where the data
+   already exists (`numstat`, a resolved base ref). A plan has no diff, so
+   `**Change shape:**` is an uncheckable free-text field — innovate conceded it
+   "can get reflexively filled with 'one change'". Uncheckable fields in a
+   mandatory header template are checkbox theater, and §4's non-goals already
+   forbid adding a mandatory checklist item to a consumer.
+3. **Its strongest in-tree evidence does not survive checking.** Innovate cited
+   `skills/build/SKILL.md:1324` as "literally the reinventing #553 names". The
+   line is `"2-3 per subagent, ~10 files max" refers to plan design` — a
+   *context-budget* heuristic on the same axis as temper's 5,000-line cap, not a
+   reviewability judgment. It is a third instance of the axis §7 exists to
+   separate, not evidence of the gap #553 names.
+
+If plan-time sizing turns out to matter, adding `planning` later is a one-line
+link — the design keeps that door open and I3's set-equality pin makes the
+addition deliberate rather than silent.
+
+**Runners-up, both correctly rejected, one worth filing.**
+- *Reverse-link/orphan check* (every `shared/*.md` must have ≥1 consumer):
+  rejected on measurement, and the measurement replicates — **7 of 17 shared docs
+  have zero CANONICAL consumers today** (`external-review-prompt`,
+  `harness-adapter`, `model-tier-policy`, `session-index-convention`,
+  `severity-rubric`, `uss-approximation-patterns`, `uss-effect-decisions`). It
+  would be RED on day one, destroying the "green on day one" property. That
+  orphan set is independently interesting — `severity-rubric.md` is canonical for
+  the whole quality-gate family and is reachable by no CANONICAL link — but it is
+  not #553's problem. **File as its own issue.**
+- *Ledger covariate* (record `numstat` alongside gate verdicts so the borrowed
+  ~100/~300/~1000 numbers become falsifiable against this repo's own history):
+  the genuinely "harder to add later" idea, but it touches `ledger-append.md`,
+  `ledger_append.py`, `check_ledger_append_doc_drift.py`, and the out-of-repo
+  `crucible-eval` reader, and §4's non-goals forbid sizing in delve's ledger row.
+  **File as its own issue.**
