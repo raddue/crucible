@@ -80,6 +80,41 @@ run() {
   fi
 }
 
+# `run_expect <token> <cmd...>` — `run` plus an assertion on the child's OUTPUT
+# (#576). Exit status alone cannot see a checker neutered into a total no-op:
+# replace a check_*.py's two entry-point lines with constants and it prints
+# nothing, asserts nothing, and still exits 0. No in-file self-check can catch
+# that — the self-check is inside the very file being neutered — so this runner
+# is the only available vantage point. OPT-IN by design: `run` above is
+# unchanged, every existing `run` line behaves exactly as before, and a line is
+# converted only once its banner has been verified BY EXECUTION.
+#
+# The token is matched against stdout AND stderr merged, so a checker moving a
+# diagnostic between the two streams does not silently break the assertion (the
+# banners converted below were verified on stdout). Matching is literal
+# (`grep -F`), never a pattern. Capturing the output does not swallow it: it is
+# re-emitted inside the same `::group::` fold, so a CI failure stays
+# diagnosable — the one difference from `run` is that the child's stdout and
+# stderr appear merged rather than interleaved live.
+run_expect() {
+  local token="$1"; shift
+  local out status
+  total=$((total + 1))
+  echo "::group::$*"
+  out="$("$@" 2>&1)"; status=$?
+  printf '%s\n' "$out"
+  if [ "$status" -ne 0 ]; then
+    echo "::endgroup::"
+    failed+=("$*")
+  elif ! printf '%s\n' "$out" | grep -qF -- "$token"; then
+    echo "MISSING EXPECTED OUTPUT TOKEN: $token"
+    echo "::endgroup::"
+    failed+=("$* (missing output token: $token)")
+  else
+    echo "::endgroup::"
+  fi
+}
+
 # --- Structural / canonical checks ---
 run python3 scripts/check_canonical_drift.py
 run python3 scripts/check_i2_marker.py
@@ -98,8 +133,8 @@ run python3 scripts/check_dispatch_graphify_consult.py
 run python3 scripts/check_handoff_stop_contract.py --selftest
 run python3 scripts/check_handoff_stop_contract.py
 # --- .claude/settings.json registration (#559) ---
-run python3 scripts/check_claude_settings.py --selftest
-run python3 scripts/check_claude_settings.py
+run_expect "selftest OK" python3 scripts/check_claude_settings.py --selftest
+run_expect "OK — .claude/settings.json is tracked" python3 scripts/check_claude_settings.py
 
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
