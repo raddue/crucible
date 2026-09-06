@@ -8,9 +8,12 @@
 # structural lint emits a 2-line ADVISORY on stderr. The hook ALWAYS exits 0 and
 # performs NO writes (find-and-report; it does not block, edit, or record anything).
 #
-# OPT-IN — not auto-enabled. Configure in .claude/settings.json:
+# OPT-IN — not auto-enabled. Configure in ~/.claude/settings.json with an
+# ABSOLUTE path (S1/CHAIN-N5, PR #583 warden gate: a relative path here is
+# cwd-dependent — the same class of bug the CA-4/IP-1 fix closed in this
+# script's own linter-resolution logic, see below):
 #   "hooks": { "SubagentStop": [{ "matcher": "*", "hooks": [
-#     { "type": "command", "command": "bash hooks/rcpt-verify-hook.sh", "timeout": 500 }
+#     { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/rcpt-verify-hook.sh", "timeout": 500 }
 #   ]}]}
 #
 # Mirrors gate-ledger-guard.sh's never-fatal skeleton + build-routing-advisor.sh's
@@ -55,25 +58,29 @@ case "$TEXT" in
   *) exit 0 ;;
 esac
 
-# Extract from the first column-0 `RCPT v1 ` line to end-of-message (trailing prose
-# lands harmlessly in the NEXT body; leading prose is excluded).
-# NOTE: the `RCPT v1 ` trailing-space anchor matches v1 receipts ONLY — `RCPT v1.1`
-# receipts are not extracted by this hook (v1.1 is out of scope for #369). This is
-# advisory-only, so a dropped v1.1 receipt simply yields no advisory.
-RCPT_BLOCK="$(printf '%s\n' "$TEXT" | awk '/^RCPT v1 /{p=1} p')"
+# Extract from the first column-0 `RCPT v1 ` / `RCPT v1.N ` line to end-of-message
+# (trailing prose lands harmlessly in the NEXT body; leading prose is excluded).
+# The optional `.N` group covers `RCPT v1.1` — the version every current skill emits —
+# as well as bare `RCPT v1` and any future v1 minor. `scripts/rcpt_verify.py` already
+# version-dispatches on the header, so both shapes lint correctly.
+RCPT_BLOCK="$(printf '%s\n' "$TEXT" | awk '/^RCPT v1(\.[0-9]+)? /{p=1} p')"
 [ -z "$RCPT_BLOCK" ] && exit 0
 
-# ── 6. Resolve repo root + the existence gate (M2) ────────────────────
-# Without this gate a SubagentStop in a non-crucible repo (these gating skills run
-# in other repos too) would `python3 <nonexistent>` → exit 2 → a
-# misleading "structural lint failed" advisory on every receipt. Never-fatal holds
-# regardless; the gate prevents the spurious advisory.
-REPO="$(git rev-parse --show-toplevel 2>/dev/null)"
-[ -z "$REPO" ] && exit 0
-[ -f "$REPO/scripts/rcpt_verify.py" ] || exit 0
+# ── 6. Resolve the linter from THIS hook's own installed location ─────
+# SIEGE-CA-4/IP-1: resolving via `git rev-parse --show-toplevel` picked up
+# whatever repo the SESSION's cwd happened to be in — these gating skills
+# run in other repos too (worktrees, cloned PR branches, eval fixture
+# trees), so a checkout containing an unrelated file at scripts/rcpt_verify.py
+# got THAT file executed as the user, with the agent's full privileges, on
+# every SubagentStop. The linter is fixed tooling belonging to THIS crucible
+# install, not something that should vary with cwd — resolve it from where
+# this hook script itself lives (immune to cwd) instead.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+LINTER="$HOOK_DIR/../scripts/rcpt_verify.py"
+[ -f "$LINTER" ] || exit 0
 
 # ── 7. Run the Tier-1 structural lint (advisory only) ─────────────────
-ERR="$(printf '%s\n' "$RCPT_BLOCK" | python3 "$REPO/scripts/rcpt_verify.py" --tier1 - 2>&1 1>/dev/null)"
+ERR="$(printf '%s\n' "$RCPT_BLOCK" | python3 "$LINTER" --tier1 - 2>&1 1>/dev/null)"
 RC=$?
 if [ "$RC" -ne 0 ]; then
   FIRST_BULLET="$(printf '%s\n' "$ERR" | head -n 1)"

@@ -417,14 +417,20 @@ def row_taught_lint(rv, rep: Report):
     for k in passes:
         print(f"   LINT-PASS   : {k} → {partition[k]}")
     rep.check("taught blocks", len(partition), 10)
+    # #583 inquisitor (Integration AV2) — re-derived: three of the five LINT-FAILs were
+    # blocks the document PRESENTS AS VALID (build/7-implementer and build/8-implementer
+    # carried an out-of-band `out=` range; v1.1 build/42-implementer carried a 65-hex
+    # ARTIFACTS sha256 and a bare `fix-verified` CLAIM with no `=<value>`). Those are doc
+    # defects, now fixed, so they moved to LINT-PASS. The two that remain are the ones
+    # that are SUPPOSED to fail: the grammar template (`<skill>/<dispatch-id>`, whose
+    # VERDICT is a placeholder) and build/9-implementer (the "Lint-failure example
+    # (rejected by linter)" fence). This row is the gate on that intent: a block inside a
+    # "valid example" fence must not appear in this list.
     rep.check("taught LINT-FAIL identities", fails, sorted([
         f"{RETURN_CONV} › RCPT v1 <skill>/<dispatch-id>",
-        f"{RETURN_CONV} › RCPT v1 build/7-implementer",
-        f"{RETURN_CONV} › RCPT v1 build/8-implementer",
         f"{RETURN_CONV} › RCPT v1 build/9-implementer",
-        f"{RETURN_CONV} › RCPT v1.1 build/42-implementer",
     ]))
-    rep.check("taught LINT-PASS count", len(passes), 5)
+    rep.check("taught LINT-PASS count", len(passes), 8)
 
 
 def row_corpus(rv, rep: Report, corpus: pathlib.Path | None):
@@ -556,13 +562,23 @@ def main(argv=None):
     # payload's own range — so the sentence was rewritten and the token went with it.
     # Nothing this row protects moved: range-shaped, accepted, in-band and max #L span
     # are all unchanged, because the dropped token was prose, never a citation.
+    #
+    # #583 inquisitor (Integration AV2) — `max #L span` re-derived 219 → 50 and
+    # `in_band_blocks` [3 blocks] → []. Cause: the three `out=` citations that put those
+    # blocks in the band were a DOC DEFECT, not a canary. return-convention.md presents
+    # build/7-implementer, build/8-implementer and v1.1 build/42-implementer as its
+    # canonical valid receipts, and all three hard-FAILED Tier-1 on `EXEC range exceeds
+    # 4 KiB` — a producer copying the documented PASS example got an exit 1 the document
+    # says is impossible. The ranges were narrowed to the ones the receipts' own CLAIMS
+    # already cite (#L200-L220, #L170-L180, #L70-L120), which is what the examples meant
+    # to show. The in-band canary they incidentally provided is redundant: the calibration
+    # is pinned directly and gated by test_rcpt_verify.py's test_9c / test_15 / test_15b.
     row_exec_file(rv, rep, RETURN_CONV, 2, dict(
-        literal=11, range_shaped=4, accepted=4, max_l_span=219,
-        in_band_blocks=[("RCPT v1 build/7-implementer", 219),
-                        ("RCPT v1 build/8-implementer", 179),
-                        ("RCPT v1.1 build/42-implementer", 60)]),
-        note="a leak of grep's 1-B/line floor into EXEC turns build/7-implementer and "
-             "build/8-implementer from committed LINT-FAIL to LINT-PASS")
+        literal=11, range_shaped=4, accepted=4, max_l_span=50,
+        in_band_blocks=[]),
+        note="the three formerly in-band blocks were narrowed by #583 (they were "
+             "committed LINT-FAILs inside 'valid example' fences); EXEC's 80-B/line "
+             "calibration is gated by test_rcpt_verify.py test_9c/test_15/test_15b")
     row_exec_file(rv, rep, RT_PROMPT, 3, dict(
         literal=1, range_shaped=0, accepted=0, max_l_span=0, in_band_blocks=[]))
     row_exec_file(rv, rep, RCPT_TESTS, 4, dict(

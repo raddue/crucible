@@ -1629,6 +1629,15 @@ class TestTheTruncationPartitionHoldsAtScale(_RootCase):
     def setUp(self):
         super().setUp()
         self.rv = _import_rv()
+        # #583 / SIEGE finding S11 (PR #583 warden gate) — MAX_RESOLVE_NAMES (a
+        # real-world RLIMIT_NOFILE ceiling) now bounds the ACTUAL open-fd count
+        # during the resolve loop, not the raw declared-name count. Almost none of
+        # the N declared names below resolve to a real file (only 4 are planted on
+        # disk), so this test never holds anywhere near N fds — the "2000 entries"
+        # is a bookkeeping-at-scale scenario, orthogonal to the fd-exhaustion the
+        # ceiling defends against — and no longer needs the ceiling patched out (it
+        # was only needed under the old declared-count-keyed check). The ceiling's
+        # own coverage lives in test_rcpt_verify.py.
         body = "ok\n"
         h = hashlib.sha256(body.encode()).hexdigest()
         art = {}

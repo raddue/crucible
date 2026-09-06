@@ -89,6 +89,7 @@ run python3 scripts/check_qg_minor_advisory.py
 run python3 scripts/check_qg_second_pass_score.py --selftest
 run python3 scripts/check_qg_second_pass_score.py
 run python3 scripts/run_second_pass_evals.py
+run python3 scripts/test_second_pass_scorer.py
 run python3 scripts/check_qg_fan_out.py --selftest
 run python3 scripts/check_qg_fan_out.py
 run python3 scripts/check_crossref.py --selftest

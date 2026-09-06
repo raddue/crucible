@@ -1209,6 +1209,38 @@ class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
 
 
+class TestEditWroteHashCheckIsLinear(unittest.TestCase):
+    """SIEGE-BA-1 (PR #583 warden gate): the EDIT/WROTE hash membership check
+    used to rebuild `{a["hash"] for a in artifacts.values()}` INSIDE the
+    `for entry in trace:` loop — O(artifacts x trace-entries). A receipt
+    declaring N artifacts and N matching EDIT lines was measured at 9.5s CPU
+    for a 2.9MB receipt (N=16000), reachable through the unbounded
+    SubagentStop hook (hooks/rcpt-verify-hook.sh feeds --tier1 - directly).
+    Pins linear-ish wall time at a size that would be seconds under the old
+    quadratic behavior."""
+
+    def test_many_declared_artifacts_and_matching_edits_completes_quickly(self):
+        rv = _import_rv()
+        n = 10000
+        hashes = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(n)]
+        text = _receipt(
+            "grep:a0.md  expect-fail=/boom/  ran=UNRUNNABLE:tooling-absent",
+            verdict="BLOCKED",
+            artifacts=[(f"a{i}.md", h, "10") for i, h in enumerate(hashes)],
+            trace=[f"EDIT  a{i}.md  sha256:{h}" for i, h in enumerate(hashes)],
+        )
+        started = time.monotonic()
+        rv.lint_receipt(text)  # verdict/exceptions irrelevant — timing is the assertion
+        elapsed = time.monotonic() - started
+        # O(n) at n=10000 completes in well under a second (measured ~0.05s);
+        # the old O(n^2) behavior measured ~1.5s at n=6000, so n=10000 scales
+        # to ~4s under the regression — 2.0s is a bound the fix clears
+        # comfortably and the regression reliably trips.
+        self.assertLess(elapsed, 2.0,
+                         "lint_receipt took too long — the artifact-hash set "
+                         "may have regressed to being rebuilt per trace entry")
+
+
 class TestTraceRefGuard(unittest.TestCase):
     """#440: a malformed `TRACE#<non-digits>` reference (attacker-influenced
     receipt text) must lint-FAIL cleanly (LintError), NOT raise a raw ValueError
@@ -6188,7 +6220,7 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         reads = []
         real_read_from_fd = rv._read_from_fd
 
-        def spy(fd, budget, label):
+        def spy(fd, budget, label, owner=None):
             # F1 STRUCTURAL FIX — every name's fd now opens during the RESOLVE phase
             # (via `_open_nofollow_walk`, one `os.open` per DISTINCT NAME STRING,
             # whether or not that name's bytes ever get consumed), so counting
@@ -6200,8 +6232,13 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
             # the witness leg's fallback read when the carry does NOT apply), so
             # counting calls to it is the direct measurement of "did this leg
             # actually read the file", independent of how many names resolved to it.
+            #
+            # #583 inquisitor AV4 — `owner` must be forwarded, not dropped: it is how
+            # `_read_from_fd` clears the caller's `rec["fd"]` at the moment it takes
+            # ownership, and a spy that swallowed it would leave the record pointing at
+            # an fd this call already closed (a double close at cache disposal).
             reads.append(label)
-            return real_read_from_fd(fd, budget, label)
+            return real_read_from_fd(fd, budget, label, owner=owner)
 
         cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         verified = {}
@@ -8940,6 +8977,192 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
         # class is (the witness-evidence requirement, not this detector) — the
         # point is it is NOT rejected via the legacy-header path this class tests.
         self.assertNotIn("declares `RCPT v1`", out.stderr)
+
+
+class TestResolvePhaseNameCeiling(unittest.TestCase):
+    """#583 inquisitor / State & Lifecycle AV1, refined by SIEGE finding S11 (PR #583
+    warden gate) — MAX_RESOLVE_NAMES bounds the ACTUAL open-fd count during the
+    resolve loop (checked dynamically per name), not the raw declared-name count.
+    A name that fails to resolve opens zero fds and so no longer counts against the
+    ceiling; MAX_DECLARED_NAMES is a separate, much higher, coarse backstop against a
+    pathological declared count regardless of fd cost. Neither check touches F1's
+    fd-holding mechanism itself."""
+
+    def test_unresolvable_names_do_not_trip_the_fd_ceiling(self):
+        rv = _import_rv()
+        # 3x MAX_RESOLVE_NAMES declared names, none of which resolve (nonexistent
+        # root) — S11's fix: since an unresolvable name opens zero fds, this must
+        # succeed cleanly even though it would have tripped the old declared-count
+        # ceiling by a wide margin.
+        n = rv.MAX_RESOLVE_NAMES * 3
+        artifacts = {
+            f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
+            for i in range(n)
+        }
+        cache = {}
+        rv._build_identity_cache(artifacts, [], [], "PASS",
+                                  pathlib.Path("/nonexistent-root"), cache)
+        self.assertEqual(len(cache) - 3, n)  # -3 for the sentinel keys
+        for i in range(n):
+            self.assertIsNone(cache[f"f{i}.txt"]["realpath"])
+            self.assertIsNone(cache[f"f{i}.txt"]["fd"])
+
+    def test_resolvable_names_over_fd_ceiling_rejected(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            _plant_git_dir(repo)
+            n = rv.MAX_RESOLVE_NAMES + 1
+            names = [f"f{i}.txt" for i in range(n)]
+            for nm in names:
+                (repo / nm).write_text("x")
+            artifacts = {
+                nm: {"hash": "sha256:" + "0" * 64, "size": 1, "meta": ""}
+                for nm in names
+            }
+            with self.assertRaises(rv.LintError) as ctx:
+                rv._build_identity_cache(artifacts, [], [], "PASS", repo, {})
+            self.assertIn(str(rv.MAX_RESOLVE_NAMES), str(ctx.exception))
+            self.assertIn("file descriptors", str(ctx.exception))
+
+    def test_at_ceiling_resolves_normally(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            _plant_git_dir(repo)
+            names = [f"f{i}.txt" for i in range(rv.MAX_RESOLVE_NAMES)]
+            for nm in names:
+                (repo / nm).write_text("x")
+            artifacts = {
+                nm: {"hash": "sha256:" + "0" * 64, "size": 1, "meta": ""}
+                for nm in names
+            }
+            cache = {}
+            rv._build_identity_cache(artifacts, [], [], "PASS", repo, cache)
+            for nm in names:
+                self.assertIsNotNone(cache[nm]["realpath"], nm)
+                self.assertIsNotNone(cache[nm]["fd"], nm)
+
+    def test_declared_name_ceiling_still_rejects_pathological_count(self):
+        rv = _import_rv()
+        artifacts = {
+            f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
+            for i in range(rv.MAX_DECLARED_NAMES + 1)
+        }
+        # `root` is never consulted — the coarse declared-count check raises before
+        # resolve_base is ever called for any name.
+        with self.assertRaises(rv.LintError) as ctx:
+            rv._build_identity_cache(artifacts, [], [], "PASS",
+                                      pathlib.Path("/nonexistent-root"), {})
+        self.assertIn(str(rv.MAX_DECLARED_NAMES), str(ctx.exception))
+
+
+class TestSupersedesReferentialIntegrity(_InqBase):
+    """#584 (SIEGE-IT-1, warden gate on PR #583) — the SUPERSEDES witness-evidence rule
+    (TestSupersedesRequiresAnEvaluatedWitness) proves properties of the CITING receipt's
+    own witness; it proves nothing about whether the predecessor it retires ever
+    existed. Before this fix, a fabricated, nonexistent 12-hex prefix with an otherwise-
+    conformant witness passed the mandated `--tier2 --strict --ledger` command line
+    cleanly, retiring a predecessor that was never real."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _v11_receipt(self, name, supersedes=PREFIX):
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={supersedes}#L1-L10"])
+        p = self.base / name
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + "TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {supersedes}\n")
+        return p
+
+    def _ledger_file(self, entries):
+        p = self.base / "receipt-ledger.jsonl"
+        p.write_text("".join(json.dumps(e) + "\n" for e in entries))
+        return p
+
+    def test_fabricated_prefix_is_rejected_when_ledger_supplied(self):
+        p = self._v11_receipt("fab.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "unrelated-1", "phase": "p", "rcpt_sha256": "ab" * 32,
+             "verdict": "PASS"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("SUPERSEDES cites unknown prefix", out.stderr)
+
+    def test_real_prefix_still_passes_when_ledger_supplied(self):
+        p = self._v11_receipt("real.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "unrelated-1", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "0" * (64 - len(self.PREFIX)),
+             "verdict": "FAIL"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_ambiguous_prefix_is_rejected(self):
+        p = self._v11_receipt("ambig.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "d1", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "1" * (64 - len(self.PREFIX)), "verdict": "FAIL"},
+            {"dispatch_id": "d2", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "2" * (64 - len(self.PREFIX)), "verdict": "FAIL"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("SUPERSEDES prefix ambiguous", out.stderr)
+
+    def test_no_ledger_is_advisory_not_fatal(self):
+        """Absent --ledger stays advisory (mirrors the DISPATCHED-binding precedent) so
+        the pre-existing witness-evidence test corpus, which deliberately runs `--tier2`
+        with no `--ledger` to isolate that dimension, is unaffected by this fix."""
+        p = self._v11_receipt("noledger.rcpt")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("UNVERIFIABLE: SUPERSEDES referential-integrity", out.stderr)
+
+
+class TestSupersedesExistenceCheckIsLinear(unittest.TestCase):
+    """SIEGE-BA-2 (PR #583 warden gate): `tier2_supersedes_existence` (added by #584 /
+    SIEGE-IT-1, this same gate run) used to rescan the WHOLE ledger from scratch for
+    EVERY SUPERSEDES prefix — O(prefixes x ledger-entries), with both dimensions
+    receipt/ledger-controlled (a receipt's comma-separated SUPERSEDES list is unbounded;
+    the ledger grows over a project's lifetime), reachable through the same unbounded
+    SubagentStop path as SIEGE-BA-1. Measured before this fix: 0.55s / 2.1s / 8.1s at
+    (prefixes=500,ledger=20000) / (1000,40000) / (2000,80000) — a clean 4x-per-doubling
+    curve. Pins near-linear wall time at a size that would be seconds under the old
+    quadratic behavior."""
+
+    def test_many_prefixes_against_large_ledger_completes_quickly(self):
+        rv = _import_rv()
+        n_ledger = 40000
+        n_prefixes = 1000
+        hashes = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(n_ledger)]
+        with tempfile.NamedTemporaryFile(
+                "w", suffix=".jsonl", delete=False) as f:
+            for h in hashes:
+                f.write(json.dumps({"rcpt_sha256": h}) + "\n")
+            ledger_path = f.name
+        try:
+            supersedes = ",".join(hashes[i][:12] for i in range(n_prefixes))
+            started = time.monotonic()
+            rv.tier2_supersedes_existence(supersedes, ledger_path)
+            elapsed = time.monotonic() - started
+        finally:
+            os.unlink(ledger_path)
+        # O(ledger log ledger + prefixes) at this size completes in well under a
+        # second (measured ~0.2s); the old O(prefixes x ledger) behavior measured
+        # ~2.1s at this exact (prefixes, ledger) pair — 1.5s is a bound the fix
+        # clears comfortably and the regression reliably trips.
+        self.assertLess(elapsed, 1.5,
+                         "tier2_supersedes_existence took too long — the ledger "
+                         "sha256 set may have regressed to being rescanned per prefix")
 
 
 if __name__ == "__main__":

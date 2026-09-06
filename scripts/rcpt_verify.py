@@ -19,7 +19,7 @@ entry on (dispatch_id, rcpt_sha256, verdict); mismatch = FAIL. Without it, a rec
 has DISPATCHED lines reports `UNVERIFIABLE: ledger binding (no --ledger)` (advisory).
 """
 from __future__ import annotations
-import contextlib, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
+import bisect, contextlib, errno, io, json, os, posixpath, re, signal, stat, sys, hashlib, pathlib, typing
 import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -52,6 +52,39 @@ WITNESS_TIMEOUT_MSG = (f"witness evaluation exceeded {WITNESS_TIMEOUT_S}s "
 # deadline (n_names is receipt-controlled and uncapped).
 RESOLVE_PER_NAME_BUDGET_S = 0.05
 RESOLVE_PHASE_CEILING_S = 2 * WITNESS_TIMEOUT_S
+
+# #583 inquisitor / State & Lifecycle AV1, refined by SIEGE finding S11 (PR #583
+# warden gate) — _build_identity_cache holds one fd open per distinct name that
+# ACTUALLY RESOLVES, for the whole resolve phase (F1 structural fix); a name that
+# fails to resolve (resolve_base returns None) never reaches _open_nofollow_walk and
+# opens ZERO fds. The original mitigation keyed its ceiling on raw DECLARED-name
+# count, not actual fd-open count — an ordinary, non-adversarial receipt with many
+# legitimately-unresolvable cited names (a common shape, not a crafted one) could hit
+# a ceiling at roughly 1/5 of the platform's real fd headroom despite opening far
+# fewer fds than that. S11's fix: MAX_RESOLVE_NAMES now bounds the ACTUAL open-fd
+# count, checked dynamically after each name resolves in the loop below (never
+# pre-computed from declared count, since whether a name opens an fd is unknowable
+# before resolving it — the same reason the original design rejected
+# bound-and-rewalk: doing so would require re-opening/re-checking already-resolved
+# names, reopening the resolve-to-read gap F1 took 3 attempts to close). 200 is
+# comfortably below the more restrictive platform's default ceiling (~252 on macOS),
+# leaving headroom for the process's own already-open fds (stdio, git plumbing,
+# etc.). This is a per-fd-open check, not a per-name check — checking it in the loop
+# does not delay any individual name's resolution or touch F1's fd-holding
+# guarantee; it only decides whether resolution CONTINUES to the next name once the
+# actual fd budget is exhausted, closing every already-opened fd via the same
+# _close_identity_cache_fds finally-based cleanup every other exit path already uses.
+MAX_RESOLVE_NAMES = 200
+
+# S11 companion — a coarse, generous pre-check against a pathologically large
+# DECLARED name count, independent of how many will actually resolve. This guards
+# the resolve loop's own per-name iteration cost (each _resolve_once call does a
+# real resolve_base() stat walk even for a name that never opens an fd) rather than
+# fd exhaustion, which MAX_RESOLVE_NAMES (above) now bounds directly and separately.
+# Set high enough that no realistic receipt — even one citing hundreds of
+# never-resolving names alongside a fd-bounded resolving set — trips it by declared
+# count alone.
+MAX_DECLARED_NAMES = 5000
 
 # SIG-9-3 / round-9 — sentinel keys for the identity cache. Plain object() so they can
 # never collide with a receipt-controlled name: every genuine cache record is keyed on
@@ -1033,6 +1066,13 @@ def lint_receipt(text):
             raise LintError(
                 f"WITNESS grep artifact not in ARTIFACTS: {_show_path(witness['art'])}")
     # EXEC out= artifact must exist; range bound
+    # SIEGE-BA-1 (PR #583 warden gate): the artifact-hash set used to be
+    # rebuilt from `artifacts.values()` on EVERY EDIT/WROTE entry, making this
+    # loop O(artifacts x trace-entries) — a receipt with N declared artifacts
+    # and N matching EDIT lines burned 9.5s CPU at N=16000 (2.9MB) with no
+    # timer on this path, reachable through the unbounded SubagentStop hook.
+    # Hoisted out of the loop: built once, O(artifacts + trace-entries) total.
+    _artifact_hashes = {a["hash"] for a in artifacts.values()}
     for entry in trace:
         if entry["verb"] == "EXEC":
             check_exec_range_bound(entry["args"])
@@ -1044,7 +1084,7 @@ def lint_receipt(text):
             m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
             if not m:
                 raise LintError(f"{entry['verb']} missing sha256: {entry['args']}")
-            if m.group(1) not in {a["hash"] for a in artifacts.values()}:
+            if m.group(1) not in _artifact_hashes:
                 # DELIBERATE NON-GATE (#412 / BS1), NOT a TODO: the EDIT/WROTE hash is
                 # provenance, not a verified claim. It is intentionally NOT required to
                 # appear in ARTIFACTS — 0000…0 placeholders are the norm, and the dominant
@@ -2234,8 +2274,8 @@ def _resolve_once(name, root, cache):
     """SIG-7-3 — resolve `name` exactly once per distinct `str(name)`, memoized in `cache`.
 
     The value is a record, not a bare `Path | None` (FATAL-12-1): `{"realpath",
-    "found", "refused", "dev_ino_at_resolve", "resolve_stat_failed", "dev_ino",
-    "nlink_at_resolve", "declared", "fd"}`. First call for a key runs the real
+    "found", "refused", "dev_ino_at_resolve", "resolve_stat_failed", "resolve_errno",
+    "dev_ino", "nlink_at_resolve", "declared", "fd"}`. First call for a key runs the real
     `resolve_base` and, immediately after it returns a non-None realpath, F1
     STRUCTURAL FIX: `_open_nofollow_walk` opens the realpath end-to-end via a
     component-by-component, `O_NOFOLLOW`-at-every-step walk (see there) and the
@@ -2279,6 +2319,7 @@ def _resolve_once(name, root, cache):
         "refused": refused,
         "dev_ino_at_resolve": None,
         "resolve_stat_failed": False,
+        "resolve_errno": None,
         "dev_ino": None,
         "nlink_at_resolve": None,
         "declared": False,
@@ -2289,7 +2330,14 @@ def _resolve_once(name, root, cache):
     if rec["realpath"] is not None:
         try:
             fd = _open_nofollow_walk(rec["realpath"])
-        except OSError:
+        except OSError as e:
+            # #583 inquisitor AV1b — retain the errno so the consumer can tell a
+            # RESOURCE failure (EMFILE/ENFILE: this process ran out of descriptors
+            # while walking, which is O(distinct declared names) here) apart from a
+            # genuine resolve/read race. Both fail closed identically; only the
+            # diagnostic differs, because an operator shown race-shaped wording on an
+            # fd-exhaustion event hunts a race that never happened.
+            rec["resolve_errno"] = e.errno
             rec["resolve_stat_failed"] = True
         else:
             # temper R1 finding (scoped re-temper, warden 2026-08-31T-563-warden-r2) —
@@ -2333,10 +2381,14 @@ def _close_identity_cache_fds(cache):
     """F1 STRUCTURAL FIX — close every held fd `_resolve_once`'s walk opened for
     `cache` that no read ever consumed.
 
-    A record's `fd` is set to `None` the MOMENT a reader (`tier2_artifacts`,
-    `tier2_witness`) takes ownership of it (see `_read_from_fd`, which closes it on
-    every exit, success or exception) — so what remains here on the paths this
-    function is actually reached from is exactly the set that was never read: a
+    A record's `fd` is set to `None` at the MOMENT ownership of it passes to a reader
+    — by `_read_from_fd` itself, via the `owner=rec` its `tier2_artifacts` /
+    `tier2_witness` callers pass (#583 inquisitor AV4), at the two points that
+    function has taken ownership and will close it on every exit, success or
+    exception. Neither caller clears it earlier: doing so left a window in which the
+    descriptor was unreachable from `cache` and so invisible here. What remains here
+    on the paths this function is actually reached from is exactly the set that was
+    never read: a
     second spelling of an already-read realpath (the S3 dedup reuses the FIRST
     spelling's bytes and never touches the second one's fd), a name whose resolve
     raised before any read was attempted (e.g. a `--strict` ambiguity raise), or a
@@ -2780,7 +2832,7 @@ def _read_capped(path: pathlib.Path, budget: int, label: str) -> bytes:
     return raw
 
 
-def _read_from_fd(fd, budget, label):
+def _read_from_fd(fd, budget, label, owner=None):
     """S17-8 / S2, generalised for F1 — classify and read an ALREADY-OPEN fd, capturing
     `(st_dev, st_ino)` from that SAME descriptor, race-free.
 
@@ -2812,14 +2864,29 @@ def _read_from_fd(fd, budget, label):
     be re-resolved. `_read_and_fstat_artifact` below is the thin, name-opening sibling
     kept for the one caller (`_read_jsonl`'s `--ledger` read) that has no earlier resolve
     step to hold a descriptor across."""
+    # #583 inquisitor AV4 — the ownership HANDOFF, mirroring code-review #583 finding
+    # #1 on the consuming side. `owner` is the `_resolve_once` record `fd` is still
+    # registered in; callers must leave `owner["fd"]` populated across the call rather
+    # than clearing it before it, so the descriptor stays reachable from the cache (and
+    # thus reclaimable by `_close_identity_cache_fds`) for the whole window an async
+    # exception — KeyboardInterrupt, or `_witness_bound`'s SIGALRM `WitnessTimeout` —
+    # could land in. This function clears it at exactly the two points it has taken
+    # ownership: the `except BaseException` arm that closes `fd` itself, and after
+    # `os.fdopen` has handed the descriptor to `fh` (whose `with` block closes it on
+    # every exit). Clearing it in either place is what keeps `_close_identity_cache_fds`
+    # from double-closing an fd number the OS may already have recycled.
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise LintError(f"Tier-2: {label} is not a regular file (not read)")
         fh = os.fdopen(fd, "rb")
     except BaseException:
+        if owner is not None:
+            owner["fd"] = None
         os.close(fd)
         raise
+    if owner is not None:
+        owner["fd"] = None
     with fh:
         raw = fh.read(budget + 1)
     if len(raw) > budget:
@@ -2926,13 +2993,36 @@ def _build_identity_cache(artifacts, trace, witnesses, verdict, root, cache_out,
     declared_map = {nm: nm in declared_names for nm in names}
 
     n_names = len(names)
+    if n_names > MAX_DECLARED_NAMES:
+        # S11 (PR #583 warden gate) — coarse guard against a pathological declared
+        # count, independent of fd cost. See MAX_DECLARED_NAMES for the rationale.
+        raise LintError(
+            f"Tier-2: {n_names} distinct artifact/witness names exceeds the resolve "
+            f"phase's declared-name ceiling of {MAX_DECLARED_NAMES}; refusing to "
+            "begin resolution")
     budget = min(RESOLVE_PHASE_CEILING_S,
                  max(WITNESS_TIMEOUT_S, RESOLVE_PER_NAME_BUDGET_S * n_names))
+    open_fd_count = 0
     try:
         with _witness_bound(seconds=budget, what="the resolve phase"):
             for nm in names:
                 _resolve_once(nm, root, cache_out)
                 cache_out[nm]["declared"] = declared_map[nm]
+                if cache_out[nm]["fd"] is not None:
+                    open_fd_count += 1
+                    if open_fd_count > MAX_RESOLVE_NAMES:
+                        # S11 — reject once the ACTUAL open-fd count (not declared
+                        # name count) crosses the fd-safety ceiling. Every fd opened
+                        # so far, including this name's, is reclaimed by
+                        # _close_identity_cache_fds at the caller's finally: (see
+                        # MAX_RESOLVE_NAMES); this raise only stops resolving
+                        # further names, it does not touch F1's fd-holding guarantee
+                        # for names already resolved.
+                        raise LintError(
+                            f"Tier-2: resolve phase opened {open_fd_count} file "
+                            f"descriptors, exceeding the fd-safety ceiling of "
+                            f"{MAX_RESOLVE_NAMES} (RLIMIT_NOFILE exhaustion "
+                            "mitigation); refusing to resolve further names")
                 dev_ino = cache_out[nm]["dev_ino_at_resolve"]
                 if dev_ino is not None and dev_ino[1] == 0:
                     cache_out[_IDENTITY_DEGENERATE] = True
@@ -3720,13 +3810,19 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
                 # when that walk did not produce a trustworthy identity
                 # (`resolve_stat_failed`), which the `dev_ino_at_resolve is None` raise
                 # just below already covers — there is no read to attempt in that case.
+                # #583 inquisitor AV4 — `rec["fd"]` is deliberately NOT cleared here.
+                # Clearing it before the call left the descriptor reachable only from
+                # this frame until `_read_from_fd` established its own guard, so an
+                # async exception in that gap leaked it (`_close_identity_cache_fds`
+                # walks the cache, not stack frames). `owner=rec` hands the clearing to
+                # `_read_from_fd`, which does it at the moment it actually takes
+                # ownership — see there.
                 fd = rec["fd"]
-                rec["fd"] = None    # ownership transferred; _read_from_fd closes it either way
                 if fd is not None:
                     try:
                         # S3 — the dedup is scoped to fstat/read only; the first
                         # spelling of a realpath reads once, later spellings reuse.
-                        st_dev_ino, raw = _read_from_fd(fd, budget, label)
+                        st_dev_ino, raw = _read_from_fd(fd, budget, label, owner=rec)
                     except LintError:
                         # Over-cap: bytes NOT read, hash NOT recomputed, remaining
                         # entries and the witness leg uncounted. Fails CLOSED — never a
@@ -3751,6 +3847,18 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
             if dev_ino_at_resolve is None:
                 if cov is not None:
                     cov.partial = True
+                # #583 inquisitor AV1b — descriptor exhaustion during the resolve walk
+                # is a RESOURCE limit of this process, not evidence of a path swap. It
+                # fails closed exactly as every other unsampled identity does; only the
+                # wording differs, so an operator is not sent hunting a race that never
+                # happened. The resolve phase holds one fd per distinct declared name,
+                # so a large receipt can reach RLIMIT_NOFILE on its own.
+                resolve_errno = rec.get("resolve_errno")
+                if resolve_errno in (errno.EMFILE, errno.ENFILE):
+                    raise LintError(
+                        f"Tier-2: {label}'s identity could not be sampled: "
+                        f"file-descriptor limit reached during resolution "
+                        f"(errno={errno.errorcode[resolve_errno]})")
                 raise LintError(
                     f"Tier-2: {label}'s identity could not be sampled at "
                     f"resolution time")
@@ -5323,13 +5431,22 @@ def tier2_witness(witness, trace, root, strict, verdict, cov=None, probe_out=Non
                 # a self-contained, zero-gap resolve-then-open with no separate
                 # by-name stat to race against — and fails exactly as closed when
                 # the underlying walk failure is still live.
+                #
+                # #583 inquisitor AV4 — `rec["fd"]` stays populated across the call
+                # (see `_read_from_fd`'s `owner`), and a FRESHLY-walked fd is stored
+                # INTO `rec["fd"]` as the first side effect after the walk returns —
+                # the same principle code-review #583 finding #1 applied inside
+                # `_resolve_once`. Both keep the descriptor reachable from the cache,
+                # and therefore reclaimable by `_close_identity_cache_fds`, for the
+                # whole window this leg's own SIGALRM `WitnessTimeout` could land in.
                 fd = rec["fd"]
-                rec["fd"] = None    # ownership transferred either way
                 try:
                     if fd is None:
                         fd = _open_nofollow_walk(art_realpath)
+                        rec["fd"] = fd
                     st_dev_ino, raw = _read_from_fd(
-                        fd, ARTIFACT_READ_CAP, f"witness {_show_path(art_name)}")
+                        fd, ARTIFACT_READ_CAP, f"witness {_show_path(art_name)}",
+                        owner=rec)
                 except LintError:
                     if cov is not None:
                         cov.partial = True
@@ -5709,6 +5826,81 @@ def tier2_ledger(trace, ledger_path):
                 f"Tier-2 --ledger: DISPATCHED {token} (verdict={verdict}, "
                 f"rcpt-sha256:{h[:12]}…) has no matching receipt-ledger entry "
                 f"(dispatch_id={did}; phase is not part of the match)")
+    return []
+
+
+def tier2_supersedes_existence(supersedes, ledger_path):
+    """#584 (SIEGE-IT-1) — SUPERSEDES referential-integrity: a cited prefix must name a
+    receipt that actually exists, not just satisfy this receipt's OWN witness-evidence
+    rule (`lint_v11_local` / the witness-evidence block in `_verify_single`, both of
+    which only check properties of the CITING receipt — never that the cited PREDECESSOR
+    is real). Before this, `SUPERSEDES: <any fabricated 12-hex prefix>` passed both
+    tiers cleanly under the mandated `--tier2 --strict --ledger` command line, retiring a
+    predecessor that never existed. return-convention.md § "The Sweep" step 3 documents
+    "uniqueness" as one of the four checks Tier-1 defers to a manifest-holding layer
+    (`lint_v11_local`'s own docstring says so explicitly) — this is that layer, for the
+    production path, mirroring `eval/ledger-return-protocol/tripwire/sweep.py`'s
+    `lint_v11` (the eval-only reference that has implemented existence + uniqueness
+    checking against ITS manifest all along; this is the same check ported onto the
+    production ledger's row shape).
+
+    Existence: at least one ledger row's `rcpt_sha256` must start with the prefix.
+    Uniqueness: at most one DISTINCT `rcpt_sha256` value may match the prefix (two
+    ledger rows sharing one `rcpt_sha256` — e.g. the same child receipt recorded on a
+    retry — are not a collision; two rows with DIFFERENT `rcpt_sha256` values that both
+    start with the prefix are).
+
+    NOT closed here, disclosed rather than silently omitted: "no-already-superseded"
+    (return-convention.md's fourth manifest-relative check) has no ledger field to test
+    against — the `{dispatch_id, phase, rcpt_sha256, verdict}` schema (#383) records
+    DISPATCHED bindings, not supersession history — so a double-supersede of the same
+    predecessor is not caught by this leg. Closing it needs a ledger schema addition
+    (a `superseded_by` write-back, mirroring sweep.py's manifest), which is a separate,
+    larger change than the existence gap this closes.
+
+    Raises LintError on a prefix with zero or with >1 distinct matching `rcpt_sha256`.
+    Returns []."""
+    prefixes = [s.strip() for s in supersedes.split(",")]
+    try:
+        ledger = [e for e in _read_jsonl(ledger_path) if isinstance(e, dict)]
+    except (OSError, ValueError, MemoryError, RecursionError) as ex:
+        raise LintError(
+            f"Tier-2 --ledger: cannot parse receipt-ledger {_show_path(ledger_path)}: {ex}")
+    # SIEGE-BA-2 (PR #583 warden gate): this used to rescan the WHOLE ledger
+    # from scratch for EVERY SUPERSEDES prefix (`{e... for e in ledger if
+    # ...startswith(prefix)}` inside the `for prefix in prefixes:` loop),
+    # making this O(prefixes x ledger-entries) -- both dimensions are
+    # receipt/ledger controlled (a receipt's comma-separated SUPERSEDES list
+    # is unbounded, and the ledger grows over a project's lifetime), reached
+    # through the same unbounded SubagentStop path as SIEGE-BA-1. Measured
+    # before this fix: 0.55s / 2.1s / 8.1s at
+    # (prefixes=500,ledger=20000) / (1000,40000) / (2000,80000) -- a clean
+    # 4x-per-doubling curve. Fixed the same way as BA-1: build the expensive
+    # structure once outside the loop. Prefix length is receipt-controlled
+    # (no fixed-length validation upstream), so this sorts the DISTINCT
+    # rcpt_sha256 values once (O(L log L)) and locates each prefix's matching
+    # range via bisect (O(log L) + O(matches) per prefix) instead of a full
+    # O(L) linear rescan per prefix.
+    sha256_values = sorted({e.get("rcpt_sha256") for e in ledger
+                             if isinstance(e.get("rcpt_sha256"), str)})
+    for prefix in prefixes:
+        lo = bisect.bisect_left(sha256_values, prefix)
+        matches = set()
+        for v in sha256_values[lo:]:
+            if not v.startswith(prefix):
+                break
+            matches.add(v)
+        if not matches:
+            raise LintError(
+                f"SUPERSEDES cites unknown prefix (referential-integrity requirement, "
+                f"#584): {prefix} matches no receipt-ledger entry — a SUPERSEDES claim "
+                f"must name a real predecessor, not just satisfy this receipt's own "
+                f"witness-evidence rule")
+        if len(matches) > 1:
+            raise LintError(
+                f"SUPERSEDES prefix ambiguous (referential-integrity requirement, "
+                f"#584): {prefix} matches {len(matches)} distinct receipt-ledger "
+                f"entries")
     return []
 
 
@@ -6646,6 +6838,26 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                         "EVALUATED at Tier-2 (witness-evidence requirement: the "
                         "witness resolved to no evaluated predicate, so it "
                         "demonstrates nothing about the predecessor it retires)")
+                # #584 (SIEGE-IT-1) — SUPERSEDES referential-integrity, sited BEFORE the
+                # Part-3 DISPATCHED-binding block below on purpose (same leg family).
+                # Mirrors DISPATCHED's own absent-ledger posture deliberately, rather
+                # than inventing a stricter one: a real ledger mismatch is a hard FAIL
+                # (strict-independent), absent --ledger is advisory UNVERIFIABLE. This
+                # keeps the huge existing SUPERSEDES witness-evidence test corpus (which
+                # deliberately runs `--tier2` with no `--ledger` to isolate THAT
+                # dimension) unaffected, while still closing the real gap under the
+                # MANDATED production command line (quality-gate/SKILL.md:30,
+                # siege/SKILL.md:52 — every consuming skill always supplies --ledger).
+                # Fires whenever this receipt claims a supersession, independent of the
+                # witness-evidence outcome above (existence of the predecessor is a
+                # SEPARATE requirement from evidence about it — see
+                # tier2_supersedes_existence).
+                if v11 is not None and v11["supersedes"] != "none":
+                    if ledger is not None:
+                        tier2_supersedes_existence(v11["supersedes"], ledger)
+                    else:
+                        wit_notes.append(
+                            "UNVERIFIABLE: SUPERSEDES referential-integrity (no --ledger)")
                 # Part-3 receipt-ledger binding: only with an orchestrator-supplied
                 # --ledger (no default-path synthesis). A mismatch is a hard FAIL
                 # (strict-independent); absent --ledger is advisory UNVERIFIABLE, and
