@@ -192,6 +192,81 @@ missing round-2s later (once Opus is confirmed healthy) would strengthen this si
 judged necessary to unblock #537, given the model-tier dimension was already known to be
 untestable from a Sonnet 5 session regardless of outage.
 
+## #561: Second Pass Findings widen the score population (2026-09-01)
+
+#561 (PR #565) fixes a real gap in `quality-gate`'s clean-pass exit: the weighted
+score and the candidate-clean predicate counted only the `### Fatal Challenges` /
+`### Significant Challenges` sections of a red-team findings file, blind to a
+Fatal or Significant surfaced under the reviewer's REQUIRED second pass
+(`red-team-prompt.md`'s "Second Pass (REQUIRED)" step) — letting a round with a
+real open Fatal exit clean because the Fatal happened to live under
+`### Second Pass Findings` instead. The fix widens the score source (and
+red-team's mirrored single-source-of-truth counting, standalone and
+QG-invoked) to include that third section, adds four new decision rules to
+`skills/quality-gate/SKILL.md` — (1) the widened Score source population itself
+(step 7, `qg-score-second-pass-population` CONTRACT block: fail-loud
+severity-token normalization, section-location/fencing rules, entry-boundary
+rules, de-dup-by-identity across sections); (2) a directional SEVERITY-COUNTS
+discrepancy exception (a declared `SEVERITY-COUNTS:` fatal+significant total
+that *exceeds* the orchestrator's own counted population blocks candidate-clean,
+so a malformed second-pass entry that would otherwise silently parse to 0
+cannot fake a clean exit); (3) an empty-work-order exception (when that
+discrepancy fires AND the orchestrator's own count is 0 Fatal/0 Significant,
+there is no real work for a fix agent, so the round exits directly via a new
+Exit Precedence slot #4, `Verdict: ESCALATED, Reason: severity-counts-discrepancy`,
+instead of entering an empty fix loop); and (4) the same discrepancy/empty-work-order
+treatment applied to look-harder's own receipt on the confirm/demote path — and
+renumbers Exit Precedence slots #4–#8 to #5–#9 accordingly (tracked end-to-end as
+`INV-561-1`, twelve consumers). `red-team/SKILL.md` and `red-team-prompt.md`'s
+`### Second Pass Findings` report-format instructions were substantially rewritten
+to match: reviewers are now told the exact section-location, entry-boundary,
+severity-normalization, and fencing rules the orchestrator's parse depends on,
+so a reviewer filling in that section produces output the mechanical parser can
+score correctly.
+
+**18 new evals** were added to `skills/quality-gate/evals/evals.json` (ids
+11–28) — behavioral fixtures for the widened population, catalogued in
+`SKILL.md`'s `INV-T18`. Unlike every other entry in this document, these are
+**not** blind-A/B skill-value evals graded by an LLM judge — they are
+correctness fixtures for a **standalone Python reoracle**: `scripts/second_pass_scorer.py`
+reimplements the CONTRACT-pinned parse spec in plain Python (no LLM call), and
+`scripts/run_second_pass_evals.py` extracts each fixture's fenced findings-file
+text, runs it through `second_pass_scorer.score()`, and asserts the result
+against a hand-mapped expected score. Both are wired into `run_tests.sh`
+(CI-gated, run on every push), alongside `scripts/check_qg_second_pass_score.py`
+and the extended `scripts/check_rt_receipt_contract.py` — structural linters
+that check the `SKILL.md` CONTRACT block's own text (pinned phrases, negative
+controls) rather than any findings-file content.
+
+Of the 28 fixtures, 17 are in scope for the oracle (evals #11–21, #23–28; #1–10
+are pre-#561 general behavioral fixtures with no embedded findings file to
+score, and #22 is a compaction-recovery scenario with no embedded findings file
+either — both documented as out-of-scope in the harness's own module docstring
+rather than silently skipped):
+
+```
+$ python3 scripts/run_second_pass_evals.py
+17/17 evals passed
+(evals [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 22] are out-of-scope general behavioral
+fixtures — no embedded findings file with a single verifiable score)
+```
+
+**Caveat, worth stating explicitly: this oracle measures a Python module, not
+the LLM executor that runs in production.** `second_pass_scorer.py` is a
+hand-written reimplementation of the same parsing rules `SKILL.md` documents
+for the orchestrator to apply by hand, and the fixtures assert that
+reimplementation's output — they say nothing about whether a live orchestrator
+session (an LLM following `SKILL.md`'s prose) actually applies the fail-loud
+severity-boundary, section-location, and fencing rules correctly when scoring
+a real red-team findings file, nor whether a live red-team reviewer (an LLM
+following `red-team-prompt.md`) produces `### Second Pass Findings` text in
+the shape this parse expects. No live orchestrator/reviewer run and no
+blind-A/B skill-value delta were measured for #561; CLAUDE.md's "eval before
+you publish" rule is satisfied here by this correctness harness rather than
+by a WITH/WITHOUT execution-eval pair — there is no meaningful "without the
+widened parse" baseline to A/B against, since the prior behavior was simply an
+undercount bug, not a design alternative.
+
 ## #460 Section B: pre-land SKILL.md-edit deltas (2026-08-31)
 
 #460 Section B (extracting the calibration-ledger reporting cluster to `raddue/crucible-eval`)
