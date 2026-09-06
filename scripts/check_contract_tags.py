@@ -650,7 +650,23 @@ def _executes_grudge_append(text: str) -> list[str]:
 
 
 def check_no_merge_grudge_writer(root: Path, errors: list[str]) -> None:
-    """No hook writes grudges — however the file is named (INV-C10, #578)."""
+    """No hook writes grudges — whatever it is named, wherever it sits (INV-C10, #578).
+
+    Scope, stated exactly, because this docstring used to claim more than the
+    code did: every regular file under `hooks/` — any name, any suffix, any
+    depth — except those under `hooks/tests/`, is read as shell text and run
+    through `_executes_grudge_append`. `hooks/tests/` is excluded on purpose: a
+    test is not a hook and may legitimately drive the writer to seed a fixture.
+    Files that are not valid UTF-8 are skipped (nothing this predicate can read).
+
+    The limit, also stated exactly: the predicate is SHELL-command-shaped — it
+    finds an invocation whose command word is the writer script or a shell
+    variable aliased to it, which is the shape of every hook in this repo. A
+    hook written in another language that reaches the writer through a language
+    API (Python `subprocess.run([...])`, node `execFile`) is NOT detected. That
+    is a real gap, deliberately left open rather than papered over: the honest
+    reading of a green run is "no shell hook executes the grudge writer".
+    """
     legacy = root / "hooks" / "grudge-merge-writer.sh"
     if legacy.exists():
         errors.append("INV-C10: hooks/grudge-merge-writer.sh exists — Path A was uncut")
@@ -658,13 +674,21 @@ def check_no_merge_grudge_writer(root: Path, errors: list[str]) -> None:
     hooks_dir = root / "hooks"
     if not hooks_dir.is_dir():
         return
-    for path in sorted(hooks_dir.glob("*.sh")):
+    tests_dir = hooks_dir / "tests"
+    for path in sorted(hooks_dir.rglob("*")):
+        if not path.is_file() or tests_dir in path.parents:
+            continue
         rel = path.relative_to(root).as_posix()
-        hits = _executes_grudge_append(path.read_text(encoding="utf-8"))
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        hits = _executes_grudge_append(text)
         if hits:
             errors.append(
                 f"INV-C10: {rel} executes the grudge writer ({hits[0]!r}) — Path A is "
-                f"'a hook records the grudge', and it stays cut regardless of the hook's name"
+                f"'a hook records the grudge', and it stays cut regardless of the hook's "
+                f"name, suffix or location under hooks/"
             )
 
 
@@ -675,12 +699,16 @@ def check_merge_pr_untouched(root: Path, base_sha: str, errors: list[str]) -> No
 
     * a clone-independent content pin of the Step 7.5 fence in the working tree
       (works in a shallow clone, a tarball, an export);
-    * the historical diff, asserted rather than printed — and guarded, so an
+    * the `base_sha`-to-WORKING-TREE diff, asserted rather than printed — and guarded, so an
       unresolvable `base_sha` is a LOUD failure instead of the silent no-op the
       original pipeline degraded to. CI clones shallow by default
       (`actions/checkout@v4` without `fetch-depth`), which is exactly why the
       original check was vacuous there; `.github/workflows/ci.yml` now sets
       `fetch-depth: 0` so this assertion is real in CI too.
+
+    Both halves end at the same state — the working tree — on purpose: with the
+    diff half ending at HEAD instead, an uncommitted edit outside the fence
+    passed both halves, which is the state this suite normally runs in.
     """
     skill = root / MERGE_PR_SKILL
     if not skill.is_file():
@@ -726,17 +754,37 @@ def check_merge_pr_untouched(root: Path, base_sha: str, errors: list[str]) -> No
         )
         return
 
+    # `<base> --` (no `..HEAD`): the diff ends at the WORKING TREE, the same
+    # state the fence pin above reads. With `..HEAD` the two halves read two
+    # different states and an UNCOMMITTED edit outside the fence passed both —
+    # pre-commit being exactly when this suite is normally run.
+    # `--no-color --no-ext-diff`: a `color.ui = always` / `diff.external` in the
+    # developer's global config would otherwise leave no line starting with `+`,
+    # and the gating suite would fail with a bogus INV-C10 error.
     diff = subprocess.run(
-        ["git", "-C", str(root), "diff", f"{base_sha}..HEAD", "--", MERGE_PR_SKILL],
+        ["git", "-C", str(root), "diff", "--no-color", "--no-ext-diff", base_sha,
+         "--", MERGE_PR_SKILL],
         capture_output=True, text=True,
     )
     if diff.returncode != 0:
-        errors.append(f"INV-C10: `git diff {base_sha}..HEAD -- {MERGE_PR_SKILL}` failed: {diff.stderr.strip()}")
+        errors.append(f"INV-C10: `git diff {base_sha} -- {MERGE_PR_SKILL}` failed: {diff.stderr.strip()}")
         return
 
+    # Hunk-anchored, NOT prefix-filtered: a removed line whose own text starts
+    # with `--` renders as `---…`, so dropping every line that starts with `---`
+    # discarded exactly the removals this file is full of (its `---` frontmatter
+    # fences). Header lines are skipped by position instead — everything before
+    # the first `@@` of a file's hunks.
     added, removed = [], []
+    in_hunk = False
     for line in diff.stdout.splitlines():
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith("diff --git "):
+            in_hunk = False
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if not in_hunk:
             continue
         if line.startswith("+"):
             added.append(line[1:])
@@ -867,7 +915,19 @@ def _fixture_errors(root: Path, coverage_map: dict = None) -> list[str]:
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+    """Run git against a fixture repo with the machine's own config neutralised.
+
+    `check=True`, so ANY ambient global/system setting that makes a fixture
+    command fail is an unhandled traceback and a spurious RED unrelated to a
+    regression — `commit.gpgsign = true` was the reported one, but the class is
+    the whole config file (`core.hooksPath`, templates, `commit.template`, …).
+    Neutralising both config layers closes the class rather than one member;
+    `hooks/tests/test-grudge-resolution-guard.sh` does the narrower
+    `git config commit.gpgsign false` per fixture repo.
+    """
+    env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                          check=True, env=env)
 
 
 def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
@@ -875,7 +935,12 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     root = Path(tempfile.mkdtemp(dir=tmp))
     (root / "skills" / "merge-pr").mkdir(parents=True)
     skill = root / MERGE_PR_SKILL
-    head = "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n" + EXPECTED_STEP_75_FENCE + "\n```\n"
+    # The `---` frontmatter fences are load-bearing fixture, not decoration: a
+    # REMOVED line whose own text starts with `--` renders as `---…` in a diff,
+    # which a header filter anchored on a bare `---` prefix silently eats.
+    head = ("---\nname: merge-pr\n---\n\n"
+            "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n"
+            + EXPECTED_STEP_75_FENCE + "\n```\n")
     skill.write_text(head + "\nNon-`fix(*)` PRs record nothing.\n", encoding="utf-8")
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "t@example.com")
@@ -1035,6 +1100,42 @@ def selftest() -> int:
         errs = []
         check_no_merge_grudge_writer(root, errs)
         expect_error("renamed merge writer", errs, "executes the grudge writer")
+        (root / "hooks" / "totally-innocent-name.sh").unlink()
+
+        # --- MUTANT: the writer moved below hooks/, or lost its extension ----
+        # A `hooks/*.sh` glob reads exactly one directory level and one
+        # extension. INV-C10 is about Path A staying cut, not about a filename
+        # OR a location OR a suffix.
+        (root / "hooks" / "lib").mkdir()
+        (root / "hooks" / "lib" / "writer.sh").write_text(
+            "#!/bin/sh\n" + executes_direct, encoding="utf-8")
+        errs = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_error("writer in a subdirectory", errs, "hooks/lib/writer.sh")
+        (root / "hooks" / "lib" / "writer.sh").unlink()
+
+        (root / "hooks" / "post-merge").write_text(
+            "#!/bin/sh\n" + executes_direct, encoding="utf-8")
+        errs = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_error("writer without a .sh suffix", errs, "hooks/post-merge")
+        (root / "hooks" / "post-merge").unlink()
+
+        # --- hooks/tests/ is NOT a hook --------------------------------------
+        # A test may legitimately drive the writer to seed a fixture store; the
+        # exclusion is deliberate, so it gets a fixture of its own.
+        (root / "hooks" / "tests").mkdir()
+        (root / "hooks" / "tests" / "test-writer.sh").write_text(
+            "#!/bin/sh\n" + executes_direct, encoding="utf-8")
+        errs = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_clean("hooks/tests/ is excluded", errs)
+
+        # --- a non-text file under hooks/ is skipped, not a crash ------------
+        (root / "hooks" / "blob.bin").write_bytes(b"\xff\xfe\x00binary")
+        errs = []
+        check_no_merge_grudge_writer(root, errs)
+        expect_clean("binary file under hooks/", errs)
 
         # --- INV-C10: the Step 7.5 history assertion -----------------------
         root, base = _make_git_fixture(tmp)
@@ -1063,6 +1164,51 @@ def selftest() -> int:
         check_merge_pr_untouched(root, base, errs)
         expect_error("fence line removed", errs, "REMOVED line(s)")
         expect_error("fence line removed", errs, "differs from the pinned templated form")
+
+        # --- MUTANT: a removed line whose own text starts with `--` ---------
+        # `-` + `---` renders as `----`; a header filter that anchors on the
+        # bare prefix `---` discards it, and "INV-C10 permits no removed lines"
+        # silently stops seeing the one edit shape the real file is full of.
+        root, base = _make_git_fixture(tmp)
+        skill = root / MERGE_PR_SKILL
+        # Exactly ONE removed line, and its own text is `---`.
+        skill.write_text(skill.read_text(encoding="utf-8").replace("\n---\n\n###", "\n\n###", 1),
+                         encoding="utf-8")
+        _git(root, "commit", "-aqm", "drop the closing --- frontmatter fence")
+        errs = []
+        check_merge_pr_untouched(root, base, errs)
+        expect_error("removed line beginning with --", errs, "REMOVED line(s)")
+
+        # --- MUTANT: an UNCOMMITTED edit outside the fence -------------------
+        # Both halves must read ONE state. The fence pin reads the working tree,
+        # so an added-lines assertion reading `base..HEAD` lets an uncommitted
+        # automation paragraph through — precisely when this suite normally runs.
+        root, base = _make_git_fixture(tmp)
+        skill = root / MERGE_PR_SKILL
+        skill.write_text(skill.read_text(encoding="utf-8") + "\nAn uncommitted automation paragraph.\n",
+                         encoding="utf-8")
+        errs = []
+        check_merge_pr_untouched(root, base, errs)
+        expect_error("uncommitted edit outside the fence", errs, "are not the one permitted paragraph")
+
+        # --- hostile ambient git config (color / external diff) --------------
+        # `color.ui = always` prefixes every diff line with ANSI, so nothing
+        # starts with `+`; a `diff.external` replaces the diff wholesale. Either
+        # turns this assertion into a bogus INV-C10 failure in the gating suite.
+        root, base = _make_git_fixture(tmp)
+        hostile = root.parent / "hostile.gitconfig"
+        hostile.write_text("[color]\n\tui = always\n[diff]\n\texternal = /bin/echo\n", encoding="utf-8")
+        saved = os.environ.get("GIT_CONFIG_GLOBAL")
+        os.environ["GIT_CONFIG_GLOBAL"] = str(hostile)
+        try:
+            errs = []
+            check_merge_pr_untouched(root, base, errs)
+            expect_clean("hostile ambient git config", errs)
+        finally:
+            if saved is None:
+                os.environ.pop("GIT_CONFIG_GLOBAL", None)
+            else:
+                os.environ["GIT_CONFIG_GLOBAL"] = saved
 
         # --- main()'s own argv dispatch ------------------------------------
         # stderr is swallowed so the usage line does not read as a failure in
