@@ -227,6 +227,7 @@ All investigation and implementation is delegated to subagents via the Agent too
 | Synthesis | Consolidation | Opus | Cross-referencing, contradiction detection, and causal reasoning — not just summarization |
 | Phase 2 | Pattern Analysis | Opus | Exhaustive comparison requires depth |
 | Phase 4 | Implementation | Opus | TDD + root cause fix |
+| Phase 4.4 | Scope judge | Sonnet | Mechanical traceability check — hypothesis text vs. fix diff, no repo context |
 | Phase 4.5 | "Where Else?" scan | Opus | Cross-codebase pattern matching and sibling fixing |
 | Phase 5 | Red-team | Opus | Adversarial analysis |
 | Phase 5 | Code review | Opus or Sonnet | Lead decides by fix complexity |
@@ -270,8 +271,11 @@ Phase 3.5: Hypothesis Red-Team (crucible:quality-gate on hypothesis)
 Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
-Orchestrator: Verify fix -> Success? Phase 4.5. Failed? Cleanup, log, loop back.
+Orchestrator: Verify fix -> Success? Phase 4.4. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user. If checkpoints exist: "Checkpoints available from prior fix cycles. Restore to a known-good state before manual investigation?"
+    |
+    v
+Phase 4.4: Scope judge — did the fix stay inside the hypothesis? (skipped on small fixes)
     |
     v
 Phase 4.5: "Where Else?" scan — find and fix sibling locations
@@ -576,6 +580,55 @@ On loop-back (failed fix or user-requested revert), `git revert <wip-sha>` clean
 If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha>`. This reverts all sibling commits plus the original WIP commit in one operation. See Phase 4.5 below.
 
 **Phase 4.5 sibling commits:** Each sibling fix uses the prefix `fix(sibling):` with a descriptive message. Example: `fix(sibling): add icon initialization to StashScreen.OnEnable`
+
+---
+
+### Phase 4.4: Scope Check (Tier-2 Scope Judge)
+
+**Prototype of `shared/dispatch-convention.md` → Scope Anchoring, tier 2 (#562).**
+
+Phase 4's implementation discipline ("ONE change at a time. No 'while I'm here'
+improvements. No bundled refactoring.") is prose the implementer is asked to honor with
+nothing checking it. Tier 1 (a pre-declared file allow-list) does not apply here — the
+hypothesis names a root cause, not the file set the fix will need. This phase adds the
+check.
+
+**Runs when** the Phase 4 WIP commit is non-trivial: **>1 file changed OR >40 changed
+lines**. Below that the judge's fixed cost outweighs what it can find — skip it silently.
+**Never runs on a loop-back path** (failed fix or regressions) — there is no fix to scope.
+
+**Ordering is load-bearing: Phase 4.4 runs AFTER the Phase 4 WIP commit and BEFORE Phase
+4.5.** Phase 4.5 fixes analogous siblings *by design*; a judge shown only the original
+hypothesis would flag every sibling commit as unrequested expansion. Judge the Phase 4
+fix alone.
+
+Dispatch one judge (model tier **sonnet**) using `shared/scope-judge-prompt.md`, disk-
+mediated per `shared/dispatch-convention.md`. It receives exactly two substitutions and
+nothing else:
+
+- `{{TASK}}` — the confirmed hypothesis from Phase 3, **verbatim** (not the investigation
+  synthesis, not the implementation report, not the implementation-details log)
+- `{{DIFF}}` — `git diff <pre-fix-sha>..HEAD`, the Phase 4 WIP commit's diff
+
+**Acting on the verdict.** The judge returns `VERDICT: IN-SCOPE | SCOPE-EXPANSION`, a
+flagged path list, per-hunk classifications, and a confidence.
+
+- `IN-SCOPE` → proceed to Phase 4.5. Record nothing beyond a `[DEC-N]` line.
+- `SCOPE-EXPANSION` **with `CONFIDENCE: high`** → the orchestrator picks one:
+  1. **Re-dispatch** the implementer to drop the flagged hunks (`git revert` the WIP
+     commit first, then re-implement) — the default when the flagged hunks are a fix to a
+     *different* defect, or bookkeeping about other work.
+  2. **Accept the deviation** — record a `[DEC-N]` line naming each flagged path and the
+     one-sentence reason it is being kept. Legitimate when the "expansion" is a
+     consequence the judge could not see without repo context.
+  Either way, the flagged paths are carried into the Phase 5 quality-gate input so the
+  red-teamer reviews them knowing they were unrequested.
+- `SCOPE-EXPANSION` **with `CONFIDENCE: medium | low`** → **advisory only.** Record the
+  `[DEC-N]` line and proceed. Never revert a fix on a low-confidence scope verdict; the
+  #562 spike found the judge's self-reported confidence drops precisely on genuinely
+  arguable hunks.
+
+The judge **never edits anything** and never re-runs. One dispatch, one verdict.
 
 ---
 

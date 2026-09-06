@@ -79,6 +79,78 @@ Begin by reading that file.
 - "Begin by reading that file" establishes the first action, not the only action
 - For teammate dispatches: mailbox/communication protocol instructions go in the dispatch file, not the pointer prompt
 
+## Scope Anchoring (opt-in)
+
+> Dispatched subagents drift: they fix an adjacent defect, generalize past the
+> request, or record bookkeeping about work nobody asked for. Scope anchoring is the
+> two-tier checkpoint any orchestrator can opt into. **Tier 1 is the default; tier 2 is
+> for dispatches whose file set cannot be known up front.** Skills that adopt either tier
+> link this section — do not re-specify it per skill.
+>
+> Prior art and reference implementation of tier 1: `skills/quality-gate/SKILL.md`
+> ("Scope Anchoring for Fix Agents"). Measured evidence for tier 2: `#562` spike,
+> `docs/research/2026-09-06-scope-judge-spike.md`.
+
+Every scope-anchored dispatch carries a **scope statement** in its dispatch file: one
+sentence naming what the subagent is fixing, and an explicit "do not add features,
+restructure, or make changes outside these findings" clause.
+
+### Tier 1 — mechanical change boundary (cheap; default)
+
+Use when the orchestrator can name the allowed files/sections **before** dispatch.
+
+1. **Change boundary.** The dispatch file lists the specific files or sections the
+   subagent may modify. A finding that cannot be resolved inside the boundary must be
+   flagged in the receipt, not fixed.
+2. **Drift detection.** After the subagent returns, the orchestrator diffs the actual
+   changed-path set against the boundary. Any path outside it → reject the round's
+   output, re-dispatch with the out-of-scope items named explicitly, and carry those
+   items forward as context for the next review round.
+
+Tier 1 costs nothing beyond a `git diff --name-only` and catches the whole class of
+"touched a file it was never pointed at". It cannot see drift *inside* an allowed file.
+
+### Tier 2 — semantic scope judge (for unpinnable scope)
+
+Use when the right file set is not knowable in advance (a bug fix whose root cause is
+still being located, an implementer working from a design), or when tier 1 passed but the
+work inside the allowed files may still have expanded.
+
+Dispatch **one** judge after the work completes — model tier **sonnet**, the same tier as
+quality-gate's fix verifier — using `shared/scope-judge-prompt.md`. It receives **only**:
+
+- (a) the original task / finding / hypothesis text, verbatim, and
+- (b) the resulting diff (or changed-file list).
+
+Nothing else. No repo access, no fix journal, no reviewer narrative, no commit messages.
+The isolation is the mechanism: a judge with the surrounding context reconstructs a
+justification for almost any change, which is exactly the failure being checked for.
+
+The judge labels every changed file — per hunk-group where a file is mixed — as
+`in-scope`, `justified-adjacent` (must name what would break without it), or
+`unrequested-expansion`, and returns `VERDICT: IN-SCOPE | SCOPE-EXPANSION` plus a flagged
+path list and a self-reported confidence.
+
+**Reading the verdict.** `SCOPE-EXPANSION` is a **signal, not a rejection** — unlike tier
+1's boundary breach, it is a judgment call and the orchestrator owns the decision. On
+`SCOPE-EXPANSION`, the orchestrator either re-dispatches asking for the flagged hunks to
+be dropped, or records the expansion as an accepted deviation with a one-line reason. A
+`CONFIDENCE: medium|low` verdict is advisory only and must never auto-reject.
+
+**When NOT to run tier 2.** The judge's cost is dominated by a fixed per-dispatch
+overhead, so it is only worth paying against work that is itself substantial. Skip it
+when tier 1 already covers the dispatch, when the diff is trivially small (single-hunk
+fixes), or when the dispatch is *deliberately* exploratory or expansive — a blast-radius
+scan that fixes sibling occurrences by design will be flagged as expansion by a judge that
+was only shown the original bug.
+
+**Cost (measured, #562, 6 cases):** ~45k fixed + ~2.7x the diff's own token size, one
+sonnet dispatch, one turn, no tool use beyond reading its dispatch file; 14-82s wall,
+fully parallelizable against other post-work checks. On the #562 corpus it scored 3/3 on
+diffs containing a real unrequested expansion and 3/3 on clean diffs whose only extra
+touches were legitimate side-effects (test wiring, dead-import removal, `.gitignore`,
+prose restated to match a changed spelling).
+
 ## Graphify Consult
 
 A `graphify-out/graph.json` call graph (AST-derived, built by graphify) is a
