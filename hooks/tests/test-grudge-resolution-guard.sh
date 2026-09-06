@@ -2194,7 +2194,9 @@ check 319 "the Stop after the unequal-count merge gives up — contract:group:in
 #     other groups at 1, "take the canonical group's count", "take the min"
 #     and "take the last group visited" each persist 2 where max() persists 3.
 #
-#     Why the canonical id is the MIDDLE one in the merge's visit order: the
+#     Why the canonical id is the MIDDLE one in the merge's visit order (a
+#     premise this fixture ASSERTS below, after check 348, because nothing in
+#     the hook's contract fixes bash's iteration order): the
 #     merge walks the bridged groups in the hook's own iteration order (C, D,
 #     E for these SHAs) and the lowest id, D, sits second — so a canonical
 #     rule of "take the first visited" picks C and "take the last visited"
@@ -2237,6 +2239,31 @@ check 347 "the middle group stands at 1 before the merge — contract:group:inv-
   "$(st "$HC_REPO" s21e ".block_counts[.sha_group[\"$T21E_D\"]]")"
 check 348 "the youngest group stands at 1 before the merge — contract:group:inv-t21" 1 \
   "$(st "$HC_REPO" s21e ".block_counts[.sha_group[\"$T21E_E\"]]")"
+# Fixture premise #2, asserted the same way and for the same reason as #1: the
+# canonical (lowest) id must sit in the MIDDLE of the merge's visit order, or
+# "take the first visited" / "take the last visited" coincides with it and check
+# 352 stops killing those two mutants. That order is bash's associative-array
+# iteration order over SHA_GROUP (`for s in "${!SHA_GROUP[@]}"`) — a property of
+# the bash build and the key set, NOT of the SHA-derived lexicographic order
+# premise #1 guards, so a different bash or a re-staged fixture could move the
+# group to first or last with every check still passing and the fixture silently
+# reduced to what arity 2 already covers.
+#
+# Reconstructed from the hook's own persisted state, the way the merge Stop will
+# reconstruct it: `_write_state` emits sha_group in the order the PREVIOUS Stop
+# iterated it, the merge Stop's `_load_maps` inserts those keys in that order,
+# and then iterates. Re-inserting them here into an array of our own, under the
+# same bash that runs the hook, models that load-then-iterate step rather than
+# assuming the file order survives it.
+T21E_ORDER="$(st "$HC_REPO" s21e '.sha_group|keys_unsorted|join(" ")')"
+unset T21E_VISIT_MAP; declare -A T21E_VISIT_MAP
+for s in $T21E_ORDER; do T21E_VISIT_MAP["$s"]=1; done
+T21E_VISIT=()
+for s in "${!T21E_VISIT_MAP[@]}"; do T21E_VISIT+=("$s"); done
+if [ "${#T21E_VISIT[@]}" -ne 3 ] || [ "${T21E_VISIT[1]}" != "$T21E_CANON" ]; then
+  echo "FIXTURE ERROR: t21e's canonical (lowest) id is not the MIDDLE group of the merge's visit order (${T21E_VISIT[*]:-<none>}) — 'take the first visited' or 'take the last visited' now coincides with the real rule and check 352 no longer kills both canonicalisation mutants. Re-stage the fixture." >&2
+  exit 1
+fi
 echo "V = 2" > "$HC_REPO/x.py"; echo "V = 2" > "$HC_REPO/y.py"; echo "V = 2" > "$HC_REPO/z.py"
 commit_all "$HC_REPO" "fix(f): x, y and z bridge"
 T21E_F="$(sha_of "$HC_REPO" HEAD)"
