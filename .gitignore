@@ -10,6 +10,10 @@ docs/plans/*
 # re-include a file under an excluded DIRECTORY, so the directory pattern is
 # widened to `docs/plans/*` and this one path is negated.
 !docs/plans/2026-08-21-488-c1-name-space-reduced.md
+# #585 — the trust-boundary design doc, negated under the same rule as the line above.
+# It is a permanent repo artifact: #586's design cites it by section, and its §9 boundary
+# sentence is a cross-document commitment quoted verbatim there.
+!docs/plans/2026-09-06-585-auth-boundary-design.md
 docs/prds/
 docs/compass.md
 # Transient compass lockdir (#408 F12: lock-beside-data); only present mid-write,
