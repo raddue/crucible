@@ -174,16 +174,18 @@ class TestAnEmptyArtifactsSetCannotSilenceTheUnhashedWitnessRead(_TwoRootCase):
     def setUp(self):
         super().setUp()
         # A REAL file the receipt never declares: the witness resolves and
-        # reads it, and no sha256 is ever recomputed for it.
-        self.plant(self.findings, "round-3-findings.md",
-                   "# Round 3 findings\nFatal: 0\n")
+        # reads it independently of TRACE's own hash claim (kept correct below
+        # so #571's fabricated-hash backstop, which now DOES recompute it, has
+        # nothing to catch — this class is about the witness leg, not that one).
+        h, _ = self.plant(self.findings, "round-3-findings.md",
+                          "# Round 3 findings\nFatal: 0\n")
         self.out = self.verify("\n".join([
             "RCPT v1 red-team/1-devils-advocate",
             "VERDICT  PASS  conf=0.90",
             "ARTIFACTS",
             "  (none)",
             "TRACE",
-            f"  1  WROTE  round-3-findings.md  sha256:{H64}",
+            f"  1  WROTE  round-3-findings.md  sha256:{h}",
             "CLAIMS",
             "  (none)",
             "WITNESS    grep:  expect-fail=/Fatal: [1-9]/  ran=TRACE#1",

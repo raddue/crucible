@@ -253,6 +253,10 @@ GLOB_ENTRIES_CAP = 8
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 CONF = re.compile(r"^(0\.\d{2}|1\.00)$")
 
+# #571 — a degenerate sha256 (all-zero or all-f) is never a real digest; a WROTE/EDIT
+# line carrying one is a fabricated-hash shape, not a legitimate placeholder.
+_DEGENERATE_SHA256 = frozenset({"0" * 64, "f" * 64})
+
 
 def _receipt_int(digits: str, label: str) -> int:
     """SIEGE-R2BA-3 — int() on a RECEIPT-AUTHORED digit string, guarded. The same
@@ -855,9 +859,22 @@ def parse_witness(body):
         # ran= must be preceded by whitespace
         pass
     # head now ends before " ran=". Find " expect-fail=" (first occurrence after payload).
-    if "expect-fail=" not in head:
+    # #572 — `expect-absent=` is the same signature grammar under the OPPOSITE
+    # polarity: a find-and-report FAIL witness pre-commits a FALSIFIER whose
+    # PRESENCE would contradict the finding, so absence (not presence) is the
+    # passing state. Mutually exclusive with `expect-fail=` — a line declaring both
+    # would leave the linter guessing which the author meant, the same reason two
+    # `pattern=` clauses are rejected rather than resolved by position.
+    has_fail_kw = "expect-fail=" in head
+    has_absent_kw = "expect-absent=" in head
+    if has_fail_kw and has_absent_kw:
+        raise LintError(
+            f"WITNESS carries both expect-fail= and expect-absent= clauses: {line!r}")
+    if not has_fail_kw and not has_absent_kw:
         raise LintError(f"WITNESS missing expect-fail= clause: {line!r}")
-    kind_payload, _, expect_fail = head.rpartition("expect-fail=")
+    polarity = "absent" if has_absent_kw else "present"
+    kind_payload, _, expect_fail = head.rpartition(
+        "expect-absent=" if has_absent_kw else "expect-fail=")
     kind_payload = kind_payload.rstrip()
     expect_fail = expect_fail.strip()
     if ":" not in kind_payload:
@@ -927,6 +944,14 @@ def parse_witness(body):
                        "WITNESS expect-fail is not a valid regex", expect_fail)
     elif not re.match(r"^(exit!=0|exit=-?\d+|match)$", expect_fail):
         raise LintError(f"WITNESS expect-fail not a valid signature form: {expect_fail!r}")
+    # #572 — the exit-clause and bare-`match` forms have no well-defined ABSENT
+    # reading (an exit code or a grep-line match is not a body signature to negate),
+    # so `expect-absent=` is restricted to the two forms it actually inverts.
+    if polarity == "absent" and not (expect_fail.startswith("/")
+                                     or expect_fail.startswith('"')):
+        raise LintError(
+            f'WITNESS expect-absent= only supports /regex/ or "literal" signatures '
+            f"(got {expect_fail!r})")
     # #474 round-1 / SIG-2 — the clause rules run on EVERY clause-carrying witness,
     # not only under `expect-fail=match`. The strip above is unconditional for
     # kind=grep, so before this a clause standing beside a /regex/ or "literal"
@@ -1008,7 +1033,7 @@ def parse_witness(body):
     return {"kind": kind, "payload": payload.strip(), "payload_raw": payload_raw.strip(),
             "pattern": clause, "art": art, "range_kind": range_kind,
             "range_a": range_a, "range_b": range_b,
-            "expect_fail": expect_fail, "ran": ran.strip()}
+            "expect_fail": expect_fail, "polarity": polarity, "ran": ran.strip()}
 
 
 _TRACE_REF_RE = re.compile(r"^TRACE#([0-9]+)$")
@@ -1046,6 +1071,14 @@ def lint_receipt(text):
     trace = parse_trace(sections["TRACE"])
     claims = parse_claims(sections["CLAIMS"])
     witness = parse_witness(sections["WITNESS"])
+    # #572 — `expect-absent=` names the find-and-report FAIL polarity (a falsifier
+    # that must be ABSENT); on PASS the existing `expect-fail=` already means exactly
+    # that (its pattern must NOT appear for the PASS to stand), so a second spelling
+    # of the same rule there would be redundant rather than meaningful.
+    if witness.get("polarity") == "absent" and verdict != "FAIL":
+        raise LintError(
+            f"WITNESS expect-absent= is only meaningful on a FAIL verdict "
+            f"(got VERDICT={verdict})")
     # #474 / D6 — a RANGED kind=grep witness payload must name an artifact the receipt
     # itself declares. Not a new contract: return-convention.md § "Citation resolution"
     # already says a
@@ -1084,6 +1117,14 @@ def lint_receipt(text):
             m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
             if not m:
                 raise LintError(f"{entry['verb']} missing sha256: {entry['args']}")
+            # #571 — an all-zero or all-f sha256 is never a real digest. Checked
+            # BEFORE the ARTIFACTS-membership non-gate below, which is about an
+            # otherwise-plausible hash simply not appearing in ARTIFACTS; a degenerate
+            # value is implausible on its own and a hard lint failure regardless.
+            if m.group(1) in _DEGENERATE_SHA256:
+                raise LintError(
+                    f"{entry['verb']} sha256 is a degenerate placeholder, never a "
+                    f"real digest: {entry['args']}")
             if m.group(1) not in _artifact_hashes:
                 # DELIBERATE NON-GATE (#412 / BS1), NOT a TODO: the EDIT/WROTE hash is
                 # provenance, not a verified claim. It is intentionally NOT required to
@@ -4050,6 +4091,128 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
     return notes
 
 
+def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified):
+    """#571 fix (2) — the fabricated-hash backstop. For every TRACE READ/WROTE/EDIT
+    entry carrying a `sha256:<hex64>` field, resolve its named path under `--root`
+    and, if it resolves, hash the file and compare against the receipt's own claim;
+    a mismatch is ALWAYS a hard FAIL (unconditional on --strict, mirroring
+    tier2_artifacts's own unconditional hash-mismatch raise — a fabricated claim is
+    not something --strict makes optional). A name that resolves nowhere stays
+    UNVERIFIABLE, exactly like an unresolved ARTIFACTS entry: this leg has no
+    ARTIFACTS-membership rule of its own to fail closed on, and #571 explicitly
+    scopes the backstop to what is verifiable under the declared roots.
+
+    Deliberately separate from tier2_artifacts rather than folded into
+    `_build_identity_cache`'s upfront name gather: that gather feeds the
+    ARTIFACTS/witness identity-collision detector (`_IDENTITY_COLLISION_CANDIDATES`),
+    and widening its input is a change to that detector's behaviour, not to this
+    one. Instead this reuses `_resolve_once` directly against the SAME shared
+    `cache`: it memoizes per name, so a TRACE entry naming an already-declared
+    ARTIFACTS key (the common, legitimate case) resolves for free and this leg reads
+    the ARTIFACTS leg's already-hash-verified `verified` buffer instead of a second
+    disk read, rather than a fresh, never-hashed one.
+
+    NOT wrapped in its own `_witness_bound`: SIEGE-R3BA-3 (see `_verify_single`)
+    fixed a real double-deadline hazard by pinning the resolve-then-witness cycle at
+    EXACTLY two `_witness_bound` arms per run (`_build_identity_cache`'s snapshot
+    phase, then `tier2_witness`); `TestWitnessTimeoutBound` pins that count. A third
+    arm here would reopen the same hazard for the sake of a name set every
+    legitimate receipt's own EDIT/WROTE/READ population is small, so the read side's
+    existing `ARTIFACT_READ_CAP` stays this leg's only ceiling — matching
+    tier2_artifacts, which resolves against the same pre-bounded cache and carries
+    no bound of its own either.
+
+    Scoped to the direct `--tier2` CLI path (`_verify_single`) only: the --eval/
+    --selftest fixture corpora exercise tier2_artifacts/tier2_witness directly, with
+    their own inline-body or synthetic-root conventions that this leg does not need
+    to accommodate."""
+    budget = ARTIFACT_READ_CAP
+    opened = {}
+    for entry in trace:
+        if entry["verb"] not in _PROVENANCE_VERBS:
+            continue
+        m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
+        if not m:
+            continue
+        claimed = m.group(1)
+        path_m = re.match(r"^(\S+)", entry["args"])
+        if not path_m:
+            continue
+        name = path_m.group(1)
+        label = f"TRACE {entry['verb']} {_show_path(name)}"
+        _resolve_once(name, root, cache)
+        rec = cache[str(name)]
+        resolved = rec["realpath"]
+        if resolved is None:
+            notes_out.append(f"UNVERIFIABLE: {label} (no file under root)")
+            continue
+        found = rec["found"]
+        if len(found) > 1:
+            # An ambiguous name has no single file to hash against, so this leg
+            # can make no claim either way. Ambiguity DISCLOSURE (the note, the
+            # --strict raise, the census bump) stays with whichever of
+            # tier2_artifacts/tier2_witness actually owns this name via ARTIFACTS
+            # membership or a WITNESS ran= citation — the two legs whose
+            # note-before-raise ordering is independently pinned
+            # (TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise /
+            # TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise). Raising
+            # here too would preempt them (this leg runs first) and silence their
+            # notes on the very run their ordering exists to survive.
+            continue
+        dev_ino_at_resolve = rec["dev_ino_at_resolve"]
+        if dev_ino_at_resolve is None:
+            raise LintError(
+                f"Tier-2: {label}'s identity could not be sampled at "
+                f"resolution time")
+        if cache.get(_IDENTITY_DEGENERATE, False):
+            raise LintError(
+                f"Tier-2: {label}'s identity cannot be checked across the "
+                f"resolve/read gap (this filesystem does not produce unique file "
+                f"identities); a path swap between resolution and read cannot be "
+                f"ruled out")
+        pair = opened.get(resolved)
+        if pair is not None:
+            st_dev_ino, raw = pair
+        else:
+            fd = rec["fd"]
+            rec["fd"] = None
+            if fd is not None:
+                try:
+                    st_dev_ino, raw = _read_from_fd(fd, budget, label)
+                except (OSError, MemoryError) as e:
+                    raise LintError(f"Tier-2: {label} unreadable ({_strerror(e)})")
+                budget -= len(raw)
+                if budget < 0:
+                    raise LintError(
+                        f"Tier-2: {label} exceeds the Tier-2 read budget "
+                        f"({ARTIFACT_READ_CAP} B total; not read)")
+            else:
+                # The fd was already consumed by another leg reading the SAME
+                # realpath under a different name (typically the matching
+                # ARTIFACTS declaration) — reuse its already-hash-verified bytes
+                # rather than treat this as unreadable.
+                raw = verified.get((resolved, dev_ino_at_resolve))
+                if raw is None:
+                    notes_out.append(
+                        f"UNVERIFIABLE: {label} (bytes already consumed by "
+                        f"another leg with no verified record to reuse)")
+                    continue
+                st_dev_ino = dev_ino_at_resolve
+            opened[resolved] = (st_dev_ino, raw)
+        if dev_ino_at_resolve != st_dev_ino:
+            raise LintError(
+                f"Tier-2: {label} resolved to a path contained under an "
+                f"allowed root at resolution time ({dev_ino_at_resolve}), but "
+                f"the file opened for reading has a different identity "
+                f"({st_dev_ino}); the path was replaced between resolution "
+                f"and read")
+        actual = hashlib.sha256(raw).hexdigest()
+        if actual != claimed:
+            raise LintError(
+                f"Tier-2: {label} sha256 mismatch (disk={actual[:12]} "
+                f"receipt={claimed[:12]})")
+
+
 def derive_art_name(cited, verdict):
     """Derive the body-lookup artifact name from the cited TRACE entry, EXACTLY as
     lint.py's tier2_verify (PASS: EXEC out= OR READ/WROTE cited path) and
@@ -4283,6 +4446,38 @@ def verify_witness(body_text, witness, verdict, cited, probe=None,
         if _expect_fail_pattern(expect_fail, witness.get("pattern")) is None:
             probe["no_predicate"] = ("lint-kind-unimplemented" if kind == "lint"
                                      else "exit-clause-not-a-body-predicate")
+    if verdict == "FAIL" and witness.get("polarity") == "absent":
+        # #572 — the find-and-report polarity: `expect_fail` here names a FALSIFIER
+        # the reviewer pre-committed, whose PRESENCE would contradict this FAIL
+        # finding. Unlike the "present" leg below, the outcome does not turn on the
+        # cited entry's own exit code at all — a correctly-framed probe's exit is
+        # whatever the probe script itself returns, not a proxy for whether the
+        # falsifier showed up in its output — so this leg reads only `content_match`.
+        pattern = _expect_fail_pattern(expect_fail, witness.get("pattern"))
+        content_match = bool(pattern and re.search(pattern, body))
+        if probe is not None and bound and _delivered_signal(body):
+            # siege S-7 parity with the PASS leg's own `and bound` gate below: the
+            # comparison ran against real, hash-verified bytes and could decide the
+            # outcome either way, so it counts as evaluated regardless of which way
+            # it decided.
+            probe["evaluated"] = True
+        if content_match:
+            raise LintError(
+                f"Tier-2 FAIL: falsifying signature present — body matches "
+                f"expect-absent {expect_fail} (witness would have fired → FAIL "
+                f"rejected)"
+            )
+        if not _delivered_signal(body):
+            # SIEGE-S3/R1-3's vacuity guard, restated for the inverted polarity: an
+            # empty or blank cited range trivially fails to contain ANY signature,
+            # so absence proves nothing there — the same "structurally could not
+            # have decided anything" argument, on the branch where "could not
+            # decide" would otherwise look identical to "confirmed".
+            raise LintError(
+                f"Tier-2 FAIL: no evidence of absence — the cited range delivered "
+                f"no content to check expect-absent {expect_fail} against"
+            )
+        return True
     if verdict == "FAIL":
         # tier2_verify_fail (lint.py:377-390)
         exit_m = re.search(r"exit=(-?\d+)", cited["args"])
@@ -6607,6 +6802,14 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # stderr on the LintError exits too.
                     notes += tier2_artifacts(artifacts, trace, root, strict, cov, notes,
                                              cache=cache, verified=verified)
+                    # #571 — the fabricated-hash backstop, over the raw TRACE
+                    # citations rather than ARTIFACTS declarations. Sited after
+                    # tier2_artifacts (whose per-name hash-verified buffer this leg
+                    # reuses when a TRACE citation names the same file) and before
+                    # the finalize call below, mirroring where tier2_artifacts itself
+                    # reads _IDENTITY_DEGENERATE.
+                    tier2_trace_hashes(trace, root, strict, notes,
+                                       cache=cache, verified=verified)
                     _finalize_identity_degenerate(cache, verified)
                     wit_probe = {}
                     if verdict in {"PASS", "FAIL"}:
