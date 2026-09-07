@@ -46,7 +46,7 @@ TRACE
 CLAIMS
   <key>=<value>  from=<citation>  [pattern=<regex>]
   ...
-WITNESS    <kind>:<payload>  expect-fail=<signature>  ran=<TRACE#N|SKIPPED:reason|UNRUNNABLE:reason>
+WITNESS    <kind>:<payload>  expect-fail=<signature>|expect-absent=<signature>  ran=<TRACE#N|SKIPPED:reason|UNRUNNABLE:reason>
 SUSPICION  <N.NN>  [ (<one-line note>) ]
 NEXT       <one-line re-verification hint>  [; <hint>]
 ```
@@ -114,6 +114,17 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 - Literal fragment: `"…"` whose content is ≥ 4 characters.
 - The bare token `match` — used with `kind=grep` to mean *"the pattern declared on the grep line matches the body"*. Failing world: the pattern matches. No length constraint because the pattern itself is already on the WITNESS line. It **requires a ranged payload** (`grep:<artifact>#<range>`), which is the form the `Kinds` grammar already defines: a rangeless payload turns off the artifact-membership, span and empty-body rules, so `match` on one would name no file it is checked against.
 
+### `expect-absent=<signature>` — the FAIL-verdict inverse
+
+`expect-fail=` and its signature forms above all read one way: the signature must be **PRESENT** for the witness to have fired. On a `VERDICT FAIL` for a find-and-report finding, a correctly-framed witness instead pre-commits a **falsifier** — a signature whose presence would *contradict* the finding — so the passing state is that signature's **absence**, not its presence. `expect-absent=<signature>` names that inverted polarity explicitly, closing GH #512's directional gap (see *Witness-evidence requirement*, below) for any receipt that uses it:
+
+- Mutually exclusive with `expect-fail=` on the same WITNESS line (a Tier-1 lint failure to carry both).
+- **Only meaningful on `VERDICT FAIL`** — a Tier-1 lint failure on `PASS`/`BLOCKED`, since `expect-fail=` already means "must be present" there.
+- Restricted to the `/regex/` and `"literal"` signature forms — the exit-clause and bare-`match` forms have no well-defined *absent* reading (an exit code or a grep-line match is not a body signature to negate).
+- Tier-2 rejects the FAIL if the signature is **present** in the cited evidence ("falsifying signature present"), and rejects it if the cited range delivers **no content at all** to check against (an empty or blank body proves nothing about absence) — it passes only when the signature is verifiably, non-vacuously absent.
+
+Example: `WITNESS  exec:bash  expect-absent="Stop 4: rc=0 ctr= degraded=1"  ran=TRACE#4` on a `FAIL` receipt reporting that Stop 4's guard is broken — the FAIL stands only if a fresh probe run does **not** reproduce the exact healthy-looking signature the finding claims is missing.
+
 ### `ran=` disposition
 
 - **`ran=TRACE#N`** — subagent already executed the witness. `TRACE#N` must be the matching verb for the kind: `EXEC` for `exec:`; `EXEC`/`READ`/`WROTE` for `grep:` (any verb that touches or produces the artifact being grepped); **any verb** for `lint:` (the citation points at the TRACE entry that most directly produced the state the rule targets — the rule itself is re-applied to the receipt, independent of the cited verb). Tier-2 will read the cited range for `exec:`/`grep:`; for `lint:` Tier-2 re-applies the named rule.
@@ -159,7 +170,21 @@ for each EXEC in TRACE:
   fail if out= byte-range exceeds 4 KiB
 
 for each EDIT / WROTE in TRACE:
-  fail if sha256:<hex64> is missing   # the hash is provenance, NOT verified vs ARTIFACTS (0000… placeholders are normal); effects are verified via declared ARTIFACTS + WITNESS + ledger, never this hash. Deliberate — see #412.
+  fail if sha256:<hex64> is missing
+  fail if sha256:<hex64> is all-zero or all-f — never a real digest, always a
+    fabricated-hash shape (#571). Unlike the ARTIFACTS-membership rule just below,
+    this is unconditional: `0000…`/`ffff…` is no longer an accepted placeholder on
+    EDIT/WROTE (it still is on READ, which this rule does not cover — READ's hash
+    is a bare observation, not #412's non-gate below). Tier-2, separately, hashes
+    the file for ANY TRACE READ/WROTE/EDIT citation that resolves under a declared
+    `--root` and hard-FAILs on a mismatch against the receipt's own claim — so a
+    well-formed but wrong hash on a real, resolvable file is caught even though
+    Tier-1 cannot tell it from a legitimate one. Only the chronologically LAST
+    citation of a given file is checked (an earlier READ/EDIT of the same path is a
+    claim about a state no longer on disk).
+  # the hash is otherwise provenance, NOT verified vs ARTIFACTS membership; effects are
+  # verified via declared ARTIFACTS + WITNESS + ledger, never this hash's membership.
+  # Deliberate — see #412.
 
 for each DISPATCHED in TRACE:
   fail if rcpt-sha256:<hex64> is missing
@@ -520,7 +545,7 @@ Tier-1 rules:
 - A cited predecessor MUST NOT already carry `SUPERSEDED_BY=*` in the manifest (supersession is a DAG, never a thicket).
 - **Witness-evidence requirement:** if any cited predecessor had `VERDICT=FAIL` OR `SUSPICION ≥ 0.30`, then `N`'s WITNESS MUST have `kind ∈ {exec, grep}` (not `lint`) AND `ran=TRACE#N` (not `SKIPPED:` / `UNRUNNABLE:`). Tier-2 then verifies the witness normally — supersession only survives if the witness demonstrably does NOT match `expect-fail` (i.e., the original concern no longer reproduces). This closes the circular-supersession attack — with one declared hole per leg, both stated below and neither closed by this rule's letter. **"Demonstrably" means the predicate's result was allowed to decide, not merely that it was computed.** A witness the census reports as `discarded` — the `FAIL` leg ran the predicate against real bytes and then threw the result away, under either reason code — demonstrates nothing about the predecessor and does **not** satisfy this requirement, whichever token the cited entry happened to carry. Neither, **on the `FAIL` leg**, does an `expect-fail` that is an **exit clause** (`exit!=0` / `exit=<N>`): no body predicate is derived from it at all, the census bills it `not-applicable (exit-clause-not-a-body-predicate)`, and that leg rejects it whichever exit code the cited entry carries (GH #501 / QG-r2 — until then this arm was the one-token evasion of the rule **on that leg**). **On the `PASS` leg the same arm is still open, and that is where the population is.** A `kind=exec` witness whose exit-clause `expect-fail` cites an entry that *does* carry an exit code has that exit code compared against the clause, so the `PASS` leg sets `evaluated` at its own site and the supersession survives at exit 0 — the census still bills it `not-applicable (exit-clause-not-a-body-predicate)`, because that code is about the absence of a **body** predicate, not about the absence of evidence. That is what keeps the mandated `run-tests` fix-agent witness (`quality-gate/SKILL.md` › *Fix-agent superseding-witness by artifact class*) working, and it is also the evasion, unclosed: measured over the three enumerated frozen corpora, **all 21** of the 68 receipts carrying a non-`none` `SUPERSEDES` are `PASS` (`{'n': 68, 'sup': 21, 'supfail': 0, 'fail': 19}`), so the closure above covers none of the measured population. Tracked on **GH #511**; do not read the `FAIL`-leg closure as closing the arm.
 
-  So on a `FAIL` receipt **whose witness sourced an artifact**, exactly one shape gets past this consequent: a cited entry with `exit=0` whose body **matches** `expect-fail`. Read that for what it is rather than as satisfaction of the requirement — it is the shape whose witness **fired**. This leg raises at exactly one site, `exit=0 AND the body does not match expect-fail`, so what Tier-2 establishes here is that the predicate was **consulted**; it cannot establish the rule's **direction**. The directional half — "demonstrably does **NOT** match" — is **unenforced on `FAIL`**, one of that leg's residual evidential gaps (GH #512; **not** #510, which is the `ran=SKIPPED:` deferral). Do not engineer a matching witness to get past this: for the shape `quality-gate/SKILL.md` › *Fix-agent superseding-witness by artifact class* mandates for the dominant QG case, a matching body means the superseded finding-anchor is **still present**. A fix agent on this leg should **drop the `SUPERSEDES:` line** and let the finding stand into the next round.
+  So on a `FAIL` receipt **whose witness sourced an artifact**, exactly one shape gets past this consequent: a cited entry with `exit=0` whose body **matches** `expect-fail`. Read that for what it is rather than as satisfaction of the requirement — it is the shape whose witness **fired**. This leg raises at exactly one site, `exit=0 AND the body does not match expect-fail`, so what Tier-2 establishes here is that the predicate was **consulted**; it cannot establish the rule's **direction**. The directional half — "demonstrably does **NOT** match" — is **unenforced on `FAIL`**, one of that leg's residual evidential gaps (GH #512; **not** #510, which is the `ran=SKIPPED:` deferral). Do not engineer a matching witness to get past this: for the shape `quality-gate/SKILL.md` › *Fix-agent superseding-witness by artifact class* mandates for the dominant QG case, a matching body means the superseded finding-anchor is **still present**. A fix agent on this leg should **drop the `SUPERSEDES:` line** and let the finding stand into the next round. A witness written with `expect-absent=` instead of `expect-fail=` (see *`expect-absent=<signature>`* above) DOES enforce the directional half — its FAIL leg raises on the falsifier's presence, not its absence — so a receipt that adopts it closes GH #512 for itself; the gap above describes `expect-fail=`'s existing behavior, unchanged, and remains open for any FAIL witness that keeps using it.
 
   One residual, stated rather than implied: a `FAIL` witness that sourced **no** artifact at all — no range to open and no EXEC output-range citation to fall back to — is exempt from this requirement, because no witness that receipt could have written would set the flag and blocking it would be a structural BLOCK with no in-receipt remedy. A `PASS` receipt's exit code is unaffected by the `FAIL`-leg re-key above, but do not read that as "the `PASS` leg always consults its predicate": a ranged `kind=grep` payload whose `expect-fail` is an exit clause derives no body predicate, and a `kind=exec` exit clause whose cited entry carries **no** exit code never reaches the comparison — both set no flag and are hard-BLOCKed here, on that leg, exactly as before #501.
 

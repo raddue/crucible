@@ -4091,16 +4091,50 @@ def tier2_artifacts(artifacts, trace, root, strict, cov=None, notes_out=None,
     return notes
 
 
-def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified):
+def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified,
+                       witness_cited_name=None):
     """#571 fix (2) — the fabricated-hash backstop. For every TRACE READ/WROTE/EDIT
-    entry carrying a `sha256:<hex64>` field, resolve its named path under `--root`
-    and, if it resolves, hash the file and compare against the receipt's own claim;
-    a mismatch is ALWAYS a hard FAIL (unconditional on --strict, mirroring
-    tier2_artifacts's own unconditional hash-mismatch raise — a fabricated claim is
-    not something --strict makes optional). A name that resolves nowhere stays
-    UNVERIFIABLE, exactly like an unresolved ARTIFACTS entry: this leg has no
-    ARTIFACTS-membership rule of its own to fail closed on, and #571 explicitly
-    scopes the backstop to what is verifiable under the declared roots.
+    entry carrying a well-formed (non-degenerate) `sha256:<hex64>` field, resolve its
+    named path under `--root` and, if it resolves, hash the file and compare against
+    the receipt's own claim; a mismatch is ALWAYS a hard FAIL (unconditional on
+    --strict, mirroring tier2_artifacts's own unconditional hash-mismatch raise — a
+    fabricated claim is not something --strict makes optional). A name that resolves
+    nowhere stays UNVERIFIABLE, exactly like an unresolved ARTIFACTS entry.
+
+    round 2 (post-review) — three corrections to the first cut, all found by an
+    adversarial review before this shipped:
+
+    1. ONLY THE LAST TRACE CITATION OF A GIVEN RESOLVED PATH IS CHECKED. TRACE is
+       chronological and return-convention.md's own worked example is `READ
+       src/foo.ts sha256:22ab…` followed by `EDIT src/foo.ts sha256:33cd…` for the
+       SAME path — two legitimately different hashes, of which only the LAST
+       (the post-edit state) is still on disk to compare against. Checking every
+       citation against CURRENT bytes made every pre-edit READ, and every but the
+       final EDIT/WROTE, an unconditional false FAIL on the exact shape the spec
+       documents. Grouped by resolved path (not raw name) so two spellings of one
+       file still collapse to one comparison; an unresolved name still gets its own
+       UNVERIFIABLE note per distinct spelling; whichever verb wins, its own hash is
+       the one compared.
+    2. A DEGENERATE CLAIM (`_DEGENERATE_SHA256`) IS SKIPPED HERE TOO, not just at
+       Tier-1. Tier-1 hard-rejects a degenerate EDIT/WROTE, but never gated READ at
+       all (READ's hash is a bare observation, not #412's EDIT/WROTE non-gate), so a
+       `READ … sha256:0000…` placeholder — legal at Tier-1 and used in the wild
+       (e.g. a QG fix-verifier reading `artifact-N.md`) — used to resolve and then
+       hard-FAIL here on an inert, never-meant-to-verify value. Treated the same way
+       #412 treats it: a non-claim, not a claim to check.
+    3. AN AMBIGUOUS NAME IS NOW DISCLOSED (note + --strict raise), mirroring
+       tier2_artifacts's own ambiguity handling, UNLESS it is the exact name the
+       WITNESS `ran=` citation resolves to (`witness_cited_name`, computed once by
+       the caller the same way tier2_witness itself derives it) — THAT name's
+       ambiguity is tier2_witness's to disclose, since it independently resolves the
+       same name (memoized in the shared cache) and its own note-before-raise
+       ordering is separately pinned
+       (TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise); this leg runs
+       first, so raising for that one name too would silence tier2_witness's note on
+       the exact run its ordering exists to survive. Every OTHER ambiguous TRACE
+       citation has no such owner and previously went completely undisclosed — a
+       receipt could opt an arbitrary fabricated hash out of this whole backstop for
+       free by planting a duplicate basename under two declared roots.
 
     Deliberately separate from tier2_artifacts rather than folded into
     `_build_identity_cache`'s upfront name gather: that gather feeds the
@@ -4111,6 +4145,15 @@ def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified):
     ARTIFACTS key (the common, legitimate case) resolves for free and this leg reads
     the ARTIFACTS leg's already-hash-verified `verified` buffer instead of a second
     disk read, rather than a fresh, never-hashed one.
+
+    A TRACE-only name (not declared in ARTIFACTS) that this leg goes on to
+    hash-verify still keeps tier2_artifacts's own `PROVENANCE-ONLY: … (declared in
+    TRACE, not verified)` note: that note's claim is about ARTIFACTS membership
+    ("no ARTIFACTS entry backs this name"), not about whether any leg happened to
+    check the bytes, and TestAnEmptyArtifactsSetCannotSilenceTheUnhashedWitnessRead
+    pins it firing on undeclared names regardless. Suppressing it on a successful
+    #571 verify was tried and reverted — it silenced that exact, deliberately
+    unconditional note.
 
     NOT wrapped in its own `_witness_bound`: SIEGE-R3BA-3 (see `_verify_single`)
     fixed a real double-deadline hazard by pinning the resolve-then-witness cycle at
@@ -4128,6 +4171,8 @@ def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified):
     to accommodate."""
     budget = ARTIFACT_READ_CAP
     opened = {}
+    last_by_resolved = {}
+    last_by_unresolved = {}
     for entry in trace:
         if entry["verb"] not in _PROVENANCE_VERBS:
             continue
@@ -4139,25 +4184,32 @@ def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified):
         if not path_m:
             continue
         name = path_m.group(1)
-        label = f"TRACE {entry['verb']} {_show_path(name)}"
         _resolve_once(name, root, cache)
         rec = cache[str(name)]
         resolved = rec["realpath"]
         if resolved is None:
-            notes_out.append(f"UNVERIFIABLE: {label} (no file under root)")
+            last_by_unresolved[str(name)] = (entry, name)
             continue
+        # Iterating `trace` in order and overwriting on each match is what makes
+        # this the LAST citation of `resolved`, per fix (1) above.
+        last_by_resolved[resolved] = (entry, name, claimed)
+    for entry, name in last_by_unresolved.values():
+        label = f"TRACE {entry['verb']} {_show_path(name)}"
+        notes_out.append(f"UNVERIFIABLE: {label} (no file under root)")
+    for resolved, (entry, name, claimed) in last_by_resolved.items():
+        label = f"TRACE {entry['verb']} {_show_path(name)}"
+        if claimed in _DEGENERATE_SHA256:
+            continue
+        rec = cache[str(name)]
         found = rec["found"]
         if len(found) > 1:
-            # An ambiguous name has no single file to hash against, so this leg
-            # can make no claim either way. Ambiguity DISCLOSURE (the note, the
-            # --strict raise, the census bump) stays with whichever of
-            # tier2_artifacts/tier2_witness actually owns this name via ARTIFACTS
-            # membership or a WITNESS ran= citation — the two legs whose
-            # note-before-raise ordering is independently pinned
-            # (TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise /
-            # TestTheArtifactsLegsWalkNoteSurvivesTheStrictAmbiguityRaise). Raising
-            # here too would preempt them (this leg runs first) and silence their
-            # notes on the very run their ordering exists to survive.
+            if name == witness_cited_name:
+                continue
+            homes = ", ".join(sorted(_show_path(p) for p in found))
+            msg = f"{label} is ambiguous across roots ({homes})"
+            if strict:
+                raise LintError(f"Tier-2 --strict: {msg}")
+            notes_out.append(f"AMBIGUOUS: {msg}")
             continue
         dev_ino_at_resolve = rec["dev_ino_at_resolve"]
         if dev_ino_at_resolve is None:
@@ -4175,10 +4227,9 @@ def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified):
             st_dev_ino, raw = pair
         else:
             fd = rec["fd"]
-            rec["fd"] = None
             if fd is not None:
                 try:
-                    st_dev_ino, raw = _read_from_fd(fd, budget, label)
+                    st_dev_ino, raw = _read_from_fd(fd, budget, label, owner=rec)
                 except (OSError, MemoryError) as e:
                     raise LintError(f"Tier-2: {label} unreadable ({_strerror(e)})")
                 budget -= len(raw)
@@ -6808,8 +6859,24 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     # reuses when a TRACE citation names the same file) and before
                     # the finalize call below, mirroring where tier2_artifacts itself
                     # reads _IDENTITY_DEGENERATE.
+                    #
+                    # `witness_cited_name` is derived the SAME way tier2_witness
+                    # (below) derives its own art_name, computed here — before that
+                    # call — only so tier2_trace_hashes can tell which one name's
+                    # ambiguity disclosure to leave to tier2_witness rather than
+                    # raising for it first itself (see tier2_trace_hashes's
+                    # docstring, fix 3). Only meaningful when tier2_witness is
+                    # actually about to run on this verdict; on BLOCKED no witness
+                    # leg ever resolves anything, so nothing should be deferred.
+                    witness_cited_name = None
+                    if verdict in {"PASS", "FAIL"} and witness["ran"].startswith("TRACE#"):
+                        _wit_idx = _trace_idx(witness["ran"])
+                        if 1 <= _wit_idx <= len(trace):
+                            witness_cited_name, _ = witness_art_name(
+                                witness, trace[_wit_idx - 1], verdict)
                     tier2_trace_hashes(trace, root, strict, notes,
-                                       cache=cache, verified=verified)
+                                       cache=cache, verified=verified,
+                                       witness_cited_name=witness_cited_name)
                     _finalize_identity_degenerate(cache, verified)
                     wit_probe = {}
                     if verdict in {"PASS", "FAIL"}:
