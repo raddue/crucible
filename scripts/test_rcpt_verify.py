@@ -3092,15 +3092,14 @@ class TestWitnessBoundIsInTier2Witness(unittest.TestCase):
         test of disposition disagreement.
         """
         note_body = "UNRESOLVED items remain\n"
+        note_hash = hashlib.sha256(note_body.encode()).hexdigest()
         rec = {"dispatch-id": "xcheck-1",
                "receipt": _receipt(
                    "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
                    "expect-fail=match  ran=TRACE#1",
                    verdict="PASS",
-                   artifacts=[("verify-note.md",
-                               hashlib.sha256(note_body.encode()).hexdigest(),
-                               str(len(note_body)))],
-                   trace=[f"WROTE  verify-note.md  sha256:{'0' * 64}"],
+                   artifacts=[("verify-note.md", note_hash, str(len(note_body)))],
+                   trace=[f"WROTE  verify-note.md  sha256:{note_hash}"],
                    skill="quality-gate/9-fix-verifier")}
         bodies = {"verify-note.md": note_body}
 
@@ -9163,6 +9162,256 @@ class TestSupersedesExistenceCheckIsLinear(unittest.TestCase):
         self.assertLess(elapsed, 1.5,
                          "tier2_supersedes_existence took too long — the ledger "
                          "sha256 set may have regressed to being rescanned per prefix")
+
+
+class Test571DegenerateHashLint(unittest.TestCase):
+    """#571 fix (1) — an all-zero or all-f sha256 on a TRACE WROTE/EDIT line is never a
+    real digest and must hard-FAIL at Tier-1, before any disk read is attempted."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_wrote_all_zero_hash_rejected(self):
+        text = _receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"WROTE  f.txt  sha256:{'0' * 64}"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertIn("degenerate", str(cm.exception))
+
+    def test_wrote_all_f_hash_rejected(self):
+        text = _receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"WROTE  f.txt  sha256:{'f' * 64}"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertIn("degenerate", str(cm.exception))
+
+    def test_edit_all_zero_hash_rejected(self):
+        text = _receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"EDIT  f.txt  sha256:{'0' * 64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_wrote_with_ordinary_hash_still_lint_passes(self):
+        # H64 = "ab"*32 — an ordinary, non-degenerate placeholder; #412's own
+        # non-gate (an undeclared EDIT/WROTE hash is provenance, not verified) is
+        # unaffected by the new degenerate-value check.
+        text = _receipt("grep:  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"WROTE  f.txt  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+
+class Test571TraceHashDiskVerification(_InqBase):
+    """#571 fix (2) — for a TRACE READ/WROTE/EDIT citing a path that resolves under a
+    declared --root, Tier-2 hashes the file and compares against the receipt's own
+    claim; mismatch is a hard FAIL. A path outside every declared root stays
+    unverifiable, exactly as an unresolved ARTIFACTS entry does. Each receipt keeps
+    the WITNESS pointed at an inert EXEC TRACE#1 entry whose out= artifact never
+    contains `BOOM`, so tier2_witness's own read is clean and the outcome is decided
+    by the new leg alone."""
+
+    def setUp(self):
+        super().setUp()
+        self.inert_hash, self.inert_size = self.plant(self.base, "inert.log", b"quiet\n")
+        self.inert_artifact = ("inert.log", self.inert_hash, self.inert_size)
+        self.inert_exec = "EXEC  `x`  exit=0  dur=0.1s  out=inert.log#L1-L1"
+
+    def test_wrote_correct_hash_on_real_file_passes(self):
+        h, _ = self.plant(self.base, "f.txt", b"real content\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  f.txt  sha256:{h}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_wrote_wrong_but_well_formed_hash_on_real_file_fails(self):
+        self.plant(self.base, "f.txt", b"real content\n")
+        wrong = ("a" * 63) + "b"          # syntactically valid, does not match disk
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_read_wrong_hash_on_real_file_fails(self):
+        self.plant(self.base, "f.txt", b"real content\n")
+        wrong = ("a" * 63) + "b"
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"READ  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_edit_wrong_hash_on_real_file_fails(self):
+        self.plant(self.base, "f.txt", b"real content\n")
+        wrong = ("a" * 63) + "b"
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"EDIT  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_wrote_citing_a_path_outside_every_root_stays_unverifiable(self):
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  nowhere.txt  sha256:{H64}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # Every RCPT v1 run also emits its own unrelated `UNVERIFIABLE: v1.1 Layer-2
+        # …` line, so a bare substring match on "UNVERIFIABLE" alone would pass even
+        # if this leg emitted nothing at all — pin the exact line this leg owns.
+        self.assertIn("UNVERIFIABLE: TRACE WROTE nowhere.txt (no file under root)",
+                      out.stderr)
+
+    def test_wrote_matching_the_declared_artifacts_hash_is_unaffected(self):
+        """The fabricated-hash class this backstop closes is orthogonal to #412's own
+        non-gate: a WROTE line whose hash matches the real file (and happens to equal
+        the ARTIFACTS declaration too) still passes cleanly."""
+        h, s = self.plant(self.base, "f.txt", b"real content\n")
+        p = self.rcpt(artifacts=[self.inert_artifact, ("f.txt", h, s)],
+                      trace=[self.inert_exec, f"WROTE  f.txt  sha256:{h}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_pre_edit_read_hash_is_not_checked_against_the_post_edit_file(self):
+        """return-convention.md's own worked example is a READ (the pre-edit
+        observation) followed by an EDIT (the post-edit hash) of the SAME path —
+        two legitimately different hashes, of which only the file's FINAL state is
+        still on disk to compare against. Checking the READ's hash against current
+        (post-edit) bytes would be an unconditional false FAIL on this ordinary
+        shape."""
+        pre = hashlib.sha256(b"before\n").hexdigest()
+        post, _ = self.plant(self.base, "f.txt", b"after\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec,
+                             f"READ  f.txt  sha256:{pre}",
+                             f"EDIT  f.txt  sha256:{post}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_the_last_of_two_edits_is_the_one_checked_and_a_wrong_one_still_fails(self):
+        post, _ = self.plant(self.base, "f.txt", b"final\n")
+        wrong = ("a" * 63) + "b"
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec,
+                             f"EDIT  f.txt  sha256:{H64}",
+                             f"EDIT  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_a_degenerate_read_hash_on_a_real_file_stays_inert(self):
+        """Tier-1 hard-rejects a degenerate EDIT/WROTE (Test571DegenerateHashLint),
+        but never gated READ at all — a `READ … sha256:0000…` placeholder is legal
+        at Tier-1 and used in the wild (e.g. a fix-verifier reading `artifact-N.md`).
+        This leg must not turn that legal placeholder into a hard FAIL just because
+        the named file happens to resolve."""
+        self.plant(self.base, "f.txt", b"real content\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"READ  f.txt  sha256:{'0' * 64}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_an_ambiguous_trace_only_name_is_disclosed_and_raises_under_strict(self):
+        """A TRACE citation naming no ARTIFACTS entry and not cited by the WITNESS
+        has no other leg to disclose its ambiguity — this leg owns it alone, and
+        must not let a receipt opt a fabricated hash out of the backstop for free
+        by planting a duplicate basename under two roots."""
+        other = self.base.parent / "second-root"
+        other.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, other, True)
+        self.plant(self.base, "dup.txt", b"one\n")
+        (other / "dup.txt").write_bytes(b"two\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  dup.txt  sha256:{H64}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base),
+                       "--root", str(other), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("is ambiguous across roots", out.stderr)
+
+    def test_an_ambiguous_witness_cited_name_still_defers_to_the_witness_leg(self):
+        """The one exception: when the ambiguous name is the exact one the WITNESS
+        `ran=` citation resolves to, tier2_witness's own note-before-raise handling
+        owns the disclosure (TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise
+        pins that ordering) — this leg must not raise for it first and silence that
+        note."""
+        other = self.base.parent / "second-root"
+        other.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, other, True)
+        body = b"dup body\n"
+        h, s = self.plant(self.base, "dup.txt", body)
+        (other / "dup.txt").write_bytes(body)
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[f"WROTE  dup.txt  sha256:{h}"],
+                      witness="grep:  expect-fail=/quiet/  ran=TRACE#1")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base),
+                       "--root", str(other), str(p))
+        # tier2_witness's own note-before-raise still fires; this leg does not
+        # preempt it with its OWN raise for the same name.
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("witness artifact", out.stderr)
+        self.assertIn("is ambiguous across roots", out.stderr)
+
+
+class Test572ExpectAbsentWitness(_InqBase):
+    """#572 — a correctly-framed WITNESS on a find-and-report FAIL pre-commits a
+    FALSIFIER: a signature whose PRESENCE would contradict the FAIL finding. The new
+    `expect-absent=` clause names that polarity explicitly; `expect-fail=` keeps its
+    existing meaning (a signature that must be PRESENT) unchanged on both verdicts."""
+
+    def _fail_receipt(self, body, expect_absent, name="p.rcpt"):
+        h, s = self.plant(self.base, "probe.log", body)
+        text = _receipt(
+            f'exec:bash  expect-absent={expect_absent}  ran=TRACE#1',
+            verdict="FAIL",
+            artifacts=[("probe.log", h, s)],
+            trace=[f"EXEC  `bash probe.sh`  exit=0  dur=0.1s  out=probe.log#L1-L1"])
+        p = self.base / name
+        p.write_text(text)
+        return p
+
+    def test_absent_signature_correctly_missing_passes(self):
+        p = self._fail_receipt(b"Stop 4: rc=1 ctr=1 degraded=0\n",
+                               '"Stop 4: rc=0 ctr= degraded=1"')
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_absent_signature_that_wrongly_appears_still_fails(self):
+        p = self._fail_receipt(b"Stop 4: rc=0 ctr= degraded=1\n",
+                               '"Stop 4: rc=0 ctr= degraded=1"')
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("falsifying signature present", out.stderr)
+
+    def test_empty_body_does_not_vacuously_confirm_absence(self):
+        p = self._fail_receipt(b"", '"Stop 4: rc=0 ctr= degraded=1"')
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("no evidence of absence", out.stderr)
+
+    def test_expect_absent_on_pass_verdict_is_a_lint_error(self):
+        rv = _import_rv()
+        text = _receipt(
+            'exec:bash  expect-absent="Stop 4: rc=0 ctr= degraded=1"  ran=TRACE#1',
+            verdict="PASS",
+            artifacts=[("probe.log", H64, "10")],
+            trace=["EXEC  `bash probe.sh`  exit=0  dur=0.1s  out=probe.log#L1-L1"])
+        with self.assertRaises(rv.LintError) as cm:
+            rv.lint_receipt(text)
+        # Several distinct lint messages mention "expect-absent" (the mutual-
+        # exclusion check, the exit-clause-form restriction); pin the one this
+        # test actually exercises so a regression in message ROUTING, not just
+        # message PRESENCE, still fails.
+        self.assertIn("only meaningful on a FAIL verdict", str(cm.exception))
+
+    def test_expect_absent_and_expect_fail_together_is_a_lint_error(self):
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError):
+            rv.parse_witness(
+                ['exec:bash  expect-fail=/x/  '
+                 'expect-absent="Stop 4: rc=0 ctr= degraded=1"  ran=TRACE#1'])
+
+    def test_expect_absent_exit_clause_form_is_a_lint_error(self):
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError):
+            rv.parse_witness(["exec:bash  expect-absent=exit!=0  ran=TRACE#1"])
 
 
 if __name__ == "__main__":

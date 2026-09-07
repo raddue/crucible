@@ -671,8 +671,8 @@ class TestATraceNameAbsentFromArtifactsIsNotSilent(_RootCase):
             artifacts=[("round-1-findings.md", h, s)],
             trace=[f"WROTE  {self.root}/round-1-findings.md  sha256:{h}",
                    "READ  /elsewhere/notes-read.md",
-                   f"EDIT  /elsewhere/notes-edit.md  sha256:{'f' * 64}",
-                   f"WROTE  /elsewhere/notes-wrote.md  sha256:{'f' * 64}"]))
+                   f"EDIT  /elsewhere/notes-edit.md  sha256:{H64}",
+                   f"WROTE  /elsewhere/notes-wrote.md  sha256:{H64}"]))
 
     def test_the_run_completes(self):
         self.assertEqual(self.out.returncode, 0, self.out.stderr)
@@ -4024,11 +4024,11 @@ class TestTheHashedBodyCarrySurvivesASpellingDifferenceAndAResolutionChange(
         names the same undeclared file, so the read, and therefore the note, is
         unchanged."""
         h, s = self.plant("declared.md", "declared and verified\n")
-        self.plant("round-3-findings.md", "# Round 3 findings\nFatal: 0\n")
+        h3, _ = self.plant("round-3-findings.md", "# Round 3 findings\nFatal: 0\n")
         out = self.verify(receipt(
             artifacts=[("declared.md", h, s)],
             trace=["READ declared.md",
-                   f"WROTE round-3-findings.md  sha256:{H64}"],
+                   f"WROTE round-3-findings.md  sha256:{h3}"],
             witness="grep:  expect-fail=/Fatal: [1-9]/  ran=TRACE#2"))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("unhashed-body", census(out.stderr), census(out.stderr))
