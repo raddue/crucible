@@ -87,7 +87,7 @@ herdr agent start <worker-name> --kind claude --pane <root_pane_id> --timeout 45
 
 Dispatch its first task with `herdr agent prompt <name> '<message>'` (this submits; `pane send-text` only types — it won't fire until someone presses enter). Assemble the message from this template rather than rolling a fresh one per worker:
 
-> Work `<worktree-path>` on branch `<branch>`. Task: `<issue/task summary>`. Run `<crucible-skill>` (e.g. `/build`, `/quality-gate`). Stay inside this worktree — never touch another live worktree or the main checkout. Message me back via `SendMessage` (I'm `<your-ListAgents-name>`, confirmed via step 6) whenever you're blocked, need a decision, or are done — don't wait for me to check in. Run `/handoff` and stop once you cross ~20-30% context remaining or finish the task; I'll rotate you.
+> Work `<worktree-path>` on branch `<branch>`. Task: `<issue/task summary>`. Run `<crucible-skill>` (e.g. `/build`, `/quality-gate`). Stay inside this worktree — never touch another live worktree or the main checkout. Use `/caveman` output mode for the rest of this session — it cuts your own token burn ~75% with no loss of technical accuracy. Message me back via `SendMessage` (I'm `<your-ListAgents-name>`, confirmed via step 6) whenever you're blocked, need a decision, or are done — don't wait for me to check in. Run `/handoff` and stop once you cross ~20-30% context remaining or finish the task; I'll rotate you.
 
 Then write the worker's entry to the fleet file (step 2).
 
@@ -103,6 +103,7 @@ Don't assume a configured backend works — verify before routing real work to i
 - A provider outage (a vendor down, a free tier's daily quota exhausted) doesn't announce itself in `agent_status` — it shows up as a dialog or error text in the pane's actual rendered output (`herdr agent read <target> --source recent-unwrapped`). "Free limit reached" / "rate limited" / "subscribe to continue" banners mean that backend is dead for now — retire that pane and reassign its work, don't keep re-prompting it.
 - A provider entry existing in a config file (e.g. an `opencode.jsonc` provider block) doesn't mean it's live — a placeholder API key (`"PASTE_YOUR_KEY_HERE"` or similar) means nothing will actually route there yet. Check for a real credential before promising the user that backend is available.
 - When you don't know, Anthropic models via the `claude` kind are the safe default fallback — they're what you're running on, so you already know they work.
+- **9Router** (`curl $NINEROUTER_URL/api/health` → `{"ok":true}` to confirm it's up) routes chat/code-gen to non-Anthropic models (Qwen/Alibaba and others) through an OpenAI-compatible REST API — see the `9router` skill. For workers doing lower-stakes or high-volume work (routine fix rounds, mechanical checks) where a cheaper model is an acceptable trade, this is real token savings over running everything on Anthropic. Don't route Tier-A gate verdicts, red-team, or anything recall-critical through it — those stay pinned to the models `shared/` conventions already specify.
 - Never touch another live session's own domain (a sibling repo, a sibling orchestration effort) that happens to be visible in the same Herdr workspace, unless the user explicitly says to. Seeing a pane doesn't mean you own it.
 
 ## 6 — Tell every worker how to reach you
