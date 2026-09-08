@@ -30,11 +30,21 @@ herdr agent rename "$HERDR_PANE_ID" orchestrator
 
 Announce this once you've done it — it's a small thing but it's how the user (and every worker you spin up) tells you apart from the pack.
 
-**This name lives in Herdr's own namespace only — it is NOT your `ListAgents`/`SendMessage` address.** Those are two separate systems: `herdr agent rename` only changes what shows up in `herdr agent list` and pane/tab titles. Your actual cross-session messaging identity (what a worker must put in `SendMessage`'s `to` field to reach you) is a different, independently-assigned name — see step 5 for how to get it right before handing it out.
+**This name lives in Herdr's own namespace only — it is NOT your `ListAgents`/`SendMessage` address.** Those are two separate systems: `herdr agent rename` only changes what shows up in `herdr agent list` and pane/tab titles. Your actual cross-session messaging identity (what a worker must put in `SendMessage`'s `to` field to reach you) is a different, independently-assigned name — see step 6 for how to get it right before handing it out.
 
-## 2 — Reconstruct in-flight state before starting anything new
+## 2 — Track the fleet on disk, not in your head
 
-Don't assume the last thing you remember is the last thing that happened — sessions get interrupted by rate limits, crashes, and closed terminals, often silently. Before dispatching any work, spend a few minutes reconstructing what's actually true on disk and upstream:
+Your own context is the one resource you can't get back. Don't hold worker↔pane↔worktree↔task state only in conversation — write it to one JSON file, rewritten on every spawn, rotation, and close, so it survives your own compaction:
+
+```bash
+FLEET=~/.claude/crucible/orchestrator/$(basename "$PWD")-fleet.json
+```
+
+Each entry: `{name, pane_id, tab_id, worktree, branch, issue, task, backend, listagents_name, status, updated_at}`. Write a worker's entry the moment you dispatch it (step 4), update it on every rotation and close (step 7), and re-read it before step 3's reconstruction — treat it as the primary source, and fall back to full `git`/`gh` reconstruction only if it's missing, stale, or disagrees with a live `herdr agent list`.
+
+## 3 — Reconstruct in-flight state before starting anything new
+
+Check the fleet file (step 2) first — if it's current and matches `herdr agent list`, you likely don't need the rest of this step. Don't assume the last thing you remember is the last thing that happened — sessions get interrupted by rate limits, crashes, and closed terminals, often silently. Before dispatching any work, spend a few minutes reconstructing what's actually true on disk and upstream:
 
 ```bash
 git worktree list
@@ -62,25 +72,30 @@ grep -ic "429\|quota\|rate.limit\|overloaded" ~/.claude/projects/<project-slug>/
 
 A cluster of `429`/`quota`/`overloaded` hits right before a transcript goes quiet means a usage-limit outage killed it, not a crash or a decision to stop — that changes what you tell the user ("this just needs picking back up," not "something broke").
 
-## 3 — Spin up workers: one per tab, not one per split
+## 4 — Spin up workers: one grouped worktree workspace per worker, not a shared tab
 
-Splitting the same tab over and over to fit more workers produces a grid of unreadably narrow panes. Give every worker its own full-width tab instead:
+Don't `git worktree add` by hand and open it as another tab in your own workspace — that produces an ungrouped, unrelated-looking entry in the Spaces panel. `herdr worktree create`/`worktree open` does the checkout (or adopts an existing one) *and* registers it as a new workspace grouped under the parent repo workspace, which is what gives you the nested tree in the sidebar instead of a flat list:
 
 ```bash
-herdr pane split --current --direction right --cwd <worktree-or-repo-path> --no-focus
-# read the new pane_id from the result, then:
-herdr agent start <worker-name> --kind claude --pane <pane_id> --timeout 45000
-# immediately relocate it out of the split:
-herdr pane move <pane_id> --new-tab --label "<worker-name>" --no-focus
+# brand-new branch — creates the checkout under <worktrees.directory>/<repo>/<branch-slug>:
+herdr worktree create --branch <branch-name> [--base <ref>] --label "<worker-name>" --no-focus
+# an existing worktree checkout (already on disk) — adopts it without touching git:
+herdr worktree open --path <existing-worktree-path> --label "<worker-name>" --no-focus
+# either way, read the new workspace's root pane_id from the result, then:
+herdr agent start <worker-name> --kind claude --pane <root_pane_id> --timeout 45000
 ```
 
-Give each worker a name that says what it's doing (`fix-563`, `worker-561`), not a generic label — you and the user will both be reading `herdr agent list` / tab titles to orient. Rename an agent mid-task with `herdr agent rename <target> <new-name>` if its job changes.
+Dispatch its first task with `herdr agent prompt <name> '<message>'` (this submits; `pane send-text` only types — it won't fire until someone presses enter). Assemble the message from this template rather than rolling a fresh one per worker:
 
-Keep at most ~2 panes in any one tab. If you're about to split a tab that already has a worker in it, move to a new tab instead.
+> Work `<worktree-path>` on branch `<branch>`. Task: `<issue/task summary>`. Run `<crucible-skill>` (e.g. `/build`, `/quality-gate`). Stay inside this worktree — never touch another live worktree or the main checkout. Message me back via `SendMessage` (I'm `<your-ListAgents-name>`, confirmed via step 6) whenever you're blocked, need a decision, or are done — don't wait for me to check in. Run `/handoff` and stop once you cross ~20-30% context remaining or finish the task; I'll rotate you.
 
-**Never point a worker at a working directory another live agent — including you — is already sitting in.** Two agents (or you and a worker) issuing git commands against the same checkout can clobber each other's state, and it's easy to do by accident: `herdr pane split --cwd "$PWD"` silently inherits *your* cwd if you don't override it. Give every worker touching a distinct branch its own git worktree (`git worktree list` to see what already exists and is free; create a new one — or point at an existing worktree for that exact branch — rather than reusing the main checkout or another live worker's directory). Read-only work (a review pass that won't commit anything) is lower-risk to share a directory for, but anything that edits, commits, or runs tests that touch git state needs its own worktree.
+Then write the worker's entry to the fleet file (step 2).
 
-## 4 — Pick a model that's actually up
+Give each worker a name that says what it's doing (`fix-563`, `worker-561`), not a generic label — you and the user will both be reading `herdr agent list` / the Spaces tree to orient. Rename an agent mid-task with `herdr agent rename <target> <new-name>` if its job changes.
+
+**Never point a worker at a working directory another live agent — including you — is already sitting in.** Two agents (or you and a worker) issuing git commands against the same checkout can clobber each other's state. Give every worker touching a distinct branch its own git worktree (`herdr worktree list` to see what already exists and is free; create a new one — or `worktree open` an existing worktree for that exact branch — rather than reusing the main checkout or another live worker's directory). Read-only work (a review pass that won't commit anything) is lower-risk to share a directory for, but anything that edits, commits, or runs tests that touch git state needs its own worktree.
+
+## 5 — Pick a model that's actually up
 
 Don't assume a configured backend works — verify before routing real work to it, and re-verify if something looks off partway through:
 
@@ -90,7 +105,7 @@ Don't assume a configured backend works — verify before routing real work to i
 - When you don't know, Anthropic models via the `claude` kind are the safe default fallback — they're what you're running on, so you already know they work.
 - Never touch another live session's own domain (a sibling repo, a sibling orchestration effort) that happens to be visible in the same Herdr workspace, unless the user explicitly says to. Seeing a pane doesn't mean you own it.
 
-## 5 — Tell every worker how to reach you
+## 6 — Tell every worker how to reach you
 
 Before you tell anyone how to reach you, find out what that actually is: call `ListAgents` yourself and read the "This session is `<name>`" self-identification line it returns. **Do not hand out the `herdr agent rename` name from step 1** — that name is real inside Herdr but `SendMessage` doesn't know it exists, and a worker that dutifully addresses you by it will get a silent delivery failure and fall back to interrupting the user directly instead of you. Confirm your real `ListAgents` name fresh each session (it's assigned per-session, not something you can hardcode from memory of a prior run).
 
@@ -105,7 +120,7 @@ If a worker reports that a message to you bounced or came back unreachable, that
 <!-- CANONICAL: shared/return-convention.md -->
 If a worker is itself dispatching subagents through Crucible's own gated skills (quality-gate, red-team, etc.), it already owns the receipt/return protocol for those — don't reach into that layer yourself. Your relationship to a worker is peer-to-peer messaging, not receipt-mediated dispatch.
 
-## 6 — Watch context and cost, not just task completion
+## 7 — Watch context and cost, not just task completion
 
 A worker running to the edge of its context window mid-task is a worse outcome than rotating it early: costs climb, and a context-starved agent makes worse decisions right when the task may be getting harder. Each worker's Herdr status line shows its usage:
 
@@ -118,7 +133,7 @@ Agree a threshold with the user if they haven't given you one (something in the 
 
 > Run `/handoff` before you stop — I'll spin a fresh worker from that doc and retire this session.
 
-Then take the resulting handoff doc, spin a new worker in a new tab seeded with it, and close the old pane (`herdr pane close <pane_id>`) once the new one has confirmed it's picked up the thread. This is a background chore, not something worth interrupting the user for every time it fires — but the *decisions* it produces (a worker hit a stagnation loop, a worker needs a call only the user can make) are worth surfacing immediately.
+Then take the resulting handoff doc. This is a same-worktree rotation, not a new worker — the grouped workspace from step 4 already exists for that branch, so start a fresh agent in a new pane inside it (`herdr pane split` + `agent start`) seeded with the handoff, and close the old pane (`herdr pane close <pane_id>`) once the new one has confirmed it's picked up the thread. Update the fleet file (step 2) at the same time — new pane_id, note the predecessor — before removing the old entry. This is a background chore, not something worth interrupting the user for every time it fires — but the *decisions* it produces (a worker hit a stagnation loop, a worker needs a call only the user can make) are worth surfacing immediately.
 
 Because this is inherently a "check back periodically, act on events as they arrive" task, run it as a self-paced background loop rather than remembering to check by hand — invoke the `loop` skill in dynamic mode once you have workers running, and let cross-session messages from workers be the primary wake signal, with a periodic context-% sweep (roughly every 20-30 minutes) as the fallback in between.
 
@@ -131,7 +146,7 @@ Because this is inherently a "check back periodically, act on events as they arr
 
 None of this is a reason to leave auto-compact disabled or stop configuring it — a lower configured window still helps some of the time, per the same data. It *is* a reason to never assume a worker "must still have headroom" just because a threshold is set: the Herdr status-line context-% check above is the actual enforcement mechanism, not a backup for one. If you're the one setting these knobs (rather than just working around their unreliability), `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` must be a real shell-level environment variable — setting it via settings.json's `env` block is reported not to take effect at all.
 
-## 7 — For review work, get two independent opinions when it's cheap to
+## 8 — For review work, get two independent opinions when it's cheap to
 
 A single reviewer misses things a second one, on a different model, tends to catch — and running both in parallel costs wall-clock time, not much else. When you're dispatching a code review:
 
@@ -139,7 +154,7 @@ A single reviewer misses things a second one, on a different model, tends to cat
 - Send a second worker on a different backend (a different model kind) an independent adversarial pass over the same diff, explicitly told not to edit anything.
 - Reconcile: findings both independently confirm are the ones to trust most; findings only one caught still deserve a look, especially anything either flagged as a real correctness gap rather than a style nit.
 
-## 8 — Open a tracking issue before starting a new significant thread
+## 9 — Open a tracking issue before starting a new significant thread
 
 If you're about to start meaningful new work that isn't already tracked (not "fix this one bug," but "build a new skill," "redesign this subsystem"), file the issue first:
 
@@ -153,6 +168,6 @@ This isn't bureaucracy for its own sake — it's what lets the *next* orchestrat
 
 The user is trusting you to hold the state of several moving parts so they don't have to track it themselves. When you report:
 
-- Say what's actually running right now (worker name, tab, task, backend) — not what you dispatched five minutes ago that may have already finished or rotated.
+- Say what's actually running right now (worker name, tab, task, backend) — not what you dispatched five minutes ago that may have already finished or rotated. The fleet file (step 2) is your source of truth here, not memory.
 - Surface decisions, not noise. "Worker X hit the same stagnation pattern twice, needs your call" is worth a message the moment it happens. "Worker Y is still working" generally isn't, unless the user just asked.
 - If you rotated a worker (handoff → new worker → old one closed), that's worth one line, not a full narration of the handoff doc's contents.
