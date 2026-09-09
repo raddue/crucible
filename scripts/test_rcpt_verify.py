@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import builtins
 import unittest
 from unittest import mock
@@ -9474,6 +9475,1395 @@ class Test572ExpectAbsentWitness(_InqBase):
         rv = _import_rv()
         with self.assertRaises(rv.LintError):
             rv.parse_witness(["exec:bash  expect-absent=exit!=0  ran=TRACE#1"])
+
+
+class TestChain1HomoglyphAndScanScope567(_InqBase):
+    """GH #567 -- the two gaps `TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent`
+    documents as still-open after PR #583's rounds 1-4: homoglyph substitution
+    (the ASCII skeleton DELETES a confusable rather than mapping it) and the
+    scan-scope gap (only text after NEXT is scanned, though parse_receipt and
+    the orchestrator's Sweep read SUPERSEDES: wherever it appears). See GH
+    #567. (round-3 quality-gate SP1: cites the issue, not a `docs/plans/...`
+    path -- this repo's `.gitignore` excludes `docs/plans/*`, so a path
+    citation here would be durable-looking but resolve to nothing, and the
+    design doc it would have pointed at predates several corrections this
+    and prior quality-gate rounds made -- round-10 quality-gate SIGNIFICANT
+    5: see this plan's "Reconciling this plan's corrections..." bullet
+    under "Out of scope" for the specific design-doc sentences involved.)
+
+    Most cases here go through the real CLI (matching _InqBase's existing
+    black-box pattern). A few need the ACTUAL resolved claim value, not just
+    "is it a claim at all" -- the caller's own gate treats "malformed" and a
+    genuine hex-prefix claim identically (same LintError text, same exit
+    code), so no CLI-observable assertion can tell them apart. Those few call
+    `_legacy_supersedes_claim` directly via this file's own `_import_rv()`
+    helper, exactly like several existing direct-unit-test classes above.
+
+    (round-10 quality-gate FATAL 1: the CLI's collapsed gate is also why the
+    empty-remainder regression needs its OWN direct-call test below,
+    `test_empty_supersedes_remainder_resolves_malformed_not_no_claim` -- a
+    black-box assertion alone cannot pin the specific value that fix
+    restores.)"""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _receipt_text(self, supersedes):
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        return (body + "TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {supersedes}\n")
+
+    def _run(self, text, name):
+        p = self.base / name
+        p.write_text(text)
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    # -- Homoglyph substitution (Decision A) --------------------------------
+
+    # The GH #567 issue's own six named examples, keyed by label for subTest
+    # (round-2 quality-gate Minor 4: an earlier draft's dict had only 4
+    # entries -- + the fullwidth-colon test below made 5, one short of the
+    # issue's own count, with the sixth, Cyrillic Р for the "P" of
+    # SUPERSEDES, present only as unpinned prose in the R-coverage test's
+    # own docstring. Added explicitly here.)
+    HOMOGLYPH_KEYWORD_LINES = {
+        "cyrillic_es_for_s": chr(0x0405) + "UPERSEDES",       # Ѕ for S
+        "cyrillic_ie_for_e": "SUP" + chr(0x0415) + "RSEDES",  # Е for the 1st E
+        "greek_epsilon_for_e": "SUP" + chr(0x0395) + "RSEDES",  # Ε for the 1st E
+        "mathbold_s_for_s": chr(0x1D412) + "UPERSEDES",       # 𝐒 for S
+        "cyrillic_er_for_p": "SU" + chr(0x0420) + "ERSEDES",  # Р for P
+    }
+
+    def test_homoglyph_substituted_keyword_letter_is_still_detected(self):
+        for label, word in self.HOMOGLYPH_KEYWORD_LINES.items():
+            with self.subTest(label=label):
+                text = self._receipt_text(self.PREFIX).replace(
+                    "SUPERSEDES:", f"{word}:", 1)
+                out = self._run(text, f"v1-homoglyph-{label}.rcpt")
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_homoglyph_substituted_colon_is_still_detected(self):
+        # FULLWIDTH COLON -- the issue's fifth named example.
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", "SUPERSEDES" + chr(0xFF1A), 1)
+        out = self._run(text, "v1-homoglyph-fullwidth-colon.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_colon_position_bypass_codepoint_is_still_detected(self):
+        """round-6 quality-gate FATAL 1: unlike the fullwidth colon above
+        (a real `CONFUSABLE_MAP` entry), U+2982 Z NOTATION TYPE COLON and
+        U+1804 MONGOLIAN COLON are NOT in the table and do not NFKD-fold to
+        `:` -- pre-round-6, the composition guard's wildcard extension
+        structurally excluded the trailing colon (`j < m - 1`), so these
+        codepoints had NO defence at all: `SUPERSEDES` + U+2982 + a real
+        hex claim resolved `v1=0 / v1.1=1` through the real CLI, the
+        SIEGE-R4BA-5 asymmetry one position right of every keyword LETTER
+        round 5 already closed. Closed by the composition guard's wildcard
+        mechanism (Task 3 Step 3), which fires whenever any real character
+        exists anywhere later on the line (round-9 quality-gate FATAL 1) --
+        these codepoints now substitute for the colon exactly as one of
+        round 5's residue codepoints substitutes for a keyword LETTER."""
+        for label, cp in {"z_notation_colon": 0x2982,
+                           "mongolian_colon": 0x1804}.items():
+            with self.subTest(label=label):
+                text = self._receipt_text(self.PREFIX).replace(
+                    "SUPERSEDES:", "SUPERSEDES" + chr(cp), 1)
+                out = self._run(text, f"v1-colon-bypass-{label}.rcpt")
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_homoglyph_r_confusable_is_also_detected(self):
+        """Positive R-coverage (round-1 quality-gate S1): an earlier draft of
+        this plan asserted "there is no single-codepoint confusable for
+        Latin R" and pinned a Cyrillic-Er residue test as a documented miss.
+        That claim was false -- measured against the vendored table:
+        U+01A6 LATIN LETTER YR maps to 'R' (22 distinct codepoints map to
+        'R' in total; Cyrillic Er U+0420 is a real miss for R specifically,
+        it maps to 'P' instead -- pinned as a POSITIVE in
+        HOMOGLYPH_KEYWORD_LINES's "cyrillic_er_for_p" case above, round-2
+        quality-gate Minor 4 -- see
+        test_homoglyph_gap_missing_from_the_confusables_table_stays_a_documented_miss
+        below for the ACTUAL residue). This test pins the table's real,
+        positive R-coverage so it is never again mistaken for a gap."""
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", "SUPE" + chr(0x01A6) + "SEDES:", 1)
+        out = self._run(text, "v1-homoglyph-r-coverage.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    # round-3 quality-gate F2, REFRAMED round-4 quality-gate F1: the
+    # vendored table's true UNMAPPED set. Split into two groups because they
+    # manifest differently, and because round-4's F1 fix changes the outcome
+    # for one group but not the other. P/E/R/D (plus the PUA case) are
+    # letters IN "SUPERSEDES:" itself -- pre-round-4 a substitution there
+    # left NO claim at all (`None`); post-round-4, Task 3's composition
+    # guard treats the dropped, unmapped codepoint as a bounded WILDCARD
+    # that can stand in for the keyword letter it replaced, so these now
+    # resolve to `"malformed"` (fail-closed), not `None` -- the substitution
+    # is DETECTED even though the table still has no entry for it. A/B/N are
+    # not in the keyword (they only occur in the `none`/hex VALUE grammar,
+    # which the wildcard guard does not reach), so a substitution there
+    # still finds the keyword but fails the VALUE grammar (`"malformed"`,
+    # unchanged by round-4) -- kept in sync with `KNOWN_RESIDUE` in
+    # scripts/check_chain1_confusables_drift.py and the Task 3 docstring's
+    # "Known residue" paragraph, all three narrowed together at round-4.
+    RESIDUE_IN_KEYWORD = {
+        "private_use_area": (0xE000, "S"),   # round-1 quality-gate S1
+        "small_cap_p": (0x1D18, "P"),        # round-3 quality-gate F2
+        "small_cap_e": (0x1D07, "E"),
+        "small_cap_r": (0x0280, "R"),
+        "small_cap_d": (0x1D05, "D"),
+    }
+    RESIDUE_IN_VALUE = {
+        "small_cap_a": 0x1D00,   # round-3 quality-gate F2 -- 'a' is a hex digit
+        "small_cap_b": 0x0299,   # 'b' is a hex digit
+        "small_cap_n": 0x0274,   # 'n' opens the "none" sentinel
+    }
+
+    def test_homoglyph_gap_missing_from_the_confusables_table_stays_a_documented_miss(self):
+        """Known residue (Task 3 docstring's "Known residue" paragraph) --
+        table-driven since round-3 quality-gate F2: the earlier version of
+        this test pinned ONLY the Private Use Area case and, combined with
+        a docstring claiming the residue was "PUA + staleness", let a
+        second, larger residue class (seven Unicode-documented small-capital
+        Latin-letter PROTOTYPE codepoints that `str.lower()` cannot fold to
+        ASCII -- see RESIDUE_IN_KEYWORD/RESIDUE_IN_VALUE above) go unpinned
+        and undocumented for two rounds.
+
+        ROUND-4 REFRAMED (quality-gate F1): RESIDUE_IN_KEYWORD's cases are
+        UNMAPPED by the table but no longer UNDETECTED -- Task 3's
+        composition guard's bounded wildcard extension catches a
+        substitution at any of these positions and resolves it to
+        `"malformed"`, closing the security gap the earlier `assertIsNone`
+        pinned as accepted. This test's own name is about the TABLE's
+        residue, not the detector's; a keyword-letter substitution here is
+        still a documented table miss (grep `KNOWN_RESIDUE` never gains
+        these codepoints), it just no longer sails through as `None`.
+
+        Round-2 quality-gate Minor 6 (still applies to every case here):
+        asserts the DIRECT function result (via this file's `_import_rv()`
+        convention), not just the CLI's `returncode == 0` -- a
+        CLI-observable `1` also holds for `"malformed"` for reasons
+        unrelated to this codepoint, so it alone cannot distinguish "known
+        table miss, closed by the guard" from "the guard itself broke and
+        every line is now malformed". This is an accepted TABLE gap, not a
+        security regression -- pinned here, and in `KNOWN_RESIDUE` in the
+        drift checker, so it isn't silently widened by a future change
+        without a deliberate update to both the code and the Task 3
+        docstring."""
+        rv = _import_rv()
+        for label, (cp, letter) in self.RESIDUE_IN_KEYWORD.items():
+            with self.subTest(label=label):
+                text = self._receipt_text(self.PREFIX).replace(
+                    "SUPERSEDES:", "SUPERSEDES:".replace(letter, chr(cp), 1), 1)
+                self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+        for label, cp in self.RESIDUE_IN_VALUE.items():
+            with self.subTest(label=label):
+                value = (chr(cp) + "one" if label == "small_cap_n"
+                          else self.PREFIX[:2] + chr(cp) + self.PREFIX[3:])
+                text = self._receipt_text(value)
+                self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+    def test_multiple_residue_substitutions_at_once_are_still_caught(self):
+        """round-5 quality-gate F1 + SP3: every keyword-substitution test in
+        this class above substitutes exactly ONE codepoint --
+        `HOMOGLYPH_KEYWORD_LINES`, `RESIDUE_IN_KEYWORD` above, and both NFKC
+        property sweeps below all use `.replace(..., 1)`, and the
+        twin-content test reuses `HOMOGLYPH_KEYWORD_LINES`. Multiplicity is
+        precisely the axis `_keyword_reachable_by_dropping_optionals`'s
+        wildcard budget (`MAXW`) bounds, so a single-substitution-only suite
+        cannot see a bound reopen: round 4 shipped `MAXW = 2`, and this
+        class's own single-substitution tests all stayed green while THREE
+        simultaneous substitutions -- drawn from this same `RESIDUE_IN_KEYWORD`
+        table -- exhausted the budget and returned `None`, not `"malformed"`,
+        reopening SIEGE-R4BA-5 through the real CLI (`RCPT v1` exit 0,
+        `RCPT v1.1` exit 1) against round 4's own mechanism. `MAXW` is now
+        `len(keyword)` (Task 3 Step 3, round-5 quality-gate F1); this test
+        adds the missing multiplicity axis so the class cannot reopen
+        silently on a future change to the guard, independent of what
+        `MAXW` happens to be set to.
+
+        Substitutes n in {1, 2, 3, len(RESIDUE_IN_KEYWORD)} of
+        RESIDUE_IN_KEYWORD's codepoints into the keyword AT ONCE (each one
+        an UNMAPPED-by-table codepoint the composition guard alone must
+        catch, not CONFUSABLE_MAP), asserting `"malformed"` via a direct
+        `_import_rv()` call (matching this class's own convention for a
+        distinction the CLI's collapsed gate cannot make). n=1 and n=2 are
+        redundant with the guard's pre-round-5 coverage (they never exceeded
+        the old `MAXW = 2` budget); n=3 is the exact shape that defeated it;
+        n=len(RESIDUE_IN_KEYWORD) confirms there is no OTHER hidden bound up
+        to that many SIMULTANEOUS substitutions (round-6 quality-gate M6:
+        `len(RESIDUE_IN_KEYWORD)` is 5 distinct residue codepoints, not the
+        keyword's full complement of 10 letters -- this is a ceiling on how
+        far this specific test's construction goes, not a claim that 10 was
+        separately tested; the exhaustive whole-Unicode letter sweep above
+        and this composition guard's own `MAXW = len(keyword)` bound are
+        what establish that all 10 positions are covered, not this count).
+        One twin `(v1, v1.1)` disposition case is pinned at n=3 through the
+        real CLI -- the shape round 4's own bound was actually defeated by,
+        so a future regression there is visible as a live exit-code
+        asymmetry, not just a direct-call assertion."""
+        rv = _import_rv()
+        substitutions = list(self.RESIDUE_IN_KEYWORD.values())
+        for n in (1, 2, 3, len(substitutions)):
+            with self.subTest(n=n):
+                word = "SUPERSEDES:"
+                for cp, letter in substitutions[:n]:
+                    word = word.replace(letter, chr(cp), 1)
+                text = self._receipt_text(self.PREFIX).replace(
+                    "SUPERSEDES:", word, 1)
+                self.assertEqual(
+                    rv._legacy_supersedes_claim(text), "malformed",
+                    f"n={n} simultaneous substitutions not detected")
+                if n == 3:
+                    self.assertTrue(text.startswith("RCPT v1 "))
+                    text_v11 = "RCPT v1.1 " + text[len("RCPT v1 "):]
+                    out_v1 = self._run(text, "v1-multiplicity-n3.rcpt")
+                    out_v11 = self._run(text_v11, "v11-multiplicity-n3.rcpt")
+                    if out_v11.returncode != 0:
+                        self.assertNotEqual(out_v1.returncode, 0,
+                                          (out_v1.stderr, out_v11.stderr))
+                    self.assertIn(out_v1.returncode, (0, 1),
+                                  (out_v1.stderr, out_v11.stderr))
+
+    def test_confusable_insertion_that_would_fragment_the_mapped_keyword_is_still_caught(self):
+        """round-2 quality-gate F2, ROUND-3 REDESIGNED per quality-gate F3
+        (see the Task 3 docstring): a mapped confusable landing INSIDE the
+        keyword can inject an extra ASCII character where round 3/4's own
+        uniform delete-only skeleton would simply have deleted the source
+        codepoint -- silently UN-detecting a claim the pre-mapping mechanism
+        would have caught, a false negative introduced by the fix meant to
+        close false negatives. U+0C02 TELUGU SIGN ANUSVARA is one such
+        mapped codepoint; inserted inside SUPERSEDES:, the composition-guard
+        fail-closed check in Task 3 Step 3 classifies the line malformed
+        rather than silently missing it. Against the REAL current (PR #583)
+        code this already passes -- round 3/4's uniform delete-only
+        skeleton was never vulnerable to this in the first place; what this
+        pins is that Task 3's own confusables-mapping step doesn't
+        reintroduce it."""
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", "SUPER" + chr(0x0C02) + "SEDES:", 1)
+        out = self._run(text, "v1-fragmented-mapped-keyword.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_homoglyph_keyword_letter_composed_with_a_fragmenting_insertion_is_still_caught(self):
+        """round-3 quality-gate F3: round-2's F2 guard compared the mapped
+        skeleton against a SEPARATE delete-only skeleton (`plain`), whose
+        own ground truth was itself blind to a homoglyph'd keyword letter
+        (it deletes non-ASCII unconditionally) -- so an attacker who
+        combines the ticket's own two named mechanisms, a homoglyph
+        substitution for a keyword LETTER plus an unrelated insertion
+        elsewhere in the keyword, defeated the round-2 guard entirely
+        (measured pre-round-3-fix: silent `None`, not `"malformed"`).
+        Cyrillic Ѕ (U+0405) substitutes for the keyword's own leading S;
+        U+0C02 TELUGU SIGN ANUSVARA (a mapped, non-keyword codepoint) is
+        the unrelated insertion a few characters later."""
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", chr(0x0405) + "UPER" + chr(0x0C02) + "SEDES:", 1)
+        out = self._run(text, "v1-homoglyph-plus-insertion.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_mixed_case_keyword_composed_with_a_fragmenting_insertion_is_still_caught(self):
+        """round-3 quality-gate F3, second trigger: round-2's F2 guard
+        compared `plain.find("SUPERSEDES:")` (case-SENSITIVE) against the
+        search it guards, `skeleton.upper().find("SUPERSEDES:")`
+        (case-insensitive, round-2 F3) -- so the guard was silent for any
+        mixed-/lower-case keyword combined with an insertion, with no odd
+        glyph required at all: `Supersedes:` is an entirely natural
+        rendering. Measured pre-round-3-fix: silent `None`."""
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", "Supers" + chr(0x0C02) + "edes:", 1)
+        out = self._run(text, "v1-mixedcase-plus-insertion.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_multicharacter_nfkd_expansion_glued_to_the_value_is_still_malformed(self):
+        """round-3 quality-gate F1 caveat: switching NFD to NFKD (see the
+        Task 3 docstring) means a single source character can now expand
+        into MULTIPLE surviving skeleton characters (e.g. `№` U+2116 -> the
+        two characters `No`, or the ligature `ﬀ` U+FB00 -> `ff`), where NFD
+        on this alphabet provably never does. Two cases, because the
+        adjacency check treats them differently (round-5 quality-gate SP1):
+
+        - `№` (U+2116): the value's last literal hex digit is immediately
+          followed by the WHOLE expansion, so the glued piece is the
+          expansion's FIRST character -- its recorded raw_line position
+          exceeds the preceding character's by exactly one, and the
+          ORIGINAL `==` adjacency check already classified this malformed
+          correctly (it is kept here as a second case, not because it once
+          exposed the bug).
+        - `ﬀ` (U+FB00 -> `ff`): built with only 11 literal hex digits before
+          the ligature, so the value-grammar's `[0-9a-f]{12}` match consumes
+          the value's 11 literal digits plus the ligature's FIRST piece
+          ('f'), landing exactly on the ligature's SECOND piece ('f') as the
+          glued character -- which shares the SAME recorded raw_line
+          position as the piece before it (both come from the one ligature
+          codepoint). The ORIGINAL `==` check required the position to
+          EXCEED by one, so it missed this arrangement entirely: measured,
+          it resolved to `"21a1b2c3d4ef"` (a truncated, seemingly-clean
+          value), not `"malformed"`. This is the case that actually exposed
+          SP1 -- the `№` case alone would have stayed green under the
+          broken predicate.
+
+        Both are direct `_import_rv()` calls, not the CLI: pre-patch (NFD,
+        or no confusables mapping at all), each expansion codepoint is
+        simply DELETED wholesale, leaving a clean, non-glued 12-hex value
+        that resolves to the literal `PREFIX` -- and the CLI's collapsed
+        gate treats a resolved claim and `"malformed"` identically
+        (returncode 1 either way, see this class's own docstring), so a
+        CLI-observable assertion here would pass whether or not NFKD's
+        multi-character expansion (or its adjacency check) is wired up
+        correctly at all. The direct call is the only way to actually
+        distinguish the two."""
+        rv = _import_rv()
+        text_first_piece_glued = self._receipt_text(self.PREFIX + chr(0x2116))
+        self.assertEqual(
+            rv._legacy_supersedes_claim(text_first_piece_glued), "malformed")
+        text_second_piece_glued = self._receipt_text(
+            self.PREFIX[:-1] + chr(0xFB00))
+        self.assertEqual(
+            rv._legacy_supersedes_claim(text_second_piece_glued), "malformed")
+
+    # -- Scan-scope gap (Decision B) -----------------------------------------
+
+    def test_supersedes_line_before_next_is_detected(self):
+        """The GH #567 example verbatim: a plain-ASCII SUPERSEDES: line placed
+        under SUSPICION (before NEXT) instead of after it."""
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        text = body.replace(
+            "SUSPICION  0.10",
+            f"SUPERSEDES: {self.PREFIX}\nSUSPICION  0.10")
+        out = self._run(text, "v1-scanscope-before-next.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_supersedes_text_embedded_in_the_header_line_itself_is_still_scanned(self):
+        """Decision B: scanning must not skip element [0] of text.split("\\n")
+        (that would reopen the round-3 header-fusion bypass class one level
+        up). Round-1 quality-gate S5: the earlier draft's version of this
+        test asserted the SAME thing a plain post-NEXT claim already proves
+        elsewhere in this class, and would still pass if a future regression
+        reintroduced a `[1:]` skip on the whole-body split -- it never put
+        anything AT index 0. This version puts the claim text ON the header
+        line itself: `parse_receipt`'s header regex (`^RCPT v(1(?:\\.1)?)
+        (.+)$`) captures everything after "RCPT v1 " as free text with no
+        further grammar check, so a receipt whose "skill" field trails off
+        into `SUPERSEDES: <hex>` is Tier-1-legal (confirmed: it is NOT
+        detected against the CURRENT, pre-round-6 code -- this is a genuine
+        RED case, not an already-passing sanity check) and, once the whole
+        receipt body is scanned, `text.split("\\n")[0]` IS that header line.
+        A reintroduced `[1:]` skip would discard exactly this element and
+        silently reopen the bypass; a naive attempt to fuse the claim to the
+        header via a line-break codepoint like U+2028 instead does not work
+        as an alternate construction -- `parse_receipt` raises "prose before
+        first section header" for any non-blank line between the header and
+        VERDICT regardless of which line-break codepoint separates them, so
+        that shape is Tier-1-illegal here (an incidental but useful thing to
+        have confirmed while writing this test)."""
+        text = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill=f"build/21-implementer SUPERSEDES: {self.PREFIX}",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        out = self._run(text, "v1-header-embedded-claim.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    # -- Interaction with PR #583's round-4 positional/glued check ----------
+
+    def test_homoglyph_claim_with_trailing_prose_is_not_misread_as_glued(self):
+        """Round 4 (PR #583) added positions[]-based glue detection so
+        `SUPERSEDES: none, as this is new` isn't misclassified as malformed.
+        Confirms NFKD + confusables mapping doesn't break that: a homoglyph'd
+        `none` with an ordinary trailing aside still reads as `none`, not
+        `malformed`."""
+        # One homoglyph inside "none" itself: Cyrillic о (U+043E) for Latin o.
+        text = self._receipt_text(
+            "n" + chr(0x043E) + "ne, as this is a net-new addition")
+        out = self._run(text, "v1-homoglyph-none-trailing-prose.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_homoglyph_hash_glued_to_extra_hex_is_still_malformed(self):
+        """round-3 quality-gate SP3: the glued check must still fire when
+        the VALUE itself contains a homoglyph -- but this construction was
+        rewritten because the earlier version passed for the WRONG reason.
+        `self.PREFIX[:-1] + <homoglyph> + "deadbeef"` makes 19-20 hex-valid
+        characters available after `SUPERSEDES:` regardless of whether the
+        homoglyph MAPS (post-patch, 'a') or is simply DELETED (what a
+        regression to round 3/4's original mechanism would do) -- either
+        way there are already more than 12, so the assertion passed
+        identically whether or not the mapping step was even exercised
+        (confirmed: both give "malformed").
+
+        This version instead places the homoglyph directly AFTER an
+        already-complete, otherwise-clean 12-hex value with nothing else
+        following: if the homoglyph is DELETED (a regression to the
+        pre-mapping mechanism), the value skeleton is exactly 12 hex
+        characters with nothing glued after it -- resolves cleanly, NOT
+        malformed (confirmed: `self.PREFIX`). Only if the homoglyph
+        actually MAPS to a hex-alphabet character does a 13th,
+        immediately-adjacent character appear and trip the glued check
+        (confirmed: `"malformed"`). The assertion below can therefore only
+        pass when the mapping step is genuinely exercised -- it cannot pass
+        vacuously the way the original construction could. Direct
+        `_import_rv()` call (matching its companion test below), since the
+        distinction this test cares about is invisible through the CLI's
+        collapsed "malformed vs. genuine claim" gate."""
+        rv = _import_rv()
+        text = self._receipt_text(self.PREFIX + chr(0xFF41) + " extra prose")
+        self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+    def test_homoglyph_hash_prefix_resolves_to_the_well_formed_claim_value(self):
+        """Positive companion to the glued test above, and the missing
+        positive pin round-1 quality-gate S3 named: a homoglyph inside the
+        hash-prefix VALUE with an ordinary separator after it (i.e. NOT
+        glued to more hex) must resolve to the LITERAL prefix -- not merely
+        "some non-none claim". The CLI's own witness-evidence gate treats
+        every non-(None,"none") value identically (see this class's own
+        docstring), so this is a direct call, matching this file's
+        `_import_rv()` convention. Uses the SAME U+FF41 -> 'a' mapping as
+        the glued test, on the SAME character position, with nothing
+        appended after it -- confirmed pre-patch this currently resolves to
+        "malformed" (11 surviving hex chars, one short), which is exactly
+        the defect this ticket closes."""
+        rv = _import_rv()
+        homoglyphed = self.PREFIX[:2] + chr(0xFF41) + self.PREFIX[3:]
+        text = self._receipt_text(homoglyphed)
+        self.assertEqual(rv._legacy_supersedes_claim(text), self.PREFIX)
+
+    # -- Must NOT regress: anti-anchoring pins (round-1 quality-gate S3) -----
+    # These test the UNCHANGED substring-search mechanism round 3/4 already
+    # established, not new round-5/6 behavior -- they pass against BOTH the
+    # current and the patched code (confirmed during planning). Pinned here
+    # because the plan's own Task 3 docstring ships a documented, permanent
+    # false positive whose obvious "improvement" is anchoring the match
+    # (`skeleton.startswith(KEYWORD)`), and nothing else in this file fails
+    # if a future change does exactly that.
+
+    def test_homoglyph_keyword_survives_arbitrary_padding(self):
+        """Fatal-3-shaped attack (see design doc prior art): 500 characters
+        of attacker-chosen ASCII padding before a homoglyph'd keyword must
+        not defeat detection -- pins that the mechanism has no bounded
+        window."""
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", "X" * 500 + chr(0x0405) + "UPERSEDES:", 1)
+        out = self._run(text, "v1-anti-anchor-padding.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_single_character_prepend_does_not_defeat_detection(self):
+        """Fatal-2-shaped attack: a single attacker-chosen character
+        prepended to the claim line must not defeat detection -- pins that
+        the mechanism is not column-0-anchored."""
+        text = self._receipt_text(self.PREFIX).replace(
+            "SUPERSEDES:", "2. SUPERSEDES:", 1)
+        out = self._run(text, "v1-anti-anchor-prepend.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_value_padding_does_not_defeat_the_wildcard_completed_keyword(self):
+        """round-8 quality-gate FATAL 1 / SIGNIFICANT 3, WIDENED round-9
+        quality-gate FATAL 1 / SECOND PASS 2: this pin was originally named
+        for the VALUE boundary's anti-padding invariant but its body only
+        ever swept INVISIBLE codepoints inserted into an otherwise-clean
+        value -- visible ASCII padding of the same value was untested and
+        did defeat detection (round-9's own FATAL 1). Now swept on BOTH
+        axes: (1) ten structurally distinct invisible codepoints inserted
+        into an otherwise-clean 12-hex value, and (2) eight ASCII value
+        SPELLINGS this file's own literal path already treats as a claim
+        (a `0x`/`sha256:`/`rcpt `/plain-word prefix, uppercase hex, one hex
+        digit short, a git-short hash) with no non-ASCII character
+        involved at all. Both axes must resolve `"malformed"` at all eleven
+        keyword positions -- not silently defeat the guard's remainder
+        classification by falling outside a fixed-size window (axis 1) or
+        by not grammar-matching at all (axis 2, closed by round 9's shared
+        `_classify_supersedes_value` predicate, see that function's
+        docstring in Task 3 Step 3)."""
+        rv = _import_rv()
+        keyword = "SUPERSEDES:"
+        for pos in range(len(keyword)):
+            word = keyword[:pos] + chr(0xE000) + keyword[pos + 1:]
+            for cp in (0x200B, 0x200C, 0x2060, 0xFEFF, 0x00AD,
+                       0x180E, 0x3164, 0x2800, 0xFE00, 0x034F):
+                with self.subTest(pos=pos, codepoint=hex(cp)):
+                    value = self.PREFIX[:6] + chr(cp) + self.PREFIX[6:]
+                    text = self._receipt_text(value).replace(
+                        "SUPERSEDES:", word, 1)
+                    self.assertEqual(
+                        rv._legacy_supersedes_claim(text), "malformed")
+            # round-9 quality-gate FATAL 1: the SAME wildcard-completed
+            # keyword, now with a plain-ASCII value SPELLING an attacker
+            # can pick specifically because it's a spelling the literal
+            # path (not the guard) already classifies as a claim.
+            ascii_spellings = {
+                "0x_prefixed": "0x" + self.PREFIX,
+                "sha256_prefixed": "sha256:" + self.PREFIX,
+                "rcpt_prefixed": "rcpt " + self.PREFIX,
+                "v_prefixed": "v" + self.PREFIX,
+                "uppercase": self.PREFIX.upper(),
+                "eleven_hex": self.PREFIX[:-1],
+                "git_short_hash": "a843f99",
+            }
+            for label, value in ascii_spellings.items():
+                with self.subTest(pos=pos, spelling=label):
+                    text = self._receipt_text(value).replace(
+                        "SUPERSEDES:", word, 1)
+                    self.assertEqual(
+                        rv._legacy_supersedes_claim(text), "malformed")
+
+    # round-4 quality-gate S1: Decision B's whole-body widening means `RCPT
+    # v1` can now see (and hard-FAIL) a SUPERSEDES-shaped line that `RCPT
+    # v1.1`'s STRUCTURED parser does not treat as a claim at all -- `v1` is
+    # strictly MORE restrictive on these two shapes, never less. Both
+    # directions are fail-closed (neither exposes a live bypass), but they
+    # are the exact shapes an EQUALITY assertion on the twin test below
+    # would need to omit to hold -- pinned separately, directionally,
+    # instead of folded into that test's own case table. Confirmed during
+    # planning: both resolve to `(v1, v1.1) == (1, 0)`.
+    #
+    # Evidence-base caveat (round-7 quality-gate MINOR 4): the whole-body
+    # scan, the case-insensitive search, and the composition guard each
+    # widen what hard-FAILs a `RCPT v1` receipt at once; `lowercase_prose_
+    # supersedes` below pins that ANY free-text mention of the word
+    # "supersedes:" in any case, anywhere in the body (not just a genuine
+    # claim line), now hard-FAILs. The only false-positive evidence for
+    # THIS specific shape (a literal, case-insensitive "supersedes:"
+    # substring match -- not the composition guard's wildcard path) is the
+    # 34 committed `.jsonl` linter fixtures (round-3 M9 already flags these
+    # as fixtures, not a sample of live agent-authored receipts) -- and
+    # agent receipts written ABOUT this very ticket (red-team/quality-gate/
+    # siege receipts discussing `SUPERSEDES:` in prose) are exactly the
+    # population most likely to trip it. Pinned here as documented,
+    # accepted operational cost, not investigated as a regression the
+    # first time it fires.
+    #
+    # RE-DATED (round-10 quality-gate SIGNIFICANT 3): this caveat predates
+    # round 9's widening of the COMPOSITION GUARD's own remainder check
+    # (grammar-gated -> any non-empty remainder), a mechanism distinct from
+    # the literal/case-insensitive match this caveat is about. That guard
+    # widening's own false-positive cost is no longer unmeasured: see
+    # `_keyword_reachable_by_dropping_optionals`'s docstring above for a
+    # real repo-wide sweep (35,634 lines, 1 hit) and the trigger rule. The
+    # 34-fixture limitation above stands only for the literal-match/
+    # case-insensitive-search widening this comment already scoped itself
+    # to; it was never evidence about the guard, and is not weakened by
+    # round 9.
+    ACCEPTED_ONE_WAY_DIVERGENCES = {
+        "pre_next_claim_plus_post_next_none": lambda prefix: _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer", trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={prefix}#L1-L10"]).replace(
+                "SUSPICION  0.10", f"SUPERSEDES: {prefix}\nSUSPICION  0.10")
+            + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n",
+        "lowercase_prose_supersedes": lambda prefix: _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log  # this supersedes: the old note"],
+            claims=[f"fix-verified=true  from={prefix}#L1-L10"])
+            + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n",
+    }
+
+    def test_twin_content_v1_and_v11_receipts_agree_on_disposition(self):
+        """SIEGE-R4BA-5 itself, the invariant this whole ticket exists to
+        preserve: a byte-identical claim body must produce a disposition on
+        `RCPT v1` (routed through this function) no MORE PERMISSIVE than on
+        `RCPT v1.1` (routed through parse_v11_sections/lint_v11_local
+        instead) -- `v1` must never silently accept what `v1.1` would flag.
+
+        round-3 quality-gate S1: the design doc specifies this invariant
+        over BOTH "plain SUPERSEDES: and homoglyph'd SUPERSEDES:" -- the
+        earlier version of this test covered only the plain-ASCII case,
+        which is exactly the shape that CANNOT distinguish "detected" from
+        "silently missed" (both dispositions already agree trivially on
+        content the six named examples were built to pass). Table-driven
+        over the SAME `HOMOGLYPH_KEYWORD_LINES` plus the fullwidth-colon
+        case used elsewhere in this class, so a future homoglyph this class
+        does not otherwise test still gets the twin check for free. This is
+        the probe that actually separates the two dispositions: measured
+        pre-round-3-fix, U+FF24/U+FF35/U+24C7/U+1D18 each showed `v1 -> 0,
+        v1.1 -> 1` (the SIEGE-R4BA-5 asymmetry itself) while the plain-ASCII
+        case and all six issue-named examples agreed throughout.
+
+        ROUND-4 CORRECTION (quality-gate S1): the equality assertion this
+        test used to make is a STRICTLY STRONGER statement than the
+        invariant this docstring claims to enforce, and it is stronger in
+        exactly the direction a regression would satisfy anyway -- the
+        equality happened to hold on every case here only because none of
+        them exercises Decision B's whole-body-widening divergence (see
+        `ACCEPTED_ONE_WAY_DIVERGENCES` above and its own test below, which
+        do). Weakened to the directional statement this test can actually
+        support on every case it covers.
+
+        ROUND-5 CORRECTION (quality-gate S3): the directional statement was
+        first written as `assertGreaterEqual(out_v1.returncode,
+        out_v11.returncode)` -- treating exit codes as an ORDINAL scale,
+        which they are not: this codebase has a distinct `2` disposition
+        (usage/root error, a crash-shaped outcome -- see
+        `TestEveryExitTwoStatesTheCensus` in this same file). A `v1` leg
+        that CRASHES (exit 2) against a `v1.1` exit of 1 satisfies `2 >= 1`
+        and passes, silently accepting a broken `v1` leg as "correctly
+        stricter." Replaced with the actual implication the docstring
+        states, plus a shape check so an exit-2 outcome is a visible
+        failure rather than a silent pass -- see the assertions below.
+
+        NAMED EXCEPTION (round-8 quality-gate SIGNIFICANT 2): this
+        invariant is NOT exceptionless. `SUPERSEDES: none <hex>` (a
+        `none`-prefixed value glued to a trailing hex run by a plain
+        space, no Unicode involved at all) resolves `(v1, v1.1) == (0,
+        1)` -- pre-existing on `1888642`, not introduced by this ticket's
+        redesign, and left deliberately OUT OF SCOPE here (see "Out of
+        scope" below) because it is a plain-ASCII value-grammar
+        prefix-match defect, not a confusables/homoglyph gap. Pinned
+        separately (not folded into the table-driven cases below, and NOT
+        added to `ACCEPTED_ONE_WAY_DIVERGENCES` -- that dict's own test
+        asserts the SAFE direction, `(1, 0)`; this shape is the direction
+        this whole invariant exists to catch, just judged out of this
+        ticket's scope rather than closed) by
+        `test_supersedes_none_prefix_glued_to_a_trailing_hex_value_bypasses_v1_documented_gap`
+        below.
+
+        ROUND-10 ADDITION (quality-gate FATAL 1): an `empty_value` case --
+        a bare `SUPERSEDES:` with nothing after it (a trailing space, no
+        value at all) -- pinning that round 9's shared-predicate redesign
+        did not silently flip this shape from `(v1, v1.1) == (1, 1)`
+        (both hard-FAIL, matching `1888642`) to `(0, 1)` (a new, plain-
+        ASCII fail-open): `parse_v11_sections` raises on an empty
+        `SUPERSEDES:` body, so `v1.1` always rejects it; `v1` must too."""
+        cases = {"plain": "SUPERSEDES"}
+        cases.update(self.HOMOGLYPH_KEYWORD_LINES)
+        cases["fullwidth_colon"] = "SUPERSEDES"  # colon substituted below
+        cases["empty_value"] = "SUPERSEDES"  # value omitted entirely, see branch below
+        for label, word in cases.items():
+            with self.subTest(label=label):
+                if label == "empty_value":
+                    text_v1 = self._receipt_text("")
+                elif label == "fullwidth_colon":
+                    text_v1 = self._receipt_text(self.PREFIX).replace(
+                        "SUPERSEDES:", "SUPERSEDES" + chr(0xFF1A), 1)
+                else:
+                    text_v1 = self._receipt_text(self.PREFIX).replace(
+                        "SUPERSEDES:", f"{word}:", 1)
+                self.assertTrue(text_v1.startswith("RCPT v1 "))
+                text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
+                out_v1 = self._run(text_v1, f"v1-twin-{label}.rcpt")
+                out_v11 = self._run(text_v11, f"v11-twin-{label}.rcpt")
+                # v1 must never be MORE permissive than v1.1 on identical
+                # content (round-4 quality-gate S1 -- was assertEqual;
+                # round-5 quality-gate S3 -- was assertGreaterEqual, which
+                # treats exit codes as ordinal and passes on a v1 CRASH,
+                # exit 2, against a v1.1 exit of 1). The actual implication:
+                # if v1.1 flags it, v1 must not have silently accepted it.
+                if out_v11.returncode != 0:
+                    self.assertNotEqual(out_v1.returncode, 0,
+                                      (out_v1.stderr, out_v11.stderr))
+                # And an exit-2 (crash-shaped) v1 outcome must be a visible
+                # failure here, not a value the implication above lets slide.
+                self.assertIn(out_v1.returncode, (0, 1),
+                              (out_v1.stderr, out_v11.stderr))
+
+    def test_empty_supersedes_remainder_resolves_malformed_not_no_claim(self):
+        """round-10 quality-gate FATAL 1: the CLI's collapsed gate treats a
+        resolved claim and `"malformed"` identically (see this class's own
+        docstring), so the twin-content test's `empty_value` subTest above
+        can pin that `v1` hard-FAILs but cannot pin WHICH value the
+        function actually returned. This direct `_import_rv()` call pins
+        that value: an empty `SUPERSEDES:` remainder resolves the literal
+        string `"malformed"` -- `1888642`'s own pre-existing answer,
+        restored here after round 9's shared-predicate redesign silently
+        weakened it to `None` (no claim). Four independently-constructed
+        empty shapes, since "empty" is not one string: no space at all
+        after the colon, a run of non-value ASCII after it, a bare
+        trailing space, and a wildcard-reachable keyword whose own tail is
+        entirely non-ASCII with nothing real following at all (still
+        "malformed" here -- this is the LITERAL path's answer, unaffected
+        by the guard's own, still-`None`, all-wildcard-tail behavior,
+        which `test_wildcard_reachable_keyword_with_no_plausible_value_now_fails_closed`
+        below continues to pin separately).
+
+        round-11 quality-gate MINOR 7: the literal-path rows above include
+        a punctuation-only tail (`dashes_only`), but the GUARD path's own
+        punctuation-only-tail case was, until this round, unpinned anywhere
+        -- `test_wildcard_reachable_keyword_with_no_plausible_value_now_fails_closed`
+        pins only a non-empty, non-punctuation-only guard remainder. A
+        second, small case set below pins the guard-side punctuation-only
+        tail as `None` (ASCII punctuation produces no token at all, so
+        `not window` is True there -- the intended `empty_is_claim`
+        asymmetry, not a bypass, but load-bearing enough that a future
+        change to what counts as a real token should not be able to flip
+        it unnoticed)."""
+        rv = _import_rv()
+        cases = {
+            "no_space": "SUPERSEDES:",
+            "dashes_only": "SUPERSEDES: ---",
+            "trailing_space": "SUPERSEDES: ",
+            "pua_no_value": "SUPERSEDES: " + chr(0xE000) * 12,
+        }
+        for label, line in cases.items():
+            with self.subTest(label=label):
+                text = f"RCPT v1 skill=x\nTRACE\nNEXT\n{line}\n"
+                self.assertEqual(
+                    rv._legacy_supersedes_claim(text), "malformed",
+                    f"empty-remainder case {label!r} did not resolve "
+                    f"'malformed' -- 1888642's own pre-existing answer")
+        # round-11 quality-gate MINOR 7: the GUARD path's own
+        # punctuation-only-tail case, pinned separately since its expected
+        # answer (`None`) differs from the literal-path rows above.
+        guard_cases = {
+            "guard_dashes_only": "SUPER" + chr(0xE000) + "EDES: ---",
+        }
+        for label, line in guard_cases.items():
+            with self.subTest(label=label):
+                text = f"RCPT v1 skill=x\nTRACE\nNEXT\n{line}\n"
+                self.assertIsNone(
+                    rv._legacy_supersedes_claim(text),
+                    f"guard-side punctuation-only-tail case {label!r} did "
+                    f"not resolve None -- the empty_is_claim=False asymmetry "
+                    f"flipped unexpectedly")
+
+    def test_v1_is_never_more_permissive_than_v11_on_accepted_divergent_shapes(self):
+        """round-4 quality-gate S1: the two shapes in
+        ACCEPTED_ONE_WAY_DIVERGENCES resolve to `(v1, v1.1) == (1, 0)` --
+        `v1` strictly stricter, never the reverse. This is the test that
+        actually exercises the directional invariant the twin-content test
+        above enforces: without this, a future change that flipped either
+        shape to `v1 -> 0` (a genuine bypass, not a documented divergence)
+        would pass every other test in this class."""
+        for label, build in self.ACCEPTED_ONE_WAY_DIVERGENCES.items():
+            with self.subTest(label=label):
+                text_v1 = build(self.PREFIX)
+                self.assertTrue(text_v1.startswith("RCPT v1 "))
+                text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
+                out_v1 = self._run(text_v1, f"v1-divergence-{label}.rcpt")
+                out_v11 = self._run(text_v11, f"v11-divergence-{label}.rcpt")
+                self.assertEqual((out_v1.returncode, out_v11.returncode), (1, 0),
+                                  (out_v1.stderr, out_v11.stderr))
+
+    def test_supersedes_none_prefix_glued_to_a_trailing_hex_value_bypasses_v1_documented_gap(self):
+        """round-8 quality-gate SIGNIFICANT 2 -- a documented, OUT-OF-SCOPE
+        gap (see this plan's "Out of scope" section and the twin-content
+        test's own docstring above), pinned so it is never mistaken for
+        regression noise and never silently widened. `SUPERSEDES: none
+        21a1b2c3d4e5` (plain ASCII, no homoglyph, no confusable, no
+        non-ASCII codepoint at all) resolves via the value grammar's
+        PREFIX match on `none` -- `re.match(r"none|[0-9a-f]{12}", ...)`
+        consumes the leading `none` and stops there, the real-space
+        separator before the trailing hex means `glued` is False, so the
+        function returns `"none"` and the caller's `not in (None,
+        "none")` gate passes the receipt on `RCPT v1`. The SAME content on
+        `RCPT v1.1` is routed through the structured parser instead, which
+        rejects the malformed SUPERSEDES section outright. Measured (and
+        re-confirmed here): `(v1, v1.1) == (0, 1)`. Pre-existing on
+        `1888642` -- not fix-generated by this ticket's redesign -- and
+        the one-keyword form of exactly the two-keyword attack round-6
+        FATAL 2 closed (`SUPERSEDES: none  SUPERSEDES: <hex>`), strictly
+        cheaper for an attacker. Left unclosed here deliberately: closing
+        it means anchoring the value grammar (a word boundary or
+        `\\Z`/`$` after `none`), which touches the LITERAL path's
+        long-standing prefix-match behavior beyond this ticket's
+        confusables/homoglyph scope -- see the design doc's "Superseded
+        mechanism" section for why this class of change needs its own
+        review, not a rider on this one.
+
+        ROUND-9 RECONSIDERED (quality-gate SIGNIFICANT 4): FATAL 1's shared
+        `_classify_supersedes_value` predicate unifies the composition
+        guard's remainder check with this SAME literal-path regex, which
+        raised the question of whether unifying the overload also closes
+        this gap as a side effect. Re-confirmed against the round-9 fix:
+        it does not -- this shape never reaches the guard at all (no
+        wildcard, the keyword is a plain contiguous match), and within the
+        literal path the "glued" adjacency check FATAL 1 did not touch is
+        the sole reason `none 21a1b2c3d4e5` resolves `"none"` rather than
+        `"malformed"` (a real-space separator between `none` and the
+        trailing hex means `glued` is False, per round-5 quality-gate
+        SP1's `<=` predicate). Still open, still out of scope, disposition
+        unchanged -- `(v1, v1.1) == (0, 1)`, re-measured identically
+        pre- and post-round-9.
+
+        ROUND-10 ADDITION (quality-gate SECOND PASS): table-driven over
+        `plain`, a homoglyph'd keyword letter (Cyrillic Ѕ, GH #567's own
+        first named example), and a lowercase keyword (round-2 F3), so
+        this gap's COMPOSITION with this ticket's own mechanisms is pinned
+        where the "Out of scope" section's corrected claim is made, not
+        just asserted in prose -- see that section for why "no Unicode
+        mechanism is involved at all" was wrong: the homoglyph and
+        lowercase forms are both found as keyword occurrences (this
+        ticket's own detection working correctly) and then both discarded
+        as `"none"` by this SAME pre-existing value-grammar gap."""
+        cases = {
+            "plain": "SUPERSEDES",
+            "cyrillic_es_for_s": chr(0x0405) + "UPERSEDES",
+            "lowercase": "supersedes",
+        }
+        for label, word in cases.items():
+            with self.subTest(label=label):
+                text_v1 = self._receipt_text("none 21a1b2c3d4e5").replace(
+                    "SUPERSEDES:", f"{word}:", 1)
+                self.assertTrue(text_v1.startswith("RCPT v1 "))
+                text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
+                out_v1 = self._run(text_v1, f"v1-significant2-none-prefix-{label}.rcpt")
+                out_v11 = self._run(text_v11, f"v11-significant2-none-prefix-{label}.rcpt")
+                self.assertEqual((out_v1.returncode, out_v11.returncode), (0, 1),
+                                  (out_v1.stderr, out_v11.stderr))
+
+    def test_same_line_double_supersedes_after_next_is_now_closed_by_the_rescan_fix(self):
+        """round-5 quality-gate SP2, CLOSED round-6 quality-gate F2: a
+        SECOND `SUPERSEDES:` on the SAME line was invisible to this
+        function's OLD `find()`-first-match search -- the value grammar
+        consumed the FIRST occurrence's value and moved to the next
+        raw_line, never rescanning the remainder of the current line for
+        another `SUPERSEDES:` -- even though the aggregation ACROSS lines
+        is strongest-claim-wins. `SUPERSEDES: none  SUPERSEDES: <hex>` on
+        one line used to resolve to `"none"` here (`(v1, v1.1) == (0, 1)`,
+        the SIEGE-R4BA-5 asymmetry in its original, plain-ASCII shape) while
+        `parse_v11_sections` (a structured per-section parser that rejects
+        a duplicated section) already flagged it.
+
+        ROUND-6 CORRECTION (quality-gate F2): the round-5 docstring here
+        characterized this as "pre-existing on `main`, unaffected by this
+        ticket's fix ... NOT closed by this plan" -- true THEN, false now.
+        `_legacy_supersedes_claim`'s rescan loop (Task 3 Step 3) finds the
+        SECOND `SUPERSEDES:` on the same line too, so BOTH header versions
+        now see the attacker's real `<hex>` claim and BOTH exit 1 (the
+        witness-evidence gate at rcpt_verify.py's SUPERSEDES check fires for
+        v1 exactly as it does for v1.1, since the claim is no longer
+        `"none"`). Renamed from
+        `..._is_a_known_open_v1_permissive_gap` and reassigned to the
+        `(1, 1)` outcome accordingly -- this was the SIMPLEST correct
+        resolution per the round-6 finding that flagged the old assertion
+        (closing F2 turns a passing `(0, 1)` expectation into a failing
+        test unless the test itself is updated to match the new, correct
+        behavior). See GH #567 for the original finding."""
+        rv = _import_rv()
+        text_v1 = self._receipt_text(f"none  SUPERSEDES: {self.PREFIX}")
+        self.assertTrue(text_v1.startswith("RCPT v1 "))
+        text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
+        out_v1 = self._run(text_v1, "v1-same-line-double-supersedes.rcpt")
+        out_v11 = self._run(text_v11, "v11-same-line-double-supersedes.rcpt")
+        self.assertEqual(
+            (out_v1.returncode, out_v11.returncode), (1, 1),
+            "if this now resolves differently, the round-6 rescan fix "
+            "either regressed or the shape changed -- investigate before "
+            "loosening this assertion")
+
+    def test_same_line_double_supersedes_before_next_is_detected(self):
+        """round-6 quality-gate FATAL 2 -- the pre-`NEXT` placement of the
+        same-line-double shape above is Decision B's own target zone, and
+        was a COMPLETE negation of this ticket's scan-scope fix rather than
+        a bounded divergence: with the attacker's claim placed BEFORE
+        `NEXT` (under `TRIPWIRE`, same as this class's other scan-scope
+        tests), the OLD code's `find()`-first-match search meant NEITHER
+        `RCPT v1` NOR `RCPT v1.1` ever saw the attacker's own claim --
+        `(v1, v1.1) == (0, 0)`, no asymmetry to notice, no defence anywhere.
+        Reachable by prepending six characters (`none  `) to an otherwise
+        ordinary, already-tested claim
+        (`test_supersedes_line_before_next_is_detected` above). Closed by
+        the SAME rescan loop as the post-`NEXT` case; both header versions
+        now see the real claim and hard-FAIL for lack of a satisfying
+        witness."""
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        text = body.replace(
+            "SUSPICION  0.10",
+            f"SUPERSEDES: none  SUPERSEDES: {self.PREFIX}\nSUSPICION  0.10")
+        out = self._run(text, "v1-same-line-double-before-next.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_u2028_fused_same_line_double_supersedes_before_next_is_detected(self):
+        """round-6 quality-gate FATAL 2 -- the same pre-`NEXT` shape as
+        above, but the two VISUAL lines are fused with a single U+2028 LINE
+        SEPARATOR instead of two spaces. Any viewer honoring U+2028 (and
+        `str.splitlines()`, which is what most readers use) renders this as
+        two ordinary lines, but `_legacy_supersedes_claim`'s literal-`\\n`-
+        only split (load-bearing since round 3, against a DIFFERENT
+        fragmentation bypass) sees one `raw_line`. This is round-3's own
+        fix-of-a-fix bypass class resurfacing one layer up, at aggregation
+        instead of slicing -- pinned directly via `_import_rv()` since a
+        raw U+2028 byte in a file written by `_run`'s `write_text` is
+        awkward to eyeball through CLI stderr alone."""
+        rv = _import_rv()
+        text = ("RCPT v1 skill=build/21-implementer\n"
+                "TRACE\n"
+                "EXEC   grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1  "
+                "out=evidence.log#L1-L5\n"
+                "CLAIMS\n"
+                f"fix-verified=true  from={self.PREFIX}#L1-L10\n"
+                "NEXT\n"
+                "TRIPWIRE:  claims-touch(auth/**)\n"
+                f"SUPERSEDES: none{chr(0x2028)}SUPERSEDES: {self.PREFIX}\n")
+        self.assertEqual(rv._legacy_supersedes_claim(text), self.PREFIX)
+
+    def test_same_line_literal_and_fragmented_supersedes_both_detected(self):
+        """round-7 quality-gate FATAL 1: every same-line-double-claim test
+        above (`test_same_line_double_supersedes_after_next_is_now_closed_by_the_rescan_fix`,
+        `..._before_next_is_detected`, `test_u2028_fused_...`) uses TWO
+        LITERAL claims; every fragmented/wildcard-substituted test
+        (`RESIDUE_IN_KEYWORD`, `test_colon_position_bypass...`,
+        `test_multiple_residue_substitutions_at_once...`) puts the
+        fragmented claim on a line with NO OTHER `SUPERSEDES:`. Neither
+        axis alone exercises the PRODUCT of the two: a line carrying ONE
+        literal `SUPERSEDES:` claim (a benign `none`) AND, on the SAME
+        line, a SECOND, fragmented/wildcard-substituted claim.
+
+        `found_on_line` (round-6 F2's rescan-loop flag) used to gate the
+        composition guard at the WHOLE-LINE level: a benign literal match
+        anywhere on the line silently un-detected the fragmented claim
+        sharing it -- measured pre-round-7-fix `(v1, v1.1) == (0, 1)` on
+        the shape below. Round-7 masks only the TOKEN SPAN each literal
+        match itself consumes (see `_legacy_supersedes_claim`'s own
+        `consumed_tokens`), so the guard still catches a second,
+        independent completion elsewhere on the line. Both orderings
+        pinned via direct `_import_rv()` calls (matching this class's
+        convention for a distinction the CLI's collapsed gate cannot make
+        -- the guard's own hit is always `"malformed"`, never the
+        attacker's literal hex value), plus a real-CLI twin-header check
+        on one of them."""
+        rv = _import_rv()
+        frag = "SU" + chr(0x1D18) + "ERSEDES: " + self.PREFIX  # small-cap P
+        cases = {
+            "literal_then_fragmented": self._receipt_text(f"none  {frag}"),
+            "fragmented_then_literal": (
+                "RCPT v1 skill=x\nTRACE\nNEXT\n"
+                f"{frag}  SUPERSEDES: none\n"),
+        }
+        for label, text in cases.items():
+            with self.subTest(label=label):
+                self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+        text_v1 = cases["literal_then_fragmented"]
+        self.assertTrue(text_v1.startswith("RCPT v1 "))
+        text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
+        out_v1 = self._run(text_v1, "v1-literal-plus-fragmented.rcpt")
+        out_v11 = self._run(text_v11, "v11-literal-plus-fragmented.rcpt")
+        self.assertEqual((out_v1.returncode, out_v11.returncode), (1, 1),
+                          (out_v1.stderr, out_v11.stderr))
+
+    # -- Must NOT regress: false positives ------------------------------------
+
+    def test_ordinary_accented_prose_elsewhere_in_the_receipt_does_not_misfire(self):
+        """NFKD-decomposing an accented Latin letter (e.g. e-acute -> e +
+        combining acute) must not manufacture a spurious claim: the base
+        letter is ordinary ASCII and the combining mark is simply dropped,
+        exactly as any other non-alphabet codepoint already is."""
+        text = self._receipt_text("none").replace(
+            "TRIPWIRE:  claims-touch(auth/**)",
+            "TRIPWIRE:  claims-touch(auth/**)  # ran the caf" + chr(0x00E9) + " suite")
+        out = self._run(text, "v1-accented-prose.rcpt")
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_grep_line_quoting_the_keyword_is_still_the_accepted_false_positive(self):
+        """Documented, accepted cost (design doc "Accepted false positive"):
+        an ordinary line that happens to contain the literal substring
+        SUPERSEDES: (e.g. quoting a grep command run against this very
+        function) still hard-FAILs, even though it names no real claim.
+        Pinned here so a future change doesn't silently alter this without
+        revisiting the design doc's tradeoff.
+
+        Round-1 quality-gate F2: the earlier draft built this as an extra
+        TRACE `EXEC` entry, reasoning that TRACE's grammar accepts free-text
+        args after a known verb. That reasoning was wrong for a DIFFERENT
+        reason than position: EVERY `EXEC` entry, anywhere in TRACE, is
+        Tier-1-checked for a valid `out=<artifact>#<range>` clause
+        (`check_exec_range_bound`) regardless of what it quotes -- this
+        construction is Tier-1-rejected ("EXEC missing out=") before
+        `_legacy_supersedes_claim` is ever reached, identically on the
+        current and the patched tree (measured). It is also placed BEFORE
+        `NEXT`, inside the structured TRACE section, so even fixing the
+        EXEC/out= problem would not have exercised the CURRENT (pre-patch)
+        code at all -- only the post-round-6 whole-body scan would ever see
+        it there, so it could not have been one of the "already PASS
+        against current code" tests it was filed under.
+
+        Fixed by using a `READ`-shaped line (no `out=` grammar requirement)
+        placed AFTER `NEXT`, alongside a real `SUPERSEDES: none` line --
+        both are scanned by BOTH the current post-NEXT-only code and the
+        patched whole-body scan, so this now genuinely exercises the
+        mechanism (and genuinely already passes pre-patch, confirmed):
+        the unrelated line's own skeleton reads `SUPERSEDES:auditmd` (the
+        `-`/`.` are stripped, `notes/` too), which satisfies neither `none`
+        nor 12-hex, so it is `"malformed"` -- fail-CLOSED, and the
+        `not in (None, "none")` gate does not care that a separate, later
+        line in the same receipt spells out an explicit `none`: any
+        non-`none` claim wins (see this function's own docstring's return
+        contract, amended round-4 quality-gate SP1 to "Returns None when
+        nothing on this receipt reads as a SUPERSEDES: claim ... Otherwise
+        the STRONGEST claim on the receipt")."""
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        text = (body + "TRIPWIRE:  claims-touch(auth/**)\n"
+                       "READ  notes/SUPERSEDES:-audit.md\n"
+                       "SUPERSEDES: none\n")
+        out = self._run(text, "v1-grep-line-false-positive.rcpt")
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("EVALUATED at Tier-2", out.stderr)
+
+    def test_supersedes_heading_with_an_em_dash_now_resolves_malformed(self):
+        """ROUND-9 CORRECTION (quality-gate FATAL 1): round 6 excused this
+        line from the composition guard via a value-grammar gate ("the
+        heading's remainder does not satisfy none|[0-9a-f]{12}, so this
+        resolves to no claim"). Round 9's FATAL 1 showed that SAME gate is
+        exactly what let an attacker spell a real value in any ASCII form
+        the literal path already treats as a claim and reach the weaker of
+        two answers. The redesigned shared predicate
+        (`_classify_supersedes_value`) no longer tries to distinguish
+        "looks like a value" from "ordinary prose" -- it answers the SAME
+        question the literal path always has: is there anything at all
+        following a keyword occurrence (literal or wildcard-reachable)? If
+        so, and it is not a clean `none`/12-hex value, it is malformed --
+        fail-closed, matching the literal path exactly, with no bounded or
+        heuristic distinction left for a future round to defeat. This
+        heading therefore now resolves `"malformed"` -- an accepted
+        false-positive cost, measured (round-10 quality-gate SIGNIFICANT
+        3): this exact line (`skills/shared/return-convention.md:492`) is
+        the ONE hit out of every repo-tracked `*.md` non-blank line
+        (35,634 swept, placed post-`NEXT` in an `RCPT v1` receipt) that
+        newly hard-FAILs under this widening -- see the composition
+        guard's own docstring for the measurement and the trigger rule.
+        Not a silent miss."""
+        rv = _import_rv()
+        text = ("RCPT v1 skill=x\nTRACE\nNEXT\n"
+                "### SUPERSEDES" + chr(0x2014) + " retiring stale tripwires\n")
+        self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+    NON_ASCII_HEAVY_FALSE_POSITIVE_LINES = {
+        "cjk_sentence": "実装は完了しました。詳細は以下の通り:",
+        "box_drawing_tree": "# ├── └── ├── └── ├── └──:",
+    }
+
+    def test_non_ascii_heavy_prose_ending_in_a_colon_now_fails_closed(self):
+        """ROUND-9 CORRECTION (quality-gate FATAL 1): round 6's own
+        SIGNIFICANT 2 fix excused this shape (ten-plus non-ASCII dropped
+        codepoints, wildcard-completing the keyword including the colon,
+        with no plausible value after it) via the SAME value-grammar gate
+        FATAL 1 showed was an exploitable asymmetry with the literal path.
+        The redesigned shared predicate no longer distinguishes "a
+        plausible value follows" from "ordinary prose follows" -- ANY
+        non-empty remainder after a reachable keyword is now malformed,
+        symmetric with the literal path. This line, once wildcard-
+        reachable via a completion covering its own trailing colon too, is
+        ALSO reachable via an EARLIER completion (one that stands in for
+        the colon slot with a wildcard rather than the real trailing
+        colon) whose remainder then includes that real, unrelated colon --
+        non-empty, does not parse as `none`/hex, hence malformed. This is
+        an accepted false-positive cost on non-ASCII-heavy content --
+        measured at 1 hit in 35,634 repo-tracked markdown lines, not a
+        functional bypass -- see the composition guard's own docstring
+        for the measurement and the trigger rule (round-10 quality-gate
+        SIGNIFICANT 3, superseding the earlier "cannot measure this cost"
+        claim)."""
+        rv = _import_rv()
+        for label, line in self.NON_ASCII_HEAVY_FALSE_POSITIVE_LINES.items():
+            with self.subTest(label=label):
+                text = f"RCPT v1 skill=x\nTRACE\nNEXT\n{line}\nSUPERSEDES: none\n"
+                self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+    def test_non_ascii_heavy_wildcard_reachable_line_with_a_plausible_value_still_fires(self):
+        """Positive companion to the false-positive pin above. Originally
+        (round 6) this distinguished "the grammar gate stops ordinary
+        non-ASCII prose from misfiring" from "the SAME run followed by a
+        real value still fires" -- round 9's FATAL 1 removed that
+        distinction (both cases now resolve `"malformed"`, see the pin
+        above's own ROUND-9 CORRECTION), so this test and that one now
+        assert the same outcome for related but distinct constructions.
+        Retained anyway: without it, a future "just skip non-ASCII-heavy
+        lines" over-correction (reintroducing some form of round-6's
+        grammar gate) could silently reopen a real bypass on exactly this
+        shape, and this pin would catch it independently of the other."""
+        rv = _import_rv()
+        for label, line in self.NON_ASCII_HEAVY_FALSE_POSITIVE_LINES.items():
+            with self.subTest(label=label):
+                text = f"RCPT v1 skill=x\nTRACE\nNEXT\n{line}{self.PREFIX}\n"
+                self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+    def test_wildcard_reachable_keyword_with_no_plausible_value_now_fails_closed(self):
+        """ROUND-9 CORRECTION (quality-gate FATAL 1): round 6's accepted
+        tradeoff (a wildcard-reachable keyword followed by a non-grammar-
+        conforming value resolves to no claim, not "malformed") is the
+        SAME gate FATAL 1 showed an attacker can route around by spelling
+        the value in any ASCII form the literal path already treats as a
+        claim. The redesigned shared predicate closes this by dropping the
+        distinction entirely: ANY non-empty remainder after a reachable
+        keyword is malformed now, matching the literal path's own long-
+        standing behavior (a literal `SUPERSEDES:` followed by ordinary
+        prose has ALWAYS resolved malformed, never no-claim) -- this test
+        pins that the guard's answer for a WILDCARD-reachable keyword must
+        be the identical answer, not a weaker one an attacker could pick
+        by choosing an unmapped homoglyph instead of ASCII."""
+        rv = _import_rv()
+        text = ("RCPT v1 skill=x\nTRACE\nNEXT\n"
+                "SUPER" + chr(0xE000) + "EDES: not-a-real-claim-value\n")
+        self.assertEqual(rv._legacy_supersedes_claim(text), "malformed")
+
+    # -- Coverage as a property, not an enumeration (round-3 quality-gate SP2) -
+
+    def test_every_nfkc_equivalent_of_a_keyword_letter_is_detected(self):
+        """round-3 quality-gate SP2: every coverage claim elsewhere in this
+        class rests on the same enumeration (the GH issue's six named
+        examples, the R-coverage pin, the residue table) -- there is no test
+        that asks "for which characters is the keyword detectable?" as a
+        PROPERTY. This is exactly the shape that let F1 (23 NFKC-equivalent
+        misses under NFD) survive three review rounds: every enumerated
+        example the plan's author had already thought of passed, and the
+        one class of input nobody had enumerated did not.
+
+        Deliberately NOT vendored/generated (unlike CONFUSABLE_MAP): this
+        set is a pure function of the RUNNING INTERPRETER's own `unicodedata`
+        module, not of Unicode's confusables.txt -- it updates automatically
+        with the interpreter's bundled UCD and needs no network fetch, no
+        source snapshot, and no drift checker of its own. Computed once
+        here, asserted against every codepoint Unicode assigns: for the
+        keyword's own alphabet (`SUPERD:`), if NFKC folds a codepoint down
+        to exactly one of those letters, substituting it into the keyword
+        must still be detected. Runs in well under a second (a linear sweep
+        over `range(128, 0x110000)`, filtered before any receipt is built).
+
+        round-4 quality-gate M2: this sweep's own coverage varies with the
+        running interpreter's bundled UCD (measured on Python 3.14/UCD
+        16.0.0, UPPERCASE-only as originally swept: 113 hits; CI's pinned
+        3.12/UCD 15.0.0 would find 107 -- the six UCD-16-only codepoints,
+        U+1CCD9/DA/E5/E7/E8/EA). ROUND-6 CORRECTION (quality-gate M3): after
+        sweeping both cases (below), Python 3.14/UCD 16.0.0 finds 218 hits
+        -- not exactly double, since case-folding is not one-to-one, but in
+        the same ballpark; the UCD-version-dependent delta scales with it
+        and is not re-measured precisely here (no 3.12 interpreter was
+        available while fixing this round). Today the UCD-version gap is
+        belt-and-braces, not a coverage hole: the six named UCD-16-only
+        codepoints are also direct
+        `CONFUSABLE_MAP` entries (vendored from Unicode 17.0.0's
+        confusables.txt, independent of the interpreter's UCD), so every
+        interpreter still detects them via the table even on a UCD where
+        NFKC doesn't fold them. Noted so a future reader doesn't mistake
+        this sweep's interpreter-dependent count for the sole source of
+        that coverage.
+
+        ROUND-6 CORRECTION (quality-gate M3): the original sweep used
+        `keyword_letters = set("SUPERD:")` -- UPPERCASE only -- even though
+        the search this test is meant to characterize is deliberately
+        case-insensitive (round-2 quality-gate F3) and the table
+        deliberately stores Unicode's own lowercase prototypes too. A
+        codepoint whose NFKC fold is LOWERCASE (e.g. U+017F LATIN SMALL
+        LETTER LONG S -> `s`) was never swept, and `"SUPERSEDES:".replace(nk,
+        ch, 1)` would have been a silent no-op for such a codepoint even if
+        it HAD been included (no lowercase letter exists in the all-
+        uppercase base string to replace) -- exactly the kind of vacuity
+        this file's own S1 finding warns about. Fixed by sweeping BOTH
+        cases and picking a base spelling that matches the fold's case, so
+        the substitution actually lands."""
+        rv = _import_rv()
+        keyword_letters = set("SUPERD:") | set("superd:")
+        for cp in range(128, 0x110000):
+            ch = chr(cp)
+            nk = unicodedata.normalize("NFKC", ch)
+            if len(nk) == 1 and nk in keyword_letters:
+                with self.subTest(codepoint=hex(cp), nfkc_equivalent=nk):
+                    base = "SUPERSEDES:" if nk in "SUPERD:" else "supersedes:"
+                    word = base.replace(nk, ch, 1)
+                    text = self._receipt_text(self.PREFIX).replace(
+                        "SUPERSEDES:", word, 1)
+                    self.assertEqual(
+                        rv._legacy_supersedes_claim(text), self.PREFIX,
+                        f"U+{cp:04X} NFKC-folds to {nk!r} but is not detected")
+
+    def test_every_nfkc_equivalent_of_a_value_alphabet_letter_is_detected(self):
+        """round-4 quality-gate M7: the property sweep above covers only the
+        KEYWORD half of the alphabet (`SUPERD:`); the VALUE grammar
+        (`none` + hex) was still enumeration-only (a couple of named
+        examples plus the RESIDUE_IN_VALUE table), so the "coverage as a
+        property" claim was only half true. Extends the identical sweep to
+        `set("none0123456789abcdef")`. For an NFKC-equivalent of a letter in
+        `"none"`, substitutes it into `"none"` and expects the resolved
+        claim to still read `"none"`. For an NFKC-equivalent of a hex digit,
+        builds a 12-character window of `"0123456789abcdef"` rotated so the
+        target digit leads (guaranteeing 12 DISTINCT hex characters, so the
+        value is well-formed and not glued to anything) and expects the
+        resolved claim to equal that literal window with the substitution
+        folded back to its plain digit -- confirming the mapping/NFKD step
+        is genuinely exercised on the value side too, not just the keyword
+        side. Confirmed during planning (248 codepoints swept, 0
+        failures)."""
+        rv = _import_rv()
+        value_letters = set("none0123456789abcdef")
+        base = "0123456789abcdef"
+        for cp in range(128, 0x110000):
+            ch = chr(cp)
+            nk = unicodedata.normalize("NFKC", ch)
+            if len(nk) == 1 and nk in value_letters:
+                with self.subTest(codepoint=hex(cp), nfkc_equivalent=nk):
+                    if nk in "none":
+                        value = "none".replace(nk, ch, 1)
+                        expected = "none"
+                    else:
+                        i = base.index(nk)
+                        window = (base[i:] + base[:i])[:12]
+                        value = window.replace(nk, ch, 1)
+                        expected = window
+                    text = self._receipt_text(value)
+                    self.assertEqual(
+                        rv._legacy_supersedes_claim(text), expected,
+                        f"U+{cp:04X} NFKC-folds to {nk!r} but is not detected")
+
+    def test_every_documented_confusable_for_a_keyword_letter_is_reachable(self):
+        """round-9 quality-gate SIGNIFICANT 2: the two coverage sweeps above
+        (and this class's other coverage claims) all enumerate the
+        mechanism's own SUCCESS set -- "does every codepoint the design
+        already knows about get caught?" -- which cannot ask the only
+        question that finds a bypass: "which codepoints escape?" Both of
+        round 9's Fatals were found by that complementary question, not by
+        the success-set sweeps above.
+
+        The complementary sweep: the union of (a) the 1439 codepoints
+        whose NFKD expansion is entirely ASCII, and (b) every
+        `CONFUSABLE_MAP` key (round-11 quality-gate SIGNIFICANT 2 --
+        round-10 quality-gate MINOR 4 claimed the (a)-only pool, combined
+        with `sanity_check_reachability`'s own `pos_list[0]`-only sweep,
+        already covered every (confusable, keyword-position) pair; it does
+        not, because (a) is filtered on NFKD, which EXCLUDES a
+        `CONFUSABLE_MAP`-resolved entry whose NFKD does not itself
+        decompose to a keeper -- the false rationale this docstring used
+        to give, "the only candidates that could ever reach the skeleton
+        as a real, non-WILDCARD character," is wrong: every
+        `CONFUSABLE_MAP` key reaches the skeleton as a real character too,
+        via the table-lookup path (see the function body's `elif dch in
+        CONFUSABLE_MAP` / source-level fallback branches). Measured
+        against the real 766-entry table: 301 entries target a keyword
+        letter, spanning 485 (entry, position) pairs; 66 of those pairs,
+        including GH #567's own headline codepoint (Cyrillic Ѕ, at
+        positions 5 and 9), were covered by NEITHER this sweep nor
+        `sanity_check_reachability` before this widening), restricted per
+        keyword position to the ones CONFUSABLE_MAP actually documents as
+        a confusable for that position's letter (485 relevant checks, not
+        (1439+possible new entries) x 11 -- most codepoints are simply not
+        a lookalike for any given position at all, and substituting one
+        produces garbage, not a homoglyph, so it is correctly undetected
+        and not informative to sweep). Every one of those substitutions,
+        placed at its position with a well-formed value following, must
+        resolve to a claim -- i.e. this ALLOW-LIST must stay empty.
+        Confirmed during planning: 0 escapes across the widened 485-pair
+        sweep against the real 766-entry table, in well under a second
+        (round-11 quality-gate SIGNIFICANT 2 re-measured this after
+        widening the pool); the SAME sweep against the unpatched,
+        round-8 mechanism was not run here (SIGNIFICANT 1's drift-checker
+        round-trip covers that regression angle already, and found U+FE30
+        exactly this way). If a future change reopens ANY entry here, this
+        RED test fails loudly with the exact codepoint and position,
+        rather than requiring another red-team round to rediscover it."""
+        rv = _import_rv()
+        keyword = "SUPERSEDES:"
+        candidates = set()
+        for cp in range(128, 0x110000):
+            if 0xD800 <= cp <= 0xDFFF:
+                continue
+            ch = chr(cp)
+            if all(ord(c) < 128 for c in unicodedata.normalize("NFKD", ch)):
+                candidates.add(ch)
+        # round-11 quality-gate SIGNIFICANT 2: union with every
+        # CONFUSABLE_MAP key -- the NFKD-all-ASCII filter above excludes
+        # exactly the table-resolved half of the table (a codepoint whose
+        # NFKD does not itself decompose to ASCII, but that IS a
+        # CONFUSABLE_MAP key), which is this test's whole subject.
+        candidates |= set(rv.CONFUSABLE_MAP.keys())
+        escapes = []
+        for pos in range(len(keyword)):
+            target_letter = keyword[pos].upper()
+            relevant = [ch for ch in candidates
+                        if rv.CONFUSABLE_MAP.get(ch, "").upper() == target_letter]
+            for ch in relevant:
+                with self.subTest(pos=pos, codepoint=hex(ord(ch))):
+                    word = keyword[:pos] + ch + keyword[pos + 1:]
+                    text = self._receipt_text(self.PREFIX).replace(
+                        "SUPERSEDES:", word, 1)
+                    result = rv._legacy_supersedes_claim(text)
+                    if result is None:
+                        escapes.append((pos, hex(ord(ch))))
+                    self.assertIsNotNone(result)
+        self.assertEqual(escapes, [],
+                          "pinned allow-list widened -- a documented "
+                          "confusable now escapes detection")
+
+    # -- Real-corpus safety net (round-1 quality-gate S2) ---------------------
+
+    def test_no_committed_rcpt_v1_receipt_in_the_corpus_gains_a_spurious_supersedes_claim(self):
+        """Replaces the earlier draft's Task 4 Step 3, which globbed for
+        `*.rcpt` files (there are none -- the real corpus is `.jsonl`, each
+        line embedding a receipt under a `receipt` key), never called the
+        detector, and filtered OUT every receipt containing the literal
+        substring `SUPERSEDES:` (i.e. discarded exactly the population that
+        could false-positive). As written it always printed 0 and called
+        that a pass-through informational note.
+
+        This is the real check: every `RCPT v1` (legacy-header) receipt
+        committed under eval/ledger-return-protocol/**/*.jsonl -- the
+        corpus the design doc's own "34 receipts, zero spurious claims"
+        verification claim is about -- must still resolve to None or
+        "none" after this ticket's whole-body-scan widening, INCLUDING the
+        ones that contain a literal SUPERSEDES: substring somewhere in
+        their TRACE/WITNESS text (previously invisible to the detector,
+        now in-scope). Confirmed during planning: exactly 34 such receipts
+        exist, and 0 currently resolve to a spurious claim -- this test
+        pins that against regression as an executable gate, not a printed
+        number an implementer has to eyeball.
+
+        Round-2 quality-gate Minor 2: paths are built from this file's own
+        `REPO` constant, not a relative `pathlib.Path(...)`, so this test
+        passes from any cwd, not only under `run_tests.sh`'s `REPO_ROOT`
+        cd. Round-2 quality-gate Minor 3: `eval/invariant-cairn/fixtures`
+        currently holds 0 `RCPT v1 ` receipts (3 `.jsonl` files, none
+        matching) -- the loop over it is a documented no-op today, kept so
+        this gate automatically covers that corpus too if it ever gains
+        legacy-header receipts, not because it currently contributes."""
+        rv = _import_rv()
+        total = 0
+        for corpus in (REPO / "eval/ledger-return-protocol",
+                       REPO / "eval/invariant-cairn/fixtures"):
+            for p in corpus.rglob("*.jsonl"):
+                for line in p.read_text(errors="replace").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        d = json.loads(line)
+                    except ValueError:
+                        continue
+                    r = d.get("receipt")
+                    if isinstance(r, str) and r.startswith("RCPT v1 "):
+                        total += 1
+                        claim = rv._legacy_supersedes_claim(r)
+                        self.assertIn(claim, (None, "none"),
+                                      f"{p}: spurious claim {claim!r}")
+        # round-3 quality-gate M3: assertGreaterEqual + an informational
+        # print, not assertEqual -- a hard equality here means every future
+        # fixture addition to eval/ledger-return-protocol/** breaks this
+        # test noisily even when the new fixture is perfectly clean (a
+        # spurious claim would already have failed the assertIn above, per
+        # receipt, before this line is ever reached). The count is still
+        # worth SEEING drop unexpectedly (a real regression: fixtures
+        # deleted, or a path filter narrowed) -- assertGreaterEqual keeps
+        # that direction as a real failure while removing the noisy one.
+        print(f"[test_no_committed_rcpt_v1_receipt...] scanned {total} "
+              f"RCPT v1 receipts (34 at round-3 quality-gate time)")
+        self.assertGreaterEqual(total, 34,
+                          "corpus receipt count DROPPED below the round-3 "
+                          "baseline -- investigate before loosening this "
+                          "assertion; a new fixture ADDING to the count is "
+                          "expected and fine")
 
 
 if __name__ == "__main__":
