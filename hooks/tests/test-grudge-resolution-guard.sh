@@ -2368,6 +2368,32 @@ check 330 "a by-files grudge clears a leading-dash candidate — contract:hook:i
 check 331 "no clearance-lookup note is printed for a dash path — contract:hook:inv-t23" \
   no "$(has "$ERR" "clearance lookup")"
 
+# ========================================================================
+# INV-T28 — issue #603: the per-Stop wall-clock budget bounds
+# per-invocation cost in ATTACKER-CHOSEN inputs. Candidate count (up to the
+# --max-count=500 scan, accumulable turn-over-turn via future-dated author
+# times), files per commit, and the stored grudge count each multiply the
+# work one Stop does; 362 s was measured on a single Stop. The only
+# input-independent bound is a wall-clock budget. Spending it must degrade
+# LOUDLY to allow (exit 0) — the never-fail-closed contract — so an attacker
+# can stall a Stop for at most the budget, never for a whole turn.
+# ========================================================================
+# contract:hook:inv-t28 checks=4
+hook_case t28ctl
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+run_hook s28ctl
+check 357 "an unresolved fix still blocks under the default budget — contract:hook:inv-t28" 2 "$RC"
+check 358 "the block path prints no budget-exceeded note — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
+hook_case t28zero
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=0"
+run_hook s28zero
+check 359 "a spent budget allows, never blocks — contract:hook:inv-t28" 0 "$RC"
+check 360 "a spent budget prints the loud degradation reason — contract:hook:inv-t28" yes "$(has "$ERR" "budget")"
+HOOK_ENV=""
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2380,7 +2406,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=368
+EXPECTED_CHECKS=372
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
