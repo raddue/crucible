@@ -2449,6 +2449,103 @@ check 364 "a zero-padded budget spends nothing and prints no budget note — con
   no "$(has "$ERR" "budget")"
 HOOK_ENV=""
 
+# ========================================================================
+# INV-T29 (#608) — a by-files clearance must not persist a counter reset
+#
+# A clearance zeroes the group's PERSISTED block counter, but the two lookup
+# predicates are NOT monotone w.r.t. the working tree: `--by-files` matches
+# only while survivors() (os.path.exists) still sees the grudge's files, so
+# `git checkout` to a branch without them silently revokes it. The reset it
+# granted, however, stays persisted — each false->true->false branch cycle
+# restores a fresh MAX_BLOCKS and blocking in a session is unbounded (#608).
+# This fence: block a 2-member overlap group to its bound, clear it with a
+# commit-less (by-files-only) grudge while the files exist, remove the member's
+# scan window, then assert a new sibling joining the persisted group does NOT
+# regain headroom — by-files evidence may clear THIS Stop, never spend the
+# durable bound.
+# ========================================================================
+# contract:group:inv-t29 checks=19
+hook_case t608
+for f in shared.py b.py c.py; do echo "V = 0 # $f" > "$HC_REPO/$f"; done
+commit_all "$HC_REPO" "chore: baseline"
+echo "S = 1" > "$HC_REPO/shared.py"; echo "B = 1" > "$HC_REPO/b.py"
+commit_all "$HC_REPO" "fix(b): touch shared and b"
+T608_B="$(sha_of "$HC_REPO" HEAD)"
+echo "S = 2" > "$HC_REPO/shared.py"; echo "C = 1" > "$HC_REPO/c.py"
+commit_all "$HC_REPO" "fix(c): touch shared and c"
+T608_C="$(sha_of "$HC_REPO" HEAD)"
+
+run_hook s608
+check 365 "the overlap pair blocks — contract:group:inv-t29" 2 "$RC"
+check 366 "the overlap pair is one persisted group — contract:group:inv-t29" 1 \
+  "$(st "$HC_REPO" s608 '[.sha_group[]]|unique|length')"
+check 367 "both members share the frozen group id — contract:group:inv-t29" true \
+  "$(st "$HC_REPO" s608 ".sha_group[\"$T608_B\"] == .sha_group[\"$T608_C\"]")"
+run_hook s608 true
+check 368 "the second block reads (2/3) — contract:group:inv-t29" yes "$(has "$ERR" "(2/3)")"
+run_hook s608 true
+check 369 "the third block reads (3/3), the bound — contract:group:inv-t29" yes "$(has "$ERR" "(3/3)")"
+check 370 "the bound is persisted before clearance — contract:group:inv-t29" 3 \
+  "$(st "$HC_REPO" s608 ".block_counts[.sha_group[\"$T608_C\"]]")"
+
+# A commit-less grudge whose file set matches the in-scope member C by FILES
+# ONLY: fixed_in_commit is empty, so `--by-commit` cannot match it and the
+# survivors-relative `--by-files` predicate is the entire clearance.
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "shared and c regressed" \
+  "shared.py,c.py" "" "2026-04-01" >/dev/null
+run_hook s608 true
+check 371 "the by-files courtesy allows the Stop — contract:group:inv-t29" 0 "$RC"
+check 372 "it is a real clearance, not the give-up — contract:group:inv-t29" no "$(has "$ERR" "giving up")"
+check 373 "the by-files clearance does NOT zero the persisted bound — contract:group:inv-t29" 3 \
+  "$(st "$HC_REPO" s608 ".block_counts[.sha_group[\"$T608_C\"]]")"
+
+# Remove the member scan window: the grudge's other survivor file leaves the
+# working tree, so survivors() drops to one and the by-files predicate (which
+# needs >=2 survivors, or a fixed_in_commit for the ==1 structural branch) stops
+# matching — exactly what `git checkout` to a branch without those files does.
+git -C "$HC_REPO" rm -q c.py
+echo "S = 3" > "$HC_REPO/shared.py"; echo "D = 1" > "$HC_REPO/d.py"
+commit_all "$HC_REPO" "fix(d): touch shared and d"
+T608_D="$(sha_of "$HC_REPO" HEAD)"
+run_hook s608 true
+check 374 "a sibling joining after the flip re-blocks — contract:group:inv-t29" 2 "$RC"
+check 375 "the sibling reads (3/3), no regained headroom — contract:group:inv-t29" yes "$(has "$ERR" "(3/3)")"
+check 376 "the persisted counter holds the bound — contract:group:inv-t29" 3 \
+  "$(st "$HC_REPO" s608 ".block_counts[.sha_group[\"$T608_D\"]]")"
+run_hook s608 true
+check 377 "the Stop after the re-armed sibling gives up — contract:group:inv-t29" 0 "$RC"
+check 378 "the give-up is announced — contract:group:inv-t29" yes "$(has "$ERR" "giving up")"
+
+# Transient-clear must not SHADOW a sibling's durable evidence: two members of
+# the SAME group on the SAME Stop, the newer one cleared by a commit-less
+# (by-files) grudge and the older one matching a real fixed_in_commit (by-commit).
+# IS_SHA is newest-first, so the by-files hit fires before the by-commit match
+# is ever evaluated — a top-of-loop "already cleared, continue" would then leave
+# the group transient and the durable reset lost. A commit-identity match
+# anywhere in the group IS durable evidence; the counter must still zero.
+hook_case t608b
+for f in shared.py b.py c.py; do echo "V = 0 # $f" > "$HC_REPO/$f"; done
+commit_all "$HC_REPO" "chore: baseline"
+echo "S = 1" > "$HC_REPO/shared.py"; echo "B = 1" > "$HC_REPO/b.py"
+commit_all "$HC_REPO" "fix(b): touch shared and b"
+T608B2="$(sha_of "$HC_REPO" HEAD)"
+echo "S = 2" > "$HC_REPO/shared.py"; echo "C = 1" > "$HC_REPO/c.py"
+commit_all "$HC_REPO" "fix(c): touch shared and c"
+T608C2="$(sha_of "$HC_REPO" HEAD)"
+run_hook s608b
+check 379 "the mixed-evidence pair is one group — contract:group:inv-t29" true \
+  "$(st "$HC_REPO" s608b ".sha_group[\"$T608B2\"] == .sha_group[\"$T608C2\"]")"
+check 380 "the mixed-evidence pair blocks first — contract:group:inv-t29" 2 "$RC"
+check 381 "the mixed-evidence pair reads (1/3) — contract:group:inv-t29" yes "$(has "$ERR" "(1/3)")"
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "shared and c regressed" \
+  "shared.py,c.py" "" "2026-04-01" >/dev/null
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "shared and b regressed" \
+  "shared.py,b.py" "$T608B2" "2026-04-01" >/dev/null
+run_hook s608b true
+check 382 "the mixed-evidence group clears — contract:group:inv-t29" 0 "$RC"
+check 383 "a durable sibling match still resets the counter — contract:group:inv-t29" 0 \
+  "$(st "$HC_REPO" s608b ".block_counts[.sha_group[\"$T608B2\"]]")"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2461,7 +2558,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=376
+EXPECTED_CHECKS=395
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

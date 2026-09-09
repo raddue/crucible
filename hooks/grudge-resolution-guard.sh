@@ -506,7 +506,7 @@ if [ -f "$SKIPS_FILE" ]; then
   done < "$SKIPS_FILE"
 fi
 
-declare -A GROUP_CLEARED
+declare -A GROUP_CLEARED GROUP_CLEARED_DURABLE
 _lookup() {
   # _lookup <args...> -> echoes stdout; sets LOOKUP_RC
   LOOKUP_OUT="$(python3 "$QUERY_SCRIPT" "$@" 2>/dev/null)"
@@ -567,9 +567,19 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   k_sha="${IS_SHA[$ci]}"
   k_at="${IS_AT[$ci]}"
   k_gid="${SHA_GROUP[$k_sha]}"
-  [ -n "${GROUP_CLEARED[$k_gid]}" ] && continue
+  # A DURABLE clear closes the group's scan: skips.log / a by-commit identity
+  # match settle its persisted counter, and nothing a later member could add
+  # changes that. A group cleared only TRANSIENTLY (by by-files) is NOT closed:
+  # it earned this Stop's allowance but no durable reset, and a sibling may
+  # still hold the by-commit evidence that upgrades the group to a reset. So
+  # the durable doors (skip, by-commit) run for every not-yet-durably-cleared
+  # member, and only the transient by-files doors are gated on the group being
+  # entirely uncleared.
+  [ -n "${GROUP_CLEARED_DURABLE[$k_gid]}" ] && continue
   if [ -n "${SKIP_SET[$k_sha]}" ]; then
+    # skips.log is a PERSISTED, commit-identity-keyed user decision: durable.
     GROUP_CLEARED["$k_gid"]=1
+    GROUP_CLEARED_DURABLE["$k_gid"]=1
     continue
   fi
   # ORDER IS LOAD-BEARING: BOTH PRIMARY (shared-key) lookups run before EITHER
@@ -582,33 +592,53 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   # FALLBACK therefore leaves the candidate unresolved WITHOUT `continue`ing:
   # the primaries have already answered, and an unbelievable extra opinion must
   # not retract them.
+  # The by-commit lookup resolves a COMMIT IDENTITY in the object store —
+  # branch-independent, so it is monotone across ordinary `git checkout`; only a
+  # rebase that orphans the object stops it. A match is durable evidence.
   _lookup_ok --by-commit "$k_sha" --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" \
              --session-root "$SESSION_ROOT" || continue
   if [ -n "$LOOKUP_OUT" ]; then
     GROUP_CLEARED["$k_gid"]=1
+    GROUP_CLEARED_DURABLE["$k_gid"]=1
     continue
   fi
-  _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
-             --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
-  if [ -n "$LOOKUP_OUT" ]; then
-    GROUP_CLEARED["$k_gid"]=1
-    continue
+  # The by-files lookup keys on survivors() = os.path.exists in the CURRENT
+  # WORKING TREE (#608). A `git checkout` to a branch where the grudge's files
+  # are absent silently revokes it, so the clearance perspective granted by it
+  # is not monotone. It still clears THIS Stop (the resolution is visible right
+  # now — the t19g/t23dash by-files clearances depend on that), but it must NOT
+  # spend the PERSISTED block counter: a held reset on flippable evidence is
+  # exactly how each false->true->false branch cycle restores full MAX_BLOCKS.
+  if [ -z "${GROUP_CLEARED[$k_gid]}" ]; then
+    _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+               --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
+    if [ -n "$LOOKUP_OUT" ]; then
+      GROUP_CLEARED["$k_gid"]=1
+      continue
+    fi
   fi
   if _worktree_fallback; then
     if _lookup_ok --by-commit "$k_sha" --repo-root "$SESSION_ROOT" "--repo=$WORKTREE_KEY" \
                   --session-root "$SESSION_ROOT" && [ -n "$LOOKUP_OUT" ]; then
       GROUP_CLEARED["$k_gid"]=1
+      GROUP_CLEARED_DURABLE["$k_gid"]=1
       continue
     fi
-    if _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
-                  --repo-root "$SESSION_ROOT" "--repo=$WORKTREE_KEY" --session-root "$SESSION_ROOT" \
-       && [ -n "$LOOKUP_OUT" ]; then
-      GROUP_CLEARED["$k_gid"]=1
+    if [ -z "${GROUP_CLEARED[$k_gid]}" ]; then
+      if _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+                    --repo-root "$SESSION_ROOT" "--repo=$WORKTREE_KEY" --session-root "$SESSION_ROOT" \
+         && [ -n "$LOOKUP_OUT" ]; then
+        GROUP_CLEARED["$k_gid"]=1
+      fi
     fi
   fi
 done
-# Clearance is a pure counter reset: sha_group / sha_files stay persisted.
-for g in "${!GROUP_CLEARED[@]}"; do
+# Clearance is a durable counter reset: sha_group / sha_files stay persisted.
+# Only DURABLE evidence may spend the PERSISTED counter — a skips.log entry or
+# a by-commit identity match are branch-independent. A by-files match keys on
+# the working tree and flips on `git checkout` (#608); it clears THIS Stop but
+# cannot zero a counter whose reset would outlive the evidence.
+for g in "${!GROUP_CLEARED_DURABLE[@]}"; do
   BLOCK_COUNTS["$g"]=0
 done
 
