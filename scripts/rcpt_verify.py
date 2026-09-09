@@ -2112,34 +2112,223 @@ CONFUSABLE_MAP = {
 # --- END GENERATED CONFUSABLE_MAP ---
 
 
+# A single module-level constant for the literal keyword, so it does not
+# appear separately as this helper's own default argument AND as a literal
+# in _legacy_supersedes_claim's own skeleton_upper.find(...)/len(...) calls
+# below -- two independent spellings of the same 11-character string that
+# could silently drift apart.
+_SUPERSEDES_KEYWORD = "SUPERSEDES:"
+_SUPERSEDES_VALUE_RE = re.compile(r"none|[0-9a-f]{12}")
+
+
+def _classify_supersedes_value(remainder_is_empty, value_match, empty_is_claim):
+    """The single, shared answer to "does this SUPERSEDES: occurrence's
+    remainder constitute a claim" -- consulted identically by
+    `_legacy_supersedes_claim`'s literal rescan loop and by
+    `_keyword_reachable_by_dropping_optionals` below, for a NON-EMPTY
+    remainder. Both callers independently determine `remainder_is_empty`
+    (nothing at all follows the matched/reachable keyword on this line)
+    and `value_match` (the result of matching `_SUPERSEDES_VALUE_RE` as a
+    PREFIX of that remainder) -- each caller computes these two facts the
+    cheapest way available to it (see each call site), since the literal
+    path's remainder is a contiguous slice of `skeleton` and the guard's is
+    a small, bounded join of specific `tokens[]` indices with WILDCARD
+    tokens interleaved. For a NON-EMPTY remainder, this function is the
+    one place that turns "matches / does not match" into "a value /
+    malformed", so the two paths can no longer disagree about what a given
+    non-empty remainder MEANS -- only about how cheaply they can produce
+    it. This shared predicate is why the two paths cannot diverge on a
+    non-empty remainder the way a fixed-width window on only one of them
+    once could: whichever path an attacker's input reaches, the non-empty
+    answer is computed by the same function.
+
+    An EMPTY remainder is NOT a case the two callers agree on. The literal
+    path's own long-standing behavior for an empty remainder is
+    `"malformed"` (an unmatched `re.match` on the empty string falls
+    through to the literal path's own `else` branch) -- an accident of
+    that match rather than a designed choice, but load-bearing regardless,
+    while the guard's need for "no claim" on an all-wildcard tail with
+    nothing plausible after it (avoiding a false positive on ordinary
+    non-ASCII-heavy prose that never resolves to a claim) is a GUARD-side
+    decision, unrelated to the literal path's own default. `empty_is_claim`
+    makes that a decision each CALLER states explicitly instead of one
+    this function imposes on both: the literal path passes `True` (empty
+    is `"malformed"`), the guard passes `False` (empty is no claim). Only
+    the empty-remainder half is ever legitimately caller-specific; the
+    non-empty half above remains the ONE place both paths decide
+    value-vs-malformed.
+
+    Returns `None` (no claim -- the remainder is empty and `empty_is_claim`
+    is False), the string `"malformed"` (the remainder is empty and
+    `empty_is_claim` is True, OR the remainder is non-empty and does not
+    start with a well-formed value), or the `Match` object itself (a
+    well-formed `none`/12-hex value). For the non-empty case, a
+    non-matching remainder is `"malformed"` on EITHER path, not silently
+    no claim, so an attacker cannot choose a cheaper answer by picking
+    which path evaluates a given spelling of a value (`0x`-prefixed,
+    `sha256:`-prefixed, uppercase, one hex digit short, a git-short hash,
+    an extra leading word, ...). See GH #567 for the full history of this
+    mechanism."""
+    if remainder_is_empty:
+        return "malformed" if empty_is_claim else None
+    return value_match if value_match else "malformed"
+
+
+def _keyword_reachable_by_dropping_optionals(tokens, keyword=_SUPERSEDES_KEYWORD):
+    """Answers "could `keyword` be spelled out, contiguously, by some
+    combination of tokens matching their corresponding letter exactly and
+    WILDCARD tokens standing in for the rest" -- and, if so, whether what
+    follows makes this a claim (via `_classify_supersedes_value` above).
+
+    `tokens`: the same `(char, mandatory)` list `_legacy_supersedes_claim`
+    builds below. `char` is `None` for a WILDCARD token (a dropped,
+    non-ASCII codepoint that neither NFKD nor `CONFUSABLE_MAP` could
+    resolve to anything). `mandatory` is True only for a character that was
+    already plain ASCII in `raw_line`; every character that arrived via
+    NFKD decomposition or a `CONFUSABLE_MAP` lookup is "optional" and may be
+    skipped without killing an in-progress match (this is what lets a
+    homoglyph'd or NFKD-inserted character land INSIDE the keyword without
+    silently un-detecting it).
+
+    Implemented as a linear forward scan over a SET of reachable
+    `(matched_length, wildcards_used)` states: state `(0, 0)` is always
+    alive (a fresh match attempt may start at any token), a token matching
+    the next keyword letter advances a state without spending a wildcard, a
+    WILDCARD token at any keyword position (including the trailing colon)
+    advances a state and spends one wildcard (`MAXW = len(keyword)` -- a
+    candidate match can need at most one wildcard per position, so this is
+    not a bound an attacker can pad around, it is the count of positions),
+    and an OPTIONAL non-matching token keeps a started state alive without
+    advancing it. A completion (`matched_length == len(keyword)`) is
+    checked at the start of each iteration, using the token stream from
+    that point on.
+
+    A completion that used NO wildcards fires immediately -- it has a real
+    ASCII anchor (the fragmentation-insertion case) and is exactly what the
+    literal rescan loop below already finds and masks out via
+    `consumed_tokens`, so this branch only ever fires for a DIFFERENT
+    occurrence the literal loop did not already consume. A completion that
+    used one or more wildcards additionally classifies its remainder via
+    `_classify_supersedes_value` (passing `empty_is_claim=False`: an
+    all-wildcard tail with nothing plausible after it is this guard's own
+    long-standing "no claim" answer, and is NOT the literal path's answer
+    for the same empty-remainder case -- see that function's own docstring
+    for why the two legitimately differ here): the up-to-12 REAL
+    (non-WILDCARD) characters at or after the completion point
+    (`nonwild_idx` + `cursor`, built once per call and only ever advanced
+    forward, so this costs O(1) amortized per completion, not a fresh scan
+    each time -- twelve characters is enough to decide `none|[0-9a-f]{12}`
+    either way, since the regex fails as soon as a non-matching character
+    appears within that count). If the classification is anything but "no
+    claim", this function returns True -- including when the remainder is
+    non-empty but does not match the value grammar, so on a NON-EMPTY
+    remainder a wildcard-completed keyword and the literal-match path
+    below can no longer disagree about whether it is a claim (see
+    `_classify_supersedes_value` above); an EMPTY remainder is the one
+    case they legitimately still disagree on, by design.
+
+    (The emptiness *determination* is still computed independently by each
+    caller, even though its *interpretation* is centralised above: `value_
+    start >= len(skeleton)` in `skeleton` coordinates for the literal path,
+    `not window` in token/masked-`guard_tokens` coordinates here. They
+    agree on every input either path can construct.)
+
+    An accepted, deliberate cost of the non-empty case: a wildcard-
+    reachable keyword followed by ordinary non-ASCII-heavy prose with no
+    plausible value also resolves `"malformed"` rather than no claim.
+    Measured: every repo-tracked `*.md` non-blank line (35,634 lines)
+    placed post-`NEXT` in an `RCPT v1` receipt -- exactly 1 newly
+    hard-FAILs under this widening (`skills/shared/return-convention.md:492`,
+    the em-dash heading pinned by
+    `test_supersedes_heading_with_an_em_dash_now_resolves_malformed`
+    below). The trigger rule: `MAXW` (`= len(keyword)`, eleven) non-ASCII
+    codepoints that resolve to no real token, reachable in order with only
+    token-less material between them, followed by one real character --
+    ASCII spaces and punctuation do not break the run, so the eleven
+    codepoints need not be adjacent. Accepted as strictly cheaper than the
+    bypass it closes. (`value_match` above is otherwise inert on this
+    path -- because ANY non-empty remainder now returns non-`None`
+    regardless of whether `value_match` matched, this guard's own `if ...
+    is not None: return True` fires identically either way; the "single
+    shared predicate" therefore couples the two paths on one bit,
+    empty-vs-non-empty, not the three-way value/malformed/no-claim
+    classification this docstring otherwise describes.) See Task 2 for the
+    regression pins this rests on (both directions) and GH #567 for the
+    full history of this mechanism."""
+    m = len(keyword)
+    MAXW = len(keyword)
+    states = {(0, 0)}
+    nonwild_idx = [k for k, (c, _) in enumerate(tokens) if c is not None]
+    cursor = 0
+    for i, (ch, mandatory) in enumerate(tokens):
+        completing = {w for j, w in states if j == m}
+        if completing:
+            if 0 in completing:
+                return True
+            while cursor < len(nonwild_idx) and nonwild_idx[cursor] < i:
+                cursor += 1
+            window = nonwild_idx[cursor:cursor + 12]
+            remainder_str = "".join(tokens[k][0] for k in window)
+            value_match = _SUPERSEDES_VALUE_RE.match(remainder_str)
+            # empty_is_claim=False here -- an all-wildcard tail with no
+            # plausible value is this guard's own "no claim" answer, NOT
+            # the literal path's (see _classify_supersedes_value's own
+            # docstring for why the two legitimately differ).
+            if _classify_supersedes_value(
+                    not window, value_match, False) is not None:
+                return True
+        new_states = set()
+        u = None if ch is None else ch.upper()
+        for j, w in states:
+            if j == m:
+                continue
+            if j == 0:
+                new_states.add((0, 0))
+            if j < m and u is not None and u == keyword[j]:
+                new_states.add((j + 1, w))
+            if j < m and u is None and w < MAXW:
+                new_states.add((j + 1, w + 1))
+            if j > 0 and not mandatory:
+                new_states.add((j, w))
+        states = new_states
+    return 0 in {w for j, w in states if j == m}
+
+
 def _legacy_supersedes_claim(text):
     """SIEGE-R4BA-5 — the `SUPERSEDES:` body of a receipt `parse_v11_sections` REFUSED.
 
-    KNOWN GAP (tracked on GH #567, deferred pending a design decision — NOT closed by
-    the fix below). This detector remains bypassable by two mechanisms distinct from
-    the invisible-character / mid-token-insertion class this fix round closes: (1)
-    homoglyph substitution — replacing an ASCII letter of the `SUPERSEDES:` keyword
-    itself with a visually identical non-ASCII codepoint (e.g. U+0405 CYRILLIC CAPITAL
-    LETTER DZE for Latin "S") causes the ASCII-only stripping step below to DELETE that
-    letter rather than preserve it, so the keyword search misses a line that renders
-    identically to a human or an LLM orchestrator; (2) the scan is scoped to the tail
-    AFTER `NEXT` only, so a plain-ASCII `SUPERSEDES:` line placed BEFORE `NEXT` is
-    invisible to this function even though `parse_receipt` accepts it and the
-    orchestrator's Sweep step (`return-convention.md` § The Sweep) reads a
-    `SUPERSEDES:` line wherever it appears, with no positional constraint. Two design
-    options are open (TR39-style confusables/skeleton normalization vs. restricting
-    receipts to ASCII-printable outright) — see GH #567 for the full writeup (six
-    distinct bypass mechanisms found this round, the two real design options, and the
-    separate scan-scope bug).
+    KNOWN GAP (tracked on GH #567) — CLOSED; retained here for the record. This
+    detector WAS bypassable by two mechanisms distinct from the invisible-character /
+    mid-token-insertion class closed above: (1) homoglyph substitution — replacing an
+    ASCII letter of the `SUPERSEDES:` keyword itself, including its trailing colon,
+    with a visually identical non-ASCII codepoint (e.g. U+0405 CYRILLIC CAPITAL LETTER
+    DZE for Latin "S") caused the ASCII-only stripping step below to DELETE that letter
+    rather than preserve it, so the keyword search missed a line that renders
+    identically to a human or an LLM orchestrator; (2) the scan was scoped to the tail
+    AFTER `NEXT` only, and to only the FIRST `SUPERSEDES:` occurrence per line, so a
+    plain-ASCII `SUPERSEDES:` line placed BEFORE `NEXT` — or a second claim on the
+    same line as an earlier one — was invisible to this function even though
+    `parse_receipt` accepts it and the orchestrator's Sweep step
+    (`return-convention.md` § The Sweep) reads a `SUPERSEDES:` line wherever it
+    appears, with no positional constraint. Two design options were weighed
+    (TR39-style confusables/skeleton normalization vs. restricting receipts to
+    ASCII-printable outright) — the maintainer chose confusables normalization; see
+    GH #567 for the full writeup and the design doc's Decision A/B for the rationale.
+    See the CHAIN-1 fix (HOMOGLYPH) and (SCAN-SCOPE) paragraphs below for how each was
+    closed — including the keyword's trailing colon and the same-line rescan — and
+    the composition guard's own docstring below for the colon mechanism.
 
-    Same post-NEXT tail scan `parse_v11_sections` runs, with the version dispatch and
-    every v1.1 STRUCTURE rule (TRIPWIRE presence, TRIPWIRE-CHILD-when-DISPATCHED,
-    duplicate detection) left out: this is not a second parser for the v1.1 grammar and
-    must not become one. It answers exactly one question — does this receipt CLAIM a
-    supersession — for the one caller that needs the answer on a header the v1.1 parser
-    version-dispatched away.
+    This function scans the WHOLE receipt body (not scoped to a
+    `parse_v11_sections`-style post-`NEXT` tail — see round 6 below), with no version
+    dispatch and none of `parse_v11_sections`'s v1.1 STRUCTURE rules (TRIPWIRE
+    presence, TRIPWIRE-CHILD-when-DISPATCHED, duplicate detection) applied: this is
+    not a second parser for the v1.1 grammar and must not become one. It answers
+    exactly one question — does this receipt CLAIM a supersession — for the one
+    caller that needs the answer on a header the v1.1 parser version-dispatched away.
 
-    Returns None when no `SUPERSEDES:` line is present at all. Otherwise the STRONGEST
+    Returns None when nothing on this receipt reads as a `SUPERSEDES:` claim -- neither
+    a literal (confusables-resolved, case-insensitive) `SUPERSEDES:` keyword nor a
+    fragmented one the composition guard below can reach. Otherwise the STRONGEST
     claim on the receipt: `parse_v11_sections` rejects a duplicated section outright and
     this scan cannot, so a first-hit-wins read would let `SUPERSEDES: none` followed by
     `SUPERSEDES: <prefix>` answer "none" — an appender's shape, and the exact
@@ -2208,7 +2397,7 @@ def _legacy_supersedes_claim(text):
     legitimate `SUPERSEDES:` line can be made of"), not a broader or better
     denylist:
 
-      1. Split the tail on the LITERAL `\\n` byte only (`str.split("\\n")`, never
+      1. Split the whole receipt body on the LITERAL `\\n` byte only (`str.split("\\n")`, never
          `str.splitlines()`), so no Unicode line-break codepoint the receipt body
          might contain is ever treated as a line boundary before this function
          gets to look at it — the round-3-first-attempt (b) residual.
@@ -2270,12 +2459,300 @@ def _legacy_supersedes_claim(text):
     rejected them — the positional gap is zero at their boundary — so nothing
     that used to be treated as a claim now silently isn't.
 
-    Neither this fix nor round 3's closes every class: SUBSTITUTION (replacing
-    one of the keyword's own ASCII letters with a visually-identical non-ASCII
-    homoglyph, which this allowlist's strip step deletes rather than preserves)
-    and the separate tail-only SCAN-SCOPE gap (a claim placed before `NEXT` is
-    never scanned at all) are open — see the KNOWN GAP paragraph above and GH
-    #567.
+    Round 3's allowlist mechanism (steps 1-4 above) stands as the closing move for the
+    invisible-character / mid-token-insertion class it was built for. The composition
+    guard below closes the two classes this paragraph used to name as open —
+    SUBSTITUTION and the separate SCAN-SCOPE gap (see GH #567 for the original
+    six-mechanism writeup). SUBSTITUTION is closed fail-closed REGARDLESS of whether a
+    given codepoint is a CONFUSABLE_MAP entry: the composition guard's wildcard
+    extension treats any dropped non-ASCII codepoint occupying a keyword-letter
+    position — including the trailing colon — as a candidate substitution, closing
+    even a codepoint Unicode's confusables.txt does not (and, for a Private Use Area
+    codepoint, structurally cannot) classify as confusable with this alphabet, with no
+    cap (`MAXW = len(keyword)`) on how many letters may be substituted in one match. A
+    completion that used at least one wildcard fires whenever ANY real (non-WILDCARD)
+    character exists anywhere at or after the completion point on that line (round-9
+    quality-gate FATAL 1: ANY non-empty remainder now resolves `"malformed"`
+    regardless of whether it is itself a well-formed `none`/12-hex value, replacing
+    round-6 quality-gate F1/S2's earlier VALUE-grammar gate — see the composition
+    guard's own docstring for the mechanism and its accepted false-positive tradeoff:
+    a wildcard-reachable keyword followed by ordinary non-ASCII prose, with no
+    plausible value, also resolves `"malformed"` rather than no claim). Only a
+    completion with no real character anywhere after it on the line resolves to no
+    claim, not `"malformed"`. A completion that used NO wildcards (the
+    fragmentation-insertion case, where the keyword's own ASCII letters are genuinely
+    present, just non-contiguous) fires unconditionally regardless of the remainder.
+    Positional coverage: the keyword's ten LETTER positions and its trailing COLON are
+    all covered by the same mechanism (wildcard reachability under round-9
+    quality-gate FATAL 1's non-empty-remainder rule); the VALUE grammar's own alphabet
+    (`none`/hex, five residue characters — see Known residue below) remains the one
+    place table staleness can still matter.
+
+    CHAIN-1 fix (HOMOGLYPH — #567) — the allowlist mechanism above keeps
+    `[A-Za-z0-9:]` and DELETES everything else, including a homoglyph
+    substitute for one of the keyword's own letters: `ЅUPERSEDES:` (Cyrillic
+    Ѕ U+0405) skeletonizes to `UPERSEDES:` (the Ѕ is gone, not converted),
+    which doesn't contain `SUPERSEDES:`, so the claim is missed entirely --
+    a false NEGATIVE in a fail-closed backstop, worse than degrading toward
+    "un-scannable." Two design options were weighed (see GH #567 for the
+    full writeup): a TR39-style confusables/skeleton normalization, or
+    rejecting non-ASCII outright. The maintainer chose confusables
+    normalization. (This docstring cites GH #567 alone, not a
+    `docs/plans/...` path -- this repo's own `.gitignore` excludes
+    `docs/plans/*`, so a path citation here would resolve to nothing for
+    anyone reading this function outside the authoring session; GH #567 is
+    the durable record.) Fixed by
+    replacing the delete-only skeleton with a map-or-delete one: each raw
+    codepoint is first NFKD-decomposed (per-codepoint, not per-line -- see
+    below), then kept if `[A-Za-z0-9:]`, else replaced with its mapped ASCII
+    prototype if it's a key in `CONFUSABLE_MAP` (a small table vendored from
+    Unicode's own confusables.txt, restricted to the ~30 characters a
+    well-formed claim can contain, spliced directly into this file by
+    scripts/gen_chain1_confusables.py -- see that script's own docstring),
+    else dropped exactly as round 3/4 already dropped it. `positions[]`
+    still records the ORIGINAL raw_line index for every surviving skeleton
+    character (mapped or kept), so round 4's glued-value check is unaffected.
+
+    Per-codepoint (not per-line) NFKD: decomposing each ORIGINAL character
+    individually, rather than normalizing the whole raw_line first, is what
+    keeps `positions[]` meaningful -- normalizing the whole line first would
+    let one source character explode into multiple codepoints at a NEW
+    string offset with no simple way back to the original raw_line index the
+    glued-check needs. Decomposing one character at a time and recording
+    that same original index for every piece it produces (kept, mapped, or
+    dropped) sidesteps that entirely. This also means an ordinary accented
+    Latin letter elsewhere in the receipt (e.g. `café`) decomposes to its
+    base letter (kept, already `[A-Za-z0-9:]`) plus a combining accent
+    (dropped, same as any other non-alphabet codepoint) -- it does not
+    manufacture a spurious claim.
+
+    Decomposition uses `NFKD`, not `NFD`: canonical decomposition (`NFD`)
+    does nothing for a COMPATIBILITY equivalence, and 23 codepoints
+    Unicode's own NFKC declares identical to one of `SUPERD:` -- FULLWIDTH
+    D/U/R (U+FF24/FF35/FF32), circled and squared Latin capitals (U+24B9
+    etc., U+1F133 etc.), modifier-letter capitals (U+1D30 etc.), and the
+    small/vertical colons (U+FE13/FE55) -- survive `NFD` untouched. `NFKD`
+    closes all 23 (swept exhaustively: for every codepoint in Unicode,
+    `len(NFKC(c)) == 1 and NFKC(c) in "SUPERD:"` implies detection; zero
+    counterexamples). `NFKD` can decompose ONE source character into
+    MULTIPLE surviving skeleton characters where `NFD` provably never does
+    on this alphabet (e.g. `№` U+2116 -> `No`, the ligature `ﬀ` U+FB00 ->
+    `ff`) -- every piece a single source character produces is recorded
+    against that SAME original `raw_line` index (see above).
+
+    This is precisely why the glued-value check's adjacency test below uses
+    `<=`, not `==`: when the character gluing onto the value is the SECOND
+    piece of a multi-character expansion, its recorded position EQUALS (not
+    exceeds by one) the position of the piece immediately before it, so an
+    `==` predicate would report `glued = False` and let the value resolve
+    to a truncated, seemingly-clean string instead of `"malformed"` (e.g.
+    a value glued to `ﬀ`, U+FB00 -> `ff`, would resolve
+    `"21a1b2c3d4ef"` under `==` -- wrong, not `"malformed"`). A value glued
+    to `№` (U+2116 -> `No`, where the glued piece is the expansion's FIRST
+    character) resolves `"malformed"` under either predicate, since there
+    the glued piece's position DOES exceed the preceding character's by
+    exactly one. `positions[value_end] <= positions[value_end - 1] + 1`
+    (equal OR adjacent both mean no separator survived in `raw_line`)
+    covers both arrangements -- see Task 2's multi-character-expansion
+    test, which exercises both U+FB00 and U+2116.
+
+    Case-insensitive table + search: a naive case-SENSITIVE membership test
+    against the alphabet above (which is itself case-mixed -- uppercase
+    from `SUPERSEDES:`, lowercase from `none`/hex) would silently drop any
+    confusables.txt entry whose Unicode-documented prototype is the OTHER
+    case of one of these letters -- e.g. U+A731 LATIN LETTER SMALL CAPITAL S
+    is documented as confusable with lowercase `s`, not `S`, yet
+    `ꜱUPERSEDES:` is a near-perfect visual match for the keyword.
+    `scripts/gen_chain1_confusables.py`'s `parse()` keeps an entry when the
+    TARGET's lowered form is in the alphabet (mapping to Unicode's own
+    prototype, not forcing a case), and the keyword search below matches on
+    `skeleton.upper()` (length-preserving on this pure-ASCII skeleton, so
+    the VALUE is still read from the original-case `skeleton`, keeping
+    `none`/hex case-exact). Accepted cost: an ordinary line of prose reading
+    `supersedes:` (all-lowercase, no confusable involved at all) also
+    hard-FAILs, the same fail-closed direction already accepted for the
+    literal-substring false positive below.
+
+    Fail-closed on a keyword mapped/decomposed INTO fragments: a mapped
+    confusable or an NFKD-decomposed insertion landing INSIDE the keyword
+    could otherwise silently UN-detect a claim a uniform delete-only
+    skeleton would still have found -- e.g. a confusable mapping to an
+    ASCII character injects an extra character into the middle of
+    `SUPERSEDES:` where deleting the same source codepoint outright would
+    not have.
+
+    This is closed by a single token-level reachability check
+    (`_keyword_reachable_by_dropping_optionals`, see its own docstring
+    below), run against the SAME per-character stream already being built
+    -- no second regex pass over `raw_line`, and no separately-computed
+    delete-only skeleton compared against the mapped one. A separate ground
+    truth is exactly what an earlier version of this guard used, and it is
+    unsound: comparing the mapped skeleton against an independently-
+    recomputed delete-only skeleton fails whenever an attack composes an
+    insertion WITH a homoglyph'd keyword letter (deleting a homoglyph'd `S`
+    deletes it from both skeletons alike, so neither shows `SUPERSEDES:`
+    and the guard never fires), and separately fails on any
+    mixed-/lower-case keyword with an insertion if the two skeletons are
+    compared with different case sensitivity. The reachability check
+    instead marks each surviving skeleton character `mandatory` (came from
+    a character already plain ASCII in `raw_line` -- must match the next
+    keyword letter exactly, in order, or the line cannot be a fragmented
+    keyword) or optional (came from a non-ASCII source, NFKD-decomposed or
+    `CONFUSABLE_MAP`-mapped -- may EITHER match the next keyword letter or
+    be treated as absent). `keyword_reachable_by_dropping_optionals()` then
+    asks: is there SOME choice, for every optional token, of "use it" vs.
+    "drop it" that makes `SUPERSEDES:` appear as a contiguous run? This is
+    answered with a small forward state-set scan (state = how much of the
+    keyword has been matched so far; a mandatory mismatch kills that state,
+    an optional non-match keeps it, either kind matching advances it) --
+    linear in `raw_line` length, no per-line second skeleton, and no
+    exponential subset search over optional tokens.
+
+    Known residue (documented, not hidden -- matching this file's
+    `_substantive_len` precedent): the vendored table only contains what
+    Unicode's confusables.txt itself documents, but an unmapped codepoint
+    substituted for one of the keyword's own letters is still DETECTED,
+    fail-closed, by the composition guard's wildcard extension
+    (`_keyword_reachable_by_dropping_optionals` treats any dropped
+    non-ASCII codepoint occupying a keyword-letter position as a candidate
+    substitution, whether or not that exact codepoint is a CONFUSABLE_MAP
+    entry) -- so table coverage no longer determines whether a
+    keyword-letter substitution is caught, only whether it resolves through
+    the table or through a WILDCARD token. What remains genuinely open is
+    the VALUE grammar's own alphabet: table staleness can still matter
+    there. This SUBSTITUTION closure is itself scoped to non-ASCII (round-11
+    quality-gate MINOR 6): the wildcard extension only ever fires for a
+    dropped codepoint with `ord(ch) > 127`, so a DROPPED ASCII codepoint
+    occupying a keyword-letter position (e.g. `"$UPERSEDES:
+    21a1b2c3d4e5"`, replacing a keyword letter with an unrelated ASCII
+    character) produces no wildcard and no detection at all -- pre-existing
+    on `1888642` (not fix-generated by this ticket) and symmetric across
+    `RCPT v1`/`RCPT v1.1` (neither header version's SUPERSEDES scan reaches
+    this line at all, so there is no asymmetry between them to close). This
+    is a stated scope boundary, not a silent gap. (This paragraph and the
+    ones below it are organized by
+    CHARACTER -- which letters lack table coverage -- not by keyword
+    POSITION; see the composition guard's own docstring's "Positional
+    coverage" paragraph for the position-organized statement that
+    complements this one.)
+
+    (1) A Private Use Area codepoint (U+E000-U+F8FF) carries no
+    Unicode-assigned meaning at all, so it can never appear as a SOURCE
+    entry in confusables.txt and is therefore never in this table, however
+    a font renders it -- but substituted for a keyword letter it resolves
+    `"malformed"` via the wildcard extension, not `None`. This is NOT the
+    same thing as "Latin R has no confusable in this table": it does
+    (U+01A6 LATIN LETTER YR maps to R; see Task 2's positive R-coverage
+    test).
+
+    (2) `str.lower()` is a no-op on seven Unicode-documented PROTOTYPE
+    codepoints relevant to this alphabet: the "LATIN LETTER SMALL CAPITAL
+    <X>" characters for X in {A, B, D, E, N, P, R} (U+1D00, U+0299, U+1D05,
+    U+1D07, U+0274, U+1D18, U+0280) -- these are not compatibility variants
+    (NFKD does not touch them either), they are Unicode's own distinct
+    confusability class for "this glyph is a small-caps rendering of an
+    uppercase Latin letter," and the case-insensitive filter above does not
+    reach them. FOUR of the seven -- D, E, P, R -- are letters IN
+    "SUPERSEDES:" itself, so a substitution there is a keyword-letter
+    position and the wildcard extension closes it exactly as the PUA case
+    above (measured: `SUᴘERSEDES:`, U+1D18 LATIN LETTER SMALL CAPITAL P,
+    and the small-cap E/R/D equivalents each resolve to `"malformed"`, not
+    `None`). The remaining THREE -- A, B, N -- are not letters in the
+    keyword; they only occur in the `none`/hex VALUE grammar, which the
+    wildcard extension does not reach (it only substitutes for a keyword
+    letter, never for the trailing colon or anything after it), so a
+    substitution there still finds the keyword but silently fails the
+    value grammar as `"malformed"` for an unrelated reason -- real residue,
+    not a security gap (the receipt still hard-FAILs, it just isn't
+    detected AS a resolved claim of a specific value). See
+    `KNOWN_RESIDUE` in scripts/check_chain1_confusables_drift.py for the
+    pinned list, and Task 2's residue test for the executable version of
+    this paragraph.
+
+    Two DIGITS, `0` and `1`, also have zero table coverage as mapping
+    VALUES -- measured on the real generated table (766 entries), the
+    distinct mapping VALUES are `23456789:ABCDEFNOPRSUabcdefnoprsu`;
+    Unicode routes `0`/`1` lookalikes to the LETTERS `O`/`l` instead, never
+    to the digits themselves, so a `0`/`1` confusable that NFKD cannot fold
+    to its own digit fails the grammar and resolves to `"malformed"`,
+    fail-closed (e.g. Cyrillic О U+041E, which NFKD leaves untouched and
+    which no `CONFUSABLE_MAP` entry targets `0` or `1` for). This does not
+    hold for every `0`/`1` confusable: seven sources whose NFKD
+    decomposition is the literal ASCII `0` (U+1D7CE, U+1D7D8, U+1D7E2,
+    U+1D7EC, U+1D7F6, U+1FBF0, U+1CCF0 -- mathematical/segmented
+    digit-zero variants; round-11 quality-gate MINOR 2: their Unicode
+    CONFUSABLE_MAP prototype/target is the LETTER `O`, exactly as the
+    first sentence above says -- it is NFKD, not the table target, that
+    yields the digit `0` for these seven) are NFKD-decomposed to the
+    literal ASCII `0` BEFORE the table lookup ever runs (the
+    token-building loop's FIRST branch, `[A-Za-z0-9:]`, catches them), so
+    they resolve CORRECTLY --
+    `test_every_nfkc_equivalent_of_a_value_alphabet_letter_is_detected`
+    passes on exactly these. (An eighth, related case: U+017F LATIN SMALL
+    LETTER LONG S has a `CONFUSABLE_MAP` target of `f`, but its NFKD
+    decomposition is `s` -- the SAME loop-ordering shadows the table
+    target with the NFKD result, so `ſ` reaches the skeleton as `s`, not
+    `f`. This is load-bearing, not incidental: `s` is a keyword letter,
+    and `test_every_nfkc_equivalent_of_a_keyword_letter_is_detected`'s
+    lowercase leg depends on `ſ` resolving to `s`.) There is no SOURCE
+    codepoint to hang a
+    `KNOWN_RESIDUE` entry off for `0`/`1` (nothing in confusables.txt maps
+    TO them) -- `sanity_check_alphabet_coverage()` in Task 1 Step 3 below
+    is a separate, positive-coverage check for exactly this reason: it
+    confirms a target value remains absent rather than watching a source
+    codepoint. The true VALUE-grammar residue is five characters -- A, B,
+    N, 0, 1.
+
+    Both residues are refreshable/re-auditable by re-running
+    scripts/gen_chain1_confusables.py against a newer confusables.txt as
+    Unicode publishes one; `KNOWN_RESIDUE` will fail loudly (not silently
+    pass) if a future Unicode release starts covering one of the remaining
+    codepoints as a source-side entry. Table staleness is not a live
+    concern for the keyword-letter substitution class at all (the wildcard
+    extension does not depend on table coverage there); it remains a live
+    concern only for the VALUE grammar above.
+
+    CHAIN-1 fix (SCAN-SCOPE — #567) — fixed by scanning every element of
+    `text.split("\\n")` -- the whole receipt body, header included, with no
+    slicing of any kind -- rather than only the tail after `NEXT`, because
+    `parse_receipt` and the orchestrator's Sweep step
+    (`return-convention.md` § The Sweep) both read a `SUPERSEDES:` line
+    wherever it appears, with no positional constraint. Not skipping the
+    header (index 0) is itself part of the fix: peeling the header off
+    first would reopen the header-fusion bypass the allowlist mechanism
+    above closes, one line lower in the file, and would ALSO miss a claim
+    an attacker places directly in the header's own free-text tail
+    (`parse_receipt`'s header regex captures everything after "RCPT v1 " as
+    unvalidated prose -- see Task 2's header-embedded-claim test). The
+    header line cannot itself satisfy the grammar on its OWN structural
+    text, so scanning it costs nothing in the ordinary case.
+
+    Each line is also rescanned for a SECOND, later `SUPERSEDES:`
+    occurrence (`start = idx + 1` after each match), applying the same
+    strongest-claim-wins rule WITHIN a line as already applies across
+    lines -- a single `find()` per line would miss an attacker-controlled
+    claim placed after an earlier, benign one on the same line, including
+    when the two are fused across a single U+2028 LINE SEPARATOR (which
+    this function's literal-`\\n`-only split treats as one `raw_line`, same
+    as any other non-`\\n` codepoint). A single `SUPERSEDES: none` followed
+    by unrelated trailing prose on the same line still has exactly one
+    match, so this behaves identically to a plain `find()` in that case.
+
+    Accepted false positive: an ordinary WITNESS/TRACE line that happens to
+    contain the literal substring `SUPERSEDES:` (e.g. quoting a grep
+    command against this very function) still skeleton-matches and, since
+    its remainder won't satisfy the value grammar, is classified
+    `"malformed"` -- a hard-FAIL on a v1 receipt where identical content
+    under `RCPT v1.1` would pass. This is a false positive, not a false
+    negative (annoying, not a bypass), and is not fixed by anchoring the
+    match: an anchor is either trivially attacker-defeated by one prepended
+    character or bounded-window-defeated by attacker padding. Accepted as
+    the documented cost of an unanchored, unwindowed, execution-proven
+    mechanism. A related false positive at the VALUE boundary: a mapped
+    confusable or NFKD-decomposed insertion immediately adjacent to the
+    VALUE (not the keyword) can glue a mapped character directly onto the
+    value with no separator, flipping the result from `"none"` to
+    `"malformed"` -- fail-closed, in the same accepted direction as above.
 
     ROUND-3 FIX-OF-A-FIX (found by this fix's own mandated scoped re-temper,
     before shipping) — step 1 (`split("\\n")`, not `splitlines()`) was applied
@@ -2299,33 +2776,176 @@ def _legacy_supersedes_claim(text):
     other non-matching line can, so scanning every element (including whatever a
     crafted separator fuses into the first one) costs nothing and leaves no
     element unscanned for any adversarial choice of separator."""
-    tail = text.split("\nNEXT", 1)[1] if "\nNEXT" in text else ""
+    tail = text
     claim = None
     for raw_line in (l for l in tail.split("\n") if l.strip()):
-        # positions[i] is raw_line's index of skeleton[i] — the round-4 fix's own
-        # record, so a value's right boundary can be judged against what `raw_line`
-        # actually had there (a real separator, or nothing) after the skeleton has
-        # already discarded it.
+        # skeleton_chars/positions/tokens/tok_idx_for_skel are built together
+        # in one pass over raw_line: skeleton_chars is the map-or-keep-or-drop
+        # ASCII skeleton the keyword/value search below runs against;
+        # positions[s] is skeleton_chars[s]'s index in raw_line (used by the
+        # glued-value check); tokens is a SUPERSET of skeleton_chars that
+        # also carries a WILDCARD entry (`(None, False)`) for a dropped,
+        # non-ASCII, non-mapped codepoint, so
+        # _keyword_reachable_by_dropping_optionals below can still see it as
+        # a candidate keyword-letter substitute; tok_idx_for_skel[s] is the
+        # tokens[] index of skeleton_chars[s], used to translate a
+        # skeleton-coordinate span into tokens[]-coordinates.
         skeleton_chars = []
         positions = []
+        tokens = []
+        tok_idx_for_skel = []
         for i, ch in enumerate(raw_line):
-            if re.match(r"[A-Za-z0-9:]", ch):
-                skeleton_chars.append(ch)
+            mandatory = ord(ch) < 128 and bool(re.match(r"[A-Za-z0-9:]", ch))
+            produced_any = False
+            for dch in unicodedata.normalize("NFKD", ch):
+                if re.match(r"[A-Za-z0-9:]", dch):
+                    skeleton_chars.append(dch)
+                    positions.append(i)
+                    tok_idx_for_skel.append(len(tokens))
+                    tokens.append((dch, mandatory))
+                    produced_any = True
+                elif dch in CONFUSABLE_MAP:
+                    mapped = CONFUSABLE_MAP[dch]
+                    skeleton_chars.append(mapped)
+                    positions.append(i)
+                    tok_idx_for_skel.append(len(tokens))
+                    tokens.append((mapped, False))
+                    produced_any = True
+                # else: this NFKD piece is dropped (ASCII-but-not-
+                # alphanumeric, or non-ASCII-but-not-a-table-key) -- handled
+                # below, once per SOURCE character, not per piece.
+            if not produced_any and ch in CONFUSABLE_MAP:
+                # The source's own NFKD pieces produced NOTHING above (`ch`'s
+                # NFKD expansion is entirely ASCII characters outside
+                # [A-Za-z0-9:], or entirely non-ASCII characters that are not
+                # themselves table keys) -- consult CONFUSABLE_MAP on the
+                # SOURCE codepoint itself before treating it as a
+                # dropped/wildcard character. A per-NFKD-piece-only lookup
+                # never reaches a source-level table entry whose own NFKD
+                # decomposition doesn't happen to reproduce its mapped target
+                # -- U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT LEADER is
+                # the measured case (NFKD is two ASCII periods, neither kept
+                # nor table-mapped as a piece, but the SOURCE is itself a
+                # documented confusable for ':'). Only reached when the
+                # per-piece loop above produced nothing, so a codepoint whose
+                # NFKD piece IS independently keepable (e.g. the seven
+                # digit-0/1 confusables that also NFKD-fold to their own
+                # digit) is unaffected -- that piece-level result still wins.
+                mapped = CONFUSABLE_MAP[ch]
+                skeleton_chars.append(mapped)
                 positions.append(i)
+                tok_idx_for_skel.append(len(tokens))
+                tokens.append((mapped, False))
+                produced_any = True
+            if not produced_any and ord(ch) > 127:
+                # A WILDCARD token for any non-ASCII codepoint that produced
+                # no real character above. Gating this on the SOURCE
+                # character and on "produced nothing above" -- rather than on
+                # `ord(dch) > 127` for each individual NFKD PIECE -- matters
+                # because 104 codepoints have an NFKD expansion that is
+                # entirely ASCII-outside-[A-Za-z0-9:] (including the
+                # CONFUSABLE_MAP entry above); gating per-piece would miss
+                # those. Gating on the source character means every
+                # non-ASCII codepoint yields either a kept/mapped character
+                # or exactly one WILDCARD, never nothing.
+                tokens.append((None, False))
+            # else: either produced a real token above, or `ch` is plain
+            # ASCII outside [A-Za-z0-9:] (e.g. punctuation) -- dropped.
         skeleton = "".join(skeleton_chars)
-        idx = skeleton.find("SUPERSEDES:")
-        if idx != -1:
-            value_start = idx + len("SUPERSEDES:")
-            m = re.match(r"none|[0-9a-f]{12}", skeleton[value_start:])
-            if m:
-                value_end = value_start + m.end()
-                glued = (value_end < len(positions)
-                         and positions[value_end] == positions[value_end - 1] + 1)
-                body = "malformed" if glued else m.group()
-            else:
-                body = "malformed"
+        # Search case-insensitively -- see parse()'s TARGET_ALPHABET_LOWER
+        # filter. `.upper()` is length-preserving on this pure-ASCII
+        # skeleton, so every index found below still lines up with
+        # `positions[]` and with `skeleton` itself (used, unchanged, for the
+        # VALUE match just below -- "none"/hex stay case-exact).
+        skeleton_upper = skeleton.upper()
+        # Rescan the whole line (`start = idx + 1` after each match),
+        # applying strongest-claim-wins WITHIN a line the same way it
+        # already applies ACROSS lines -- a single `find()` would only
+        # locate the first `SUPERSEDES:` on a line. consumed_tokens collects
+        # the tokens[]-index span of every literal match's own KEYWORD and
+        # VALUE extent (once value_start/value_end are known) so the
+        # composition guard below never re-derives a redundant "trivial"
+        # completion from tokens a literal match already resolved, and never
+        # lets a preceding wildcard-completed run borrow this match's own
+        # value to satisfy its own remainder check.
+        consumed_tokens = set()
+        start = 0
+        while True:
+            idx = skeleton_upper.find(_SUPERSEDES_KEYWORD, start)
+            if idx == -1:
+                break
+            tok_start = tok_idx_for_skel[idx]
+            tok_end = tok_idx_for_skel[idx + len(_SUPERSEDES_KEYWORD) - 1]
+            consumed_tokens.update(range(tok_start, tok_end + 1))
+            value_start = idx + len(_SUPERSEDES_KEYWORD)
+            # Matched by POSITION (`pos=value_start`) against the full
+            # `skeleton`, not by slicing `skeleton[value_start:]` first -- a
+            # compiled pattern's `match(string, pos)` returns ABSOLUTE
+            # indices in `m.end()`, so `value_end = m.end()` needs no
+            # addition, and this scan never copies the remaining tail of
+            # `skeleton` once per literal match on the line (measured
+            # flat-linear, doubling ratio 2.00 at every size from 22000 to
+            # 704000 characters). Emptiness is a plain length comparison,
+            # equally O(1).
+            value_match = _SUPERSEDES_VALUE_RE.match(skeleton, value_start)
+            # empty_is_claim=True here -- an empty remainder on the
+            # literal path is this path's own long-standing "malformed"
+            # answer (see _classify_supersedes_value's own docstring).
+            result = _classify_supersedes_value(
+                value_start >= len(skeleton), value_match, True)
+            if result is not None:
+                if isinstance(result, str):
+                    body = result
+                else:
+                    m = result
+                    value_end = m.end()
+                    tok_value_start = tok_idx_for_skel[value_start]
+                    tok_value_end = tok_idx_for_skel[value_end - 1]
+                    consumed_tokens.update(range(tok_value_start, tok_value_end + 1))
+                    # `<=`, not `==` -- a multi-character NFKD expansion's
+                    # second piece needs `<=` here (see the docstring above
+                    # for why).
+                    glued = (value_end < len(positions)
+                             and positions[value_end] <= positions[value_end - 1] + 1)
+                    body = "malformed" if glued else m.group()
+                if claim is None or claim == "none":
+                    claim = body
+            start = idx + 1
+        # A mapped confusable or an NFKD-decomposed insertion landing INSIDE
+        # the keyword can, without this check, silently REMOVE a match that
+        # would otherwise be reachable -- fail closed instead of un-detecting
+        # it. Runs on EVERY line unconditionally -- a line with a literal
+        # match is NOT exempt, since the literal loop and this guard cover
+        # disjoint attack shapes -- over a token list with the literal
+        # loop's own consumed spans removed, so a literal match's own
+        # tokens never feed a redundant "trivial" completion here.
+        #
+        # Masking is NOT purely subtractive of completions redundant with
+        # the literal match's own keyword+value span -- masking a
+        # wildcard-completion's own REMAINDER span (not just the
+        # literal match's own keyword+value span) can suppress a completion
+        # the unmasked guard would otherwise report. Measured:
+        # '<W>UPERSEDES:SUPERSEDES: none', 'SUPERSEDES<W>SUPERSEDES: none'
+        # and 'SUPERSEDES: none <W>UPERSEDES:' (`<W>` a dropped wildcard
+        # codepoint) all give an unmasked `True` but resolve `"none"` as
+        # shipped. Harmless as built, not merely "probably fine": masking a
+        # wildcard-completion's remainder requires a literal match whose own
+        # VALUE span covers it, and that same literal match has therefore
+        # already resolved the value itself -- so an attacker-visible hex
+        # prefix is always detected via the literal match instead of the
+        # guard (confirmed: the three companion shapes carrying a hex value
+        # in place of "none" above all resolve that literal hex value, not
+        # silently "none" -- the caller's `not in (None, "none")` gate
+        # treats a resolved value the same as `"malformed"`, so this is
+        # still a hard-FAIL, just via a different returned string). So
+        # masking is subtractive of completions the literal match
+        # has already made moot, not merely of ones "redundant" with it --
+        # a narrower guarantee than the sentence this replaces implied.
+        guard_tokens = tokens if not consumed_tokens else [
+            tok for k, tok in enumerate(tokens) if k not in consumed_tokens]
+        if _keyword_reachable_by_dropping_optionals(guard_tokens):
             if claim is None or claim == "none":
-                claim = body
+                claim = "malformed"
     return claim
 
 
