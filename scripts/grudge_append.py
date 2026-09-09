@@ -61,9 +61,17 @@ def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
     base = start_dir or os.getcwd()
     try:
         import subprocess
+        # #605 (siege S-3): run git under an ALLOWLIST env, never the inherited
+        # one. Hooks export GIT_DIR/GIT_WORK_TREE; with no env= those leak in
+        # and steer which repo git reports — the store dir, the repo_root
+        # isolation key, and the privacy-guard check all follow the WRONG repo.
+        # A denylist can't work (GIT_CONFIG_KEY_n is indexed, no finite set), so
+        # keep only what git needs: PATH (find git) + HOME (read ~/.gitconfig).
+        keep = ("PATH", "HOME")
+        env = {k: os.environ[k] for k in keep if k in os.environ}
         proc = subprocess.run(
             ["git", "-C", base, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         top = proc.stdout.strip()
         if proc.returncode == 0 and top:
