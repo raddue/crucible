@@ -2193,15 +2193,21 @@ def _keyword_reachable_by_dropping_optionals(tokens, keyword=_SUPERSEDES_KEYWORD
     Implemented as a linear forward scan over a SET of reachable
     `(matched_length, wildcards_used)` states: state `(0, 0)` is always
     alive (a fresh match attempt may start at any token), a token matching
-    the next keyword letter advances a state without spending a wildcard, a
-    WILDCARD token at any keyword position (including the trailing colon)
-    advances a state and spends one wildcard (`MAXW = len(keyword)` -- a
-    candidate match can need at most one wildcard per position, so this is
-    not a bound an attacker can pad around, it is the count of positions),
-    and an OPTIONAL non-matching token keeps a started state alive without
-    advancing it. A completion (`matched_length == len(keyword)`) is
-    checked at the start of each iteration, using the token stream from
-    that point on.
+    the next keyword letter advances a state without spending a wildcard,
+    and any OPTIONAL (non-mandatory) token that does NOT match the next
+    keyword letter -- a WILDCARD, or a real character `CONFUSABLE_MAP`
+    mapped to a DIFFERENT letter (warden-gate finding 2, GH #567 round 1:
+    a table-correct mapping to the wrong letter, e.g. U+A75A -> '2'
+    standing in for 'R', used to be able only to keep a state alive, never
+    advance one, so a line with no OTHER candidate for that letter could
+    never complete) -- BOTH advances a state and spends one wildcard
+    (`MAXW = len(keyword)` -- a candidate match can need at most one
+    wildcard per position, so this is not a bound an attacker can pad
+    around, it is the count of positions) AND keeps the state alive
+    unspent, at the trailing colon included; both possibilities are
+    tracked in parallel in the state set. A completion
+    (`matched_length == len(keyword)`) is checked at the start of each
+    iteration, using the token stream from that point on.
 
     A completion that used NO wildcards fires immediately -- it has a real
     ASCII anchor (the fragmentation-insertion case) and is exactly what the
@@ -2241,11 +2247,18 @@ def _keyword_reachable_by_dropping_optionals(tokens, keyword=_SUPERSEDES_KEYWORD
     hard-FAILs under this widening (`skills/shared/return-convention.md:492`,
     the em-dash heading pinned by
     `test_supersedes_heading_with_an_em_dash_now_resolves_malformed`
-    below). The trigger rule: `MAXW` (`= len(keyword)`, eleven) non-ASCII
-    codepoints that resolve to no real token, reachable in order with only
-    token-less material between them, followed by one real character --
-    ASCII spaces and punctuation do not break the run, so the eleven
-    codepoints need not be adjacent. Accepted as strictly cheaper than the
+    below). The trigger rule, as measured: `MAXW` (`= len(keyword)`, eleven)
+    non-ASCII codepoints that resolve to no real token, reachable in order
+    with only token-less material between them, followed by one real
+    character -- ASCII spaces and punctuation do not break the run, so the
+    eleven codepoints need not be adjacent. Warden-gate finding 2 (GH #567
+    round 1) widened WHICH tokens can spend a wildcard to also include a
+    real, `CONFUSABLE_MAP`-mapped character that isn't the letter needed at
+    its position, so the trigger set is now a superset of the one measured
+    above (this cost was already accepted for the WILDCARD-only case; the
+    widened set can only ever add MORE lines to the "1 newly hard-FAILs"
+    figure above, never fewer, since every previously-reachable run is
+    still reachable exactly as before). Accepted as strictly cheaper than the
     bypass it closes. (`value_match` above is otherwise inert on this
     path -- because ANY non-empty remainder now returns non-`None`
     regardless of whether `value_match` matched, this guard's own `if ...
@@ -2286,7 +2299,17 @@ def _keyword_reachable_by_dropping_optionals(tokens, keyword=_SUPERSEDES_KEYWORD
                 new_states.add((0, 0))
             if j < m and u is not None and u == keyword[j]:
                 new_states.add((j + 1, w))
-            if j < m and u is None and w < MAXW:
+            # warden-gate finding 2 (GH #567 round 1) -- was `u is None`: a
+            # non-mandatory token that resolved to a REAL character via
+            # CONFUSABLE_MAP but one that isn't the letter needed here (e.g.
+            # U+A75A -> '2' standing in for 'R') could previously only take
+            # the "stay put" transition below, never spend a wildcard to
+            # advance -- so a line with no OTHER candidate for that letter
+            # could never complete. `not mandatory and u != keyword[j]`
+            # covers that case too (a WILDCARD's `u is None` is always
+            # `!= keyword[j]`, so this is a strict widening, not a
+            # replacement).
+            if j < m and not mandatory and u != keyword[j] and w < MAXW:
                 new_states.add((j + 1, w + 1))
             if j > 0 and not mandatory:
                 new_states.add((j, w))
@@ -2323,8 +2346,13 @@ def _legacy_supersedes_claim(text):
     dispatch and none of `parse_v11_sections`'s v1.1 STRUCTURE rules (TRIPWIRE
     presence, TRIPWIRE-CHILD-when-DISPATCHED, duplicate detection) applied: this is
     not a second parser for the v1.1 grammar and must not become one. It answers
-    exactly one question — does this receipt CLAIM a supersession — for the one
-    caller that needs the answer on a header the v1.1 parser version-dispatched away.
+    exactly one question — does this receipt CLAIM a supersession — for TWO callers
+    (warden-gate finding 1, GH #567 round 1): one that needs the answer on a header
+    the v1.1 parser version-dispatched away (`RCPT v1`), and one that cross-checks
+    this hardened raw-text answer against `parse_v11_sections`'s own structural
+    `supersedes` field on an `RCPT v1.1` header, which had no homoglyph/confusables
+    defense of its own — see that cross-check's own call site for why both need
+    the SAME oracle rather than a second, independently-maintained one.
 
     Returns None when nothing on this receipt reads as a `SUPERSEDES:` claim -- neither
     a literal (confusables-resolved, case-insensitive) `SUPERSEDES:` keyword nor a
@@ -8420,6 +8448,25 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                         "one — were not evaluated, and a supersession cannot be granted "
                         "by the header format that opts out of checking it; declare "
                         "`RCPT v1.1` and satisfy the rule, or return `SUPERSEDES: none`)")
+                # warden-gate finding 1 (GH #567 round 1) — `parse_v11_sections`'s own
+                # `SUPERSEDES:` extraction (a byte-exact `line.startswith` predating
+                # CONFUSABLE_MAP) has NO homoglyph/confusables defense: a v1.1 receipt
+                # with a compliant `SUPERSEDES: none` line plus a homoglyph'd second
+                # `SUPERSEDES:` line elsewhere leaves `v11["supersedes"] == "none"`
+                # while the hardened oracle above sees a real claim. Sited HERE,
+                # immediately beside the v1 check, for the same reason that check is
+                # sited here: a v1 claim and this v1.1 disagreement fail at the same
+                # point in the run and render the same census.
+                if v11 is not None and v11["supersedes"] == "none" \
+                        and _legacy_supersedes_claim(text) not in (None, "none"):
+                    raise LintError(
+                        "SUPERSEDES: none disagrees with the CHAIN-1-hardened raw-text "
+                        "scan, which finds a real supersedes claim elsewhere on this "
+                        "receipt (this receipt declares `RCPT v1.1`, but its own "
+                        "structural SUPERSEDES: field and the hardened scan disagree — "
+                        "the v1.1 parser's SUPERSEDES: extraction has no homoglyph "
+                        "defense of its own; fix whichever SUPERSEDES: line does not "
+                        "reflect the intended value)")
                 if v11 is not None and v11["supersedes"] != "none" \
                         and not wit_probe.get("unsourced") \
                         and (not wit_probe.get("evaluated")

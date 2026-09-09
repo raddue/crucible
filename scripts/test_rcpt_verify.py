@@ -29,6 +29,8 @@ import unittest
 from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "rcpt_verify.py"
+CONFUSABLES_DRIFT_SCRIPT = (
+    pathlib.Path(__file__).resolve().parent / "check_chain1_confusables_drift.py")
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CORPUS = REPO / "eval/ledger-return-protocol"
 
@@ -45,6 +47,14 @@ def _import_rv():
     rv = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rv)
     return rv
+
+
+def _import_confusables_drift():
+    spec = importlib.util.spec_from_file_location(
+        "check_chain1_confusables_drift", CONFUSABLES_DRIFT_SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _plant_git_dir(repo):
@@ -10025,13 +10035,26 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
 
     # round-4 quality-gate S1: Decision B's whole-body widening means `RCPT
     # v1` can now see (and hard-FAIL) a SUPERSEDES-shaped line that `RCPT
-    # v1.1`'s STRUCTURED parser does not treat as a claim at all -- `v1` is
-    # strictly MORE restrictive on these two shapes, never less. Both
+    # v1.1`'s STRUCTURED parser does not treat as a claim at all. Both
     # directions are fail-closed (neither exposes a live bypass), but they
-    # are the exact shapes an EQUALITY assertion on the twin test below
+    # were the exact shapes an EQUALITY assertion on the twin test below
     # would need to omit to hold -- pinned separately, directionally,
-    # instead of folded into that test's own case table. Confirmed during
-    # planning: both resolve to `(v1, v1.1) == (1, 0)`.
+    # instead of folded into that test's own case table. Originally
+    # confirmed: both resolved to `(v1, v1.1) == (1, 0)`.
+    #
+    # WARDEN-GATE FINDING 1 (GH #567 round 1): `v1.1`'s own structural
+    # `SUPERSEDES:` extraction (`parse_v11_sections`) had no homoglyph/
+    # confusables defense of its own, so a cross-check was added beside the
+    # existing `RCPT v1` check -- when `v1.1`'s structural field says
+    # `"none"` but this same hardened oracle finds a real claim anywhere in
+    # the body, `v1.1` now hard-FAILs too, closing this asymmetry rather
+    # than leaving `v1.1` silently exempt from an oracle already trusted to
+    # gate `v1`. That cross-check does not distinguish a genuine
+    # homoglyph'd claim from the oracle's own pre-existing accepted false
+    # positives (the whole-body scan, the case-insensitive search) on these
+    # two shapes, so both now resolve `(v1, v1.1) == (1, 1)` -- no longer a
+    # one-way divergence, kept here (name retained for history) as the
+    # regression pin for the NOW-CLOSED asymmetry.
     #
     # Evidence-base caveat (round-7 quality-gate MINOR 4): the whole-body
     # scan, the case-insensitive search, and the composition guard each
@@ -10128,7 +10151,8 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
         prefix-match defect, not a confusables/homoglyph gap. Pinned
         separately (not folded into the table-driven cases below, and NOT
         added to `ACCEPTED_ONE_WAY_DIVERGENCES` -- that dict's own test
-        asserts the SAFE direction, `(1, 0)`; this shape is the direction
+        asserts the SAFE direction, now `(1, 1)` since warden-gate finding
+        1 (GH #567 round 1) closed it; this shape is the UNSAFE direction
         this whole invariant exists to catch, just judged out of this
         ticket's scope rather than closed) by
         `test_supersedes_none_prefix_glued_to_a_trailing_hex_value_bypasses_v1_documented_gap`
@@ -10234,12 +10258,22 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
 
     def test_v1_is_never_more_permissive_than_v11_on_accepted_divergent_shapes(self):
         """round-4 quality-gate S1: the two shapes in
-        ACCEPTED_ONE_WAY_DIVERGENCES resolve to `(v1, v1.1) == (1, 0)` --
-        `v1` strictly stricter, never the reverse. This is the test that
-        actually exercises the directional invariant the twin-content test
-        above enforces: without this, a future change that flipped either
-        shape to `v1 -> 0` (a genuine bypass, not a documented divergence)
-        would pass every other test in this class."""
+        ACCEPTED_ONE_WAY_DIVERGENCES originally resolved to
+        `(v1, v1.1) == (1, 0)` -- `v1` strictly stricter, never the
+        reverse. This is the test that actually exercises the directional
+        invariant the twin-content test above enforces: without this, a
+        future change that flipped either shape to `v1 -> 0` (a genuine
+        bypass, not a documented divergence) would pass every other test
+        in this class.
+
+        WARDEN-GATE FINDING 1 (GH #567 round 1): the new `RCPT v1.1`
+        cross-check (`v11["supersedes"] == "none"` disagreeing with this
+        same hardened oracle) does not distinguish a genuine homoglyph'd
+        claim from the oracle's own pre-existing whole-body/case-
+        insensitive false positives, so both of these shapes now resolve
+        `(v1, v1.1) == (1, 1)` -- no longer a divergence at all, which is
+        still consistent with "v1 must never be MORE permissive than
+        v1.1" (equally strict is not more permissive)."""
         for label, build in self.ACCEPTED_ONE_WAY_DIVERGENCES.items():
             with self.subTest(label=label):
                 text_v1 = build(self.PREFIX)
@@ -10247,7 +10281,7 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
                 text_v11 = "RCPT v1.1 " + text_v1[len("RCPT v1 "):]
                 out_v1 = self._run(text_v1, f"v1-divergence-{label}.rcpt")
                 out_v11 = self._run(text_v11, f"v11-divergence-{label}.rcpt")
-                self.assertEqual((out_v1.returncode, out_v11.returncode), (1, 0),
+                self.assertEqual((out_v1.returncode, out_v11.returncode), (1, 1),
                                   (out_v1.stderr, out_v11.stderr))
 
     def test_supersedes_none_prefix_glued_to_a_trailing_hex_value_bypasses_v1_documented_gap(self):
@@ -10864,6 +10898,125 @@ class TestChain1HomoglyphAndScanScope567(_InqBase):
                           "baseline -- investigate before loosening this "
                           "assertion; a new fixture ADDING to the count is "
                           "expected and fine")
+
+
+class TestWardenGateRound1Findings567(_InqBase):
+    """Warden-gate round-1 findings on GH #567's CHAIN-1 fix
+    (fix-round1-dispatch, 2026-09-07): two independent adversarial review
+    passes (temper + delve) ran against the merged CHAIN-1 diff and found
+    three CONFIRMED gaps it left open. Pins all three closures, each with
+    the dispatch's own repro plus one independent case."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _v11_receipt(self, extra_lines):
+        """A well-formed RCPT v1.1 receipt with a compliant `SUPERSEDES:
+        none`, followed by `extra_lines`. Non-`none` TRIPWIRE (matching
+        this class's own `_receipt_text` convention) so the `TRIPWIRE:
+        none` two-leg SUSPICION=0.00 rule doesn't interfere -- SUPERSEDES
+        is the only field this class's fixtures exercise."""
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={self.PREFIX}#L1-L10"])
+        return (body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                + "TRIPWIRE:  claims-touch(auth/**)\nSUPERSEDES: none\n"
+                + extra_lines)
+
+    def _run(self, text, name):
+        p = self.base / name
+        p.write_text(text)
+        return self.cli("--tier2", "--root", str(self.base), str(p))
+
+    # -- Finding 1 (Critical): v1.1's own SUPERSEDES parsing has no
+    # homoglyph defense of its own -- a compliant `SUPERSEDES: none` line
+    # plus a second, homoglyph'd real claim elsewhere in the body used to
+    # leave `parse_v11_sections`'s `supersedes` field reading "none" and
+    # the receipt exiting 0. ------------------------------------------
+
+    FINDING1_DISAGREEING_LINES = {
+        # the dispatch's own repro: U+0405 CYRILLIC CAPITAL LETTER DZE for 'S'
+        "cyrillic_es_for_s": chr(0x0405) + "UPERSEDES: " + PREFIX + "\n",
+        # independent case: FULLWIDTH COLON standing in for the keyword's own
+        "fullwidth_colon": "SUPERSEDES" + chr(0xFF1A) + " " + PREFIX + "\n",
+    }
+
+    def test_v11_supersedes_none_disagreeing_with_a_homoglyphd_line_hard_fails(self):
+        rv = _import_rv()
+        for label, extra in self.FINDING1_DISAGREEING_LINES.items():
+            with self.subTest(label=label):
+                text = self._v11_receipt(extra)
+                v11 = rv.parse_v11_sections(text)
+                # Fixture sanity: this finding only exists while the
+                # official v1.1 channel and the hardened oracle disagree --
+                # confirm both sides of that disagreement directly before
+                # trusting the CLI-level assertion below.
+                self.assertEqual(v11["supersedes"], "none")
+                self.assertEqual(rv._legacy_supersedes_claim(text), self.PREFIX)
+                out = self._run(text, f"v11-finding1-{label}.rcpt")
+                self.assertEqual(out.returncode, 1, out.stderr)
+                self.assertIn(
+                    "disagrees with the CHAIN-1-hardened raw-text scan",
+                    out.stderr)
+
+    # -- Finding 2 (Important): a CONFUSABLE_MAP entry resolving to a REAL
+    # character that is not the letter needed at that position could only
+    # keep an in-progress match alive, never SATISFY the position -- so a
+    # line with no other candidate for that letter never completed the
+    # match, and the claim was completely invisible (not merely
+    # misclassified). -----------------------------------------------
+
+    FINDING2_WRONG_LETTER_LINES = {
+        # the dispatch's own repro: U+A75A LATIN CAPITAL LETTER R ROTUNDA
+        # maps to digit '2' (table-correct), standing in for 'R'
+        "yr_rotunda_for_r": "SUPE" + chr(0xA75A) + "SEDES",
+        # independent case: U+01B7 LATIN CAPITAL LETTER EZH maps to digit
+        # '3' (table-correct), standing in for the keyword's first 'E'
+        "ezh_for_e": "SUP" + chr(0x01B7) + "RSEDES",
+    }
+
+    def test_confusable_mapped_to_the_wrong_letter_still_completes_the_match(self):
+        rv = _import_rv()
+        for label, word in self.FINDING2_WRONG_LETTER_LINES.items():
+            with self.subTest(label=label):
+                text = f"RCPT v1 skill=x\nTRACE\nNEXT\n{word}: {self.PREFIX}\n"
+                self.assertIsNotNone(
+                    rv._legacy_supersedes_claim(text),
+                    f"{label}: a table-correct mapping to the wrong letter "
+                    f"must still be eligible to spend the wildcard budget")
+
+    # -- Finding 3 (Important): `sanity_check_reachability` is a vacuous
+    # self-test on an empty/shrunken mapping, and separately cannot tell
+    # "detected via the mapping under test" from "detected via an
+    # unrelated WILDCARD completion" -- so deleting the round-9
+    # source-level fallback branch passes it (and every pre-existing test
+    # in this file) undetected. -----------------------------------------
+
+    def test_sanity_check_reachability_no_longer_passes_vacuously(self):
+        d = _import_confusables_drift()
+        # the dispatch's own repro: a totally empty mapping
+        self.assertTrue(d.sanity_check_reachability({}))
+        # independent case: non-empty but drastically shrunken
+        self.assertTrue(d.sanity_check_reachability({chr(0x0405): "S"}))
+
+    def test_source_level_fallback_deletion_is_now_caught(self):
+        # Pinned two ways: the new drift-checker function against the
+        # real, unmutated table (must pass clean -- confirmed separately,
+        # by hand, that commenting out rcpt_verify.py's
+        # `if not produced_any and ch in CONFUSABLE_MAP:` branch makes
+        # this same function report a problem), and the underlying
+        # mechanism it depends on -- _legacy_supersedes_claim resolving
+        # U+FE30 to the EXACT hex value, not merely detecting SOME claim.
+        d = _import_confusables_drift()
+        gen = d._load_gen()
+        source_text = d.SOURCE_SNAPSHOT.read_text(encoding="utf-8")
+        mapping = gen.parse(source_text)
+        self.assertEqual(d.sanity_check_source_level_fallback(mapping), [])
+
+        rv = _import_rv()
+        text = f"RCPT v1 skill=x\nTRACE\nNEXT\nSUPERSEDES{chr(0xFE30)} {self.PREFIX}\n"
+        self.assertEqual(rv._legacy_supersedes_claim(text), self.PREFIX)
 
 
 if __name__ == "__main__":

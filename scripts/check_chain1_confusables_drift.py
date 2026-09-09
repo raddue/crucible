@@ -307,10 +307,28 @@ def sanity_check_reachability(mapping) -> list:
     candidate pool is now widened to the union of NFKD-all-ASCII and
     `CONFUSABLE_MAP.keys()`, so the claim now genuinely holds: this
     function is still the all-entries, first-position half of the pair,
-    and Task 2's test is now the genuinely all-positions half.)"""
+    and Task 2's test is now the genuinely all-positions half.)
+
+    WARDEN-GATE FINDING 3 (GH #567 round 1) -- everything above is a
+    per-entry loop: an EMPTY (or drastically shrunken) `mapping` makes the
+    loop run zero (or too few) times and this function returns `[]`, a
+    vacuous pass indistinguishable from "every entry checked out". Guarded
+    below by a genuine floor: `mapping`'s size must match the live,
+    imported `CONFUSABLE_MAP` this checker's own splice target actually
+    runs with (`rv`, already loaded above for the per-entry loop) -- reusing
+    that existing wiring rather than inventing a second way to reach
+    rcpt_verify.py's table."""
     rv = _load_rcpt_verify()
     keyword = "SUPERSEDES:"
     problems = []
+    if len(mapping) != len(rv.CONFUSABLE_MAP):
+        problems.append(
+            f"mapping has {len(mapping)} entries but the live "
+            f"rcpt_verify.py CONFUSABLE_MAP has {len(rv.CONFUSABLE_MAP)} -- "
+            f"an empty or drastically shrunken mapping would otherwise pass "
+            f"this function's per-entry loop vacuously (nothing to iterate "
+            f"is nothing to fail)")
+        return problems
     for src, target in mapping.items():
         pos_list = [i for i, c in enumerate(keyword) if c.upper() == target.upper()]
         if pos_list:
@@ -347,6 +365,77 @@ def sanity_check_reachability(mapping) -> list:
     return problems
 
 
+# WARDEN-GATE FINDING 3, part 2 (GH #567 round 1): the codepoint whose own
+# round-9 "Known residue" measurement (rcpt_verify.py's Task 3 docstring,
+# "SOURCE-LEVEL fallback" paragraph) documents it as reachable ONLY through
+# the token-building loop's source-level fallback branch (its own NFKD
+# pieces resolve to nothing kept/mapped, so only a lookup on the SOURCE
+# codepoint itself, `if not produced_any and ch in CONFUSABLE_MAP`, finds
+# it) -- deleting that branch does not un-detect this codepoint, because a
+# dropped codepoint at the keyword's trailing-colon position is STILL
+# wildcard-reachable (this file's own `sanity_check_reachability` above
+# cannot tell "reached via the mapped ':'" from "reached via a WILDCARD
+# standing in for it" -- both return non-`None`). What differs is the
+# RESOLVED VALUE: the mapped ':' lands in `skeleton_chars`, so the LITERAL
+# rescan loop finds "SUPERSEDES:" and reads the real hex value that follows
+# it; a WILDCARD never enters `skeleton_chars` at all, so the literal loop
+# can't see it, and only the composition guard's `_keyword_reachable_by_
+# dropping_optionals` fires, which always resolves "malformed" (never the
+# actual value) once reachable. This is the targeted, mechanism-level
+# regression check `sanity_check_reachability` cannot provide.
+_SOURCE_LEVEL_FALLBACK_ONLY_CODEPOINT = 0xFE30  # PRESENTATION FORM FOR
+# VERTICAL TWO DOT LEADER -- the documented case; see rcpt_verify.py's
+# Task 3 docstring for why its NFKD pieces (two ASCII periods) resolve to
+# nothing kept or mapped.
+
+
+def sanity_check_source_level_fallback(mapping) -> list:
+    """Pins that U+FE30 -- reachable only via the round-9 source-level
+    fallback branch -- resolves to its EXACT mapped ':' in the running
+    skeleton, not merely to SOME detection. Placed at the keyword's own
+    trailing colon, followed by a real hex value: if the fallback branch
+    resolves it, the literal rescan loop finds "SUPERSEDES:" and returns
+    the hex value verbatim; if that branch is deleted (the round-9
+    regression this check exists to catch), U+FE30 falls through to a bare
+    WILDCARD, the literal loop never sees a colon at all, and only the
+    composition guard fires -- which resolves "malformed" unconditionally,
+    regardless of the real value that follows. Confirmed by execution
+    against a scratch copy of rcpt_verify.py with the fallback branch
+    (`if not produced_any and ch in CONFUSABLE_MAP:`) removed: the exact
+    value this check demands changes from the real hex value to
+    "malformed" -- a claim is still detected either way (which is why
+    sanity_check_reachability above, and all 36 pre-existing
+    TestChain1HomoglyphAndScanScope567 tests, pass regardless of whether
+    the fallback branch is present), but the EXACT resolved value is not,
+    which is what this check demands instead."""
+    rv = _load_rcpt_verify()
+    src = chr(_SOURCE_LEVEL_FALLBACK_ONLY_CODEPOINT)
+    if src not in mapping:
+        return [
+            f"U+{_SOURCE_LEVEL_FALLBACK_ONLY_CODEPOINT:04X} is no longer a "
+            f"CONFUSABLE_MAP source -- this check's documented "
+            f"source-level-fallback-only case (see rcpt_verify.py's Task 3 "
+            f"docstring) needs a different codepoint; find one whose NFKD "
+            f"pieces are all outside [A-Za-z0-9:] and not themselves table "
+            f"keys, update _SOURCE_LEVEL_FALLBACK_ONLY_CODEPOINT, and check "
+            f"the docstring's own example is still accurate"]
+    text = f"RCPT v1 skill=x\nTRACE\nNEXT\nSUPERSEDES{src} 21a1b2c3d4e5\n"
+    result = rv._legacy_supersedes_claim(text)
+    if result != "21a1b2c3d4e5":
+        return [
+            f"U+{_SOURCE_LEVEL_FALLBACK_ONLY_CODEPOINT:04X} reaches "
+            f"_legacy_supersedes_claim as {result!r}, not the exact hex "
+            f"value '21a1b2c3d4e5' -- it is reachable ONLY through the "
+            f"round-9 source-level fallback branch (its own NFKD pieces "
+            f"resolve to nothing kept or mapped), so this means that "
+            f"branch is gone or broken: the codepoint is falling through "
+            f"to a bare WILDCARD, which the composition guard still "
+            f"detects (as 'malformed', never the real value) but "
+            f"sanity_check_reachability above cannot distinguish from a "
+            f"genuine mapped-':' detection"]
+    return []
+
+
 def main() -> int:
     gen = _load_gen()
     # round-4 quality-gate M4: an explicit, actionable message on a partial
@@ -366,6 +455,7 @@ def main() -> int:
     problems += sanity_check_ascii_targets(mapping)
     problems += sanity_check_alphabet_coverage(mapping, gen.TARGET_ALPHABET)
     problems += sanity_check_reachability(mapping)
+    problems += sanity_check_source_level_fallback(mapping)
     if problems:
         print("CHAIN1 CONFUSABLES DRIFT:")
         for p in problems:
