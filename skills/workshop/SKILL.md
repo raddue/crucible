@@ -5,4 +5,4 @@ description: Tour of the Crucible workshop — the headline orchestrators users 
 
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~50 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~51 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
