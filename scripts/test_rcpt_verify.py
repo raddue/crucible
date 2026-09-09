@@ -6367,8 +6367,26 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         os.chmod(repo, 0o777)
         out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(r))
         self.assertEqual(out.returncode, 1, out.stderr)
-        self.assertIn("world-writable git toplevel", out.stderr)
+        self.assertIn("world-writable (o+w) git toplevel", out.stderr)
         self.assertIn(str(repo), out.stderr)
+
+    def test_a_group_writable_toplevel_is_diagnosed_group_writable(self):
+        """#601 — a `g+w`-only git toplevel (the `drwxrwsr-x` worktree shape, 0o2775) is
+        still REFUSED, but the diagnosis must name the bit that actually fired. The old
+        wording called it "world-writable" and told the operator to "make it
+        non-world-writable" — a remedy already in place for `g+w`-only, so nothing
+        changed and the real cause stayed invisible."""
+        repo, r = self._repo()
+        os.chmod(repo, 0o2775)                       # setgid group-writable, no o+w
+        self.addCleanup(os.chmod, repo, 0o755)
+        if not (repo.stat().st_mode & 0o020):
+            self.skipTest("filesystem does not honour chmod; cannot set g+w")
+        out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(r))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("group-writable (g+w) git toplevel", out.stderr)
+        self.assertIn(str(repo), out.stderr)
+        self.assertNotIn("world-writable", out.stderr)
+        self.assertIn("non-group-writable", out.stderr)
 
     def test_an_absolute_cited_name_is_diagnosed_too(self):
         """The shape a refusal blocks through the CONTAINMENT UNION rather than through
@@ -6394,7 +6412,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         os.chmod(repo, 0o777)
         out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
-        self.assertIn("world-writable git toplevel", out.stderr)
+        self.assertIn("world-writable (o+w) git toplevel", out.stderr)
         # Non-vacuity: the ABSOLUTE name is the one being diagnosed.
         self.assertIn(absname, out.stderr)
 

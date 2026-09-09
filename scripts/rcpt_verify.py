@@ -2776,10 +2776,33 @@ def _unresolved_disposition(name, strict, cov, witness_leg=False, refused=None):
     return f"UNVERIFIABLE: {label} (no file under root){_refused_clause(refused)}"
 
 
+def _writability_notes(d):
+    """SIEGE-C1 — name the writability class that actually refused `d` as a probe base.
+
+    `_is_world_writable`'s mask is `0o022`, so a directory that is group-writable (`g+w`,
+    mode bit `0o020`) but not other-writable is refused too — and calling THAT a
+    "world-writable git toplevel" is a double misdiagnosis: not only is the directory not
+    world-writable, the remedy it states ("make it non-world-writable") is already
+    satisfied, so an operator who follows the text changes nothing and never reaches the
+    real cause (`g+w`). Each refused directory is reported against its own mode instead.
+    `0o002` is the superset threat, so an other-writable directory takes the world label.
+    An unstattable directory falls back to the world label — `_is_world_writable` already
+    treated that as writable (fail closed), and the superset claim can only overstate."""
+    try:
+        m = d.stat().st_mode
+    except OSError:
+        m = 0o002
+    if m & 0o002:
+        return ("world-writable (o+w)", "any local uid can plant a marker there",
+                "make it non-world-writable (chmod o-w)")
+    return ("group-writable (g+w)", "any uid in the directory's group can plant a marker there",
+            "make it non-group-writable (chmod g-w, or -D on a shared parent)")
+
+
 def _refused_clause(refused):
     """SIEGE-C1 — the suffix naming a probe base that was DROPPED rather than absent.
 
-    A world-writable git toplevel is refused as a probe base, so a repo-relative name
+    A writable git toplevel is refused as a probe base, so a repo-relative name
     resolves nowhere and (path-shaped, under the mandated --strict) hard-FAILs. Without
     this the operator is told the artifact is "absent under all bases" for a file that is
     present and readable, with nothing on stderr mentioning permissions — so a checkout in
@@ -2787,7 +2810,11 @@ def _refused_clause(refused):
     umask-000 container clones) blocks every receipt citing such a name, with a false
     diagnosis. Blocks, precisely: a PATH-SHAPED name hard-FAILs under --strict; a bare
     basename stays UNVERIFIABLE at exit 0. The clause is appended on both dispositions,
-    since the operator needs the reason either way.
+    since the operator needs the reason either way. Each refused directory is diagnosed
+    against the write bit that actually fired (`_writability_notes`): `world-writable (o+w)`
+    for `0o002`, `group-writable (g+w)` for a `g+w`-only directory — the pre-#601 wording
+    called both world-writable and so pointed a group-writable checkout at a remedy that
+    was already satisfied.
 
     It reaches BOTH cited-name shapes because the refusal is recorded in `_allowed_bases`:
     a relative name loses `repo / name` as a candidate, and an absolute name inside the
@@ -2805,9 +2832,11 @@ def _refused_clause(refused):
     What was wrong was the silence, not the refusal."""
     if not refused:
         return ""
-    homes = ", ".join(sorted(_show_path(d) for d in refused))
-    return (f" [refused as probe base: world-writable git toplevel {homes} — "
-            f"any local uid can plant a marker there; make it non-world-writable]")
+    parts = []
+    for d in sorted(refused, key=str):
+        label, threat, remedy = _writability_notes(d)
+        parts.append(f"{label} git toplevel {_show_path(d)} — {threat}; {remedy}")
+    return " [refused as probe base: " + "; ".join(parts) + "]"
 
 
 # SIEGE-R2BA-2 — the ceiling on how many bytes ONE Tier-2 leg will materialise from
