@@ -21,6 +21,7 @@ Pure stdlib `unittest`:  python3 scripts/test_558_559_acceptance.py
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -394,8 +395,7 @@ class StopHookDegradationTest(unittest.TestCase):
                         "basename", "realpath", "readlink", "pwd", "env",
                         "git", "python3", "python", "wc", "mktemp", "stat",
                         "find", "xargs", "tee", "chmod", "sleep", "uname"):
-                src = subprocess.run(["command", "-v", cmd],
-                                     capture_output=True, text=True).stdout.strip()
+                src = shutil.which(cmd)
                 if src:
                     os.symlink(src, os.path.join(nojq, cmd))
             env = fx.env(PATH=nojq)
