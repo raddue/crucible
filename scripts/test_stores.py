@@ -100,8 +100,15 @@ class GrudgeResolveRepoEnvTest(unittest.TestCase):
         os.environ.update(self.saved)
 
     def _gitinit(self, d):
+        # Run the fixture's own git under the SAME allowlist the code under test
+        # uses. These tests deliberately poison the ambient env (GIT_DIR /
+        # GIT_WORK_TREE, and PATH in the walk-up test); inheriting that here
+        # would steer or break `git init` itself, so the fixture would stop
+        # building what the assertions claim to exercise.
         subprocess.run(["git", "init", "-q", d], check=True,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True,
+                       env={k: os.environ[k] for k in ("PATH", "HOME")
+                            if k in os.environ})
 
     def test_inherited_git_dir_does_not_steer_repo_resolution(self):
         with tempfile.TemporaryDirectory() as out:
@@ -143,6 +150,34 @@ class GrudgeResolveRepoEnvTest(unittest.TestCase):
             self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
             self.assertFalse(os.path.exists(os.path.join(store, "real_repo")))
             self.assertFalse(os.path.exists(os.path.join(store, "hidden_repo")))
+
+    def test_git_failure_in_subdir_still_finds_the_real_repo_root(self):
+        # The allowlist made the git call failable in legitimate setups. If a
+        # failure fell through to realpath(cwd), a cwd one level down would be
+        # reported as the repo root — and append()'s privacy guard, comparing
+        # the store dir against that too-narrow root, would then permit a write
+        # INTO the repo tree. Same leak as #605, reached by a silent git
+        # failure. Here git is genuinely unreachable (PATH holds no git), which
+        # is a real failure, not a mock.
+        with tempfile.TemporaryDirectory() as out:
+            repo = os.path.join(out, "real_repo")
+            self._gitinit(repo)
+            sub = os.path.join(repo, "src", "deep")
+            os.makedirs(sub)
+            os.environ["PATH"] = os.path.join(out, "empty_bin")
+            os.makedirs(os.environ["PATH"])
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                repo_name, root = ga.resolve_repo(start_dir=sub)
+                # ...and the guard that depends on it still refuses an in-tree store.
+                refused = ga.append(
+                    symptom="private bug", files_touched=["src/secret.py"],
+                    repo=repo_name, repo_root=root,
+                    base_dir=os.path.join(repo, ".claude", "grudge"))
+            self.assertEqual(root, os.path.realpath(repo))   # NOT the subdir
+            self.assertEqual(repo_name, "real_repo")
+            self.assertIsNone(refused)
+            self.assertFalse(os.path.exists(os.path.join(repo, ".claude")))
 
 
 # --------------------------------------------------------------------------- #
