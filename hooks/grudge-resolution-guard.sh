@@ -18,9 +18,34 @@
 # Disable errexit — this hook must never fail fatally (INV-C7)
 set +e
 
+# LC_ALL=C, and it must be LC_ALL rather than LC_NUMERIC: `$EPOCHREALTIME` is
+# rendered with the LOCALE'S radix character, so under de_DE / fr_FR / es_ES /
+# pt_BR / ru_RU and friends bash emits `1788995310,670161`. `${EPOCHREALTIME%%.*}`
+# then strips NOTHING (there is no `.` to match), and `$(( 1788995310,670161 ))`
+# parses that comma as C's COMMA OPERATOR — evaluating to the trailing
+# microseconds field alone (~10^5), forever below a ~10^9 deadline. `_budget_ok`
+# would answer "budget remains" on every call and the whole #603 budget below
+# would be a silent no-op, with no error output, in exactly the fail-open
+# direction it exists to prevent. `LC_NUMERIC=C` alone cannot fix it: an
+# inherited LC_ALL outranks LC_NUMERIC, and an inherited LC_ALL is precisely the
+# reproducing case. Nothing else here regresses under C: `_git` already runs
+# under `env -i`, `date -u -d` parses the transcript's ISO-8601 stamps
+# locale-independently, and python3 auto-enables UTF-8 mode under a C locale
+# (PEP 540), so non-ASCII paths still round-trip through grudge_query.py.
+export LC_ALL=C
+
 MAX_BLOCKS=3
 MAX_SECONDS="${CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS:-8}"
 case "$MAX_SECONDS" in ''|*[!0-9]*) MAX_SECONDS=8 ;; esac
+# Base 10 EXPLICITLY. The all-digits test above accepts `08`, `09` and `010`,
+# and bash reads a leading zero as OCTAL: `$(( $(date +%s) + 08 ))` is a "value
+# too great for base" arithmetic error that leaves $BUDGET_DEADLINE EMPTY — every
+# later `_budget_ok` comparison then errors too and degrades the Stop to an
+# unenforced allow — while `010` raises no error and silently means 8 seconds,
+# not 10. Normalising once HERE, rather than at the arithmetic use site, keeps
+# the number used for the deadline and the number printed in `_budget_out`'s
+# message the same value.
+MAX_SECONDS=$(( 10#$MAX_SECONDS ))
 
 # `git -C <dir>` ONLY chdirs — it does not clear the environment, and git obeys
 # TWO families of inherited variable that outrank anything this hook says:
