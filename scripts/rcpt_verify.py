@@ -2509,6 +2509,20 @@ def _is_git_marker(g: pathlib.Path) -> bool:
     return False
 
 
+class _RefusedBase(typing.NamedTuple):
+    """A probe base SIEGE-C1 dropped, carried WITH the mode that dropped it.
+
+    #615 — the refusal decision and the human-readable diagnosis used to `stat()` the
+    directory independently, so they could disagree about the same path: a first stat that
+    failed (`_writable_mode`'s fail-closed arm) followed by a second that succeeded made a
+    0755 directory print "group-writable (g+w) … chmod g-w", a remedy already satisfied —
+    the exact confusing-diagnosis class #601 was about — and a mode change between the two
+    stats could label an `o+w` directory as merely `g+w`, understating the threat. One
+    stat, carried to the message, cannot disagree with itself."""
+    path: pathlib.Path
+    mode: int
+
+
 def _git_toplevel(start: pathlib.Path, refused=None):
     d = start if start.is_dir() else start.parent
     for cur in [d, *d.parents]:
@@ -2540,7 +2554,10 @@ def _git_toplevel(start: pathlib.Path, refused=None):
         # is a design change to the probe set (quality-gate/SKILL.md:30 defines it as
         # "each supplied root plus that root's git toplevel") and not a linter-local fix.
         if _is_git_marker(cur / ".git"):
-            if not _is_world_writable(cur):
+            # #615 — ONE stat, whose mode both decides the refusal here and words the
+            # diagnosis in `_writability_notes`. See `_RefusedBase`.
+            mode = _writable_mode(cur)
+            if not mode & 0o022:
                 return cur
             # `refused` is an optional out-param (the same idiom as found/cov/probe/
             # meter/bodies): the refusal must be REPORTABLE, not merely silent. Dropping
@@ -2549,8 +2566,8 @@ def _git_toplevel(start: pathlib.Path, refused=None):
             # so in a world-writable checkout the refusal blocks every receipt of the run
             # while stderr says only "absent under all bases", of a file that is present
             # and readable. The disposition appends the real reason instead.
-            if refused is not None and cur not in refused:
-                refused.append(cur)
+            if refused is not None and not any(r.path == cur for r in refused):
+                refused.append(_RefusedBase(cur, mode))
             # siege S-3 — and STOP. This used to KEEP WALKING, on the reasoning that "a
             # legitimate repo further up still wins". Measured, that reasoning INVERTED
             # the containment guarantee: the ancestor toplevel a continued walk finds is
@@ -2572,12 +2589,19 @@ def _git_toplevel(start: pathlib.Path, refused=None):
     return None   # stdlib-only: walk for .git rather than shelling out to git
 
 
-def _is_world_writable(d: pathlib.Path) -> bool:
-    """SIEGE-C1 — writable by someone other than its owner, on the directory that HOLDS
+def _writable_mode(d: pathlib.Path) -> int:
+    """SIEGE-C1 — the mode deciding whether `d` is writable by someone other than its
+    owner, on the directory that HOLDS
     the `.git` marker, i.e. "a uid that is not this one could have created this marker".
     Raw mode bits rather than an `import stat` for two bits; the sticky bit is irrelevant
-    here (it restrains deletion, not creation). An unstattable directory is treated as
-    writable — fail closed.
+    here (it restrains deletion, not creation). An unstattable directory returns the
+    sentinel `0o002` and is therefore treated as writable — fail closed, and it takes the
+    superset (world) label in `_writability_notes`, which can only overstate.
+
+    #615 — this returns the MODE rather than a bool so that `_git_toplevel` can carry the
+    very mode it refused on into the diagnosis (`_RefusedBase`) instead of the message
+    re-`stat()`ing the path and possibly disagreeing. The mask (`0o022`) is applied by the
+    caller; everything below is about that mask.
 
     siege S-3 — the mask was `0o002` (other) ALONE while this function's callers, and
     `quality-gate/SKILL.md` § "Dispatch-root and findings-root layout (#486)" pin (b)
@@ -2593,9 +2617,9 @@ def _is_world_writable(d: pathlib.Path) -> bool:
     has no portable reader, and this module is stdlib-only — so an ACL-writable directory
     with owner-only mode bits still contributes its toplevel."""
     try:
-        return bool(d.stat().st_mode & 0o022)
+        return d.stat().st_mode
     except OSError:
-        return True
+        return 0o002
 
 
 # SIEGE-C2 — the ONE renderer for a filesystem path interpolated into stderr.
@@ -2776,23 +2800,23 @@ def _unresolved_disposition(name, strict, cov, witness_leg=False, refused=None):
     return f"UNVERIFIABLE: {label} (no file under root){_refused_clause(refused)}"
 
 
-def _writability_notes(d):
-    """SIEGE-C1 — name the writability class that actually refused `d` as a probe base.
+def _writability_notes(mode):
+    """SIEGE-C1 — name the writability class that actually refused a probe base.
 
-    `_is_world_writable`'s mask is `0o022`, so a directory that is group-writable (`g+w`,
+    The refusal mask is `0o022`, so a directory that is group-writable (`g+w`,
     mode bit `0o020`) but not other-writable is refused too — and calling THAT a
     "world-writable git toplevel" is a double misdiagnosis: not only is the directory not
     world-writable, the remedy it states ("make it non-world-writable") is already
     satisfied, so an operator who follows the text changes nothing and never reaches the
     real cause (`g+w`). Each refused directory is reported against its own mode instead.
     `0o002` is the superset threat, so an other-writable directory takes the world label.
-    An unstattable directory falls back to the world label — `_is_world_writable` already
-    treated that as writable (fail closed), and the superset claim can only overstate."""
-    try:
-        m = d.stat().st_mode
-    except OSError:
-        m = 0o002
-    if m & 0o002:
+    An unstattable directory falls back to the world label — `_writable_mode` already
+    treated that as writable (fail closed), and the superset claim can only overstate.
+
+    #615 — `mode` is the mode `_git_toplevel` ACTUALLY REFUSED ON, handed over in
+    `_RefusedBase`, not one this function re-derives from the path. Re-stat'ing here made
+    the message able to contradict the decision that produced it: see `_RefusedBase`."""
+    if mode & 0o002:
         return ("world-writable (o+w)", "any local uid can plant a marker there",
                 "make it non-world-writable (chmod o-w)")
     return ("group-writable (g+w)", "any uid in the directory's group can plant a marker there",
@@ -2833,10 +2857,13 @@ def _refused_clause(refused):
     if not refused:
         return ""
     parts = []
-    for d in sorted(refused, key=str):
-        label, threat, remedy = _writability_notes(d)
-        parts.append(f"{label} git toplevel {_show_path(d)} — {threat}; {remedy}")
-    return " [refused as probe base: " + "; ".join(parts) + "]"
+    for r in sorted(refused, key=lambda e: str(e.path)):
+        label, threat, remedy = _writability_notes(r.mode)
+        parts.append(f"{label} git toplevel {_show_path(r.path)} — {threat}; {remedy}")
+    # #615 — entries are joined with " | ", not "; ": "; " is ALREADY the separator
+    # INSIDE one entry (threat from remedy), so two refused directories rendered as four
+    # semicolon-separated clauses with nothing marking where one directory ended.
+    return " [refused as probe base: " + " | ".join(parts) + "]"
 
 
 # SIEGE-R2BA-2 — the ceiling on how many bytes ONE Tier-2 leg will materialise from

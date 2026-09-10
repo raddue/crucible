@@ -6388,6 +6388,50 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         self.assertNotIn("world-writable", out.stderr)
         self.assertIn("non-group-writable", out.stderr)
 
+    def test_the_diagnosis_uses_the_mode_the_refusal_used(self):
+        """#615 — the refusal (`_git_toplevel`) and the wording (`_writability_notes`)
+        used to `stat()` the directory INDEPENDENTLY, so a mode change between the two
+        made the message contradict the decision that produced it: an `o+w` directory
+        could be reported as merely `g+w` (understating the threat), and a first stat that
+        failed closed followed by a second that succeeded could point a 0755 directory at
+        `chmod g-w` — a remedy already satisfied, the #601 class over again. One stat,
+        carried in `_RefusedBase`, cannot disagree with itself."""
+        rv = _import_rv()
+        d = self.base / "toctou"; d.mkdir()
+        _plant_git_dir(d)
+        os.chmod(d, 0o777)
+        self.addCleanup(os.chmod, d, 0o755)
+        if not (d.stat().st_mode & 0o002):
+            self.skipTest("filesystem does not honour chmod; cannot set o+w")
+        refused = []
+        self.assertIsNone(rv._git_toplevel(d, refused))
+        os.chmod(d, 0o755)                 # the race: mode moves after the decision
+        clause = rv._refused_clause(refused)
+        self.assertIn("world-writable (o+w) git toplevel", clause)
+        self.assertNotIn("group-writable", clause)
+
+    def test_two_refused_directories_are_separable(self):
+        """#615 — `; ` was both the intra-entry separator (threat from remedy) and the
+        inter-entry one, so two refused directories rendered as four semicolon-separated
+        clauses with nothing marking where one directory ended."""
+        rv = _import_rv()
+        dirs = []
+        for nm in ("a", "b"):
+            d = self.base / nm; d.mkdir()
+            _plant_git_dir(d)
+            os.chmod(d, 0o777)
+            self.addCleanup(os.chmod, d, 0o755)
+            if not (d.stat().st_mode & 0o002):
+                self.skipTest("filesystem does not honour chmod; cannot set o+w")
+            dirs.append(d)
+        refused = []
+        for d in dirs:
+            self.assertIsNone(rv._git_toplevel(d, refused))
+        clause = rv._refused_clause(refused)
+        self.assertEqual(len(clause.split(" | ")), 2, clause)
+        for d in dirs:
+            self.assertIn(str(d), clause)
+
     def test_an_absolute_cited_name_is_diagnosed_too(self):
         """The shape a refusal blocks through the CONTAINMENT UNION rather than through
         the candidate list. An absolute name keeps its own candidate, but the refused
@@ -6888,7 +6932,7 @@ class TestTheWorldWritableRefusalIsMonotone(_InqBase):
         self.assertIn("refused as probe base", hostile.stderr)
 
     def test_a_group_writable_toplevel_is_refused_too(self):
-        """`_is_world_writable` tested `0o002` alone while its callers, and
+        """The writability check tested `0o002` alone while its callers, and
         quality-gate/SKILL.md:41, both claim "any local uid could have planted" — 0775 and
         0770 are exactly that claim's case and were accepted."""
         rv = _import_rv()
