@@ -311,6 +311,20 @@ def query(
     return matched[:limit], stats
 
 
+def _escapable(v: str) -> str:
+    """Escape control chars so stored scrap can never forge a fresh block line
+    (siege S-5 / #606): POSIX git stores newlines verbatim in filenames, so a
+    fix(*) commit's files_touched can carry a newline followed by forged text.
+    Rendered raw, that text becomes a flush-left top-level line in the pre-flight
+    block. Newline/CR/tab get visible escapes; every other control char becomes
+    \\xNN — the forged text survives as inert data, never a forged line."""
+    esc = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    return "".join(
+        esc.get(c) or (c if c.isprintable() else f"\\x{ord(c):02x}")
+        for c in v
+    )
+
+
 def render_block(matched: List[Dict], stats: Dict) -> str:
     if not matched:
         return ""
@@ -322,10 +336,18 @@ def render_block(matched: List[Dict], stats: Dict) -> str:
 
     lines = [f"⚠️  {len(matched)} grudge(s) held against the files you're about to touch — DO NOT REPEAT:"]
     for g in matched:
+        # #602 S-0: contributor-editable free-text fields are collapsed to one
+        # line — stored text there is a description, not an identifier, so
+        # losing embedded newlines is an acceptable, simple defense.
         sym = _one_line(g.get("symptom")) or "(no symptom)"
         commit = _one_line(g.get("fixed_in_commit"))
         when = _one_line(g.get("date_fixed"))
-        files = ", ".join(_one_line(f) for f in g.get("files_touched", []))
+        # #606 (siege S-5): files_touched entries are real filenames — POSIX
+        # git stores a literal newline in a filename verbatim, so collapsing it
+        # away (like the free-text fields above) would silently launder a
+        # hostile filename into a plausible-looking one. Escape visibly instead
+        # so the forged bytes survive as inert, readable data.
+        files = _escapable(", ".join(g.get("files_touched", [])))
         tag = f" (fixed {commit[:9]}{', ' + when if when else ''})" if commit or when else ""
         lines.append(f"  ☠ {sym}{tag}")
         rc = _one_line(g.get("root_cause"))
