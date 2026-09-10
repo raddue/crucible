@@ -104,6 +104,10 @@ run python3 scripts/check_dispatch_graphify_consult.py
 run python3 scripts/check_handoff_stop_contract.py --selftest
 run python3 scripts/check_handoff_stop_contract.py
 
+# --- tracked-app-config execution surface (#604, siege S-1) ---
+run python3 scripts/check_settings_surface.py --selftest
+run python3 scripts/check_settings_surface.py
+
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
 run python3 scripts/check_warden_structure.py

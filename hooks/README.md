@@ -373,3 +373,33 @@ bash hooks/tests/test-rcpt-verify-hook.sh
 
 `jq` and `python3` — both absent-tolerant (the hook exits 0 silently when either is
 missing). No `git` dependency beyond the optional repo-root resolution (absent → exit 0).
+
+## Hook Registration Surface (#604)
+
+Repo-owned hooks (`hooks/*.sh`) are registered in **per-machine, untracked config** —
+never in a committed `.claude/settings.json`. A committed `settings.json` that
+registers an executable hook turns every PR checkout into an arbitrary-code
+execution surface on the reviewer's machine (GH-604, siege S-1): Claude Code's
+directory trust is per-directory, so checking out a branch inside an
+already-`/trust`ed repo does not re-prompt, and a reviewer's `gh pr checkout N`
+runs the branch's hook (and whatever `scripts/` helper it names) with the
+reviewer's full privileges on the next Stop.
+
+The two legal registration points are `.claude/settings.local.json`
+(machine-local, untracked — the whole `.claude/` directory is git-ignored, and
+`scripts/check_settings_surface.py` fails the gate if any of it is re-tracked)
+and user-global `~/.claude/settings.json` (the `gate-ledger-guard` /
+`build-routing-advisor` convention). Both make the hook's execution surface
+opt-in per machine rather than automatic per clone. A registration command must
+reference the hook by its **absolute installed path** (or `$CLAUDE_PROJECT_DIR`);
+the machine that installed it is the machine that accepts the surfaced code.
+
+Review rule: every PR touching a `hooks/` or `scripts/` diff gets full review
+before merge — those files execute with the maintainer's privileges.
+
+### Testing
+
+```bash
+python3 scripts/check_settings_surface.py --selftest
+python3 scripts/check_settings_surface.py
+```
