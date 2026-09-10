@@ -14,6 +14,9 @@ The finder angles, the verify gate, the effort tiers, the `cap` semantics, and t
 <!-- CANONICAL: shared/severity-verdict-contract.md -->
 The `severity` and `verdict` vocabularies, and the gating rule `T = {CONFIRMED, PLAUSIBLE} × {Critical, Important}`, are the contract's — not temper's (I11). See `shared/severity-verdict-contract.md`; temper consumes that gating rule to build `T` and defines no scale or verdict of its own.
 
+<!-- CANONICAL: shared/change-sizing.md -->
+Sizing thresholds are human-reviewability guidance temper *surfaces*, never gates on: sizing never enters `T`; distinct from Step 1.5's 5,000-line context cap; the named strategies are what the "split per-commit or per-file" offer resolves to.
+
 Like tempering steel after forging — iterative heat-and-quench cycles that set final hardness and elasticity — `/temper` runs successive fresh-eyes review rounds until the change converges. Round 1 drives the **delve-engine fan-out** (bug-angle subset) to enumerate a tracked set `T` of gating findings; each later round re-verifies whether every member of `T` is resolved against the fixed code and admits any new gating finding the fix introduced. The loop exits when `T` is fully resolved and no new gating finding entered.
 
 **Core principle:** Review early, review often. Fresh eyes every round — but the per-round instrument is the engine's **parallel finder fan-out + verify gate** (plus a per-member re-verification pass), **not** one holistic reviewer. Convergence is the resolution status of an enumerated finding set, never a cross-round count comparison. (Distinct from `/audit`: temper drives delve-engine's *instance-bug* fan-out — one-reproduction defects; `/audit` runs *systemic* lenses — different machines.)
@@ -124,6 +127,8 @@ Run `git diff --numstat <base>..<head>` and inspect:
 - **Submodule pointer-only diff** (changes are entirely in `.gitmodules` or submodule SHA pointers): note it in the round metadata and flag a Suggestion to inspect the submodule contents separately. Do not produce a spurious Clean.
 - **Mixed text + binary**: pass the text portion normally as the engine `scope`; note the binary files in the round metadata so they are not treated as reviewed.
 - **Diff too large** (>5,000 added+deleted lines per `numstat`): warn the user and offer to split per-commit or per-file. If the user proceeds anyway, note the over-cap in the round metadata and dispatch with a context-window degradation warning. This is a soft cap, not a hard block. **Non-interactive callers** (build / debugging / finish dispatching `/temper`): on >5,000-line diffs, proceed automatically with the over-cap note and emit a `degraded-context` flag in the round metadata. Interactive (standalone) callers retain the offer-to-split flow above.
+
+- **Reviewability note** (when added+deleted exceeds ~300 lines, per `change-sizing.md`): record the changed-line count as a non-gating round-metadata note and name the applicable splitting strategy. Independent of the `degraded-context` flag in the `>5,000` bullet above — a different axis. <!-- CONTRACT:change-sizing-hook -->
 
 **Empty-diff caller contract.** Pipeline callers (build / debugging / finish) MUST treat `Reason: empty-diff` as a soft-warn — surface to the user ("temper found no changes between BASE and HEAD; confirm this is intended") before proceeding past the gate. The most common cause is uncommitted work, a wrong base, or detached-HEAD post-rebase. Ad-hoc / standalone callers may proceed silently (the user invoked /temper knowing the state).
 
