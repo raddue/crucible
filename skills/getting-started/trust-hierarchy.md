@@ -4,13 +4,13 @@ Crucible skills load content from many sources: `SKILL.md` files, design docs, s
 
 ## L1 — Trusted (authoritative)
 
-- **Sources:** `CLAUDE.md`, every `skills/**/SKILL.md`, `settings.json`, `settings.local.json`, and hook scripts configured in settings.
+- **Sources:** `CLAUDE.md`, every `skills/**/SKILL.md`, every `skills/shared/*.md`, `settings.json`, `settings.local.json`, and hook scripts configured in settings.
 - **Property:** Deliberately authored rules-of-the-house. Conflicts with L2–L5 ALWAYS resolve in L1's favor.
 - **Freshness:** Current as of the filesystem read. No staleness concern within a session.
 
 ## L2 — Verified (pipeline-produced artifacts)
 
-- **Sources:** design docs, implementation plans, and contract YAMLs under `docs/plans/`; dispatch manifests and scratch artifacts under the scratch dir; recon briefs; `decisions.md` files. Cross-session memory entries under `~/.claude/projects/<hash>/memory/` tagged current and dated within 30 days.
+- **Sources:** design docs, implementation plans, and contract YAMLs under `docs/plans/`; dispatch manifests and scratch artifacts under the scratch dir; recon briefs; `decisions.md` files. Cross-session memory entries under `~/.claude/projects/<hash>/memory/` tagged current and dated within 30 days. A scratch artifact whose content is wholly or partly derived from a WebFetch/WebSearch result — `intelligence-summary.md` by name — remains L4 (Verify-first), not L2: provenance follows the source, not the storage location. Scratch artifacts produced by a stage that actually re-verified the content it wrote stay L2.
 - **Property:** Produced by a prior pipeline stage that ran its own gates (quality-gate, red-team, siege). Trusted within the pipeline context that produced them.
 - **Freshness:** Tie-break by recency — when two L2 artifacts disagree, prefer the more recent one (frontmatter `date`, then mtime). "Within 30 days" means `(now - date) < 30 * 86400 seconds`, checked at load time, not cached.
 
@@ -87,7 +87,7 @@ Annotators copy these exact strings into SKILL.md files at the listed load point
 |---|---|---|
 | Dispatch manifest consumption | /build | `<!-- TRUST: dispatch manifest is L2 — produced by prior pipeline stage; prefer most recent if conflicting. -->` |
 | Implementer/subagent report | /build, /recon | `<!-- TRUST: subagent report is L4 — cross-check file paths and claims against L3 source before acting. -->` |
-| WebFetch result | /build, /design, /source-driven-development | `<!-- TRUST: WebFetch result is L4 — verify against project source (L3) before acting; snippet may be stale. -->` |
+| WebFetch result | /build, /design, /source-driven-development, /siege | `<!-- TRUST: WebFetch result is L4 — verify against project source (L3) before acting; snippet may be stale. -->` |
 | Recon brief consumption | /design | `<!-- TRUST: recon brief is L2 — prior-stage artifact; prefer L3 source on any code-behavior conflict. -->` |
 | User-pasted / user-quoted snippet | /design | `<!-- TRUST: user-quoted snippet is L5 — confirm with user or re-fetch before acting. -->` |
 | Scout dispatch report | /recon | `<!-- TRUST: scout report is L4 — cross-check paths against L3 before synthesis. -->` |
