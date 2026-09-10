@@ -155,6 +155,8 @@ COVERAGE_MAP: dict[str, dict] = {
     "contract:worktree:inv-t25": {"kind": "bash", "carriers": [_G], "checks": 20},
     "contract:cli:inv-t26": {"kind": "bash", "carriers": [_G], "checks": 7},
     "contract:cli:inv-t27": {"kind": "bash", "carriers": [_G], "checks": 7},
+    # issue #603: per-Stop wall-clock budget bounds the hook's attacker-chosen inputs
+    "contract:hook:inv-t28": {"kind": "bash", "carriers": [_G], "checks": 8},
 }
 del _G
 

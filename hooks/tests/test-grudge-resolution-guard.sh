@@ -2368,6 +2368,87 @@ check 330 "a by-files grudge clears a leading-dash candidate — contract:hook:i
 check 331 "no clearance-lookup note is printed for a dash path — contract:hook:inv-t23" \
   no "$(has "$ERR" "clearance lookup")"
 
+# ========================================================================
+# INV-T28 — issue #603: the per-Stop wall-clock budget bounds
+# per-invocation cost in ATTACKER-CHOSEN inputs. Candidate count (up to the
+# --max-count=500 scan, accumulable turn-over-turn via future-dated author
+# times), files per commit, and the stored grudge count each multiply the
+# work one Stop does; 362 s was measured on a single Stop. The only
+# input-independent bound is a wall-clock budget. Spending it must degrade
+# LOUDLY to allow (exit 0) — the never-fail-closed contract — so an attacker
+# can stall a Stop for at most the budget, never for a whole turn.
+# ========================================================================
+# contract:hook:inv-t28 checks=8
+hook_case t28ctl
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+run_hook s28ctl
+check 357 "an unresolved fix still blocks under the default budget — contract:hook:inv-t28" 2 "$RC"
+check 358 "the block path prints no budget-exceeded note — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
+hook_case t28zero
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=0"
+run_hook s28zero
+check 359 "a spent budget allows, never blocks — contract:hook:inv-t28" 0 "$RC"
+check 360 "a spent budget prints the loud degradation reason — contract:hook:inv-t28" yes "$(has "$ERR" "budget")"
+HOOK_ENV=""
+
+# The budget is only a bound if its CLOCK survives the invoking environment.
+# `$EPOCHREALTIME` is rendered with the locale's radix character, so under a
+# comma-decimal locale `${EPOCHREALTIME%%.*}` strips nothing and `$(( ... ))`
+# reads the comma as the comma operator, yielding the microseconds field alone —
+# forever under the deadline, so `_budget_ok` never once says "spent" and the
+# whole budget silently reverts to the unbounded cost of #603. Re-running the
+# spent-budget scenario under such a locale is the regression test: without the
+# hook's own `export LC_ALL=C` it blocks (rc 2) with no degradation note.
+#
+# WHICH locales are generated varies by machine and CI image, so the locale is
+# not assumed from its name — each candidate is confirmed by asking bash what
+# `$EPOCHREALTIME` actually looks like under it. If the machine has none, the
+# scenario still runs (the check count is pinned, so a silent skip would fail
+# the suite) and says so, rather than reporting coverage it did not get.
+comma_radix_locale() {
+  local L
+  for L in de_DE.UTF-8 fr_FR.UTF-8 es_ES.UTF-8 pt_BR.UTF-8 ru_RU.UTF-8 \
+           de_DE.utf8 fr_FR.utf8 de_DE fr_FR; do
+    case "$(LC_ALL="$L" bash -c 'printf %s "${EPOCHREALTIME:-}"' 2>/dev/null)" in
+      *,*) printf '%s' "$L"; return 0 ;;
+    esac
+  done
+  return 1
+}
+hook_case t28loc
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+T28LOC="$(comma_radix_locale || true)"
+if [ -n "$T28LOC" ]; then
+  HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=0 LC_ALL=$T28LOC"
+else
+  echo "NOTE: no comma-radix locale is generated here — the two locale checks below run under the default radix and cannot detect a locale-sensitive budget clock"
+  HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=0"
+fi
+run_hook s28loc
+check 361 "a spent budget still allows under a comma-radix locale — contract:hook:inv-t28" 0 "$RC"
+check 362 "a spent budget still degrades loudly under a comma-radix locale — contract:hook:inv-t28" \
+  yes "$(has "$ERR" "budget")"
+HOOK_ENV=""
+
+# A zero-padded budget is DECIMAL, never octal. The all-digits validator accepts
+# `08`, and bash reads a leading zero as base 8: `$(( $(date +%s) + 08 ))` is a
+# "value too great for base" error that leaves the deadline EMPTY, so every
+# `_budget_ok` comparison errors and the very first one degrades the Stop to an
+# unenforced allow. `08` is eight seconds — ample — so the hook must still block.
+hook_case t28zpad
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=08"
+run_hook s28zpad
+check 363 "a zero-padded budget is read base-10, so an unresolved fix still blocks — contract:hook:inv-t28" 2 "$RC"
+check 364 "a zero-padded budget spends nothing and prints no budget note — contract:hook:inv-t28" \
+  no "$(has "$ERR" "budget")"
+HOOK_ENV=""
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2380,7 +2461,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=368
+EXPECTED_CHECKS=376
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

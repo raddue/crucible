@@ -18,7 +18,34 @@
 # Disable errexit — this hook must never fail fatally (INV-C7)
 set +e
 
+# LC_ALL=C, and it must be LC_ALL rather than LC_NUMERIC: `$EPOCHREALTIME` is
+# rendered with the LOCALE'S radix character, so under de_DE / fr_FR / es_ES /
+# pt_BR / ru_RU and friends bash emits `1788995310,670161`. `${EPOCHREALTIME%%.*}`
+# then strips NOTHING (there is no `.` to match), and `$(( 1788995310,670161 ))`
+# parses that comma as C's COMMA OPERATOR — evaluating to the trailing
+# microseconds field alone (~10^5), forever below a ~10^9 deadline. `_budget_ok`
+# would answer "budget remains" on every call and the whole #603 budget below
+# would be a silent no-op, with no error output, in exactly the fail-open
+# direction it exists to prevent. `LC_NUMERIC=C` alone cannot fix it: an
+# inherited LC_ALL outranks LC_NUMERIC, and an inherited LC_ALL is precisely the
+# reproducing case. Nothing else here regresses under C: `_git` already runs
+# under `env -i`, `date -u -d` parses the transcript's ISO-8601 stamps
+# locale-independently, and python3 auto-enables UTF-8 mode under a C locale
+# (PEP 540), so non-ASCII paths still round-trip through grudge_query.py.
+export LC_ALL=C
+
 MAX_BLOCKS=3
+MAX_SECONDS="${CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS:-8}"
+case "$MAX_SECONDS" in ''|*[!0-9]*) MAX_SECONDS=8 ;; esac
+# Base 10 EXPLICITLY. The all-digits test above accepts `08`, `09` and `010`,
+# and bash reads a leading zero as OCTAL: `$(( $(date +%s) + 08 ))` is a "value
+# too great for base" arithmetic error that leaves $BUDGET_DEADLINE EMPTY — every
+# later `_budget_ok` comparison then errors too and degrades the Stop to an
+# unenforced allow — while `010` raises no error and silently means 8 seconds,
+# not 10. Normalising once HERE, rather than at the arithmetic use site, keeps
+# the number used for the deadline and the number printed in `_budget_out`'s
+# message the same value.
+MAX_SECONDS=$(( 10#$MAX_SECONDS ))
 
 # `git -C <dir>` ONLY chdirs — it does not clear the environment, and git obeys
 # TWO families of inherited variable that outrank anything this hook says:
@@ -44,6 +71,35 @@ MAX_BLOCKS=3
 _git() {
   local d="$1"; shift
   env -i PATH="$PATH" HOME="$HOME" git -C "$d" "$@" 2>/dev/null
+}
+
+# ── Per-Stop wall-clock budget (issue #603) ─────────────────────────────
+# Per-invocation cost grows in THREE attacker-chosen inputs — candidate count
+# (up to the --max-count=500 scan, and accumulable turn-over-turn through
+# future-dated author times), files per commit, and the stored grudge count
+# each grudge_query.py lookup must see — so neither the scan cap nor any
+# structural filter can bound wall time (362 s measured on one Stop). The one
+# input-independent bound is a wall-clock budget. Once it is spent the hook
+# gives up on the WHOLE call and degrades LOUDLY to allow (exit 0), matching
+# the never-fail-closed contract: an attacker can stall a Stop for at most
+# MAX_SECONDS, never block it. The allow is a rescan-on-next-Stop, not a
+# clearance: the checkpoint (step 16) only advances on a normal pass.
+#
+# The clock is bash's `$EPOCHREALTIME` (bash >=5) — a builtin, so a check
+# costs integer arithmetic, not a subprocess. That matters in `_overlap`'s
+# nested loop, where a `date` per call would re-add the very cost this budget
+# exists to bound. On older bash it falls back to a whole-second `date +%s`,
+# which still bounds to ~1 s past the deadline at the loop boundaries below.
+_budget_ok() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    [ "$(( ${EPOCHREALTIME%%.*}+0 ))" -lt "$BUDGET_DEADLINE" ]
+  else
+    [ "$(date +%s)" -lt "$BUDGET_DEADLINE" ]
+  fi
+}
+_budget_out() {
+  echo "grudge-resolution-guard: per-Stop wall-clock budget (${MAX_SECONDS}s) reached before the candidate set was fully checked — allowing this Stop to bound per-invocation cost; grudge compliance was NOT enforced for every candidate (issue #603). Any unresolved fix(*) commit will be scanned again on a later Stop." >&2
+  exit 0
 }
 
 # ── 1. Read stdin ───────────────────────────────────────────────────────
@@ -77,6 +133,16 @@ SENTINEL="$PROJECT_MEMORY/.grudge-resolution-guard-disabled"
 if [ -f "$SENTINEL" ]; then
   echo "grudge-resolution-guard: disabled via sentinel file $SENTINEL — fix(*) commits are not being checked for grudge compliance" >&2
   exit 0
+fi
+
+# The budget is measured from here — every cheaper setup step (stdin, project
+# derivation, breadcrumb, kill-switches) has already run, but nothing below
+# (dependency probe, payload parse, git scans, candidate diff-tree fan-out,
+# grouping, clearance subprocesses) is input-independent work. A zero budget
+# therefore trips on the very first check.
+BUDGET_DEADLINE=$(( $(date +%s) + MAX_SECONDS ))
+if ! _budget_ok; then
+  _budget_out
 fi
 
 # ── 5. Dependencies + payload ───────────────────────────────────────────
@@ -291,6 +357,9 @@ _split_csv() {
 
 IS_SHA=(); IS_AT=(); IS_FILES=()
 while IFS= read -r line; do
+  # One `git diff-tree` subprocess may follow per candidate — the first of the
+  # two attacker-multiplied fan-outs this budget bounds.
+  _budget_ok || _budget_out
   [ -z "$line" ] && continue
   c_sha="${line%%|*}"
   c_rest="${line#*|}"
@@ -348,6 +417,15 @@ done < <(printf '%s\n' "$LOG")
 # ── 12. Grouping / join / merge / re-arm ────────────────────────────────
 _overlap() {
   # _overlap <csv-a> <csv-b> -> 0 iff they share at least one path
+  # The step-12 grouping hotspot: called once per candidate pair (~n^2), each
+  # compare squaring the files-per-commit — the pure-CPU half of issue #603.
+  # The clock is a bash builtin, so this check is arithmetic, not a subprocess.
+  _budget_ok || _budget_out
+  # ponytail: the check gates the CALL, not each path pair — one candidate
+  # pair whose file lists are both enormous can run past the budget in a
+  # single call. Moving the check into the inner loop would bound even that,
+  # at the cost of an arithmetic op per string compare on the hot path; the
+  # measured 362 s case (500 candidates x 30 files) trips between calls.
   local a b
   local -a AA BB
   local IFS=','
@@ -365,6 +443,7 @@ _overlap() {
 
 # Ancestry order (oldest first) so `group_id` is frozen at genuine first sight.
 for (( gi=${#IS_SHA[@]}-1; gi>=0; gi-- )); do
+  _budget_ok || _budget_out
   n_sha="${IS_SHA[$gi]}"
   n_files="${IS_FILES[$gi]}"
   # Persisted once from filter (c)'s own diff-tree output; never recomputed,
@@ -481,6 +560,10 @@ _worktree_fallback() {
   [ ! "$SESSION_ROOT" -ef "$STORE_REPO_ROOT" ] && [ -d "$GRUDGE_ROOT/$WORKTREE_KEY" ]
 }
 for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
+  # Each uncleared candidate can spawn two to four `python3 grudge_query.py`
+  # subprocesses (a second attacker-multiplied fan-out), so the budget is
+  # checked before — not after — the clearance lookups.
+  _budget_ok || _budget_out
   k_sha="${IS_SHA[$ci]}"
   k_at="${IS_AT[$ci]}"
   k_gid="${SHA_GROUP[$k_sha]}"
