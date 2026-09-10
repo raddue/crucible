@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 17 test cases validating allow/block behavior.
+# Runs 26 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=25
+TOTAL=26
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -105,6 +105,15 @@ make_legacy_json() {
   local file_path="$1"
   local content="$2"
   jq -nc --arg fp "$file_path" --arg c "$content" '{"tool":"Write","input":{"file_path":$fp,"content":$c}}'
+}
+
+# ── Helper: build LEGACY-shape Edit JSON (.tool/.input) ─────────────────
+make_legacy_edit_json() {
+  local file_path="$1"
+  local old_string="$2"
+  local new_string="$3"
+  jq -nc --arg fp "$file_path" --arg os "$old_string" --arg ns "$new_string" \
+    '{"tool":"Edit","input":{"file_path":$fp,"old_string":$os,"new_string":$ns}}'
 }
 
 # ── Helper: create verdict marker ──────────────────────────────────────
@@ -587,10 +596,32 @@ JSON="$(make_json "$LEDGER_PATH" "$DOUBLE_SPACE_CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 25 "R2BA-3: double-space phase header PASS-introducing write blocked" 2 "$RC"
 
+# ========================================================================
+# Test 26: LEGACY-shape (.tool/.input) Edit introducing a PASS, no verdict
+# marker — blocked (exit 2). Exercises the Edit-path legacy fallback
+# (EDIT_OLD/EDIT_NEW via .tool_input.old_string // .input.old_string and
+# .tool_input.new_string // .input.new_string), which test 22 (Write-path
+# legacy fallback only) does not cover. Genuine discriminating power: with
+# the .input fallback removed, a legacy-shape Edit payload resolves
+# EDIT_NEW empty, the hook takes the "exit 0" early-return, and this test
+# fails.
+# ========================================================================
+reset_state
+EXISTING="$(make_ledger "build-test-026" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+mkdir -p "$VERDICT_DIR"
+JSON="$(make_legacy_edit_json "$LEDGER_PATH" "Status: IN_PROGRESS" "Status: PASS")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 26 "Legacy .tool/.input Edit PASS introduction blocked" 2 "$RC"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
 
+if [ "$((PASSED + FAILED))" -ne "$TOTAL" ]; then
+  echo "FATAL: $((PASSED + FAILED)) tests recorded a result (PASSED=$PASSED, FAILED=$FAILED) but TOTAL=$TOTAL — a test silently did not run." >&2
+  exit 1
+fi
 if [ "$FAILED" -gt 0 ]; then
   exit 1
 fi

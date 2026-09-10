@@ -79,7 +79,9 @@ External enforcement hook for the build pipeline's gate ledger. Blocks unauthori
 
 ### Setup
 
-Add the following to your `.claude/settings.json` (project-level) or `~/.claude/settings.json` (user-level):
+**Installed automatically** when the crucible plugin is enabled — `.claude-plugin/plugin.json` registers this hook on the `PreToolUse` event (matcher `Write|Edit`) via `${CLAUDE_PLUGIN_ROOT}`, so no manual configuration is needed. See the MIN-5-R6 Parity Note below for details.
+
+For a non-plugin install (running this hook standalone), add the following to your `.claude/settings.local.json` (machine-local, untracked) or `~/.claude/settings.json` (user-level) — never a committed `.claude/settings.json` (see Hook Registration Surface below):
 
 ```json
 {
@@ -88,7 +90,7 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "bash hooks/gate-ledger-guard.sh", "timeout": 500 }
+          { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/gate-ledger-guard.sh", "timeout": 500 }
         ]
       }
     ]
@@ -96,7 +98,7 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
 }
 ```
 
-> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.) The maintainer's actual user-global registration uses `Write|Edit` (see the MIN-5-R6 Parity Note below); the `*` shown here is simply the simplest illustrative form.
+> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.) For the manual path, use an absolute path (S1/CHAIN-N5: a repo-relative path is cwd-dependent).
 
 ### Verification
 
@@ -126,7 +128,9 @@ Run the test suite:
 bash hooks/tests/test-gate-ledger-guard.sh
 ```
 
-17 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, and PipelineID change detection.
+26 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, PipelineID change detection, legacy `.tool`/`.input` fallback (Write and Edit paths), indented old_string, backslash old_string, and double-space phase headers.
+
+`bash hooks/tests/test-plugin-manifest-hooks.sh` separately checks that `.claude-plugin/plugin.json` actually declares the `PreToolUse` registration described above (matcher, `type: command`, `${CLAUDE_PLUGIN_ROOT}` path) — a wiring check, not a runtime liveness check (#591 item 3).
 
 ### Dependencies
 
@@ -134,7 +138,7 @@ bash hooks/tests/test-gate-ledger-guard.sh
 
 ### MIN-5-R6 Parity Note
 
-Registered in user-global `~/.claude/settings.json`. Matcher: `Write|Edit` (verified by reading `~/.claude/settings.json` on 2026-04-15). Because a concrete matcher is set, Claude Code filters upstream and only Write/Edit PreToolUse events reach the hook — no internal filtering is needed for other tool families. The hook still internally filters by target path (`build-gate-ledger.md`) and exits 0 for every other file. By contrast, `build-routing-advisor` registers `matcher: "Agent"` (canonical per T1; legacy alias `"Task"` also honored) in the SAME user-global `~/.claude/settings.json`. Both hooks share scope (user-global, not `.claude/settings.json` at the repo root) and are documented side-by-side so the matcher choices are explicit for parity.
+Registered via the plugin, not via manual settings.json (#591). This section previously claimed the hook was "Registered in user-global `~/.claude/settings.json`. Matcher: `Write|Edit` (verified ... on 2026-04-15)" — that was never true; no settings.json ever installed this hook, which is why it sat inert. The durable fact is that `.claude-plugin/plugin.json` declares a `PreToolUse` hook for this script (matcher `Write|Edit`, command `bash "${CLAUDE_PLUGIN_ROOT}/hooks/gate-ledger-guard.sh"`) (#591 item 3), so enabling the plugin installs it automatically. The manual `~/.claude/settings.json` / `.claude/settings.local.json` registration shown in the Setup section above is a fallback for non-plugin installs — redundant, not required, once the plugin is enabled. Whether a given reader's own settings.json additionally declares a redundant `PreToolUse` entry for this script is machine-local and can drift between developers — check your own files rather than trusting a hook inventory recorded here. `build-routing-advisor` (below) remains in the state this hook used to be in: it is NOT registered via the plugin, and its Setup section is a manual-registration instruction, not a description of an existing registration.
 
 ## Build Routing Advisor
 
@@ -385,17 +389,27 @@ already-`/trust`ed repo does not re-prompt, and a reviewer's `gh pr checkout N`
 runs the branch's hook (and whatever `scripts/` helper it names) with the
 reviewer's full privileges on the next Stop.
 
-The two legal registration points are `.claude/settings.local.json`
+The per-machine settings registration points are `.claude/settings.local.json`
 (machine-local, untracked — the whole `.claude/` directory is git-ignored, and
 `scripts/check_settings_surface.py` fails the gate if any of it is re-tracked)
-and user-global `~/.claude/settings.json` (the `gate-ledger-guard` /
-`build-routing-advisor` convention). Both make the hook's execution surface
-opt-in per machine rather than automatic per clone. A registration command must
-reference the hook by its **absolute installed path** (or `$CLAUDE_PROJECT_DIR`);
-the machine that installed it is the machine that accepts the surfaced code.
+and user-global `~/.claude/settings.json` (the `build-routing-advisor`
+convention). Both make the hook's execution surface opt-in per machine rather
+than automatic per clone. A registration command must reference the hook by its
+**absolute installed path** (or `$CLAUDE_PROJECT_DIR`); the machine that
+installed it is the machine that accepts the surfaced code.
 
-Review rule: every PR touching a `hooks/` or `scripts/` diff gets full review
-before merge — those files execute with the maintainer's privileges.
+A third, distinct mechanism is the plugin manifest: `.claude-plugin/plugin.json`
+may declare a `hooks.PreToolUse` entry (as `gate-ledger-guard` now does, #591),
+which fires only after the user explicitly enables the crucible plugin on their
+machine. This is per-machine opt-in exactly like the settings points — enabling
+a plugin is an affirmative execute-code grant, not a checkout side-effect — so
+it does not create the GH-604 surface. The prohibition above targets committed
+`.claude/settings.json`, which auto-loads on checkout without fresh consent.
+
+Review rule: every PR touching a `hooks/` or `scripts/` diff (or
+`.claude-plugin/plugin.json`, which carries hook-execution config — command,
+matcher, timeout) gets full review before merge — those files execute with the
+maintainer's privileges.
 
 ### Testing
 
