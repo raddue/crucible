@@ -59,7 +59,8 @@ plan-writer `safe-partial` rollback annotation.
 
 Complete file deletions; mechanical or automated refactors where the reviewer verifies
 intent, not every line; generated files. This escape valve is load-bearing — without it the
-thresholds get cargo-culted into a hard rule, which §3 forbids.
+thresholds get cargo-culted into a hard rule, which the header's "advisory — never
+gating" rule forbids.
 
 ## 6. Separate refactoring from feature work
 

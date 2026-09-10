@@ -384,21 +384,21 @@ def selftest() -> int:
     check(i9_doc_violations(["advisory only, never gates"]) == [], "case12 i9 doc clean")
     check(i9_doc_violations(["hard stop here"]) != [], "case12 i9 doc token fails")
 
-    # Case 14 — F2: word/symbol boundaries. `Nit` inside `Nitpick`, `5,000`
+    # Case 13 — F2: word/symbol boundaries. `Nit` inside `Nitpick`, `5,000`
     # inside `15,000`/`25,000` do NOT trip I4/I5; bare tokens still do.
-    check(i4_violations(["Nitpick review note"]) == [], "case14 Nitpick not I4")
-    check(i4_violations(["FYI: fine"]) != [], "case14 FYI still I4 without §8")
+    check(i4_violations(["Nitpick review note"]) == [], "case13 Nitpick not I4")
+    check(i4_violations(["FYI: fine"]) != [], "case13 FYI still I4 without §8")
     check(i4_violations(["note about Optional: in prose", "## 8.", "ok"]) != [],
-          "case14 Optional: outside §8 still I4")
-    check(i5_violations(["15,000 and 25,000 are caps"]) == [], "case14 15k/25k not I5")
-    check(i5_violations(["5,000 is our threshold"]) != [], "case14 bare 5,000 still I5")
+          "case13 Optional: outside §8 still I4")
+    check(i5_violations(["15,000 and 25,000 are caps"]) == [], "case13 15k/25k not I5")
+    check(i5_violations(["5,000 is our threshold"]) != [], "case13 bare 5,000 still I5")
 
-    # Case 15 — F3: whitespace inside `**Linked from:**` backticks stripped.
+    # Case 14 — F3: whitespace inside `**Linked from:**` backticks stripped.
     padded = ("> **Linked from:** `skills/temper/SKILL.md `, ` skills/delve/SKILL.md`, "
               "`skills/finish/SKILL.md `")
-    check(set(linked_from_paths([padded])) == three, "case15 padded backticks parsed")
+    check(set(linked_from_paths([padded])) == three, "case14 padded backticks parsed")
     check(linked_from_violations(set(linked_from_paths([padded]))) == [],
-          "case15 padded two-way pin passes")
+          "case14 padded two-way pin passes")
 
     if failures:
         print("SELFTEST FAILED:")
