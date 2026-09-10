@@ -84,20 +84,27 @@ python3 "$append" \
 ---
 schema: 1
 hash: <sha256(repo_root|sorted-normalized(files_touched)|discriminator)[:12]>
-repo: <basename>            # cosmetic dir name
-repo_root: <abs realpath>   # isolation key; reads filter on this
-fixed_in_commit: <sha>      # recorded, NOT part of the key
-symptom: <one-line>         # dedupe discriminator when no signature
-root_cause: <one-line>
+repo: "<basename>"            # cosmetic dir name
+repo_root: "<abs realpath>"   # isolation key; reads filter on this
+fixed_in_commit: "<sha>"      # recorded, NOT part of the key
+symptom: "<one-line>"         # dedupe discriminator when no signature
+root_cause: "<one-line>"
 files_touched: ["repo/rel/path", ...]
 anti_pattern_signature: "<regex or literal snippet>"   # optional
-date_fixed: YYYY-MM-DD
+date_fixed: "YYYY-MM-DD"
 ---
 ## Repro
 <steps>
 ## Why this kept happening
 <expanded root cause>
 ```
+
+Every free-text value is JSON-encoded ([#602](https://github.com/raddue/crucible/issues/602)):
+a field containing a newline, a bare `---` line, or `key: value` lines must not
+be able to smuggle forged keys or an early terminator into the frontmatter.
+(`schema` and `hash` are emitted bare — a constant int and a hex digest that
+cannot carry a newline.) The reader (`grudge_query.parse_grudge`) also rejects
+unknown keys and duplicates — never trust a line the writer cannot emit.
 
 **Dedupe:** key excludes `fixed_in_commit` (one bug can be fixed in many commits);
 `discriminator = anti_pattern_signature` when non-empty else `symptom`. Same key →

@@ -120,21 +120,25 @@ def _is_inside(child: str, parent: str) -> bool:
 # Serialization                                                               #
 # --------------------------------------------------------------------------- #
 def _render(record: dict) -> str:
-    """Render a grudge to markdown. Frontmatter is simple `key: value` lines;
-    files_touched is a JSON array on one line so the reader can json.loads it
-    without a YAML dependency."""
+    """Render a grudge to markdown. Every frontmatter value is JSON-encoded on
+    one line (#602 S-0): fields are written through the writer alone, never
+    copied, so a value cannot smuggle a bare `---` terminator or forged
+    `key: value` lines past the fence — the reader's `key: value` parsing can
+    then never see attacker-injected keys. This is why the writer-side escape
+    closes the class the reader's key-set validation cannot: forged keys are
+    all *known* keys, so allowlisting the reader is not enough alone."""
     fm = [
         "---",
         f"schema: {SCHEMA_VERSION}",
         f"hash: {record['hash']}",
-        f"repo: {record['repo']}",
-        f"repo_root: {record['repo_root']}",
-        f"fixed_in_commit: {record.get('fixed_in_commit', '') or ''}",
-        f"symptom: {record.get('symptom', '') or ''}",
-        f"root_cause: {record.get('root_cause', '') or ''}",
+        f"repo: {json.dumps(record['repo'])}",
+        f"repo_root: {json.dumps(record['repo_root'])}",
+        f"fixed_in_commit: {json.dumps(record.get('fixed_in_commit', '') or '')}",
+        f"symptom: {json.dumps(record.get('symptom', '') or '')}",
+        f"root_cause: {json.dumps(record.get('root_cause', '') or '')}",
         f"files_touched: {json.dumps(record.get('files_touched', []))}",
         f"anti_pattern_signature: {json.dumps(record.get('anti_pattern_signature', '') or '')}",
-        f"date_fixed: {record.get('date_fixed', '') or ''}",
+        f"date_fixed: {json.dumps(record.get('date_fixed', '') or '')}",
         "---",
         "## Repro",
         (record.get("repro") or "").rstrip(),
