@@ -110,6 +110,9 @@ Multiple base-branch candidates found: main, master. Which did this branch split
 
 Do not silently pick the first match.
 
+<!-- CANONICAL: shared/change-sizing.md -->
+Measure `git diff --numstat <base>..HEAD` (two-dot, matching temper's two-dot range — both diff the base ref's tip against HEAD, never the merge base). If past the ~300 reviewability band (per `change-sizing.md` §1), say so and name the applicable strategy. Advisory input to the merge-vs-PR-vs-stack choice, not a gate.
+
 ### Step 5: Present Options
 
 Present exactly these 4 options:
