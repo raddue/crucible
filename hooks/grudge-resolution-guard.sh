@@ -613,8 +613,15 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
     _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
                --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
     if [ -n "$LOOKUP_OUT" ]; then
+      # TRANSIENT, so this candidate is NOT done: `continue`ing here would skip
+      # the worktree by-commit door below for THIS SAME candidate — the
+      # same-member form of the cross-member shadowing the group gating above
+      # fixes. In a linked worktree (the shape _worktree_fallback exists for)
+      # the candidate's own grudge is recorded worktree-keyed WITH a
+      # fixed_in_commit, while some older, unrelated shared-store grudge can
+      # match by files first; jumping to the next candidate would leave the
+      # group transient despite its own durable commit-identity evidence.
       GROUP_CLEARED["$k_gid"]=1
-      continue
     fi
   fi
   if _worktree_fallback; then

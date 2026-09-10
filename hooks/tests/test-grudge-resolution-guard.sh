@@ -2464,7 +2464,7 @@ HOOK_ENV=""
 # regain headroom — by-files evidence may clear THIS Stop, never spend the
 # durable bound.
 # ========================================================================
-# contract:group:inv-t29 checks=19
+# contract:group:inv-t29 checks=23
 hook_case t608
 for f in shared.py b.py c.py; do echo "V = 0 # $f" > "$HC_REPO/$f"; done
 commit_all "$HC_REPO" "chore: baseline"
@@ -2546,6 +2546,43 @@ check 382 "the mixed-evidence group clears — contract:group:inv-t29" 0 "$RC"
 check 383 "a durable sibling match still resets the counter — contract:group:inv-t29" 0 \
   "$(st "$HC_REPO" s608b ".block_counts[.sha_group[\"$T608B2\"]]")"
 
+# ...and the SAME-MEMBER form of that shadowing, which the group gating above
+# does not reach. Inside a linked worktree the writers record a candidate's own
+# grudge WORKTREE-keyed (grudge_append.resolve_repo() -> --show-toplevel) with a
+# real fixed_in_commit, so its durable evidence lives behind the worktree
+# by-commit door only. If an older, unrelated SHARED-store grudge matches the
+# same candidate by FILES first, a `continue` on that transient hit jumps to the
+# next candidate and never opens the candidate's own durable door: the group
+# clears this Stop but keeps a non-zero persisted counter despite genuine
+# commit-identity evidence. The transient hit must fall through, not `continue`.
+hook_case t608c
+echo "VALUE = 0" > "$HC_REPO/app.py"; echo "L = 0" > "$HC_REPO/lib.py"
+commit_all "$HC_REPO" "chore: baseline"
+git -C "$HC_REPO" branch wtbr608
+T608C_WT="$HC_ROOT/linked"
+git -C "$HC_REPO" worktree add -q "$T608C_WT" wtbr608
+T608C_WT="$(cd "$T608C_WT" && pwd -P)"
+echo "VALUE = 1" > "$T608C_WT/app.py"; echo "L = 1" > "$T608C_WT/lib.py"
+commit_all "$T608C_WT" "fix(widget): repair from inside the linked worktree"
+T608C_FIX="$(sha_of "$T608C_WT" HEAD)"
+HC_CWD="$T608C_WT"
+run_hook s608c
+check 384 "premise: the worktree candidate blocks with an empty store — contract:group:inv-t29" 2 "$RC"
+check 385 "premise: the block is persisted as 1 — contract:group:inv-t29" 1 \
+  "$(st "$T608C_WT" s608c ".block_counts[.sha_group[\"$T608C_FIX\"]]")"
+# The shadowing grudge: shared-keyed, commit-less, and OLDER — it can only ever
+# match through the primary `--by-files` door, i.e. transiently.
+append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "app and lib regressed" \
+  "app.py,lib.py" "" "2026-03-01" >/dev/null
+# The candidate's OWN durable evidence, recorded the way the writers record it
+# from inside a linked worktree: worktree-keyed, with a fixed_in_commit.
+append_grudge "$HC_STORE" "$(basename "$T608C_WT")" "$T608C_WT" "the widget regressed" \
+  "app.py" "$T608C_FIX" "2026-04-01" >/dev/null
+run_hook s608c true
+check 386 "the shadowed worktree candidate clears — contract:group:inv-t29" 0 "$RC"
+check 387 "a transient by-files hit cannot shadow the SAME member's by-commit evidence — contract:group:inv-t29" 0 \
+  "$(st "$T608C_WT" s608c ".block_counts[.sha_group[\"$T608C_FIX\"]]")"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2558,7 +2595,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=395
+EXPECTED_CHECKS=399
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

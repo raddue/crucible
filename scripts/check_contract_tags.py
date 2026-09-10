@@ -158,7 +158,7 @@ COVERAGE_MAP: dict[str, dict] = {
     # issue #603: per-Stop wall-clock budget bounds the hook's attacker-chosen inputs
     "contract:hook:inv-t28": {"kind": "bash", "carriers": [_G], "checks": 8},
     # issue #608: by-files clearance must not spend the persisted block counter
-    "contract:group:inv-t29": {"kind": "bash", "carriers": [_G], "checks": 19},
+    "contract:group:inv-t29": {"kind": "bash", "carriers": [_G], "checks": 23},
 }
 del _G
 
