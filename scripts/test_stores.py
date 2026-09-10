@@ -46,8 +46,15 @@ from scripts import atomic_write as aw  # noqa: E402
 # --------------------------------------------------------------------------- #
 
 class GrudgeNormalizeTest(unittest.TestCase):
-    def test_backslashes_to_posix(self):
-        self.assertEqual(ga.normalize_path("a\\b\\c.py", "/repo"), "a/b/c.py")
+    def test_backslash_handling_is_os_aware(self):
+        if os.name == "nt":
+            # On Windows (separator) backslash must still normalize to '/'.
+            self.assertEqual(ga.normalize_path("a\\b\\c.py", "/repo"), "a/b/c.py")
+        else:
+            # #607 (siege S-8): POSIX backslash is a legal filename byte — git
+            # stores it verbatim. Rewriting it to '/' stores a DIFFERENT path,
+            # voiding the grudge; --cull then deletes it. Must round-trip.
+            self.assertEqual(ga.normalize_path("a\\b\\c.py", "/repo"), "a\\b\\c.py")
 
     def test_absolute_made_repo_relative(self):
         self.assertEqual(ga.normalize_path("/repo/src/a.py", "/repo"), "src/a.py")
@@ -322,6 +329,37 @@ class CullTest(unittest.TestCase):
             self._write(gdir, "g.md", repo_root, ["a.py"])
             self.assertEqual(gq.cull("myrepo", repo_root, base), [])
             self.assertTrue(os.path.exists(os.path.join(gdir, "g.md")))
+
+
+class GrudgeBackslashRoundTripTest(unittest.TestCase):
+    """#607 (siege S-8): a filename containing a backslash (legal on POSIX, git
+    stores it verbatim) must survive append -> query -> cull. normalize_path
+    rewriting `\\` to `/` stored a DIFFERENT, non-existent path -> survivors()
+    went [], the grudge never matched, and --cull permanently DELETED it.
+    Windows-only behavior is covered by the caller-side unit test above."""
+
+    def test_backslash_file_survives_append_query_cull(self):
+        if os.name == "nt":
+            self.skipTest("backslash is the path separator on Windows — n/a")
+        with tempfile.TemporaryDirectory() as repo, \
+                tempfile.TemporaryDirectory() as base:
+            weird = os.path.join(repo, "weird\\name.py")  # one filename, literal backslash
+            open(weird, "w").close()
+            path = ga.append(
+                symptom="retry-logic regression on weird names",
+                files_touched=[weird],  # absolute, as git's diff-tree would give it
+                repo="myrepo", repo_root=repo, base_dir=base,
+            )
+            self.assertIsNotNone(path)
+            self.assertTrue(os.path.exists(path))
+            # pre-flight must match the grudge against the same in-scope file
+            matched, stats = gq.query([weird], "myrepo", repo, base_dir=base)
+            self.assertEqual(stats["matched"], 1,
+                             "grudge failed to match its own backslash-named file")
+            self.assertEqual(stats["skipped_stale"], 0)
+            # cull must not treat the still-existing file as gone
+            self.assertEqual(gq.cull("myrepo", repo, base), [])
+            self.assertTrue(os.path.exists(path))
 
 
 class RenderBlockTest(unittest.TestCase):

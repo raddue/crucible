@@ -78,10 +78,18 @@ def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
 def normalize_path(p: str, repo_root: str) -> str:
     """Normalize a path to repo-relative POSIX form (fix #1): forward-slashes,
     made relative to repo_root when absolute, no leading './', no trailing '/'."""
-    p = p.replace("\\", "/").strip()
+    # #607 (siege S-8): only Windows treats backslash as a path separator. On
+    # POSIX it is a legal filename byte — git stores it verbatim (diff-tree -z),
+    # so rewriting it to '/' stores a DIFFERENT non-existent path, voiding the
+    # grudge; --cull then permanently deletes it. Rewrite only on Windows.
+    _windows = os.name == "nt"
+    p = p.replace("\\", "/") if _windows else p
+    p = p.strip()
     if os.path.isabs(p) or p.startswith(repo_root):
         try:
-            p = os.path.relpath(p, repo_root).replace("\\", "/")
+            p = os.path.relpath(p, repo_root)
+            if _windows:
+                p = p.replace("\\", "/")
         except ValueError:  # different drive on Windows — leave as-is
             pass
     while p.startswith("./"):
