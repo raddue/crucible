@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -78,6 +79,105 @@ class GrudgeIsInsideTest(unittest.TestCase):
     def test_parent_equals_child_is_inside(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertTrue(ga._is_inside(d, d))
+
+
+# --------------------------------------------------------------------------- #
+# grudge_append — resolve_repo() env allowlist (siege S-3, #605)               #
+# --------------------------------------------------------------------------- #
+
+class GrudgeResolveRepoEnvTest(unittest.TestCase):
+    """#605 — resolve_repo() shells out to git with the FULL inherited env.
+    Git hooks export GIT_DIR/GIT_WORK_TREE; with no `env=` those leak in and
+    steer which repo git reports, which decides the store dir, the repo_root
+    isolation key, AND the privacy-guard check. git must run under an
+    allowlist env (PATH + HOME), never the inherited one."""
+
+    def setUp(self):
+        self.saved = dict(os.environ)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.saved)
+
+    def _gitinit(self, d):
+        # Run the fixture's own git under the SAME allowlist the code under test
+        # uses. These tests deliberately poison the ambient env (GIT_DIR /
+        # GIT_WORK_TREE, and PATH in the walk-up test); inheriting that here
+        # would steer or break `git init` itself, so the fixture would stop
+        # building what the assertions claim to exercise.
+        subprocess.run(["git", "init", "-q", d], check=True,
+                       capture_output=True, text=True,
+                       env={k: os.environ[k] for k in ("PATH", "HOME")
+                            if k in os.environ})
+
+    def test_inherited_git_dir_does_not_steer_repo_resolution(self):
+        with tempfile.TemporaryDirectory() as out:
+            real = os.path.join(out, "real_repo")
+            hidden = os.path.join(out, "hidden_repo")
+            for d in (real, hidden):
+                self._gitinit(d)
+            # Recreate a git hook's exported environment: GIT_DIR/WORK_TREE
+            # point at the WRONG repo (this is exactly what hooks export).
+            os.environ["GIT_DIR"] = os.path.join(hidden, ".git")
+            os.environ["GIT_WORK_TREE"] = hidden
+            repo, root = ga.resolve_repo(start_dir=real)
+            # Must resolve to the repo the cwd is in, not the GIT_DIR-steered one.
+            self.assertEqual(repo, "real_repo")
+            self.assertEqual(root, os.path.realpath(real))
+
+    def test_append_cli_refuses_store_into_repo_tree_under_poisoned_env(self):
+        # #605 end-to-end (the siege-verified leak): the whole append() chain key
+        # on the repo resolve_repo() reports. With GIT_DIR inherited, it reports
+        # the steered repo, the privacy guard compares against the WRONG
+        # repo_root, and the private store gets written INTO the real repo tree.
+        # With the fix the guard still refuses on the REAL cwd repo (rc=1, and
+        # no grudges under the store path inside the repo tree).
+        with tempfile.TemporaryDirectory() as out:
+            real = os.path.join(out, "real_repo")
+            hidden = os.path.join(out, "hidden_repo")
+            for d in (real, hidden):
+                self._gitinit(d)
+            store = os.path.join(real, ".claude", "grudge")
+            env = dict(os.environ)
+            env["GIT_DIR"] = os.path.join(hidden, ".git")
+            env["GIT_WORK_TREE"] = hidden
+            env["CRUCIBLE_GRUDGE_DIR"] = store
+            script = os.path.join(HERE, "grudge_append.py")
+            r = subprocess.run(
+                [sys.executable, script, "--symptom", "private bug",
+                 "--files", "src/secret.py", "--root-cause", "regression"],
+                cwd=real, env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertFalse(os.path.exists(os.path.join(store, "real_repo")))
+            self.assertFalse(os.path.exists(os.path.join(store, "hidden_repo")))
+
+    def test_git_failure_in_subdir_still_finds_the_real_repo_root(self):
+        # The allowlist made the git call failable in legitimate setups. If a
+        # failure fell through to realpath(cwd), a cwd one level down would be
+        # reported as the repo root — and append()'s privacy guard, comparing
+        # the store dir against that too-narrow root, would then permit a write
+        # INTO the repo tree. Same leak as #605, reached by a silent git
+        # failure. Here git is genuinely unreachable (PATH holds no git), which
+        # is a real failure, not a mock.
+        with tempfile.TemporaryDirectory() as out:
+            repo = os.path.join(out, "real_repo")
+            self._gitinit(repo)
+            sub = os.path.join(repo, "src", "deep")
+            os.makedirs(sub)
+            os.environ["PATH"] = os.path.join(out, "empty_bin")
+            os.makedirs(os.environ["PATH"])
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                repo_name, root = ga.resolve_repo(start_dir=sub)
+                # ...and the guard that depends on it still refuses an in-tree store.
+                refused = ga.append(
+                    symptom="private bug", files_touched=["src/secret.py"],
+                    repo=repo_name, repo_root=root,
+                    base_dir=os.path.join(repo, ".claude", "grudge"))
+            self.assertEqual(root, os.path.realpath(repo))   # NOT the subdir
+            self.assertEqual(repo_name, "real_repo")
+            self.assertIsNone(refused)
+            self.assertFalse(os.path.exists(os.path.join(repo, ".claude")))
 
 
 # --------------------------------------------------------------------------- #

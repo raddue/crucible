@@ -54,16 +54,39 @@ def grudges_dir(repo: str, base_dir: Optional[str] = None) -> str:
     return os.path.join(base, repo, "grudges")
 
 
+def _walk_up_git_root(base: str) -> Optional[str]:
+    """Env-free repo-root detector: walk up from `base` looking for a `.git`
+    entry (a dir in a normal clone, a file in a worktree/submodule). Returns the
+    realpath of the containing dir, or None when no `.git` is found."""
+    cur = os.path.realpath(os.path.abspath(base))
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
 def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
     """(repo_basename, repo_root_realpath) for the repo the cwd is in. Shells to
-    git; falls back to the realpath of start_dir/cwd when not in a git repo.
+    git; if that fails, walks up for a `.git` entry; falls back to the realpath
+    of start_dir/cwd only when neither finds a repo.
     Never raises. CLI-only (git side effect)."""
     base = start_dir or os.getcwd()
     try:
         import subprocess
+        # #605 (siege S-3): run git under an ALLOWLIST env, never the inherited
+        # one. Hooks export GIT_DIR/GIT_WORK_TREE; with no env= those leak in
+        # and steer which repo git reports — the store dir, the repo_root
+        # isolation key, and the privacy-guard check all follow the WRONG repo.
+        # A denylist can't work (GIT_CONFIG_KEY_n is indexed, no finite set), so
+        # keep only what git needs: PATH (find git) + HOME (read ~/.gitconfig).
+        keep = ("PATH", "HOME")
+        env = {k: os.environ[k] for k in keep if k in os.environ}
         proc = subprocess.run(
             ["git", "-C", base, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         top = proc.stdout.strip()
         if proc.returncode == 0 and top:
@@ -71,6 +94,22 @@ def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
             return (os.path.basename(root.rstrip("/")) or root, root)
     except Exception:  # noqa: BLE001 — best-effort, never fatal
         pass
+    # #605 (follow-up): the allowlist above makes the git call newly FAILABLE in
+    # legitimate setups (config reachable only via GIT_CONFIG_GLOBAL/XDG_CONFIG_HOME,
+    # a Windows box needing SystemRoot/PATHEXT, git off PATH). Falling straight
+    # through to cwd would report a SUBDIR as the repo root — and then the
+    # privacy guard in append() compares the store dir against that too-narrow
+    # root and happily writes the private store INTO the repo tree, which is the
+    # exact leak #605 closed, reached via a silent git failure instead. So try an
+    # env-free walk-up first; bare cwd is only for a genuine non-repo dir.
+    walked = _walk_up_git_root(base)
+    if walked is not None:
+        _warn(
+            f"git rev-parse failed under the allowlist env (PATH+HOME) but {base} is "
+            f"inside a git repo; using the walked-up root {walked}. Grudge dedupe keys "
+            f"and the privacy guard depend on this root being the real toplevel."
+        )
+        return (os.path.basename(walked.rstrip("/")) or walked, walked)
     root = os.path.realpath(os.path.abspath(base))
     return (os.path.basename(root) or "unknown", root)
 
