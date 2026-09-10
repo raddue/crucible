@@ -95,6 +95,8 @@ run python3 scripts/check_qg_fan_out.py
 run python3 scripts/check_crossref.py --selftest
 run python3 scripts/check_crossref.py
 run python3 scripts/catalog.py check
+run python3 scripts/check_adr_integrity.py --selftest
+run python3 scripts/check_adr_integrity.py
 
 # --- graphify-consult convention structural check (ai-rack#93) ---
 run python3 scripts/check_dispatch_graphify_consult.py --selftest

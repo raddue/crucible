@@ -40,6 +40,17 @@ Stop. Don't proceed to Step 2.
 
 **If tests pass:** Continue to Step 2.
 
+### Step 1.5: ADR hook (before the review gate)
+
+If the branch diff changes a public interface, a data/persistence format, a
+security or trust boundary, a dependency choice, or a cross-skill convention,
+run `crucible:adr` scoped to the branch diff. It promotes any `PROPOSED` ADR
+whose decision the diff now implements to `ACCEPTED` (a state-token edit only),
+and for anything not already recorded, runs the D1 eligibility test and writes
+at most one new `ACCEPTED` ADR. Stage and commit what it writes (`git add
+docs/decisions/NNNN-*.md` + `git commit -m "docs: ADR-NNNN <title>"`) so the ADR
+is part of the tree warden reviews and the PR later carries.
+
 ### Step 2: Review Gate (Mandatory)
 
 **Before presenting options, run the consolidated pre-push review gate.**
