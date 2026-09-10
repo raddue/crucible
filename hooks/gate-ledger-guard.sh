@@ -6,8 +6,11 @@
 # (legacy .tool/.input fallback accepted — see build-routing-advisor.sh's T1 finding)
 # Exit 0 = allow, non-zero = block (reason on stderr).
 #
-# Configured in ~/.claude/settings.json with an ABSOLUTE path (S1/CHAIN-N5, PR
-# #583 warden gate: a relative path here is cwd-dependent):
+# Registered via .claude-plugin/plugin.json's "hooks" key (#591 item 3) — this
+# installs the hook automatically when the crucible plugin is enabled;
+# ${CLAUDE_PLUGIN_ROOT} keeps the invoked path absolute regardless of cwd.
+# For non-plugin installs, see hooks/README.md — register per-machine
+# (S1/CHAIN-N5, PR #583 warden gate: use an ABSOLUTE path, never repo-relative):
 #   "hooks": { "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash /absolute/path/to/crucible/hooks/gate-ledger-guard.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally

@@ -239,6 +239,7 @@ run python3 scripts/test_catalog.py
 # --- Build-routing advisor + reconcile hooks ---
 run bash hooks/tests/test-build-routing-advisor.sh
 run bash hooks/tests/test-gate-ledger-guard.sh
+run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
 
 # --- Summary ---
