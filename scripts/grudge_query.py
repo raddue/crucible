@@ -45,6 +45,19 @@ def _qwarn(msg: str) -> None:
     print(f"[grudge_query WARN] {msg}", file=sys.stderr)
 
 
+# #602 S-0: the only frontmatter keys the reader will ever trust. Every known
+# key is emitted by grudge_append._render; anything else is a smuggled line
+# (a forged value with a bare `---` early terminator copied its own keys in).
+# Rejecting unknown keys alone does NOT close the hole — files_touched is a
+# *known* key, so a forged duplicate would still be accepted — which is why
+# the writer also JSON-encodes every value (grudge_append._render) and the
+# reader rejects duplicates below. Both sides, always.
+_KNOWN_KEYS = frozenset({
+    "schema", "hash", "repo", "repo_root", "fixed_in_commit", "symptom",
+    "root_cause", "files_touched", "anti_pattern_signature", "date_fixed",
+})
+
+
 class _SigTimeout(Exception):
     """Raised by the SIGALRM handler when a signature match overruns its budget."""
 
@@ -90,6 +103,21 @@ def parse_grudge(path: str) -> Optional[Dict]:
             continue
         key, _, val = line.partition(":")
         key, val = key.strip(), val.strip()
+        # #602 S-0: never trust a key the writer cannot emit. A key outside the
+        # known set means attacker-controlled lines landed in the frontmatter
+        # block (a forged early `---` in a value followed them in); the file is
+        # not a well-formed grudge, so reject it outright rather than parse the
+        # first matching key permissively.
+        if key not in _KNOWN_KEYS:
+            _qwarn(f"forged frontmatter key {key!r} in {path}; rejecting grudge")
+            return None
+        # #602 S-0: a key set is supposed to be unique. A duplicate means the
+        # on-disk block disagrees with the writer's contract (carries both a
+        # forged value and the genuine one); last-wins would silently prefer the
+        # forged line, so reject the whole file.
+        if key in rec:
+            _qwarn(f"duplicate frontmatter key {key!r} in {path}; rejecting grudge")
+            return None
         if key in ("files_touched",):
             try:
                 rec[key] = json.loads(val)
@@ -103,6 +131,22 @@ def parse_grudge(path: str) -> Optional[Dict]:
         elif key == "anti_pattern_signature":
             try:
                 rec[key] = json.loads(val) if val else ""
+            except (ValueError, TypeError):
+                rec[key] = val
+        # #602 S-0: _render now JSON-encodes every string field, so a value's
+        # newlines / bare `---` / forged `key: value` lines live inside one
+        # quoted cell and cannot split the block. Decode them back; legacy
+        # grudges written before the escape carry bare `key: value` (their
+        # unquoted text fails json.loads and is kept verbatim).
+        elif key in ("repo", "repo_root", "fixed_in_commit", "symptom",
+                     "root_cause", "date_fixed"):
+            try:
+                decoded = json.loads(val) if val else ""
+                # A bare legacy value that happens to be valid JSON (e.g.
+                # `date_fixed: 123` or `symptom: null`) decodes to a non-str;
+                # keep the raw text rather than let a native type break
+                # downstream string consumers (repo_root realpath, date sort).
+                rec[key] = decoded if isinstance(decoded, str) else val
             except (ValueError, TypeError):
                 rec[key] = val
         else:
@@ -270,15 +314,21 @@ def query(
 def render_block(matched: List[Dict], stats: Dict) -> str:
     if not matched:
         return ""
+    # #602 S-0: a field that survived JSON-encoding may carry embedded newlines
+    # (contributor text). Render it collapsed onto one line so stored text can
+    # never forge the block's structural indentation/prefixes.
+    def _one_line(s):
+        return " ".join((s or "").split())
+
     lines = [f"⚠️  {len(matched)} grudge(s) held against the files you're about to touch — DO NOT REPEAT:"]
     for g in matched:
-        sym = g.get("symptom", "(no symptom)")
-        commit = g.get("fixed_in_commit", "")
-        when = g.get("date_fixed", "")
-        files = ", ".join(g.get("files_touched", []))
+        sym = _one_line(g.get("symptom")) or "(no symptom)"
+        commit = _one_line(g.get("fixed_in_commit"))
+        when = _one_line(g.get("date_fixed"))
+        files = ", ".join(_one_line(f) for f in g.get("files_touched", []))
         tag = f" (fixed {commit[:9]}{', ' + when if when else ''})" if commit or when else ""
         lines.append(f"  ☠ {sym}{tag}")
-        rc = g.get("root_cause", "")
+        rc = _one_line(g.get("root_cause"))
         if rc:
             lines.append(f"      root cause: {rc}")
         if files:
