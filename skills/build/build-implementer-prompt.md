@@ -65,6 +65,12 @@ Task tool (general-purpose, model: opus, team_name: "<team-name>", name: "implem
     citation (`Source: <url> (YYYY-MM-DD)`) in the commit footer or as an inline
     comment directly above the call site.
 
+    **Definition-of-Done addition (fetched-content containment):** an endpoint or construct copied from
+    fetched content (per `skills/shared/fetched-content-containment.md`) carries a
+    `.crucible/fetched-endpoints.md` entry, and is named under **"Unexpected findings or deviations from
+    the plan"** in the report — NOT under **"Noticed But Not Touching"** (which stays reserved for items
+    absent from the diff).
+
     - If a "Known Defect Patterns" section is present above, before writing
       your first test, scan your task's target files for each listed pattern.
       If any pattern applies to code you are writing or modifying, write a
