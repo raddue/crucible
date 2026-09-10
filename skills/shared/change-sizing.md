@@ -15,7 +15,8 @@
 ## 1. Reviewability thresholds
 
 A human reviewer holds a diff in working memory to spot defects and to know how to revert
-it. Three bands, keyed to *changed* lines (`git diff --numstat` added+deleted):
+it. Three thresholds, keyed to *changed* lines (`git diff --numstat` added+deleted),
+with `above ~1000` as the tail:
 
 | Changed lines | Reviewability |
 |---|---|
@@ -66,12 +67,12 @@ Two changes, submitted separately; small cleanups may ride along at reviewer dis
 
 ## 7. These are not context-window caps
 
-`temper:126` and `delve:95` cap diffs at >5,000 lines because a *reviewing agent's* recall
-degrades past that (remedy flag: `degraded-context`). This doc's numbers are about a *human*
-missing a defect or being unable to revert. Same unit (`numstat` lines), different axis, 5×
-apart. Neither supersedes the other, and this doc does not move temper/delve's 5,000-line
-caps. The one legitimate contact point: `temper`'s "offer to split per-commit or per-file" is
-an unnamed instance of Stack / By-file-group; §4 names it.
+`temper`'s **Diff too large** bullet and `delve`'s **Oversized diff** bullet cap diffs at >5,000 lines.
+A *reviewing agent's* recall degrades past that (remedy flag: `degraded-context`). This
+doc's numbers are about a *human* missing a defect or being unable to revert. Same unit
+(`numstat` lines), different axis, 5× apart. Neither supersedes the other, and this doc does
+not move temper/delve's 5,000-line caps. The one legitimate contact point: `temper`'s "offer
+to split per-commit or per-file" is an unnamed instance of Stack / By-file-group; §4 names it.
 
 ## 8. Comment-prefix vocabulary — deliberately not adopted (#553)
 

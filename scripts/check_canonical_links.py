@@ -42,7 +42,12 @@ CONSUMERS = {
     "skills/finish/SKILL.md",
 }
 I4_TOKENS = ("Nit", "FYI", "Optional:", "Consider:")
+I4_MATCHERS = [
+    (t, re.compile(r"\b" + re.escape(t) + (r"\b" if t[-1].isalnum() else ""), re.ASCII))
+    for t in I4_TOKENS
+]
 I5_TOKEN = "5,000"
+I5_RE = re.compile(r"(?<![0-9,])5,000(?![0-9,])")
 I5_REQUIRE = ("temper", "delve")
 I9_TOKENS = ("STOP", "hard stop", "BLOCK", "must not proceed")
 I9_WINDOW = 5
@@ -57,13 +62,13 @@ def tracked_md_files() -> list[str]:
 
 
 def find_links(lines: list[str]) -> list[tuple[int, str]]:
-    """Return (1-based line_no, target) for every line matching MATCH_RE."""
-    found = []
-    for i, line in enumerate(lines, 1):
-        m = MATCH_RE.match(line)
-        if m:
-            found.append((i, m.group(1)))
-    return found
+    """Return (1-based line_no, target) for every line matching MATCH_RE.
+
+    Match rule is deliberately column-0-anchored with no fence state — the same
+    discipline as check_i2_marker.py. In-fence CANONICAL lines in dispatch
+    templates render inside a ``` block but ARE live links, not examples."""
+    return [(i, m.group(1)) for i, line in enumerate(lines, 1)
+            for m in [MATCH_RE.match(line)] if m]
 
 
 def read(path: str) -> list[str]:
@@ -116,7 +121,7 @@ def linked_from_paths(lines: list[str]) -> list[str]:
         while stripped.startswith(">"):
             stripped = stripped[1:].lstrip()
         if stripped.startswith("**Linked from:**"):
-            return re.findall(r"`([^`]+)`", stripped)
+            return [p.strip() for p in re.findall(r"`([^`]+)`", stripped)]
     return []
 
 
@@ -144,8 +149,8 @@ def i4_violations(lines: list[str]) -> list[str]:
     bounds = section_bounds(lines, "## 8.")
     errs = []
     for i, line in enumerate(lines):
-        for tok in I4_TOKENS:
-            if tok in line and (bounds is None or not (bounds[0] <= i < bounds[1])):
+        for tok, pat in I4_MATCHERS:
+            if pat.search(line) and (bounds is None or not (bounds[0] <= i < bounds[1])):
                 errs.append(f"- I4 token {tok!r} appears outside §8 (line {i + 1})")
     return errs
 
@@ -155,7 +160,7 @@ def i5_violations(lines: list[str]) -> list[str]:
     `delve` — it names their context cap, never change-sizing's own threshold."""
     errs = []
     for i, line in enumerate(lines):
-        if I5_TOKEN in line and not any(r in line for r in I5_REQUIRE):
+        if I5_RE.search(line) and not any(r in line for r in I5_REQUIRE):
             errs.append(f"- I5 token {I5_TOKEN!r} lacking temper/delve (line {i + 1})")
     return errs
 
@@ -379,11 +384,27 @@ def selftest() -> int:
     check(i9_doc_violations(["advisory only, never gates"]) == [], "case12 i9 doc clean")
     check(i9_doc_violations(["hard stop here"]) != [], "case12 i9 doc token fails")
 
+    # Case 14 — F2: word/symbol boundaries. `Nit` inside `Nitpick`, `5,000`
+    # inside `15,000`/`25,000` do NOT trip I4/I5; bare tokens still do.
+    check(i4_violations(["Nitpick review note"]) == [], "case14 Nitpick not I4")
+    check(i4_violations(["FYI: fine"]) != [], "case14 FYI still I4 without §8")
+    check(i4_violations(["note about Optional: in prose", "## 8.", "ok"]) != [],
+          "case14 Optional: outside §8 still I4")
+    check(i5_violations(["15,000 and 25,000 are caps"]) == [], "case14 15k/25k not I5")
+    check(i5_violations(["5,000 is our threshold"]) != [], "case14 bare 5,000 still I5")
+
+    # Case 15 — F3: whitespace inside `**Linked from:**` backticks stripped.
+    padded = ("> **Linked from:** `skills/temper/SKILL.md `, ` skills/delve/SKILL.md`, "
+              "`skills/finish/SKILL.md `")
+    check(set(linked_from_paths([padded])) == three, "case15 padded backticks parsed")
+    check(linked_from_violations(set(linked_from_paths([padded]))) == [],
+          "case15 padded two-way pin passes")
+
     if failures:
         print("SELFTEST FAILED:")
         print("\n".join(failures))
         return 1
-    print("SELFTEST OK — all 12 I6 cases behave as specified.")
+    print("SELFTEST OK — all I6 + F2/F3 hardening cases behave as specified.")
     return 0
 
 
