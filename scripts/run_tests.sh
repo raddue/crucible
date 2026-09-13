@@ -243,6 +243,9 @@ run python3 -m pytest skills/warden/evals/ -q
 run python3 scripts/check_warden_helper_drift.py --selftest
 run python3 scripts/check_warden_helper_drift.py
 
+# --- AACR-Bench review-gate measurement core (#631) ---
+run python3 scripts/test_aacr_bench_measure.py
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 
