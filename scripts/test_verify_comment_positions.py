@@ -62,6 +62,14 @@ class ExtractSymbolsTest(unittest.TestCase):
         self.assertEqual(extract_symbols("mid uses token.exp past expiry"),
                          ["token.exp"])
 
+    def test_apostrophe_does_not_pair_with_backtick(self):
+        # regression #633: prose like "token's `expiresAt`" previously let the
+        # apostrophe pair as an opening quote and a LATER backtick as its
+        # closer, extracting the junk span "s " — "s" appears on nearly every
+        # line, so `any(s in cited)` passed and genuine drift was VERIFIED.
+        self.assertEqual(extract_symbols("token's `expiresAt` compared with `<`"),
+                         ["expiresAt", "<"])
+
 
 class VerifyRecordPositionsTest(unittest.TestCase):
     FILES = {

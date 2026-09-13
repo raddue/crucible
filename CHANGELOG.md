@@ -15,7 +15,9 @@ they reach the user.
   ref resolves to a real existing line in the tree; a referenced symbol present
   in the file must occur on the cited line (else the finding is REJECTED as
   position drift). Pure-prose / removed-code refs degrade to provenance-only
-  so they are never hard-rejected. `--selftest`, `--root`, `--window`. (#628)
+  so they are never hard-rejected. `--selftest`, `--root`, `--window`. Tracks
+  quote spans with a backreference so prose like `token's `expiresAt`` cannot
+  pair an apostrophe with a later backtick and leak the junk symbol `s`. (#628)
 - **`scripts/test_verify_comment_positions.py`** — 18-case stdlib suite pinning
   the gate (drift rejection, EOF/malformed refs, range refs, provenance
   degrade, CLI exit codes); wired into `scripts/run_tests.sh`.

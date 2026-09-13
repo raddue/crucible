@@ -36,7 +36,7 @@ import os
 import re
 import sys
 
-_QUOTED_RE = re.compile(r"[`\"'](.{1,200}?)[`\"']")
+_QUOTED_RE = re.compile(r"([`\"'])(.{1,200}?)\1")
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_.]*"
                             r"|[A-Za-z_][A-Za-z0-9_]*")
 
@@ -66,7 +66,7 @@ def extract_symbols(summary: str) -> list:
 
     if summary:
         for m in _QUOTED_RE.finditer(summary):
-            quoted = m.group(1).strip()
+            quoted = m.group(2).strip()
             if quoted:
                 _add(quoted)
                 for ident in _IDENTIFIER_RE.findall(quoted):
