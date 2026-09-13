@@ -4,6 +4,33 @@ Notable changes to the Crucible skill library. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); entries are grouped by
 milestone since skills ship as a library rather than a versioned binary.
 
+## Unreleased — Deterministic change-bundling for large-diff coverage (#630)
+
+A deterministic changed-file selection + bundling step gives any many-file
+review the same per-file coverage guarantee alibaba/open-code-review gets from
+its deterministic pipeline: enumerate every changed path, select the reviewable
+ones (deleted/binary are explicit skips, never silent), bundle locale siblings /
+same-directory files, and emit a per-file coverage report that assigns every
+changed file to exactly one bundle — machine-enforced (a file with no bundle and
+no skip raises), so a review over a many-file diff produces per-file coverage
+with no silent skips. `warden` and `orchestrator` both dispatch one review
+worker per bundle, concurrently; the union of every leg's coverage markers must
+equal the report's `bundled` set on completion, and a dead bundle surfaces as
+uncovered (fail-closed).
+
+### Added
+
+- **`skills/shared/change-bundling-convention.md`** — canonical reference for the
+  deterministic step (enumerate → select → bundle → cover-report) + the
+  one-worker-per-bundle dispatch protocol, linked by warden and orchestrator.
+- **`scripts/change_bundling.py`** — pure stdlib engine
+  (`parse_git_name_status`, `select_reviewable`, `bundle_files`,
+  `coverage_report`); locale-sibling fold + directory affinity + size cap
+  (10/bundle). Contract pinned by `scripts/test_change_bundling.py`.
+- **`scripts/check_change_bundling.py`** — structural CI gate pinning the
+  convention + both integration sites (`--selftest` + tree check, wired into
+  `scripts/run_tests.sh`).
+
 ## v1.9.0 — Calibration reporting moves out-of-repo — 2026-08-31
 
 The calibration-ledger **reporting** cluster leaves Crucible. Verdict *emission*

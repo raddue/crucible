@@ -157,6 +157,10 @@ A single reviewer misses things a second one, on a different model, tends to cat
 - Send a second worker on a different backend (a different model kind) an independent adversarial pass over the same diff, explicitly told not to edit anything.
 - Reconcile: findings both independently confirm are the ones to trust most; findings only one caught still deserve a look, especially anything either flagged as a real correctness gap rather than a style nit.
 
+<!-- CANONICAL: shared/change-bundling-convention.md -->
+
+On a **many-file diff**, don't hand a worker "the diff, review it" — that's how files get silently skipped (coverage becomes whatever the prompt happened to emphasize). Before fanning review work out, run the deterministic **change-bundling** step (`scripts/change_bundling.py`): enumerate every changed path, select the reviewable ones (deleted/binary are explicit skips, never silent), bundle locale-siblings / same-directory files, and emit a per-file coverage report that assigns every changed file to **exactly one bundle**. Then dispatch **one worker per bundle** (concurrent where possible), each worker's task naming its exact bundle file list. On completion, the union of every bundle's covered files must equal the report's `bundled` set — every changed file is **covered exactly once**, and a bundle whose worker dies surfaces as uncovered (fail-closed). A 1–3 file change collapses to one bundle and behaves exactly as today.
+
 ## 9 — Open a tracking issue before starting a new significant thread
 
 If you're about to start meaningful new work that isn't already tracked (not "fix this one bug," but "build a new skill," "redesign this subsystem"), file the issue first:
