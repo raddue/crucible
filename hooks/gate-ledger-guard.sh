@@ -6,8 +6,11 @@
 # (legacy .tool/.input fallback accepted — see build-routing-advisor.sh's T1 finding)
 # Exit 0 = allow, non-zero = block (reason on stderr).
 #
-# Configured in ~/.claude/settings.json with an ABSOLUTE path (S1/CHAIN-N5, PR
-# #583 warden gate: a relative path here is cwd-dependent):
+# Registered via .claude-plugin/plugin.json's "hooks" key (#591 item 3) — this
+# installs the hook automatically when the crucible plugin is enabled;
+# ${CLAUDE_PLUGIN_ROOT} keeps the invoked path absolute regardless of cwd.
+# For non-plugin installs, see hooks/README.md — register per-machine
+# (S1/CHAIN-N5, PR #583 warden gate: use an ABSOLUTE path, never repo-relative):
 #   "hooks": { "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash /absolute/path/to/crucible/hooks/gate-ledger-guard.sh", "timeout": 500 }] }] }
 
 # Disable errexit — this hook must never fail fatally
@@ -47,6 +50,14 @@ FILE_PATH="$(echo "$INPUT" | jq -r '.tool_input.file_path // .input.file_path //
 if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
+
+# Only gate writes to build-gate-ledger.md — filter BEFORE any content
+# read/scan below, so a non-ledger Write/Edit (the common case, now fired on
+# every Edit for every plugin-enabled user) never reads or scans the target.
+case "$FILE_PATH" in
+  *build-gate-ledger.md) ;;
+  *) exit 0 ;;
+esac
 
 if [ "$IS_EDIT" = "true" ]; then
   # Edit tool: check if new_string introduces "Status: PASS" where old_string didn't have it
@@ -103,12 +114,6 @@ else
     exit 0
   fi
 fi
-
-# Only gate writes to build-gate-ledger.md
-case "$FILE_PATH" in
-  *build-gate-ledger.md) ;;
-  *) exit 0 ;;
-esac
 
 # ── Parse incoming content: extract phase→status map ────────────────────
 # Returns lines like "1:PASS", "2:IN_PROGRESS", etc.
@@ -201,8 +206,10 @@ fi
 # Path format: .../.claude/projects/<hash>/memory/build-gate-ledger.md
 PROJECT_HASH="$(echo "$RESOLVED_PATH" | sed -n 's|.*\.claude/projects/\([^/]*\)/memory/.*|\1|p')"
 if [ -z "$PROJECT_HASH" ]; then
-  echo "BLOCKED: Cannot determine project from ledger path — ensure the ledger is at the canonical path under .claude/projects/." >&2
-  exit 2
+  # Filename matches but path is NOT the canonical ledger location — this is
+  # a doc/repo file literally named build-gate-ledger.md, not the ledger we
+  # enforce. Ignore (allow) rather than hard-block an unrelated file.
+  exit 0
 fi
 
 VERDICT_DIR="$HOME/.claude/projects/$PROJECT_HASH/memory/quality-gate"

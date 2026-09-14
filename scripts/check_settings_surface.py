@@ -16,10 +16,12 @@ turn. Claude Code's directory-trust prompt does not help: it is per-directory,
 so checking out a branch inside an already-`/trust`ed repo does not re-prompt.
 Verified: a contributor-modified helper created a marker file in `$HOME` from the
 hook's argv on an ordinary Stop. The `/.claude/` git-ignore being blanket means
-the ONLY legal registration points for a repo-owned hook are per-machine and
-untracked: `.claude/settings.local.json` or user-global `~/.claude/settings.json`
-(the `gate-ledger-guard` / `build-routing-advisor` convention). This check pins
-the surface closed:
+the ONLY legal settings registration points for a repo-owned hook are per-machine
+and untracked: `.claude/settings.local.json` or user-global `~/.claude/settings.json`
+(the `build-routing-advisor` convention). A plugin manifest may separately
+declare hooks (see `.claude-plugin/plugin.json`, #591), which fire on explicit
+per-machine plugin enable — not a checkout side-effect. This check pins the
+settings surface closed:
 
   1. `.claude/settings.json` (and any other tracked file under `.claude/`) is
      NOT git-tracked — `git ls-files` must list nothing under `.claude/`.
