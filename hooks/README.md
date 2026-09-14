@@ -128,7 +128,7 @@ Run the test suite:
 bash hooks/tests/test-gate-ledger-guard.sh
 ```
 
-26 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, PipelineID change detection, legacy `.tool`/`.input` fallback (Write and Edit paths), indented old_string, backslash old_string, and double-space phase headers.
+27 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, PipelineID change detection, legacy `.tool`/`.input` fallback (Write and Edit paths), indented old_string, backslash old_string, double-space phase headers, and non-canonical `build-gate-ledger.md` paths ignored.
 
 `bash hooks/tests/test-plugin-manifest-hooks.sh` separately checks that `.claude-plugin/plugin.json` actually declares the `PreToolUse` registration described above (matcher, `type: command`, `${CLAUDE_PLUGIN_ROOT}` path) — a wiring check, not a runtime liveness check (#591 item 3).
 

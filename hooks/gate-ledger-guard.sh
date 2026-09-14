@@ -51,6 +51,14 @@ if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
 
+# Only gate writes to build-gate-ledger.md — filter BEFORE any content
+# read/scan below, so a non-ledger Write/Edit (the common case, now fired on
+# every Edit for every plugin-enabled user) never reads or scans the target.
+case "$FILE_PATH" in
+  *build-gate-ledger.md) ;;
+  *) exit 0 ;;
+esac
+
 if [ "$IS_EDIT" = "true" ]; then
   # Edit tool: check if new_string introduces "Status: PASS" where old_string didn't have it
   EDIT_OLD="$(echo "$INPUT" | jq -r '.tool_input.old_string // .input.old_string // empty' 2>/dev/null)"
@@ -106,12 +114,6 @@ else
     exit 0
   fi
 fi
-
-# Only gate writes to build-gate-ledger.md
-case "$FILE_PATH" in
-  *build-gate-ledger.md) ;;
-  *) exit 0 ;;
-esac
 
 # ── Parse incoming content: extract phase→status map ────────────────────
 # Returns lines like "1:PASS", "2:IN_PROGRESS", etc.
@@ -204,8 +206,10 @@ fi
 # Path format: .../.claude/projects/<hash>/memory/build-gate-ledger.md
 PROJECT_HASH="$(echo "$RESOLVED_PATH" | sed -n 's|.*\.claude/projects/\([^/]*\)/memory/.*|\1|p')"
 if [ -z "$PROJECT_HASH" ]; then
-  echo "BLOCKED: Cannot determine project from ledger path — ensure the ledger is at the canonical path under .claude/projects/." >&2
-  exit 2
+  # Filename matches but path is NOT the canonical ledger location — this is
+  # a doc/repo file literally named build-gate-ledger.md, not the ledger we
+  # enforce. Ignore (allow) rather than hard-block an unrelated file.
+  exit 0
 fi
 
 VERDICT_DIR="$HOME/.claude/projects/$PROJECT_HASH/memory/quality-gate"

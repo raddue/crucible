@@ -2,8 +2,14 @@
 # hooks/tests/test-plugin-manifest-hooks.sh
 # Structural check (#591 item 3): .claude-plugin/plugin.json actually declares
 # a PreToolUse registration for gate-ledger-guard.sh, so the plugin install
-# path is real rather than just documented. This is a WIRING check — it does
-# NOT assert the hook fires at runtime (that's #591 item 4 / #585's scope).
+# path is real rather than just documented.
+#
+# KNOWN GAP — NOT a runtime liveness check. This suite asserts the manifest's
+# declared JSON shape ONLY; it does NOT (and cannot, from a bash subprocess)
+# confirm that Claude Code loads/executes this inline plugin.json hooks block
+# at runtime. That verification is #591 item 4 (positive runtime liveness
+# signal), still open and owned by the #585 auth-boundary design. A green run
+# here proves the wiring is declared, not that the guard actually fires.
 
 set -euo pipefail
 
@@ -52,6 +58,7 @@ check 5 "matcher covers Write and Edit" "true" "$MATCHER_OK"
 
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
+echo "NOTE: wiring-only — does not verify hook fires at runtime (#591 item 4, owned by #585)." >&2
 
 if [ "$FAILED" -gt 0 ] || [ "$((PASSED + FAILED))" -ne "$TOTAL" ]; then
   exit 1

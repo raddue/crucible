@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 26 test cases validating allow/block behavior.
+# Runs 27 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=26
+TOTAL=27
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -613,6 +613,21 @@ mkdir -p "$VERDICT_DIR"
 JSON="$(make_legacy_edit_json "$LEDGER_PATH" "Status: IN_PROGRESS" "Status: PASS")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 26 "Legacy .tool/.input Edit PASS introduction blocked" 2 "$RC"
+
+# ========================================================================
+# Test 27: build-gate-ledger.md OUTSIDE the canonical
+# .claude/projects/<hash>/memory/ layout (e.g. a repo/doc file literally
+# named build-gate-ledger.md) with a forged PASS — must be IGNORED (exit 0),
+# not hard-blocked. The hook only enforces the canonical ledger location;
+# before this fix the empty PROJECT_HASH path hard-blocked (exit 2) any such
+# unrelated file for every plugin user.
+# ========================================================================
+reset_state
+NONCANON_PATH="$TMPDIR_BASE/elsewhere/build-gate-ledger.md"
+CONTENT="$(make_ledger "build-test-027" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_json "$NONCANON_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 27 "Non-canonical build-gate-ledger.md PASS write ignored" 0 "$RC"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
