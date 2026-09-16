@@ -148,6 +148,9 @@ run python3 scripts/test_central_store.py
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
 
+# --- Zero-token vulnerability pattern matcher (#629) ---
+run python3 scripts/test_vuln_ruleset.py
+
 # --- crucible-qg-fix model-pin regression (#537) ---
 run python3 scripts/test_qg_fix_pin.py
 

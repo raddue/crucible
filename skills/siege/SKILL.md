@@ -301,6 +301,22 @@ Build the exposure map and cross-reference with `manifest.md`:
 
 **Line budget:** The exposure map summary appended to Tier 1 context (Step 1 of Automated Context Assembly) is capped at **15 lines**: endpoint count, gap count, and the gap list. The full endpoint table remains in `scratch/<run-id>/exposure-map.md` only.
 
+### Step 2.6: Zero-Token Pattern Pre-Filter (Optional)
+
+**Optional, on by default for `code` and `mixed` artifact types.** Before dispatching any LLM agents, run the deterministic pattern matcher over the manifest files to catch common defect classes that the plain-language passes re-derive at token cost (NPE, thread-safety, XSS, SQL injection, command injection, insecure deserialization).
+
+**How to run:** Resolve `scripts/vuln_ruleset.py` by absolute path from the plugin root and run:
+
+```bash
+python3 "$plugin_root/scripts/vuln_ruleset.py" <manifest files…>
+```
+
+The matcher is pure, stdlib-only, LLM-free, and cost-free (~0 tokens). It reads the curated multi-language ruleset at `scripts/vuln_rules.json` (extension → language → regex patterns), scans each manifest file line by line, and prints line-level hits (capped at 50 lines for the agent-facing summary).
+
+**Fallback:** If the script or ruleset is missing, skip silently -- a missing matcher must never block the audit.
+
+**Use of hits:** Hits are a **baseline catch**, distinct from agent findings: (a) prepend the hit summary to Tier 1 context as "pattern-baseline hits" so agents confirm, deepen, or dismiss rather than rediscover; (b) agent findings that merely restate a baseline hit are NOT counted as new signal -- a finding must move past the pattern to count. This is an optional pre-filter: the audit proceeds identically if it yields nothing.
+
 ### Step 3: Load Persistent Threat Model
 
 Read `~/.claude/projects/<project-hash>/memory/security-audit/threat-model.md` if it exists. Extract:
