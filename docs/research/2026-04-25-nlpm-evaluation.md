@@ -9,11 +9,11 @@
 
 ## TL;DR
 
-The 50 R-rules are a genuinely good NL-artifact style guide. Triage breakdown: 35 rules already followed (a), 13 worth adopting (b — covered by 12 action lines because R19+R20 share one entry), 2 incompatible (c). The (b) bucket is what gets folded into `/skill-creator` and `/quality-gate` as cited checklist items; the (c) bucket — primarily R05's 500-line cap — represents friction with Crucible's orchestrator-skill topology that is real today but contestable on measured-token-cost grounds. We don't adopt the scorer wholesale until that measurement exists.
+The 50 R-rules are a genuinely good NL-artifact style guide. Triage breakdown: 35 rules already followed (a), 13 worth adopting (b — covered by 12 action lines because R19+R20 share one entry), 2 incompatible (c). The (b) bucket is what gets folded into `/anvil` and `/quality-gate` as cited checklist items; the (c) bucket — primarily R05's 500-line cap — represents friction with Crucible's orchestrator-skill topology that is real today but contestable on measured-token-cost grounds. We don't adopt the scorer wholesale until that measurement exists.
 
 The scoring tooling itself — deterministic per-artifact penalty scoring — is suspect for Crucible specifically. The hard 500-line cap (R05) would mark every orchestrator skill we own as "context bloat," which is a topology disagreement, not a quality finding. Per-artifact scores also can't see the cross-skill orchestration that's the largest source of Crucible's measured value.
 
-Adopting NLPM as a hard pre-merge gate would block legitimate orchestrator PRs. Adopting it as an optional manual tool offers little over "the user can install it themselves." Adopting the rule corpus as cited reference material in `/skill-creator` and `/quality-gate` is the highest-leverage option that doesn't require changing pipeline mechanics.
+Adopting NLPM as a hard pre-merge gate would block legitimate orchestrator PRs. Adopting it as an optional manual tool offers little over "the user can install it themselves." Adopting the rule corpus as cited reference material in `/anvil` and `/quality-gate` is the highest-leverage option that doesn't require changing pipeline mechanics.
 
 ---
 
@@ -74,13 +74,13 @@ R48 (`name` as only required plugin manifest field) — applies to plugin packag
 
 ### (b) Worth adopting — 13 rules (12 action lines; R19+R20 share one entry)
 
-R06 (code examples must be runnable, not pseudocode) — Crucible could be more rigorous about this in some skill bodies. Worth adding to `/skill-creator`'s checklist.
+R06 (code examples must be runnable, not pseudocode) — Crucible could be more rigorous about this in some skill bodies. Worth adding to `/anvil`'s checklist.
 
 R07 (scope note when related skills exist) — Crucible has overlap between `audit`, `red-team`, `temper`, `siege`, and `quality-gate`. Cross-references exist but are inconsistent. Adopting R07 as a `/stocktake` audit dimension would surface dead pointers and missing pointers.
 
 R08 (patterns over theory) — Crucible's larger orchestrator skills sometimes drift toward theory in their preamble sections. R08 as a quality-gate criterion for skill artifacts would catch this.
 
-R09 (mandatory `<example>` blocks for agents) — Crucible doesn't ship Claude Code agent files, but the principle applies to dispatch prompt files. Cite R09 in `/skill-creator` for any prompt template authoring.
+R09 (mandatory `<example>` blocks for agents) — Crucible doesn't ship Claude Code agent files, but the principle applies to dispatch prompt files. Cite R09 in `/anvil` for any prompt template authoring.
 
 R12 (output format defined in body) — Crucible's dispatch prompt files mostly define output format but a few rely on implicit "report findings" framing. R12 as a `/quality-gate` check for prompt artifacts would catch the looser ones.
 
@@ -135,7 +135,7 @@ Even setting aside R05, three concerns make NLPM's penalty scores a poor pre-mer
 
 2. **Determinism cuts both ways.** Same artifact, same score is good for regression tracking (a -3 delta on a SKILL.md edit is meaningful). But the absolute number is anchored to the NLPM author's penalty priors, which were not derived from measured eval deltas. We cannot trust the absolute score; we can trust the delta-on-edit.
 
-3. **`/stocktake` and `/quality-gate` already do most of this work.** `/stocktake` audits cross-skill structure (overlap, staleness, broken refs); `/quality-gate` runs adversarial reviews on artifacts. NLPM's `/nlpm:check` is a thinner version of `/stocktake`; `/nlpm:score` is a shallower version of `/quality-gate` for skill-shaped artifacts. The NL-TDD spec-first mode is interesting but overlaps with `skill-creator`'s existing eval loop.
+3. **`/stocktake` and `/quality-gate` already do most of this work.** `/stocktake` audits cross-skill structure (overlap, staleness, broken refs); `/quality-gate` runs adversarial reviews on artifacts. NLPM's `/nlpm:check` is a thinner version of `/stocktake`; `/nlpm:score` is a shallower version of `/quality-gate` for skill-shaped artifacts. The NL-TDD spec-first mode is interesting but overlaps with `anvil`'s existing eval loop.
 
 ---
 
@@ -143,8 +143,8 @@ Even setting aside R05, three concerns make NLPM's penalty scores a poor pre-mer
 
 **Action items, in order:**
 
-1. Add a new file `skills/skill-creator/nlpm-rules-reference.md` containing the (b)-bucket rules (R06, R07, R08, R09, R12, R19, R20, R21, R23, R24, R25, R49, R50) with one-line "why this matters for Crucible" notes and a credit/link to the upstream NLPM repo (MIT compatibility verified — credit + link suffices). Note: the immediate concrete payoff is the R19+R20 frontmatter audit on `skills/shared/` — that work should ship as part of action item 1 or as its own follow-up ticket.
-2. Update `/skill-creator` SKILL.md to load that file as a checklist when authoring new skills or major skill rewrites.
+1. Add a new file `skills/anvil/nlpm-rules-reference.md` containing the (b)-bucket rules (R06, R07, R08, R09, R12, R19, R20, R21, R23, R24, R25, R49, R50) with one-line "why this matters for Crucible" notes and a credit/link to the upstream NLPM repo (MIT compatibility verified — credit + link suffices). Note: the immediate concrete payoff is the R19+R20 frontmatter audit on `skills/shared/` — that work should ship as part of action item 1 or as its own follow-up ticket.
+2. Update `/anvil` SKILL.md to load that file as a checklist when authoring new skills or major skill rewrites.
 3. Update `/quality-gate`'s red-team prompt template (artifact type `design` and `code` when target is a skill file) to cite the (b)-bucket rules as additional review dimensions.
 4. **Do not** integrate `/nlpm:score` into `/build` Phase 4, `/merge-pr`, or CI. R05 alone makes this block legitimate orchestrator changes.
 5. Document the (a)-bucket alignment in `docs/architecture.md` or a new `docs/skill-quality-rubric.md` so future contributors know which conventions Crucible already enforces and which were imported from NLPM.
@@ -161,7 +161,7 @@ Even setting aside R05, three concerns make NLPM's penalty scores a poor pre-mer
 
 If this decision lands:
 
-1. **`feat(skill-creator): incorporate NLPM rule corpus as authoring checklist`** — implement action items 1 and 2 above.
+1. **`feat(anvil): incorporate NLPM rule corpus as authoring checklist`** — implement action items 1 and 2 above.
 2. **`feat(quality-gate): cite NLPM (b)-bucket rules in skill-artifact red-team prompts`** — implement action item 3. Specifically: add the (b)-bucket rule list to `skills/red-team/red-team-prompt.md` as additional review dimensions when the artifact under review is a SKILL.md or dispatch prompt file. Do NOT add to `skills/quality-gate/SKILL.md` itself (orchestrator framing) or to `shared/external-review-prompt.md` (independent perspective should not be biased by an internal rubric).
 3. **`docs: document Crucible's skill-quality rubric and NLPM alignment`** — implement action item 5.
 4. **(Deferred / optional) `research: re-evaluate NLPM scorer integration once upstream stabilizes`** — revisit in 6 months. If NLPM gains more stars / more case studies / a way to scope rules per-skill-type (e.g., let orchestrator skills opt out of R05), reconsider tooling integration.

@@ -56,7 +56,7 @@ CATEGORIES: dict[str, list[str]] = {
         "distill", "recall",
     ],
     "Maintenance & Meta": [
-        "stocktake", "merge-pr", "skill-creator", "getting-started", "handoff",
+        "stocktake", "merge-pr", "anvil", "getting-started", "handoff",
         "workshop", "orchestrator",
     ],
     "Unity UI (Domain-Specific)": [

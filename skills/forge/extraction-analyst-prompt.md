@@ -15,7 +15,7 @@ Task tool (general-purpose, model: sonnet):
     if so, produce a structured proposal for human review.
 
     You produce proposals for human review. You do NOT create skills, invoke
-    skill-creator, modify existing skills, or dispatch any agent to do so.
+    anvil, modify existing skills, or dispatch any agent to do so.
 
     ## Retrospective Entry
 
@@ -76,7 +76,7 @@ Task tool (general-purpose, model: sonnet):
     ## Workflow Shape
 
     [Numbered sequence of steps, decision points, and tool calls that
-     constitute this workflow. Be specific enough that skill-creator
+     constitute this workflow. Be specific enough that anvil
      can use this as input.]
 
     ## Trigger Conditions
