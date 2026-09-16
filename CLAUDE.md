@@ -18,7 +18,8 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
   There is no JS/TS toolchain: any `package.json`/`tsconfig.json`/`node_modules/`
   in your tree is vestigial `npm init` scaffolding (gitignored, never shipped).
 - Skill behavior evals: defined in `skills/<skill>/evals/evals.json`, run via
-  Anthropic's skill-creator (blind A/B); measured deltas live in `docs/evals.md`.
+  `/anvil` (forked from Anthropic's skill-creator, blind A/B); measured deltas
+  live in `docs/evals.md`.
 - Install for live use: symlink skills into Claude Code —
   `ln -sf "$PWD"/skills/* ~/.claude/skills/`. Editing a skill's `SKILL.md`
   changes its behavior immediately on next activation.
@@ -75,7 +76,7 @@ Headline orchestrators:
 - `/quality-gate` — red-team any artifact until clean
 - `/recon` — investigate unfamiliar code before starting a task
 - `/audit` / `/siege` — adversarial subsystem review / security audit
-- `/skill-creator` — create, modify, and eval skills in *this* repo
+- `/anvil` — create, modify, and eval skills in *this* repo
 - `/finish`, `/handoff`, `/forge` — wrap-up, session handoff, retrospective
 
 Run `/skills` for the full catalog.

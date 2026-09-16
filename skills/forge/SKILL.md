@@ -367,7 +367,7 @@ If total retrospective count >= 10 AND any deviation type has 3+ occurrences, su
 > "Forge has accumulated enough data for skill improvement proposals. Would you like to run mutation analysis?"
 
 If a skill extraction proposal was generated in step 9, notify the user:
-> "Forge detected a skill-worthy workflow: [proposed skill name or extension target]. Proposal written to [path]. When you're ready, you can use skill-creator with this proposal as a starting point."
+> "Forge detected a skill-worthy workflow: [proposed skill name or extension target]. Proposal written to [path]. When you're ready, you can use anvil with this proposal as a starting point."
 
 Do NOT prompt for immediate action. The notification is informational. The user
 decides when (or whether) to act on it.
@@ -389,7 +389,7 @@ success, failure if it reported failure, partial otherwise). The entry still
 goes through the full redaction pass.
 
 This ensures trajectory data is captured even when forge does not run, at the
-cost of less-rich analytical fields. The skill-creator's eval generation pipeline
+cost of less-rich analytical fields. anvil's eval generation pipeline
 handles entries with `deviation_type: "unknown"` by clustering on execution
 metrics alone.
 
@@ -530,7 +530,7 @@ descriptions from the skill directories to check for overlap.
 - Run mutation analysis with fewer than 10 retrospectives
 - Treat feed-forward warnings as hard blockers (they are advisories)
 - Auto-create skills from extraction proposals (Iron Law applies to extraction too)
-- Dispatch skill-creator from within the forge pipeline
+- Dispatch anvil from within the forge pipeline
 - Generate skill proposals for trivial workflows (single-step, domain-specific)
 - Propose a new skill when an existing skill already covers the workflow
 - Store raw user prompts in trajectory files — only store prompt hashes and redacted summaries

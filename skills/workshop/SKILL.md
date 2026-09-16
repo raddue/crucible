@@ -82,7 +82,7 @@ The big skills compose. The most common pipelines:
 Crucible has ~52 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `adversarial-tester`, `checkpoint`, `verify`, `assay`, `innovate`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
 - **Domain-specific** (e.g., `mock-to-unity`, `ui-verify`, `mockup-builder`) — load when their domain triggers.
-- **Utility / meta** (e.g., `skill-creator`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
+- **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
 

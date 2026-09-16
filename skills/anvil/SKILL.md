@@ -1,9 +1,9 @@
 ---
-name: skill-creator
-description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
+name: anvil
+description: Create new skills, modify and improve existing skills, and measure skill performance (formerly skill-creator). Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
 ---
 
-# Skill Creator
+# Anvil (skill-creator)
 
 A skill for creating new skills and iteratively improving them.
 
@@ -290,7 +290,7 @@ Once all runs are done:
 
 1. **Grade each run** — spawn a grader subagent (or grade inline) that reads `agents/grader.md` and evaluates each assertion against the outputs. Save results to `grading.json` in each run directory. The grading.json expectations array must use the fields `text`, `passed`, and `evidence` (not `name`/`met`/`details` or other variants) — the viewer depends on these exact field names. For assertions that can be checked programmatically, write and run a script rather than eyeballing it — scripts are faster, more reliable, and can be reused across iterations.
 
-2. **Aggregate into benchmark** — run the aggregation script from the skill-creator directory:
+2. **Aggregate into benchmark** — run the aggregation script from the anvil directory:
    ```bash
    python -m scripts.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
    ```
@@ -301,7 +301,7 @@ Put each with_skill version before its baseline counterpart.
 
 4. **Launch the viewer** with both qualitative outputs and quantitative data:
    ```bash
-   nohup python <skill-creator-path>/eval-viewer/generate_review.py \
+   nohup python <anvil-path>/eval-viewer/generate_review.py \
      <workspace>/iteration-N \
      --skill-name "my-skill" \
      --benchmark <workspace>/iteration-N/benchmark.json \
@@ -539,10 +539,10 @@ The references/ directory has additional documentation:
 
 Skill-creator and forge's mutation proposals are complementary, not overlapping:
 
-- **skill-creator** covers green-field skill creation with eval iteration -- building new skills from scratch, testing them, and optimizing their descriptions.
+- **anvil** covers green-field skill creation with eval iteration -- building new skills from scratch, testing them, and optimizing their descriptions.
 - **forge** (Mode 3: Mutation Proposals) covers improvements to existing skills based on retrospective evidence -- patterns observed across real usage drive concrete edit proposals.
 
-When forge generates a skill extraction proposal (`skill-proposals/`), skill-creator is the natural next step for developing it into a full skill with evals. When forge generates a mutation proposal (`mutation-proposals/`), the edits target an existing skill that skill-creator can then re-evaluate.
+When forge generates a skill extraction proposal (`skill-proposals/`), anvil is the natural next step for developing it into a full skill with evals. When forge generates a mutation proposal (`mutation-proposals/`), the edits target an existing skill that anvil can then re-evaluate.
 
 ---
 
