@@ -39,9 +39,56 @@ Keywords: `user data`, `PII`, `personal data`, `GDPR`, `retention`, `logging sen
 
 Keywords: `new package`, `npm install`, `pip install`, `cargo add`, `version bump`, `native binding`, `dependency`, `third-party`, `supply chain`, `package.json`, `requirements.txt`, `Cargo.toml`
 
+### 8. Destination-Bearing Construct (structurally detected)
+
+Not a keyword scan. Reads two inputs — a **host baseline** and a **shape match** — from the
+`git diff` and the tree it lives in:
+
+- **Host baseline (source + staleness policy).** The set of hosts already referenced by project code,
+  computed once per run by a case-insensitive `git grep -Eo` at the comparison **base** SHA over
+  `https?://[^/ ]+` literals and over module specifiers (`from "…"`, `require("…")`, `import … "…"`)
+  whose first segment parses as host-qualified (contains `//` or `.`). Only host literals and
+  host-qualified specifiers are extracted; anything else (hosts assembled at runtime from variables)
+  returns **uncertain**, not "not contacted". No cache — recomputed against `base` each run, bounding
+  staleness by the run itself.
+- **Shape match over the diff:** (1) a call-expression containing a URL/host literal; (2) an assignment
+  to an identifier matching a `url|endpoint|webhook|callback|dsn|tracking`-shaped name; (3) a call
+  signature in the **finite SDK-init table** — initialised to `Sentry.init(`, the
+  PostHog/`analytics`-family init, `Datadog`, New Relic, Mixpanel, and Segment init calls, each a bare
+  entry, extended only by adding a row never by keyword inference; or (4) a package-manifest
+  dependency/scripts/postinstall entry that adds or invokes a host/shim, or a registry/proxy/mirror
+  assignment in a config file (`.npmrc` `registry=`, `proxy=`/`mirror=`/`registry=` keys in
+  `.npmrc`/`.yarnrc`/`.cargo/config`-shaped files), whose value is a host literal visible in the diff.
+  This fourth primitive detects only dependency/package and registry/proxy/mirror/install-hook additions
+  whose destination is a **host literal visible in the diff** — it does **not** reach the
+  named-shim-runtime-hidden form (see the detector residual below).
+
+**Single-match trigger.** A shape match fires **only when** its resolved destination is a host **not in
+the baseline** — a *new* host the diff introduces. Excluded by construction: same-host literals,
+relative-origin URLs (`fetch("/api/x")`), test-file paths (`*/test/*`, `*/tests/*`, `*_test.*`,
+`*.test.*`), and string literals not inside a call/assignment expression — **except** in the
+package-manifest and registry/proxy/mirror config-file contexts, where a bare
+`postinstall`/`registry`/`mirror`/`proxy` value is itself the destination-bearing construct and is
+matched in place. Unlike the seven keyword categories, **a single bounded match is sufficient on its
+own** to trigger siege — independent of the 2-of-7 threshold — because a new-host destination is
+exactly the construct class this rule exists to catch. The existing 2-of-7 threshold is otherwise
+unchanged.
+
+**Cannot-conclusively-classify.** If a shape token is present **and** its destination is unresolvable
+from the diff (the identifier matches the shape or an `https?://` literal is present but the host is
+assembled from variables not in the diff — baseline extraction returns **uncertain**), report
+**"cannot conclusively classify"**. Zero shape tokens → skip (nothing to classify).
+
+**Detector residual (stated, not papered over).** The named-shim-runtime-hidden form — a dependency
+whose smuggled destination lives only in the published package's runtime/postinstall code, with no host
+literal in the diff (`npm i <attacker-shim>` + `import … from "attacker-shim"`) — is **not
+detector-reachable** and emits zero shape tokens. It is covered by the disclosure half (DEC-5's
+fourth-class declaration makes the shim destination-bearing, so a conforming author mints a ledger entry
+or emits a "did not copy" decline signal), not by this trigger.
+
 ## Activation Threshold
 
-**2+ distinct categories** must match to activate siege. A single category match is insufficient (too many false positives).
+**2+ distinct categories** must match to activate siege. A single category match is insufficient (too many false positives). Category 8 (Destination-Bearing Construct) is the sole exception: a single bounded match there fires alone.
 
 | Matched Categories | Action |
 |---|---|

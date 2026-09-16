@@ -38,7 +38,7 @@ The "Runs" column is split by **reviewer-set** (the dispatch parameter
 | temper | always | always | `T = {CONFIRMED,PLAUSIBLE} × {Critical,Important}` non-empty | the merge-verdict loop |
 | delve | always | always | any kept finding at `{CONFIRMED,PLAUSIBLE} × {Critical,Important}` (trio scale; `PLAUSIBLE@Crit/Imp` is a real regression per contract) | delve is **report-only with no fix loop** — warden applies the predicate to delve's kept findings and owns the fix path (see Fix behavior) |
 | red-team (via quality-gate) | always | always | quality-gate verdict ≠ PASS (Fatal>0 ∨ Significant>0) | delegates to existing `crucible:quality-gate` on the `code` artifact to reuse its red-team loop, invoked so the QG leg **re-dispatches siege** exactly as build's Step-6 gate does (warden does **not** suppress the QG-internal siege) — the second of warden's two siege passes (I-W4 / S-A); the leg's marker is **not** build-tagged (see §Verdict marker ownership / I-W7) — warden owns the aggregate verdict marker; it writes **no** calibration ledger entry (each leg self-emits its native entry, I-W8) |
-| siege | conditional — security-surface diff (reuse build's existing Step 5.5 trigger) | conditional — same security-surface trigger | Critical>0 ∨ High>0 | heavy 6-agent Opus audit; not run on non-security diffs. **siege is warden's own native leg on its own CVSS scale** (disjunction-of-native-gates, a LOCKED decision). warden sieges **twice**, **coverage-equal to build's two sieges (position redistributed across the two passes)**: warden's own siege leg at step-1 HEAD (≈ build Step 5.5), and the QG red-team leg's internal siege auto-dispatch at `SHA_pre_redteam` (≈ build Step 6) — the QG leg is invoked so it **re-dispatches** its internal siege as build does (warden does **not** suppress it) (I-W4 / S-A) |
+| siege | conditional — security-surface diff (reuse build's existing Step 5.5 trigger) | conditional — same security-surface trigger | Critical>0 ∨ High>0 | heavy 6-agent Opus audit; not run on non-security diffs. **siege is warden's own native leg on its own CVSS scale** (disjunction-of-native-gates, a LOCKED decision). warden sieges **twice**, **coverage-equal to build's two sieges (position redistributed across the two passes)**: warden's own siege leg at step-1 HEAD (≈ build Step 5.5), and the QG red-team leg's internal siege auto-dispatch at `SHA_pre_redteam` (≈ build Step 6) — the QG leg is invoked so it **re-dispatches** its internal siege as build does (warden does **not** suppress it) (I-W4 / S-A). **Fail-safe:** if the destination-bearing-construct detector reports "cannot conclusively classify" (`security-signals.md` category 8), siege **runs** (unknown → run, mirroring the inquisitor escalator's fail-safe). |
 | inquisitor | **always (unconditional)** — preserves build Phase 4 Step 4 coverage | conditional — risk-aware predicate (escalators → run; pure-doc-only → skip; else `>1 changed file OR >1 top-level module`). See *Standalone inquisitor-inclusion predicate*. | any adversarial test `Result: FAIL` | heavy 5-dim fan-out. In the `full` set it stays unconditional so a single-file build does **not** lose the inquisitor pass it gets today; the standalone diff-shape trigger is the risk-aware *Standalone inquisitor-inclusion predicate* subsection, where per-push cost matters |
 
 temper and delve share the trio contract scale, so their two legs use one
@@ -374,7 +374,17 @@ commit):
    working-tree changes, if any** (`git add -A && git commit -m '<subject>'` — stages
    new/untracked files too; no path-scoping), with a leg-labeled
    non-`fix:` subject (`chore(warden): temper fixes <run-id>`, `chore(warden): delve fixes
-   <run-id>`, per M-c). Under the fully-empty clean-tree precondition (step 0) that
+   <run-id>`, per M-c).
+
+   **Ledger-monotonicity check (before each auto-commit).** Before each per-leg `git add -A && git commit`,
+   diff `.crucible/fetched-endpoints.md` against its content at the start of that fixer leg. If any
+   previously-present line is missing or altered (append-only violated), abort the auto-commit and escalate
+   to the user. Separately, any `APPROVED-*` / `REJECTED-*` disposition line appended during the non-human
+   leg is definitionally agent-authored (a human cannot operate inside the automated leg): if such a line
+   appears without an out-of-boundary human commit, abort the auto-commit and escalate rather than
+   conferring forged "out-of-boundary" provenance under a `chore(warden):` commit.
+
+   Under the fully-empty clean-tree precondition (step 0) that
    residual is exactly the current leg's delta (a new file the leg created is staged and
    committed, and no pre-existing untracked file exists to misattribute). Committing between legs (not batched at the end) keeps
    each residual attributable to the leg that produced it — so every non-terminal leg's

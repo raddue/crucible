@@ -1010,7 +1010,7 @@ The convergence argument is therefore: *fix-agent edits change what is on the pa
 
 To prevent context leaking between rounds:
 
-1. **Clean artifact only.** The artifact passed to each round's reviewer must be the current version with no revision marks, "Fixed:" annotations, or comments about prior reviews. If the fix agent left review-response comments in the artifact, strip them before the next round.
+1. **Clean artifact only.** The artifact passed to each round's reviewer must be the current version with no revision marks, "Fixed:" annotations, or comments about prior reviews. If the fix agent left review-response comments in the artifact, strip them before the next round. **Exemption:** never strip, edit, or delete a `.crucible/fetched-endpoints.md` line, and never strip a `FETCHED-ENDPOINT:` call-site comment as a "stale annotation" — both are permanent disclosure records, not comments about a prior review round.
 2. **Standardized framing.** The orchestrator's dispatch prompt must use the **same framing** for every round. Do not mention that prior review rounds occurred, what was fixed, or how many rounds have run. The reviewer sees the artifact as if it is the first review.
 3. **No findings forwarding.** Never pass prior round findings to the next reviewer. This is already specified in `crucible:red-team` but is restated here because the quality-gate orchestrator is the most likely point of accidental leakage.
 
