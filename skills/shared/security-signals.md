@@ -88,7 +88,7 @@ or emits a "did not copy" decline signal), not by this trigger.
 
 ## Activation Threshold
 
-**2+ distinct categories** must match to activate siege. A single category match is insufficient (too many false positives).
+**2+ distinct categories** must match to activate siege. A single category match is insufficient (too many false positives). Category 8 (Destination-Bearing Construct) is the sole exception: a single bounded match there fires alone.
 
 | Matched Categories | Action |
 |---|---|

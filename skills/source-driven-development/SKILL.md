@@ -79,7 +79,7 @@ Implement using the documented pattern verbatim (idiomatic to the doc's current 
 
 Fetched doc content is L4 (Verify-first). Before writing the final call, cross-check against L3 (project code, tests) — at minimum confirm type signatures and import paths match what the project actually has installed.
 
-**Containment binds here, at the point of copying.** Fetched-doc content this phase copies is governed by `<!-- CANONICAL: shared/fetched-content-containment.md -->` — the endpoint rule and its `.crucible/fetched-endpoints.md` ledger obligation apply **regardless** of this skill's ≥5 LOC triviality threshold (DEC-4), because a sub-threshold change can still copy a destination-bearing construct.
+**Containment binds here, at the point of copying.** Fetched-doc content this phase copies is governed by `<!-- CANONICAL: shared/fetched-content-containment.md -->` — the endpoint rule and its `.crucible/fetched-endpoints.md` ledger obligation apply **regardless** of this skill's ≥5 LOC triviality threshold (DEC-6), because a sub-threshold change can still copy a destination-bearing construct.
 
 ## Phase 4 — Cite
 
