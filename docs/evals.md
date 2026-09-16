@@ -192,6 +192,67 @@ missing round-2s later (once Opus is confirmed healthy) would strengthen this si
 judged necessary to unblock #537, given the model-tier dimension was already known to be
 untestable from a Sonnet 5 session regardless of outage.
 
+## Review-Gate Precision/Recall on AACR-Bench (#631, deepseek-v4-pro — 2026-09-13)
+
+The first measured quantification of crucible's review-gate precision/recall, against
+[AACR-Bench](https://github.com/alibaba/aacr-bench)'s expert-verified grounding
+(Apache-2.0; dataset mirrored at HuggingFace `Alibaba-Aone/aacr-bench` — 2,145 review
+comments across 200 real PRs / 50 repos / 10 languages: `label=1` = expert-verified
+CORRECT comment, `label=0` = incorrect). The harness is `scripts/aacr_bench_measure.py`
+and its CI-gated deterministic core (subset selection, four-stage matcher, metric
+arithmetic) is pinned by `scripts/test_aacr_bench_measure.py`.
+
+**What was measured:** for each sampled PR the gate (the delve eight-field
+severity/verdict engine in the configured model, `CONFIRMED`/`PLAUSIBLE` kept, `REFUTED`
+dropped per `shared/severity-verdict-contract.md` §2) reviews the PR's unified diff; its
+kept findings are deterministically matched against the PR's `label=1` reference comments
+(four-stage, mirroring AACR's own `evaluation/judge.py`: path → side → line(k=1) →
+semantic, with a shared-signal-token fallback for paraphrased findings). Metrics follow
+AACR's formulas: **precision = matches / generated, recall = matches / expected,
+F1, noise = (generated − matches) / generated**.
+
+**Result (seed 631, 8 PRs, 17 expected correct comments, single gate pass, temp 0):**
+
+| Met | Value |
+|---|---|
+| precision | **1.000** (2/2 kept findings matched) |
+| recall | **0.118** (2/17 expected comments found) |
+| F1 | **0.211** |
+| noise | 0.000 |
+| token cost | 27,431 (11,790 prompt + 15,641 completion) |
+
+Honest scope: this is a **first directional datapoint, not a verdict**. The gate found
+every issue it kept (precision 1.0, noise 0), but on an 8-PR subset it surfaced only 2 of
+17 expert-verified comments (recall 0.118) — the model cheaply drops Minor/Suggestion and
+misses parts of the diff the ground truth annotates. The subset is small (8 PRs, 17
+expected), single-pass (no temper-style iterate-to-convergence), and run on
+`alitp-intl/deepseek-v4-pro-0813` (the review gate pins `opus` in
+`shared/model-tier-policy.md`; Opus was rate-limited during the run — re-running under
+the pinned tier is the first reproducibility check). Expect precision/recall/F1 to move
+with model tier, diff size, and convergence rounds; the harness exists so that movement
+is measurable rather than asserted.
+
+**Reproducible command** (run from repo root; needs `NINEROUTER_URL`/`NINEROUTER_KEY` and
+the dataset JSON downloaded from HF — the deterministic half runs without any of that):
+
+```bash
+# fetch the AACR-Bench dataset once (2 MB, Apache-2.0)
+curl -L https://huggingface.co/datasets/Alibaba-Aone/aacr-bench/resolve/main/dataset.json \
+  -o /tmp/aacr-dataset.json
+
+# review a seeded, reproducible subset with the configured gate model behind NINEROUTER
+python3 scripts/aacr_bench_measure.py run \
+  --dataset /tmp/aacr-dataset.json --seed 631 --limit-prs 8 \
+  --model alitp-intl/deepseek-v4-pro-0813 --out /tmp/aacr-results
+
+# deterministic half only (no LLM, no network): pinned in CI by test_aacr_bench_measure.py
+python3 scripts/test_aacr_bench_measure.py
+```
+
+The run writes per-PR findings records (`--out/records/*.json`) and an aggregate
+`--out/results.json`, so a re-run resumes completed PRs instead of re-spending the LLM
+budget.
+
 ## #561: Second Pass Findings widen the score population (2026-09-01)
 
 #561 (PR #565) fixes a real gap in `quality-gate`'s clean-pass exit: the weighted
