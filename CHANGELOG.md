@@ -4,6 +4,30 @@ Notable changes to the Crucible skill library. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); entries are grouped by
 milestone since skills ship as a library rather than a versioned binary.
 
+## Deterministic Comment-Position Verification — 2026-09-13
+
+Review findings' `file:line` refs now get a deterministic position gate before
+they reach the user.
+
+### Added
+
+- **`scripts/verify_comment_positions.py`** — verifies every `{file, line}`
+  ref resolves to a real existing line in the tree; a referenced symbol present
+  in the file must occur on the cited line (else the finding is REJECTED as
+  position drift). Pure-prose / removed-code refs degrade to provenance-only
+  so they are never hard-rejected. `--selftest`, `--root`, `--window`. Tracks
+  quote spans with a backreference so prose like `token's `expiresAt`` cannot
+  pair an apostrophe with a later backtick and leak the junk symbol `s`. (#628)
+- **`scripts/test_verify_comment_positions.py`** — 18-case stdlib suite pinning
+  the gate (drift rejection, EOF/malformed refs, range refs, provenance
+  degrade, CLI exit codes); wired into `scripts/run_tests.sh`.
+
+### Changed
+
+- **`delve` Step 3.1** — the engine's kept findings pass through the position
+  gate before display; REJECTED findings are surfaced separately as
+  position-drift and never shown or posted as verified findings. (#628)
+
 ## Unreleased — Deterministic change-bundling for large-diff coverage (#630)
 
 A deterministic changed-file selection + bundling step gives any many-file

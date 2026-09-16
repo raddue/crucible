@@ -156,6 +156,10 @@ run python3 scripts/test_pathmatch.py
 # --- Zero-token vulnerability pattern matcher (#629) ---
 run python3 scripts/test_vuln_ruleset.py
 
+# --- Deterministic comment-position verification (#628) ---
+run python3 scripts/verify_comment_positions.py --selftest
+run python3 scripts/test_verify_comment_positions.py
+
 # --- crucible-qg-fix model-pin regression (#537) ---
 run python3 scripts/test_qg_fix_pin.py
 
