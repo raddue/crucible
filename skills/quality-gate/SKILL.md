@@ -554,6 +554,11 @@ This rule is necessary because no-op rounds preserve the weighted score, which u
 
 ## Scope Anchoring for Fix Agents
 
+<!-- CANONICAL: shared/dispatch-convention.md (Scope Anchoring) — this section is the
+     tier-1 reference implementation. The generalized two-tier pattern, and the tier-2
+     semantic scope judge for dispatches whose file set cannot be pinned up front, live
+     in the shared convention. -->
+
 Fix agents are prone to drift — addressing findings by adding unrequested features, restructuring documents, or expanding scope beyond what was asked. This costs real time in re-anchoring and rework.
 
 **Before dispatching each fix agent, the orchestrator MUST include in the fix prompt:**
