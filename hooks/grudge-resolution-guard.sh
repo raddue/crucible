@@ -202,7 +202,7 @@ if [ ! -d "$GRUDGE_ROOT/$WORKTREE_KEY" ] && [ ! -d "$GRUDGE_ROOT/$SHARED_KEY" ];
   exit 0
 fi
 
-# ── 8. State file (INV-C12's five fields) + the separate skips log ──────
+# ── 8. State file (INV-C12: version + four fields) + separate skips log ─
 STATE_FILE="$STATE_DIR/$SESSION_ID.json"
 SKIPS_FILE="$STATE_DIR/skips.log"
 
@@ -213,7 +213,26 @@ fi
 QUERY_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_query.py"
 APPEND_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_append.py"
 
-declare -A SHA_GROUP SHA_FILES BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP
+declare -A SHA_GROUP BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP
+
+# ── State document format version (INV-C12, §5.2 hazard 2) ─────────────
+# R4 removes the `sha_files` JSON field (its per-sha path list can hold a
+# byte jq cannot carry, S-2) and persists touched files only as the
+# NUL-delimited `$STATE_DIR/<sha>.files` sibling artifact. A state document
+# whose `version` disagrees with this build was written by a different hook
+# generation; its fields are not trusted (they may carry the removed schema)
+# and the file is discarded so this Stop rewrites it fresh on the next scan.
+STATE_VERSION=1
+# Only a document that actually PARSES participates in the version gate — an
+# empty or non-JSON file is the baseline's `BASELINE_READABLE` case (loud
+# allow), not a competing-version discard.
+if [ -f "$STATE_FILE" ] && jq -e 'type == "object"' "$STATE_FILE" >/dev/null 2>&1; then
+  STORED_VERSION="$(jq -r '.version // 0' "$STATE_FILE" 2>/dev/null)"
+  case "$STORED_VERSION" in ''|*[!0-9]*) STORED_VERSION=0 ;; esac
+  if [ "$STORED_VERSION" != "$STATE_VERSION" ]; then
+    rm -f "$STATE_FILE" 2>/dev/null
+  fi
+fi
 
 # ── The durable baseline the block predicate (step 14b) measures against ─
 # What was ON DISK for this session when this Stop began, read with NO
@@ -249,11 +268,72 @@ _load_maps() {
     [ -n "$k" ] && SHA_GROUP["$k"]="$v"
   done < <(jq -r '(.sha_group // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
   while IFS=$'\t' read -r k v; do
-    [ -n "$k" ] && SHA_FILES["$k"]="$v"
-  done < <(jq -r '(.sha_files // {}) | to_entries[] | "\(.key)\t\(.value | join(","))"' "$STATE_FILE" 2>/dev/null)
-  while IFS=$'\t' read -r k v; do
     [ -n "$k" ] && BLOCK_COUNTS["$k"]="$v"
   done < <(jq -r '(.block_counts // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
+  # The per-sha touched-file list lives ONLY in the NUL-delimited
+  # `$STATE_DIR/<sha>.files` artifacts (§5/S-2/INV-C12) — never in the JSON.
+  _load_files
+}
+
+# C-o (SIEGE-R2-H6): a candidate sha used to build a bash identifier.
+# Hex-only + bounded length, the same shape the hook applies to SESSION_ID.
+_sha_key_ok() {
+  case "$1" in ''|*[!0-9a-fA-F]*) return 1 ;; esac
+  [ "${#1}" -ge 4 ] && [ "${#1}" -le 64 ]
+}
+
+# C-o funnel: EVERY bash identifier named after a sha goes through here, from
+# BOTH branches — the fresh `diff-tree` scan AND the `.files` load — so no
+# branch can concatenate an unvalidated sha into `declare -a "F_$sha"`.
+_sha_array_set() {
+  local sha="$1"; shift
+  _sha_key_ok "$sha" || return 1
+  # `-g`: the F_<sha> arrays are hook-global state (grouping, clearances, and
+  # the message rendering read them long after this function returns); a bare
+  # `declare -a` inside a function would scope them to this call.
+  declare -g -a "F_$sha"
+  declare -n _sa="F_$sha"
+  _sa=("$@")
+  unset -n _sa
+  return 0
+}
+
+_sha_array_has() {
+  # 0 iff the per-sha array F_$1 is already loaded (a persisted candidate's
+  # paths were restored at hook start from its `<sha>.files` artifact).
+  declare -n _ah="F_$1"
+  local n=0
+  [ "${#_ah[@]}" -gt 0 ] && n=1
+  unset -n _ah
+  [ "$n" -eq 1 ]
+}
+
+_load_files() {
+  local f sha p _files=()
+  for f in "$STATE_DIR"/*.files; do
+    [ -e "$f" ] || continue
+    sha="${f##*/}"; sha="${sha%.files}"
+    _files=()
+    while IFS= read -r -d '' p; do _files+=("$p"); done < "$f"
+    # C-o: the sha from the FILENAME is validated inside the funnel before
+    # it can name an array; a crafted name (`deadbeef[$(...)].files`) is
+    # skipped, never concatenated into `declare -a "F_$sha"`.
+    _sha_array_set "$sha" "${_files[@]}"
+  done
+  return 0
+}
+
+# SIEGE-R2-H3 / S-17 shape: EVERY hook-side write to an attacker-derivable or
+# fixed `$STATE_DIR` path is wrapped in a bounded `timeout`, so a `mkfifo`'d
+# target turns the append's opening redirect into a blocking open that ends at
+# the 1s bound, never at the hook's own timeout ceiling. `|| :` is applied
+# TWICE: the append's own failure is absorbed inside the child (best-effort
+# write), and `timeout`'s 124 is absorbed outside — the write must never
+# affect a block/allow verdict. C-k decides the remedy from what landed.
+_write_state_files() {
+  local target="$1"; shift
+  timeout 1 bash -c 't="$1"; shift; printf "%s\0" "$@" >> "$t" || :' \
+    _ "$target" "$@" || :
 }
 
 # ── 9/10. Pick the scan range ───────────────────────────────────────────
@@ -321,8 +401,8 @@ SCAN_HEAD="$(_git "$SESSION_ROOT" rev-parse --verify --quiet "HEAD^{commit}")"
 # truncate it. --root so a parentless root commit still lists its paths.
 _has_non_md() {
   # "$@" = one RAW path per ARGUMENT — never a delimited string. BOTH branches
-  # of filter (c) — the fresh diff-tree and the persisted sha_files — call THIS
-  # one predicate, so the two can never disagree about the same commit.
+  # of filter (c) — the fresh diff-tree and the persisted `.files` load — call
+  # THIS one predicate, so the two can never disagree about the same commit.
   #
   # Taking an ARRAY rather than a delimited string is the whole point. Every
   # string form has some byte it cannot carry: git's display form cannot carry a
@@ -341,21 +421,7 @@ _has_non_md() {
   return 1
 }
 
-_split_csv() {
-  # $1 = comma-joined paths -> CSV_PARTS array, split on the COMMA delimiter
-  # ONLY. `read -r -a` with IFS=, would additionally stop at the first NEWLINE,
-  # re-introducing the very line-orientation _has_non_md exists to avoid.
-  CSV_PARTS=()
-  local rest="$1" head
-  while :; do
-    head="${rest%%,*}"
-    CSV_PARTS+=("$head")
-    [ "$head" = "$rest" ] && break
-    rest="${rest#*,}"
-  done
-}
-
-IS_SHA=(); IS_AT=(); IS_FILES=()
+IS_SHA=(); IS_AT=()
 while IFS= read -r line; do
   # One `git diff-tree` subprocess may follow per candidate — the first of the
   # two attacker-multiplied fan-outs this budget bounds.
@@ -369,8 +435,7 @@ while IFS= read -r line; do
   case "$c_at" in ''|*[!0-9]*) continue ;; esac
   printf '%s' "$c_subj" | grep -qE '^fix[(:]' || continue
   [ "$c_at" -ge "$SEEDED_AT" ] || continue
-  c_files="${SHA_FILES[$c_sha]}"
-  if [ -z "$c_files" ]; then
+  if ! _sha_array_has "$c_sha"; then
     # `-z` (NUL-delimited RAW paths) is load-bearing, not a style choice.
     # Without it `diff-tree --name-only` prints git's DISPLAY form, which
     # C-quotes any path holding a non-ASCII byte, a `"` or a `\`
@@ -378,8 +443,8 @@ while IFS= read -r line; do
     # so the docs-only exclusion below reads it as a non-.md path and a
     # DOCUMENTATION-ONLY fix(*) commit becomes a candidate and blocks, against
     # INV-T14. The predicate must see the path, not its rendering. The raw form
-    # is also what gets persisted into sha_files, and therefore what the
-    # `--by-files` clearance lookup and the Step-15 prefill go on to use.
+    # is also what gets persisted into the `<sha>.files` artifact, and therefore
+    # what the `--by-files` clearance lookup and the Step-15 prefill use.
     #
     # The NUL delimiter is kept end to end, into an ARRAY. Translating it to a
     # newline first (`tr '\0' '\n'`) only swaps one impossible delimiter for
@@ -390,33 +455,27 @@ while IFS= read -r line; do
     done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$c_sha")
     [ "${#c_paths[@]}" -eq 0 ] && continue
     _has_non_md "${c_paths[@]}" || continue
-    # STORAGE is a separate question from the predicate, and its encoding is
-    # narrower: the state file holds sha_files as one `F<TAB>sha<TAB>csv` LINE
-    # per commit and #568 freezes the comma join, so the stored form can carry
-    # neither a comma nor a newline. Stating that limit rather than papering
-    # over it: a newline is folded onto the comma delimiter HERE, at the store,
-    # exactly as it was before — never left to truncate the record at write
-    # time, which would drop every path after the first and could turn a stored
-    # candidate back into a non-candidate on the next Stop. The fold cannot
-    # change a VERDICT: splitting a path that does not end in `.md` leaves a
-    # last fragment that still does not end in `.md`, so a candidate stays a
-    # candidate, and only candidates are ever stored. Widening the encoding so
-    # the stored PATHS are exact too is #568's business, not filter (c)'s.
-    c_files="$(printf '%s,' "${c_paths[@]}" | tr '\n' ',')"
-    c_files="${c_files%,}"
+    # C-o funnel: only a hex-validated sha may name an in-hook array.
+    _sha_array_set "$c_sha" "${c_paths[@]}" || continue
+    # Persist the path list ONCE, byte-exact, as the NUL-delimited
+    # `$STATE_DIR/<sha>.files` artifact (§5/S-2/S6) — never a delimited JSON
+    # field. Bounded write (SIEGE-R2-H3): a mkfifo'd target holds the open for
+    # the 1s timeout, never for the hook's own timeout ceiling.
+    _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
   else
-    # Split on the COMMA delimiter only. The old form replaced commas with
-    # newlines and then let the predicate split on lines as well, which is what
-    # let one real path containing a newline read as two.
-    _split_csv "$c_files"
-    _has_non_md "${CSV_PARTS[@]}" || continue
+    declare -n _cf="F_$c_sha"
+    _has_non_md "${_cf[@]}" || continue
+    unset -n _cf
   fi
-  IS_SHA+=("$c_sha"); IS_AT+=("$c_at"); IS_FILES+=("$c_files")
+  IS_SHA+=("$c_sha"); IS_AT+=("$c_at")
 done < <(printf '%s\n' "$LOG")
 
 # ── 12. Grouping / join / merge / re-arm ────────────────────────────────
 _overlap() {
-  # _overlap <csv-a> <csv-b> -> 0 iff they share at least one path
+  # _overlap <sha-a> <sha-b> -> 0 iff their touched-file sets share a path.
+  # Both sides are the per-sha F_<sha> argument vectors (loaded fresh or from
+  # the `.files` artifacts) — never a comma- or newline-joined string (DEC-5).
+  # A real array carries every byte a path can hold; a delimited string cannot.
   # The step-12 grouping hotspot: called once per candidate pair (~n^2), each
   # compare squaring the files-per-commit — the pure-CPU half of issue #603.
   # The clock is a bash builtin, so this check is arithmetic, not a subprocess.
@@ -427,17 +486,14 @@ _overlap() {
   # at the cost of an arithmetic op per string compare on the hot path; the
   # measured 362 s case (500 candidates x 30 files) trips between calls.
   local a b
-  local -a AA BB
-  local IFS=','
-  read -r -a AA <<< "$1"
-  read -r -a BB <<< "$2"
-  IFS=$' \t\n'
-  for a in "${AA[@]}"; do
+  declare -n _aa="F_$1" _bb="F_$2"
+  for a in "${_aa[@]}"; do
     [ -z "$a" ] && continue
-    for b in "${BB[@]}"; do
-      [ "$a" = "$b" ] && return 0
+    for b in "${_bb[@]}"; do
+      [ "$a" = "$b" ] && { unset -n _aa _bb; return 0; }
     done
   done
+  unset -n _aa _bb
   return 1
 }
 
@@ -445,17 +501,16 @@ _overlap() {
 for (( gi=${#IS_SHA[@]}-1; gi>=0; gi-- )); do
   _budget_ok || _budget_out
   n_sha="${IS_SHA[$gi]}"
-  n_files="${IS_FILES[$gi]}"
-  # Persisted once from filter (c)'s own diff-tree output; never recomputed,
-  # never cleared — the join test needs it after the SHA leaves scope.
-  [ -z "${SHA_FILES[$n_sha]}" ] && SHA_FILES["$n_sha"]="$n_files"
+  # The per-sha array was set in filter (c) (fresh scan) or restored from its
+  # `<sha>.files` artifact at hook start; never recomputed, never cleared —
+  # the join test needs it after the SHA leaves scope.
   [ -n "${SHA_GROUP[$n_sha]}" ] && continue
 
   bridged=""
   for s in "${!SHA_GROUP[@]}"; do
     g="${SHA_GROUP[$s]}"
     case " $bridged " in *" $g "*) continue ;; esac
-    if _overlap "$n_files" "${SHA_FILES[$s]}"; then
+    if _overlap "$n_sha" "$s"; then
       bridged="$bridged $g"
     fi
   done
@@ -492,6 +547,19 @@ for (( gi=${#IS_SHA[@]}-1; gi>=0; gi-- )); do
     BLOCK_COUNTS["$canon"]="$m_max"
   fi
 done
+
+# C-m: every `--by-files` construction is the single joined token
+# `--by-files=<path>`, one per touched path — never a space-separated or
+# comma-joined token (a value beginning with `-` would be consumed as a flag).
+_by_files_args() {
+  BY_ARGS=()
+  local p
+  declare -n _bf="F_$1"
+  for p in "${_bf[@]}"; do
+    BY_ARGS+=("--by-files=$p")
+  done
+  unset -n _bf
+}
 
 # ── 13. Clearance — SCOPED TO THIS STOP'S IN-SCOPE SET ──────────────────
 declare -A SKIP_SET
@@ -610,7 +678,8 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
   # spend the PERSISTED block counter: a held reset on flippable evidence is
   # exactly how each false->true->false branch cycle restores full MAX_BLOCKS.
   if [ -z "${GROUP_CLEARED[$k_gid]}" ]; then
-    _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+    _by_files_args "$k_sha"
+    _lookup_ok "${BY_ARGS[@]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
                --repo-root "$STORE_REPO_ROOT" "--repo=$SHARED_KEY" --session-root "$SESSION_ROOT" || continue
     if [ -n "$LOOKUP_OUT" ]; then
       # TRANSIENT, so this candidate is NOT done: `continue`ing here would skip
@@ -632,7 +701,8 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
       continue
     fi
     if [ -z "${GROUP_CLEARED[$k_gid]}" ]; then
-      if _lookup_ok "--by-files=${SHA_FILES[$k_sha]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
+      _by_files_args "$k_sha"
+      if _lookup_ok "${BY_ARGS[@]}" --candidate-sha "$k_sha" --candidate-at "$k_at" \
                     --repo-root "$SESSION_ROOT" "--repo=$WORKTREE_KEY" --session-root "$SESSION_ROOT" \
          && [ -n "$LOOKUP_OUT" ]; then
         GROUP_CLEARED["$k_gid"]=1
@@ -640,7 +710,8 @@ for (( ci=0; ci<${#IS_SHA[@]}; ci++ )); do
     fi
   fi
 done
-# Clearance is a durable counter reset: sha_group / sha_files stay persisted.
+# Clearance is a durable counter reset: sha_group stays persisted; the
+# per-sha `<sha>.files` artifacts stay on disk.
 # Only DURABLE evidence may spend the PERSISTED counter — a skips.log entry or
 # a by-commit identity match are branch-independent. A by-files match keys on
 # the working tree and flips on `git checkout` (#608); it clears THIS Stop but
@@ -698,22 +769,23 @@ if [ "${#BLOCKING[@]}" -gt 0 ]; then
   fi
 fi
 
-# ── Persist state atomically (INV-C12's exact five fields) ──────────────
+# ── Persist state atomically (INV-C12: version + four display/checkpoint
+# fields — `sha_files` is NOT a field; per-sha files live in `.files`) ─────
 _write_state() {
   local tmp="$STATE_FILE.tmp.$$"
   {
+    printf 'V\t%s\n' "$STATE_VERSION"
     printf 'L\t%s\n' "$LAST_NEW"
     printf 'S\t%s\n' "$SEEDED_AT"
     for s in "${!SHA_GROUP[@]}"; do printf 'G\t%s\t%s\n' "$s" "${SHA_GROUP[$s]}"; done
-    for s in "${!SHA_FILES[@]}"; do printf 'F\t%s\t%s\n' "$s" "${SHA_FILES[$s]}"; done
     for s in "${!BLOCK_COUNTS[@]}"; do printf 'B\t%s\t%s\n' "$s" "${BLOCK_COUNTS[$s]}"; done
   } | jq -R -s '
       split("\n") | map(select(length > 0) | split("\t")) |
       {
+        version:          (((map(select(.[0] == "V"))[0] // ["V", "0"])[1]) | tonumber),
         last_checked_sha: ((map(select(.[0] == "L"))[0] // ["L", ""])[1]),
         seeded_at:        (((map(select(.[0] == "S"))[0] // ["S", "0"])[1]) | tonumber),
         sha_group:        (map(select(.[0] == "G")) | map({key: .[1], value: .[2]}) | from_entries),
-        sha_files:        (map(select(.[0] == "F")) | map({key: .[1], value: (.[2] | split(","))}) | from_entries),
         block_counts:     (map(select(.[0] == "B")) | map({key: .[1], value: (.[2] | tonumber)}) | from_entries)
       }' > "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
@@ -812,13 +884,34 @@ if [ "${#BLOCKING[@]}" -gt 0 ] && ! _progress_demonstrated; then
 fi
 
 # ── 15. Messages ────────────────────────────────────────────────────────
+# C-k + S-17 (SIEGE-R2-H3): the printed `>> skips.log` remedy promises the
+# target is writable. PROVING that by appending is itself a write to a fixed
+# $STATE_DIR path, so the probe is time-bounded — a mkfifo'd skips.log costs
+# the 1 s bound, never the hook's own timeout — and a failed probe only
+# degrades the message, never a verdict.
+_skips_probe_ok() {
+  timeout 1 bash -c 'printf "" >> "$1"' _ "$SKIPS_FILE" 2>/dev/null
+}
+
 _prefill() {
-  # One fully-resolved, copy-pasteable record-a-grudge command per still-
-  # unresolved candidate SHA. --repo-root/--repo are UNCONDITIONALLY the
-  # shared-clone pair — exactly the identity step 13's lookup queries — so the
-  # recorded grudge clears the very next Stop from ANY worktree of the clone.
-  printf '    python3 "%s" --symptom "<one line: what broke>" --files="%s" --commit "%s" --repo-root "%s" --repo="%s"\n' \
-    "$APPEND_SCRIPT" "${SHA_FILES[$1]}" "$1" "$STORE_REPO_ROOT" "$SHARED_KEY" >&2
+  # Exactly ONE fixed, copy-pasteable record-a-grudge command per still-
+  # unresolved candidate SHA: `--files-from` names the NUL-delimited
+  # `$STATE_DIR/<sha>.files` artifact, which the shell passes through UNPARSED
+  # — no element of any filename can become shell syntax or a rendered path
+  # (§3.2 message content, SIEGE-R2-H1/H2). --repo-root/--repo remain
+  # UNCONDITIONALLY the shared-clone pair — exactly the identity step 13's
+  # lookups query — so the recorded grudge clears the very next Stop from ANY
+  # worktree of the clone.
+  #
+  # C-k: printed only when the target is a readable REGULAR file this Stop has
+  # on disk — a missing or mkfifo'd target would hand the maintainer a dead
+  # command, so it degrades to SHA-and-count-only instead.
+  local sha="$1" files_path
+  files_path="$STATE_DIR/$sha.files"
+  if [ -f "$files_path" ]; then
+    printf '    python3 "%s" --files-from="%s" --candidate-sha="%s" --symptom "<one line: what broke>" --repo-root "%s" --repo="%s"\n' \
+      "$APPEND_SCRIPT" "$files_path" "$sha" "$STORE_REPO_ROOT" "$SHARED_KEY" >&2
+  fi
 }
 
 for g in "${GIVEUP[@]}"; do
@@ -843,7 +936,9 @@ if [ "${#BLOCKING[@]}" -gt 0 ]; then
       _prefill "$m"
     done
     set -- $members
-    echo "    echo \"$1 <reason>\" >> \"$SKIPS_FILE\"" >&2
+    if _skips_probe_ok; then
+      echo "    echo \"$1 <reason>\" >> \"$SKIPS_FILE\"" >&2
+    fi
   done
   exit 2
 fi

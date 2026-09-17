@@ -279,7 +279,7 @@ class StopHookClearanceTest(unittest.TestCase):
             r = subprocess.run(
                 [sys.executable, GRUDGE_APPEND,
                  "--symptom", "widget exploded on launch",
-                 "--files", "app.py",
+                 "--files=app.py",
                  "--commit", fx.fix_sha,
                  "--repo-root", os.path.realpath(fx.repo),
                  "--repo", fx.repo_key],
@@ -305,7 +305,7 @@ class StopHookClearanceTest(unittest.TestCase):
             r0 = subprocess.run(
                 [sys.executable, GRUDGE_APPEND,
                  "--symptom", "widget exploded on launch",
-                 "--files", "app.py",
+                 "--files=app.py",
                  "--commit", fx.fix_sha,
                  "--repo-root", os.path.realpath(fx.repo),
                  "--repo", fx.repo_key],

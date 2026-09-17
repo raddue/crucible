@@ -275,7 +275,7 @@ plugin_root="$(realpath "<this-skill-base-dir>/../..")"
 python3 "$plugin_root/scripts/grudge_append.py" \
   --symptom "<PR title minus the fix() prefix>" \
   --root-cause "<from PR body, if stated>" \
-  --files "<comma-separated files the PR changed>" \
+  --files="<changed file 1>" --files="<changed file 2>" \
   --commit "<squash/merge SHA>" \
   --why "<from PR body, if stated>"
 ```

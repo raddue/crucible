@@ -580,17 +580,24 @@ plugin_root="$(realpath "<this-skill-base-dir>/../..")"
 python3 "$plugin_root/scripts/grudge_append.py" \\
   --symptom "<PR title minus the fix() prefix>" \\
   --root-cause "<from PR body, if stated>" \\
-  --files "<comma-separated files the PR changed>" \\
+  --files="<changed file 1>" --files="<changed file 2>" \\
   --commit "<squash/merge SHA>" \\
   --why "<from PR body, if stated>"'''
 
-# The only change INV-C10 permits since INV_C10_BASE_SHA: the one added
-# paragraph (plus the blank line separating it). Measured from the real diff.
+# The only changes INV-C10 permits since INV_C10_BASE_SHA: the one added
+# paragraph (plus the blank line separating it), and the R4 fence rewrite —
+# the comma-joined `--files "<comma-separated…>"` sentinel line replaced by
+# the repeatable equals-form `--files="…"` pair (DEC-5/#568, C-m). Measured
+# from the real diff.
 EXPECTED_ADDED_LINES = [
+    '  --files="<changed file 1>" --files="<changed file 2>" \\',
     "If this step is skipped or fails, Path B's Stop hook "
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
     "",
+]
+EXPECTED_REMOVED_LINES = [
+    '  --files "<comma-separated files the PR changed>" \\',
 ]
 
 # Command words that may precede the real command word in a simple command.
@@ -795,10 +802,13 @@ def check_merge_pr_untouched(root: Path, base_sha: str, errors: list[str]) -> No
         elif line.startswith("-"):
             removed.append(line[1:])
 
-    if removed:
+    if removed != EXPECTED_REMOVED_LINES:
         errors.append(
             f"INV-C10: {MERGE_PR_SKILL} has {len(removed)} REMOVED line(s) since {base_sha}; "
-            f"INV-C10 permits none. First: {removed[0]!r}"
+            f"INV-C10 permits none beyond the pinned R4 fence-rewrite. "
+            f"First: {removed[0]!r}" if removed else
+            f"INV-C10: {MERGE_PR_SKILL} has REMOVED lines since {base_sha} that do not "
+            f"match the pinned R4 fence-rewrite"
         )
     if added != EXPECTED_ADDED_LINES:
         errors.append(
@@ -935,7 +945,9 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
-    """A repo whose merge-pr/SKILL.md gained exactly the permitted paragraph."""
+    """A repo whose merge-pr/SKILL.md gained exactly the permitted paragraph
+    AND the R4 fence rewrite (comma-joined sentinel replaced by the repeatable
+    equals-form pair) — the only two changes INV-C10 allows since base."""
     root = Path(tempfile.mkdtemp(dir=tmp))
     (root / "skills" / "merge-pr").mkdir(parents=True)
     skill = root / MERGE_PR_SKILL
@@ -943,19 +955,23 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     # REMOVED line whose own text starts with `--` renders as `---…` in a diff,
     # which a header filter anchored on a bare `---` prefix silently eats.
     head = ("---\nname: merge-pr\n---\n\n"
-            "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n"
-            + EXPECTED_STEP_75_FENCE + "\n```\n")
-    skill.write_text(head + "\nNon-`fix(*)` PRs record nothing.\n", encoding="utf-8")
+            "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n")
+    # The pre-R4 comma-joined sentinel fence, as the base commit carried it.
+    old_fence = EXPECTED_STEP_75_FENCE.replace(
+        '  --files="<changed file 1>" --files="<changed file 2>" \\',
+        '  --files "<comma-separated files the PR changed>" \\',
+    )
+    skill.write_text(head + old_fence + "\n```\n\nNon-`fix(*)` PRs record nothing.\n",
+                     encoding="utf-8")
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "t")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "base")
     base = _git(root, "rev-parse", "HEAD").stdout.strip()
-    skill.write_text(
-        head + "\n" + EXPECTED_ADDED_LINES[0] + "\n\nNon-`fix(*)` PRs record nothing.\n",
-        encoding="utf-8",
-    )
+    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n", EXPECTED_ADDED_LINES[1],
+                "\n\nNon-`fix(*)` PRs record nothing.\n"])
+    skill.write_text("".join(working), encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "add paragraph")
     return root, base

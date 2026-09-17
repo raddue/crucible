@@ -285,6 +285,13 @@ run python3 scripts/test_558_559_acceptance.py
 run_expect "selftest OK" python3 scripts/check_contract_tags.py --selftest
 run_expect "OK — contract coverage" python3 scripts/check_contract_tags.py
 
+# --- R4 encoding + injection fences (#574/#568, DEC-5): C-m/C-d/C-o/T-s greps
+run python3 scripts/check_grudge_encoding_invariants.py --selftest
+run python3 scripts/check_grudge_encoding_invariants.py
+
+# --- R4 encoding + injection behavior (T-h/T-i/T-k/T-l/T-n/T-aa) ---
+run python3 scripts/test_grudge_r4_encoding.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo

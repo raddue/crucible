@@ -172,7 +172,7 @@ AT16="$(at_of "$R2" HEAD)"
 # (a) survivors subset of candidate files, date_fixed before candidate -> match
 S16A="$TMPROOT/store16a"
 P16A="$(append_grudge "$S16A" k16a "$R2" "a and b regressed together" "a.py,b.py" "" "2026-05-15")"
-run_query "$S16A" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
+run_query "$S16A" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16a --session-root "$R2"
 check 7 "2-file subset with earlier date_fixed matches, rc — contract:match:inv-t16" 0 "$RC"
 check 8 "2-file subset with earlier date_fixed matches, stem — contract:match:inv-t16" "$(stem_of "$P16A")" "$OUT"
@@ -180,7 +180,7 @@ check 8 "2-file subset with earlier date_fixed matches, stem — contract:match:
 # (b) 30+ days old, still date_fixed-before the candidate -> STILL matches
 S16B="$TMPROOT/store16b"
 P16B="$(append_grudge "$S16B" k16b "$R2" "ancient a/b regression" "a.py,b.py" "" "2026-01-05")"
-run_query "$S16B" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
+run_query "$S16B" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16b --session-root "$R2"
 check 9 "grudge 5 months old is not time-bounded, rc — contract:match:inv-t16" 0 "$RC"
 check 10 "grudge 5 months old is not time-bounded, stem — contract:match:inv-t16" "$(stem_of "$P16B")" "$OUT"
@@ -188,7 +188,7 @@ check 10 "grudge 5 months old is not time-bounded, stem — contract:match:inv-t
 # (c) partial overlap (grudge names zz.py, untouched by the candidate) -> no match
 S16C="$TMPROOT/store16c"
 append_grudge "$S16C" k16c "$R2" "a and zz regressed together" "a.py,zz.py" "" "2026-05-15" >/dev/null
-run_query "$S16C" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
+run_query "$S16C" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16c --session-root "$R2"
 check 11 "intersection without subset does not match, rc — contract:match:inv-t16" 0 "$RC"
 check 12 "intersection without subset does not match, stdout — contract:match:inv-t16" "" "$OUT"
@@ -196,7 +196,7 @@ check 12 "intersection without subset does not match, stdout — contract:match:
 # (d) date_fixed AFTER the candidate author date -> no match
 S16D="$TMPROOT/store16d"
 append_grudge "$S16D" k16d "$R2" "a and b fixed after the candidate" "a.py,b.py" "" "2026-06-02" >/dev/null
-run_query "$S16D" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
+run_query "$S16D" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16d --session-root "$R2"
 check 13 "date_fixed after candidate does not match, rc — contract:match:inv-t16" 0 "$RC"
 check 14 "date_fixed after candidate does not match, stdout — contract:match:inv-t16" "" "$OUT"
@@ -211,7 +211,7 @@ AT16E="$(at_of "$R2" HEAD)"
 S16E="$TMPROOT/store16e"
 P16E="$(append_grudge "$S16E" k16e "$R2" "utc boundary regression" "a.py,b.py" "" "2026-06-30")"
 QUERY_TZ="America/Los_Angeles"
-run_query "$S16E" --by-files "a.py,b.py" --candidate-sha "$C16E" --candidate-at "$AT16E" \
+run_query "$S16E" --by-files=a.py --by-files=b.py --candidate-sha "$C16E" --candidate-at "$AT16E" \
   --repo-root "$R2" --repo k16e --session-root "$R2"
 QUERY_TZ=""
 check 15 "author date compared in UTC not local time, rc — contract:match:inv-t16" 0 "$RC"
@@ -278,7 +278,7 @@ date_fixed: 2026-05-15
 ## Why this kept happening
 
 EOF
-run_query "$S16F" --by-files "a.py,b.py,c.py" --candidate-sha "$C16" --candidate-at "$AT16" \
+run_query "$S16F" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$C16" --candidate-at "$AT16" \
   --repo-root "$R2" --repo k16f --session-root "$R2"
 check 17 "malformed records are silent misses not exit 3, rc — contract:match:inv-t16" 0 "$RC"
 check 18 "malformed records are silent misses not exit 3, stem — contract:match:inv-t16" "$(stem_of "$P16F")" "$OUT"
@@ -308,14 +308,14 @@ AT17="$(at_of "$R3" HEAD)"
 
 S17A="$TMPROOT/store17a"
 P17A="$(append_grudge "$S17A" k17a "$R3" "feat broke on launch" "feat.py" "$S17" "2026-05-02")"
-run_query "$S17A" --by-files "feat.py" --candidate-sha "$C17" --candidate-at "$AT17" \
+run_query "$S17A" --by-files=feat.py --candidate-sha "$C17" --candidate-at "$AT17" \
   --repo-root "$R3" --repo k17a --session-root "$R3"
 check 20 "squashed rewrite matches by patch-id, rc — contract:match:inv-t17" 0 "$RC"
 check 21 "squashed rewrite matches by patch-id, stem — contract:match:inv-t17" "$(stem_of "$P17A")" "$OUT"
 
 S17B="$TMPROOT/store17b"
 append_grudge "$S17B" k17b "$R3" "coincidental filename only" "feat.py" "$D17" "2026-05-03" >/dev/null
-run_query "$S17B" --by-files "feat.py" --candidate-sha "$C17" --candidate-at "$AT17" \
+run_query "$S17B" --by-files=feat.py --candidate-sha "$C17" --candidate-at "$AT17" \
   --repo-root "$R3" --repo k17b --session-root "$R3"
 check 22 "same filename with a different patch does not match, rc — contract:match:inv-t17" 0 "$RC"
 check 23 "same filename with a different patch does not match, stdout — contract:match:inv-t17" "" "$OUT"
@@ -362,11 +362,11 @@ W25="$(cd "$W25" && pwd -P)"
 S25B="$TMPROOT/store25b"
 P25B="$(append_grudge "$S25B" k25b "$R5" "feat regressed in the worktree" "feat.py" "$S25WT" "2026-05-02")"
 
-run_query "$S25B" --by-files "feat.py" --candidate-sha "$C25WT" --candidate-at "$AT25WT" \
+run_query "$S25B" --by-files=feat.py --candidate-sha "$C25WT" --candidate-at "$AT25WT" \
   --repo-root "$R5" --repo k25b --session-root "$W25"
 check 26 "session-root worktree resolves HEAD for the match, rc — contract:worktree:inv-t25" 0 "$RC"
 check 27 "session-root worktree resolves HEAD for the match, stem — contract:worktree:inv-t25" "$(stem_of "$P25B")" "$OUT"
-run_query "$S25B" --by-files "feat.py" --candidate-sha "$C25WT" --candidate-at "$AT25WT" \
+run_query "$S25B" --by-files=feat.py --candidate-sha "$C25WT" --candidate-at "$AT25WT" \
   --repo-root "$R5" --repo k25b --session-root "$R5"
 check 28 "other worktree's HEAD makes the stored fix an ancestor, rc — contract:worktree:inv-t25" 0 "$RC"
 check 29 "other worktree's HEAD makes the stored fix an ancestor, stdout — contract:worktree:inv-t25" "" "$OUT"
@@ -384,11 +384,11 @@ AT25WTO="$(at_of "$W25" HEAD)"
 S25C="$TMPROOT/store25c"
 P25C="$(append_grudge "$S25C" k25c "$R5" "feat and the worktree-only file regressed" "feat.py,wt-only.py" "" "2026-05-02")"
 
-run_query "$S25C" --by-files "feat.py,wt-only.py" --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
+run_query "$S25C" --by-files=feat.py --by-files=wt-only.py --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
   --repo-root "$R5" --repo k25c --session-root "$W25"
 check 30 "survivors() sees the worktree-only file (>=2 subset branch), rc — contract:worktree:inv-t25" 0 "$RC"
 check 31 "survivors() sees the worktree-only file (>=2 subset branch), stem — contract:worktree:inv-t25" "$(stem_of "$P25C")" "$OUT"
-run_query "$S25C" --by-files "feat.py,wt-only.py" --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
+run_query "$S25C" --by-files=feat.py --by-files=wt-only.py --candidate-sha "$C25WTO" --candidate-at "$AT25WTO" \
   --repo-root "$R5" --repo k25c --session-root "$R5"
 check 32 "checkout root sees one survivor so the structural branch runs, rc — contract:worktree:inv-t25" 0 "$RC"
 check 33 "checkout root sees one survivor so the structural branch runs, stdout — contract:worktree:inv-t25" "" "$OUT"
@@ -497,11 +497,11 @@ AT27="$(at_of "$R7" HEAD)"
 S27="$TMPROOT/store27"
 P27="$(append_grudge "$S27" k27 "$R7" "p and q regressed" "p.py,q.py" "" "2026-05-01")"
 
-run_query "$S27" --by-files "p.py,q.py,r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
+run_query "$S27" --by-files=p.py --by-files=q.py --by-files=r.py --candidate-sha "$C27" --candidate-at "$AT27" \
   --repo-root "$R7" --repo k27 --session-root "$R7"
 check 51 "subset match exits 0 — contract:cli:inv-t27" 0 "$RC"
 check 52 "subset match prints the record stem — contract:cli:inv-t27" "$(stem_of "$P27")" "$OUT"
-run_query "$S27" --by-files "r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
+run_query "$S27" --by-files=r.py --candidate-sha "$C27" --candidate-at "$AT27" \
   --repo-root "$R7" --repo k27 --session-root "$R7"
 check 53 "clean miss exits 0 — contract:cli:inv-t27" 0 "$RC"
 check 54 "clean miss prints nothing — contract:cli:inv-t27" "" "$OUT"
@@ -510,7 +510,7 @@ if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: unreadable-store fixture (--by-files) needs a non-root uid"
 else
   chmod 000 "$S27/k27/grudges"
-  run_query "$S27" --by-files "p.py,q.py,r.py" --candidate-sha "$C27" --candidate-at "$AT27" \
+  run_query "$S27" --by-files=p.py --by-files=q.py --by-files=r.py --candidate-sha "$C27" --candidate-at "$AT27" \
     --repo-root "$R7" --repo k27 --session-root "$R7"
   check 55 "unreadable store exits 3 — contract:cli:inv-t27" 3 "$RC"
   check 56 "unreadable store writes a stderr diagnostic — contract:cli:inv-t27" yes "$(nonempty "$ERR")"
@@ -536,7 +536,7 @@ append_grudge "$S0S" k0s "$R8" "both named files were deleted later" "gone1.py,g
 # Without `if not surv: continue` the ==1 branch indexes surv[0], raises
 # IndexError, and the outer handler turns a contract-mandated miss into exit 3.
 rm -f "$R8/gone1.py" "$R8/gone2.py"
-run_query "$S0S" --by-files "kept.py" --candidate-sha "$C0S" --candidate-at "$AT0S" \
+run_query "$S0S" --by-files=kept.py --candidate-sha "$C0S" --candidate-at "$AT0S" \
   --repo-root "$R8" --repo k0s --session-root "$R8"
 check 58 "a 0-survivor grudge is a miss not an IndexError, rc" 0 "$RC"
 check 59 "a 0-survivor grudge is a miss, stdout" "" "$OUT"
@@ -560,7 +560,7 @@ PN="$(append_grudge "$SN" knorm "$R9" "a and b regressed together" "a.py,b.py" "
 # survivors() are stored repo-relative; this candidate list mixes ./-prefixed,
 # absolute and bare forms, so the subset test holds only if the candidate side
 # is normalized against --session-root first.
-run_query "$SN" --by-files "./a.py,$R9/b.py,c.py" --candidate-sha "$CN" --candidate-at "$ATN" \
+run_query "$SN" --by-files=./a.py --by-files=$R9/b.py --by-files=c.py --candidate-sha "$CN" --candidate-at "$ATN" \
   --repo-root "$R9" --repo knorm --session-root "$R9"
 check 61 "./-prefixed and absolute candidate paths still subset-match, rc" 0 "$RC"
 check 62 "./-prefixed and absolute candidate paths still subset-match, stem" "$(stem_of "$PN")" "$OUT"
@@ -611,10 +611,10 @@ CV2="$(sha_of "$RV2" HEAD)"; ATV2="$(at_of "$RV2" HEAD)"
 SV2="$TMPROOT/storeadvsub"
 PV2="$(append_grudge "$SV2" kadvsub "$RV2" "a and b regressed" "a.py,b.py" "" "2026-05-15")"
 
-run_query "$SV2" --by-files "a.py,b.py,c.py" --candidate-sha "$CV2" --candidate-at "$ATV2" \
+run_query "$SV2" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$CV2" --candidate-at "$ATV2" \
   --repo-root "$RV2" --repo kadvsub --session-root "$RV2"
 check 65 "session-root control: the checkout root matches" "$(stem_of "$PV2")" "$OUT"
-run_query "$SV2" --by-files "a.py,b.py,c.py" --candidate-sha "$CV2" --candidate-at "$ATV2" \
+run_query "$SV2" --by-files=a.py --by-files=b.py --by-files=c.py --candidate-sha "$CV2" --candidate-at "$ATV2" \
   --repo-root "$RV2" --repo kadvsub --session-root "$RV2/sub"
 check 66 "a --session-root inside the checkout still matches" "$(stem_of "$PV2")" "$OUT"
 
@@ -667,12 +667,12 @@ git -C "$RV4" checkout -q main
 
 SV4T="$TMPROOT/storeadvroottwin"
 PV4T="$(append_grudge "$SV4T" kadvroott "$RV4" "feat regressed" "feat.py" "$TWINV4" "2026-05-02")"
-run_query "$SV4T" --by-files "feat.py" --candidate-sha "$CV4" --candidate-at "$ATV4" \
+run_query "$SV4T" --by-files=feat.py --candidate-sha "$CV4" --candidate-at "$ATV4" \
   --repo-root "$RV4" --repo kadvroott --session-root "$RV4"
 check 69 "root-commit control: a non-root fix with the same patch matches" "$(stem_of "$PV4T")" "$OUT"
 SV4="$TMPROOT/storeadvroot"
 PV4="$(append_grudge "$SV4" kadvroot "$RV4" "feat regressed" "feat.py" "$FIXV4" "2026-05-02")"
-run_query "$SV4" --by-files "feat.py" --candidate-sha "$CV4" --candidate-at "$ATV4" \
+run_query "$SV4" --by-files=feat.py --candidate-sha "$CV4" --candidate-at "$ATV4" \
   --repo-root "$RV4" --repo kadvroot --session-root "$RV4"
 check 70 "a root commit as the stored fix still matches by patch-id" "$(stem_of "$PV4")" "$OUT"
 
@@ -783,7 +783,8 @@ check 76 "prefill carries the shared-clone --repo-root — contract:hook:inv-t12
 # with `-` (a legal POSIX path, and git sorts it first) is read by argparse as
 # a stray option, so the printed remedy would not run. See inv-t23 below.
 check 77 "prefill carries the shared-clone --repo key — contract:hook:inv-t12" yes "$(has "$ERR" "--repo=\"$HC_KEY\"")"
-check 78 "prefill carries the candidate's sha_files — contract:hook:inv-t12" yes "$(has "$ERR" "--files=\"app.py\"")"
+check 78 "prefill carries the candidate's .files remedy — contract:hook:inv-t12" yes \
+  "$(has "$ERR" "--files-from=\"$(guard_dir "$HC_REPO")/$T12_FIX.files\"")"
 run_hook s12 true
 check 79 "Stop 2 re-blocks — contract:hook:inv-t12" 2 "$RC"
 check 80 "Stop 2 carries the (2/3) counter — contract:hook:inv-t12" yes "$(has "$ERR" "(2/3)")"
@@ -951,10 +952,11 @@ run_hook s14nlcode true
 check 327 "the persisted branch still blocks it on Stop 2 — contract:hook:inv-t14" yes \
   "$(has "$ERR" "(2/3)")"
 
-# The same path beside a code path IS a candidate, and what lands in sha_files
-# is the raw path — which is what the --by-files clearance lookup and the
-# Step-15 prefill are then handed. Stop 2 re-derives candidacy from that stored
-# value, so filter (c)'s persisted branch is pinned here too.
+# The same path beside a code path IS a candidate, and what lands in the
+# NUL-delimited `.files` artifact is the raw path — which is what the
+# `--by-files` clearance lookup and the Step-15 prefill are then handed.
+# Stop 2 re-derives candidacy from that stored value, so filter (c)'s persisted
+# branch is pinned here too.
 hook_case t14mdmixed
 mkdir -p "$HC_REPO/docs"; echo "VALUE = 0" > "$HC_REPO/app.py"
 commit_all "$HC_REPO" "chore: baseline"
@@ -963,10 +965,10 @@ commit_all "$HC_REPO" "fix(widget): code plus a non-ASCII note"
 T14X="$(sha_of "$HC_REPO" HEAD)"
 run_hook s14mdmixed
 check 289 "a non-ASCII .md beside a code path still blocks — contract:hook:inv-t14" 2 "$RC"
-check 290 "sha_files stores the raw path, not git's quoted form — contract:hook:inv-t14" true \
-  "$(st "$HC_REPO" s14mdmixed "(.sha_files[\"$T14X\"] | index(\"docs/café.md\")) != null")"
+check 290 "the .files artifact stores the raw path, not git's quoted form — contract:hook:inv-t14" true \
+  "$(python3 -c 'import sys; d=open(sys.argv[1], "rb").read(); print("true" if "docs/café.md".encode("utf-8") in d else "false")' "$(guard_dir "$HC_REPO")/$T14X.files" 2>/dev/null || echo false)"
 run_hook s14mdmixed true
-check 291 "the persisted-sha_files branch agrees on Stop 2 — contract:hook:inv-t14" yes "$(has "$ERR" "(2/3)")"
+check 291 "the persisted .files branch agrees on Stop 2 — contract:hook:inv-t14" yes "$(has "$ERR" "(2/3)")"
 
 # Filter (a) is `^fix[(:]`: anchored, and the character right after `fix`
 # decides. Only near-miss subjects can tell it from a bare `^fix` or from an
@@ -1070,8 +1072,8 @@ echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 T22E_HEAD="$(sha_of "$HC_REPO" HEAD)"
 run_hook s22empty
 check 114 "a first Stop with no candidates allows — contract:hook:inv-t22" 0 "$RC"
-check 115 "the seeded state carries exactly INV-C12's five fields — contract:hook:inv-t22" \
-  "block_counts,last_checked_sha,seeded_at,sha_files,sha_group" \
+check 115 "the seeded state carries exactly INV-C12's versioned fields — contract:hook:inv-t22" \
+  "block_counts,last_checked_sha,seeded_at,sha_group,version" \
   "$(st "$HC_REPO" s22empty '[keys[]]|sort|join(",")')"
 check 116 "a candidate-free first Stop seeds last_checked_sha to HEAD — contract:hook:inv-t22" \
   "$T22E_HEAD" "$(st "$HC_REPO" s22empty '.last_checked_sha')"
@@ -1173,8 +1175,8 @@ echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
 mkdir -p "$(guard_dir "$HC_REPO")"
 cat > "$(guard_dir "$HC_REPO")/s23stale.json" <<'STALEJSON'
-{"last_checked_sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef","seeded_at":1767225600,
- "sha_group":{},"sha_files":{},"block_counts":{}}
+{"version":1,"last_checked_sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef","seeded_at":1767225600,
+ "sha_group":{},"block_counts":{}}
 STALEJSON
 run_hook s23stale true
 check 131 "an unresolvable last_checked_sha re-scans instead of allowing — contract:hook:inv-t23" 2 "$RC"
@@ -1426,8 +1428,8 @@ echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair
 T23SM_FIX="$(sha_of "$HC_REPO" HEAD)"
 mkdir -p "$(guard_dir "$HC_REPO")"
 cat > "$(guard_dir "$HC_REPO")/s23stalemax.json" <<STALEMAXJSON
-{"last_checked_sha":"$T23SM_FIX","seeded_at":0,
- "sha_group":{"$T23SM_FIX":"$T23SM_FIX"},"sha_files":{"$T23SM_FIX":["app.py"]},
+{"version":1,"last_checked_sha":"$T23SM_FIX","seeded_at":0,
+ "sha_group":{"$T23SM_FIX":"$T23SM_FIX"},
  "block_counts":{"$T23SM_FIX":3}}
 STALEMAXJSON
 if [ "$(id -u)" -eq 0 ]; then
@@ -1541,8 +1543,8 @@ echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair
 T23PD_FIX="$(sha_of "$HC_REPO" HEAD)"
 mkdir -p "$(guard_dir "$HC_REPO")"
 cat > "$(guard_dir "$HC_REPO")/s23priordirect.json" <<PRIORDIRECTJSON
-{"last_checked_sha":"$T23PD_FIX","seeded_at":0,
- "sha_group":{},"sha_files":{},"block_counts":{"$T23PD_FIX":1}}
+{"version":1,"last_checked_sha":"$T23PD_FIX","seeded_at":0,
+ "sha_group":{},"block_counts":{"$T23PD_FIX":1}}
 PRIORDIRECTJSON
 run_hook s23priordirect true
 check 277 "a counter reachable only by the same-id lookup is still a baseline — contract:hook:inv-t23" 0 "$RC"
@@ -1560,8 +1562,8 @@ echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair
 T23PW_FIX="$(sha_of "$HC_REPO" HEAD)"
 mkdir -p "$(guard_dir "$HC_REPO")"
 cat > "$(guard_dir "$HC_REPO")/s23priorwalk.json" <<PRIORWALKJSON
-{"last_checked_sha":"$T23PW_FIX","seeded_at":0,
- "sha_group":{"$T23PW_FIX":"oldgroupid"},"sha_files":{},
+{"version":1,"last_checked_sha":"$T23PW_FIX","seeded_at":0,
+ "sha_group":{"$T23PW_FIX":"oldgroupid"},
  "block_counts":{"oldgroupid":1}}
 PRIORWALKJSON
 run_hook s23priorwalk true
@@ -2002,8 +2004,8 @@ check 191 "last_checked_sha advances past the cleared C1 — contract:group:inv-
   "$(sha_of "$HC_REPO" HEAD)" "$(st "$HC_REPO" s20 '.last_checked_sha')"
 check 192 "sha_group still holds C1 after clearance — contract:group:inv-t20" true \
   "$(st "$HC_REPO" s20 '.sha_group|has("'"$T20_C1"'")')"
-check 193 "sha_files still holds C1 after clearance — contract:group:inv-t20" true \
-  "$(st "$HC_REPO" s20 '.sha_files|has("'"$T20_C1"'")')"
+check 193 "the .files artifact still holds C1 after clearance — contract:group:inv-t20" yes \
+  "$(exists "$(guard_dir "$HC_REPO")/$T20_C1.files")"
 echo "H = 2" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(c2): second hub fix"
 T20_C2="$(sha_of "$HC_REPO" HEAD)"
 run_hook s20 true
@@ -2326,7 +2328,7 @@ commit_all "$HC_REPO" "fix(widget): repair the widget"
 T22S_FIX="$(sha_of "$HC_REPO" HEAD)"
 T22S_DIR="$(guard_dir "$HC_REPO")"
 mkdir -p "$T22S_DIR"
-printf '{"session_id":"s22s","seeded_at":1767225600,"last_checked_sha":"HEAD","block_counts":{},"sha_group":{},"sha_files":{}}' \
+printf '{"version":1,"session_id":"s22s","seeded_at":1767225600,"last_checked_sha":"HEAD","block_counts":{},"sha_group":{}}' \
   > "$T22S_DIR/s22s.json"
 run_hook s22s true
 check 324 "a symbolic-ref checkpoint is not believed — contract:hook:inv-t22" 2 "$RC"
@@ -2339,13 +2341,14 @@ check 326 "the poisoned checkpoint is replaced by a real object id — contract:
 # INV-T23 (extension) — a leading-dash path must not make clearance
 # unreachable, and must not be MISREPORTED as a transient degradation
 #
-# `-` is a legal first byte of a POSIX path and git sorts it first, so step
-# 11's comma-joined path list can BEGIN with `-`. Passed as a separate option
-# value (`--by-files "$CSV"`) argparse rejects it as a stray option and
-# grudge_query.py exits 2 — permanently, for every session, no matter what
-# grudge is recorded. The `=`-joined single-argv form cannot be mistaken for
-# an option. The step-15 prefill has the same argv boundary (`--files`), so
-# the printed remedy must be runnable for such a commit too.
+# `-` is a legal first byte of a POSIX path and git sorts it first, so a
+# candidate's touched set can BEGIN with `-`. Passed as a SEPARATE option value
+# (`--by-files "$CSV"`) argparse rejects a `-`-leading value as a stray option
+# and grudge_query.py exits 2 — permanently, for every session, no matter what
+# grudge is recorded. The `=`-joined single-argv form (`--by-files=-dash.py`,
+# or the `--files-from` paste-me that names a NUL-delimited file) cannot be
+# mistaken for an option, so the step-15 prefill must be runnable for such a
+# commit too.
 # ========================================================================
 # contract:hook:inv-t23 checks=5
 hook_case t23dash
@@ -2354,12 +2357,13 @@ commit_all "$HC_REPO" "chore: baseline"
 T23D_BASE="$(sha_of "$HC_REPO" HEAD)"
 echo "V = 1" > "$HC_REPO/-dash.py"; echo "V = 1" > "$HC_REPO/other.py"
 commit_all "$HC_REPO" "fix(widget): repair the widget"
+T23D_FIX="$(sha_of "$HC_REPO" HEAD)"
 check 327 "fixture: the leading-dash path is really in the candidate — contract:hook:inv-t23" \
   yes "$(has "$(git -C "$HC_REPO" diff-tree --no-commit-id --name-only -r HEAD)" "-dash.py")"
 run_hook s23d
 check 328 "with no grudge recorded the dash candidate blocks — contract:hook:inv-t23" 2 "$RC"
-check 329 "the prefilled remedy uses the =-joined --files form — contract:hook:inv-t23" \
-  yes "$(has "$ERR" '--files="-dash.py')"
+check 329 "the prefilled remedy passes the .files artifact, never the dash path — contract:hook:inv-t23" \
+  yes "$(has "$ERR" "--files-from=\"$(guard_dir "$HC_REPO")/$T23D_FIX.files\"")"
 # fixed_in_commit names the unrelated baseline, so ONLY --by-files can clear.
 append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "dash path regression" \
   "-dash.py,other.py" "$T23D_BASE" "2026-05-01" >/dev/null

@@ -525,8 +525,12 @@ def _main(argv: List[str]) -> int:
     ap.add_argument("--repo", default=None, help="override repo basename (tests)")
     ap.add_argument("--by-commit", default=None, metavar="SHA",
                     help="#559: print the stem of the grudge fixed by this commit")
-    ap.add_argument("--by-files", default=None, metavar="CSV",
-                    help="#559: comma-separated files the candidate commit touched")
+    # Repeatable, EQUALS-form: --by-files=PATH one per touched path (action=
+    # "append"). Each value is a single argv element, so a comma in a filename
+    # is data, not a delimiter, and a value beginning with `-` stays inert
+    # (C-m, DEC-5/#568).
+    ap.add_argument("--by-files", action="append", default=None, metavar="PATH",
+                    help="#559: a file the candidate commit touched (repeatable)")
     ap.add_argument("--candidate-sha", default=None, help="#559: candidate commit for --by-files")
     ap.add_argument("--candidate-at", type=int, default=None,
                     help="#559: candidate commit author date, epoch seconds")
@@ -555,13 +559,11 @@ def _main(argv: List[str]) -> int:
             if args.by_commit is not None:
                 hit = find_by_commit(args.by_commit, repo, repo_root, session_root)
             else:
-                # KNOWN LIMITATION: --by-files is pinned by the contract as a
-                # comma-separated list, so a path that itself contains a comma
-                # (legal on POSIX) is split into two names — inventing candidate
-                # entries and destroying the real one. Changing the encoding
-                # would change the frozen CLI surface; carried deliberately.
+                # DEC-5 (#568): --by-files is repeatable equals-form, one
+                # `--by-files=path` per touched path. Each value is a single
+                # argv element — a comma in a filename is data, never split.
                 hit = find_by_files(
-                    [f for f in args.by_files.split(",") if f.strip()],
+                    args.by_files or [],
                     repo, repo_root, session_root,
                     args.candidate_sha or "", args.candidate_at or 0,
                 )

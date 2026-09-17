@@ -71,7 +71,7 @@ stderr and never fails the host skill):
 python3 "$append" \
   --symptom "one-line observable failure" \
   --root-cause "one-line underlying cause" \
-  --files "src/a.py,src/b.py" \
+  --files=src/a.py --files=src/b.py \
   --signature "optional regex or literal snippet that fingerprints the bug" \
   --commit "<fixing sha>" \
   --repro "minimal repro steps" \

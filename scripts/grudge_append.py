@@ -207,6 +207,16 @@ def append(
     return path
 
 
+def _read_files_from(path: str) -> List[str]:
+    """Read a NUL-delimited path list (the `$STATE_DIR/<sha>.files` artifact,
+    DEC-5). Python reads the file itself — the shell never re-tokenizes its
+    contents — so every byte a path can hold (TAB, LF, comma, backtick) comes
+    through unchanged. Invalid UTF-8 round-trips via surrogateescape."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    return [p.decode("utf-8", "surrogateescape") for p in data.split(b"\0") if p]
+
+
 # --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
@@ -215,9 +225,18 @@ def _main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="Record a grudge (fixed bug) into the Book of Grudges.")
     ap.add_argument("--symptom", required=True)
     ap.add_argument("--root-cause", default="")
-    ap.add_argument("--files", required=True, help="comma-separated files_touched")
+    # Repeatable, EQUALS-form: --files=PATH one per touched path. A value is a
+    # single argv element, so a comma in a filename is data, not a delimiter,
+    # and a value beginning with `-` stays inert (C-m, DEC-5/#568).
+    ap.add_argument("--files", action="append", metavar="PATH",
+                    help="a touched file (repeatable: one --files= per path)")
+    ap.add_argument("--files-from", dest="files_from", default=None, metavar="PATH",
+                    help="NUL-delimited file of touched paths (the hook's paste-me remedy)")
     ap.add_argument("--signature", default="", help="anti_pattern_signature (regex or literal snippet)")
-    ap.add_argument("--commit", default="", help="fixed_in_commit SHA")
+    ap.add_argument("--commit", dest="fixed_in_commit", default="",
+                    help="fixed_in_commit SHA")
+    ap.add_argument("--candidate-sha", dest="fixed_in_commit", default="",
+                    help="alias for --commit (hook paste-me form)")
     ap.add_argument("--repro", default="")
     ap.add_argument("--why", default="")
     ap.add_argument("--repo-root", default=None, help="override git toplevel realpath (tests)")
@@ -232,10 +251,14 @@ def _main(argv: List[str]) -> int:
         if args.repo:
             repo = args.repo
 
-    files = [f for f in (args.files.split(",") if args.files else []) if f.strip()]
+    if args.files_from:
+        files = _read_files_from(args.files_from)
+    else:
+        files = list(args.files or [])
+    files = [f for f in files if f and f.strip()]
     path = append(
         symptom=args.symptom, root_cause=args.root_cause, files_touched=files,
-        anti_pattern_signature=args.signature, fixed_in_commit=args.commit,
+        anti_pattern_signature=args.signature, fixed_in_commit=args.fixed_in_commit,
         repro=args.repro, why=args.why, repo=repo, repo_root=repo_root,
     )
     if path:

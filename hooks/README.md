@@ -399,18 +399,19 @@ A checkout that predates this change may already have a **personal, untracked** 
 8. **Never fail closed** — missing `jq`/`git`, a malformed payload, an unreadable transcript, a non-git cwd, an absent grudge store, an unwritable state dir, or a spent cost budget all exit 0.
 9. **Cost budget** — a per-Stop wall-clock budget (`CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS`, default `8` s) is checked around every potentially-expensive step: the `--max-count=500` scan, the per-candidate `git diff-tree` fan-out, the file-similarity grouping (`_overlap`, whose nested loop squares candidate count × files-per-commit), and the `grudge_query.py` clearance subprocesses. When the budget is spent the hook prints a loud degradation note and allows the Stop (`exit 0`) — an attacker-chosen input can stall a Stop for at most the budget, never for a whole turn (#603). The allow is a *rescan-on-next-Stop*, not a clearance: the `last_checked_sha` checkpoint only advances on a normal pass, so an unresolved `fix(*)` commit whose Stop ran out of budget is checked again next time, under the same budget.
 
-The block message and the give-up note each carry, above the `skips.log` escape hatch, a fully-resolved copy-pasteable `grudge_append.py` command — one per still-unresolved candidate SHA — prefilled with the hook's own clearance identity (`--repo-root`/`--repo`) and that commit's changed files, so recording the grudge is one paste plus a symptom line (Innovate incorporation (2026-08-30)).
+The block message and the give-up note each carry, above the `skips.log` escape hatch, a fully-resolved copy-pasteable `grudge_append.py` command — one per still-unresolved candidate SHA — prefilled with the hook's own clearance identity (`--repo-root`/`--repo`) and the candidate's NUL-delimited touched-path file (`--files-from="$STATE_DIR/<sha>.files"`, which the shell passes through unparsed; the hook renders no file name). Recording the grudge is then one paste plus a symptom line (Innovate incorporation (2026-08-30)).
 
 ### State
 
 ```
 $PROJECT_MEMORY/grudge-guard/
-  <session-id>.json   # last_checked_sha, seeded_at, sha_group, sha_files, block_counts
+  <session-id>.json   # version, last_checked_sha, seeded_at, sha_group, block_counts
+  <sha>.files         # NUL-delimited touched paths for a candidate (one per sha)
   skips.log           # one `<sha> <reason>` line per deliberately-skipped commit
   .last-run           # touched on every invocation (execution evidence)
 ```
 
-`skips.log` is a flat file, deliberately separate from the per-session JSON, so it survives across sessions and can be appended by hand.
+`skips.log` is a flat file, deliberately separate from the per-session JSON, so it survives across sessions and can be appended by hand. A state document whose `version` disagrees with the hook's `STATE_VERSION` is discarded and re-written fresh on the next scan.
 
 ### Kill Switch
 
