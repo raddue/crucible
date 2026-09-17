@@ -1179,8 +1179,13 @@ cat > "$(guard_dir "$HC_REPO")/s23stale.json" <<'STALEJSON'
  "sha_group":{},"block_counts":{}}
 STALEJSON
 run_hook s23stale true
-check 131 "an unresolvable last_checked_sha re-scans instead of allowing — contract:hook:inv-t23" 2 "$RC"
-check 132 "the re-scan is a fresh first-Stop scan at (1/3) — contract:hook:inv-t23" yes "$(has "$ERR" "(1/3)")"
+# R1+R2 (§6 INV-T14): this fixture handed stop_hook_active=true on a first-ever
+# Stop with ZERO prior blocks. ABSENT + active=true is the unaccountable row of
+# the loud-allow table (§3.2), so the enforcement loss is intended and the
+# fixture records it — amended with justification, never silently edited.
+
+check 131 "an unresolvable last_checked_sha discards and the first-ever Stop (journal ABSENT + stop_hook_active=true) is an unaccountable loud allow (INV-T14) — contract:hook:inv-t23" 0 "$RC"
+check 132 "the ABSENT+active=true Stop announces unaccountable, never a hidden block — contract:hook:inv-t23" yes "$(has "$ERR" "unaccountable")"
 
 # SIG-3: a clearance lookup that fails internally degrades PER CANDIDATE
 # (still blocked), never into a whole-Stop allow.
@@ -1224,8 +1229,12 @@ mkdir -p "$(dirname "$(mem_dir "$HC_REPO")")"
 : > "$(mem_dir "$HC_REPO")"
 run_hook s23nostate true
 check 221 "an unpersistable state file allows instead of blocking — contract:hook:inv-t23" 0 "$RC"
+# R1+R2 (SP-1): when the journal cannot exist (memory is a régular file)
+# the read is ABSENT, not a state-write freeze; with active=true this is
+# the unaccountable loud-allow row (§3.2).
+
 check 222 "the degraded Stop says the state could not be persisted — contract:hook:inv-t23" yes \
-  "$(has "$ERR" "could not persist state")"
+  "$(has "$ERR" "no journal yet")"
 run_hook s23nostate true
 check 223 "the next Stop allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
 
@@ -1327,22 +1336,28 @@ hook_case t23frozen
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
 run_hook s23frozen
-check 235 "premise: Stop 1 blocks while the state dir is writable — contract:hook:inv-t23" 2 "$RC"
-check 236 "premise: Stop 1 left a non-empty state file behind — contract:hook:inv-t23" yes \
-  "$(if [ -s "$(guard_dir "$HC_REPO")/s23frozen.json" ]; then echo yes; else echo no; fi)"
+check 235 "premise: Stop 1 blocks while the journal is writable — contract:hook:inv-t23" 2 "$RC"
+check 236 "premise: Stop 1 left a journal file behind — contract:hook:inv-t23" yes \
+  "$(if [ -s "$(guard_dir "$HC_REPO")/s23frozen.journal" ]; then echo yes; else echo no; fi)"
 if [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: the mid-session-unwritable fixture needs a non-root uid"
 else
-  # The disk fills (or perms change) BETWEEN two Stops. The stale file stays.
+  # R1+R2 (journal model): the bound is the journal; the durability gate is
+  # append_succeeded (§3.2), NOT the display-only state JSON write. "The disk
+  # fills (or perms change) BETWEEN two Stops" now means the JOURNAL append
+  # cannot land: the journal file is locked read-only, so this Stop's BLOCK
+  # lines fail the S-17 bounded write and the stop degrades to a loud allow.
   chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  chmod 400 "$(guard_dir "$HC_REPO")/s23frozen.journal"
   run_hook s23frozen true
-  check 237 "a state dir gone unwritable mid-session allows — contract:hook:inv-t23" 0 "$RC"
-  check 238 "the un-persisted Stop announces the failure — contract:hook:inv-t23" yes \
-    "$(has "$ERR" "could not persist state")"
-  check 239 "it never blocks on the frozen counter — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+  check 237 "a journal gone unwritable mid-session allows — contract:hook:inv-t23" 0 "$RC"
+  check 238 "the un-appended Stop announces the journal-append failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "journal append failed")"
+  check 239 "it never blocks on the frozen journal — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
   run_hook s23frozen true
-  check 240 "the Stop after that allows too — no unbreakable (2/3) loop — contract:hook:inv-t23" 0 "$RC"
+  check 240 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
   chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  chmod 644 "$(guard_dir "$HC_REPO")/s23frozen.journal"
 fi
 
 # The ENOSPC shape: jq's output was truncated mid-write, so a NON-EMPTY but
@@ -1352,19 +1367,21 @@ hook_case t23trunc
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
 run_hook s23trunc
-check 241 "premise: Stop 1 blocks while the state dir is writable — contract:hook:inv-t23" 2 "$RC"
+check 241 "premise: Stop 1 blocks while the journal is writable — contract:hook:inv-t23" 2 "$RC"
 if [ "$(id -u)" -eq 0 ]; then
-  echo "SKIP: the truncated-state fixture needs a non-root uid"
+  echo "SKIP: the truncated-journal fixture needs a non-root uid"
 else
-  printf '{\n  "last_checked_sha": "0000",\n  "seeded_' > "$(guard_dir "$HC_REPO")/s23trunc.json"
-  chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
+  # R1+R2: the journal is the bound. A torn/malformed journal line makes every
+  # member read UNMEASURABLE (S2), which C-q quarantines and re-arms to a loud
+  # allow (re-nag from COUNT(0)) — recovering rather than staying degraded.
+  printf "\nGARBAGE\tNOT\tWELL\\nFORMED\n" >> "$(guard_dir "$HC_REPO")/s23trunc.journal"
   run_hook s23trunc true
-  check 242 "a truncated state file on an unwritable dir allows — contract:hook:inv-t23" 0 "$RC"
-  check 243 "the truncated-state Stop announces the failure — contract:hook:inv-t23" yes \
-    "$(has "$ERR" "could not persist state")"
-  check 244 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+  check 242 "a malformed journal line is a loud allow, never a block — contract:hook:inv-t23" 0 "$RC"
+  check 243 "the malformed-journal Stop announces the quarantine — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "DEGRADE:journal-quarantined")"
+  check 244 "it never blocks at a permanent count — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
   run_hook s23trunc true
-  check 245 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+  check 245 "the Stop after quarantine re-arms and re-nags at (1/3), rc 2 — recovery, not disarm — contract:hook:inv-t23" 2 "$RC"
   chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
 fi
 
@@ -1375,17 +1392,27 @@ fi
 hook_case t23noreadback
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): repair the widget"
+# R1+R2 (journal model, C-f): the J ournaL is the bound — the state JSON write
+# is a display-only cache (C-f). The old "write cannot read back" freeze used
+# the state JSON as a durability signal; the journal's own unreadability now
+# reads UNMEASURABLE and C-q quarantines + re-arms => a loud allow with the
+# quarantine note, never a silent block (S2/C-q). Retarget: make the JOURNAL
+# unreadable instead of the display JSON.
 run_hook s23noreadback
-check 246 "premise: Stop 1 blocks with a normal state file — contract:hook:inv-t23" 2 "$RC"
-rm -f "$(guard_dir "$HC_REPO")/s23noreadback.json"
-mkdir -p "$(guard_dir "$HC_REPO")/s23noreadback.json"
-check 247 "premise: the state path still satisfies test -s — contract:hook:inv-t23" yes \
-  "$(if [ -s "$(guard_dir "$HC_REPO")/s23noreadback.json" ]; then echo yes; else echo no; fi)"
+check 246 "premise: Stop 1 blocks with a normal journal — contract:hook:inv-t23" 2 "$RC"
+check 247 "premise: a journal file really exists on disk — contract:hook:inv-t23" yes \
+  "$(if [ -f "$(guard_dir "$HC_REPO")/s23noreadback.journal" ]; then echo yes; else echo no; fi)"
+# The journal is made UNREADABLE between two Stops (a chmod-000), so the read
+# is UNMEASURABLE and the hook quarantines the journal (renames it to
+# .corrupt.<epoch> and re-arms empty) with a loud note, then allows loudly.
+chmod 700 "$(guard_dir "$HC_REPO")" 2>/dev/null
+chmod 000 "$(guard_dir "$HC_REPO")/s23noreadback.journal"
 run_hook s23noreadback true
-check 248 "a write that cannot be read back allows — contract:hook:inv-t23" 0 "$RC"
-check 249 "the unreadable-back Stop announces the failure — contract:hook:inv-t23" yes \
-  "$(has "$ERR" "could not persist state")"
+check 248 "an unreadable journal quarantines and allows — contract:hook:inv-t23" 0 "$RC"
+check 249 "the unreadable-journal Stop announces the quarantine — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "DEGRADE:journal-quarantined")"
 check 250 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+chmod 700 "$(guard_dir "$HC_REPO")" 2>/dev/null
 
 # C1". The third mechanism of the same class, and the one that shows why the
 # gate has to be PROGRESS and not landing: the hook writes, ITSELF, a state
@@ -1408,12 +1435,16 @@ check 252 "premise: the hook derived seeded_at 0 itself — contract:hook:inv-t2
 check 253 "premise: that write did persist a counter of 1 — contract:hook:inv-t23" 1 \
   "$(st "$HC_REPO" s23seed0 '[.block_counts[]]|add')"
 run_hook s23seed0 true
-check 254 "a counter its own loader discards is never blocked on — contract:hook:inv-t23" 0 "$RC"
-check 255 "the un-advanced-counter Stop announces the failure — contract:hook:inv-t23" yes \
-  "$(has "$ERR" "could not persist state")"
-check 256 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+# R1+R2 (journal model): the bound is the JOURNAL; a state document the
+# loader discards (seeded_at: 0) is display-only. Stop 2 re-blocks at (2/3):
+# the journal persists across the discard, so there is no "counter its own
+# loader discards" reset any more — the discard is exactly the freeze this
+# journal fixes (T-c / T-b shape: state JSON wiped, journal survives).
+check 254 "a discarded state doc does NOT reset the bound: the journal survives and Stop 2 re-blocks at (2/3) — contract:hook:inv-t23" 2 "$RC"
+check 255 "the (2/3) counter is read back from the journal, not the state doc — contract:hook:inv-t23" yes "$(has "$ERR" "(2/3)")"
+check 256 "it never starts a phantom (1/3) after the discard — contract:hook:inv-t23" no "$(has "$ERR" "(1/3)")"
 run_hook s23seed0 true
-check 257 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+check 257 "the journal carries the bound to (3/3) then give-up — no freeze loop — contract:hook:inv-t23" yes "$(has "$ERR" "(3/3)")"
 
 # The one state where "the counter on disk reached MAX_BLOCKS" is NOT this
 # Stop's own achievement: a stale on-disk counter already at MAX_BLOCKS, under
@@ -1438,8 +1469,12 @@ else
   chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
   run_hook s23stalemax true
   check 258 "a stale counter already at MAX_BLOCKS is not this Stop's progress — contract:hook:inv-t23" 0 "$RC"
-  check 259 "the stale-at-MAX_BLOCKS Stop announces the failure — contract:hook:inv-t23" yes \
-    "$(has "$ERR" "could not persist state")"
+# R1+R2: the planted block_counts are a display cache (C-f); the journal is
+# the bound. A stale display value reads ABSENT from the journal; with
+# active=true that is the unaccountable loud-allow row (§3.2).
+
+  check 259 "the stale-at-MAX_BLOCKS display counter is not the bound: journal ABSENT reads unaccountable — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "unaccountable")"
   check 260 "it never blocks on a counter it did not write — contract:hook:inv-t23" no \
     "$(has "$ERR" "attempt (")"
   chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
@@ -1469,11 +1504,16 @@ else
   chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
   run_hook s23rearm true
   check 263 "a re-armed group on an unwritable dir allows — contract:hook:inv-t23" 0 "$RC"
-  check 264 "the re-armed Stop announces the failure — contract:hook:inv-t23" yes \
-    "$(has "$ERR" "could not persist state")"
+# R1+R2 (F1/§3.2): legacy re-arm leniency is DROPPED. An exhausted member
+# takes the give-up row; the fresh member survives and re-nags from its
+# OWN count. No re-arm headroom, no state-write-failure message.
+
+  check 264 "re-arm is dropped (F1): the join Stop gives up loudly, it does not announce a state-write failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "giving up")"
   check 265 "it never blocks at a permanent (3/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
   run_hook s23rearm true
-  check 266 "the Stop after that allows too — no unbreakable (3/3) loop — contract:hook:inv-t23" 0 "$RC"
+  check 266 "the fresh member survives the exhausted co-member and re-nags next Stop — no (3/3) freeze — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "(1/3)")"
   chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
 fi
 
@@ -1500,12 +1540,16 @@ else
   chmod 500 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
   run_hook s23mergemax true
   check 268 "a merge of exhausted groups on an unwritable dir allows — contract:hook:inv-t23" 0 "$RC"
-  check 269 "the merged Stop announces the failure — contract:hook:inv-t23" yes \
-    "$(has "$ERR" "could not persist state")"
+# R1+R2 (F1): merging two exhausted groups fires the per-member give-up,
+# not a block; the fresh bridge member survives (FATAL-2).
+
+  check 269 "the merge of exhausted groups gives up loudly, not a state-write failure — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "giving up")"
   check 270 "it never blocks on the clamped-then-restored counter — contract:hook:inv-t23" no \
     "$(has "$ERR" "attempt (")"
   run_hook s23mergemax true
-  check 271 "the Stop after the merge allows too — contract:hook:inv-t23" 0 "$RC"
+  check 271 "a fresh bridge member survives the exhausted merge and re-nags next Stop — contract:hook:inv-t23" yes \
+    "$(has "$ERR" "(1/3)")"
   chmod 700 "$(guard_dir "$HC_REPO")" "$(mem_dir "$HC_REPO")"
 fi
 
@@ -1522,13 +1566,16 @@ check 272 "premise: Stop 1 blocks at (1/3) with a normal state file — contract
   "$(has "$ERR" "(1/3)")"
 : > "$(guard_dir "$HC_REPO")/s23wiped.json"
 run_hook s23wiped true
-check 273 "a state file emptied before every Stop allows — contract:hook:inv-t23" 0 "$RC"
-check 274 "the unmeasurable-baseline Stop announces the failure — contract:hook:inv-t23" yes \
-  "$(has "$ERR" "could not persist state")"
-check 275 "it never blocks at a permanent (1/3) — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+# R1+R2: the journal is the bound (DEC-1); emptying the display-only state
+# doc neither resets it nor triggers a freeze — STOP blocks from the
+# journal to the give-up bound (T-c shape).
+
+check 273 "emptying the display-only state doc does NOT reset the journal bound: Stop 2 re-blocks at (2/3) — contract:hook:inv-t23" 2 "$RC"
+check 274 "the (2/3) counter is read back from the journal, not the emptied state doc — contract:hook:inv-t23" yes "$(has "$ERR" "(2/3)")"
+check 275 "it never starts a phantom (1/3) after the wipe — contract:hook:inv-t23" no "$(has "$ERR" "(1/3)")"
 : > "$(guard_dir "$HC_REPO")/s23wiped.json"
 run_hook s23wiped true
-check 276 "the Stop after that allows too — no unbreakable (1/3) loop — contract:hook:inv-t23" 0 "$RC"
+check 276 "the journal carries the bound to (3/3) then give-up — no freeze loop — contract:hook:inv-t23" yes "$(has "$ERR" "(3/3)")"
 
 # _prior_block_count has two halves and each is load-bearing on its own. Both
 # fixtures below use `seeded_at: 0`, which step 9's loader rejects, so the
@@ -1548,8 +1595,15 @@ cat > "$(guard_dir "$HC_REPO")/s23priordirect.json" <<PRIORDIRECTJSON
 PRIORDIRECTJSON
 run_hook s23priordirect true
 check 277 "a counter reachable only by the same-id lookup is still a baseline — contract:hook:inv-t23" 0 "$RC"
-check 278 "the same-id-baseline Stop announces the failure — contract:hook:inv-t23" yes \
-  "$(has "$ERR" "could not persist state")"
+# R1+R2 (journal model): the prior display counter in the state doc is NOT the
+# bound — the journal is. With no journal written yet and stop_hook_active=true,
+# this is the ABSENT/unaccountable row (§3.2), a loud allow.
+# R1+R2: a display-only prior counter in the planted state JSON is not the
+# bound. Journal ABSENT + active=true is the unaccountable loud-allow row.
+# _prior_block_count no longer exists; the journal is the only durable term.
+
+check 278 "the planted display counter is not the bound: journal ABSENT + active reads unaccountable — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "unaccountable")"
 check 279 "it never re-blocks at (1/3) against its own stale counter — contract:hook:inv-t23" no \
   "$(has "$ERR" "attempt (")"
 
@@ -1568,8 +1622,8 @@ cat > "$(guard_dir "$HC_REPO")/s23priorwalk.json" <<PRIORWALKJSON
 PRIORWALKJSON
 run_hook s23priorwalk true
 check 280 "a counter reachable only through the member walk is still a baseline — contract:hook:inv-t23" 0 "$RC"
-check 281 "the renamed-group-baseline Stop announces the failure — contract:hook:inv-t23" yes \
-  "$(has "$ERR" "could not persist state")"
+check 281 "the renamed-group-baseline display counter is not the bound: journal ABSENT + active reads unaccountable — contract:hook:inv-t23" yes \
+  "$(has "$ERR" "unaccountable")"
 check 282 "it never re-blocks at (1/3) against a renamed stale counter — contract:hook:inv-t23" no \
   "$(has "$ERR" "attempt (")"
 
@@ -2104,15 +2158,17 @@ check 207 "the group is exhausted after three Stops — contract:group:inv-t21" 
 echo "H = 2" > "$HC_REPO/hub.py"; commit_all "$HC_REPO" "fix(d): second hub fix"
 T21B_D="$(sha_of "$HC_REPO" HEAD)"
 run_hook s21b true
-check 208 "joining an exhausted group re-arms and blocks — contract:group:inv-t21" 2 "$RC"
-check 209 "the new member is named on the join Stop — contract:group:inv-t21" yes "$(has "$ERR" "$T21B_D")"
-check 210 "re-arm min(3,2)=2 plus one increment persists 3 — contract:group:inv-t21" 3 \
-  "$(st "$HC_REPO" s21b ".block_counts[.sha_group[\"$T21B_D\"]]")"
+# R1+R2 (F1/§3.1): legacy re-arm leniency is DROPPED. The fresh member reads its
+# own count (ABSENT/low), the exhausted member reaches the GIVE-UP row (§3.2) and
+# retires per-member; the fresh member survives in scope (FATAL-2, T-bb arm).
+check 208 "joining an exhausted group is a loud give-up, not a re-arm block — contract:group:inv-t21" 0 "$RC"
+check 209 "the exhausted member is the one named in the give-up — contract:group:inv-t21" yes "$(has "$ERR" "$T21B_C")"
+check 210 "the fresh member stays in scope; no re-arm headroom — contract:group:inv-t21" yes \
+  "$(if [ -f "$(guard_dir "$HC_REPO")/s21b.journal" ] && grep -q "GIVEUP" "$(guard_dir "$HC_REPO")/s21b.journal"; then echo yes; else echo no; fi)"
 run_hook s21b true
-check 211 "the Stop after the re-armed block allows — contract:group:inv-t21" 0 "$RC"
-check 212 "the give-up note re-fires after the re-arm — contract:group:inv-t21" yes "$(has "$ERR" "giving up")"
+check 211 "the fresh member re-nags from its OWN count after the give-up — contract:group:inv-t21" yes "$(has "$ERR" "(1/3)")"
+check 212 "the exhausted member is not re-nagged — it gave up — contract:group:inv-t21" no "$(has "$ERR" "$T21B_C")"
 
-# (c) two EQUAL-count exhausted groups bridged by one new SHA still block
 hook_case t21c
 echo "V = 0" > "$HC_REPO/x.py"; echo "V = 0" > "$HC_REPO/z.py"
 commit_all "$HC_REPO" "chore: baseline"
@@ -2129,22 +2185,18 @@ echo "V = 2" > "$HC_REPO/x.py"; echo "V = 2" > "$HC_REPO/z.py"
 commit_all "$HC_REPO" "fix(e): x and z bridge"
 T21C_E="$(sha_of "$HC_REPO" HEAD)"
 run_hook s21c true
-check 215 "an equal-count (3,3) merge still blocks — contract:group:inv-t21" 2 "$RC"
-check 216 "the bridging SHA is named — contract:group:inv-t21" yes "$(has "$ERR" "$T21C_E")"
-check 217 "the equal-count merge collapses to one counter — contract:group:inv-t21" 1 \
-  "$(st "$HC_REPO" s21c '.block_counts|length')"
-check 218 "min(max(3,3),2)=2 plus one increment persists 3 — contract:group:inv-t21" 3 \
-  "$(st "$HC_REPO" s21c ".block_counts[.sha_group[\"$T21C_E\"]]")"
+# R1+R2 (F1/§3.2): the merge of two EXHAUSTED groups reads COUNT(3) >= MAX, so
+# the give-up row fires per-member: only the exhausted members (C and D) get a
+# GIVEUP; the fresh bridge member E (its own count 0) survives in scope.
+check 215 "an equal-count (3,3) merge of exhausted groups gives up, it does not block — contract:group:inv-t21" 0 "$RC"
+check 216 "the give-up retires both exhausted members — contract:group:inv-t21" yes \
+  "$(if [ -f "$(guard_dir "$HC_REPO")/s21c.journal" ] && [ "$(grep -c "^.*GIVEUP" "$(guard_dir "$HC_REPO")/s21c.journal")" -eq 2 ]; then echo yes; else echo no; fi)"
+check 217 "the exhausted members are the ones named in the give-up — contract:group:inv-t21" yes \
+  "$(has "$ERR" "$T21C_C")"
 run_hook s21c true
-check 219 "the Stop after the equal-count merge allows — contract:group:inv-t21" 0 "$RC"
+check 218 "the fresh bridge member re-nags from its OWN count, not the inherited max — contract:group:inv-t21" yes "$(has "$ERR" "(1/3)")"
+check 219 "the exhausted members are never re-nagged — they gave up — contract:group:inv-t21" no "$(has "$ERR" "$T21C_C")"
 
-# (d) UNEQUAL counts — the only shape that can tell the merge's max() from a
-#     min(). (a) merges 1 with 1 and (c) merges 3 with 3, and on equal inputs
-#     max, min, first-wins and last-wins are the same function. Here C's group
-#     stands at 2 and D's at 1 when E bridges them: max(2,1), clamped to
-#     MAX_BLOCKS-1, is 2, plus this Stop's single increment — so the merge Stop
-#     blocks at (3/3) and the NEXT Stop gives up. A min-taking merge persists 2,
-#     reports (2/3), and inverts block-vs-allow on the Stop after.
 hook_case t21d
 for f in x y z; do echo "V = 0" > "$HC_REPO/$f.py"; done
 commit_all "$HC_REPO" "chore: baseline"
@@ -2312,8 +2364,8 @@ echo "V = 1" > "$HC_REPO/app.py"
 commit_all "$HC_REPO" "fix(widget): repair the widget"
 T22U_FIX="$(sha_of "$HC_REPO" HEAD)"
 run_hook s22u true
-check 322 "a fix(*) after an unborn-HEAD Stop is still seen — contract:hook:inv-t22" 2 "$RC"
-check 323 "the post-unborn candidate is named — contract:hook:inv-t22" yes "$(has "$ERR" "$T22U_FIX")"
+check 322 "a fix(*) after an unborn-HEAD Stop, first-ever candidate with stop_hook_active=true (journal ABSENT), is an unaccountable loud allow (INV-T14 absences row) — contract:hook:inv-t22" 0 "$RC"
+check 323 "the ABSENT+active=true allow is announced as unaccountable — contract:hook:inv-t22" yes "$(has "$ERR" "unaccountable")"
 
 # Defence in depth: `cat-file -e` cannot tell an object id from a symbolic ref
 # that happens to resolve, so step 9 gates on SHAPE first. Poison the stored
@@ -2331,8 +2383,8 @@ mkdir -p "$T22S_DIR"
 printf '{"version":1,"session_id":"s22s","seeded_at":1767225600,"last_checked_sha":"HEAD","block_counts":{},"sha_group":{}}' \
   > "$T22S_DIR/s22s.json"
 run_hook s22s true
-check 324 "a symbolic-ref checkpoint is not believed — contract:hook:inv-t22" 2 "$RC"
-check 325 "the candidate hidden behind HEAD..HEAD is named — contract:hook:inv-t22" \
+check 324 "a symbolic-ref checkpoint is not believed, and the re-scan finds the candidate — the first-ever candidate with stop_hook_active=true (journal ABSENT) is an unaccountable loud allow (INV-T14) — contract:hook:inv-t22" 0 "$RC"
+check 325 "the ABSENT+active=true allow is announced as unaccountable — contract:hook:inv-t22" yes \
   yes "$(has "$ERR" "$T22S_FIX")"
 check 326 "the poisoned checkpoint is replaced by a real object id — contract:hook:inv-t22" \
   yes "$(st "$HC_REPO" s22s '.last_checked_sha' | grep -Eqx '[0-9a-fA-F]{40}|[0-9a-fA-F]{64}' && echo yes || echo no)"
@@ -2511,14 +2563,21 @@ git -C "$HC_REPO" rm -q c.py
 echo "S = 3" > "$HC_REPO/shared.py"; echo "D = 1" > "$HC_REPO/d.py"
 commit_all "$HC_REPO" "fix(d): touch shared and d"
 T608_D="$(sha_of "$HC_REPO" HEAD)"
+# R1+R2 (per-member give-up, §3.2 FATAL-2): a new sibling joining a group whose
+# exhausted members are at MAX_BLOCKS fires the give-up row — the exhausted
+# members (B/C, own count 3) get a GIVEUP and retire; the fresh sibling D (own
+# count 0) SURVIVES in scope and re-nags from its own count. No re-arm, no
+# regained headroom, and no inherited exhaustion either.
 run_hook s608 true
-check 374 "a sibling joining after the flip re-blocks — contract:group:inv-t29" 2 "$RC"
-check 375 "the sibling reads (3/3), no regained headroom — contract:group:inv-t29" yes "$(has "$ERR" "(3/3)")"
-check 376 "the persisted counter holds the bound — contract:group:inv-t29" 3 \
-  "$(st "$HC_REPO" s608 ".block_counts[.sha_group[\"$T608_D\"]]")"
+check 374 "a sibling joining after the flip is a loud give-up, not a re-block — contract:group:inv-t29" 0 "$RC"
+check 375 "the exhausted member, not a fresh (3/3) block, is announced — contract:group:inv-t29" yes \
+  "$(has "$ERR" "$T608_B")"
+check 376 "the give-up is announced per-member — contract:group:inv-t29" yes "$(has "$ERR" "giving up")"
 run_hook s608 true
-check 377 "the Stop after the re-armed sibling gives up — contract:group:inv-t29" 0 "$RC"
-check 378 "the give-up is announced — contract:group:inv-t29" yes "$(has "$ERR" "giving up")"
+check 377 "the fresh sibling stays in scope and re-nags from its own count — contract:group:inv-t29" yes \
+  "$(has "$ERR" "(1/3)")"
+check 378 "the exhausted members are never re-nagged — they gave up — contract:group:inv-t29" no \
+  "$(has "$ERR" "$T608_B")"
 
 # Transient-clear must not SHADOW a sibling's durable evidence: two members of
 # the SAME group on the SAME Stop, the newer one cleared by a commit-less
@@ -2547,7 +2606,14 @@ append_grudge "$HC_STORE" "$HC_KEY" "$HC_REPO" "shared and b regressed" \
   "shared.py,b.py" "$T608B2" "2026-04-01" >/dev/null
 run_hook s608b true
 check 382 "the mixed-evidence group clears — contract:group:inv-t29" 0 "$RC"
-check 383 "a durable sibling match still resets the counter — contract:group:inv-t29" 0 \
+# R1+R2 (C-n / per-member CLEAR, F-1): a durable by-commit sibling resets that
+# member's OWN journal count; the by-files-only member receives no CLEAR (its
+# working-tree evidence is transient) and keeps its count. The group display is
+# max(0, 1) = 1, never zeroed via a sibling's durable evidence.
+# R1+R2 (C-n): a durable by-commit sibling mints CLEAR only for that
+# member; the by-files-only member keeps its count (per-member CLEAR).
+
+check 383 "a durable sibling match resets that member, the by-files member keeps its count — contract:group:inv-t29" 1 \
   "$(st "$HC_REPO" s608b ".block_counts[.sha_group[\"$T608B2\"]]")"
 
 # ...and the SAME-MEMBER form of that shadowing, which the group gating above

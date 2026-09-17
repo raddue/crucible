@@ -412,14 +412,17 @@ class TL_STATE_VERSION_DISCARD(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(old, fh)
 
-            # a NON-discarding hook would continue the old counter at (2/3);
-            # the discarding hook must re-scan fresh at (1/3) — never a freeze.
+            # R1+R2 (journal model): the discarded display doc is separate from
+            # the journal, which IS the bound and SURVIVES the discard. The
+            # journal already carries one BLOCK from Stop 1, so Stop 2 correctly
+            # re-blocks at (2/3) — the counter is derivable from durable
+            # evidence, never lost to a display-doc version discard.
             r2 = fx.run("sess-r4l")
             self.assertEqual(r2.returncode, 2, f"stderr={r2.stderr!r}")
-            self.assertIn("(1/3)", r2.stderr,
-                          "version-discard must re-scan fresh, not inherit the "
-                          "old counter (T-l) — otherwise a pre-R4 file freezes "
-                          "the candidate at max")
+            self.assertIn("(2/3)", r2.stderr,
+                          "the journal (the bound) must survive a display-doc "
+                          "version discard — T-l/a, a pre-R4 state file cannot "
+                          "reset durable BLOCK history")
 
             fresh = fx.state_json("sess-r4l")
             self.assertEqual(fresh.get("version"), STATE_VERSION,
@@ -429,13 +432,13 @@ class TL_STATE_VERSION_DISCARD(unittest.TestCase):
             self.assertTrue(os.path.isfile(
                 os.path.join(fx.guard_dir, f"{sha}.files")))
 
-            # the re-seeded chain is still bounded: an old->new alternation
-            # cannot freeze; three more Stops give up loudly.
+            # the journal-anchored chain is still bounded: an old->new
+            # alternation cannot freeze; the (2/3) chain gives up loudly.
             rcs = [r2.returncode]
-            for _ in range(3):
+            for _ in range(2):
                 r = fx.run("sess-r4l")
                 rcs.append(r.returncode)
-            self.assertEqual(rcs, [2, 2, 2, 0],  # (2/3) (3/3) then give-up
+            self.assertEqual(rcs, [2, 2, 0],  # (3/3) then give-up; (1/3) was Stop 1
                              f"bound broken after version discard: {rcs}")
 
 

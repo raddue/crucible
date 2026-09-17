@@ -54,16 +54,35 @@ def grudges_dir(repo: str, base_dir: Optional[str] = None) -> str:
     return os.path.join(base, repo, "grudges")
 
 
+# #605 / C-l: every git shell-out in the grudge subsystem runs git through this
+# PATH+HOME-only allowlist, never the inherited process environment — git
+# obeys repository-LOCATION variables (GIT_DIR, GIT_WORK_TREE, …) and
+# config-transport variables (GIT_CONFIG_COUNT/KEY_n/VALUE_n,
+# GIT_CONFIG_PARAMETERS, …) that outrank any `-C` argument, so a single
+# inherited variable can silently retarget or misreport a query. A denylist
+# cannot be complete (GIT_CONFIG_KEY_n is indexed); an allowlist only has to
+# name what git genuinely needs: PATH (findable at all) and HOME (per-user
+# config, where a legitimate `safe.directory` lives). Mirrors the hook's
+# `env -i PATH HOME git` and grudge_query.py's `_git_env()`.
+_GIT_ENV_KEEP = ("PATH", "HOME")
+
+
+def _git_env() -> dict:
+    import os as _os
+    return {k: _os.environ[k] for k in _GIT_ENV_KEEP if k in _os.environ}
+
+
 def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
     """(repo_basename, repo_root_realpath) for the repo the cwd is in. Shells to
-    git; falls back to the realpath of start_dir/cwd when not in a git repo.
-    Never raises. CLI-only (git side effect)."""
+    git via the PATH/HOME allowlist (#605/C-l); falls back to the realpath of
+    start_dir/cwd when not in a git repo. Never raises. CLI-only (git side
+    effect). FILESYSTEM identity — the worktree."""
     base = start_dir or os.getcwd()
     try:
         import subprocess
         proc = subprocess.run(
             ["git", "-C", base, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=_git_env(),
         )
         top = proc.stdout.strip()
         if proc.returncode == 0 and top:
@@ -73,6 +92,48 @@ def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
         pass
     root = os.path.realpath(os.path.abspath(base))
     return (os.path.basename(root) or "unknown", root)
+
+
+def resolve_store_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
+    """(repo_basename, store_root) — the STORE identity for the repo at
+    start_dir: the git-common-dir parent, RESOLVED AGAINST start_dir (never
+    the process cwd — SIEGE-R2-M8: git returns `--git-common-dir` relative to
+    its `-C` directory for an ordinary clone), when that resolved path's final
+    component is '.git' AND its own parent is not itself literally named
+    'modules' (SIEGE-R2-M7 — a submodule's common-dir is
+    `<super>/.git/modules/<name>`, whose parent `modules` is excluded so a
+    submodule an attacker names `.git` cannot defeat the discriminator, and
+    sibling submodules do not collide); otherwise falls back to
+    `resolve_repo()` — the worktree root — and records that the fallback fired
+    (submodule, bare repo, or an unresolvable common-dir) via a WARN.
+
+    Distinct from `resolve_repo()` (FILESYSTEM identity = `--show-toplevel`,
+    the worktree). Never used for filesystem existence checks. Invokes git via
+    the same PATH/HOME allowlist (#605/C-l)."""
+    base = start_dir or os.getcwd()
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["git", "-C", base, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5, env=_git_env(),
+        )
+        common = proc.stdout.strip()
+        if proc.returncode == 0 and common:
+            # Resolve the R E L A T I V E common-dir against start_dir, not the
+            # process cwd (SIEGE-R2-M8): `ledger_doctor`/`brier_advisory` call
+            # in with a start_dir that differs from cwd.
+            resolved = common if os.path.isabs(common) \
+                else os.path.realpath(os.path.join(base, common))
+            if os.path.basename(resolved) == ".git" \
+                    and os.path.basename(os.path.dirname(resolved)) != "modules":
+                parent = os.path.dirname(resolved)
+                return (os.path.basename(parent) or parent, parent)
+    except Exception:  # noqa: BLE001 — best-effort, never fatal
+        pass
+    _warn("resolve_store_repo: store-identity discriminator failed — fell back "
+          "to resolve_repo()'s worktree root (submodule, bare repo, or an "
+          "unresolvable git-common-dir)")
+    return resolve_repo(base)
 
 
 def normalize_path(p: str, repo_root: str) -> str:

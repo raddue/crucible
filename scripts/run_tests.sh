@@ -292,6 +292,17 @@ run python3 scripts/check_grudge_encoding_invariants.py
 # --- R4 encoding + injection behavior (T-h/T-i/T-k/T-l/T-n/T-aa) ---
 run python3 scripts/test_grudge_r4_encoding.py
 
+# --- R1+R2 journal invariants (#570/#581/#582): C-a/C-h/C-j/C-l/C-n greps +
+#     INV-C8 4a (C-c hook grep) + 4b (machine-local contract-YAML wording) ---
+run python3 scripts/check_grudge_guard_journal_invariants.py --selftest
+run python3 scripts/check_grudge_guard_journal_invariants.py
+
+# --- R1+R2 journal-bound behavior (T-a..T-cc, hook-driven, red-first) ---
+run python3 scripts/test_grudge_guard_journal.py
+
+# --- pre-R3 store identity (#580 resolve_store_repo) + C-l env hardening ---
+run python3 scripts/test_grudge_guard_redesign.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo
