@@ -36,6 +36,13 @@ import re
 import sys
 from datetime import datetime
 
+# resolve repo root so `scripts.atomic_write` imports both as a CLI and as a package
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)
+if _REPO not in sys.path:
+    sys.path.insert(0, _REPO)
+from scripts.atomic_write import atomic_write_text  # noqa: E402
+
 HEALTH_ORDER = {"GREEN": 0, "YELLOW": 1, "RED": 2}
 MAX_EVENTS = 5
 MEMORY_ROOT = os.path.expanduser("~/.claude/projects")
@@ -92,22 +99,26 @@ def read_status(path):
     if m:
         out["started_iso"] = m.group(1)
 
-    # Recent events: lines "- [HH:MM] text" inside the file, newest-first
-    m = re.search(r"## Recent Events\n((?:.*\n)*)", text)
-    if m:
-        for line in m.group(1).splitlines():
-            em = re.match(r"^- \[(\d{2}:\d{2})\] (.*)$", line)
+    # Recent events + skill body: parse ## Recent Events until the next ## heading
+    events = []
+    skill_body = None
+    body_lines = text.split("\n")
+    ev_idx = None
+    for i, ln in enumerate(body_lines):
+        if ln.strip() == "## Recent Events":
+            ev_idx = i
+            break
+    if ev_idx is not None:
+        j = ev_idx + 1
+        while j < len(body_lines) and not body_lines[j].strip().startswith("## "):
+            em = re.match(r"^- \[(\d{2}:\d{2})\] (.*)$", body_lines[j])
             if em:
-                out["events"].append((em.group(1), em.group(2)))
-
-    # skill body = everything after the (last) "## Recent Events" section
-    idx = text.find("## Recent Events")
-    if idx != -1:
-        rest = text[idx:]
-        rest = re.sub(r"^## Recent Events\n(?:.*\n)*?", "", rest, count=1)
-        # keep remaining skill-specific sections (Task Progress, etc.)
-        kept = [ln for ln in rest.splitlines() if ln.strip()]
-        out["skill_body"] = "\n".join(kept) + ("\n" if kept else "")
+                events.append((em.group(1), em.group(2)))
+            j += 1
+        kept = [ln for ln in body_lines[j:] if ln.strip()]
+        skill_body = "\n".join(kept) + ("\n" if kept else "")
+    out["events"] = events
+    out["skill_body"] = skill_body
     return out
 
 
@@ -175,9 +186,7 @@ def cmd_write(args):
             skill_body = f.read()
     content = render(path, args.skill, args.phase, args.health,
                      args.suggested_action, args.event, skill_body)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+    atomic_write_text(path, content)
     print(f"wrote {path} ({args.phase} | {args.health})")
     return 0
 

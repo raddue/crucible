@@ -91,6 +91,12 @@ class PipelineStatusTest(unittest.TestCase):
         ps.cmd_write(Args(path=self.path, skill="build", phase="3", health="RED"))
         self.assertEqual(ps.cmd_write(Args(path=self.path, skill="build", phase="4", health="GREEN")), 0)
 
+    def test_phase_change_immediate_escalation_allowed(self):
+        # reset sets the baseline to GREEN in the new phase, so YELLOW/RED on the
+        # first write is a forward move, not a backward one
+        ps.cmd_write(Args(path=self.path, skill="build", phase="3", health="RED"))
+        self.assertEqual(ps.cmd_write(Args(path=self.path, skill="build", phase="4", health="RED")), 0)
+
     def test_body_file_included(self):
         body = os.path.join(self.tmp, "body.md")
         with open(body, "w", encoding="utf-8") as f:
@@ -99,6 +105,15 @@ class PipelineStatusTest(unittest.TestCase):
         with open(self.path, encoding="utf-8") as f:
             text = f.read()
         self.assertIn("## Task Progress", text)
+
+    def test_skill_body_bullets_not_swept_into_events(self):
+        body = os.path.join(self.tmp, "body.md")
+        with open(body, "w", encoding="utf-8") as f:
+            f.write("## Compression State\nGoal: x\n- [12:00] not an event\n")
+        ps.cmd_write(Args(path=self.path, skill="build", phase="3", health="GREEN", body_file=body))
+        st = ps.read_status(self.path)
+        self.assertEqual(len(st["events"]), 0)  # body bullet must NOT become history
+        self.assertIn("## Compression State", st["skill_body"])
 
     def test_compact_no_file(self):
         self.assertEqual(ps.cmd_compact(Args(path=self.path)), 0)

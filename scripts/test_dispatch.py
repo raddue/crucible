@@ -79,8 +79,13 @@ class DispatchTest(unittest.TestCase):
     def test_after_invalid_status(self):
         self.assertEqual(dispatch.cmd_after(_Args(status="dispatched", seq=1)), 2)
 
-    def test_before_missing_file(self):
-        self.assertEqual(dispatch.cmd_before(_Args(self.ddir, 1, "/nonexistent", "r", None, None, "opus")), 1)
+    def test_before_missing_file_writes_null_input_chars(self):
+        # measurement failure must not block dispatch — input_chars null
+        self.assertEqual(dispatch.cmd_before(_Args(self.ddir, 1, "/nonexistent", "r", None, None, "opus")), 0)
+        rows = read_manifest(self.ddir)
+        self.assertEqual(rows[0]["status"], "dispatched")
+        self.assertIsNone(rows[0]["input_chars"])
+        self.assertEqual(rows[0]["file"], "nonexistent")
 
     def test_before_invalid_tier(self):
         self.assertEqual(dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "r", None, None, "fable")), 2)
@@ -89,10 +94,18 @@ class DispatchTest(unittest.TestCase):
         huge = "s" * 8000
         dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "plan-writer", None, None, "opus"))
         self.assertEqual(dispatch.cmd_after(_Args(self.ddir, status="completed", seq=1, summary=huge)), 0)
-        # measure the actual byte length of the last written line
         with open(os.path.join(self.ddir, "manifest.jsonl"), encoding="utf-8") as f:
             lines = f.read().splitlines()
-        self.assertLessEqual(len(lines[-1]) + 1, dispatch.PIPE_BUF)
+        self.assertLessEqual(len(lines[-1].encode("utf-8")) + 1, dispatch.PIPE_BUF)
+
+    def test_summary_pipebuf_unicode_bytes(self):
+        # multibyte chars: PIPE_BUF is BYTES not characters
+        huge = "\u00e9" * 8000
+        dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "plan-writer", None, None, "opus"))
+        self.assertEqual(dispatch.cmd_after(_Args(self.ddir, status="completed", seq=1, summary=huge)), 0)
+        with open(os.path.join(self.ddir, "manifest.jsonl"), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        self.assertLessEqual(len(lines[-1].encode("utf-8")) + 1, dispatch.PIPE_BUF)
 
     def test_cleanup_success_copies_and_deletes(self):
         dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "plan-writer", None, None, "opus"))
@@ -113,6 +126,34 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(dispatch.cmd_cleanup(_Args(self.ddir, scratch=scratch, failed=True)), 0)
         self.assertTrue(os.path.isdir(os.path.join(scratch, "crucible-dispatch-123")))
         self.assertTrue(os.path.exists(self.ddir))  # /tmp copy left in place
+
+    def test_seq_refuses_on_interior_corruption(self):
+        with open(os.path.join(self.ddir, "manifest.jsonl"), "w") as f:
+            f.write('{"seq":1,"x":0}\n')
+            f.write('{corrupt interior line}\n')
+            f.write('{"seq":2,"x":0}\n')
+        self.assertEqual(dispatch.cmd_seq(self.ddir), 1)
+
+    def test_after_refuses_without_dispatched_entry(self):
+        self.assertEqual(dispatch.cmd_after(_Args(self.ddir, status="completed", seq=1)), 1)
+        rows = read_manifest(self.ddir)
+        self.assertEqual(len(rows), 0)
+
+    def test_cleanup_refuses_missing_ledger(self):
+        dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "plan-writer", None, None, "opus"))
+        dispatch.cmd_after(_Args(self.ddir, status="completed", seq=1))
+        # receipt-ledger.jsonl missing -> refuse, leave dir intact
+        scratch = os.path.join(self.tmp, "scratch")
+        self.assertEqual(dispatch.cmd_cleanup(_Args(self.ddir, scratch=scratch)), 1)
+        self.assertTrue(os.path.exists(self.ddir))
+
+    def test_cleanup_failed_copies_dir(self):
+        with open(os.path.join(self.ddir, "manifest.jsonl"), "w") as f:
+            f.write("{}\n")
+        scratch = os.path.join(self.tmp, "scratch")
+        self.assertEqual(dispatch.cmd_cleanup(_Args(self.ddir, scratch=scratch, failed=True)), 0)
+        self.assertTrue(os.path.isdir(os.path.join(scratch, "crucible-dispatch-123")))
+        self.assertTrue(os.path.exists(self.ddir))
 
 
 class _Args:

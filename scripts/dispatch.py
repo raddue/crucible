@@ -14,17 +14,18 @@ Invocation (from repo root; cwd-independent):
                            [--summary ".."] [--output-chars C] [--tool-calls K] [--duration S]
     dispatch.py cleanup    --dir <D> --scratch <s> [--failed]
 
-`before` measures the dispatch file's character count and appends the
-`status:"dispatched"` entry. `after` appends the authoritative completion
-entry for the same seq, copying the dispatched entry's context fields
-(file/role/phase/task/model_tier/input_chars) so the last entry per seq is
-self-sufficient — matching the convention's completed-entry example. Entries
-are kept under POSIX PIPE_BUF (4096 bytes) by truncating `summary`, so a
+`before` measures the dispatch file's size and appends the `status:"dispatched"`
+entry. `after` appends the authoritative completion entry for the same seq,
+copying the dispatched entry's context fields (file/role/phase/task/model_tier/
+input_chars) so the last entry per seq is self-sufficient — matching the
+convention's completed-entry example — and refuses to run if that dispatched
+entry is absent (no fabricated history). Entries are kept under POSIX PIPE_BUF
+(4096 bytes, measured on the UTF-8 encoded line) by shrinking `summary`, so a
 single `write()` append stays atomic under concurrent access.
 
 Deliberately NOT here: token/rework aggregation (`summary`) — forge owns that
-aggregation (its ## Step 8.5 already hand-computes totals); a third
-implementation would be a drift surface, not a win. Pure stdlib.
+aggregation; a third implementation would be a drift surface, not a win.
+Pure stdlib.
 """
 
 import argparse
@@ -37,7 +38,7 @@ PIPE_BUF = 4096
 MANIFEST = "manifest.jsonl"
 RECEIPT_LEDGER = "receipt-ledger.jsonl"
 
-STATUSES = {"completed", "failed", "error", "skipped", "dispatched"}
+STATUSES = {"completed", "failed", "error", "skipped"}
 TIERS = {"opus", "sonnet", "haiku"}
 
 
@@ -46,60 +47,83 @@ def _manifest_path(d):
 
 
 def _read_manifest(dirpath):
-    """Return list of parsed entries; tolerant of ragged final lines."""
+    """Return (rows, interior_corrupt_count).
+
+    Interior corrupt lines (anything but a torn final line) are counted —
+    seq recovery is unsafe across them. A ragged trailing line (mid-write
+    crash) is tolerated silently, matching the convention's crash safety.
+    """
     p = _manifest_path(dirpath)
-    if not os.path.exists(p):
-        return []
+    lines = []
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            lines = [ln for ln in f.read().split("\n") if ln.strip()]
     rows = []
-    with open(p, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
+    corrupt = 0
+    for i, ln in enumerate(lines):
+        try:
+            rows.append(json.loads(ln))
+        except json.JSONDecodeError:
+            if i != len(lines) - 1:  # only the final line may be torn
+                corrupt += 1
+    return rows, corrupt
+
+
+def _serialize(entry):
+    return json.dumps(entry, separators=(",", ":"), ensure_ascii=False)
 
 
 def _append(dirpath, entry):
-    line = json.dumps(entry, separators=(",", ":"), ensure_ascii=False)
-    if len(line) + 1 > PIPE_BUF:
-        # shrink summary until the whole line fits PIPE_BUF
-        fixed = dict(entry)
-        fixed["summary"] = None
-        overhead = len(json.dumps(fixed, separators=(",", ":"), ensure_ascii=False))
-        budget = PIPE_BUF - 1 - overhead
-        if entry.get("summary") is not None and budget > 0:
-            s = entry["summary"]
-            if len(s) > budget:
-                # reserve 1 for the ellipsis
-                s = s[: max(budget - 1, 0)] + "\u2026"
-            entry["summary"] = s
-            line = json.dumps(entry, separators=(",", ":"), ensure_ascii=False)
-        if len(line) + 1 > PIPE_BUF:
+    line = _serialize(entry)
+    if len(line.encode("utf-8")) + 1 > PIPE_BUF:
+        summary = entry.get("summary")
+        if summary is not None:
+            # binary-search the largest summary prefix (bytes) that fits
+            fixed = dict(entry)
+            fixed["summary"] = None
+            overhead = len(_serialize(fixed).encode("utf-8"))
+            budget = PIPE_BUF - 1 - overhead
+            ell = "..."
+            lo, hi, best = 0, len(summary), 0
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                entry["summary"] = summary[:mid] + (ell if mid < len(summary) else "")
+                if len(_serialize(entry).encode("utf-8")) + 1 <= PIPE_BUF:
+                    best = mid
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            entry["summary"] = summary[:best] + (ell if best < len(summary) else "")
+            line = _serialize(entry)
+        if len(line.encode("utf-8")) + 1 > PIPE_BUF:
             print(f"[dispatch WARN] entry for seq {entry.get('seq')} still exceeds "
-                  f"PIPE_BUF after summary truncation; writing anyway", file=sys.stderr)
+                  f"PIPE_BUF after summary truncation (fixed fields too large); "
+                  f"writing anyway", file=sys.stderr)
     with open(_manifest_path(dirpath), "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
 def cmd_seq(dirpath):
-    rows = _read_manifest(dirpath)
+    rows, corrupt = _read_manifest(dirpath)
+    if corrupt:
+        print(f"dispatch seq: {corrupt} interior corrupt line(s) in manifest.jsonl "
+              f"— seq recovery unsafe, refusing to allocate", file=sys.stderr)
+        return 1
     seqs = [int(r["seq"]) for r in rows if isinstance(r.get("seq"), int)]
-    print(max(seqs) + 1 if seqs else 1)
+    print(seqs[-1] + 1 if seqs else 1)
     return 0
 
 
 def cmd_before(args):
     fp = args.file
+    input_chars = None
     try:
         with open(fp, encoding="utf-8") as f:
             input_chars = len(f.read())
-    except OSError as e:
-        print(f"dispatch before: cannot read dispatch file {fp}: {e}", file=sys.stderr)
-        return 1
+    except (OSError, UnicodeDecodeError) as e:
+        # measurement failure must never block dispatch — proceed with null
+        print(f"[dispatch WARN] cannot read dispatch file {fp}: {e}; "
+              f"input_chars set to null", file=sys.stderr)
     if args.model_tier not in TIERS:
         print(f"dispatch before: model-tier must be one of {sorted(TIERS)}", file=sys.stderr)
         return 2
@@ -123,27 +147,30 @@ def cmd_before(args):
 
 
 def cmd_after(args):
-    if args.status not in STATUSES - {"dispatched"}:
-        print(f"dispatch after: status must be one of "
-              f"{sorted(STATUSES - {'dispatched'})}", file=sys.stderr)
+    if args.status not in STATUSES:
+        print(f"dispatch after: status must be one of {sorted(STATUSES)}", file=sys.stderr)
         return 2
-    # copy context fields from the dispatched entry for this seq (last one wins)
     prev = None
-    for r in _read_manifest(args.dir):
+    rows, _ = _read_manifest(args.dir)
+    for r in rows:
         if r.get("seq") == args.seq and r.get("status") == "dispatched":
             prev = r
+    if prev is None:
+        print(f"dispatch after: no dispatched entry for seq {args.seq} — "
+              f"refusing to fabricate a completion record", file=sys.stderr)
+        return 1
     entry = {
         "seq": args.seq,
-        "file": prev.get("file") if prev else f"{args.seq}-unknown.md",
-        "role": prev.get("role") if prev else None,
-        "phase": prev.get("phase") if prev else None,
-        "task": prev.get("task") if prev else None,
+        "file": prev.get("file"),
+        "role": prev.get("role"),
+        "phase": prev.get("phase"),
+        "task": prev.get("task"),
         "status": args.status,
         "duration_s": args.duration,
         "summary": args.summary,
-        "input_chars": prev.get("input_chars") if prev else None,
+        "input_chars": prev.get("input_chars"),
         "output_chars": args.output_chars,
-        "model_tier": prev.get("model_tier") if prev else None,
+        "model_tier": prev.get("model_tier"),
         "tool_calls": args.tool_calls,
     }
     _append(args.dir, entry)
@@ -158,17 +185,20 @@ def cmd_cleanup(args):
         print(f"dispatch cleanup: dispatch dir missing: {dirpath}", file=sys.stderr)
         return 1
     if args.failed:
-        # directory-into-directory, basename preserved -> lands at <scratch>/crucible-dispatch-<sid>/
         dst = os.path.join(scratch, os.path.basename(os.path.normpath(dirpath)))
         shutil.copytree(dirpath, dst, dirs_exist_ok=True)
         print(f"copied dispatch dir to {dst} (left /tmp in place)")
         return 0
+    src_m = os.path.join(dirpath, MANIFEST)
+    src_r = os.path.join(dirpath, RECEIPT_LEDGER)
+    if not (os.path.exists(src_m) and os.path.exists(src_r)):
+        print(f"dispatch cleanup: both {MANIFEST} and {RECEIPT_LEDGER} must exist "
+              f"before deleting the dispatch dir (refusing)", file=sys.stderr)
+        return 1
     dest = os.path.join(scratch, os.path.basename(os.path.normpath(dirpath)))
     os.makedirs(dest, exist_ok=True)
-    for name in (MANIFEST, RECEIPT_LEDGER):
-        src = os.path.join(dirpath, name)
-        if os.path.exists(src):
-            shutil.copy2(src, os.path.join(dest, name))
+    shutil.copy2(src_m, os.path.join(dest, MANIFEST))
+    shutil.copy2(src_r, os.path.join(dest, RECEIPT_LEDGER))
     shutil.rmtree(dirpath)
     print(f"copied {MANIFEST} + {RECEIPT_LEDGER} to {dest}; deleted {dirpath}")
     return 0
@@ -205,7 +235,6 @@ def main(argv):
     c.add_argument("--failed", action="store_true")
 
     a2 = p.parse_args(argv)
-
     if a2.cmd == "seq":
         return cmd_seq(a2.dir)
     if a2.cmd == "before":
