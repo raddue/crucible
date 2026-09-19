@@ -99,6 +99,8 @@ Once a fact is recorded as `I-NN` with a `[ref:]` trailer (per Rule 3a) and the 
 
 ## Phase Entry Check
 
+**Runtime tool (preferred — the pseudocode below is the spec + fallback).** Run `python3 scripts/cairn.py check <cairn-file> [--expect-phase <name>/<counter>]` on every phase entry; apply the pseudocode below in-context only when the tool is unavailable. `cairn.py` is the deterministic transcription of this check (exit 0 = pass, 1 = abort); do not duplicate the check into the script's prose twice.
+
 Before doing any phase-N+1 work, after re-reading the cairn from disk:
 
 ```
@@ -118,6 +120,8 @@ Lint failure at phase entry aborts the transition. The orchestrator narrates the
 ## Reconciliation Pass
 
 After the structural Phase Entry Check passes but before phase-N+1 work begins, the orchestrator runs the **reconciliation pass** — a closed set of rules that compare the cairn's claims against ground truth on disk and in-context. This turns the cairn from an *asserted* recall substrate into a *verified* one.
+
+**Runtime tool (preferred — the rules below are the spec + fallback).** Run `python3 scripts/cairn.py reconcile <cairn-file> --ledger <dispatch-dir>/receipt-ledger.jsonl [--active-run <active-run.md>]` (exit 0 = pass, 1 = escalate). The script implements Rules 1–5 except the in-context pieces it cannot see: Rule 2's witness `ran=` disposition, Rule 2's `SUPERSEDED_BY` manifest check, and Rule 4's supersession decision point — those remain orchestrator judgment and are reported as notes, not silently passed.
 
 Inputs:
 - `<dispatch-dir>/receipt-ledger.jsonl` (Layer 1) — the dispatch directory's append-only receipt ledger (canonical location per `shared/return-convention.md` / `shared/dispatch-convention.md`), resolved via the run's `dispatch_dir` (carried in the `.pipeline-active` marker) or, for a sealed/terminal run whose dispatch dir is gone, the durable session-namespaced scratch copy `<scratch>/crucible-dispatch-<session-id>/receipt-ledger.jsonl` (per `shared/dispatch-convention.md` › Receipt Ledger, and Recovery step 2). It is session-scoped, NOT a project-memory file, so concurrent pipelines stay isolated.
