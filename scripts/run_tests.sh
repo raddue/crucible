@@ -175,6 +175,9 @@ run python3 scripts/test_cairn.py
 # --- Dispatch manifest bookkeeping (#643) ---
 run python3 scripts/test_dispatch.py
 
+# --- Ambient pipeline status writer (#643) ---
+run python3 scripts/test_pipeline_status.py
+
 # --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
 

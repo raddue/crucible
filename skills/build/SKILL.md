@@ -334,6 +334,9 @@ Quality gates are unconditional at all three gate points:
 
 ## Pipeline Status
 
+<!-- CANONICAL: shared/pipeline-status-convention.md (shared header, health state machine, events buffer, inline CLI, compaction recovery; build keeps only its skill-specific body + YELLOW/RED triggers) -->
+**Runtime tool (preferred — the format below is the skill-specific reference).** Compose the shared header/health/events with `python3 scripts/pipeline_status.py write --skill build --phase … --health … [--event …] --body-file <skill-body.md>` (see `shared/pipeline-status-convention.md`); hand-compose only build's skill-specific body (`## Task Progress`, `## Quality Gates`, `## Checkpoints`, `## Compression State`).
+
 Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
 
 ### Write Triggers
