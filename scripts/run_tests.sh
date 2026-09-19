@@ -172,6 +172,9 @@ run python3 scripts/test_locks.py
 # --- Layer 3 cairn Phase Entry Check + Reconciliation Pass (#643) ---
 run python3 scripts/test_cairn.py
 
+# --- Dispatch manifest bookkeeping (#643) ---
+run python3 scripts/test_dispatch.py
+
 # --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
 

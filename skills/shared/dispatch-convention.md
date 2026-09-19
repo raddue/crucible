@@ -371,6 +371,8 @@ After compaction, skills can read `summary.md` from this path for narrative cont
 
 Every dispatch directory includes `manifest.jsonl` — a structured execution trace. Manifest entries must remain under 4096 bytes (POSIX PIPE_BUF) to ensure atomic appends under concurrent access.
 
+**Runtime tool (preferred — the steps below are the spec + fallback).** Use `python3 scripts/dispatch.py` for the mechanical bookkeeping: `seq --dir <D>` (crash-safe next seq = last manifest `seq` + 1), `before --dir <D> --seq N --file <dispatch-file> --role <r> [--phase P] [--task K] --model-tier <t>` (measures `input_chars` and appends the `dispatched` entry), `after --dir <D> --seq N --status <completed|failed|error|skipped> [--summary …] [--output-chars C] [--tool-calls K] [--duration S]` (appends the authoritative completion entry, copying the dispatched entry's context fields), and `cleanup --dir <D> --scratch <s> [--failed]` (## Cleanup). Token/rework aggregation stays in forge's Step 8.5 (single owner — no third copy). The steps below remain the canonical spec.
+
 ### Protocol: Write Before Dispatch
 
 1. **Before dispatching:** Measure the dispatch file size in characters (e.g., read the file, count characters). Append entry with `status: "dispatched"` and `input_chars` set to the measured character count. Include `model_tier` based on the dispatch decision (opus/sonnet/haiku). Set `output_chars` and `tool_calls` to null (not yet available).
