@@ -10,9 +10,11 @@ Pure stdlib. Never touches real machine state.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -552,7 +554,76 @@ class TCC_SINGLE_PASS_READ(unittest.TestCase):
                 f"{len(group_passes)}: {group_passes!r}")
 
 
-EXPECTED_TESTS = 20
+class TM_WITNESS_SURVIVES_STATE_WIPE(unittest.TestCase):
+    """T-m (§5b.1): a $STATE_DIR wipe cannot erase the outcome witness — the
+    proof that the hook ran survives mechanism 3 (#581); plus the control arm:
+    an untampered run records the healthy terminal GIVEUP line, so the test
+    distinguishes 'never degraded' from 'never wired up'."""
+
+    def _witness(self, fx):
+        return os.path.join(fx.home, ".claude", "crucible", "grudge-guard",
+                            "outcomes.tsv")
+
+    def _read(self, p):
+        with open(p, "r", encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_witness_survives_state_wipe(self):
+        with tempfile.TemporaryDirectory() as root:
+            fx = HookFixture(root)
+            fx.ensure_store()
+            fx.commit(["app.py"])
+            r = fx.run("sess")                     # blocks -> BLOCK witness line
+            self.assertEqual(r.returncode, 2)
+            w = self._witness(fx)
+            self.assertTrue(os.path.isfile(w), f"no witness at {w}")
+            before = self._read(w)
+            self.assertIn("\tBLOCK\t", before)
+            self.assertIn("\tsess\t", before)
+            shutil.rmtree(fx.guard_dir)            # mechanism-3 wipe of $STATE_DIR
+            self.assertTrue(os.path.isfile(w),
+                            "witness lives OUTSIDE $STATE_DIR (C-i)")
+            self.assertEqual(self._read(w), before,
+                             "a $STATE_DIR wipe must not erase the witness")
+
+    def test_healthy_terminal_giveup_recorded(self):
+        """Control arm: an untampered run to give-up records the healthy
+        terminal GIVEUP event — 'never wired up' could not produce this line."""
+        with tempfile.TemporaryDirectory() as root:
+            fx = HookFixture(root)
+            fx.ensure_store()
+            fx.commit(["app.py"])
+            for i in range(4):
+                r = fx.run("sess", stop_hook_active=(i > 0))
+            self.assertIn("giving up", r.stderr)
+            body = self._read(self._witness(fx))
+            self.assertIn("\tGIVEUP\t", body)
+
+
+class TN_WITNESS_MKFIFO_BOUNDED(unittest.TestCase):
+    """T-n witness arm (SIEGE-R2-H3): a mkfifo'd witness path is a blocking
+    open that a post-command `|| :` cannot abort; the timeout-1 bound must let
+    the Stop finish (and still block) well before its own budget, not hang on
+    the open."""
+
+    def test_mkfifo_witness_does_not_hang(self):
+        with tempfile.TemporaryDirectory() as root:
+            fx = HookFixture(root)
+            fx.ensure_store()
+            fx.commit(["app.py"])
+            wdir = os.path.join(fx.home, ".claude", "crucible", "grudge-guard")
+            os.makedirs(wdir, exist_ok=True)
+            os.mkfifo(os.path.join(wdir, "outcomes.tsv"))
+            t0 = time.time()
+            r = fx.run("sess")
+            elapsed = time.time() - t0
+            self.assertEqual(r.returncode, 2, f"stderr={r.stderr!r}")
+            self.assertLess(elapsed, 30,
+                            f"mkfifo'd witness must cost the bounded wait, not "
+                            f"the hook budget (took {elapsed:.1f}s)")
+
+
+EXPECTED_TESTS = 23
 
 
 def _run_with_count_guard():

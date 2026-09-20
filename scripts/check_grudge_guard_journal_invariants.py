@@ -10,7 +10,12 @@ its restatements disagreed with each other).
   rename-to-quarantine-and-re-arm (`_journal_quarantine`). No other code path
   may do so.
 - **C-h** — The hook never reads `outcomes.tsv`. No read, no test, no branch —
-  the witness is write-only.
+  the witness is write-only. A full-file occurrence check would fire on the
+  legitimate write (the `WITNESS_FILE=` assignment and the bounded `>>` append),
+  so the check allows those two shapes and flags every OTHER line that names the
+  witness path.
+- **C-i** — The outcome witness lives OUTSIDE `$STATE_DIR`, so wiping
+  `$STATE_DIR` (mechanism 3, #581) cannot erase the proof the hook ran.
 - **C-j** — No code path converts a per-member `ABSENT` or `UNMEASURABLE`
   journal read into a numeric contribution (never coerced to `0`).
 - **C-l** — Every git shell-out in this subsystem (`grudge_append.py`'s
@@ -63,8 +68,45 @@ def _lineno(text, match):
 # C-q's `corrupt.<epoch>` quarantine rename.
 _C_A_BANNED = None  # implemented line-windowed in _truncate_sites
 
-# C-h: the hook may never read the witness.
-_C_H_READS = re.compile(r'\boutcomes\.tsv\b')
+_C_H_READS = re.compile(r'\boutcomes\.tsv\b|\$WITNESS_FILE')
+_C_H_WRITE = re.compile(
+    r'^WITNESS_FILE=.*outcomes\.tsv'          # the one assignment
+    r'|\$WITNESS_FILE[^\n]*>>|>>[^\n]*\$WITNESS_FILE'  # the bounded append
+)
+
+# C-i: the witness path must never derive from $STATE_DIR. Flags a line where
+# the WITNESS_* variable is assigned from, or the path concatenates, $STATE_DIR.
+_C_I_VIOLATION = re.compile(
+    r'^WITNESS_(?:DIR|FILE)=.*\$STATE_DIR'
+    r'|WITNESS_FILE=.*\$STATE_DIR'
+    r'|\$STATE_DIR[^"\n]*\$WITNESS_FILE|\$STATE_DIR[^"\n]*outcomes\.tsv')
+
+
+def _ch_chw_lines(text):
+    """C-h: flag any non-comment line naming the witness path that is neither
+    the `WITNESS_FILE=` assignment nor a `>>` append — a read, a test, or a
+    branch. Returns (lineno, line) tuples."""
+    out = []
+    for ln, line in enumerate(text.splitlines(), 1):
+        if not _C_H_READS.search(line):
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if _C_H_WRITE.search(line):
+            continue
+        out.append((ln, line.rstrip()))
+    return out
+
+
+def _ci_lines(text):
+    """C-i: flag lines where WITNESS_DIR/WITNESS_FILE touch $STATE_DIR."""
+    out = []
+    for ln, line in enumerate(text.splitlines(), 1):
+        if not _C_I_VIOLATION.search(line):
+            continue
+        out.append((ln, line.rstrip()))
+    return out
 
 # C-j: assigning a numeric that folds ABSENT/UNMEASURABLE into the group fold.
 # The forbidden shapes are `ABSENT`/`UNMEASURABLE` adjacent to a numeric
@@ -290,10 +332,15 @@ def _scan_hook(text, rel):
             errors.append(
                 f"[C-n] {rel}:{ln}: CLEAR write ({bad!r}) on a transient/"
                 f"by-files window — durable resolution only (C-n)")
-    for m in _C_H_READS.finditer(text):
+    for ln, bad in _ch_chw_lines(text):
         errors.append(
-            f"[C-h] {rel}:{_lineno(text, m)}: the hook reads/named "
-            f"outcomes.tsv — the witness is write-only")
+            f"[C-h] {rel}:{ln}: the hook reads/tests/branches on the witness "
+            f"path ({bad!r}) — the witness is write-only; only the WITNESS_FILE="
+            f" assignment and the bounded >> append may name it")
+    for ln, bad in _ci_lines(text):
+        errors.append(
+            f"[C-i] {rel}:{ln}: witness path derived from $STATE_DIR ({bad!r}) "
+            f"— wiping $STATE_DIR must not erase the proof the hook ran")
     for m in _C_J_COERCE.finditer(text):
         errors.append(
             f"[C-j] {rel}:{_lineno(text, m)}: ABSENT/UNMEASURABLE coerced to a "
@@ -361,7 +408,7 @@ def main(argv):
     if errors:
         print(f"grudge-guard journal invariants: {len(errors)} defect(s)")
         return 1
-    print("OK — C-a, C-h, C-j, C-l, C-n journal invariants + 4a/4b hold "
+    print("OK — C-a, C-h, C-i, C-j, C-l, C-n journal invariances + 4a/4b hold "
           f"across {len(real)} production file(s)")
     return 0
 
@@ -379,6 +426,8 @@ _PASS = {
         "  printf '%s\\n' \"$epoch\\tBLOCK\\t$m\\t$nonce\" >> \"$JOURNAL_FILE\"\n"
         "  printf '%s\\n' \"$epoch\\tCLEAR\\t$m\" >> \"$JOURNAL_FILE\"\n"
         "}\n"
+        "WITNESS_FILE=\"$WITNESS_DIR/outcomes.tsv\"\n"
+        "timeout 1 bash -c 'printf \"%s\\n\" \"$1\" >> \"$2\" || :' _ \"$row\" \"$WITNESS_FILE\" 2>/dev/null || :\n"
         "_journal_read_group() {\n"
         "  case \"$r\" in\n"
         "    ABSENT) : ;;        # contributes nothing — C-j\n"
@@ -409,6 +458,10 @@ _FAIL_EXPECT = [
      "printf '' > \"$JOURNAL_FILE\"  # rewrite\n"),
     ("C-h read outcomes", HOOK[0], "[C-h]",
      "grep -c resolved outcomes.tsv \"$WITNESS\" 2>/dev/null\n"),
+    ("C-h cat witness", HOOK[0], "[C-h]",
+     "cat \"$WITNESS_FILE\" 2>/dev/null\n"),
+    ("C-i witness inside state", HOOK[0], "[C-i]",
+     'WITNESS_FILE="$STATE_DIR/grudge-guard/outcomes.tsv"\n'),
     ("C-j coerce ABSENT to 0", HOOK[0], "[C-j]",
      "case \"$r\" in ABSENT) n=0 ;; esac\n"),
     ("C-l no-env python", "scripts/grudge_append.py", "[C-l]",

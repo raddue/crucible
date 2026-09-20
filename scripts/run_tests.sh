@@ -303,6 +303,12 @@ run python3 scripts/test_grudge_guard_journal.py
 # --- pre-R3 store identity (#580 resolve_store_repo) + C-l env hardening ---
 run python3 scripts/test_grudge_guard_redesign.py
 
+# --- R5 outcome witness (#580/§5b): reader behavior (T-o) over fixtures ---
+run_expect "selftest OK" python3 scripts/ledger_doctor.py --grudge-guard --selftest
+# --- R5 outcome witness: wiring + executability fence (T-x, criterion 8) ---
+run python3 scripts/check_grudge_guard_witness_wiring.py --selftest
+run python3 scripts/check_grudge_guard_witness_wiring.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo

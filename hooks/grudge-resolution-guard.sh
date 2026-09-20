@@ -202,6 +202,38 @@ if [ ! -d "$GRUDGE_ROOT/$WORKTREE_KEY" ] && [ ! -d "$GRUDGE_ROOT/$SHARED_KEY" ];
   exit 0
 fi
 
+# ── 7.5. Outcome witness (design §5b) — write-ONLY execution evidence ─────────
+# Written OUTSIDE $STATE_DIR (C-i), so wiping $STATE_DIR (mechanism 3, #581)
+# cannot erase the proof that the hook ran and how it terminated. The hook
+# NEVER reads it (C-h) — only the reader (scripts/ledger_doctor.py
+# --grudge-guard) does. A divergence between witness and journal is therefore
+# the DETECTOR's signal, never a second term in a decision (§5b.2).
+#   <epoch>\t<session-id>\t<repo-basename>\t<outcome>\t<nonce-or-->
+#   outcome ∈ BLOCK | GIVEUP | CLEARED | DEGRADE:<reason-code> (closed vocab:
+#   journal-quarantined, witness-write-failed, journal-write-failed,
+#   harness-drift — never free text, SIEGE-R2-M5). The <nonce-or--> field
+#   carries the BLOCK's batch nonce (minting one is the forger-unseen event);
+#   terminal/DEGRADE lines fall back to `-`.
+WITNESS_DIR="${CRUCIBLE_GRUDGE_GUARD_WITNESS_DIR:-$HOME/.claude/crucible/grudge-guard}"
+WITNESS_FILE="$WITNESS_DIR/outcomes.tsv"
+_witness_outcome() {
+  local outcome="$1" nonce="${2:--}" epoch row
+  [ -n "${SESSION_ID:-}" ] || return 0
+  mkdir -p "$WITNESS_DIR" 2>/dev/null || return 0
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    epoch="${EPOCHREALTIME%%.*}"
+  else
+    epoch="$(date +%s 2>/dev/null)"
+  fi
+  [ -n "$epoch" ] || epoch=0
+  row="$(printf '%s\t%s\t%s\t%s\t%s' "$epoch" "$SESSION_ID" "$SHARED_KEY" "$outcome" "$nonce")"
+  # Bounded wait (siege S-17 / SIEGE-R2-H3): a same-uid actor that mkfifos the
+  # fixed witness path turns `>>` into a blocking open, which a post-command
+  # `|| :` cannot short-circuit — `timeout 1` costs the bound, never the hook's
+  # own budget, and a failure never affects a verdict (C-h/C-i).
+  timeout 1 bash -c 'printf "%s\n" "$1" >> "$2" || :' _ "$row" "$WITNESS_FILE" 2>/dev/null || :
+}
+
 # ── 8. State file (INV-C12: version + four fields) + separate skips log ─
 STATE_FILE="$STATE_DIR/$SESSION_ID.json"
 SKIPS_FILE="$STATE_DIR/skips.log"
@@ -213,7 +245,7 @@ fi
 QUERY_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_query.py"
 APPEND_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_append.py"
 
-declare -A SHA_GROUP BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP
+declare -A SHA_GROUP BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP LAST_BLOCK_NONCE
 
 # ── State document format version (INV-C12, §5.2 hazard 2) ─────────────
 # R4 removes the `sha_files` JSON field (its per-sha path list can hold a
@@ -582,6 +614,7 @@ _journal_quarantine() {
   epoch="$(date +%s 2>/dev/null)"
   [ -e "$JOURNAL_FILE" ] && mv -f "$JOURNAL_FILE" "$JOURNAL_FILE.corrupt.$epoch" 2>/dev/null
   : > "$JOURNAL_FILE" 2>/dev/null
+  _witness_outcome "DEGRADE:journal-quarantined" "-"
   echo "grudge-resolution-guard: journal was unreadable/malformed — quarantined to $JOURNAL_FILE.corrupt.$epoch (DEGRADE:journal-quarantined); every candidate re-nags from count 0; grudge compliance checked normally from now" >&2
 }
 
@@ -1005,6 +1038,18 @@ if [ "${#DURABLE_CLEARED[@]}" -gt 0 ]; then
   _journal_append_group CLEAR "" "${!DURABLE_CLEARED[@]}"
   if [ "$APPEND_OK" -ne 1 ]; then
     echo "grudge-resolution-guard: could not persist the durable CLEAR to the journal — a cleared member will not be retired from scope; blocking continues. This is a degraded loud allow, never a silent reset." >&2
+  else
+    # Witness CLEARED (healthy terminal event, §5b.2): one line per clearing
+    # Stop, carrying the last known BLOCK batch nonce the clear resolves.
+    _clear_nonce="-"
+    for _cm in "${!DURABLE_CLEARED[@]}"; do
+      _cg="${SHA_GROUP[$_cm]:-}"
+      if [ -n "$_cg" ] && [ -n "${LAST_BLOCK_NONCE[$_cg]:-}" ]; then
+        _clear_nonce="${LAST_BLOCK_NONCE[$_cg]}"
+        break
+      fi
+    done
+    _witness_outcome CLEARED "$_clear_nonce"
   fi
 fi
 
@@ -1077,6 +1122,8 @@ _nonce_batch() {
   fi
   BLOCKING+=("$g")
   BLOCK_COUNTS["$g"]="$(_display_count "$@")"
+  LAST_BLOCK_NONCE["$g"]="$nonce"
+  _witness_outcome BLOCK "$nonce"
   return 0
 }
 _giveup_loud() {
@@ -1095,6 +1142,9 @@ _giveup_loud() {
   done
   [ "${#GIVEUP_SHAS[@]}" -gt 0 ] || return 0
   _journal_append_group GIVEUP "" "${!GIVEUP_SHAS[@]}"
+  # Witness GIVEUP (healthy terminal event, §5b.2): the nonce of the last BLOCK
+  # line this group's give-up resolves, when one was recorded this session.
+  _witness_outcome GIVEUP "${LAST_BLOCK_NONCE[$g]:--}"
   return 0
 }
 
