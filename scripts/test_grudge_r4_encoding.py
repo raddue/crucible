@@ -364,7 +364,7 @@ class TK_COMMMA_PATH_NO_INVENT_NO_DESTROY(unittest.TestCase):
                     "from scripts.grudge_append import append; "
                     "p = append(symptom='s', files_touched=['a,b.py','c.py'], "
                     "fixed_in_commit=sys.argv[2], repo=sys.argv[3], "
-                    "repo_root=sys.argv[4], base_dir=sys.argv[5], "
+                    "store_root=sys.argv[4], base_dir=sys.argv[5], "
                     "date_fixed='2026-01-01'); print(p or '')"
                 ), REPO_ROOT, sha, fx.repo_key, os.path.realpath(fx.repo),
                    fx.store],

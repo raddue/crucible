@@ -51,7 +51,7 @@ def test_signature_match():
         _write(repo_root, "src/new.py", "x = FORBIDDEN_CALL(1)\n")
         ga.append(symptom="forbidden call reintroduced", files_touched=["src/other.py"],
                   anti_pattern_signature=r"FORBIDDEN_CALL\(", repo="r",
-                  repo_root=repo_root, base_dir=base)
+                  store_root=repo_root, base_dir=base)
         # path does NOT match (new.py vs other.py); signature does, with the flag
         m_off, _ = gq.query(["src/new.py"], "r", repo_root, base_dir=base, with_signatures=False)
         _check("O-2 signature NOT checked without flag", not m_off)
@@ -69,7 +69,7 @@ def test_invalid_regex_degrades():
         _write(repo_root, "src/code.py", "value = foo(bar + 1\n")  # contains literal 'foo(bar'
         ga.append(symptom="bad pattern", files_touched=["src/other.py"],
                   anti_pattern_signature="foo(bar", repo="r",  # invalid regex (unbalanced paren)
-                  repo_root=repo_root, base_dir=base)
+                  store_root=repo_root, base_dir=base)
         try:
             m, _ = gq.query(["src/code.py"], "r", repo_root, base_dir=base, with_signatures=True)
             crashed = False
@@ -90,7 +90,7 @@ def test_staleness_per_path_and_cull():
         _write(repo_root, "src/a.py")
         _write(repo_root, "src/b.py")
         ga.append(symptom="two-file bug", files_touched=["src/a.py", "src/b.py"],
-                  repo="r", repo_root=repo_root, base_dir=base)
+                  repo="r", store_root=repo_root, base_dir=base)
         # both exist: matches a
         m1, _ = gq.query(["src/a.py"], "r", repo_root, base_dir=base)
         _check("O-5 both files present -> match", bool(m1))

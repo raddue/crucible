@@ -65,15 +65,24 @@ python3 "$query" path/to/file1 path/to/file2 [--with-signatures] [--limit N]
 ## Write mode (record a grudge — on bug resolution / fix(*) PR)
 
 When a bug is confirmed fixed, record it (best-effort; a failed record logs to
-stderr and never fails the host skill):
+stderr and never fails the host skill). Pass the **store identity** explicitly
+(DEC-4): the git-common-dir parent, shared across linked worktrees — NOT this
+worktree's root, which would key the record to a worktree and lose it when that
+worktree is removed. `--worktree-root` is left to default (the filesystem root
+is resolved from where the skill runs; the store identity mirrors the hook's
+own resolution, `hooks/grudge-resolution-guard.sh` §7):
 
 ```
+store_common="$(cd "$(pwd)" 2>/dev/null && realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)"
+store_root="$(dirname "$store_common" 2>/dev/null)"
+store_key="$(basename "$store_root" 2>/dev/null)"
 python3 "$append" \
   --symptom "one-line observable failure" \
   --root-cause "one-line underlying cause" \
   --files=src/a.py --files=src/b.py \
   --signature "optional regex or literal snippet that fingerprints the bug" \
   --commit "<fixing sha>" \
+  --repo-root "$store_root" --repo "$store_key" \
   --repro "minimal repro steps" \
   --why "why this kept happening"
 ```

@@ -16,6 +16,14 @@ its restatements disagreed with each other).
   witness path.
 - **C-i** — The outcome witness lives OUTSIDE `$STATE_DIR`, so wiping
   `$STATE_DIR` (mechanism 3, #581) cannot erase the proof the hook ran.
+- **C-g** — `resolve_repo()` is never used for store identity, nor
+  `resolve_store_repo()` for filesystem existence; and the fix-#6 privacy guard
+  refuses when the target is inside `worktree_root` OR `store_root`
+  (SIEGE-R2-H7), not only `worktree_root` — a store under the main clone is
+  refused even when recording from a linked worktree (S5/siege-S-2). The known
+  store-identity call sites (ledger_doctor's `_default_grudge_dir`,
+  brier_advisory's `_grudge_hits`) are enumerated and pinned; the guard-line
+  shape itself is asserted (SIEGE-R2-H8).
 - **C-j** — No code path converts a per-member `ABSENT` or `UNMEASURABLE`
   journal read into a numeric contribution (never coerced to `0`).
 - **C-l** — Every git shell-out in this subsystem (`grudge_append.py`'s
@@ -107,6 +115,49 @@ def _ci_lines(text):
             continue
         out.append((ln, line.rstrip()))
     return out
+
+
+# C-g: store identity ↔ filesystem identity separation (DEC-4, §4.2) + the
+# two-root privacy guard (SIEGE-R2-H7, S5).
+_C_G_TWOROOT = re.compile(
+    r'_is_inside\(target_dir,\s*worktree_root\)\s+or\s+'
+    r'_is_inside\(target_dir,\s*store_root\)')
+# Enumerate EVERY store-identity call site across scripts/, like the design's
+# `grep -rn 'resolve_repo\|grudges_dir'` — so a module gaining a store-identity
+# call cannot silently fall outside a hand-written list (SIEGE-R2-H8).
+_STORE_IDENTITY_RE = re.compile(r'resolve_repo\b|resolve_store_repo\b|grudges_dir\b')
+
+
+def _cg_files(files):
+    """C-g: (errors, call-site enumeration). """
+    errs = []
+    sites = []
+    ga = files.get("scripts/grudge_append.py", "")
+    if not _C_G_TWOROOT.search(ga):
+        errs.append("[C-g] append()'s privacy guard must refuse when the target "
+                    "is inside worktree_root OR store_root (SIEGE-R2-H7) — a "
+                    "store under the main clone must be refused from a linked "
+                    "worktree too")
+    for rel, text in files.items():
+        for ln, line in enumerate(text.splitlines(), 1):
+            if _STORE_IDENTITY_RE.search(line):
+                sites.append(f"{rel}:{ln}: {line.strip()}")
+    ld = files.get("scripts/ledger_doctor.py", "")
+    ba = files.get("scripts/brier_advisory.py", "")
+    # Code-only vocabulary (strip docstrings/comments so documentation that
+    # NAMES a concept is not taken for a call site). The banned shape is a real
+    # import/call of resolve_repo for the grudge store.
+    code = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'|#[^\n]*', '', ld, flags=re.S)
+    if re.search(r'\bresolve_repo\s*\(', code):
+        errs.append("[C-g] ledger_doctor.py must not use resolve_repo() for the "
+                    "grudge store — only resolve_store_repo() (SIEGE-R2-H8, H8)")
+    if ba:
+        m = re.search(r'def _grudge_hits.*?(?=\ndef |\Z)', ba, re.S)
+        if m and re.search(r'resolve_repo\b', m.group(0)):
+            errs.append("[C-g] brier_advisory._grudge_hits resolves the grudge "
+                        "store with worktree identity — must use "
+                        "resolve_store_repo()")
+    return errs, sites
 
 # C-j: assigning a numeric that folds ABSENT/UNMEASURABLE into the group fold.
 # The forbidden shapes are `ABSENT`/`UNMEASURABLE` adjacent to a numeric
@@ -207,8 +258,9 @@ _C8_AMENDED_WORDING = ("may never be the sole term of an allow/block gate, and "
 
 
 def _scan(files):
-    """files: {rel_path: text}. Returns list of defect strings ([] == clean)."""
+    """files: {rel_path: text}. Returns (errors, note_lines)."""
     errors = []
+    notes = []
 
     for rel, text in files.items():
         if rel in HOOK:
@@ -219,7 +271,11 @@ def _scan(files):
                     f"[C-l] {rel}:{ln}: git shell-out without the "
                     f"PATH/HOME allowlist ({frag!r})")
 
-    return errors
+    cg_errs, sites = _cg_files(files)
+    errors += cg_errs
+    notes.append("C-g store-identity call sites (grep-enumerated): "
+                 + " | ".join(sites))
+    return errors, notes
 
 
 _BARE_GIT = re.compile(r'(?<!\w)git[ \t]+')
@@ -391,7 +447,7 @@ def main(argv):
             with open(p, "r", encoding="utf-8", errors="replace") as fh:
                 real[rel] = fh.read()
 
-    errors = _scan(real)
+    errors, scan_notes = _scan(real)
     if argv[0:1] == ["--selftest"]:
         selftest_rc = _selftest()
         if selftest_rc:
@@ -401,6 +457,7 @@ def main(argv):
         yerr, ynotes = _4b_yaml(ROOT)
         errors.extend(yerr)
         notes.extend(ynotes)
+    notes.extend(scan_notes)
     for note in notes:
         print(f"NOTE: {note}")
     for e in errors:
@@ -408,8 +465,9 @@ def main(argv):
     if errors:
         print(f"grudge-guard journal invariants: {len(errors)} defect(s)")
         return 1
-    print("OK — C-a, C-h, C-i, C-j, C-l, C-n journal invariances + 4a/4b hold "
-          f"across {len(real)} production file(s)")
+    print("OK — C-a, C-h, C-i, C-j, C-l, C-n journal invariances, C-g store-identity "
+          "separation + 4a/4b hold across "
+          f"{len(real)} production file(s)")
     return 0
 
 
@@ -445,9 +503,10 @@ _PASS = {
         "proc = subprocess.run(\n"
         "    [\"git\", \"-C\", base, \"rev-parse\", \"--git-common-dir\"],\n"
         "    capture_output=True, text=True, timeout=5, env=_git_env())\n"
+        "    if _is_inside(target_dir, worktree_root) or _is_inside(target_dir, store_root): return None\n"
     ),
     "scripts/ledger_doctor.py": (
-        "from scripts.grudge_append import resolve_repo\n"
+        "from scripts.grudge_append import resolve_store_repo\n"
     ),
 }
 
@@ -485,11 +544,11 @@ def _fail_fixture(label, rel, bad_text):
 
 def _selftest():
     failures = 0
-    if _scan(_PASS):
+    if _scan(_PASS)[0]:
         print("SELFTEST FAIL: clean PASS fixture produced defects")
         failures += 1
     for label, rel, prefix, bad in _FAIL_EXPECT:
-        errors = _scan(_fail_fixture(label, rel, bad))
+        errors = _scan(_fail_fixture(label, rel, bad))[0]
         hits = [e for e in errors if e.startswith(prefix)]
         if not hits:
             print(f"SELFTEST FAIL: {label} — expected a {prefix} defect, got none")

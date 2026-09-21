@@ -88,7 +88,7 @@ sys.path.insert(0, sys.argv[1])
 from scripts.grudge_append import append
 base, repo, root, symptom, files, commit, date_fixed = sys.argv[2:9]
 p = append(symptom=symptom, files_touched=files.split(","),
-           fixed_in_commit=commit, repo=repo, repo_root=root,
+           fixed_in_commit=commit, repo=repo, store_root=root,
            base_dir=base, date_fixed=(date_fixed or None))
 print(p or "")
 ' "$REPO_ROOT" "$1" "$2" "$3" "$4" "$5" "$6" "$7")"

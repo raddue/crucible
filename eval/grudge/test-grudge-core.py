@@ -51,7 +51,7 @@ def test_live_hitrate():
         for i, f in enumerate(files):
             _touch(repo_root, f)
             ga.append(symptom=f"bug {i}", files_touched=[f], repo="myrepo",
-                      repo_root=repo_root, base_dir=base, fixed_in_commit=f"c{i}")
+                      store_root=repo_root, base_dir=base, fixed_in_commit=f"c{i}")
         catches = 0
         for f in files:
             matched, _ = gq.query([f], "myrepo", repo_root, base_dir=base)
@@ -69,7 +69,7 @@ def test_normalization():
     try:
         _touch(repo_root, "src/auth/token.py")
         ga.append(symptom="null session", files_touched=["src/auth/token.py"],
-                  repo="r", repo_root=repo_root, base_dir=base)
+                  repo="r", store_root=repo_root, base_dir=base)
         forms = [
             os.path.join(repo_root, "src/auth/token.py"),  # absolute
             "./src/auth/token.py",                          # ./-prefixed
@@ -91,13 +91,13 @@ def test_no_false_positive_and_glob():
         _touch(repo_root, "src/deep/sub/x.py")
         # exact grudge on token.py
         ga.append(symptom="bug", files_touched=["src/auth/token.py"],
-                  repo="r", repo_root=repo_root, base_dir=base)
+                  repo="r", store_root=repo_root, base_dir=base)
         m, _ = gq.query(["src/db/conn.py"], "r", repo_root, base_dir=base)
         _check("O-3 unrelated file -> no match", not m)
 
         # glob grudge: src/deep/* must NOT cross / into src/deep/sub/x.py
         ga.append(symptom="glob bug", files_touched=["src/deep/*"],
-                  repo="r", repo_root=repo_root, base_dir=base)
+                  repo="r", store_root=repo_root, base_dir=base)
         _touch(repo_root, "src/deep/y.py")
         m_deep, _ = gq.query(["src/deep/sub/x.py"], "r", repo_root, base_dir=base)
         _check("O-3 glob * does not cross /", not m_deep)
@@ -113,9 +113,9 @@ def test_idempotent_commit_not_in_key():
     try:
         _touch(repo_root, "src/mod.py")
         ga.append(symptom="same bug", files_touched=["src/mod.py"], repo="r",
-                  repo_root=repo_root, base_dir=base, fixed_in_commit="aaaaaaa")
+                  store_root=repo_root, base_dir=base, fixed_in_commit="aaaaaaa")
         ga.append(symptom="same bug", files_touched=["src/mod.py"], repo="r",
-                  repo_root=repo_root, base_dir=base, fixed_in_commit="bbbbbbb")
+                  store_root=repo_root, base_dir=base, fixed_in_commit="bbbbbbb")
         d = ga.grudges_dir("r", base)
         n = len([x for x in os.listdir(d) if x.endswith(".md")])
         _check("O-4 same bug, two commits -> one file", n == 1, f"n={n}")
@@ -129,9 +129,9 @@ def test_empty_discriminator_falls_back_to_symptom():
     try:
         _touch(repo_root, "src/mod.py")
         ga.append(symptom="bug A", files_touched=["src/mod.py"], repo="r",
-                  repo_root=repo_root, base_dir=base, fixed_in_commit="aaaaaaa")
+                  store_root=repo_root, base_dir=base, fixed_in_commit="aaaaaaa")
         ga.append(symptom="bug B", files_touched=["src/mod.py"], repo="r",
-                  repo_root=repo_root, base_dir=base, fixed_in_commit="aaaaaaa")
+                  store_root=repo_root, base_dir=base, fixed_in_commit="aaaaaaa")
         d = ga.grudges_dir("r", base)
         n = len([x for x in os.listdir(d) if x.endswith(".md")])
         _check("O-4b two bugs/one commit/no sig -> two files (symptom keys)", n == 2, f"n={n}")

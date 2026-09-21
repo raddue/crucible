@@ -115,7 +115,7 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
         path = ga.append(
             symptom="auth bypass regression",
             files_touched=["src/auth/token.py"],
-            repo="myrepo", repo_root=self.repo, base_dir=inside_base,
+            repo="myrepo", store_root=self.repo, base_dir=inside_base,
         )
         self.assertIsNone(path)
         # Nothing was created anywhere under the repo tree.
@@ -126,7 +126,7 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
             symptom="auth bypass regression",
             files_touched=["src/auth/token.py"],
             anti_pattern_signature="verify_token",
-            repo="myrepo", repo_root=self.repo, base_dir=self.outside,
+            repo="myrepo", store_root=self.repo, base_dir=self.outside,
         )
         self.assertIsNotNone(path)
         self.assertTrue(os.path.exists(path))
@@ -139,7 +139,7 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
     def test_idempotent_overwrite_on_same_key(self):
         kw = dict(symptom="same symptom", files_touched=["a.py"],
                   anti_pattern_signature="sig", repo="r",
-                  repo_root=self.repo, base_dir=self.outside)
+                  store_root=self.repo, base_dir=self.outside)
         p1 = ga.append(**kw)
         p2 = ga.append(**kw)
         self.assertEqual(p1, p2)   # overwrite-on-key, not a second file
@@ -150,13 +150,13 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
     def test_no_files_skipped(self):
         self.assertIsNone(ga.append(
             symptom="x", files_touched=[], repo="r",
-            repo_root=self.repo, base_dir=self.outside))
+            store_root=self.repo, base_dir=self.outside))
 
     def test_empty_discriminator_skipped(self):
         # no anti_pattern_signature AND no symptom → nothing to key on → skip.
         self.assertIsNone(ga.append(
             symptom="", files_touched=["a.py"], repo="r",
-            repo_root=self.repo, base_dir=self.outside))
+            store_root=self.repo, base_dir=self.outside))
 
 
 # --------------------------------------------------------------------------- #
@@ -762,7 +762,7 @@ class GrudgeAtomicWriteTest(unittest.TestCase):
         path = ga.append(
             symptom="auth regression", files_touched=["src/auth/token.py"],
             anti_pattern_signature="verify_token", repo="myrepo",
-            repo_root=self.repo, base_dir=self.outside)
+            store_root=self.repo, base_dir=self.outside)
         self.assertIsNotNone(path)
         store_dir = os.path.dirname(path)
         # the store dir holds only finished *.md grudges — no .atomic-* temp.

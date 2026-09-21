@@ -241,7 +241,7 @@ class TA_STOP_HOOK_ACCOUNTABILITY(unittest.TestCase):
                     "import sys; sys.path.insert(0, sys.argv[1]); "
                     "from scripts.grudge_append import append; "
                     "append(symptom='s', files_touched=sys.argv[2].split(','), "
-                    "fixed_in_commit='', repo=sys.argv[3], repo_root=sys.argv[4], "
+                    "fixed_in_commit='', repo=sys.argv[3], store_root=sys.argv[4], "
                     "base_dir=sys.argv[5], date_fixed='2026-01-01')"
                 ), REPO_ROOT, "widget.py,lib.py", fx.repo_key,
                    os.path.realpath(fx.repo), fx.store],

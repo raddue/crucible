@@ -577,20 +577,31 @@ def check_python_carrier(root: Path, rel: str, coverage_map: dict, errors: list[
 # INV-C10 check runs in a shallow clone, a tarball, anywhere.
 EXPECTED_STEP_75_FENCE = '''# only for fix(*) PRs
 plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+# store identity (DEC-4): the git-common-dir parent, shared across linked
+# worktrees — NOT this worktree's root, which would lose the record.
+store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"
+store_key="$(basename "$store_root" 2>/dev/null)"
 python3 "$plugin_root/scripts/grudge_append.py" \\
   --symptom "<PR title minus the fix() prefix>" \\
   --root-cause "<from PR body, if stated>" \\
   --files="<changed file 1>" --files="<changed file 2>" \\
   --commit "<squash/merge SHA>" \\
+  --repo-root "$store_root" --repo "$store_key" \\
   --why "<from PR body, if stated>"'''
 
 # The only changes INV-C10 permits since INV_C10_BASE_SHA: the one added
-# paragraph (plus the blank line separating it), and the R4 fence rewrite —
-# the comma-joined `--files "<comma-separated…>"` sentinel line replaced by
-# the repeatable equals-form `--files="…"` pair (DEC-5/#568, C-m). Measured
-# from the real diff.
+# paragraph (plus the blank line separating it), the R4 fence rewrite — the
+# comma-joined `--files "<comma-separated…>"` sentinel line replaced by the
+# repeatable equals-form `--files="…"` pair (DEC-5/#568, C-m) — and the R3
+# store-identity fence (DEC-4/#580): the store_root/store_key derivation block
+# and the explicit `--repo-root`/`--repo` pair, pin + fence moved together.
 EXPECTED_ADDED_LINES = [
+    "# store identity (DEC-4): the git-common-dir parent, shared across linked",
+    "# worktrees — NOT this worktree's root, which would lose the record.",
+    'store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"',
+    'store_key="$(basename "$store_root" 2>/dev/null)"',
     '  --files="<changed file 1>" --files="<changed file 2>" \\',
+    '  --repo-root "$store_root" --repo "$store_key" \\',
     "If this step is skipped or fails, Path B's Stop hook "
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
@@ -956,11 +967,16 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     # which a header filter anchored on a bare `---` prefix silently eats.
     head = ("---\nname: merge-pr\n---\n\n"
             "### Step 7.5: Record a grudge if this was a fix\n\n```bash\n")
-    # The pre-R4 comma-joined sentinel fence, as the base commit carried it.
-    old_fence = EXPECTED_STEP_75_FENCE.replace(
-        '  --files="<changed file 1>" --files="<changed file 2>" \\',
-        '  --files "<comma-separated files the PR changed>" \\',
-    )
+    # The pre-R4 comma-joined, pre-R3 (no store identity) sentinel fence, as the
+    # base commit 3193271 carried it — fetched from the real history.
+    old_fence = ('# only for fix(*) PRs\n'
+                 'plugin_root="$(realpath "<this-skill-base-dir>/../..")"\n'
+                 'python3 "$plugin_root/scripts/grudge_append.py" \\\n'
+                 '  --symptom "<PR title minus the fix() prefix>" \\\n'
+                 '  --root-cause "<from PR body, if stated>" \\\n'
+                 '  --files "<comma-separated files the PR changed>" \\\n'
+                 '  --commit "<squash/merge SHA>" \\\n'
+                 '  --why "<from PR body, if stated>"')
     skill.write_text(head + old_fence + "\n```\n\nNon-`fix(*)` PRs record nothing.\n",
                      encoding="utf-8")
     _git(root, "init", "-q")
@@ -969,7 +985,11 @@ def _make_git_fixture(tmp: Path) -> tuple[Path, str]:
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "base")
     base = _git(root, "rev-parse", "HEAD").stdout.strip()
-    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n", EXPECTED_ADDED_LINES[1],
+    working = ([head, EXPECTED_STEP_75_FENCE, "\n```\n\n",
+                "If this step is skipped or fails, Path B's Stop hook "
+                "(`grudge-resolution-guard.sh`) will block the session's next "
+                "Stop event until a grudge is recorded or explicitly skipped — "
+                "see `hooks/README.md`.",
                 "\n\nNon-`fix(*)` PRs record nothing.\n"])
     skill.write_text("".join(working), encoding="utf-8")
     _git(root, "add", "-A")

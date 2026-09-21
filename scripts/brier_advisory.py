@@ -332,11 +332,15 @@ def _grudge_hits(files) -> dict:
             survivors as _survivors,
             _path_match as _grudge_path_match,
         )
-        from scripts.grudge_append import normalize_path as _norm, resolve_repo
+        from scripts.grudge_append import normalize_path as _norm, resolve_store_repo
     except Exception:  # noqa: BLE001 — grudge module unavailable -> signal empty
         return {}
     try:
-        repo, repo_root = resolve_repo()
+        # STORE identity (DEC-4, §4.2): the grudge store is keyed and
+        # filtered by the git-common-dir parent, shared across worktrees —
+        # resolve_repo()'s worktree root would look in a store dir that does
+        # not exist from a linked worktree (C-g, H8).
+        repo, repo_root = resolve_store_repo()
         norm_inputs = {_norm(f, repo_root) for f in files if f and f.strip()}
         if not norm_inputs:
             return {}

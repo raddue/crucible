@@ -170,7 +170,185 @@ class C_L_ENV_ALLOWLIST(unittest.TestCase):
                       "grudge_append must define the PATH/HOME allowlist")
 
 
-EXPECTED_TESTS = 5
+def _run_cli(cmd, cwd, env, timeout=60):
+    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout)
+
+
+def _cli_env(store):
+    env = _clean_env(CRUCIBLE_GRUDGE_DIR=store,
+                     GIT_AUTHOR_NAME="R3 Test", GIT_AUTHOR_EMAIL="r3@test.invalid",
+                     GIT_COMMITTER_NAME="R3 Test",
+                     GIT_COMMITTER_EMAIL="r3@test.invalid")
+    return env
+
+
+def _linked_worktree(root, repo, branch="wtbr"):
+    _write_bytes(os.path.join(repo, "README.md"), b"t\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "chore: base")
+    _git(repo, "branch", branch)
+    wt = os.path.join(root, "linked")
+    _git(repo, "worktree", "add", "-q", wt, branch)
+    return wt
+
+
+class R3_STORE_IDENTITY_ROUND_TRIP(unittest.TestCase):
+    """R3 (#580) T-j: a grudge written from a LINKED WORKTREE is found from the
+    main checkout, and one written from the main checkout is found from the
+    linked worktree — the store is keyed by store identity (git-common-dir
+    parent), not filesystem identity."""
+    GRUDGE_QUERY = os.path.join(REPO_ROOT, "scripts", "grudge_query.py")
+
+    def test_worktree_to_main_and_back(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo = _init_repo(root)
+            wt = _linked_worktree(root, repo)
+            store = os.path.join(root, "store")
+            env = _cli_env(store)
+            # Write a file present in BOTH trees (same branch).
+            for tree in (repo, wt):
+                _write_bytes(os.path.join(tree, "src", "a.py"), b"V = 1\n")
+                _write_bytes(os.path.join(tree, "src", "b.py"), b"W = 2\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "feat: add a + b")
+            _git(wt, "merge", "-q", "HEAD")
+            # Record from the LINKED WORKTREE.
+            r_wt = _run_cli(
+                [sys.executable, GRUDGE_APPEND, "--symptom", "s",
+                 "--root-cause", "c", "--files=src/a.py", "--why", "w"],
+                cwd=wt, env=env)
+            self.assertEqual(r_wt.returncode, 0, r_wt.stderr)
+            self.assertNotEqual(r_wt.stdout.strip(), "")
+            # Found from the MAIN checkout.
+            r_main = _run_cli([sys.executable, self.GRUDGE_QUERY, "src/a.py"],
+                              cwd=repo, env=env)
+            self.assertEqual(r_main.returncode, 0, r_main.stderr)
+            self.assertIn("grudge(s) held", r_main.stdout)
+            # A second grudge recorded from MAIN, found from the WORKTREE.
+            r_main2 = _run_cli(
+                [sys.executable, GRUDGE_APPEND, "--symptom", "s2",
+                 "--root-cause", "c2", "--files=src/b.py", "--why", "w2"],
+                cwd=repo, env=env)
+            self.assertEqual(r_main2.returncode, 0, r_main2.stderr)
+            r_wt2 = _run_cli([sys.executable, self.GRUDGE_QUERY, "src/b.py"],
+                             cwd=wt, env=env)
+            self.assertEqual(r_wt2.returncode, 0, r_wt2.stderr)
+            self.assertIn("grudge(s) held", r_wt2.stdout)
+
+
+class R3_ABSOLUTE_PATH_NORMALIZES(unittest.TestCase):
+    """R3 (#580) T-w: an ABSOLUTE path under a linked worktree, recorded with
+    store identity, normalises identically to the same file recorded from the
+    main checkout — the single-repo_root shape that silently broke this (S5)."""
+
+    def test_absolute_path_round_trips_via_store_identity(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo = _init_repo(root)
+            wt = _linked_worktree(root, repo)
+            store = os.path.join(root, "store")
+            env = _cli_env(store)
+            for tree in (repo, wt):
+                _write_bytes(os.path.join(tree, "src", "a.py"), b"V = 1\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "feat: add a")
+            _git(wt, "merge", "-q", "HEAD")
+            # Absolute path under the LINKED WORKTREE root. Same symptom: the
+            # discriminator is identical, so only the normalized path can move
+            # the hash — both recordings MUST collide on one file.
+            abs_wt = os.path.join(wt, "src", "a.py")
+            r1 = _run_cli(
+                [sys.executable, GRUDGE_APPEND, "--symptom", "s",
+                 "--files=" + abs_wt], cwd=wt, env=env)
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            # Same file recorded from MAIN with an absolute main-root path.
+            abs_main = os.path.join(repo, "src", "a.py")
+            r2 = _run_cli(
+                [sys.executable, GRUDGE_APPEND, "--symptom", "s",
+                 "--files=" + abs_main], cwd=repo, env=env)
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+            # Same store, same normalized path -> same hash — one file.
+            self.assertEqual(r1.stdout.strip(), r2.stdout.strip(),
+                             "both recordings must land in the SAME store file")
+
+
+class R3_TWO_ROOT_PRIVACY_GUARD(unittest.TestCase):
+    """R3 (#580) T-w negative arm (SIEGE-R2-H7): a store path placed inside the
+    MAIN clone while recording from a linked worktree is REFUSED — the two-root
+    guard catches what a worktree_root-only check would miss."""
+
+    def test_store_inside_main_clone_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo = _init_repo(root)
+            wt = _linked_worktree(root, repo)
+            _write_bytes(os.path.join(repo, "src", "a.py"), b"V = 1\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "feat: add a")
+            _git(wt, "merge", "-q", "HEAD")
+            # The grudge base SITS inside the main clone root — a public tree.
+            store = os.path.join(repo, ".grudge-store")
+            env = _cli_env(store)
+            r = _run_cli(
+                [sys.executable, GRUDGE_APPEND, "--symptom", "s",
+                 "--files=src/a.py"], cwd=wt, env=env)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("refusing to write grudges into the repo tree",
+                          r.stderr)
+
+
+class R3_STORE_KEY_MIGRATION(unittest.TestCase):
+    """R3 (#580) §4.3: the store-identity detector reports a worktree-keyed
+    record, and --migrate-store-keys moves the directory AND the repo_root
+    frontmatter so a store-identity reader finds it."""
+    LEDGER_DOCTOR = os.path.join(REPO_ROOT, "scripts", "ledger_doctor.py")
+
+    def test_detect_and_migrate_worktree_keyed(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo = _init_repo(root)
+            wt = _linked_worktree(root, repo)
+            store = os.path.join(root, "store")
+            _write_bytes(os.path.join(repo, "src", "a.py"), b"V = 1\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "feat: add a")
+            # Build a WORKTREE-keyed record by hand: it lives under the store
+            # dir named for the WORKTREE basename, with a mismatched repo_root.
+            wt_key = os.path.basename(os.path.realpath(wt))
+            wt_dir = os.path.join(store, wt_key, "grudges")
+            os.makedirs(wt_dir)
+            _write_bytes(os.path.join(wt_dir, "wtkeyed.md"),
+                         ("---\nschema: 1\nhash: wtkeyed\nrepo: %s\n"
+                          "repo_root: %s\nfixed_in_commit: \nsymptom: s\n"
+                          "root_cause: c\nfiles_touched: []\n"
+                          "anti_pattern_signature: ''\ndate_fixed: 2026-01-01\n"
+                          "---\n## Repro\nr\n## Why this kept happening\nw\n"
+                          % (wt_key, os.path.realpath(wt))).encode())
+            env = _cli_env(store)
+            # Detector (worktree-keyed -> non-zero + names the record).
+            d = _run_cli([sys.executable, self.LEDGER_DOCTOR, "--grudge-keys"],
+                         cwd=wt, env=env)
+            self.assertEqual(d.returncode, 1, d.stdout)
+            self.assertIn("worktree-keyed", d.stdout)
+            self.assertIn("wtkeyed", d.stdout)
+            # Migrate (dir + frontmatter -> store identity).
+            m = _run_cli([sys.executable, self.LEDGER_DOCTOR,
+                          "--migrate-store-keys"], cwd=wt, env=env)
+            self.assertEqual(m.returncode, 0, m.stdout)
+            store_key = os.path.basename(os.path.realpath(repo))
+            dst = os.path.join(store, store_key, "grudges", "wtkeyed.md")
+            self.assertTrue(os.path.isfile(dst),
+                            "worktree-keyed grudge must move into the store dir")
+            self.assertFalse(os.path.exists(os.path.join(wt_dir, "wtkeyed.md")))
+            body = open(dst, "r", encoding="utf-8").read()
+            self.assertIn("repo_root: %s" % os.path.realpath(repo), body,
+                          "frontmatter repo_root must be rewritten to store root")
+            # After migration the store is clean.
+            d2 = _run_cli([sys.executable, self.LEDGER_DOCTOR, "--grudge-keys"],
+                          cwd=wt, env=env)
+            self.assertEqual(d2.returncode, 0, d2.stdout)
+
+
+EXPECTED_TESTS = 9
 
 
 def _run_with_count_guard():

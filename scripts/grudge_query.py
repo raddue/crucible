@@ -31,6 +31,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 from scripts.grudge_append import (  # noqa: E402
     default_base_dir, grudges_dir, normalize_path, resolve_repo,
+    resolve_store_repo,
 )
 from scripts.pathmatch import glob_match as _glob_match  # noqa: E402
 
@@ -542,7 +543,12 @@ def _main(argv: List[str]) -> int:
         repo_root = os.path.realpath(args.repo_root)
         repo = args.repo or os.path.basename(repo_root) or "unknown"
     else:
-        repo, repo_root = resolve_repo()
+        # DEC-4 / R3 (#580): the grudge STORE is keyed by store identity
+        # (git-common-dir parent), not the worktree — a query run from a linked
+        # worktree must find records written from the main checkout (T-j). The
+        # hook already passes --repo-root explicitly; the default is steadied to
+        # the same store identity.
+        repo, repo_root = resolve_store_repo()
         if args.repo:
             repo = args.repo
 

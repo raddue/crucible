@@ -217,14 +217,26 @@ def append(
     repro: str = "",
     why: str = "",
     repo: str,
-    repo_root: str,
+    store_root: str,
+    worktree_root: Optional[str] = None,
     base_dir: Optional[str] = None,
     date_fixed: Optional[str] = None,
 ) -> Optional[str]:
     """Record (write/overwrite) one grudge. Returns the file path, or None if the
     write was refused/skipped. Overwrite-on-same-key (last write wins) — NOT the
-    ledger's append-only-skip model (stated honestly per fix #2)."""
-    files_norm = sorted({normalize_path(f, repo_root) for f in (files_touched or []) if f and f.strip()})
+    ledger's append-only-skip model (stated honestly per fix #2).
+
+    DEC-4 / §4.2: store identity and filesystem identity are DIFFERENT concepts
+    (S5 / siege S-2 — one root cannot serve both once they diverge in a linked
+    worktree). `store_root` (git-common-dir parent) feeds compute_hash() and the
+    recorded `repo_root` frontmatter field; `worktree_root` (--show-toplevel),
+    defaulting to `store_root` for the ordinary-clone case, feeds normalize_path()
+    and the fix-#6 privacy guard. The guard refuses when the target is inside
+    EITHER root (SIEGE-R2-H7): a store placed inside the main clone is caught
+    even when recording from a linked worktree whose own worktree_root is not a
+    parent of it."""
+    worktree_root = worktree_root or store_root
+    files_norm = sorted({normalize_path(f, worktree_root) for f in (files_touched or []) if f and f.strip()})
     if not files_norm:
         _warn("no files_touched — grudge needs at least one file to hold a grudge against; skipped")
         return None
@@ -236,20 +248,24 @@ def append(
 
     target_dir = grudges_dir(repo, base_dir)
 
-    # Privacy guard (fix #6): never write the live store into the repo we're in.
-    if _is_inside(target_dir, repo_root):
+    # Privacy guard (fix #6, SIEGE-R2-H7): never write the live store into ANY
+    # git working tree the write could reach — the worktree the recording runs
+    # from, OR the store identity's main clone (public, tracked). With a single
+    # root, a store under the main clone escaped the guard when recording from a
+    # linked worktree (its worktree_root is not a parent of the main clone).
+    if _is_inside(target_dir, worktree_root) or _is_inside(target_dir, store_root):
         _warn(
             f"refusing to write grudges into the repo tree ({target_dir} is inside "
-            f"{repo_root}); grudges carry private paths and must live outside any repo. "
-            f"Unset/relocate CRUCIBLE_GRUDGE_DIR."
+            f"{worktree_root} or {store_root}); grudges carry private paths and must "
+            f"live outside any repo. Unset/relocate CRUCIBLE_GRUDGE_DIR."
         )
         return None
 
-    h = compute_hash(repo_root, files_norm, disc)
+    h = compute_hash(store_root, files_norm, disc)
     record = {
         "hash": h,
         "repo": repo,
-        "repo_root": repo_root,
+        "repo_root": store_root,
         "fixed_in_commit": fixed_in_commit or "",
         "symptom": (symptom or "").strip(),
         "root_cause": (root_cause or "").strip(),
@@ -300,18 +316,43 @@ def _main(argv: List[str]) -> int:
                     help="alias for --commit (hook paste-me form)")
     ap.add_argument("--repro", default="")
     ap.add_argument("--why", default="")
-    ap.add_argument("--repo-root", default=None, help="override git toplevel realpath (tests)")
+    ap.add_argument("--repo-root", default=None,
+                    help="override STORE identity realpath (git-common-dir "
+                    "parent; tests / explicit store identity)")
+    ap.add_argument("--worktree-root", default=None,
+                    help="override FILESYSTEM identity realpath "
+                    "(--show-toplevel; defaults to resolve_repo())")
     ap.add_argument("--repo", default=None, help="override repo basename (tests)")
     args = ap.parse_args(argv)
 
     if args.repo_root:
-        repo_root = os.path.realpath(args.repo_root)
-        repo = args.repo or os.path.basename(repo_root) or "unknown"
+        store_root = os.path.realpath(args.repo_root)
+        repo = args.repo or os.path.basename(store_root) or "unknown"
     else:
-        repo, repo_root = resolve_repo()
+        repo, store_root = resolve_store_repo()
         if args.repo:
             repo = args.repo
-
+    worktree_root = None
+    if args.worktree_root:
+        worktree_root = os.path.realpath(args.worktree_root)
+    else:
+        # --worktree-root defaults to the filesystem root the recording runs
+        # from (resolve_repo), NOT store_root — the two diverge in a linked
+        # worktree and normalize_path must see the worktree (T-w, DEC-4).
+        _basename, worktree_root = resolve_repo()
+        # resolve_repo() silently falls back to the realpath of cwd when cwd is
+        # NOT in a git work tree. A non-git cwd carries no filesystem identity:
+        # trusting that path makes the two-root guard refuse a store that merely
+        # sits under an unrelated parent (an explicit --repo-root caller like
+        # test_558_559_acceptance, cwd = a tmp dir). Steady default: the store
+        # identity itself, the old single-root semantics.
+        import subprocess as _core_sp
+        _in_tree = _core_sp.run(
+            ["git", "-C", os.getcwd(), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=5, env=_git_env(),
+        ).returncode == 0
+        if not _in_tree:
+            worktree_root = store_root
     if args.files_from:
         files = _read_files_from(args.files_from)
     else:
@@ -320,7 +361,8 @@ def _main(argv: List[str]) -> int:
     path = append(
         symptom=args.symptom, root_cause=args.root_cause, files_touched=files,
         anti_pattern_signature=args.signature, fixed_in_commit=args.fixed_in_commit,
-        repro=args.repro, why=args.why, repo=repo, repo_root=repo_root,
+        repro=args.repro, why=args.why, repo=repo, store_root=store_root,
+        worktree_root=worktree_root,
     )
     if path:
         print(path)

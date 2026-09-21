@@ -55,7 +55,7 @@ def test_privacy_guard_refuses_in_repo():
         # base_dir INSIDE the repo -> must refuse
         in_repo_base = os.path.join(repo_root, ".crucible", "grudge")
         path = ga.append(symptom="leaky", files_touched=["src/x.py"], repo="r",
-                         repo_root=repo_root, base_dir=in_repo_base)
+                         store_root=repo_root, base_dir=in_repo_base)
         _check("O-6b append refuses to write into the repo tree", path is None, f"path={path}")
         gdir = ga.grudges_dir("r", in_repo_base)
         wrote = os.path.isdir(gdir) and any(f.endswith(".md") for f in os.listdir(gdir))
@@ -93,7 +93,7 @@ def test_same_basename_isolation():
                 fh.write("x\n")
         # grudge recorded under repo A only (cosmetic dir "proj" shared by both)
         ga.append(symptom="A-only bug", files_touched=["src/x.py"], repo="proj",
-                  repo_root=rootA, base_dir=base)
+                  store_root=rootA, base_dir=base)
         mA, _ = gq.query(["src/x.py"], "proj", rootA, base_dir=base)
         mB, _ = gq.query(["src/x.py"], "proj", rootB, base_dir=base)
         _check("O-7 repo A sees its own grudge", bool(mA))

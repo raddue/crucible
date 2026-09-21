@@ -132,15 +132,163 @@ def scan_grudges(grudge_dir: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# R3 store-identity detector + migration (design §4.3, criterion 9).          #
+# --------------------------------------------------------------------------- #
+# DEFS: a grudge is STORE-keyed iff its recorded frontmatter `repo_root`
+# equals the cwd repo's STORE identity (git-common-dir parent, shared across
+# worktrees); it is WORKTREE-keyed iff that field records a filesystem root
+# that differs — a record captured before DEC-4, whose isolation key would
+# change when the recording worktree is removed / re-cloned, and which a
+# store-identity reader cannot find. Criterion 9: `_worktree_fallback` in the
+# hook is kept — and the dual-key read may only be DELETED later, gated on
+# this detector reporting ZERO worktree-keyed records on the machines that
+# run it. `--migrate-store-keys` performs the non-destructive move (directory
+# AND the `repo_root` frontmatter field — moving the dir alone is not a
+# migration, load_grudges filters on that field) and prints what it moved.
+
+
+def _frontmatter_value(path: str, key: str) -> "str | None":
+    """Value of one `key: value` frontmatter line, or None."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                line = ln.rstrip("\n")
+                if line == "---":
+                    continue
+                if line.startswith("## "):
+                    return None
+                if line.startswith(key + ":"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def scan_grudge_store_keys(grudge_base: "str | None", store_repo: "str | None",
+                           store_root: "str | None") -> dict:
+    """Classify every grudge under grudge_base by identity key. Returns
+    {store_keyed: [path...], worktree_keyed: [(path, recorded_root)...]}."""
+    rep = {"store_keyed": [], "worktree_keyed": []}
+    if store_root is None or not grudge_base or not os.path.isdir(grudge_base):
+        return rep
+    sroot = os.path.realpath(store_root)
+    for key in sorted(os.listdir(grudge_base)):
+        grudges = os.path.join(grudge_base, key, "grudges")
+        if not os.path.isdir(grudges):
+            continue
+        for name in sorted(os.listdir(grudges)):
+            if not name.endswith(".md"):
+                continue
+            p = os.path.join(grudges, name)
+            recorded = _frontmatter_value(p, "repo_root")
+            if recorded is not None and os.path.realpath(recorded) == sroot:
+                rep["store_keyed"].append(p)
+            else:
+                rep["worktree_keyed"].append((p, recorded))
+    return rep
+
+
+def _rewrite_repo_root(text: str, new_root: str) -> str:
+    """Replace the frontmatter `repo_root:` value; leave every other byte and
+    the body untouched."""
+    out = []
+    in_fm = False
+    for ln in text.splitlines(keepends=True):
+        if ln.rstrip("\n") == "---":
+            in_fm = not in_fm
+            out.append(ln)
+        elif in_fm and ln.startswith("repo_root:"):
+            out.append(f"repo_root: {new_root}\n")
+        else:
+            out.append(ln)
+    return "".join(out)
+
+
+def migrate_grudge_store_keys(grudge_base: "str | None", store_repo: "str | None",
+                              store_root: "str | None") -> list:
+    """Move worktree-keyed grudges into the store identity (directory + the
+    `repo_root` frontmatter), returning a list of (src, dst, new_root) moves.
+    Non-destructive: a rewrite failure aborts THAT file (left in place)."""
+    moved: list = []
+    if store_repo is None or store_root is None:
+        return moved
+    scan = scan_grudge_store_keys(grudge_base, store_repo, store_root)
+    store_dir = os.path.join(grudge_base, store_repo, "grudges")
+    sroot = os.path.realpath(store_root)
+    for p, recorded in scan["worktree_keyed"]:
+        try:
+            with open(p, "r", encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        rewritten = _rewrite_repo_root(text, sroot)
+        if rewritten == text and p.startswith(os.path.join(grudge_base, store_repo)):
+            continue  # already store-identity; nothing to migrate
+        os.makedirs(store_dir, exist_ok=True)
+        name = os.path.basename(p)
+        dst = os.path.join(store_dir, name)
+        if os.path.abspath(dst) == os.path.abspath(p):
+            if rewritten == text:
+                continue
+            try:
+                with open(p, "w", encoding="utf-8") as fh:
+                    fh.write(rewritten)
+            except OSError:
+                continue
+            moved.append((p, p, sroot))
+            continue
+        tmp = dst + ".migrating"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(rewritten)
+            os.replace(tmp, dst)
+            os.remove(p)
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            continue
+        moved.append((p, dst, sroot))
+    return moved
+
+
+def report_grudge_store_keys(grudge_base: "str | None", store_repo: "str | None",
+                             store_root: "str | None") -> int:
+    """Print the detector report; 0 = zero worktree-keyed records (the
+    criterion-9 precondition), 1 = worktree-keyed records found."""
+    scan = scan_grudge_store_keys(grudge_base, store_repo, store_root)
+    print("=== grudge store identity ===")
+    print(f"  store-keyed:   {len(scan['store_keyed'])}")
+    print(f"  worktree-keyed: {len(scan['worktree_keyed'])}")
+    for p, recorded in scan["worktree_keyed"]:
+        print(f"  [FAIL] {p}  (repo_root={recorded!r})")
+    if scan["worktree_keyed"]:
+        print("  --- worktree-keyed records found — run --migrate-store-keys to "
+              "move them into the store identity; the hook's dual-key "
+              "_worktree_fallback stays active until this reports zero "
+              "(criterion 9) ---")
+        return 1
+    print("  [ok] zero worktree-keyed records — a clean store identity")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Report                                                                      #
 # --------------------------------------------------------------------------- #
 
 def _default_grudge_dir() -> "str | None":
     """Best-effort grudge store for the cwd's repo, or None if undeterminable
-    (not in a git repo, grudge subsystem absent). Never raises."""
+    (not in a git repo, grudge subsystem absent). Never raises.
+
+    Retargeted from resolve_repo() to resolve_store_repo() (round-3 finding
+    SIEGE-R2-H8, C-g): the store is keyed by the git-common-dir parent, shared
+    across worktrees — the worktree root would inspect a directory that usually
+    does not exist from a linked worktree and report an empty (vacuously clean)
+    store."""
     try:
-        from scripts.grudge_append import grudges_dir, resolve_repo
-        repo, _repo_root = resolve_repo()
+        from scripts.grudge_append import grudges_dir, resolve_store_repo
+        repo, _root = resolve_store_repo()
         return grudges_dir(repo)
     except Exception:  # noqa: BLE001 — best-effort
         return None
@@ -372,6 +520,25 @@ def doctor(ledger_dir: str, grudge_dir: "str | None") -> int:
     return 1 if issues else 0
 
 
+def _store_identity():
+    """(repo_basename, store_root) from resolve_store_repo (C-l allowlisted),
+    or (None, None) when the subsystem is absent / not a repo."""
+    try:
+        from scripts.grudge_append import resolve_store_repo
+        repo, root = resolve_store_repo()
+        return repo, root
+    except Exception:  # noqa: BLE001 — best-effort
+        return None, None
+
+
+def _grudge_base():
+    try:
+        from scripts.grudge_append import default_base_dir
+        return default_base_dir()
+    except Exception:  # noqa: BLE001 — best-effort
+        return None
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Consistency check for the calibration + grudge stores (#400).")
@@ -397,6 +564,14 @@ def main(argv=None) -> int:
         help="#558/§5b: repo-basename the --grudge-guard filter uses "
              "(default: cwd's store identity)")
     parser.add_argument(
+        "--grudge-keys", action="store_true",
+        help="#580/§4.3: report STORE-keyed vs WORKTREE-keyed grudges; non-zero "
+             "exit when worktree-keyed records exist (criterion 9 pre-gate)")
+    parser.add_argument(
+        "--migrate-store-keys", action="store_true",
+        help="#580/§4.3: move worktree-keyed grudges into the store identity "
+             "(directory + repo_root frontmatter), printing what was moved")
+    parser.add_argument(
         "--selftest", action="store_true",
         help="#558/§5b: run the witness reader's synthetic-fixture self-test")
     args = parser.parse_args(argv)
@@ -411,6 +586,21 @@ def main(argv=None) -> int:
             args.witness_dir if args.witness_dir is not None
             else default_witness_dir(),
             repo, age_hours=args.witness_age_hours)
+
+    if args.grudge_keys or args.migrate_store_keys:
+        store_repo, store_root = _store_identity()
+        base = _grudge_base()
+        if args.migrate_store_keys:
+            moved = migrate_grudge_store_keys(base, store_repo, store_root)
+            print("=== grudge store migration ===")
+            if not moved:
+                print("  [ok] nothing to migrate — zero worktree-keyed records")
+            for src, dst, new_root in moved:
+                where = "rewrote repo_root in-place" if src == dst else \
+                    f"moved to {dst}"
+                print(f"  {src} -> {where}  (repo_root -> {new_root})")
+            return report_grudge_store_keys(base, store_repo, store_root)
+        return report_grudge_store_keys(base, store_repo, store_root)
 
     grudge_dir = args.grudge_dir if args.grudge_dir is not None \
         else _default_grudge_dir()
