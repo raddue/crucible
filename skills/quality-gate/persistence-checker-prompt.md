@@ -43,7 +43,7 @@ Emit a single JSON object with this schema. Output ONLY the JSON; no prose pream
   "round_n_plus_1_finding_count": <int>,
   "correspondences": [
     {
-      "round_n_plus_1_finding_id": "<id or short title from round-(N+1)-findings.md>",
+      "round_n_plus_1_finding_id": "<Fatal/Significant: the finding's 1-based ordinal among **Severity:** Fatal/**Severity:** Significant lines in round-(N+1)-findings.md, in file order, optionally suffixed with a short title; Minor/Nit: a title-only id (round 8, F1) — see Rules below>",
       "matched_round_n_finding_id": "<id or short title from round-N-findings.md, or null>",
       "fix_verifier_status_on_round_n": "Unresolved",
       "semantic_match_confidence": "high" | "medium" | "none",
@@ -60,6 +60,7 @@ Rules:
 - `matched_round_n_finding_id` is `null` when `semantic_match_confidence: none`.
 - `persistent_finding_count` equals the count of correspondences with `semantic_match_confidence: high`. It MUST NOT include `medium`.
 - `round_n_unresolved_count` is the count of round-N findings with `Unresolved` verifier verdict (from the fix-journal `### Verifier Assessment` sub-section). Used by the orchestrator as a sanity check on your read.
+- <!-- CONTRACT:qg-fan-out-persistence-finding-id-rule:START -->**Finding-identity rule (round 8, F1).** For a Fatal/Significant-severity round-(N+1) finding, `round_n_plus_1_finding_id` is **the finding's 1-based ordinal among `**Severity:** Fatal`/`**Severity:** Significant` lines in `round-(N+1)-findings.md`, in file order**, optionally suffixed with a short title for readability — the identical mechanical rule the fix-generated-defect checker uses for its own `judgments[].round_n_plus_1_finding_id` (see `SKILL.md`'s `qg-fan-out-finding-identity` span), so the two checkers' identities for the same finding are computed the same way rather than being two independently-rendered free-form titles that happen to match. This checker's own population (`correspondences`) is **not** severity-scoped — it covers every round-(N+1) finding, including Minor/Nit — but the ordinal rule only applies within the Fatal/Significant subset (which is the only subset that carries a `**Severity:** Fatal`/`**Severity:** Significant` line to number); a Minor/Nit-severity finding keeps a title-only id instead.<!-- CONTRACT:qg-fan-out-persistence-finding-id-rule:END -->
 
 ## Fail-open behavior
 

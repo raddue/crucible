@@ -75,7 +75,7 @@ assertions and pass this check. **Read a green run as "every declared invariant
 has a tagged test that asserts something", never as "every declared invariant is
 pinned".** Mutation testing is the instrument for the stronger claim.
 
-Style mirrors `scripts/check_claude_settings.py` / `scripts/check_stdlib_only.py`:
+Style mirrors `scripts/check_settings_surface.py` / `scripts/check_stdlib_only.py`:
 ROOT-from-`__file__`, error accumulation, `sys.exit(main())`, stdlib only (the
 contract YAML is parsed for the one construct this needs — `test_tag:` scalars —
 rather than pulling in PyYAML), no argparse. Exit codes are `0` (ok) or `1` (any
@@ -127,17 +127,15 @@ COVERAGE_MAP: dict[str, dict] = {
     "contract:floor:inv-t2": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
     "contract:qualname:inv-t3": {
         "kind": "python",
-        "carriers": ["scripts/test_brier_advise.py", "scripts/test_complexity_index.py"],
-        "tests": 2,
+        "carriers": ["scripts/test_complexity_index.py"],
+        "tests": 1,
     },
     "contract:paths:inv-t4": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
     "contract:order:inv-t5": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
     "contract:nesting:inv-t6": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
     "contract:diffscope:inv-t7": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
-    "contract:diffscope:inv-t8": {"kind": "python", "carriers": ["scripts/test_brier_advise.py"], "tests": 1},
     "contract:calibration:inv-t9": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 1},
     "contract:isolation:inv-t10": {"kind": "python", "carriers": ["scripts/test_complexity_index.py"], "tests": 2},
-    "contract:cli:inv-t11": {"kind": "python", "carriers": ["scripts/test_brier_advise.py"], "tests": 1},
     # --- bash carrier (#559 Stop-hook seam suite) ---
     "contract:hook:inv-t12": {"kind": "bash", "carriers": [_G := "hooks/tests/test-grudge-resolution-guard.sh"], "checks": 16},
     "contract:hook:inv-t13": {"kind": "bash", "carriers": [_G], "checks": 6},

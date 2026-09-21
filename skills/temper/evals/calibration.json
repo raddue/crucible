@@ -24,5 +24,5 @@
   "design_ceiling": 0.7,
   "ceiling_binding": false,
   "method": "min(max(2x empirical sigma over k=3 synth-only convergence baseline runs, 0.447 analytic floor), 0.7 design ceiling)",
-  "note": "Placeholder baseline pending real k=3 calibration runs via the 3-step stage / /temper-eval-collect / score protocol. Schema retargeted (#333) from PASS/FAIL lens columns to the convergence verdicts. Empirical sigmas zeroed; analytic floor (0.447) is binding. Run scripts/calibrate_tolerance.py to refresh after collecting baseline data."
+  "note": "Placeholder baseline pending real k=3 calibration runs via the 3-step stage / /temper-eval-collect / score protocol. Schema retargeted (#333) from PASS/FAIL lens columns to the convergence verdicts. Empirical sigmas zeroed; analytic floor (0.447) is binding. Run raddue/crucible-eval's scripts/calibrate_tolerance.py (moved there — #460) to refresh after collecting baseline data."
 }

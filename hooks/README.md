@@ -79,7 +79,9 @@ External enforcement hook for the build pipeline's gate ledger. Blocks unauthori
 
 ### Setup
 
-Add the following to your `.claude/settings.json` (project-level) or `~/.claude/settings.json` (user-level):
+**Installed automatically** when the crucible plugin is enabled — `.claude-plugin/plugin.json` registers this hook on the `PreToolUse` event (matcher `Write|Edit`) via `${CLAUDE_PLUGIN_ROOT}`, so no manual configuration is needed. See the MIN-5-R6 Parity Note below for details.
+
+For a non-plugin install (running this hook standalone), add the following to your `.claude/settings.local.json` (machine-local, untracked) or `~/.claude/settings.json` (user-level) — never a committed `.claude/settings.json` (see Hook Registration Surface below):
 
 ```json
 {
@@ -88,7 +90,7 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "bash hooks/gate-ledger-guard.sh", "timeout": 500 }
+          { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/gate-ledger-guard.sh", "timeout": 500 }
         ]
       }
     ]
@@ -96,7 +98,7 @@ Add the following to your `.claude/settings.json` (project-level) or `~/.claude/
 }
 ```
 
-> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.) The maintainer's actual user-global registration uses `Write|Edit` (see the MIN-5-R6 Parity Note below); the `*` shown here is simply the simplest illustrative form.
+> **Note:** `"matcher": "*"` — the hook intercepts all PreToolUse events and filters internally for Write and Edit tool calls. This ensures both tools are gated. (You may narrow to `"matcher": "Write|Edit"` to let Claude Code filter upstream; the hook's internal target-path check makes either choice safe.) For the manual path, use an absolute path (S1/CHAIN-N5: a repo-relative path is cwd-dependent).
 
 ### Verification
 
@@ -126,7 +128,9 @@ Run the test suite:
 bash hooks/tests/test-gate-ledger-guard.sh
 ```
 
-17 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, and PipelineID change detection.
+27 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, PipelineID change detection, legacy `.tool`/`.input` fallback (Write and Edit paths), indented old_string, backslash old_string, double-space phase headers, and non-canonical `build-gate-ledger.md` paths ignored.
+
+`bash hooks/tests/test-plugin-manifest-hooks.sh` separately checks that `.claude-plugin/plugin.json` actually declares the `PreToolUse` registration described above (matcher, `type: command`, `${CLAUDE_PLUGIN_ROOT}` path) — a wiring check, not a runtime liveness check (#591 item 3).
 
 ### Dependencies
 
@@ -134,7 +138,7 @@ bash hooks/tests/test-gate-ledger-guard.sh
 
 ### MIN-5-R6 Parity Note
 
-Registered in user-global `~/.claude/settings.json`. Matcher: `Write|Edit` (verified by reading `~/.claude/settings.json` on 2026-04-15). Because a concrete matcher is set, Claude Code filters upstream and only Write/Edit PreToolUse events reach the hook — no internal filtering is needed for other tool families. The hook still internally filters by target path (`build-gate-ledger.md`) and exits 0 for every other file. By contrast, `build-routing-advisor` registers `matcher: "Agent"` (canonical per T1; legacy alias `"Task"` also honored) in the SAME user-global `~/.claude/settings.json`. Both hooks share scope (user-global, not `.claude/settings.json` at the repo root) and are documented side-by-side so the matcher choices are explicit for parity. The one exception to that shared scope is `grudge-resolution-guard.sh` (#559), which registers repo-scoped in the committed `.claude/settings.json` at the repo root — see Grudge Resolution Guard below for why.
+Registered via the plugin, not via manual settings.json (#591). This section previously claimed the hook was "Registered in user-global `~/.claude/settings.json`. Matcher: `Write|Edit` (verified ... on 2026-04-15)" — that was never true; no settings.json ever installed this hook, which is why it sat inert. The durable fact is that `.claude-plugin/plugin.json` declares a `PreToolUse` hook for this script (matcher `Write|Edit`, command `bash "${CLAUDE_PLUGIN_ROOT}/hooks/gate-ledger-guard.sh"`) (#591 item 3), so enabling the plugin installs it automatically. The manual `~/.claude/settings.json` / `.claude/settings.local.json` registration shown in the Setup section above is a fallback for non-plugin installs — redundant, not required, once the plugin is enabled. Whether a given reader's own settings.json additionally declares a redundant `PreToolUse` entry for this script is machine-local and can drift between developers — check your own files rather than trusting a hook inventory recorded here. `build-routing-advisor` (below) remains in the state this hook used to be in: it is NOT registered via the plugin, and its Setup section is a manual-registration instruction, not a description of an existing registration.
 
 ## Build Routing Advisor
 
@@ -336,7 +340,7 @@ not block, edit, or record anything).
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "bash hooks/rcpt-verify-hook.sh", "timeout": 500 }
+          { "type": "command", "command": "bash /absolute/path/to/crucible/hooks/rcpt-verify-hook.sh", "timeout": 500 }
         ]
       }
     ]
@@ -353,10 +357,13 @@ not block, edit, or record anything).
    blocks). Unrecognized shape / parse error / no text → `exit 0` silently.
 3. Gate: if the text contains no `RCPT v1` token → `exit 0` silently. Otherwise extracts
    from the first column-0 `RCPT v1 ` line to end-of-message.
-4. Resolves the repo via `git rev-parse --show-toplevel` and gates on
-   `[ -f "$REPO/scripts/rcpt_verify.py" ]` — so a SubagentStop in a **non-crucible repo**
-   exits 0 silently with no spurious advisory (the existence gate; never-fatal holds
-   regardless).
+4. Resolves the linter from **this hook script's own installed location**
+   (`$(dirname "$0")/../scripts/rcpt_verify.py`) — NOT from `git rev-parse
+   --show-toplevel` on the session's cwd, which would pick up whatever repo
+   the session happens to be visiting (SIEGE-CA-4/IP-1: a repo containing an
+   unrelated file at that path would get it executed with the agent's full
+   privileges). Gates on `[ -f "$LINTER" ]`, so a SubagentStop still exits 0
+   silently with no spurious advisory if the install is broken.
 5. Pipes the receipt block to `--tier1 -`. On non-zero, prints the `[rcpt-verify]`
    advisory (first stderr bullet) and **still exits 0**.
 
@@ -375,17 +382,19 @@ missing). No `git` dependency beyond the optional repo-root resolution (absent �
 
 Blocking **Stop** hook enforcing grudge write-discipline for this repo (#559). It is crucible's first Stop hook and its first hook that blocks the turn: while a `fix(*)` commit that landed in this session's window — and touched at least one non-`.md` file — still has neither a grudge record nor a `skips.log` entry, the hook exits 2 and Claude Code refuses the Stop. It backstops the LLM-authored grudge-recording steps in `skills/debugging/SKILL.md` and `skills/merge-pr/SKILL.md` Step 7.5: those still do the recording, this catches the case where they were skipped. Every block is bounded — see MAX_BLOCKS below — so a session can never be trapped.
 
-### Setup
+### Setup (opt-in — NOT committed; #604)
 
-**Already registered — there is nothing to copy-paste.** Unlike every other hook on this page, this one ships registered: `.claude/settings.json` at the repo root is a **committed, tracked file** whose `hooks.Stop` entry names `bash "$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh"`. Cloning the repo registers the hook.
+#559 originally shipped this hook registered in a committed `.claude/settings.json`. That is an RCE surface (GH-604 / siege S-1: a reviewer's `gh pr checkout N` would run the branch's Stop hook and whatever `scripts/` helper it names with the reviewer's privileges), so — like every other hook on this page — this one is registered **per-machine** and never in a committed `.claude/settings.json`. Register it for one machine, to `.claude/settings.local.json` (repo-local, gitignored) or user-global `~/.claude/settings.json`, referencing the hook by its absolute installed path (`$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh`), `type: command`, `timeout: 500`:
 
-Scope is deliberately repo-scoped, the one stated exception to this file's user-global convention (see the Build Routing Advisor Setup note and the MIN-5-R6 Parity Note above): a hook that *blocks* the turn, on subject matter that is crucible-only, must not fire in unrelated projects.
+```json
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh\"", "timeout": 500 } ] } ] } }
+```
+
+Scope is deliberately repo-local (this hook *blocks* the turn on crucible-only subject matter; it must never fire in an unrelated project). `check_settings_surface.py` keeps the committed-config prohibition mechanical (see the Hook Registration Surface section below). Missing registration = the hook never fires = #559 compliance is simply not enforced on that machine (fail-open).
+
+The hook caps its own per-invocation work with a **per-Stop wall-clock budget** (`CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS`, default `8`, issue #603): candidate count (up to the `--max-count=500` scan, and accumulable turn-over-turn through future-dated author times), files per commit, and the stored grudge count are all attacker-multiplied inputs, and when the budget is spent the hook degrades **loudly to allow** (`exit 0`) rather than stall the Stop — 362 s measured on a single Stop before the budget existed. `timeout: 500` is retained only as the ceiling for the one failure class the loud-allow cannot help with: a hook that *hangs* outright (a `git` call against a corrupted or network-mounted repo that never returns), where the budget's own clock never advances.
 
 `timeout: 500` (seconds) matches this repo's other hooks, but for a blocking Stop hook it is deliberately **not** the bound the hook relies on. The hook caps its own per-invocation work with a **per-Stop wall-clock budget** (`CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS`, default `8`, issue #603): candidate count (up to the `--max-count=500` scan, and accumulable turn-over-turn through future-dated author times), files per commit, and the stored grudge count are all attacker-multiplied inputs, and when the budget is spent the hook degrades **loudly to allow** (`exit 0`) rather than stall the Stop — 362 s measured on a single Stop before the budget existed. `500` is retained only as the ceiling for the one failure class the loud-allow cannot help with: a hook that *hangs* outright (a `git` call against a corrupted or network-mounted repo that never returns), where the budget's own clock never advances.
-
-#### Migration for existing checkouts
-
-A checkout that predates this change may already have a **personal, untracked** `.claude/settings.json` (previously the whole `.claude/` tree was gitignored). **Back it up before you pull or merge — git will not stop you.** Git's untracked-file protection does not apply to a file that is *ignored* at the time of the operation, and on the pre-branch side the bare `.claude/` rule ignores exactly this file, so a pull or merge that adds the tracked version overwrites your local one silently, rc=0, with no prompt. So, *first*: move your personal keys into `.claude/settings.local.json` (still gitignored, still loaded by Claude Code) and delete the untracked `.claude/settings.json`; *then* merge. This is a one-time, per-checkout step, not a runtime concern — a fresh clone has nothing to migrate.
 
 ### How It Works
 
@@ -424,7 +433,7 @@ Two disable paths, both honored **after** the `.last-run` breadcrumb so a disabl
 
 ### Verification
 
-Registration (`settings.json` is tracked and correct) and execution evidence (did the hook actually *fire*) are two different questions; `check_claude_settings.py` answers only the first. A Claude Code version that silently stopped honoring repo-scoped Stop hooks would leave everything here inert while the settings file looked perfect. To answer the second, end a turn and inspect the breadcrumb's mtime:
+Registration and execution evidence (did the hook actually *fire*) are two different questions. Whether the hook is registered on THIS machine is a per-machine, untracked fact — `scripts/check_settings_surface.py` enforces the prohibition on *committed* config, and the `.claude/settings.local.json` / `~/.claude/settings.json` registration above is checked the way any per-machine config is: by inspecting your own files, not a hook inventory. Execution evidence is `$PROJECT_MEMORY/grudge-guard/.last-run` (outside the repo, so it survives `git clean`). End a turn and inspect the breadcrumb's mtime:
 
 ```bash
 date > /tmp/before-stop-time
@@ -435,15 +444,47 @@ test "$PROJECT_MEMORY/grudge-guard/.last-run" -nt /tmp/before-stop-time && echo 
 
 `$PROJECT_MEMORY` is spelled out rather than referenced by name on purpose: it is a variable computed *inside* the hook's own process and is not exported to your shell, so a `test "$PROJECT_MEMORY/..."` copied verbatim would expand to an empty prefix and error on a missing operand instead of giving a clean pass/fail. Run this snippet once on a real checkout after this lands — it is the one property no fixture or check script can substitute for.
 
+## Hook Registration Surface (#604)
+
+Repo-owned hooks (`hooks/*.sh`) are registered in **per-machine, untracked config** —
+never in a committed `.claude/settings.json`. A committed `settings.json` that
+registers an executable hook turns every PR checkout into an arbitrary-code
+execution surface on the reviewer's machine (GH-604, siege S-1): Claude Code's
+directory trust is per-directory, so checking out a branch inside an
+already-`/trust`ed repo does not re-prompt, and a reviewer's `gh pr checkout N`
+runs the branch's hook (and whatever `scripts/` helper it names) with the
+reviewer's full privileges on the next Stop.
+
+The per-machine settings registration points are `.claude/settings.local.json`
+(machine-local, untracked — the whole `.claude/` directory is git-ignored, and
+`scripts/check_settings_surface.py` fails the gate if any of it is re-tracked)
+and user-global `~/.claude/settings.json` (the `build-routing-advisor`
+convention). Both make the hook's execution surface opt-in per machine rather
+than automatic per clone. A registration command must reference the hook by its
+**absolute installed path** (or `$CLAUDE_PROJECT_DIR`); the machine that
+installed it is the machine that accepts the surfaced code.
+
+A third, distinct mechanism is the plugin manifest: `.claude-plugin/plugin.json`
+may declare a `hooks.PreToolUse` entry (as `gate-ledger-guard` now does, #591),
+which fires only after the user explicitly enables the crucible plugin on their
+machine. This is per-machine opt-in exactly like the settings points — enabling
+a plugin is an affirmative execute-code grant, not a checkout side-effect — so
+it does not create the GH-604 surface. The prohibition above targets committed
+`.claude/settings.json`, which auto-loads on checkout without fresh consent.
+
+Review rule: every PR touching a `hooks/` or `scripts/` diff (or
+`.claude-plugin/plugin.json`, which carries hook-execution config — command,
+matcher, timeout) gets full review before merge — those files execute with the
+maintainer's privileges.
+
 ### Testing
 
 ```bash
 bash hooks/tests/test-grudge-resolution-guard.sh   # hook behavior
-python3 scripts/check_claude_settings.py           # registration (bare)
-python3 scripts/check_claude_settings.py --selftest
+python3 scripts/check_settings_surface.py --selftest   # registration surface (pre-quick)
+python3 scripts/check_settings_surface.py
 ```
 
-`check_claude_settings.py` asserts that `.claude/settings.json` exists, parses as JSON, names `hooks/grudge-resolution-guard.sh` in a `hooks.Stop[].hooks[].command`, is git-tracked, and that `.gitignore` carries `.claude/*` plus `!.claude/settings.json` and no bare `.claude/` line.
 
 ### Dependencies
 

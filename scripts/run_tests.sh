@@ -121,9 +121,19 @@ run python3 scripts/check_i2_marker.py
 run python3 scripts/check_qg_stagnation_minor.py
 run python3 scripts/check_qg_minor_advisory.py --selftest
 run python3 scripts/check_qg_minor_advisory.py
+run python3 scripts/check_qg_second_pass_score.py --selftest
+run python3 scripts/check_qg_second_pass_score.py
+run python3 scripts/run_second_pass_evals.py
+run python3 scripts/test_second_pass_scorer.py
+run python3 scripts/check_qg_fan_out.py --selftest
+run python3 scripts/check_qg_fan_out.py
 run python3 scripts/check_crossref.py --selftest
 run python3 scripts/check_crossref.py
+run python3 scripts/check_canonical_links.py --selftest
+run python3 scripts/check_canonical_links.py
 run python3 scripts/catalog.py check
+run python3 scripts/check_adr_integrity.py --selftest
+run python3 scripts/check_adr_integrity.py
 
 # --- graphify-consult convention structural check (ai-rack#93) ---
 run python3 scripts/check_dispatch_graphify_consult.py --selftest
@@ -132,9 +142,10 @@ run python3 scripts/check_dispatch_graphify_consult.py
 # --- handoff hard-stop structural check (#556) ---
 run python3 scripts/check_handoff_stop_contract.py --selftest
 run python3 scripts/check_handoff_stop_contract.py
-# --- .claude/settings.json registration (#559) ---
-run_expect "selftest OK" python3 scripts/check_claude_settings.py --selftest
-run_expect "OK — .claude/settings.json is tracked" python3 scripts/check_claude_settings.py
+
+# --- tracked-app-config execution surface (#604, siege S-1) ---
+run python3 scripts/check_settings_surface.py --selftest
+run python3 scripts/check_settings_surface.py
 
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
@@ -144,6 +155,11 @@ run python3 scripts/check_build_clean_tree_contract.py
 run python3 scripts/check_warden_integration.py --selftest
 run python3 scripts/check_warden_integration.py
 
+# --- deterministic change-bundling (#630) ---
+run python3 scripts/test_change_bundling.py
+run python3 scripts/check_change_bundling.py --selftest
+run python3 scripts/check_change_bundling.py
+
 # --- Receipt-verify (rcpt_verify) ---
 run python3 scripts/rcpt_verify.py --selftest
 run python3 scripts/test_rcpt_verify.py
@@ -152,26 +168,38 @@ run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
-# --- Calibration dispatch / Brier advisory ---
-run python3 scripts/check_calibration_dispatch.py --selftest
-run python3 scripts/check_calibration_dispatch.py
-run python3 scripts/test_brier_advise.py
-run python3 scripts/test_calibrate_tolerance.py
 # --- Complexity-ranked dispatch signal (#558) ---
 run python3 scripts/test_complexity_index.py
 run python3 scripts/complexity_index.py --selftest
 run python3 scripts/test_complexity_index_adversarial.py
 run python3 scripts/check_stdlib_only.py
 run python3 scripts/check_stdlib_only.py --selftest
+# --- #488 c1 receipt name-space acceptance tests ---
+run python3 scripts/test_488_name_space.py
+run python3 scripts/dec31_sweep.py          # AC-6 DEC-31 mutant sweep (#488 c1)
+run python3 scripts/test_dec31_sweep_harness.py   # the sweep HARNESS itself
 
+# --- #488 c1 warden-leg-2 (inquisitor) cross-component robustness pins ---
+run python3 scripts/test_488_wiring.py
+run python3 scripts/test_488_inquisitor_integration.py
+run python3 scripts/test_488_inquisitor_edge.py
+run python3 scripts/test_488_inquisitor_state.py
+run python3 scripts/test_488_regression_inquisitor.py
 # --- Ledger pipeline pure core (#398 Phase 1) ---
 run python3 scripts/test_ledger_core.py
 
-# --- Ledger GIT layer: falsification discovery (#439 / #441) ---
-run python3 scripts/test_reconcile_git.py
+# --- Central-store path resolution + emit CLI (#270; restored ex-eval, #460) ---
+run python3 scripts/test_central_store.py
 
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
+
+# --- Zero-token vulnerability pattern matcher (#629) ---
+run python3 scripts/test_vuln_ruleset.py
+
+# --- Deterministic comment-position verification (#628) ---
+run python3 scripts/verify_comment_positions.py --selftest
+run python3 scripts/test_verify_comment_positions.py
 
 # --- crucible-qg-fix model-pin regression (#537) ---
 run python3 scripts/test_qg_fix_pin.py
@@ -179,13 +207,10 @@ run python3 scripts/test_qg_fix_pin.py
 # --- compass parser/patch/render core (#408 F16a) ---
 run python3 scripts/test_compass.py
 
-# --- ledger weekly render core (#408 F16b) ---
-run python3 scripts/test_render_ledger.py
-
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
 
-# --- Central-store mutators: grudge / render_ledger / backfill (#398 Phase 3) ---
+# --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
 
 # --- Model-pin guardrail ---
@@ -196,7 +221,12 @@ run python3 scripts/check_model_pins.py
 run python3 scripts/check_ledger_write_path.py --selftest
 run python3 scripts/check_ledger_write_path.py
 
+# --- ledger-append.md reference-block drift (#460 round-4 S4) ---
+run python3 scripts/check_ledger_append_doc_drift.py --selftest
+run python3 scripts/check_ledger_append_doc_drift.py
+
 # --- #366 red-team <-> quality-gate receipt contract ---
+run python3 scripts/check_rt_receipt_contract.py --selftest
 run python3 scripts/check_rt_receipt_contract.py
 
 # --- Inquisitor eval harness (#424) ---
@@ -258,12 +288,16 @@ run python3 -m pytest skills/warden/evals/ -q
 run python3 scripts/check_warden_helper_drift.py --selftest
 run python3 scripts/check_warden_helper_drift.py
 
+# --- AACR-Bench review-gate measurement core (#631) ---
+run python3 scripts/test_aacr_bench_measure.py
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 
 # --- Build-routing advisor + reconcile hooks ---
 run bash hooks/tests/test-build-routing-advisor.sh
 run bash hooks/tests/test-gate-ledger-guard.sh
+run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
 run bash hooks/tests/test-grudge-resolution-guard.sh
 

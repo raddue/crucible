@@ -18,7 +18,8 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
   There is no JS/TS toolchain: any `package.json`/`tsconfig.json`/`node_modules/`
   in your tree is vestigial `npm init` scaffolding (gitignored, never shipped).
 - Skill behavior evals: defined in `skills/<skill>/evals/evals.json`, run via
-  Anthropic's skill-creator (blind A/B); measured deltas live in `docs/evals.md`.
+  `/anvil` (forked from Anthropic's skill-creator, blind A/B); measured deltas
+  live in `docs/evals.md`.
 - Install for live use: symlink skills into Claude Code —
   `ln -sf "$PWD"/skills/* ~/.claude/skills/`. Editing a skill's `SKILL.md`
   changes its behavior immediately on next activation.
@@ -40,8 +41,9 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
 - **The calibration ledger is the epistemic backbone.** Tier-A gate verdicts
   append to the machine-local central store `~/.claude/crucible/ledger/runs.jsonl`
   (never committed — this repo is public; not to be confused with the deliberate
-  11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl`, which is
-  intentional — keep it). The `CRUCIBLE_CALIBRATION_DISABLED=1`
+  11-row test fixture committed in-repo at `.crucible/ledger/runs.jsonl` — as of
+  #460 it has no in-repo reader (its former readers moved to `raddue/crucible-eval`),
+  retained as a schema/corpus reference — keep it). The `CRUCIBLE_CALIBRATION_DISABLED=1`
   kill-switch is fixture-only — never silence production verdicts.
 - **Eval before you publish.** A skill change ships with its evals run; prefer
   anti-rationalization tables + stagnation detection over trusting the model to
@@ -74,7 +76,7 @@ Headline orchestrators:
 - `/quality-gate` — red-team any artifact until clean
 - `/recon` — investigate unfamiliar code before starting a task
 - `/audit` / `/siege` — adversarial subsystem review / security audit
-- `/skill-creator` — create, modify, and eval skills in *this* repo
+- `/anvil` — create, modify, and eval skills in *this* repo
 - `/finish`, `/handoff`, `/forge` — wrap-up, session handoff, retrospective
 
 Run `/skills` for the full catalog.

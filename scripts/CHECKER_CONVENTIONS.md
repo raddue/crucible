@@ -112,7 +112,7 @@ the three globbing checkers above false-fire on them.
 - **Stdlib only.** No third-party imports — these run in bare CI.
 - **Exit 0 clean / 1 with a `- <error>` list.** One finding per line.
 - **A `--selftest` is encouraged** for detection logic with edge cases
-  (`check_model_pins.py`, `check_crossref.py`, `check_calibration_dispatch.py`),
+  (`check_model_pins.py`, `check_crossref.py`),
   and is run as its own line in `scripts/run_tests.sh` ahead of the tree check.
 - **Wire it into `scripts/run_tests.sh`** — the single source of truth that
   `.github/workflows/ci.yml` invokes. A checker not listed there does not run.

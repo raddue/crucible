@@ -15,7 +15,7 @@ version: 1
 
 **Paste-only exemption:** If a future template is under 500 tokens total payload, uses the Task tool, and needs no file access, it may skip disk-mediation. No current templates qualify — all were promoted to disk-mediated after validation.
 
-**Excluded skills:** `skill-creator` is a meta-tool, not a production pipeline orchestrator (its dispatches are A/B eval test-runs, not pipeline work). `stocktake`'s only subagent use is a single read-only Explore evaluation agent — not a disk-mediated pipeline dispatch. (`parallel` is a production dispatcher and is NOT excluded: it follows this convention and links it as canonical.)
+**Excluded skills:** `anvil` (formerly `skill-creator`) is a meta-tool, not a production pipeline orchestrator (its dispatches are A/B eval test-runs, not pipeline work). `stocktake`'s only subagent use is a single read-only Explore evaluation agent — not a disk-mediated pipeline dispatch. (`parallel` is a production dispatcher and is NOT excluded: it follows this convention and links it as canonical.)
 
 ## Dispatch Directory
 
@@ -78,6 +78,171 @@ Begin by reading that file.
 - Token limits apply to the `prompt` parameter/field only, not to structured Task tool fields (`team_name`, `name`, `description`, `subagent_type`)
 - "Begin by reading that file" establishes the first action, not the only action
 - For teammate dispatches: mailbox/communication protocol instructions go in the dispatch file, not the pointer prompt
+
+## Scope Anchoring (opt-in)
+
+> Dispatched subagents drift: they fix an adjacent defect, generalize past the
+> request, or record bookkeeping about work nobody asked for. Scope anchoring is the
+> two-tier checkpoint any orchestrator can opt into. **Tier 1 is the default; tier 2 is
+> for dispatches whose file set cannot be pinned up front, or whose file set is pinnable
+> but whose intra-file work is not mechanically constrained.** Skills that adopt either tier
+> link this section — do not re-specify it per skill (except quality-gate's tier-1
+> reference implementation, retained deliberately; de-duplicating it is tracked
+> separately).
+>
+> Prior art and reference implementation of tier 1: `skills/quality-gate/SKILL.md`
+> ("Scope Anchoring for Fix Agents"). Measured evidence for tier 2: `#562` spike,
+> `docs/research/2026-09-06-scope-judge-spike.md`.
+
+Every scope-anchored dispatch carries a **scope statement** in its dispatch file: one
+sentence naming what the subagent is fixing, and an explicit "do not add features,
+restructure, or make changes outside these findings" clause.
+
+### Tier 1 — mechanical change boundary (cheap; default)
+
+Use when the orchestrator can name the allowed files/sections **before** dispatch.
+
+1. **Change boundary.** The dispatch file lists the specific files or sections the
+   subagent may modify. A finding that cannot be resolved inside the boundary must be
+   flagged in the receipt, not fixed.
+2. **Drift detection.** After the subagent returns, the orchestrator diffs the actual
+   changed-path set against the boundary — and, where sections were named, checks by
+   inspection whether the change also stayed inside the named sections. Any path outside
+   the boundary, or a change outside a named section within an allowed file, → reject the
+   round's output, re-dispatch with the out-of-scope items named explicitly, and carry
+   those items forward as context for the next review round.
+
+The `git diff --name-only` check catches "touched a file it was never pointed at" for
+free; section-level drift inside an allowed file is caught only by inspection (see
+quality-gate's implementation), which is what tier 2 mechanizes — whether the file set
+could not be pinned up front, or was pinned but its intra-file work is not mechanically
+constrained.
+
+### Tier 2 — semantic scope judge (for unpinnable scope)
+
+Use when the right file set is not knowable in advance (a bug fix whose root cause is
+still being located, an implementer working from a design), or when the dispatch's
+allowed file set was pinnable but the work inside those files is not mechanically
+constrained — i.e. intra-file expansion is a plausible failure mode that a named-section
+inspection was not run against.
+
+Dispatch **one** judge after the work completes — model tier **sonnet**, the same tier as
+quality-gate's fix verifier — using `shared/scope-judge-prompt.md`. It receives **only**:
+
+- (a) the original task / finding / hypothesis text, verbatim, and
+- (b) the resulting diff.
+
+Nothing else. No repo access, no fix journal, no reviewer narrative, no commit messages.
+The isolation is the mechanism: a judge with the surrounding context reconstructs a
+justification for almost any change, which is exactly the failure being checked for.
+The judge's procedure requires hunk-level content to classify — a bare changed-file list
+is not a valid substitute and was not measured; if a diff is too large to dispatch
+whole, restrict it by path rather than passing a file list.
+
+The judge labels every changed file — per hunk-group where a file is mixed — as
+`in-scope`, `justified-adjacent` (must name what would break without it), or
+`unrequested-expansion`, and returns `VERDICT: IN-SCOPE | SCOPE-EXPANSION` plus a flagged
+path list and a self-reported confidence.
+
+**Reading the verdict.** `SCOPE-EXPANSION` is a **signal, not a rejection** — unlike tier
+1's boundary breach, it is a judgment call and the orchestrator owns the decision. On
+`SCOPE-EXPANSION`, the orchestrator picks one of three responses: inspect the flagged
+hunks itself and re-dispatch asking for the ones it independently agrees are untraceable
+to be dropped; record the expansion as an accepted deviation with a one-line reason; or,
+for an advisory-only adoption that does not act on the verdict at all, record it and
+surface it for a later review phase to weigh (this is the shape debugging's Phase 4.4
+uses). `CONFIDENCE: medium` is advisory only and must never auto-reject; `CONFIDENCE:
+high` is a self-report that classification felt unambiguous, not a validated measure of
+correctness, and must not auto-reject on its own either. **`CONFIDENCE: low` is not a
+scope verdict at all** — per `shared/scope-judge-prompt.md`'s `## Confidence`, it reports
+that the request text was unusable, which forces every group to `unrequested-expansion`
+by construction; treat it exactly as an unparseable return: record why the verdict was
+unusable, and proceed.
+
+**If the judge's return is missing `VERDICT:`, missing `CONFIDENCE:`, carries
+`CONFIDENCE: low`, the `VERDICT`/`FLAGGED` pair is internally inconsistent (e.g.
+`SCOPE-EXPANSION` with `FLAGGED: none`, or `IN-SCOPE` with a non-empty `FLAGGED` list), or
+either contradicts `CLASSIFICATION` — `VERDICT: IN-SCOPE` or `FLAGGED: none` while any
+`CLASSIFICATION` group is labelled `unrequested-expansion`, or the `CLASSIFICATION`
+section carries no groups at all, in either verdict direction, or a path with such a group
+missing from a non-empty `FLAGGED` list — or, in the other direction, `VERDICT:
+SCOPE-EXPANSION` or a non-empty `FLAGGED` list while **no** `CLASSIFICATION` group is
+labelled `unrequested-expansion`, or a `FLAGGED` path none of whose `CLASSIFICATION`
+groups is so labelled — or otherwise unparseable:** record why the
+verdict was unusable, and proceed. Do not
+re-dispatch the judge — it is a one-shot check by design.
+
+**Known divergence from `shared/return-convention.md`.** The tier-2 judge
+(`shared/scope-judge-prompt.md`) returns plain structured text (`VERDICT:`/`FLAGGED:`/
+`CLASSIFICATION:`/`CONFIDENCE:`), not an Evidence Receipt. An orchestrator that has
+adopted the receipt convention — "every subagent it dispatches ... MUST return exactly
+one Evidence Receipt" — has an unresolved conflict the moment it adopts tier 2: giving
+the judge a receipt shape is a prerequisite for that adoption and has not been done.
+Debugging's Phase 4.4 prototype does not carry the `return-convention.md` marker, so it
+does not hit this conflict today; a future adopter that does carry the marker must
+resolve it before dispatching the judge as specified here.
+
+**When NOT to run tier 2.** The judge's cost is dominated by a fixed per-dispatch
+overhead, so it is only worth paying against work that is itself substantial. Skip it
+when:
+
+1. the dispatch's allowed file set was fully pinnable up front AND the work inside those
+   files is mechanically constrained (a rename, a config value) — i.e. intra-file
+   expansion is not a plausible failure mode;
+2. the diff is trivially small (single-hunk fixes); or
+3. the dispatch is *deliberately* exploratory or expansive — a blast-radius scan that
+   fixes sibling occurrences by design will be flagged as expansion by a judge that was
+   only shown the original bug.
+
+Conditions (1) and (3) are categorical: where either holds, do not run tier 2, whatever
+an adopting skill's size threshold says — (3) in particular cannot be expressed as a
+threshold, and a large deliberately-expansive diff is the case a size rule gets wrong.
+Condition (2) is deliberately imprecise; an adopting skill's own mechanical size
+threshold (e.g. debugging's Phase 4.4: `>1 non-test file OR >40 changed lines in
+non-test files`) is the operative rule wherever it and "trivially small" could disagree
+on a specific diff.
+
+**Cost (measured, #562):** these figures and the threshold above assume a Sonnet judge;
+no agent def binds that tier today (`harness-adapter.md` Mapping 1b — prose model words
+are descriptive, not binding), so an orchestrator running on a larger model pays
+proportionally more and the threshold is correspondingly miscalibrated. All six run-1
+dispatches now have a retained token/wall
+figure — P1/P2/N1/N2 captured at run time, P3/N3 recovered from the session transcript's
+per-dispatch `<usage>` records and cross-validated (that field matches the four
+run-time-recorded figures exactly, 4/4, so it is the same measurement — see the write-up's
+Provenance section). A fixed per-dispatch floor of **~50.3k tokens** dominates: the two
+smallest diffs cost 50,439 and 50,325 tokens, close to that floor. Across the full
+six-point corpus the spread is 50,325-60,119 tokens — under 20% between the cheapest and
+most expensive case, while diff size varies 4.7x. Diff-size dependence beyond the floor is
+**not characterized**, and the full corpus sharpens the non-monotonicity: N3's diff is
+about half the size of P1's yet costs more tokens and over 3x the wall time (58,678
+tokens/81.7s vs. 56,422 tokens/23.9s) — confirming, on all six points rather than four,
+that a fixed floor dominates and diff-size dependence past it is not characterized. One
+sonnet dispatch per case; the one-turn/one-tool-call characterization was observed at
+spike time but is not itself a retained, citable figure (see the write-up's Cost
+section). 14-82s wall across the six cases, fully parallelizable against other post-work
+checks. Run 2's cost (P3 = 58,513 tokens/58.4s, N3 = 58,422 tokens/78.7s) was also
+recovered post-hoc from the transcript, the same route and caveat as run 1's P3/N3
+figures — cost is post-hoc for run 2 and for run 1's P3/N3; run 1's P1/P2/N1/N2 cost was
+captured at run time (see the write-up).
+
+On the #562 corpus the judge scored 3/3 on diffs containing a real unrequested expansion
+and 3/3 on clean diffs whose only extra touches were legitimate side-effects (dead-import
+removal, `.gitignore`, prose restated to match a changed spelling) — case-level verdicts
+against pre-registered ground truth: four cases (P1, P2, N1, N2) single-run, two cases
+(P3, N3) whose retained run-1 verdict was recovered post-hoc from the session transcript
+and then confirmed by a live-captured second run — two of the six cases were re-run, n=6,
+one model (see the write-up's Provenance for the run-1/run-2 provenance asymmetry).
+Hunk-level labels were **not** stable under replication: run 1 P3 had 3 of 9
+hunk-classification groups differ from ground truth, 2 of them crossing the expansion
+line (one root judgment error, propagated to its test) and a third that does not (a
+justified-adjacent-vs-in-scope mismatch), that run 2's different 7-group partition
+matched ground truth on, while reproducing the case-level verdict, flagged set, and
+confidence exactly (see the write-up), so the 3/3 rates above are case-level results, not
+a variance-measured false-positive rate at the hunk level.
+The prompt was also amended after measurement (a `## Confidence` rubric and injection
+hardening were added), so these numbers are evidence for the approach, not for the
+shipped `shared/scope-judge-prompt.md` text as written.
 
 ## Graphify Consult
 

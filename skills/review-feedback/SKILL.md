@@ -216,7 +216,6 @@ When (and only when) running standalone, at the terminal conclusion emit ONE **T
 - The `emit` CLI owns the mechanics: graceful skip on `CRUCIBLE_CALIBRATION_DISABLED=1` (L-6), and auto-fill of `repo` + `schema_version`. If the script can't be resolved, warn to stderr and skip — a missing emit must **never block** the skill.
 - Populate ONLY meaningful values: `schema_version: 2`, `run_id`, `skill: "review-feedback"`, `tier: "B"`, `verdict` (feedback evaluated and resolved → `PASS`; feedback disputed / routed to the user → `ESCALATED`), `timestamp` (ISO-8601 UTC), `gated_files` (the reviewed artifact's files, repo-relative), `artifact_type` (per the reviewed artifact; default `code`).
 - Set ALL calibration fields EXPLICITLY null per "Tier-B null semantics": `severity_histogram`, `highest_finding`, `would_have_shipped_without_gate`, `findings_count`, `confidence`, `chunk_hash`, `rounds`, `predicted_falsifier` — all `null`. Also `gated_files_truncated: 0`, `comment: null`, `backfilled: false`, `falsified: null`, `falsified_by: null`.
-- **No advisory wiring.** review-feedback produces no confidence-weighted verdict, so Brier is not viable and no `brier_advisory` is read here by design.
 
 ## The Bottom Line
 

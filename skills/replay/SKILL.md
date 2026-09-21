@@ -368,7 +368,7 @@ Append a structured signal to the manifest directory:
 This output is designed to be:
 - **Human-readable** (markdown tables) for decision-making
 - **Machine-readable** (JSONL) for future chronicle/eval integration
-- **Eval-compatible** -- structured input/output pairs from real pipelines, suitable for skill-creator eval generation
+- **Eval-compatible** -- structured input/output pairs from real pipelines, suitable for anvil eval generation
 
 ## Edge Cases
 

@@ -88,7 +88,7 @@ Next Steps:
 
 Health transitions are one-directional within a phase: GREEN -> YELLOW -> RED. Phase boundaries reset to GREEN.
 
-- **Phase boundaries** (reset to GREEN): Phase 0->1, 1->Synthesis, Synthesis->2, 2->3, 3->4, 4->4.5, 4.5->5. Sub-phases (3.5, within Phase 3) do NOT reset.
+- **Phase boundaries** (reset to GREEN): Phase 0->1, 1->Synthesis, Synthesis->2, 2->3, 3->4, 4->4.5, 4.5->5. Sub-phases (3.5, within Phase 3; 4.4, within 4->4.5) do NOT reset.
 - **YELLOW:** hypothesis cycle 3+, quality gate round 5+, fix retry in progress
 - **RED:** escalation pending, stagnation detected, 3 fix failures reached
 
@@ -119,18 +119,22 @@ The debugging skill writes session state to disk at **every phase transition**, 
 **Scratch directory:** `/tmp/crucible-debug-<session-id>/` where `<session-id>` is a timestamp generated at the start of the debugging session.
 
 **Write at each phase transition:**
-- `phase-state.md`: current phase, cycle count, current hypothesis (if formed)
+- `phase-state.md`: current phase, cycle count, current hypothesis (if formed), and
+  `wip-sha-<cycle>:` (where `<cycle>` is the same N as `pre-debug-fix-cycle-N` — the
+  current hypothesis cycle's Phase 4 WIP commit SHA, once recorded — see Commit Strategy;
+  **never drop a given cycle's key on a subsequent phase-transition write**)
 - `hypothesis-log.md`: running hypothesis log (updated at Phase 3, after Phase 4 results)
 - `synthesis-report.md`: latest synthesis report (written after Synthesis completes)
 - `implementation-details.md`: cumulative record of implementation attempts — what was tried, which files changed, regressions encountered, why it failed (appended after each Phase 4)
 - `where-else-state.md`: Phase 4.5 state — pre-Phase-4.5 SHA, generalized pattern, siblings found/fixed/remaining (written during Phase 4.5, read during compaction recovery)
+- `scope-check-<cycle>.md` (where `<cycle>` is the hypothesis cycle count, the same N as `pre-debug-fix-cycle-N`): Phase 4.4 state for the current hypothesis cycle — verdict (from the closed set in Phase 4.4, including the skip/unparseable outcomes), flagged paths, and confidence, or the reason no usable verdict exists (written after Phase 4.4 runs or is skipped, read during compaction recovery)
 
 At each phase transition, in addition to writing session state files, emit a Compression State Block into the conversation. The block captures the reasoning layer (goal, decisions, constraints, next steps) that the session state files do not.
 
 ### Checkpoint Timing
 
 Emit a Compression State Block at:
-- **Phase transitions:** 0→1, Synthesis→3, 3.5→4, 4.5→5 — emit a **Phase Handoff Manifest** (see below) instead of a Compression State Block at these major boundaries. Other transitions (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5) continue to use CSBs.
+- **Phase transitions:** 0→1, Synthesis→3, 3.5→4, 4.5→5 — emit a **Phase Handoff Manifest** (see below) instead of a Compression State Block at these major boundaries. Other transitions (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5) continue to use CSBs. (Phase 4.4 is a sub-phase within 4→4.5 and does not emit its own CSB.)
 - **Hypothesis cycles:** After each hypothesis is formed or invalidated
 - **Fix attempts:** After each Phase 4 implementation attempt completes (success or failure)
 - **Escalations:** Before any escalation to user
@@ -144,6 +148,7 @@ Emit a Compression State Block at:
 2. Read `hypothesis-log.md` for hypothesis history.
 3. Read `synthesis-report.md` for latest investigation findings.
 4. Read `implementation-details.md` for prior fix attempts.
+   - Also read `scope-check-<cycle>.md` for the *current* hypothesis cycle (if it exists) — written for every Phase 4.4 outcome, including `SKIPPED-BELOW-THRESHOLD`, `SKIPPED-NO-WIP-COMMIT`, `SKIPPED-HEAD-MISMATCH`, and `UNPARSEABLE`, not only a usable judge verdict — so a resumed run knows Phase 4.4 already ran (or was correctly skipped) for this cycle and does not re-dispatch the scope judge blindly — **presence means Phase 4.4 is done for this cycle and Phase 4.5 may proceed, EXCEPT when the recorded outcome is `SKIPPED-NO-WIP-COMMIT` or `SKIPPED-HEAD-MISMATCH`, which are halts, not completions: do not proceed to Phase 4.5. For `SKIPPED-NO-WIP-COMMIT`, resolve the commit failure, then re-enter Phase 4.4 from the top for this cycle and overwrite the file. For `SKIPPED-HEAD-MISMATCH`, resolve per case (a) or (b) as applicable, overwrite `scope-check-<cycle>.md` with the resulting outcome, before proceeding.**
 5. Read `where-else-state.md` (if exists) for Phase 4.5 progress — which siblings have been fixed, which remain.
 6. Output status to user and continue from the current phase.
 
@@ -176,7 +181,7 @@ At major phase boundaries (0→1, Synthesis→3, 3.5→4, 4.5→5), write a **ha
 **Rules:**
 - After writing the manifest, emit an explicit **shed statement**.
 - After writing the manifest, update `## Compression State` in pipeline-status.md with manifest contents.
-- CSBs continue at non-major-boundary checkpoint triggers (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5, hypothesis cycles, fix attempts, escalations, health transitions).
+- CSBs continue at non-major-boundary checkpoint triggers (1→Synthesis, Synthesis→2, 2→3, 3→3.5, 4→4.5, hypothesis cycles, fix attempts, escalations, health transitions). Phase 4.4 is a sub-phase within 4→4.5 and emits no CSB for its own phase transition; the escalation and health-transition triggers above apply inside it normally (gate (1) case (b) escalates to the user).
 - **Backward compatibility:** If no manifest exists at a recovery point, fall back to CSB-based recovery.
 
 ## The Iron Law
@@ -227,6 +232,7 @@ All investigation and implementation is delegated to subagents via the Agent too
 | Synthesis | Consolidation | Opus | Cross-referencing, contradiction detection, and causal reasoning — not just summarization |
 | Phase 2 | Pattern Analysis | Opus | Exhaustive comparison requires depth |
 | Phase 4 | Implementation | Opus | TDD + root cause fix |
+| Phase 4.4 | Scope judge | Sonnet | Semantic traceability check — hypothesis text vs. fix diff, no repo context |
 | Phase 4.5 | "Where Else?" scan | Opus | Cross-codebase pattern matching and sibling fixing |
 | Phase 5 | Red-team | Opus | Adversarial analysis |
 | Phase 5 | Code review | Opus or Sonnet | Lead decides by fix complexity |
@@ -270,8 +276,11 @@ Phase 3.5: Hypothesis Red-Team (crucible:quality-gate on hypothesis)
 Phase 4: Implementation agent (TDD: failing test, fix, verify)
     |
     v
-Orchestrator: Verify fix -> Success? Phase 4.5. Failed? Cleanup, log, loop back.
+Orchestrator: Verify fix -> Success? Phase 4.4. Failed? Cleanup, log, loop back.
     -> 3 failures? Escalate to user. If checkpoints exist: "Checkpoints available from prior fix cycles. Restore to a known-good state before manual investigation?"
+    |
+    v
+Phase 4.4: Scope judge — did the fix stay inside the hypothesis? (skipped on small fixes; halts if no WIP commit was created, or if HEAD cannot be confirmed to be this cycle's WIP commit)
     |
     v
 Phase 4.5: "Where Else?" scan — find and fix sibling locations
@@ -569,13 +578,227 @@ git commit -m "fix(wip): [hypothesis summary]"        # on success
 git commit -m "fix(wip-failed): [hypothesis summary]"  # on failure or regressions
 ```
 
+**Immediately after the commit succeeds, record its SHA** (`git rev-parse HEAD`) to
+`phase-state.md` as `wip-sha-<cycle>:` (this cycle's key) — this is the durable record
+Phase 4.4's gate (1) cites as its comparison operand, so it survives a compaction between
+this commit and Phase 4.4.
+
 This gives every outcome path a clean revert target (`git revert <sha>`), gives Phase 5 code review a real diff, and isolates Phase 5 test modifications from the core fix. If the full pipeline succeeds, the final commit message is amended to drop the `(wip)` prefix. If Phase 5 requires changes (test audit updates, gap test additions), those are committed as separate follow-up commits.
 
-On loop-back (failed fix or user-requested revert), `git revert <wip-sha>` cleanly undoes all Phase 4 changes including new files.
+On loop-back (failed fix or user-requested revert), `git revert <wip-sha-cycle>` (this cycle's recorded SHA) cleanly undoes all Phase 4 changes including new files.
 
-If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha>`. This reverts all sibling commits plus the original WIP commit in one operation. See Phase 4.5 below.
+If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha-cycle>`. This reverts all sibling commits plus the original WIP commit in one operation. See Phase 4.5 below.
 
 **Phase 4.5 sibling commits:** Each sibling fix uses the prefix `fix(sibling):` with a descriptive message. Example: `fix(sibling): add icon initialization to StashScreen.OnEnable`
+
+---
+
+### Phase 4.4: Scope Check (Tier-2 Scope Judge, Advisory)
+
+**Prototype of `shared/dispatch-convention.md` → Scope Anchoring, tier 2 (#562).**
+
+**EXPERIMENTAL.** This phase is a #562 spike prototype, not a hardened pattern, and is
+**advisory-only**: it runs the judge, records the verdict to disk, and surfaces it — it
+never reverts, resets, or re-dispatches anything, so there is no destructive step for a
+crash to interrupt. Its accuracy numbers come from a different input shape than the one
+it actually feeds the judge (see "Unmeasured input shape" below), and its output format
+has a known, declared conflict with `shared/return-convention.md` (see
+`shared/dispatch-convention.md`'s Scope Anchoring section). Do not copy this phase into
+another skill until those gaps are closed.
+
+Phase 4's implementation discipline ("ONE change at a time. No 'while I'm here'
+improvements. No bundled refactoring.") is prose the implementer is asked to honor with
+nothing checking it. Tier 1 (a pre-declared file allow-list) does not apply here — the
+hypothesis names a root cause, not the file set the fix will need. This phase adds a
+read-only check: it flags likely scope expansion for a human, or a later review phase,
+to weigh — it does not act on what it finds.
+
+**Unmeasured input shape:** the #562 spike's six cases all used issue/finding text
+(request-shaped, with an enumerable ask list); none used a Phase 3 hypothesis (a causal
+assertion with no enumerable ask list). This adoption feeds the judge a hypothesis, the
+one input shape the spike never measured — so the spike's accuracy numbers do not
+transfer to it unexamined. Treat the first several runs as calibration: compare the
+verdict against what Phase 5's red-team flags. **This is a primed cross-check, not an
+independent one** — the Phase 4.5→5 handoff already carries the Phase 4.4 `[DEC-N]`
+(flagged paths and confidence) into Phase 5's context (see Phase Handoff: 4.5 → 5 below),
+so a systematic bias toward `unrequested-expansion` on a single-item ask list can be
+masked if the red-teamer's own read is anchored on having seen the judge's flags first.
+Weigh agreement accordingly.
+
+**One rule governs when this phase runs: Phase 4.4 runs immediately before Phase 4.5,
+whenever the pipeline is about to reach Phase 4.5.** (The `SKIPPED-NO-WIP-COMMIT` branch
+of gate (1) below is a defensive fallback for the case where Commit Strategy's own
+guarantee — a WIP commit always gets created — somehow did not hold; it does not describe
+a normal path into this phase.)
+In practice that is the "Fix works, no regressions" outcome in Loop-back, Cleanup, and
+Escalation below — the only outcome that proceeds to Phase 4.5. It does **not** run on
+either loop-back path: not on the regression path ("Fix works but introduces regressions"
+— the original fix stays, but the pipeline starts a new investigation cycle instead of
+proceeding to Phase 4.5; that retained fix is never scope-judged by Phase 4.4 — the judge
+only ever sees the current cycle's HEAD commit against the current cycle's hypothesis, so
+a later cycle's own success reaches Phase 4.4 judging only that later cycle's own WIP
+commit, and the retained fix is reviewed by Phase 5 only), and not on the fix-failed path
+(the WIP commit is reverted, so there is nothing left to scope). It runs again on the
+Phase 4 of whichever cycle next reaches the success outcome, judging that cycle's own WIP
+commit against its own hypothesis.
+
+**Evaluate the two gates below in this order — (1) then (2) — never (2) first:**
+
+**(1) Requires a Phase 4 WIP commit, and it must be `HEAD`.** Phase 4.4 only runs on the
+"Fix works, no regressions" outcome, which is exactly the outcome where the Commit
+Strategy above always creates a WIP commit (the implementer modified files to fix the
+bug). The "test passes immediately, bug already resolved" outcome is a different
+Loop-back outcome — it bypasses Phase 4.4 (and Phase 4.5) entirely on its own terms, not
+because no WIP commit exists for the case this phase actually handles. Confirm identity,
+not just existence: `git rev-parse HEAD` must equal `phase-state.md`'s `wip-sha-<cycle>:`
+**for the current cycle only** (see Commit Strategy above, which records it immediately
+after the WIP commit succeeds) — `HEAD` alone is not proof, since it silently resolves to
+whatever commit came before if the WIP commit was never created, or to a later commit if
+one landed on top (e.g. a pre-commit hook's auto-fix commit, or the "preserve reproduction
+test" commit pattern used elsewhere in this skill). A `wip-sha-<cycle>:` belonging to any
+other cycle is never a valid comparison operand or case-(a) operand for this cycle's gate
+(1) — treat it as absent. This gate has two distinct failure modes, and each gets its own
+outcome token and remedy — do not conflate them:
+
+- **`SKIPPED-NO-WIP-COMMIT`** — the Commit Strategy step itself observably failed for this
+  cycle (e.g. `git commit` exited non-zero, a pre-commit hook blocked it), and no WIP
+  commit was created at all. If this happens, write `SKIPPED-NO-WIP-COMMIT` to
+  `scope-check-<cycle>.md` (see "Record the outcome" below) and **STOP: the commit failure
+  must be resolved** (retry after fixing the hook failure, or escalate) **before Phase
+  4.5**, which requires the WIP commit's SHA. Phase 4.4 does not itself resolve it. If the
+  commit failure is resolved and the WIP commit is created, re-enter Phase 4.4 from the
+  top for this cycle and overwrite `scope-check-<cycle>.md` with the resulting outcome.
+- **`SKIPPED-HEAD-MISMATCH`** — the identity check cannot confirm `HEAD` is this cycle's
+  WIP commit, for either of two reasons: (a) `phase-state.md` has a `wip-sha-<cycle>:` for
+  this cycle but it is not `HEAD` — e.g. a pre-commit hook appended a follow-up commit, or
+  the implementer made a second commit on top; or (b) `phase-state.md` has no
+  `wip-sha-<cycle>:` for this cycle at all (including when only a prior cycle's key is
+  present — that is never a valid operand for this cycle, per gate (1) above) **and the
+  Commit Strategy step was not observed to fail** — the identity operand is missing, and
+  `HEAD` cannot supply it, since a value read from `HEAD` is not evidence about `HEAD`. Do
+  not attempt to recover `wip-sha-<cycle>:` mechanically from `git log -1` or any other
+  inspection of `HEAD` in case (b). Neither case is a commit failure (in (a) a commit
+  exists; in (b) no commit failure was observed; if one *was* observed, this is
+  SKIPPED-NO-WIP-COMMIT, above) — do **not** apply the `SKIPPED-NO-WIP-COMMIT` remedy
+  (telling the user to fix a hook failure that did not occur is itself the defect this
+  token exists to avoid). If this happens, write `SKIPPED-HEAD-MISMATCH` to
+  `scope-check-<cycle>.md`. For (a): either evaluate gate (2) against the recorded
+  `wip-sha-<cycle>:` (`git show --numstat --format='' <wip-sha-cycle>` in place of `HEAD`)
+  and, if it passes, judge that commit directly (`git show --format='' <wip-sha-cycle>` in
+  place of `HEAD`), or escalate. For (b): there is no recorded commit to judge directly —
+  escalate, naming the missing `wip-sha-<cycle>:` as the cause, and ask the user to
+  confirm which commit is this cycle's WIP commit before Phase 4.4 proceeds. **Record the
+  confirmed SHA to phase-state.md as wip-sha-<cycle>: before proceeding** — it is the
+  operand Phase 4.5 and the Loop-back revert paths read. Once the remedy resolves — gate
+  (2) resolves to a judged verdict or a below-threshold skip, or the escalation settles on
+  one — **overwrite `scope-check-<cycle>.md` with the resulting outcome** (`IN-SCOPE`,
+  `SCOPE-EXPANSION`, `UNPARSEABLE`, or `SKIPPED-BELOW-THRESHOLD`) so the recovery key
+  records the completed check, not the resolved mismatch.
+
+Both are outcomes that do not terminate the phase for the cycle in the ordinary
+done-for-this-cycle sense — see the exception in "Record the outcome" and Compaction
+Recovery below. Do not evaluate gate (2) against `HEAD` until this gate passes; case (a)'s
+remedy above is the only route by which gate (2) may be evaluated against a different
+operand, and it is permitted.
+
+**(2) Runs when** the Phase 4 WIP commit (confirmed by gate (1) to be `HEAD`) is
+non-trivial: **>1 non-test file changed OR >40 changed lines (insertions + deletions,
+from `git show --numstat --format='' HEAD`) in non-test files**. (`--numstat` gives full,
+unabbreviated paths and insertions/deletions
+as two summable integers, unlike `--stat`, which truncates long paths; count a binary
+file as one changed non-test file with 0 lines, and use the post-rename path for
+classification when `--numstat` reports a rename.) A test file is a file whose
+**basename** matches `test_*`, `*_test.*`, `*.test.*`, `*.spec.*`, `*_spec.*`, `*Test.*`,
+`*Tests.*`, or (in this repo) `check_*` (Crucible's structural checkers), or whose path
+contains a `tests/`, `test/`, `spec/`, `__tests__/` or `evals/` segment — a purpose-based
+rule, not an invocation-based one: `scripts/run_tests.sh` invokes plenty of production
+scripts (e.g. `scripts/rcpt_verify.py --selftest`) that are not themselves test files, and
+classifying everything it invokes as a test file would make the below-threshold branch
+swallow diffs that should be judged. A path following a test convention this list does not
+name still counts as a test file; when genuinely ambiguous, count it as a **non-test**
+file — the cost of running the judge unnecessarily is bounded; the cost of skipping it is
+losing the check entirely. Phase 4's TDD cycle guarantees at least one
+test file plus one source file on every fix, so counting test files toward the threshold
+would make the "below this, skip" branch unreachable. Below the threshold the judge's
+fixed cost outweighs what it can find — skip it, writing `SKIPPED-BELOW-THRESHOLD` to
+`scope-check-<cycle>.md` rather than skipping silently, so a resumed run knows why no
+judge ran this cycle. This threshold assumes a Sonnet judge; no agent def binds that tier
+today (`harness-adapter.md` Mapping 1b — prose model words are descriptive, not binding),
+so an orchestrator on a larger model pays proportionally more and the threshold is
+correspondingly miscalibrated (see `shared/dispatch-convention.md`'s Cost paragraph).
+
+**Ordering is load-bearing: Phase 4.4 runs AFTER the Phase 4 WIP commit and BEFORE Phase
+4.5.** Phase 4.5 fixes analogous siblings *by design*; a judge shown only the original
+hypothesis would flag every sibling commit as unrequested expansion. Judge the Phase 4
+fix alone.
+
+Dispatch one judge (model tier **sonnet**) using `shared/scope-judge-prompt.md`, disk-
+mediated per `shared/dispatch-convention.md`. It receives exactly two substitutions and
+nothing else:
+
+- `{{TASK}}` — the hypothesis text as it stood when Phase 4 was dispatched for this cycle
+  (i.e. the post-Phase-3.5 reform if the hypothesis was reformed, and this cycle's entry
+  if the pipeline has looped back), **verbatim** (not the investigation
+  synthesis, not the implementation report, not the implementation-details log)
+- `{{DIFF}}` — `git show --format='' HEAD`, the Phase 4 WIP commit's own diff (Phase 4.4
+  runs immediately after that commit, so `HEAD` names it directly — no dependence on the
+  undefined `<pre-fix-sha>` placeholder used elsewhere in this skill). `--format=''`
+  suppresses the commit message, which matters for the same reason the judge gets no
+  other repo context: a commit message states the author's own rationalization of the
+  change, which is exactly what the judge must not see.
+
+**The verdict is advisory only.** The judge returns `VERDICT: IN-SCOPE | SCOPE-EXPANSION`,
+a flagged path list, per-hunk classifications, and a confidence (see
+`shared/scope-judge-prompt.md`'s `## Confidence` section — Phase 4.4 gates no
+*tree-modifying* action on confidence, at any level. The one place confidence is
+consulted is routing: `CONFIDENCE: low` is an unusable return per the canonical trigger
+list below, and is recorded as `UNPARSEABLE`). **If the
+return is unusable** (unparseable per the canonical trigger list in
+`shared/dispatch-convention.md`'s Scope Anchoring tier
+2, "Reading the verdict" — do not re-specify that list here): record a
+`[DEC-N]` line noting the scope check did not produce a usable verdict, write
+`UNPARSEABLE` to `scope-check-<cycle>.md` (see "Record the outcome" below), and proceed to
+Phase 4.5. Do not re-dispatch the judge; do not block on it.
+
+**Record the outcome to disk before proceeding, for every branch above** (judge ran,
+skipped below threshold, skipped for no WIP commit, skipped for a HEAD mismatch, or
+unparseable) — `<scratch-dir>/scope-check-<cycle>.md` (the session scratch directory
+`/tmp/crucible-debug-<session-id>/`, same as the other Session State files — do not use
+the `<scratch>` token, which names the persistent memory directory instead), holding one
+verdict from the closed set `{IN-SCOPE,
+SCOPE-EXPANSION, UNPARSEABLE, SKIPPED-BELOW-THRESHOLD, SKIPPED-NO-WIP-COMMIT,
+SKIPPED-HEAD-MISMATCH}` plus a
+one-line reason, and — when the judge actually ran — the flagged path list and
+confidence. Writing the file on every branch, not only when the judge produced a usable
+verdict, is what makes it a reliable recovery marker: compaction recovery keys on this
+file's presence **for the current cycle** (see Compaction Recovery below) to know Phase
+4.4 already ran (or was correctly skipped) for this cycle and must not be re-dispatched —
+a file written only on some branches would let a resumed run silently re-run Phase 4.4 on
+the branches that didn't write one, defeating "one-shot check by design." There is
+nothing destructive to resume into either way, since Phase 4.4 never modifies the tree.
+**Presence means done and Phase 4.5 may proceed, except when the recorded outcome is
+`SKIPPED-NO-WIP-COMMIT` or `SKIPPED-HEAD-MISMATCH`** — both are transient/blocking by
+design (see gate (1) above) and must be resolved (and, for either halt token, overwritten
+once it is resolved — see gate (1) above for what each token's remedy overwrites the file
+with) rather than treated as a terminal record that clears the cycle to proceed.
+
+- `IN-SCOPE` → record a `[DEC-N]` line and proceed to Phase 4.5.
+- `SCOPE-EXPANSION` → record a `[DEC-N]` line naming the flagged paths and the verdict's
+  confidence, surface the verdict to the user, and proceed to Phase 4.5. **Phase 4.4
+  never reverts, resets, re-dispatches the implementer, or otherwise modifies the tree —
+  at any confidence level.** The flagged paths are information for the orchestrator and
+  for Phase 5's red-teamer to weigh, not a trigger for action, and Phase 4.4 has no
+  interaction with the 3-failure escalation counter: it never counts as, and never
+  causes, a Phase 4 fix attempt.
+
+Either way, record the `[DEC-N]` line under Decisions Carried Forward in the Phase
+4.5→5 handoff. **Known gap:** the 4.5→5 Phase Handoff Manifest's `Inputs for Phase 5`
+allowlist does not yet name the scope-check file itself, so the red-teamer sees the
+decision but not the judge's full classification output — do not assume it is visible
+unless the orchestrator surfaces it directly. This is a known gap in the #562 prototype,
+not yet filed as a follow-up issue.
+
+The judge **never edits anything** and never re-runs. One dispatch, one verdict.
 
 ---
 
@@ -583,7 +806,7 @@ If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` i
 
 **RECOMMENDED SUB-SKILL:** Use crucible:checkpoint — create checkpoint with reason "pre-where-else" before dispatching the scan agent. This replaces the need to manually track the pre-Phase-4.5 SHA for revert mechanics — the checkpoint captures the full working directory state.
 
-After Phase 4 succeeds and the WIP commit is created, dispatch the "Where Else?" scan agent to find and fix analogous locations in the codebase that have the same bug pattern. Phase 4.5 does NOT run on loop-back paths (fix failed, regressions found).
+After Phase 4 succeeds, the WIP commit is created, and Phase 4.4 has recorded an outcome other than `SKIPPED-NO-WIP-COMMIT` or `SKIPPED-HEAD-MISMATCH` (see Phase 4.4's gate (1) above — either of those two outcomes is a halt, not a completion, and must be resolved before Phase 4.5 can run), dispatch the "Where Else?" scan agent to find and fix analogous locations in the codebase that have the same bug pattern. Phase 4.5 does NOT run on loop-back paths (fix failed, regressions found).
 
 **Prompt template:** `./where-else-prompt.md`
 
@@ -707,7 +930,7 @@ Before invoking the quality gate on the fix:
 1. Write `handoff-4.5-to-5.md` with:
    - **Goal:** original bug report, verbatim
    - **Inputs for Phase 5:** full diff (`git diff <pre-fix-sha>..HEAD`), conventions path, test file paths, Where Else report path (or "no siblings found"), defect signature path (if written)
-   - **Decisions Carried Forward:** root cause, fix approach, sibling fix decisions
+   - **Decisions Carried Forward:** root cause, fix approach, sibling fix decisions, any Phase 4.4 scope-judge `[DEC-N]`
    - **Active Constraints:** constraints on review scope
    - **Shed Receipt:** Phase 4 TDD cycle details, Phase 4.5 candidate evaluation reasoning → fix is in the diff, sibling results in the report
 2. Emit shed statement: "Implementation context shed. Fix diff, test files, and sibling report on disk. TDD cycle details and candidate evaluation reasoning are not carried forward."
@@ -810,6 +1033,7 @@ Decision types:
 - `gate-round` — hypothesis red-team results per round
 - `escalation` — why orchestrator escalated
 - `hypothesis-reform` — why hypothesis was reformed after red-team
+- `scope-check` — Phase 4.4 verdict and, on SCOPE-EXPANSION, flagged paths
 
 ---
 
@@ -817,7 +1041,7 @@ Decision types:
 
 After the Implementation agent reports back, the orchestrator evaluates four possible outcomes:
 
-**Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 4.5 ("Where Else?" blast radius scan). After Phase 4.5 completes, proceed to Phase 5. After Phase 5 passes clean:
+**Fix works, no regressions** -- Log the result in the hypothesis log. Proceed to Phase 4.4 (scope check), then Phase 4.5 ("Where Else?" blast radius scan). After Phase 4.5 completes, proceed to Phase 5. After Phase 5 passes clean:
 - **RECOMMENDED:** Use crucible:forge (retrospective mode) — capture the debugging journey and lessons learned
 - **Chronicle signal fallback:** If forge retrospective will not run (user declined, session ending),
   append a minimal chronicle signal directly:
@@ -830,15 +1054,15 @@ After the Implementation agent reports back, the orchestrator evaluates four pos
 
 **Test passes immediately (no fix applied)** -- The implementer's reproduction test passed before any fix was written. Two possibilities:
 1. **Bug was already resolved** (by investigation side effects, environment change, or prior cycle). Verify by running the original reproduction steps. If the original bug is gone: proceed to Phase 5 but **skip Step 1 (quality-gate on code)** since there is no code change. Go directly to Step 2 (code review) scoped to the reproduction test file only.
-2. **Test doesn't reproduce the bug** (hypothesis was wrong about the reproduction). Log the hypothesis as "wrong — test did not reproduce" in the hypothesis log. Revert the WIP commit (`git revert <wip-sha>`) to remove the non-reproducing test. Loop back to Phase 3 to reform the hypothesis, or Phase 1 if the root cause itself is in question.
+2. **Test doesn't reproduce the bug** (hypothesis was wrong about the reproduction). Log the hypothesis as "wrong — test did not reproduce" in the hypothesis log. Revert the WIP commit (`git revert <wip-sha-cycle>`, this cycle's recorded SHA) to remove the non-reproducing test. Loop back to Phase 3 to reform the hypothesis, or Phase 1 if the root cause itself is in question.
 
-**Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug. **Critical:** Pass the original bug context (hypothesis, fix applied, original root cause) to the new investigation agents as background context, with the constraint: "The original fix must not be reverted. Investigate why the fix caused regressions and propose an additive solution."
+**Fix works but introduces regressions** -- Start a new investigation cycle targeting the regressions. The original fix stays; the regressions are a new bug. This path does not proceed to Phase 4.5, so Phase 4.4 does not run on it either (see Phase 4.4's "One rule governs when this phase runs" rule above) — the retained original fix is reviewed by Phase 5's red-team, not by Phase 4.4, whenever the pipeline eventually reaches Phase 5. **Critical:** Pass the original bug context (hypothesis, fix applied, original root cause) to the new investigation agents as background context, with the constraint: "The original fix must not be reverted. Investigate why the fix caused regressions and propose an additive solution."
 
 **Fix does not resolve the issue** -- Before looping back:
 1. Log the failure in the hypothesis log with metrics (see Stagnation Detection below)
 2. **Test triage:** Dispatch a quick Opus subagent to read the test and the hypothesis log, then decide: keep the test (if it validly reproduces the bug regardless of the failed fix) or remove it (if it was hypothesis-specific and doesn't reproduce the actual bug). The orchestrator does not make this judgment directly — it requires reading code.
-3. **Revert the WIP commit** using `git revert <wip-sha>` (see Commit Strategy above). This cleanly undoes all Phase 4 changes including any new files created during refactoring. If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha>` to revert all sibling commits plus the original WIP commit.
-   - If triage decided **"keep the test"**: dispatch a subagent to recover the test file from the reverted commit (`git checkout <wip-sha> -- <test-file-path>`) and commit it separately (`test: preserve reproduction test from cycle N`).
+3. **Revert the WIP commit** using `git revert <wip-sha-cycle>` (this cycle's recorded SHA; see Commit Strategy above). This cleanly undoes all Phase 4 changes including any new files created during refactoring. If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha-cycle>` to revert all sibling commits plus the original WIP commit.
+   - If triage decided **"keep the test"**: dispatch a subagent to recover the test file from the reverted commit (`git checkout <wip-sha-cycle> -- <test-file-path>`) and commit it separately (`test: preserve reproduction test from cycle N`).
    - If triage decided **"remove the test"**: no further action — the revert already removed it.
 4. Verify the working tree is clean: dispatch the cleanup agent to run `git status` and report any remaining modifications or untracked files. If any remain, clean them up before proceeding.
 5. Loop back to Phase 1 with the new information from the failed attempt. On loop-back, dispatch MORE agents than the prior cycle, not fewer — widen the investigation.
@@ -903,6 +1127,7 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
 | **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
 | **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
+| **4.4. Scope Check** | 1 subagent (Sonnet, advisory) | Judge whether the Phase 4 fix stayed inside the hypothesis (sub-phase of 4→4.5; skipped on small fixes) | Verdict recorded to disk; never blocks on the judge's verdict (halts if the Phase 4 WIP commit was never created, or if HEAD cannot be confirmed against phase-state.md's wip-sha-<cycle>:) |
 | **4.5. Where Else?** | 1 subagent (Opus) + 1 recorder (Sonnet) | Find and fix sibling locations; persist defect signature | Siblings fixed, signature written (if 1+ candidates) |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
 | **5b. Test Audit** | Test coverage skill (conditional) | Audit existing tests for staleness after fix | Stale tests updated/removed |

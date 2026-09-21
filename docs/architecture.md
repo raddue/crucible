@@ -19,6 +19,8 @@ The **forge** and **cartographer** skills are recommended (not required) knowled
 
 The **project-init** skill accelerates onboarding — run `/project-init` on an unfamiliar repo to get full structural context before the first `/build` or `/design`. It produces the same cartographer files that would accumulate over multiple sessions, tagged as structural scaffolding that gets replaced by task-verified content over time.
 
+The **adr** skill records durable Architecture Decision Records — write, supersede, and maintain the "why" of a technical choice in `docs/decisions/` — with trigger hooks in `design` (draft `PROPOSED`) and `finish` (promote/write `ACCEPTED`), plus a structural CI checker (`scripts/check_adr_integrity.py`).
+
 ## Investigation and decision layers
 
 The **recon** and **assay** skills provide the investigation and decision-evaluation layer. Recon produces a layered investigation brief (structure, patterns, scope, prior art) with optional depth modules. Assay evaluates competing approaches with constraint_fit scoring and kill criteria. Both are dispatched automatically by design (Phase 2), spec (per-ticket investigation), migrate (Phase 0 + User Gate), and audit (Phase 1 scoping). They're also usable standalone — `/recon` before any task, `/assay` for any architectural decision.
@@ -47,7 +49,7 @@ The **compass** skill maintains per-repo arc-state in `docs/compass.md` (current
 
 ## Calibration and regression memory
 
-These skills make Crucible's quality claims falsifiable and let past defects guard future ones. The **calibration ledger** is the epistemic backbone: Tier-A gate verdicts are appended to a machine-local central store (`~/.claude/crucible/ledger/`, never committed). **calibration-reconcile** later walks merged fix/hotfix branches to falsify those verdicts and computes per-skill Brier scores; **ledger** renders the weekly report — the honest "Crucible caught N silent bugs" headline, verdict breakdown, per-skill severity rates, and an inflation detector. The **grudge** skill (the Book of Grudges) is the complementary regression memory: every fixed bug is recorded as a machine-local, per-repo grudge, and skills query it for the files in scope before touching code, surfacing past regressions as forced "DO NOT REPEAT" context.
+The **grudge** skill and the calibration ledger together make Crucible's quality claims falsifiable and let past defects guard future ones. The **calibration ledger** is the epistemic backbone: Tier-A gate verdicts are appended to a machine-local central store (`~/.claude/crucible/ledger/`, never committed) by every gating skill's emit step. Reconciliation (walking merged fix/hotfix branches to falsify verdicts, computing per-skill Brier scores) and reporting (the weekly "Crucible caught N silent bugs" render) have **moved out of this repo** to the private `raddue/crucible-eval` repo (#460), which reads the same central store and, **as of #460**, vendors this repo's emission-side helpers by content hash — so a change to `ledger_append.py`, `atomic_write.py`, `pathmatch.py`, `grudge_append.py`, `grudge_query.py` or `uuid7.py` needs a manual re-sync there, which nothing here can check. The **grudge** skill (the Book of Grudges) is the complementary regression memory: every fixed bug is recorded as a machine-local, per-repo grudge, and skills query it for the files in scope before touching code, surfacing past regressions as forced "DO NOT REPEAT" context.
 
 ## Token efficiency
 

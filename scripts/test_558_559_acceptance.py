@@ -3,8 +3,8 @@
 
 Coarse, feature-level end-to-end tests for:
   #558 — complexity-ranked dispatch signal: `scripts/complexity_index.py`
-         (McCabe CC, diff-scoping) wired as the 4th advisory signal inside
-         `scripts/brier_advisory.py advise ... --diff`.
+         (McCabe CC, diff-scoping). (The brier_advisory dispatch overlay moved
+         to raddue/crucible-eval with the calibration-ledger cluster, #460.)
   #559 — grudge write-discipline Stop hook `hooks/grudge-resolution-guard.sh`
          backed by `scripts/grudge_query.py --by-commit` / `--by-files`.
 
@@ -31,7 +31,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
 COMPLEXITY_SCRIPT = os.path.join(REPO_ROOT, "scripts", "complexity_index.py")
-BRIER_SCRIPT = os.path.join(REPO_ROOT, "scripts", "brier_advisory.py")
 GRUDGE_APPEND = os.path.join(REPO_ROOT, "scripts", "grudge_append.py")
 HOOK = os.path.join(REPO_ROOT, "hooks", "grudge-resolution-guard.sh")
 
@@ -155,37 +154,6 @@ class ComplexityScoreCliTest(unittest.TestCase):
             )
             self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
             self.assertIn("hot_path", r.stdout)
-            self.assertNotIn("cold_path", r.stdout)
-
-
-class AdviseDiffSignalTest(unittest.TestCase):
-    """#558 — the 4th signal reaches the rendered advice end-to-end."""
-
-    def test_advise_diff_surfaces_only_intersecting_complexity_line(self):
-        with tempfile.TemporaryDirectory() as root, \
-                tempfile.TemporaryDirectory() as ledger_dir, \
-                tempfile.TemporaryDirectory() as grudge_dir:
-            repo = _init_repo(root)
-            _write(os.path.join(repo, "mod.py"), _complex_module())
-            _git(repo, "add", "-A")
-            _git(repo, "commit", "-qm", "chore: baseline")
-            _edit_first_line_inside_hot(repo)
-            diff_path = _capture_u0_diff(repo, os.path.join(root, "fixture.diff"))
-            env = _clean_env(
-                HOME=os.path.join(root, "home"),
-                CRUCIBLE_LEDGER_DIR=ledger_dir,
-                CRUCIBLE_GRUDGE_DIR=grudge_dir,
-            )
-            os.makedirs(env["HOME"], exist_ok=True)
-            r = subprocess.run(
-                [sys.executable, BRIER_SCRIPT, "advise", "inquisitor",
-                 "--diff", diff_path, "mod.py"],
-                cwd=repo, capture_output=True, text=True, env=env, timeout=60,
-            )
-            self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
-            self.assertIn("calibration-weighted dispatch", r.stdout)
-            self.assertIn("high complexity", r.stdout)
-            self.assertIn("mod.py::hot_path", r.stdout)
             self.assertNotIn("cold_path", r.stdout)
 
 
@@ -443,7 +411,7 @@ class GitEnvIsolationTest(unittest.TestCase):
 # how many tests actually EXECUTED: collected, minus skips, minus
 # expected-failures/unexpected-successes (all three keep a test in testsRun
 # while neutering its assertions). Bump this when adding a test.
-EXPECTED_TESTS = 12
+EXPECTED_TESTS = 11
 
 
 def _run_with_count_guard():

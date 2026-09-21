@@ -32,7 +32,10 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SKIP_DIRS = {"node_modules", ".git"}
+# `.worktrees/` is gitignored (like other checkers that walk `git ls-files`), so an
+# isolated worktree must never be scanned -- its files can even be unreadable under
+# a different owner (Errno 13), which would otherwise abort the whole clean-tree check.
+SKIP_DIRS = {"node_modules", ".git", ".worktrees"}
 
 # Anchored at line start. Built from fragments so this source file is not itself
 # a column-0 occurrence of the phrase.

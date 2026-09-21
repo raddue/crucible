@@ -14,6 +14,9 @@ The finder angles, the verify gate, the effort tiers, and the output schema are 
 <!-- CANONICAL: shared/severity-verdict-contract.md -->
 The `severity` and `verdict` vocabularies the findings carry are the contract's, not delve's. See `shared/severity-verdict-contract.md`.
 
+<!-- CANONICAL: shared/change-sizing.md -->
+Sizing thresholds are human-reviewability guidance delve *reports*, never gates on: a sizing observation is a property of the run's scope, never a verdict or a record field.
+
 `/delve` is the **standalone instance reviewer** of the review trio. It owns ONE concrete defect with one reproduction (even across files); it does not own systemic patterns (that is `/audit`), the merge gate (that is `/temper`), or codebase exploration (that is `/recon` / `/prospector`).
 
 **Authored fresh, clean retro slate.** delve is a freshly-authored fan-out wrapper — nothing is seeded from any existing skill, and it inherits **none** of the old `code_review` forge-retrospective lessons (that lineage forks to `temper`). On Claude Code the built-in `/code-review` still exists; there is no collision (different name), and the built-in stays an **optional accelerator**, never a dependency (I1).
@@ -107,9 +110,6 @@ Drive `shared/delve-engine.md` a **single** time with:
 
 The fan-out (finder angles) and the per-candidate verify gate run as parallel subagents **through the harness-adapter dispatch mechanism** — delve issues **no harness-specific call inline** (I1). On a harness with no parallel-subagent primitive, the adapter's **sequential fallback** runs the angles as multiple sequential passes (one per angle), never collapsed into a single in-context pass; it warns once that recall may drop.
 
-<!-- CANONICAL: shared/calibration-weighted-dispatch.md -->
-**Calibration-weighted dispatch (advisory).** Before driving the engine, derive the file list from the resolved `scope` (`git diff --name-only` for a range, or the path's file set), resolve `scripts/brier_advisory.py` by absolute path from the plugin root, and run `python3 <script> advise delve <file list…>`. If it prints a DispatchAdvice block, attach it verbatim to the per-angle finder prompt context the engine dispatches (the same engine-dispatch boundary on both the parallel and sequential-fallback paths), as scrutiny hints (NOT as findings, NOT scored). Best-effort: on empty output or any error, dispatch normally. See `shared/calibration-weighted-dispatch.md`.
-
 delve runs the engine **once**. There is no fix-verification loop and no second round — that cadence belongs to `temper`.
 
 ### Step 3: Report (always)
@@ -120,7 +120,18 @@ Print the engine's kept findings (CONFIRMED + PLAUSIBLE), ranked most-severe-fir
 {file, line, summary, failure_scenario, severity, verdict, scope, effort}
 ```
 
-The engine returns the **already-ranked, already-capped** set; delve re-groups by severity for **display only** (Critical → Important → Minor → Suggestion) and never re-truncates or re-caps per band. Within a band, **preserve the engine's returned order** (most-severe-first per delve-engine §6); delve adds no sort key of its own. Each line shows `file:line`, the summary, the verdict, and the failure scenario. State the run's `scope`/`effort` once at the top (they are identical on every record). When the kept Critical/Important count exceeds `cap`, surface a truncation caveat to the user (per delve-engine §6 — treat truncation of a gating finding as a signal) rather than presenting the capped list as complete; delve does not change the engine's cap, it only flags the condition. If the engine returns nothing, report `No verified findings` — not a Clean **verdict** (delve has no verdict; that distinction is temper's).
+The engine returns the **already-ranked, already-capped** set.
+
+#### Step 3.1: Deterministic position verification (#628) — runs before any finding is displayed
+
+The engine's `file`/`line` refs come straight out of the model with no guarantee the cited line actually matches the claimed code; a drifted position silently degrades the report's trust. Before surfacing any finding, run the deterministic position gate:
+
+- Resolve `scripts/verify_comment_positions.py` by absolute path from the plugin root, and run `python3 <script> --root <repo-root> <refs.json>`, where `<refs.json>` is the kept findings' `{file, line, summary}` written to a temp file and `<repo-root>` is the resolved working tree.
+- Read the gate's exit code and per-ref `VERIFIED` / `REJECTED` status lines (see the script's docstring: a ref REJECTs when the file/line does not resolve, or when a referenced symbol present in the file does not occur on the cited line; a provenance-only ref degrades to VERIFIED so removed-behavior findings survive).
+- **REJECTED findings are never displayed nor posted as verified findings.** Re-report them distinctly, e.g. under a `-- POSITION DRIFT (rejected before display, #628) --` header, with each one's `file:line` + reason, so the drift is caught *before* it reaches the user and the model is not credited with a position it did not earn. A finding that does not survive the position gate is not a finding the user should act on.
+- Missing script / non-zero for a non-rejection reason / empty refs: treat as best-effort like the calibration step — surface a terse note and continue; never hard-block the report on tooling (I9 is about never silently *dropping* the comment, not about gating on the verifier's presence).
+
+After the position gate, delve re-groups the **surviving** findings by severity for **display only** (Critical → Important → Minor → Suggestion) and never re-truncates or re-caps per band. Within a band, **preserve the engine's returned order** (most-severe-first per delve-engine §6); delve adds no sort key of its own. Each line shows `file:line`, the summary, the verdict, and the failure scenario. State the run's `scope`/`effort` once at the top (they are identical on every record). For a **diff** scope whose changed-line count exceeds the doc's ~300 middle band, append to that line a sizing note: `sizing: ~<count> changed lines (past the ~300 reviewability band, per `change-sizing.md`); split via <named strategy>`. For **path** scope there is no diff to measure, so the run-level line carries no sizing note — a specified outcome, not an implementation accident. <!-- CONTRACT:change-sizing-hook --> When the kept Critical/Important count exceeds `cap`, surface a truncation caveat to the user (per delve-engine §6 — treat truncation of a gating finding as a signal) rather than presenting the capped list as complete; delve does not change the engine's cap, it only flags the condition. If the engine returns nothing (or every finding was REJECTED by the position gate), report `No verified findings` — not a Clean **verdict** (delve has no verdict; that distinction is temper's).
 
 **Output policy:** report only. delve never emits a merge verdict and never gates. `--fix` and `--comment` below are optional add-ons, not part of the report contract.
 

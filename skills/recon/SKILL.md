@@ -834,6 +834,10 @@ recon scratch brief files — they record falsifications in handoff docs
 under their own control, which the next `/recon` run surfaces via Phase 5
 falsification-grep and doc-mining.
 
+In a repo with an ADR corpus (`docs/decisions/`), record the falsification
+sentence under a trailing `## Falsifications` heading (created on first append),
+so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsification-home -->
+
 ### For recon maintainers
 
 - Ledger format and assembly: see Phase 3 `### Ledger Assembly`.

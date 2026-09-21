@@ -71,18 +71,39 @@ def _git_env() -> dict:
     import os as _os
     return {k: _os.environ[k] for k in _GIT_ENV_KEEP if k in _os.environ}
 
+def _walk_up_git_root(base: str) -> Optional[str]:
+    """Env-free repo-root detector: walk up from `base` looking for a `.git`
+    entry (a dir in a normal clone, a file in a worktree/submodule). Returns the
+    realpath of the containing dir, or None when no `.git` is found."""
+    cur = os.path.realpath(os.path.abspath(base))
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
 
 def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
     """(repo_basename, repo_root_realpath) for the repo the cwd is in. Shells to
-    git via the PATH/HOME allowlist (#605/C-l); falls back to the realpath of
-    start_dir/cwd when not in a git repo. Never raises. CLI-only (git side
-    effect). FILESYSTEM identity — the worktree."""
+    git; if that fails, walks up for a `.git` entry; falls back to the realpath
+    of start_dir/cwd only when neither finds a repo.
+    Never raises. CLI-only (git side effect)."""
     base = start_dir or os.getcwd()
     try:
         import subprocess
+        # #605 (siege S-3): run git under an ALLOWLIST env, never the inherited
+        # one. Hooks export GIT_DIR/GIT_WORK_TREE; with no env= those leak in
+        # and steer which repo git reports — the store dir, the repo_root
+        # isolation key, and the privacy-guard check all follow the WRONG repo.
+        # A denylist can't work (GIT_CONFIG_KEY_n is indexed, no finite set), so
+        # keep only what git needs: PATH (find git) + HOME (read ~/.gitconfig).
+        keep = ("PATH", "HOME")
+        env = {k: os.environ[k] for k in keep if k in os.environ}
         proc = subprocess.run(
             ["git", "-C", base, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5, env=_git_env(),
+            capture_output=True, text=True, timeout=5, env=env,
         )
         top = proc.stdout.strip()
         if proc.returncode == 0 and top:
@@ -90,6 +111,22 @@ def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
             return (os.path.basename(root.rstrip("/")) or root, root)
     except Exception:  # noqa: BLE001 — best-effort, never fatal
         pass
+    # #605 (follow-up): the allowlist above makes the git call newly FAILABLE in
+    # legitimate setups (config reachable only via GIT_CONFIG_GLOBAL/XDG_CONFIG_HOME,
+    # a Windows box needing SystemRoot/PATHEXT, git off PATH). Falling straight
+    # through to cwd would report a SUBDIR as the repo root — and then the
+    # privacy guard in append() compares the store dir against that too-narrow
+    # root and happily writes the private store INTO the repo tree, which is the
+    # exact leak #605 closed, reached via a silent git failure instead. So try an
+    # env-free walk-up first; bare cwd is only for a genuine non-repo dir.
+    walked = _walk_up_git_root(base)
+    if walked is not None:
+        _warn(
+            f"git rev-parse failed under the allowlist env (PATH+HOME) but {base} is "
+            f"inside a git repo; using the walked-up root {walked}. Grudge dedupe keys "
+            f"and the privacy guard depend on this root being the real toplevel."
+        )
+        return (os.path.basename(walked.rstrip("/")) or walked, walked)
     root = os.path.realpath(os.path.abspath(base))
     return (os.path.basename(root) or "unknown", root)
 
@@ -139,10 +176,18 @@ def resolve_store_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
 def normalize_path(p: str, repo_root: str) -> str:
     """Normalize a path to repo-relative POSIX form (fix #1): forward-slashes,
     made relative to repo_root when absolute, no leading './', no trailing '/'."""
-    p = p.replace("\\", "/").strip()
+    # #607 (siege S-8): only Windows treats backslash as a path separator. On
+    # POSIX it is a legal filename byte — git stores it verbatim (diff-tree -z),
+    # so rewriting it to '/' stores a DIFFERENT non-existent path, voiding the
+    # grudge; --cull then permanently deletes it. Rewrite only on Windows.
+    _windows = os.name == "nt"
+    p = p.replace("\\", "/") if _windows else p
+    p = p.strip()
     if os.path.isabs(p) or p.startswith(repo_root):
         try:
-            p = os.path.relpath(p, repo_root).replace("\\", "/")
+            p = os.path.relpath(p, repo_root)
+            if _windows:
+                p = p.replace("\\", "/")
         except ValueError:  # different drive on Windows — leave as-is
             pass
     while p.startswith("./"):
@@ -181,21 +226,25 @@ def _is_inside(child: str, parent: str) -> bool:
 # Serialization                                                               #
 # --------------------------------------------------------------------------- #
 def _render(record: dict) -> str:
-    """Render a grudge to markdown. Frontmatter is simple `key: value` lines;
-    files_touched is a JSON array on one line so the reader can json.loads it
-    without a YAML dependency."""
+    """Render a grudge to markdown. Every frontmatter value is JSON-encoded on
+    one line (#602 S-0): fields are written through the writer alone, never
+    copied, so a value cannot smuggle a bare `---` terminator or forged
+    `key: value` lines past the fence — the reader's `key: value` parsing can
+    then never see attacker-injected keys. This is why the writer-side escape
+    closes the class the reader's key-set validation cannot: forged keys are
+    all *known* keys, so allowlisting the reader is not enough alone."""
     fm = [
         "---",
         f"schema: {SCHEMA_VERSION}",
         f"hash: {record['hash']}",
-        f"repo: {record['repo']}",
-        f"repo_root: {record['repo_root']}",
-        f"fixed_in_commit: {record.get('fixed_in_commit', '') or ''}",
-        f"symptom: {record.get('symptom', '') or ''}",
-        f"root_cause: {record.get('root_cause', '') or ''}",
+        f"repo: {json.dumps(record['repo'])}",
+        f"repo_root: {json.dumps(record['repo_root'])}",
+        f"fixed_in_commit: {json.dumps(record.get('fixed_in_commit', '') or '')}",
+        f"symptom: {json.dumps(record.get('symptom', '') or '')}",
+        f"root_cause: {json.dumps(record.get('root_cause', '') or '')}",
         f"files_touched: {json.dumps(record.get('files_touched', []))}",
         f"anti_pattern_signature: {json.dumps(record.get('anti_pattern_signature', '') or '')}",
-        f"date_fixed: {record.get('date_fixed', '') or ''}",
+        f"date_fixed: {json.dumps(record.get('date_fixed', '') or '')}",
         "---",
         "## Repro",
         (record.get("repro") or "").rstrip(),

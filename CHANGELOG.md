@@ -4,6 +4,120 @@ Notable changes to the Crucible skill library. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); entries are grouped by
 milestone since skills ship as a library rather than a versioned binary.
 
+## Deterministic Comment-Position Verification — 2026-09-13
+
+Review findings' `file:line` refs now get a deterministic position gate before
+they reach the user.
+
+### Added
+
+- **`scripts/verify_comment_positions.py`** — verifies every `{file, line}`
+  ref resolves to a real existing line in the tree; a referenced symbol present
+  in the file must occur on the cited line (else the finding is REJECTED as
+  position drift). Pure-prose / removed-code refs degrade to provenance-only
+  so they are never hard-rejected. `--selftest`, `--root`, `--window`. Tracks
+  quote spans with a backreference so prose like `token's `expiresAt`` cannot
+  pair an apostrophe with a later backtick and leak the junk symbol `s`. (#628)
+- **`scripts/test_verify_comment_positions.py`** — 18-case stdlib suite pinning
+  the gate (drift rejection, EOF/malformed refs, range refs, provenance
+  degrade, CLI exit codes); wired into `scripts/run_tests.sh`.
+
+### Changed
+
+- **`delve` Step 3.1** — the engine's kept findings pass through the position
+  gate before display; REJECTED findings are surfaced separately as
+  position-drift and never shown or posted as verified findings. (#628)
+
+## Unreleased — Deterministic change-bundling for large-diff coverage (#630)
+
+A deterministic changed-file selection + bundling step gives any many-file
+review the same per-file coverage guarantee alibaba/open-code-review gets from
+its deterministic pipeline: enumerate every changed path, select the reviewable
+ones (deleted/binary are explicit skips, never silent), bundle locale siblings /
+same-directory files, and emit a per-file coverage report that assigns every
+changed file to exactly one bundle — machine-enforced (a file with no bundle and
+no skip raises), so a review over a many-file diff produces per-file coverage
+with no silent skips. `warden` and `orchestrator` both dispatch one review
+worker per bundle, concurrently; the union of every leg's coverage markers must
+equal the report's `bundled` set on completion, and a dead bundle surfaces as
+uncovered (fail-closed).
+
+### Added
+
+- **`skills/shared/change-bundling-convention.md`** — canonical reference for the
+  deterministic step (enumerate → select → bundle → cover-report) + the
+  one-worker-per-bundle dispatch protocol, linked by warden and orchestrator.
+- **`scripts/change_bundling.py`** — pure stdlib engine
+  (`parse_git_name_status`, `select_reviewable`, `bundle_files`,
+  `coverage_report`); locale-sibling fold + directory affinity + size cap
+  (10/bundle). Contract pinned by `scripts/test_change_bundling.py`.
+- **`scripts/check_change_bundling.py`** — structural CI gate pinning the
+  convention + both integration sites (`--selftest` + tree check, wired into
+  `scripts/run_tests.sh`).
+
+## v1.9.0 — Calibration reporting moves out-of-repo — 2026-08-31
+
+The calibration-ledger **reporting** cluster leaves Crucible. Verdict *emission*
+is unchanged — every gating skill still appends Tier-A verdicts to the
+machine-local central store — but reconciliation, Brier scoring, the weekly
+render, and the calibration-weighted dispatch advisory now live in a separate
+maintainer-side repo that reads the same store. Two slash commands ship no more.
+(#460 Section B)
+
+### Removed
+
+- **`/ledger` and `/calibration-reconcile` are no longer part of this plugin.**
+  The weekly "caught N silent bugs" render and the merged-branch falsification /
+  Brier walk moved to a separate maintainer-side repo against the same
+  machine-local store. Skill count 52 → 50. (#460)
+- **Calibration-weighted dispatch (advisory) is retired.** `brier_advisory.py`,
+  its `advise` / `advisory` / `stale-check` entry points, all 8 call sites across
+  siege, quality-gate, inquisitor, delve, audit and getting-started, the
+  `shared/calibration-weighted-dispatch.md` convention doc, and the
+  `check_calibration_dispatch.py` wiring checker are all deleted. The advisory
+  was print-only and carried an explicit never-block contract, so no gate's
+  behavior changes. (#460; retires #372)
+- **Reporting-side scripts and their suites** — `reconcile_ledger.py`,
+  `render_ledger.py`, `ledger_reduce.py`, `calibrate_tolerance.py`,
+  `backfill-ledger.py`, `ledger_doctor.py`, `shared/ledger-reduce.md` (its L-9
+  spec was relocated and reconciled against the module — the old doc's copy
+  predated the #400 guards — into `skills/shared/ledger-append.md`, not
+  deleted), `eval/calibration-ledger/`, and the test files covering them. Not
+  all of that test coverage was dropped: four of those tests' useful
+  assertions were restored into `scripts/` rather than lost —
+  `test_central_store.py`, and the `LedgerContentionTest`,
+  `TierNullSemanticsTest`, and `Uuid7Test` classes added to
+  `scripts/test_locks.py` / `scripts/test_ledger_core.py`. Net effect on
+  `scripts/run_tests.sh`: 6 `run` lines leave, 3 arrive (the restored
+  `test_central_store.py`, plus the new `check_ledger_append_doc_drift.py`
+  doc-drift checker's two lines) — 85 → 82, not a flat −6. (#460)
+
+### Migration
+
+The ledger's on-disk schema is unchanged and skills are Markdown — there is **no
+data migration**, and no emitted verdict is lost. Behavioral notes:
+
+- **The central store is untouched — no data migration.** `~/.claude/crucible/ledger/`
+  (override `$CRUCIBLE_LEDGER_DIR`) keeps receiving Tier-A verdicts exactly as
+  before. Only the *reader* side leaves. `scripts/ledger_append.py` did gain a
+  `#400` fix in this window — `caller_dedup` now guards against non-dict JSON
+  lines instead of raising — and `skills/shared/ledger-append.md` absorbed
+  `shared/ledger-reduce.md`'s L-9 spec verbatim. `raddue/crucible-eval` vendors
+  these emission-side helpers by content hash (see `docs/architecture.md`), so
+  any change to one needs a manual re-sync there — this window that's
+  `ledger_append.py`, `pathmatch.py`, and `grudge_query.py`, all three changed
+  in this diff.
+- **There is no in-repo replacement for the two commands.** Reporting is run by
+  the maintainer from a separate repo. If you were running `/ledger` or
+  `/calibration-reconcile` against your own store, say so on #460 — a public home
+  for the reporting cluster is exactly what that issue tracks.
+- **Clean up a symlinked install after upgrading.** Skills install by symlink;
+  remove `~/.claude/skills/ledger` and `~/.claude/skills/calibration-reconcile`
+  (guard on `[ -L ]` — a copied install is a directory and must be removed by
+  hand).
+- **`docs/CONTRIBUTING-CALIBRATION.md` lags this cut** — it still describes the
+  in-repo reporting loop. Corrected under #545.
+
 ## v1.8.1 — README eval-figure sync — 2026-06-14
 
 Docs-only patch. The README's headline A/B deltas still carried the Opus 4.6

@@ -50,14 +50,14 @@ CATEGORIES: dict[str, list[str]] = {
         "debugging",
     ],
     "Knowledge & Learning": [
-        "forge", "project-init", "grudge", "compass",
+        "forge", "project-init", "grudge", "compass", "adr",
     ],
     "Utilities": [
         "distill", "recall",
     ],
     "Maintenance & Meta": [
-        "stocktake", "merge-pr", "skill-creator", "getting-started", "handoff",
-        "ledger", "calibration-reconcile", "workshop",
+        "stocktake", "merge-pr", "anvil", "getting-started", "handoff",
+        "workshop", "orchestrator",
     ],
     "Unity UI (Domain-Specific)": [
         "mockup-builder", "mock-to-unity", "ui-verify",

@@ -30,7 +30,7 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | temper | Subagent dispatch for review | Agent reviews in-context |
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | adversarial-tester | Subagent dispatch for test writing | Agent writes tests in-context |
-| skill-creator | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
+| anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
 | assay | Subagent dispatch for approach evaluation (Opus evaluator) | Evaluates approaches in-context |
 | test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
@@ -64,14 +64,12 @@ These skills require features specific to Claude Code. They will not work on oth
 | cartographer-skill | Persistent memory (`~/.claude/projects/<hash>/memory/cartographer/`) | Codebase maps must persist across sessions to accumulate knowledge |
 | project-init | Persistent cartographer memory + subagent scan | Onboarding output must persist across sessions, like cartographer's |
 | grudge | Machine-local per-repo persistent memory (regression graveyard) | Regression memory must persist across sessions to guard future edits |
-| ledger | Machine-local calibration ledger (`~/.claude/crucible/ledger/`) | Calibration history must persist to be meaningful |
-| calibration-reconcile | Machine-local ledger + git branch walkback | Falsification needs the persisted verdict history |
 | recall | Session activity index maintained by PostToolUse hooks | No event log without the hook infrastructure |
 | replay | Pipeline dispatch manifests + checkpoints | Crash recovery needs Claude Code pipeline state |
 | consensus | MCP multi-provider model dispatch | Multi-model synthesis needs MCP providers |
 | temper-eval-calibrate | Session-dispatch eval harness (Claude Code) | Wraps live session invocations; no portable equivalent |
 | temper-eval-collect | Task-tool parallel reviewer dispatch (Claude Code) | Live reviewer dispatch is harness-specific |
-| skill-selection-evals | Anthropic skill-creator eval harness | Eval-only; consumed by the blind A/B tooling, not invoked at runtime |
+| skill-selection-evals | Anthropic skill-creator eval harness (anvil's ancestor) | Eval-only; consumed by the blind A/B tooling, not invoked at runtime |
 
 ### Tier 4 — Domain-Specific (Unity UI Toolkit)
 

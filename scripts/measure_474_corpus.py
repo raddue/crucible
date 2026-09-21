@@ -47,18 +47,65 @@ def load(path):
 def disposition(rv, text, root, strict):
     """Run one receipt through Tier-1 + Tier-2 exactly as `--tier2` does.
     Returns (verdict_label, message_or_notes)."""
+    # temper R1 cross-file finding (scoped re-temper, warden 2026-08-31T-563-warden-r2)
+    # — `_build_identity_cache` now opens and HOLDS an fd per resolved name
+    # (rcpt_verify.py's F1 structural fix); the three in-module call sites close every
+    # unconsumed one via `rv._close_identity_cache_fds()` in a `finally:`, but this
+    # corpus loop (and measure_486_corpus.py's equivalent) had no equivalent — a
+    # receipt that raises before every entry's fd is consumed (e.g. a `--strict`
+    # ambiguity) leaked it, accumulating across the corpus.
+    #
+    # temper R2 finding on the FIRST attempt at this fix — `cache = None` followed by
+    # `cache = _cache_for(...)` (which only `return`s the dict on `_cache_for`'s OWN
+    # success) left `cache` still `None` if `_build_identity_cache` itself raised
+    # (e.g. `WitnessTimeout` mid-resolve-phase) — every fd it had already opened for
+    # names resolved before the raise was then unreachable to the `finally:` below.
+    # Fixed the way `rcpt_verify.py`'s own `_selftest_run_fixture` does it: `cache = {}`
+    # is created HERE, in this frame, BEFORE the call, and passed BY REFERENCE into
+    # `_build_identity_cache` (which mutates it in place per name as it resolves) —
+    # so this frame's `cache` variable already points at the same dict object, with
+    # whatever it holds so far, even when the build call raises partway through.
+    #
+    # #583 inquisitor Regression finding — this ONE helper drives BOTH modules: this
+    # tree's `rcpt_verify.py` AND whatever older copy `--baseline` names. #488
+    # re-signatured the Tier-2 entry points (`bodies=` → keyword-only `cache=`/
+    # `verified=`) and added the three identity-cache helpers, so a helper pinned to the
+    # post-#488 shape raises `AttributeError: no attribute '_close_identity_cache_fds'`
+    # on any pre-#488 baseline — disabling the exact leg this tool exists to run. So
+    # introspect the module in hand rather than assume one shape; the legacy branch below
+    # is byte-for-byte the pre-#488 call sequence this file itself used (which never
+    # passed `bodies`, so nothing is lost by not passing it).
+    identity_cache = hasattr(rv, "_build_identity_cache")
+    cache = {}
     try:
         verdict = rv.lint_receipt(text)
         sections = rv.parse_receipt(text)
         artifacts = rv.parse_artifacts(sections["ARTIFACTS"])
         trace = rv.parse_trace(sections["TRACE"])
         witness = rv.parse_witness(sections["WITNESS"])
-        notes = rv.tier2_artifacts(artifacts, trace, root, strict)
+        tier2_kw = {}
+        if identity_cache:
+            rv._build_identity_cache(artifacts, trace,
+                                     [witness] if witness is not None else [],
+                                     verdict, root, cache)
+            tier2_kw = {"cache": cache, "verified": {}}
+        notes = rv.tier2_artifacts(artifacts, trace, root, strict, **tier2_kw)
+        # #563 inquisitor finding — the real `--tier2` CLI runs this between the
+        # ARTIFACTS and WITNESS legs (rcpt_verify.py's _verify_single); omitting it here
+        # left tier2_witness reading a cache whose _IDENTITY_DEGENERATE /
+        # _IDENTITY_UNVERIFIABLE_COLLISION sentinels were never finalized, diverging from
+        # what "exactly as --tier2 does" (this function's own docstring) promises.
+        if identity_cache:
+            rv._finalize_identity_degenerate(cache, tier2_kw["verified"])
         if verdict in {"PASS", "FAIL"}:
-            notes = notes + rv.tier2_witness(witness, trace, root, strict, verdict)
+            notes = notes + rv.tier2_witness(witness, trace, root, strict,
+                                             verdict, **tier2_kw)
         return "clean", "; ".join(notes)
     except rv.LintError as e:
         return "BLOCKED", str(e)
+    finally:
+        if identity_cache:
+            rv._close_identity_cache_fds(cache)
 
 
 def body_source(rv, text, verdict_override=None):

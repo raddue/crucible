@@ -3,7 +3,8 @@
 
 Protocol-as-spec lives in skills/shared/ledger-append.md. This module is the
 importable, executable single source of truth used by T-1 subprocesses, by Tier A
-emit call-sites, and by the Phase 3 backfill script.
+emit call-sites, and by the Phase 3 backfill script (moved to
+raddue/crucible-eval, #460).
 
 Invariants enforced here:
 - L-1 append-only (O_APPEND, never rewrite a line)
@@ -45,8 +46,9 @@ def _kill_switch_active() -> bool:
 # The live ledger is machine-local and aggregates EVERY repo's gating runs    #
 # into one place — never inside any git repo, because entries carry private   #
 # file paths and verbatim finding quotes and crucible is a public repo.       #
-# These helpers are the single source of truth for the path; render_ledger    #
-# imports them. default_repo() shells to git and is therefore CLI-only —      #
+# These helpers are the single source of truth for the path; the weekly       #
+# renderer (now in raddue/crucible-eval, #460) imports them. default_repo()   #
+# shells to git and is therefore CLI-only —                                   #
 # append() stays free of git/subprocess side effects (INV-2).                 #
 # --------------------------------------------------------------------------- #
 SCHEMA_VERSION = 2
@@ -110,7 +112,8 @@ def valid_ledger_identity(entry: dict) -> bool:
     """True iff a ledger `entry` carries a valid (run_id, skill) join identity
     (#402). Factors the `_valid_identity(run_id) AND _valid_identity(skill)`
     guard that was inlined verbatim ×5 across reconcile_ledger / render_ledger
-    (#408 F9) into one source, so the #402 read-side contract cannot drift."""
+    (moved to raddue/crucible-eval, #460) (#408 F9) into one source, so the
+    #402 read-side contract cannot drift."""
     return _valid_identity(entry.get("run_id")) and _valid_identity(entry.get("skill"))
 
 
@@ -138,16 +141,17 @@ def _truncate_payload(entry: dict, max_gated_files: int,
     return out, overflow
 
 
-def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
-    """L-2 caller-side dedup. Returns True if (run_id, skill) already in ledger.
+def _find_existing_entry(ledger_path: str, run_id: str, skill: str) -> Optional[dict]:
+    """Scan `ledger_path` for the first row matching `(run_id, skill)`.
 
-    Callers MUST invoke this BEFORE append() to honor invariant L-2. The append
-    helper does not scan for prior entries. Full-scan; bounded by current ledger
-    size (acceptable while ledger is sub-MB; future rotation lands in v1.1).
+    Returns the parsed entry dict, or None if no match / file absent /
+    unreadable. Shared implementation behind `caller_dedup` (bool) and the
+    SIEGE-IT-3 divergence check in `_cli_emit`, which needs the matched
+    row's *content* to tell an idempotent retry from a colliding forged one.
     """
     if not os.path.exists(ledger_path):
-        return False
-    found = False
+        return None
+    match: Optional[dict] = None
     skipped = 0  # #400: count corrupt lines instead of silently weakening dedup
     try:
         with open(ledger_path, "rb") as f:
@@ -160,14 +164,30 @@ def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     skipped += 1
                     continue
+                if not isinstance(obj, dict):
+                    # #400/L-9: a valid-JSON-but-non-object line (e.g. `[1,2,3]`)
+                    # has no `.get` — treat it as corruption, same as the L-9
+                    # reduction contract in skills/shared/ledger-append.md.
+                    skipped += 1
+                    continue
                 if obj.get("run_id") == run_id and obj.get("skill") == skill:
-                    found = True
+                    match = obj
                     break
     except OSError:
-        return False
+        return None
     if skipped:
-        _warn(f"caller_dedup: skipped {skipped} unparseable line(s) in {ledger_path}")
-    return found
+        _warn(f"caller_dedup: skipped {skipped} corrupt/unusable line(s) in {ledger_path}")
+    return match
+
+
+def caller_dedup(ledger_path: str, run_id: str, skill: str) -> bool:
+    """L-2 caller-side dedup. Returns True if (run_id, skill) already in ledger.
+
+    Callers MUST invoke this BEFORE append() to honor invariant L-2. The append
+    helper does not scan for prior entries. Full-scan; bounded by current ledger
+    size (acceptable while ledger is sub-MB; future rotation lands in v1.1).
+    """
+    return _find_existing_entry(ledger_path, run_id, skill) is not None
 
 
 def _try_stale_recovery(lockdir: str) -> bool:
@@ -183,12 +203,18 @@ def _try_stale_recovery(lockdir: str) -> bool:
     try:
         with open(holder, "r", encoding="utf-8") as f:
             line = f.read().strip()
-        # holder format: <run_id>:<skill>:<pid>:<iso_ts>
-        parts = line.split(":")
-        if len(parts) < 4:
+        # SIEGE-FA-1/CA-5: holder is JSON, not a `:`-delimited line — run_id/
+        # skill are caller-supplied and may contain ':' (e.g. ISO-timestamp-
+        # shaped run ids), which shifted the pid field under the old
+        # delimited format (wedging the lock against a live holder, or
+        # destroying a live holder's lock). JSON has no such ambiguity.
+        obj = json.loads(line)
+        if not isinstance(obj, dict):
             raise ValueError("malformed holder")
-        pid = int(parts[2])
-    except (OSError, ValueError):
+        pid = obj["pid"]
+        if not isinstance(pid, int):
+            raise ValueError("malformed holder")
+    except (OSError, ValueError, json.JSONDecodeError, KeyError):
         # Branch B: missing or malformed holder
         try:
             try:
@@ -285,7 +311,8 @@ def append(
 
     # #402 identity gate. append() serves BOTH central stores, which carry
     # different join keys:
-    #   - runs.jsonl  → (run_id, skill)        (reconcile_ledger.ledger_entry_hash)
+    #   - runs.jsonl  → (run_id, skill)        (reconcile_ledger.ledger_entry_hash,
+    #     moved to raddue/crucible-eval, #460)
     #   - falsification log → ledger_entry_hash (the walkback / predicate rows)
     # An entry carrying NEITHER key collapses to the shared "unknown" bucket —
     # silently merging unrelated runs across every repo in the machine-local
@@ -293,8 +320,9 @@ def append(
     # compute_brier mis-buckets them. Require at least one valid join key.
     # The OR-rule's soundness depends on ledger_entry_hash appearing ONLY on
     # falsification-log rows (never on a runs-ledger row); the consumer-side
-    # "unknown" fallback in reconcile_ledger.compute_brier is a known residual
-    # deliberately deferred to the read-path follow-up PR.
+    # "unknown" fallback in reconcile_ledger.compute_brier (moved to
+    # raddue/crucible-eval, #460) is a known residual deliberately deferred to
+    # the read-path follow-up PR.
     run_id = entry.get("run_id")
     skill = entry.get("skill")
     entry_hash = entry.get("ledger_entry_hash")
@@ -344,9 +372,13 @@ def append(
 
     holder_path = os.path.join(lockdir, HOLDER_FILENAME)
     try:
-        # Step 2: write identity inside the lockdir
+        # Step 2: write identity inside the lockdir (JSON — see
+        # _try_stale_recovery for why not a `:`-delimited line, SIEGE-FA-1/CA-5)
         with open(holder_path, "w", encoding="utf-8") as hf:
-            hf.write(f"{run_id}:{skill}:{os.getpid()}:{_now_iso()}")
+            hf.write(json.dumps({
+                "run_id": run_id, "skill": skill,
+                "pid": os.getpid(), "acquired_ts": _now_iso(),
+            }))
 
         # L-8 sidecar: write only AFTER the size check passed, inside the lock.
         # Avoids orphan-sidecar leaks when the ledger append itself is rejected.
@@ -422,9 +454,36 @@ def _cli_emit(ledger_arg: str, entry: dict) -> int:
 
     run_id = entry.get("run_id", "unknown")
     skill = entry.get("skill", "unknown")
-    if caller_dedup(ledger_path, run_id, skill):
-        print(f"[ledger_append] duplicate (run_id={run_id} skill={skill}); "
-              f"emit skipped", file=sys.stderr)
+    existing = _find_existing_entry(ledger_path, run_id, skill)
+    if existing is not None:
+        # SIEGE-IT-3: the (run_id, skill) join key is self-asserted by the
+        # caller, with no ownership/authentication behind it — any local
+        # process can emit under an identity it does not own. append() is
+        # O_APPEND-only, so a genuine second emitter under a squatted key can
+        # never land its own row. We cannot safely accept a second row here
+        # (every downstream reader — Brier scoring, the falsification
+        # walkback — assumes (run_id, skill) uniqueness; relaxing that is a
+        # ledger-schema decision, not a mechanical fix), so this remains a
+        # graceful no-op per L-2/INV-9. What changes: a content MISMATCH
+        # (this emit's verdict differs from the row already on disk) is
+        # surfaced as a loud, distinctly-labeled warning instead of the
+        # routine "duplicate" message, so a genuine collision is at least
+        # visible on the diagnostic channel rather than silently absorbed.
+        # This is a detection improvement, not a fix for the underlying
+        # unauthenticated-identity gap — closing that needs real ownership/
+        # authentication infrastructure this ledger does not have today.
+        if existing.get("verdict") != entry.get("verdict"):
+            print(
+                f"[ledger_append] IDENTITY COLLISION (run_id={run_id} skill={skill}): "
+                f"an entry already on disk has verdict={existing.get('verdict')!r}, "
+                f"this emit's verdict is {entry.get('verdict')!r} — one of these did "
+                f"not originate from the process that owns this (run_id, skill); "
+                f"emit skipped, ledger keeps the FIRST row (append-only, L-2)",
+                file=sys.stderr,
+            )
+        else:
+            print(f"[ledger_append] duplicate (run_id={run_id} skill={skill}); "
+                  f"emit skipped", file=sys.stderr)
         return 0
 
     return 0 if append(ledger_path, entry) else 1

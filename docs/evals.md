@@ -192,6 +192,210 @@ missing round-2s later (once Opus is confirmed healthy) would strengthen this si
 judged necessary to unblock #537, given the model-tier dimension was already known to be
 untestable from a Sonnet 5 session regardless of outage.
 
+## Review-Gate Precision/Recall on AACR-Bench (#631, deepseek-v4-pro — 2026-09-13)
+
+The first measured quantification of crucible's review-gate precision/recall, against
+[AACR-Bench](https://github.com/alibaba/aacr-bench)'s expert-verified grounding
+(Apache-2.0; dataset mirrored at HuggingFace `Alibaba-Aone/aacr-bench` — 2,145 review
+comments across 200 real PRs / 50 repos / 10 languages: `label=1` = expert-verified
+CORRECT comment, `label=0` = incorrect). The harness is `scripts/aacr_bench_measure.py`
+and its CI-gated deterministic core (subset selection, four-stage matcher, metric
+arithmetic) is pinned by `scripts/test_aacr_bench_measure.py`.
+
+**What was measured:** for each sampled PR the gate (the delve eight-field
+severity/verdict engine in the configured model, `CONFIRMED`/`PLAUSIBLE` kept, `REFUTED`
+dropped per `shared/severity-verdict-contract.md` §2) reviews the PR's unified diff; its
+kept findings are deterministically matched against the PR's `label=1` reference comments
+(four-stage, mirroring AACR's own `evaluation/judge.py`: path → side → line(k=1) →
+semantic, with a shared-signal-token fallback for paraphrased findings). Metrics follow
+AACR's formulas: **precision = matches / generated, recall = matches / expected,
+F1, noise = (generated − matches) / generated**.
+
+**Result (seed 631, 8 PRs, 17 expected correct comments, single gate pass, temp 0):**
+
+| Met | Value |
+|---|---|
+| precision | **1.000** (2/2 kept findings matched) |
+| recall | **0.118** (2/17 expected comments found) |
+| F1 | **0.211** |
+| noise | 0.000 |
+| token cost | 27,431 (11,790 prompt + 15,641 completion) |
+
+Honest scope: this is a **first directional datapoint, not a verdict**. The gate found
+every issue it kept (precision 1.0, noise 0), but on an 8-PR subset it surfaced only 2 of
+17 expert-verified comments (recall 0.118) — the model cheaply drops Minor/Suggestion and
+misses parts of the diff the ground truth annotates. The subset is small (8 PRs, 17
+expected), single-pass (no temper-style iterate-to-convergence), and run on
+`alitp-intl/deepseek-v4-pro-0813` (the review gate pins `opus` in
+`shared/model-tier-policy.md`; Opus was rate-limited during the run — re-running under
+the pinned tier is the first reproducibility check). Expect precision/recall/F1 to move
+with model tier, diff size, and convergence rounds; the harness exists so that movement
+is measurable rather than asserted.
+
+**Reproducible command** (run from repo root; needs `NINEROUTER_URL`/`NINEROUTER_KEY` and
+the dataset JSON downloaded from HF — the deterministic half runs without any of that):
+
+```bash
+# fetch the AACR-Bench dataset once (2 MB, Apache-2.0)
+curl -L https://huggingface.co/datasets/Alibaba-Aone/aacr-bench/resolve/main/dataset.json \
+  -o /tmp/aacr-dataset.json
+
+# review a seeded, reproducible subset with the configured gate model behind NINEROUTER
+python3 scripts/aacr_bench_measure.py run \
+  --dataset /tmp/aacr-dataset.json --seed 631 --limit-prs 8 \
+  --model alitp-intl/deepseek-v4-pro-0813 --out /tmp/aacr-results
+
+# deterministic half only (no LLM, no network): pinned in CI by test_aacr_bench_measure.py
+python3 scripts/test_aacr_bench_measure.py
+```
+
+The run writes per-PR findings records (`--out/records/*.json`) and an aggregate
+`--out/results.json`, so a re-run resumes completed PRs instead of re-spending the LLM
+budget.
+
+## #561: Second Pass Findings widen the score population (2026-09-01)
+
+#561 (PR #565) fixes a real gap in `quality-gate`'s clean-pass exit: the weighted
+score and the candidate-clean predicate counted only the `### Fatal Challenges` /
+`### Significant Challenges` sections of a red-team findings file, blind to a
+Fatal or Significant surfaced under the reviewer's REQUIRED second pass
+(`red-team-prompt.md`'s "Second Pass (REQUIRED)" step) — letting a round with a
+real open Fatal exit clean because the Fatal happened to live under
+`### Second Pass Findings` instead. The fix widens the score source (and
+red-team's mirrored single-source-of-truth counting, standalone and
+QG-invoked) to include that third section, adds four new decision rules to
+`skills/quality-gate/SKILL.md` — (1) the widened Score source population itself
+(step 7, `qg-score-second-pass-population` CONTRACT block: fail-loud
+severity-token normalization, section-location/fencing rules, entry-boundary
+rules, de-dup-by-identity across sections); (2) a directional SEVERITY-COUNTS
+discrepancy exception (a declared `SEVERITY-COUNTS:` fatal+significant total
+that *exceeds* the orchestrator's own counted population blocks candidate-clean,
+so a malformed second-pass entry that would otherwise silently parse to 0
+cannot fake a clean exit); (3) an empty-work-order exception (when that
+discrepancy fires AND the orchestrator's own count is 0 Fatal/0 Significant,
+there is no real work for a fix agent, so the round exits directly via a new
+Exit Precedence slot #4, `Verdict: ESCALATED, Reason: severity-counts-discrepancy`,
+instead of entering an empty fix loop); and (4) the same discrepancy/empty-work-order
+treatment applied to look-harder's own receipt on the confirm/demote path — and
+renumbers Exit Precedence slots #4–#8 to #5–#9 accordingly (tracked end-to-end as
+`INV-561-1`, twelve consumers). `red-team/SKILL.md` and `red-team-prompt.md`'s
+`### Second Pass Findings` report-format instructions were substantially rewritten
+to match: reviewers are now told the exact section-location, entry-boundary,
+severity-normalization, and fencing rules the orchestrator's parse depends on,
+so a reviewer filling in that section produces output the mechanical parser can
+score correctly.
+
+**18 new evals** were added to `skills/quality-gate/evals/evals.json` (ids
+11–28) — behavioral fixtures for the widened population, catalogued in
+`SKILL.md`'s `INV-T18`. Unlike every other entry in this document, these are
+**not** blind-A/B skill-value evals graded by an LLM judge — they are
+correctness fixtures for a **standalone Python reoracle**: `scripts/second_pass_scorer.py`
+reimplements the CONTRACT-pinned parse spec in plain Python (no LLM call), and
+`scripts/run_second_pass_evals.py` extracts each fixture's fenced findings-file
+text, runs it through `second_pass_scorer.score()`, and asserts the result
+against a hand-mapped expected score. Both are wired into `run_tests.sh`
+(CI-gated, run on every push), alongside `scripts/check_qg_second_pass_score.py`
+and the extended `scripts/check_rt_receipt_contract.py` — structural linters
+that check the `SKILL.md` CONTRACT block's own text (pinned phrases, negative
+controls) rather than any findings-file content.
+
+Of the 28 fixtures, 17 are in scope for the oracle (evals #11–21, #23–28; #1–10
+are pre-#561 general behavioral fixtures with no embedded findings file to
+score, and #22 is a compaction-recovery scenario with no embedded findings file
+either — both documented as out-of-scope in the harness's own module docstring
+rather than silently skipped):
+
+```
+$ python3 scripts/run_second_pass_evals.py
+17/17 evals passed
+(evals [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 22] are out-of-scope general behavioral
+fixtures — no embedded findings file with a single verifiable score)
+```
+
+**Caveat, worth stating explicitly: this oracle measures a Python module, not
+the LLM executor that runs in production.** `second_pass_scorer.py` is a
+hand-written reimplementation of the same parsing rules `SKILL.md` documents
+for the orchestrator to apply by hand, and the fixtures assert that
+reimplementation's output — they say nothing about whether a live orchestrator
+session (an LLM following `SKILL.md`'s prose) actually applies the fail-loud
+severity-boundary, section-location, and fencing rules correctly when scoring
+a real red-team findings file, nor whether a live red-team reviewer (an LLM
+following `red-team-prompt.md`) produces `### Second Pass Findings` text in
+the shape this parse expects. No live orchestrator/reviewer run and no
+blind-A/B skill-value delta were measured for #561; CLAUDE.md's "eval before
+you publish" rule is satisfied here by this correctness harness rather than
+by a WITH/WITHOUT execution-eval pair — there is no meaningful "without the
+widened parse" baseline to A/B against, since the prior behavior was simply an
+undercount bug, not a design alternative.
+
+## #460 Section B: pre-land SKILL.md-edit deltas (2026-08-31)
+
+#460 Section B (extracting the calibration-ledger reporting cluster to `raddue/crucible-eval`)
+edits 11 `SKILL.md` files in this change window (`skills/calibration-reconcile/SKILL.md` and
+`skills/ledger/SKILL.md` are removed outright along with their skill directories — not edited —
+and carry no eval-before-publish obligation). Of those 11: 6 lose an active `brier_advisory.py`
+call site (`getting-started`, `quality-gate`, `audit`, `delve`, `siege`, `inquisitor` — 8 call
+sites total); 3 more (`review-feedback`, `test-coverage`, `verify`) lose a "No advisory wiring"
+note that documented the *absence* of a call site rather than a real one; and `stocktake` /
+`workshop` are edited for unrelated reasons (a checker-inventory line removal, a skill-count
+correction) with no calibration/advisory surface at all — out of scope for this record.
+
+Delve's, siege's, and inquisitor's call-site removal is covered by their existing CI-gated
+regression harnesses, so those three don't need the manual check below. The remaining 6
+`evals.json`-bearing edits are: `skills/getting-started/SKILL.md` (loses its entire "Calibration
+Snapshot" session-init section), `skills/quality-gate/SKILL.md` (loses item `1.5.` from its
+"How It Works" enumeration), `skills/audit/SKILL.md` (loses its `advise audit` call site and
+CANONICAL block), and `skills/review-feedback/SKILL.md`, `skills/test-coverage/SKILL.md`,
+`skills/verify/SKILL.md` (each loses one "No advisory wiring" documentation line — added on
+round-4 quality-gate review, since the original pass here covered only the 3 with a real call
+site). None of the 6 is backed by a CI-gated eval harness the way `siege`/`delve`/`inquisitor`
+are, so CLAUDE.md's "eval before you publish" rule applies to them directly rather than being
+satisfied by an existing gate.
+
+**Coverage check, not a live A/B run.** Before spending a live run, all six skills' own
+`evals/evals.json` were read in full and grepped for any reference to the removed material:
+
+```
+grep -o -i -E 'calibrat[a-z]*|ledger|brier|snapshot|advisor[a-z]*' \
+  skills/getting-started/evals/evals.json skills/quality-gate/evals/evals.json \
+  skills/audit/evals/evals.json skills/review-feedback/evals/evals.json \
+  skills/test-coverage/evals/evals.json skills/verify/evals/evals.json
+```
+
+Zero hits in `getting-started` (15 sequence evals covering verify-before-completion,
+debugging-before-fix, tdd-deletion-rule, design-before-build, and review-feedback-clarify-first —
+none touch session-init or calibration reporting). One incidental, unrelated hit in `quality-gate`
+(the word "snapshot" inside an unrelated prompt about a `_cache` dict). Zero hits in `audit` (4
+evals, all systemic-lens code-review scenarios — none touch the removed `advise audit` call site).
+Zero hits in `review-feedback` (3 evals), `test-coverage` (4 evals), and `verify` (4 evals) — all
+11 are code-review/verification-report scenarios unrelated to calibration reporting, and none
+touches the removed "No advisory wiring" note (unsurprising: that note documented an absence,
+so there was never a call site for an eval to exercise). Every eval in all six files was also
+read end-to-end by hand to confirm none exercises the removed prose's *presence* (structure,
+sequence, length) even indirectly — all 40 evals (15 + 10 + 4 + 3 + 4 + 4) grade entirely
+different behavioral axes than the deleted sections.
+
+**Verdict: null delta by construction, recorded without a live run.** Given zero eval-suite
+surface area touches the removed material, a live blind A/B (which for `quality-gate` would mean
+10 full recursive `/quality-gate` sessions per arm — each eval expects multi-round red-team/fix/
+verify loops, not a single-turn response) would spend real compute to re-confirm a result already
+established by direct inspection. This is the same "null by construction, not by measurement"
+scope the originating plan (`docs/plans/2026-08-23-460-section-b-eval-strip.md`, Task 10) itself
+anticipated for the *live-run* case (there, the null comes from `brier_advisory.py`'s absence
+degrading silently in both arms); here the null is established one level earlier, by the evals
+never being able to see the change at all. Recorded per CLAUDE.md's non-negotiable rule — the
+recording is the point, not the run.
+
+**Deviation from Task 10's prescribed procedure, maintainer-authorized.** Task 10 specifies a live
+blind A/B with a pre-edit/post-edit pass-rate table. This is not that — no subagents were
+dispatched, so there is no per-arm pass rate to table. The maintainer, presented with the coverage
+finding above and the recursive-`/quality-gate`-per-eval cost it implies, explicitly chose to skip
+the live run rather than pay that cost for a result already pinned by inspection. This is a
+narrower, cheaper substitute for Task 10's own "eval cannot be executed at all" escape hatch (that
+clause covers *inability* — outage, budget exhaustion; this is *informed refusal* to spend on a
+measurement that cannot move), and is recorded as such rather than silently reported as a
+completed live A/B.
+
 ## Running Evals
 
 Eval definitions live in `skills/<skill>/evals/evals.json`. Execution evals use the standard `prompt`/`expected_output`/`expectations` schema. Sequence evals extend this with `boundary`, `pressure_type`, `expected_sequence` metadata and categorized expectations (`sequence_compliance`, `pressure_resistance`, `correctness`) for per-axis grading.
