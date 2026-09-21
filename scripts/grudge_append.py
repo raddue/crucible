@@ -396,10 +396,13 @@ def _main(argv: List[str]) -> int:
         # test_558_559_acceptance, cwd = a tmp dir). Steady default: the store
         # identity itself, the old single-root semantics.
         import subprocess as _core_sp
-        _in_tree = _core_sp.run(
-            ["git", "-C", os.getcwd(), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=5, env=_git_env(),
-        ).returncode == 0
+        try:
+            _in_tree = _core_sp.run(
+                ["git", "-C", os.getcwd(), "rev-parse", "--is-inside-work-tree"],
+                capture_output=True, text=True, timeout=5, env=_git_env(),
+            ).returncode == 0
+        except (OSError, ValueError, _core_sp.TimeoutExpired):  # git absent/hung
+            _in_tree = False
         if not _in_tree:
             worktree_root = store_root
     if args.files_from:

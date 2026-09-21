@@ -28,6 +28,7 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
 GRUDGE_APPEND = os.path.join(REPO_ROOT, "scripts", "grudge_append.py")
 HOOK = os.path.join(REPO_ROOT, "hooks", "grudge-resolution-guard.sh")
+GRUDGE_GUARD_DOCTOR = os.path.join(REPO_ROOT, "scripts", "grudge_guard_doctor.py")
 
 SESSION_START_TS = "2026-01-01T00:00:00.000Z"
 
@@ -325,13 +326,13 @@ class R3_STORE_KEY_MIGRATION(unittest.TestCase):
                           % (wt_key, os.path.realpath(wt))).encode())
             env = _cli_env(store)
             # Detector (worktree-keyed -> non-zero + names the record).
-            d = _run_cli([sys.executable, self.GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
+            d = _run_cli([sys.executable, GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
                          cwd=wt, env=env)
             self.assertEqual(d.returncode, 1, d.stdout)
             self.assertIn("worktree-keyed", d.stdout)
             self.assertIn("wtkeyed", d.stdout)
             # Migrate (dir + frontmatter -> store identity).
-            m = _run_cli([sys.executable, self.GRUDGE_GUARD_DOCTOR,
+            m = _run_cli([sys.executable, GRUDGE_GUARD_DOCTOR,
                           "--migrate-store-keys"], cwd=wt, env=env)
             self.assertEqual(m.returncode, 0, m.stdout)
             store_key = os.path.basename(os.path.realpath(repo))
@@ -343,12 +344,43 @@ class R3_STORE_KEY_MIGRATION(unittest.TestCase):
             self.assertIn("repo_root: %s" % os.path.realpath(repo), body,
                           "frontmatter repo_root must be rewritten to store root")
             # After migration the store is clean.
-            d2 = _run_cli([sys.executable, self.GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
+            d2 = _run_cli([sys.executable, GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
                           cwd=wt, env=env)
             self.assertEqual(d2.returncode, 0, d2.stdout)
 
 
-EXPECTED_TESTS = 9
+class R3_FRONTMATTER_JSON_QUOTE(unittest.TestCase):
+    """Regression (2026-09-20 warden pass): the writer JSON-quotes frontmatter
+    values (#602: `repo_root: "/tmp/x"`); the store-identity detector must
+    unquote before the realpath comparison, or every writer-produced record is
+    misclassified as worktree-keyed and criterion 9 is unreachable."""
+
+    def test_writer_produced_record_is_store_keyed(self):
+        with tempfile.TemporaryDirectory() as root:
+            repo = _init_repo(root)
+            wt = _linked_worktree(root, repo)          # same store identity
+            store = os.path.join(root, "store")
+            env = _cli_env(store)
+            _write_bytes(os.path.join(repo, "src", "a.py"), b"V = 1\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "feat: add a")
+            _git(wt, "merge", "-q", "HEAD")
+            # Writer-produced record (real append() -> JSON-quoted repo_root).
+            r = _run_cli(
+                [sys.executable, GRUDGE_APPEND, "--symptom", "s",
+                 "--files=src/a.py"], cwd=wt, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            d = _run_cli([sys.executable, GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
+                         cwd=wt, env=env)
+            self.assertEqual(d.returncode, 0,
+                             "a clean store-identity record must classify as "
+                             "store-keyed (zero worktree-keyed), got:\n"
+                             + d.stdout + d.stderr)
+            self.assertIn("store-keyed:   1", d.stdout)
+            self.assertIn("worktree-keyed: 0", d.stdout)
+
+
+EXPECTED_TESTS = 10
 
 
 def _run_with_count_guard():

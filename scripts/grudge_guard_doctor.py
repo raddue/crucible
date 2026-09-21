@@ -54,7 +54,15 @@ if _REPO_ROOT not in sys.path:
 
 
 def _frontmatter_value(path: str, key: str) -> "str | None":
-    """Value of one `key: value` frontmatter line, or None."""
+    """Value of one `key: value` frontmatter line, or None.
+
+    The writer (`grudge_append._render`) JSON-escapes frontmatter values
+    (#602) and encodes paths in a JSON list — `repo_root: "/tmp/x"` — so the
+    Value read here is a JSON STRING LITERAL, not the bare path. The store-key
+    comparison must unquote it (json.loads, with a raw fallback for
+    hand-written / pre-#602 records) or every writer-produced record is
+    misclassified as worktree-keyed (SIEGE-R2-H8 / criterion 9 unreachable)."""
+    import json as _json
     try:
         with open(path, "r", encoding="utf-8") as fh:
             for ln in fh:
@@ -64,7 +72,15 @@ def _frontmatter_value(path: str, key: str) -> "str | None":
                 if line.startswith("## "):
                     return None
                 if line.startswith(key + ":"):
-                    return line.split(":", 1)[1].strip()
+                    raw = line.split(":", 1)[1].strip()
+                    if raw:
+                        try:
+                            dec = _json.loads(raw)
+                            if isinstance(dec, str):
+                                return dec
+                        except (ValueError, TypeError):
+                            pass
+                    return raw or None
     except OSError:
         return None
     return None

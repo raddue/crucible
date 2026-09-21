@@ -146,7 +146,7 @@ Warn-only PreToolUse hook on the `Agent` matcher (canonical per T1; legacy `Task
 
 ### Setup
 
-Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/settings.json` at the repo root — same scope as `gate-ledger-guard`, per the #168 README convention). **The one stated exception to that convention is `grudge-resolution-guard.sh` (#559)**, which registers repo-scoped in the committed `.claude/settings.json` at the repo root: it is a *blocking* hook whose subject matter is crucible-only (grudge write-discipline for this repo's own `fix(*)` commits), so it must not fire — let alone block a Stop — in every unrelated project the maintainer works in, the way a user-global registration would. See Grudge Resolution Guard below.
+Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/settings.json` at the repo root — same scope as `gate-ledger-guard`, per the #168 README convention). See Grudge Resolution Guard below for its own per-machine registration (also opt-in — never committed, per #604).
 
 ```json
 {

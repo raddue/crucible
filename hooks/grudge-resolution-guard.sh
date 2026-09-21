@@ -152,6 +152,14 @@ fi
 if ! command -v git >/dev/null 2>&1; then
   exit 0
 fi
+# Never-fail-closed (README §7 + the contract's dependency rows): python3 and
+# the grudge query/append helper scripts are load-bearing for a CLEARANCE
+# (skips.log + --by-commit lookups), but their absence must ALLOW the Stop, not
+# block it — a stripped PATH (missing python3) or a partial checkout (missing
+# scripts/) would otherwise turn the lookup's rc=127/2 into a block.
+if ! command -v python3 >/dev/null 2>&1; then
+  exit 0
+fi
 if ! printf '%s' "$INPUT" | jq -e . >/dev/null 2>&1; then
   exit 0   # malformed JSON
 fi
@@ -244,6 +252,14 @@ if [ ! -f "$CRUCIBLE_ROOT/scripts/grudge_query.py" ]; then
 fi
 QUERY_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_query.py"
 APPEND_SCRIPT="$CRUCIBLE_ROOT/scripts/grudge_append.py"
+
+# Never-fail-closed: a checkout where the scripts are unresolvable (a partial
+# clone, a stripped plugin) must ALLOW, not block — the clearance lookups would
+# otherwise read python3's "can't open file" rc=2 as "unresolved commit".
+if [ ! -f "$QUERY_SCRIPT" ] || [ ! -f "$APPEND_SCRIPT" ]; then
+  echo "grudge-resolution-guard: $QUERY_SCRIPT or $APPEND_SCRIPT missing — allowing Stop; grudge compliance NOT enforced (#559). Never fail closed by design." >&2
+  exit 0
+fi
 
 declare -A SHA_GROUP BLOCK_COUNTS PRIOR_COUNTS PRIOR_GROUP LAST_BLOCK_NONCE
 
@@ -755,8 +771,15 @@ while IFS= read -r line; do
     # Persist the path list ONCE, byte-exact, as the NUL-delimited
     # `$STATE_DIR/<sha>.files` artifact (§5/S-2/S6) — never a delimited JSON
     # field. Bounded write (SIEGE-R2-H3): a mkfifo'd target holds the open for
-    # the 1s timeout, never for the hook's own timeout ceiling.
-    _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
+    # the 1s timeout, never for the hook's own timeout ceiling. The artifact is
+    # content-addressed (sha -> path list is deterministic), so a fresh session
+    # whose `_load_files` never restored this candidate (its JSON state file is
+    # per-session) must NOT re-append a second copy — guard on existence.
+    if [ -e "$STATE_DIR/$c_sha.files" ]; then
+      :  # artifact already persisted (previous session), content is correct
+    else
+      _write_state_files "$STATE_DIR/$c_sha.files" "${c_paths[@]}"
+    fi
   else
     declare -n _cf="F_$c_sha"
     _has_non_md "${_cf[@]}" || continue
@@ -1034,6 +1057,29 @@ done
 # a durable reset to a co-member that earned nothing.
 for s in "${!SKIP_SET[@]}"; do DURABLE_CLEARED["$s"]=0; done
 for s in "${!DURABLE_BY_COMMIT[@]}"; do DURABLE_CLEARED["$s"]=0; done
+# SKIP_SET accumulates the whole skips.log, so on an idle Stop every historical
+# skip would re-fire a fresh CLEAR every time (journal + witness grow
+# O(stops×skips) toward the quarantine ceiling with NO new resolution). Scope
+# the durable clear to members this Stop can actually retire:
+#   1. in the in-scope candidate set (IS_SHA) — a skip for an out-of-window
+#      commit needs no CLEAR, its audit trail lives in skips.log itself;
+#   2. whose journal does NOT already end in CLEAR (done(m) pruning, one
+#      T-cc single pass over the candidate set).
+if [ "${#DURABLE_CLEARED[@]}" -gt 0 ]; then
+  _in_scope=" ${IS_SHA[*]:-} "  # space-delimited membership probe
+  for _cm in "${!DURABLE_CLEARED[@]}"; do
+    case " $_in_scope " in
+      *" $_cm "*) : ;;
+      *) unset "DURABLE_CLEARED[$_cm]" ;;
+    esac
+  done
+  if [ "${#DURABLE_CLEARED[@]}" -gt 0 ]; then
+    _journal_pass "${!DURABLE_CLEARED[@]}"
+    for _cm in "${!DURABLE_CLEARED[@]}"; do
+      [ "${JBLAST[$_cm]:-}" = "CLEAR" ] && unset "DURABLE_CLEARED[$_cm]"
+    done
+  fi
+fi
 if [ "${#DURABLE_CLEARED[@]}" -gt 0 ]; then
   _journal_append_group CLEAR "" "${!DURABLE_CLEARED[@]}"
   if [ "$APPEND_OK" -ne 1 ]; then

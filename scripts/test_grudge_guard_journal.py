@@ -623,7 +623,84 @@ class TN_WITNESS_MKFIFO_BOUNDED(unittest.TestCase):
                             f"the hook budget (took {elapsed:.1f}s)")
 
 
-EXPECTED_TESTS = 23
+class TW_POST_MERGE_REGRESSIONS(unittest.TestCase):
+    """Regressions from the warden fresh-eyes pass (2026-09-20, post dev-sync):
+
+    - T-w-1 (fail-open): a PATH without python3 must ALLOW, never block.
+    - T-w-2 (CLEAR spam): an idle Stop must not re-CLEAR a skip forever.
+    - T-w-3 (.files dedup): a NEW session's first scan must not re-append the
+      NUL-delimited `.files` artifact it only references from another session.
+    """
+
+    def test_missing_helpers_allows(self):
+        # A honeypot clone: the hook copied into a scripts-less install tree
+        # (no grudge_query/grudge_append resolve) must ALLOW, not block — the
+        # never-fail-closed dependency probes (python3 + helper scripts).
+        with tempfile.TemporaryDirectory() as root:
+            fx = HookFixture(root)
+            fx.ensure_store()
+            fx.commit(["app.py"])
+            stereo_dir = os.path.join(root, "install", "hooks")
+            os.makedirs(stereo_dir)
+            shutil.copy2(HOOK, os.path.join(stereo_dir, "grudge-resolution-guard.sh"))
+            env = fx.env()
+            env.pop("CLAUDE_PROJECT_DIR", None)  # no script root available
+            r = subprocess.run(
+                ["bash", os.path.join(stereo_dir, "grudge-resolution-guard.sh")],
+                input=fx.payload("sess-honeypot"), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", cwd=fx.repo, env=env,
+                timeout=90,
+            )
+            self.assertEqual(r.returncode, 0,
+                             "unresolvable helper scripts must allow the Stop "
+                             "(never-fail-closed), got rc=%s stderr=%r"
+                             % (r.returncode, r.stderr))
+
+    def test_idle_stop_does_not_respawn_skips_clear(self):
+        with tempfile.TemporaryDirectory() as root:
+            fx = HookFixture(root)
+            fx.ensure_store()
+            sha = fx.commit(["app.py"])
+            os.makedirs(fx.guard_dir, exist_ok=True)
+            fx.add_skip(sha)
+            r1 = fx.run("sess")             # skip retire -> CLEAR line
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            j1 = fx.journal("sess")
+            n1 = j1.count("CLEAR")
+            self.assertGreaterEqual(n1, 1)
+            r2 = fx.run("sess", stop_hook_active=True)  # idle Stop now
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+            j2 = fx.journal("sess")
+            self.assertEqual(j2.count("CLEAR"), n1,
+                             "an idle Stop must not re-CLEAR an already "
+                             "retired skip (journal growth, quarantine spiral)")
+
+    def test_new_session_does_not_duplicate_files_artifact(self):
+        with tempfile.TemporaryDirectory() as root:
+            fx = HookFixture(root)
+            fx.ensure_store()
+            fx.commit(["app.py"])
+            r1 = fx.run("sessA")
+            self.assertEqual(r1.returncode, 2)
+            files_art = [f for f in os.listdir(fx.guard_dir)
+                         if f.endswith(".files")]
+            self.assertTrue(files_art)
+            artifact = os.path.join(fx.guard_dir, files_art[0])
+            with open(artifact, "rb") as fh:
+                n1 = len([p for p in fh.read().split(b"\0") if p])
+            self.assertEqual(n1, 1)
+            r2 = fx.run("sessB")            # NEW session id -> first scan
+            # The candidate is still unresolved, so B re-blocks — the point is
+            # the artifact must NOT have grown by re-appending.
+            self.assertEqual(r2.returncode, 2, r2.stderr)
+            with open(artifact, "rb") as fh:
+                n2 = len([p for p in fh.read().split(b"\0") if p])
+            self.assertEqual(n2, 1,
+                             "a new session must not re-append the "
+                             "content-addressed .files artifact")
+
+
+EXPECTED_TESTS = 26
 
 
 def _run_with_count_guard():
