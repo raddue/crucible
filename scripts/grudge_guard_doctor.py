@@ -1,135 +1,41 @@
 #!/usr/bin/env python3
-"""`ledger doctor` — on-demand consistency check for the calibration + grudge
-stores (#400).
+"""grudge-guard doctor — consistency + identity checks for the grudge subsystem.
 
-The calibration ledger is "the epistemic backbone": every reader degrades
-SILENTLY on a torn / unparseable line, so a single corrupt write permanently and
-invisibly degrades calibration accuracy and the grudge preflight — "the only
-symptom is the advisory stopped showing up." `compass.py` already ships a
-`doctor`; this is its analogue for the ledger and grudge stores, reporting
-unparseable-line counts and #402 identity-less rows.
+Two on-demand readers, both pure-stdlib, both gating NOTHING:
 
-On-demand only — it gates NOTHING. Pure stdlib; reads the central machine-local
-store by default (override via CRUCIBLE_LEDGER_DIR / --ledger-dir / --grudge-dir).
+1. **--grudge-guard** (R5, design §5b): the read side of the Stop hook's
+   write-ONLY outcome witness at <witness-dir>/outcomes.tsv. The hook never
+   reads that file (C-h); this is its only consumer. It flags a possibly-STUCK
+   stop hook: a session whose last recorded outcome is a `BLOCK` older than the
+   age threshold with no terminal `CLEARED`/`GIVEUP` and no later `BLOCK` for
+   the same session.
 
-Exit codes (mirrors compass doctor): 0 = healthy, 1 = corruption found.
+2. **--grudge-keys / --migrate-store-keys** (R3, design §4.3, criterion 9):
+   reports STORE-keyed vs WORKTREE-keyed grudges (non-zero exit when
+   worktree-keyed records exist), and migrates worktree-keyed records into the
+   store identity (directory AND the `repo_root` frontmatter field). The hook's
+   dual-key `_worktree_fallback` stays active until this reports zero on the
+   machines that run it.
+
+History: this subsystem lived in `scripts/ledger_doctor.py` until origin/dev
+moved the calibration-ledger reporting cluster to raddue/crucible-eval
+(#460/#569). The grudge-guard responsibilities (which the #558/#559 plan places
+here) were re-homed into this file so the PR adds code instead of resurrecting a
+deleted host.
+
+Exit codes: 0 = healthy, 1 = issue found. `--selftest` runs the witness reader's
+synthetic-fixture self-test (design §9 T-o vs a fixture, never live $HOME state).
 """
 import argparse
-import json
 import os
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
-
-from scripts.ledger_append import default_ledger_dir, _valid_identity  # noqa: E402
-
-
-# --------------------------------------------------------------------------- #
-# PURE scanners (deterministic; unit-tested)                                  #
-# --------------------------------------------------------------------------- #
-
-def scan_jsonl(path: str, *, identity: bool = False) -> dict:
-    """Scan a JSONL store. Returns counts WITHOUT mutating anything.
-
-    Reads exactly as every production reader does (render_ledger.load_runs /
-    ledger_reduce.reduce / reconcile_ledger.load_jsonl): BYTE mode, split on
-    b"\\n", drop a partial trailing line (no terminating newline — crash-mid-
-    append), skip only a TRULY empty chunk, and feed each remaining RAW chunk to
-    json.loads. A whitespace-only chunk and an invalid-UTF-8 chunk therefore
-    count as unparseable, exactly as the readers count them — the doctor's whole
-    job is to surface the corruption the readers degrade silently on.
-
-    Keys: exists, total (non-empty chunks scanned == parseable + unparseable),
-    parseable, unparseable, and — when `identity` is set — identityless
-    (parseable object rows lacking a valid (run_id, skill) join key, the #402
-    collision risk). A non-object parseable chunk counts as unparseable (a store
-    row must be a JSON object). A present-but-unreadable store (OSError on open/
-    read — e.g. a directory or permission-denied) is reported as one unparseable
-    line, NOT healthy: the doctor must be more honest than the readers, which
-    swallow OSError.
-    """
-    rep = {"exists": False, "total": 0, "parseable": 0, "unparseable": 0,
-           "identityless": 0}
-    if not path or not os.path.exists(path):
-        return rep
-    rep["exists"] = True
-    try:
-        with open(path, "rb") as f:
-            raw = f.read()
-    except OSError:
-        # File exists but cannot be read (directory, permission-denied). The
-        # readers return [] silently; the doctor surfaces it as corruption.
-        rep["total"] += 1
-        rep["unparseable"] += 1
-        return rep
-    if not raw:
-        return rep
-    parts = raw.split(b"\n")
-    if not raw.endswith(b"\n"):
-        # Last element is a partial trailing line (crash-mid-append) — drop it,
-        # matching the readers.
-        parts = parts[:-1]
-    for chunk in parts:
-        if not chunk:  # only a TRULY empty chunk is skipped (matches readers)
-            continue
-        rep["total"] += 1
-        try:
-            obj = json.loads(chunk)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            rep["unparseable"] += 1
-            continue
-        if not isinstance(obj, dict):
-            rep["unparseable"] += 1
-            continue
-        rep["parseable"] += 1
-        if identity and not (
-            _valid_identity(obj.get("run_id"))
-            and _valid_identity(obj.get("skill"))
-        ):
-            rep["identityless"] += 1
-    return rep
-
-
-def scan_brier(path: str) -> dict:
-    """Scan brier-rolling.json. Keys: exists, ok (parses to a JSON object)."""
-    rep = {"exists": False, "ok": False}
-    if not path or not os.path.exists(path):
-        return rep
-    rep["exists"] = True
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        rep["ok"] = isinstance(data, dict)
-    except (OSError, ValueError):
-        rep["ok"] = False
-    return rep
-
-
-def scan_grudges(grudge_dir: str) -> dict:
-    """Scan a grudge store directory of `*.md` files. Keys: exists, total,
-    unparseable (files `grudge_query.parse_grudge` rejects)."""
-    rep = {"exists": False, "total": 0, "unparseable": 0}
-    if not grudge_dir or not os.path.isdir(grudge_dir):
-        return rep
-    rep["exists"] = True
-    # Imported lazily: grudge_query pulls in grudge_append; keep doctor importable
-    # even if the grudge subsystem is absent.
-    try:
-        from scripts.grudge_query import parse_grudge
-    except Exception:  # noqa: BLE001 — grudge subsystem unavailable
-        return rep
-    for name in sorted(os.listdir(grudge_dir)):
-        if not name.endswith(".md"):
-            continue
-        rep["total"] += 1
-        if parse_grudge(os.path.join(grudge_dir, name)) is None:
-            rep["unparseable"] += 1
-    return rep
-
+# Root at the repo (scripts.X package), matching the grudge subsystem files.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # --------------------------------------------------------------------------- #
 # R3 store-identity detector + migration (design §4.3, criterion 9).          #
@@ -210,10 +116,11 @@ def migrate_grudge_store_keys(grudge_base: "str | None", store_repo: "str | None
     `repo_root` frontmatter), returning a list of (src, dst, new_root) moves.
     Non-destructive: a rewrite failure aborts THAT file (left in place)."""
     moved: list = []
-    if store_repo is None or store_root is None:
+    if store_repo is None or store_root is None or not grudge_base:
         return moved
-    scan = scan_grudge_store_keys(grudge_base, store_repo, store_root)
-    store_dir = os.path.join(grudge_base, store_repo, "grudges")
+    base = grudge_base
+    scan = scan_grudge_store_keys(base, store_repo, store_root)
+    store_dir = os.path.join(base, store_repo, "grudges")
     sroot = os.path.realpath(store_root)
     for p, recorded in scan["worktree_keyed"]:
         try:
@@ -222,7 +129,7 @@ def migrate_grudge_store_keys(grudge_base: "str | None", store_repo: "str | None
         except OSError:
             continue
         rewritten = _rewrite_repo_root(text, sroot)
-        if rewritten == text and p.startswith(os.path.join(grudge_base, store_repo)):
+        if rewritten == text and p.startswith(os.path.join(base, store_repo)):
             continue  # already store-identity; nothing to migrate
         os.makedirs(store_dir, exist_ok=True)
         name = os.path.basename(p)
@@ -273,23 +180,21 @@ def report_grudge_store_keys(grudge_base: "str | None", store_repo: "str | None"
     return 0
 
 
-# --------------------------------------------------------------------------- #
-# Report                                                                      #
-# --------------------------------------------------------------------------- #
-
-def _default_grudge_dir() -> "str | None":
-    """Best-effort grudge store for the cwd's repo, or None if undeterminable
-    (not in a git repo, grudge subsystem absent). Never raises.
-
-    Retargeted from resolve_repo() to resolve_store_repo() (round-3 finding
-    SIEGE-R2-H8, C-g): the store is keyed by the git-common-dir parent, shared
-    across worktrees — the worktree root would inspect a directory that usually
-    does not exist from a linked worktree and report an empty (vacuously clean)
-    store."""
+def _store_identity():
+    """(repo_basename, store_root) from resolve_store_repo (C-l allowlisted),
+    or (None, None) when the subsystem is absent / not a repo."""
     try:
-        from scripts.grudge_append import grudges_dir, resolve_store_repo
-        repo, _root = resolve_store_repo()
-        return grudges_dir(repo)
+        from scripts.grudge_append import resolve_store_repo
+        repo, root = resolve_store_repo()
+        return repo, root
+    except Exception:  # noqa: BLE001 — best-effort
+        return None, None
+
+
+def _grudge_base():
+    try:
+        from scripts.grudge_append import default_base_dir
+        return default_base_dir()
     except Exception:  # noqa: BLE001 — best-effort
         return None
 
@@ -319,8 +224,8 @@ def default_witness_dir() -> str:
 
 
 def _repo_basename():
-    """Store identity basename for the cwd's repo (design §4.2/§8), or the
-    worktree basename fallback. Never raises."""
+    """Store identity basename for the cwd's repo (design §4.2/§8), or None.
+    Never raises."""
     try:
         from scripts.grudge_append import resolve_store_repo
         repo, _root = resolve_store_repo()
@@ -333,7 +238,7 @@ def scan_witness(witness_path: str, repo: "str | None", *,
                  age_hours: int = WITNESS_AGE_HOURS) -> dict:
     """Scan the outcome witness for the given repo. Returns counts + flagged
     (epoch_s, session_id) pairs for possibly-stuck sessions. {} shapes on an
-    unreadable/absent file, mirroring scan_grudges; never raises."""
+    unreadable/absent file; never raises."""
     rep = {"exists": False, "total": 0, "parseable": 0, "unparseable": 0,
            "flagged": []}
     if not witness_path or not os.path.isfile(witness_path):
@@ -445,7 +350,6 @@ def _go_selftest() -> int:
         g = scan_witness(good_p, "r")
         assert g["flagged"] == [], f"GOOD fixture flagged: {g['flagged']}"
         assert g["parseable"] == 5, f"GOOD parseable got {g['parseable']} (foreign repo excluded)"
-        # foreign-repo-only view still reads 0 line for repo "r".
         # STALE fixture -> the stuck session's LAST BLOCK flagged exactly once.
         s = scan_witness(stale_p, "r")
         assert [x[1] for x in s["flagged"]] == ["s-stuck"], f"STALE fixture: {s['flagged']}"
@@ -457,97 +361,12 @@ def _go_selftest() -> int:
         return 0
 
 
-def doctor(ledger_dir: str, grudge_dir: "str | None") -> int:
-    """Print the consistency report; return 0 healthy / 1 corruption found."""
-    runs = scan_jsonl(os.path.join(ledger_dir, "runs.jsonl"), identity=True)
-    fals = scan_jsonl(os.path.join(ledger_dir, "falsification.jsonl"))
-    brier = scan_brier(os.path.join(ledger_dir, "brier-rolling.json"))
-    grudges = scan_grudges(grudge_dir) if grudge_dir else {"exists": False}
-
-    info, warnings, issues = [], [], []
-
-    info.append(f"ledger-dir: {ledger_dir}")
-
-    if not runs["exists"]:
-        info.append("runs.jsonl — not present (no gating runs captured yet)")
-    else:
-        line = (f"runs.jsonl — {runs['parseable']}/{runs['total']} parseable")
-        if runs["unparseable"]:
-            issues.append(f"runs.jsonl: {runs['unparseable']} unparseable line(s)")
-        else:
-            info.append(line)
-        if runs["identityless"]:
-            warnings.append(
-                f"runs.jsonl: {runs['identityless']} row(s) lack a valid "
-                f"(run_id, skill) identity — skipped by consumers (#402)")
-
-    if not fals["exists"]:
-        info.append("falsification.jsonl — not present (reconciler not run yet)")
-    elif fals["unparseable"]:
-        issues.append(
-            f"falsification.jsonl: {fals['unparseable']} unparseable line(s)")
-    else:
-        info.append(
-            f"falsification.jsonl — {fals['parseable']}/{fals['total']} parseable")
-
-    if not brier["exists"]:
-        info.append("brier-rolling.json — not present (reconciler not run yet)")
-    elif not brier["ok"]:
-        issues.append("brier-rolling.json: corrupt or not a JSON object")
-    else:
-        info.append("brier-rolling.json — OK")
-
-    if not grudges["exists"]:
-        info.append("grudge store — not present / not resolvable")
-    elif grudges["unparseable"]:
-        issues.append(
-            f"grudge store: {grudges['unparseable']}/{grudges['total']} "
-            f"unparseable file(s)")
-    else:
-        info.append(f"grudge store — {grudges['total']} grudge(s), all parseable")
-
-    print("=== ledger doctor ===")
-    for line in info:
-        print(f"  [ok] {line}")
-    for line in warnings:
-        print(f"  [warn] {line}")
-    for line in issues:
-        print(f"  [FAIL] {line}")
-    if issues:
-        print(f"  --- {len(issues)} issue(s) found ---")
-    else:
-        print("  --- healthy ---")
-    return 1 if issues else 0
-
-
-def _store_identity():
-    """(repo_basename, store_root) from resolve_store_repo (C-l allowlisted),
-    or (None, None) when the subsystem is absent / not a repo."""
-    try:
-        from scripts.grudge_append import resolve_store_repo
-        repo, root = resolve_store_repo()
-        return repo, root
-    except Exception:  # noqa: BLE001 — best-effort
-        return None, None
-
-
-def _grudge_base():
-    try:
-        from scripts.grudge_append import default_base_dir
-        return default_base_dir()
-    except Exception:  # noqa: BLE001 — best-effort
-        return None
-
-
+# --------------------------------------------------------------------------- #
+# CLI                                                                          #
+# --------------------------------------------------------------------------- #
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Consistency check for the calibration + grudge stores (#400).")
-    parser.add_argument(
-        "--ledger-dir", default=default_ledger_dir(),
-        help="ledger store dir (default: central ~/.claude/crucible/ledger)")
-    parser.add_argument(
-        "--grudge-dir", default=None,
-        help="grudge store dir of *.md files (default: derive from cwd repo)")
+        description="Consistency + identity checks for the grudge subsystem.")
     parser.add_argument(
         "--grudge-guard", action="store_true",
         help="#558/§5b: report the cwd repo's grudge-guard outcome witness "
@@ -602,9 +421,9 @@ def main(argv=None) -> int:
             return report_grudge_store_keys(base, store_repo, store_root)
         return report_grudge_store_keys(base, store_repo, store_root)
 
-    grudge_dir = args.grudge_dir if args.grudge_dir is not None \
-        else _default_grudge_dir()
-    return doctor(args.ledger_dir, grudge_dir)
+    parser.error("one of --grudge-guard / --grudge-keys / --migrate-store-keys "
+                 "is required")
+    return 2  # unreachable
 
 
 if __name__ == "__main__":

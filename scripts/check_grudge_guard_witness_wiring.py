@@ -1,18 +1,18 @@
 """R5 outcome-witness wiring fence (design §9 T-x, §10 criterion 8).
 
 The outcome witness (§5b) is write-only from the hook and is surfaced by an
-explicit `ledger_doctor --grudge-guard` invocation that `/handoff` and
+explicit `grudge_guard_doctor --grudge-guard` invocation that `/handoff` and
 `/finish` call — or it does not ship (criterion 8). This check forbids the
 round-2 shape T-x replaced: a wired-nothing pair satisfiable by a flag that
 argparse accepts but nothing runs. Three assertions:
 
-  1. **Wiring clauses** — `ledger_doctor --grudge-guard` appears inside the
+  1. **Wiring clauses** — `grudge_guard_doctor --grudge-guard` appears inside the
      `## Process` section of `skills/handoff/SKILL.md` and inside the
      `### Step 5.5` section of `skills/finish/SKILL.md` (clause-presence
      within a NAMED executable step section, NOT a whole-file substring and
      NOT a fenced example or comment — the check_handoff_stop_contract.py
      technique, round-3 finding S-4).
-  2. **Executability** — `scripts/ledger_doctor.py --grudge-guard` exits 0 and
+  2. **Executability** — `scripts/grudge_guard_doctor.py --grudge-guard` exits 0 and
      emits its report header when run against a synthetic fixture directory
      via `--witness-dir` (T-o shape), not merely that argparse accepts the
      flag (SIEGE-R2-M9/CHAIN-4).
@@ -29,13 +29,13 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-LEDGER_DOCTOR = ROOT / "scripts" / "ledger_doctor.py"
+DELIVERABLE = ROOT / "scripts" / "grudge_guard_doctor.py"
 HANDOFF = ROOT / "skills" / "handoff" / "SKILL.md"
 FINISH = ROOT / "skills" / "finish" / "SKILL.md"
 
-INVOCATION = "ledger_doctor --grudge-guard"
+INVOCATION = "grudge_guard_doctor --grudge-guard"
 # The fences may name the script with or without its `.py` suffix.
-_INVOCATION_RE = re.compile(r"ledger_doctor(?:\.py)? --grudge-guard")
+_INVOCATION_RE = re.compile(r"grudge_guard_doctor(?:\.py)? --grudge-guard")
 
 # Named executable-step section per skill; the invocation must appear inside
 # the section BODY, after fenced blocks are removed.
@@ -91,7 +91,7 @@ def build_fixture(rows: str) -> str:
 
 def run_reader(fixture_dir: str) -> tuple[int, str]:
     proc = subprocess.run(
-        [sys.executable, str(LEDGER_DOCTOR), "--grudge-guard",
+        [sys.executable, str(DELIVERABLE), "--grudge-guard",
          "--witness-dir", fixture_dir, f"--repo={_PIN_REPO}",
          "--witness-age-hours", "1"],
         capture_output=True, text=True, timeout=60,
@@ -108,14 +108,14 @@ def check_reader() -> list[str]:
     try:
         rc, stdout = run_reader(good)
         if rc != 0:
-            out.append(f"ledger_doctor --grudge-guard exited {rc} on a clean "
+            out.append(f"grudge_guard_doctor --grudge-guard exited {rc} on a clean "
                        f"fixture (expect 0)")
         if "=== grudge-guard witness ===" not in stdout:
-            out.append("ledger_doctor --grudge-guard did not emit its report "
+            out.append("grudge_guard_doctor --grudge-guard did not emit its report "
                        "header (=== grudge-guard witness ===)")
         rc3, stdout3 = run_reader(stale)
         if rc3 == 0:
-            out.append("ledger_doctor --grudge-guard exited 0 on a STALE "
+            out.append("grudge_guard_doctor --grudge-guard exited 0 on a STALE "
                        "fixture — a possibly-stuck stop hook must fail loudly")
         if "stuck-sess" not in stdout3:
             out.append("stale fixture did not name the stuck session in output")
@@ -131,10 +131,10 @@ def selftest() -> int:
     # 1. GOOD wiring samples per skill pass; per-clause RED when the
     #    invocation is removed from the named section.
     good_docs = {
-        "skills/handoff/SKILL.md": "## Process\n\n- run `ledger_doctor "
+        "skills/handoff/SKILL.md": "## Process\n\n- run `grudge_guard_doctor "
         "--grudge-guard` here.\n--\n## Next\n",
         "skills/finish/SKILL.md": "### Step 5.5: Pre-Push Validation\n\nrun "
-        "`ledger_doctor --grudge-guard`.\n\n### Step 6\n",
+        "`grudge_guard_doctor --grudge-guard`.\n\n### Step 6\n",
     }
     for rel, text in good_docs.items():
         e = check_wiring(text, rel)
@@ -147,7 +147,7 @@ def selftest() -> int:
             errs.append(f"RED wiring sample passed (invocation removed): {rel}")
     # 2. Fenced example must NOT satisfy the clause (S-4): invocation only
     #    inside ``` fences.
-    fenced = ("## Process\n\n```bash\nledger_doctor --grudge-guard\n```\n"
+    fenced = ("## Process\n\n```bash\ngrudge_guard_doctor --grudge-guard\n```\n"
               "--\n")
     if not check_wiring(fenced, "skills/handoff/SKILL.md"):
         errs.append("fenced-only invocation satisfied the wiring clause")

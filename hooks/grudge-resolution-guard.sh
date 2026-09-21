@@ -205,7 +205,7 @@ fi
 # ── 7.5. Outcome witness (design §5b) — write-ONLY execution evidence ─────────
 # Written OUTSIDE $STATE_DIR (C-i), so wiping $STATE_DIR (mechanism 3, #581)
 # cannot erase the proof that the hook ran and how it terminated. The hook
-# NEVER reads it (C-h) — only the reader (scripts/ledger_doctor.py
+# NEVER reads it (C-h) — only the reader (scripts/grudge_guard_doctor.py
 # --grudge-guard) does. A divergence between witness and journal is therefore
 # the DETECTOR's signal, never a second term in a decision (§5b.2).
 #   <epoch>\t<session-id>\t<repo-basename>\t<outcome>\t<nonce-or-->
@@ -608,7 +608,7 @@ _ordinal_of() {
 # delete) the journal to <session>.journal.corrupt.<epoch>, then start a fresh,
 # empty journal so every candidate re-reads COUNT(0) and re-nags loudly — the
 # conservative direction (D-1). The malformed evidence survives intact for
-# ledger_doctor. Called ONLY on an UNMEASURABLE read.
+# grudge_guard_doctor. Called ONLY on an UNMEASURABLE read.
 _journal_quarantine() {
   local epoch
   epoch="$(date +%s 2>/dev/null)"

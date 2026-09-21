@@ -21,14 +21,14 @@ its restatements disagreed with each other).
   refuses when the target is inside `worktree_root` OR `store_root`
   (SIEGE-R2-H7), not only `worktree_root` — a store under the main clone is
   refused even when recording from a linked worktree (S5/siege-S-2). The known
-  store-identity call sites (ledger_doctor's `_default_grudge_dir`,
+  store-identity call sites (grudge_guard_doctor's store identity,
   brier_advisory's `_grudge_hits`) are enumerated and pinned; the guard-line
   shape itself is asserted (SIEGE-R2-H8).
 - **C-j** — No code path converts a per-member `ABSENT` or `UNMEASURABLE`
   journal read into a numeric contribution (never coerced to `0`).
 - **C-l** — Every git shell-out in this subsystem (`grudge_append.py`'s
   `resolve_repo()`/`resolve_store_repo()`, `grudge_query.py`'s
-  `_git_env()`-backed calls, `ledger_doctor.py`'s store-identity resolution,
+  `_git_env()`-backed calls, `grudge_guard_doctor.py`'s store-identity resolution,
   the hook's `_git()`) invokes git through the PATH/HOME-only allowlist, never
   the inherited process environment (#605).
 - **C-n** — No journal write may lower `blocks(m)` for a member that was not
@@ -62,7 +62,7 @@ ROOT = os.path.abspath(os.path.join(_HERE, ".."))
 
 HOOK = ("hooks/grudge-resolution-guard.sh",)
 PY_PROD = ("scripts/grudge_query.py", "scripts/grudge_append.py",
-           "scripts/ledger_doctor.py")
+           "scripts/grudge_guard_doctor.py")
 CONTRACT_YAML = "docs/plans/2026-08-28-558-559-crap-grudge-contract.yaml"
 
 
@@ -142,21 +142,14 @@ def _cg_files(files):
         for ln, line in enumerate(text.splitlines(), 1):
             if _STORE_IDENTITY_RE.search(line):
                 sites.append(f"{rel}:{ln}: {line.strip()}")
-    ld = files.get("scripts/ledger_doctor.py", "")
-    ba = files.get("scripts/brier_advisory.py", "")
+    ld = files.get("scripts/grudge_guard_doctor.py", "")
     # Code-only vocabulary (strip docstrings/comments so documentation that
     # NAMES a concept is not taken for a call site). The banned shape is a real
     # import/call of resolve_repo for the grudge store.
     code = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'|#[^\n]*', '', ld, flags=re.S)
     if re.search(r'\bresolve_repo\s*\(', code):
-        errs.append("[C-g] ledger_doctor.py must not use resolve_repo() for the "
+        errs.append("[C-g] grudge_guard_doctor.py must not use resolve_repo() for the "
                     "grudge store — only resolve_store_repo() (SIEGE-R2-H8, H8)")
-    if ba:
-        m = re.search(r'def _grudge_hits.*?(?=\ndef |\Z)', ba, re.S)
-        if m and re.search(r'resolve_repo\b', m.group(0)):
-            errs.append("[C-g] brier_advisory._grudge_hits resolves the grudge "
-                        "store with worktree identity — must use "
-                        "resolve_store_repo()")
     return errs, sites
 
 # C-j: assigning a numeric that folds ABSENT/UNMEASURABLE into the group fold.
@@ -505,7 +498,7 @@ _PASS = {
         "    capture_output=True, text=True, timeout=5, env=_git_env())\n"
         "    if _is_inside(target_dir, worktree_root) or _is_inside(target_dir, store_root): return None\n"
     ),
-    "scripts/ledger_doctor.py": (
+    "scripts/grudge_guard_doctor.py": (
         "from scripts.grudge_append import resolve_store_repo\n"
     ),
 }

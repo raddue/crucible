@@ -301,7 +301,7 @@ class R3_STORE_KEY_MIGRATION(unittest.TestCase):
     """R3 (#580) §4.3: the store-identity detector reports a worktree-keyed
     record, and --migrate-store-keys moves the directory AND the repo_root
     frontmatter so a store-identity reader finds it."""
-    LEDGER_DOCTOR = os.path.join(REPO_ROOT, "scripts", "ledger_doctor.py")
+    GRUDGE_GUARD_DOCTOR = os.path.join(REPO_ROOT, "scripts", "grudge_guard_doctor.py")
 
     def test_detect_and_migrate_worktree_keyed(self):
         with tempfile.TemporaryDirectory() as root:
@@ -325,13 +325,13 @@ class R3_STORE_KEY_MIGRATION(unittest.TestCase):
                           % (wt_key, os.path.realpath(wt))).encode())
             env = _cli_env(store)
             # Detector (worktree-keyed -> non-zero + names the record).
-            d = _run_cli([sys.executable, self.LEDGER_DOCTOR, "--grudge-keys"],
+            d = _run_cli([sys.executable, self.GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
                          cwd=wt, env=env)
             self.assertEqual(d.returncode, 1, d.stdout)
             self.assertIn("worktree-keyed", d.stdout)
             self.assertIn("wtkeyed", d.stdout)
             # Migrate (dir + frontmatter -> store identity).
-            m = _run_cli([sys.executable, self.LEDGER_DOCTOR,
+            m = _run_cli([sys.executable, self.GRUDGE_GUARD_DOCTOR,
                           "--migrate-store-keys"], cwd=wt, env=env)
             self.assertEqual(m.returncode, 0, m.stdout)
             store_key = os.path.basename(os.path.realpath(repo))
@@ -343,7 +343,7 @@ class R3_STORE_KEY_MIGRATION(unittest.TestCase):
             self.assertIn("repo_root: %s" % os.path.realpath(repo), body,
                           "frontmatter repo_root must be rewritten to store root")
             # After migration the store is clean.
-            d2 = _run_cli([sys.executable, self.LEDGER_DOCTOR, "--grudge-keys"],
+            d2 = _run_cli([sys.executable, self.GRUDGE_GUARD_DOCTOR, "--grudge-keys"],
                           cwd=wt, env=env)
             self.assertEqual(d2.returncode, 0, d2.stdout)
 
