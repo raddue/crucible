@@ -146,7 +146,7 @@ Warn-only PreToolUse hook on the `Agent` matcher (canonical per T1; legacy `Task
 
 ### Setup
 
-Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/settings.json` at the repo root — same scope as `gate-ledger-guard`, per the #168 README convention):
+Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/settings.json` at the repo root — same scope as `gate-ledger-guard`, per the #168 README convention). See Grudge Resolution Guard below for its own per-machine registration (also opt-in — never committed, per #604).
 
 ```json
 {
@@ -223,7 +223,7 @@ Two disable paths:
 
 ### Cross-project firing (M6)
 
-> This hook is registered user-globally in `~/.claude/settings.json`. It fires on subagent dispatches from ANY project where the user works. Outside crucible, there is no `.pipeline-active` marker so suppression never applies; a build-shaped dispatch in an unrelated project will emit the advisory. For per-project disable, create the sentinel file `<project-root>/.build-routing-advisor-disabled` (preferred — does not require shell init). The env-var path `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` requires the user's shell init (e.g. `.bashrc`, `.zshrc`, or a shell-init wrapper) since hook subprocesses do NOT auto-source `.envrc` or direnv hooks — a `.envrc`-only export will NOT propagate. The design accepts this cross-project fire surface as a tradeoff for the broader enforcement.
+> This hook is registered user-globally in `~/.claude/settings.json`. It fires on subagent dispatches from ANY project where the user works. Outside crucible, there is no `.pipeline-active` marker so suppression never applies; a build-shaped dispatch in an unrelated project will emit the advisory. For per-project disable, create the sentinel file `$PROJECT_MEMORY/.build-routing-advisor-disabled` (preferred — does not require shell init). The env-var path `CRUCIBLE_DISABLE_BUILD_ROUTING_ADVISOR=1` requires the user's shell init (e.g. `.bashrc`, `.zshrc`, or a shell-init wrapper) since hook subprocesses do NOT auto-source `.envrc` or direnv hooks — a `.envrc`-only export will NOT propagate. The design accepts this cross-project fire surface as a tradeoff for the broader enforcement.
 
 ### State File
 
@@ -378,6 +378,72 @@ bash hooks/tests/test-rcpt-verify-hook.sh
 `jq` and `python3` — both absent-tolerant (the hook exits 0 silently when either is
 missing). No `git` dependency beyond the optional repo-root resolution (absent → exit 0).
 
+## Grudge Resolution Guard
+
+Blocking **Stop** hook enforcing grudge write-discipline for this repo (#559). It is crucible's first Stop hook and its first hook that blocks the turn: while a `fix(*)` commit that landed in this session's window — and touched at least one non-`.md` file — still has neither a grudge record nor a `skips.log` entry, the hook exits 2 and Claude Code refuses the Stop. It backstops the LLM-authored grudge-recording steps in `skills/debugging/SKILL.md` and `skills/merge-pr/SKILL.md` Step 7.5: those still do the recording, this catches the case where they were skipped. Every block is bounded — see MAX_BLOCKS below — so a session can never be trapped.
+
+### Setup (opt-in — NOT committed; #604)
+
+#559 originally shipped this hook registered in a committed `.claude/settings.json`. That is an RCE surface (GH-604 / siege S-1: a reviewer's `gh pr checkout N` would run the branch's Stop hook and whatever `scripts/` helper it names with the reviewer's privileges), so — like every other hook on this page — this one is registered **per-machine** and never in a committed `.claude/settings.json`. Register it for one machine, to `.claude/settings.local.json` (repo-local, gitignored) or user-global `~/.claude/settings.json`, referencing the hook by its absolute installed path (`$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh`), `type: command`, `timeout: 500`:
+
+```json
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/hooks/grudge-resolution-guard.sh\"", "timeout": 500 } ] } ] } }
+```
+
+Scope is deliberately repo-local (this hook *blocks* the turn on crucible-only subject matter; it must never fire in an unrelated project). `check_settings_surface.py` keeps the committed-config prohibition mechanical (see the Hook Registration Surface section below). Missing registration = the hook never fires = #559 compliance is simply not enforced on that machine (fail-open).
+
+The hook caps its own per-invocation work with a **per-Stop wall-clock budget** (`CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS`, default `8`, issue #603): candidate count (up to the `--max-count=500` scan, and accumulable turn-over-turn through future-dated author times), files per commit, and the stored grudge count are all attacker-multiplied inputs, and when the budget is spent the hook degrades **loudly to allow** (`exit 0`) rather than stall the Stop — 362 s measured on a single Stop before the budget existed. `timeout: 500` is retained only as the ceiling for the one failure class the loud-allow cannot help with: a hook that *hangs* outright (a `git` call against a corrupted or network-mounted repo that never returns), where the budget's own clock never advances.
+
+`timeout: 500` (seconds) matches this repo's other hooks, but for a blocking Stop hook it is deliberately **not** the bound the hook relies on. The hook caps its own per-invocation work with a **per-Stop wall-clock budget** (`CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS`, default `8`, issue #603): candidate count (up to the `--max-count=500` scan, and accumulable turn-over-turn through future-dated author times), files per commit, and the stored grudge count are all attacker-multiplied inputs, and when the budget is spent the hook degrades **loudly to allow** (`exit 0`) rather than stall the Stop — 362 s measured on a single Stop before the budget existed. `500` is retained only as the ceiling for the one failure class the loud-allow cannot help with: a hook that *hangs* outright (a `git` call against a corrupted or network-mounted repo that never returns), where the budget's own clock never advances.
+
+### How It Works
+
+1. **Stop hook** (`grudge-resolution-guard.sh`) fires on every Stop event. Exit 0 allows, exit 2 blocks — Claude Code's Stop contract only blocks on 2.
+2. Derives `PROJECT_ROOT` / `PROJECT_MEMORY` and touches `$PROJECT_MEMORY/grudge-guard/.last-run` as execution evidence, **before** either kill-switch, so even a disabled invocation records that it ran.
+3. **Session window** — on the first Stop of a session it seeds `seeded_at` from the earliest timestamp in the transcript (falling back, loudly, to wall-clock now) and scans `git log --no-merges --max-count=500`; later Stops rescan only `<last_checked_sha>..HEAD`. The first scan therefore reaches **backwards** over commits made earlier in the same session.
+4. **Candidate filter** — a commit is in scope when its subject matches `^fix[(:]`, its author date is `>= seeded_at`, and it touched at least one non-`.md` path. Documentation-only fixes never block.
+5. **Grouping** — candidates that share changed files are grouped, so one grudge clears the whole group rather than one commit at a time.
+6. **Clearance** — a group clears when `grudge_query.py` finds a matching grudge (looked up by commit and by changed files, under the shared-clone identity so any worktree of the clone counts), or when any member SHA appears in `$PROJECT_MEMORY/grudge-guard/skips.log`.
+7. **Bounded blocking** — each still-unresolved group carries a block counter; the message reads `attempt (n/3)`. At `MAX_BLOCKS=3` the hook **gives up loudly** and allows the Stop, stating plainly that compliance was not enforced. A block is only ever issued when this Stop can prove its counter advanced on disk; if it cannot, the Stop is allowed instead, because a frozen counter would make the loop unbreakable.
+8. **Never fail closed** — missing `jq`/`git`, a malformed payload, an unreadable transcript, a non-git cwd, an absent grudge store, an unwritable state dir, or a spent cost budget all exit 0.
+9. **Cost budget** — a per-Stop wall-clock budget (`CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS`, default `8` s) is checked around every potentially-expensive step: the `--max-count=500` scan, the per-candidate `git diff-tree` fan-out, the file-similarity grouping (`_overlap`, whose nested loop squares candidate count × files-per-commit), and the `grudge_query.py` clearance subprocesses. When the budget is spent the hook prints a loud degradation note and allows the Stop (`exit 0`) — an attacker-chosen input can stall a Stop for at most the budget, never for a whole turn (#603). The allow is a *rescan-on-next-Stop*, not a clearance: the `last_checked_sha` checkpoint only advances on a normal pass, so an unresolved `fix(*)` commit whose Stop ran out of budget is checked again next time, under the same budget.
+
+The block message and the give-up note each carry, above the `skips.log` escape hatch, a fully-resolved copy-pasteable `grudge_append.py` command — one per still-unresolved candidate SHA — prefilled with the hook's own clearance identity (`--repo-root`/`--repo`) and the candidate's NUL-delimited touched-path file (`--files-from="$STATE_DIR/<sha>.files"`, which the shell passes through unparsed; the hook renders no file name). Recording the grudge is then one paste plus a symptom line (Innovate incorporation (2026-08-30)).
+
+### State
+
+```
+$PROJECT_MEMORY/grudge-guard/
+  <session-id>.json   # version, last_checked_sha, seeded_at, sha_group, block_counts
+  <sha>.files         # NUL-delimited touched paths for a candidate (one per sha)
+  skips.log           # one `<sha> <reason>` line per deliberately-skipped commit
+  .last-run           # touched on every invocation (execution evidence)
+```
+
+`skips.log` is a flat file, deliberately separate from the per-session JSON, so it survives across sessions and can be appended by hand. A state document whose `version` disagrees with the hook's `STATE_VERSION` is discarded and re-written fresh on the next scan.
+
+### Kill Switch
+
+Two disable paths, both honored **after** the `.last-run` breadcrumb so a disabled invocation is still visible:
+
+- **Env var:** `CRUCIBLE_DISABLE_GRUDGE_RESOLUTION_GUARD=1`. As with the other hooks, this must be exported from shell init — hook subprocesses do not source `.envrc`/direnv.
+- **Sentinel file:** `$PROJECT_MEMORY/.grudge-resolution-guard-disabled` (preferred — no shell init needed). Either path prints a loud stderr note that `fix(*)` commits are not being checked.
+
+> **Per-worktree residual:** `$PROJECT_MEMORY` is derived from `git rev-parse --show-toplevel`, so each worktree of the same clone gets its OWN memory directory — and therefore its own sentinel and its own `skips.log`. Disabling the hook in one worktree does not disable it in another; a skip recorded in one worktree does not clear the commit in another. (Grudge *records* are unaffected: clearance queries use the shared-clone identity deliberately, so a recorded grudge clears every worktree.)
+
+### Verification
+
+Registration and execution evidence (did the hook actually *fire*) are two different questions. Whether the hook is registered on THIS machine is a per-machine, untracked fact — `scripts/check_settings_surface.py` enforces the prohibition on *committed* config, and the `.claude/settings.local.json` / `~/.claude/settings.json` registration above is checked the way any per-machine config is: by inspecting your own files, not a hook inventory. Execution evidence is `$PROJECT_MEMORY/grudge-guard/.last-run` (outside the repo, so it survives `git clean`). End a turn and inspect the breadcrumb's mtime:
+
+```bash
+date > /tmp/before-stop-time
+# ... end the turn, let Stop fire ...
+PROJECT_MEMORY="$HOME/.claude/projects/$(git rev-parse --show-toplevel | tr / -)/memory"
+test "$PROJECT_MEMORY/grudge-guard/.last-run" -nt /tmp/before-stop-time && echo "hook fired" || echo "hook did NOT fire"
+```
+
+`$PROJECT_MEMORY` is spelled out rather than referenced by name on purpose: it is a variable computed *inside* the hook's own process and is not exported to your shell, so a `test "$PROJECT_MEMORY/..."` copied verbatim would expand to an empty prefix and error on a missing operand instead of giving a clean pass/fail. Run this snippet once on a real checkout after this lands — it is the one property no fixture or check script can substitute for.
+
 ## Hook Registration Surface (#604)
 
 Repo-owned hooks (`hooks/*.sh`) are registered in **per-machine, untracked config** —
@@ -414,6 +480,15 @@ maintainer's privileges.
 ### Testing
 
 ```bash
-python3 scripts/check_settings_surface.py --selftest
+bash hooks/tests/test-grudge-resolution-guard.sh   # hook behavior
+python3 scripts/check_settings_surface.py --selftest   # registration surface (pre-quick)
 python3 scripts/check_settings_surface.py
 ```
+
+
+### Dependencies
+
+- `jq` — required for payload parsing and state I/O; absent → exit 0 (allow).
+- `git` — absent, or a cwd outside a work tree → exit 0 (allow).
+- `python3` — runs `scripts/grudge_query.py` for clearance lookups.
+- **GNU coreutils `date`** — the `seeded_at` derivation uses `date -u -d "<transcript timestamp>" +%s`. BSD/macOS `date` has no `-d` and yields an empty epoch; under the hook's `set +e` that falls through to the wall-clock fallback and, in the degenerate case, to a hook that never blocks. That degradation is fail-open by design (consistent with the never-fail-closed contract), but on macOS install `coreutils` and put `gdate`'s GNU `date` first on PATH if you want real enforcement.

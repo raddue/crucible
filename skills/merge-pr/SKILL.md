@@ -272,13 +272,20 @@ If the merged PR's title/type is `fix(*)` (a conventional-commit bug fix), recor
 ```bash
 # only for fix(*) PRs
 plugin_root="$(realpath "<this-skill-base-dir>/../..")"
+# store identity (DEC-4): the git-common-dir parent, shared across linked
+# worktrees — NOT this worktree's root, which would lose the record.
+store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"
+store_key="$(basename "$store_root" 2>/dev/null)"
 python3 "$plugin_root/scripts/grudge_append.py" \
   --symptom "<PR title minus the fix() prefix>" \
   --root-cause "<from PR body, if stated>" \
-  --files "<comma-separated files the PR changed>" \
+  --files="<changed file 1>" --files="<changed file 2>" \
   --commit "<squash/merge SHA>" \
+  --repo-root "$store_root" --repo "$store_key" \
   --why "<from PR body, if stated>"
 ```
+
+If this step is skipped or fails, Path B's Stop hook (`grudge-resolution-guard.sh`) will block the session's next Stop event until a grudge is recorded or explicitly skipped — see `hooks/README.md`.
 
 Non-`fix(*)` PRs record nothing. See `skills/grudge/SKILL.md`.
 

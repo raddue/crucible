@@ -90,13 +90,15 @@ Same omit-over-filler rule applies.
 
 4. **Verify load-bearing claims, with a budget.** Spend at most a handful of tool calls verifying things you're about to cite (current branch name, last commit SHA, PR numbers, file paths, function names). If a claim can't be cheaply verified, mark it `(unverified)` in the doc rather than digging deeper. Don't audit the entire codebase.
 
-5. **Write the file.** Detect the project's handoff convention before choosing a path:
+5. **Run the grudge-guard outcome-witness check (this repo only).** If this repo is a Crucible checkout with `scripts/grudge_guard_doctor.py`, run `python3 scripts/grudge_guard_doctor.py --grudge-guard` alongside the checks above. A stale un-terminated `BLOCK` in its report is a possibly-*stuck* grudge-resolution Stop hook (design §5b — the stop hook never reads the witness; this doctor is its only reader). Name it in the handoff as an open risk the next session must resolve. A missing script or an empty witness is an ordinary skip — never a failure, never blocking.
+
+6. **Write the file.** Detect the project's handoff convention before choosing a path:
    - Check for an existing `docs/handoffs/`, `handoffs/`, or `.handoffs/` directory in the project root. If one exists, use it and match the filename style of the most recent file in that directory (`ls -t | head` it).
    - If none exists, default to `docs/handoffs/YYYY-MM-DD-<short-topic-slug>.md`. Create the directory if needed and note the new convention in the doc itself.
    - For backlog handoffs, the topic slug should signal the scope (e.g., `<milestone-or-epic>-backlog`).
    - **If a same-day, same-topic file already exists**, do not clobber and do not append. Instead, create a new file with `-pt2` (or `-pt3`, etc.) appended to the slug, and reference the prior file's path in the new file's first paragraph. The `Read this doc and continue:` line then points unambiguously at the freshest content.
 
-6. **Output the file path** — see Output Contract below.
+7. **Output the file path** — see Output Contract below.
 
 ## Output Contract
 

@@ -5,6 +5,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, not the default depth-1 shallow clone. INV-C10's
+          # Step 7.5 assertion in scripts/check_contract_tags.py resolves a
+          # historical base commit (3193271); in a shallow clone that commit is
+          # absent and the check fails loudly by design (#578). Before this
+          # line, that same check was silently vacuous in CI.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

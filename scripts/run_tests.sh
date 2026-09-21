@@ -80,6 +80,41 @@ run() {
   fi
 }
 
+# `run_expect <token> <cmd...>` — `run` plus an assertion on the child's OUTPUT
+# (#576). Exit status alone cannot see a checker neutered into a total no-op:
+# replace a check_*.py's two entry-point lines with constants and it prints
+# nothing, asserts nothing, and still exits 0. No in-file self-check can catch
+# that — the self-check is inside the very file being neutered — so this runner
+# is the only available vantage point. OPT-IN by design: `run` above is
+# unchanged, every existing `run` line behaves exactly as before, and a line is
+# converted only once its banner has been verified BY EXECUTION.
+#
+# The token is matched against stdout AND stderr merged, so a checker moving a
+# diagnostic between the two streams does not silently break the assertion (the
+# banners converted below were verified on stdout). Matching is literal
+# (`grep -F`), never a pattern. Capturing the output does not swallow it: it is
+# re-emitted inside the same `::group::` fold, so a CI failure stays
+# diagnosable — the one difference from `run` is that the child's stdout and
+# stderr appear merged rather than interleaved live.
+run_expect() {
+  local token="$1"; shift
+  local out status
+  total=$((total + 1))
+  echo "::group::$*"
+  out="$("$@" 2>&1)"; status=$?
+  printf '%s\n' "$out"
+  if [ "$status" -ne 0 ]; then
+    echo "::endgroup::"
+    failed+=("$*")
+  elif ! printf '%s\n' "$out" | grep -qF -- "$token"; then
+    echo "MISSING EXPECTED OUTPUT TOKEN: $token"
+    echo "::endgroup::"
+    failed+=("$* (missing output token: $token)")
+  else
+    echo "::endgroup::"
+  fi
+}
+
 # --- Structural / canonical checks ---
 run python3 scripts/check_canonical_drift.py
 run python3 scripts/check_i2_marker.py
@@ -133,6 +168,12 @@ run python3 scripts/test_measure_474.py
 run python3 scripts/test_measure_486.py
 run bash hooks/tests/test-rcpt-verify-hook.sh
 
+# --- Complexity-ranked dispatch signal (#558) ---
+run python3 scripts/test_complexity_index.py
+run python3 scripts/complexity_index.py --selftest
+run python3 scripts/test_complexity_index_adversarial.py
+run python3 scripts/check_stdlib_only.py
+run python3 scripts/check_stdlib_only.py --selftest
 # --- #488 c1 receipt name-space acceptance tests ---
 run python3 scripts/test_488_name_space.py
 run python3 scripts/dec31_sweep.py          # AC-6 DEC-31 mutant sweep (#488 c1)
@@ -258,6 +299,49 @@ run bash hooks/tests/test-build-routing-advisor.sh
 run bash hooks/tests/test-gate-ledger-guard.sh
 run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
+run bash hooks/tests/test-grudge-resolution-guard.sh
+
+# --- Grudge eval suite (first eval/ wirings; #559) ---
+run python3 eval/grudge/test-grudge-core.py
+run python3 eval/grudge/test-grudge-match-stale.py
+run python3 eval/grudge/test-grudge-privacy-isolation.py
+run python3 eval/grudge/test-grudge-regressions.py
+run python3 eval/grudge/test-grudge-wiring.py
+
+# --- #558/#559 acceptance oracle (#579) ---
+run python3 scripts/test_558_559_acceptance.py
+
+# --- #558/#559 contract-tag coverage sweep + INV-C10 (#577, #566, #578) ---
+# Was a shell fence pasted out of the plan doc's Step 12.3, five of whose
+# assertions could not fail. run_expect, not run: a bare `run` would accept a
+# future mutation that exits 0 without asserting anything, which is the exact
+# failure mode this script was written to end.
+run_expect "selftest OK" python3 scripts/check_contract_tags.py --selftest
+run_expect "OK — contract coverage" python3 scripts/check_contract_tags.py
+
+# --- R4 encoding + injection fences (#574/#568, DEC-5): C-m/C-d/C-o/T-s greps
+run python3 scripts/check_grudge_encoding_invariants.py --selftest
+run python3 scripts/check_grudge_encoding_invariants.py
+
+# --- R4 encoding + injection behavior (T-h/T-i/T-k/T-l/T-n/T-aa) ---
+run python3 scripts/test_grudge_r4_encoding.py
+
+# --- R1+R2 journal invariants (#570/#581/#582): C-a/C-h/C-j/C-l/C-n greps +
+#     INV-C8 4a (C-c hook grep) + 4b (machine-local contract-YAML wording) ---
+run python3 scripts/check_grudge_guard_journal_invariants.py --selftest
+run python3 scripts/check_grudge_guard_journal_invariants.py
+
+# --- R1+R2 journal-bound behavior (T-a..T-cc, hook-driven, red-first) ---
+run python3 scripts/test_grudge_guard_journal.py
+
+# --- pre-R3 store identity (#580 resolve_store_repo) + C-l env hardening ---
+run python3 scripts/test_grudge_guard_redesign.py
+
+# --- R5 outcome witness (#580/§5b): reader behavior (T-o) over fixtures ---
+run_expect "selftest OK" python3 scripts/grudge_guard_doctor.py --grudge-guard --selftest
+# --- R5 outcome witness: wiring + executability fence (T-x, criterion 8) ---
+run python3 scripts/check_grudge_guard_witness_wiring.py --selftest
+run python3 scripts/check_grudge_guard_witness_wiring.py
 
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
