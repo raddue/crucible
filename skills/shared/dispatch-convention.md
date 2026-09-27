@@ -371,20 +371,20 @@ After compaction, skills can read `summary.md` from this path for narrative cont
 
 Every dispatch directory includes `manifest.jsonl` — a structured execution trace. Manifest entries must remain under 4096 bytes (POSIX PIPE_BUF) to ensure atomic appends under concurrent access.
 
-**Runtime tool (preferred — the steps below are the spec + fallback).** Use `python3 scripts/dispatch.py` for the mechanical bookkeeping: `seq --dir <D>` (crash-safe next seq = last manifest `seq` + 1), `before --dir <D> --seq N --file <dispatch-file> --role <r> [--phase P] [--task K] --model-tier <t>` (measures `input_chars` and appends the `dispatched` entry), `after --dir <D> --seq N --status <completed|failed|error|skipped> [--summary …] [--output-chars C] [--tool-calls K] [--duration S]` (appends the authoritative completion entry, copying the dispatched entry's context fields), and `cleanup --dir <D> --scratch <s> [--failed]` (## Cleanup). Token/rework aggregation stays in forge's Step 8.5 (single owner — no third copy). The steps below remain the canonical spec.
+**Runtime tool (preferred — the steps below are the spec + fallback).** Use `python3 scripts/dispatch.py` for the mechanical bookkeeping: `seq --dir <D>` (crash-safe next seq = last manifest `seq` + 1), `before --dir <D> --seq N --file <dispatch-file> --role <r> [--phase P] [--task K] [--model-tier <profile-or-label>]` (measures `input_chars` and appends the `dispatched` entry), `after --dir <D> --seq N --status <completed|failed|error|skipped> [--summary …] [--output-chars C] [--tool-calls K] [--duration S] [--actual-model <observed-label>]` (appends the authoritative completion entry, copying the dispatched entry's context fields), and `cleanup --dir <D> --scratch <s> [--failed]` (## Cleanup). Token/rework aggregation stays in forge's Step 8.5 (single owner — no third copy). The steps below remain the canonical spec.
 
 ### Protocol: Write Before Dispatch
 
-1. **Before dispatching:** Measure the dispatch file size in characters (e.g., read the file, count characters). Append entry with `status: "dispatched"` and `input_chars` set to the measured character count. Include `model_tier` based on the dispatch decision (opus/sonnet/haiku). Set `output_chars` and `tool_calls` to null (not yet available).
-2. **After dispatch returns:** Measure the subagent response length in characters. Append a new entry with the same `seq` and updated status/duration/summary. Set `output_chars` to the measured response length. Set `tool_calls` to the count of tool invocations if available from the response metadata, otherwise null. The last entry for a given `seq` is authoritative (append-only, no in-place rewrite — this preserves crash safety).
+1. **Before dispatching:** Measure the dispatch file size in characters (e.g., read the file, count characters). Append entry with `status: "dispatched"` and `input_chars` set to the measured character count. Include `model_tier` as the requested profile, legacy alias, or harness/provider label when known; omit it or set it to null rather than blocking when unknown. `dispatch.py` normalizes known aliases into `model_profile`. Set `output_chars` and `tool_calls` to null (not yet available).
+2. **After dispatch returns:** Measure the subagent response length in characters. Append a new entry with the same `seq` and updated status/duration/summary. Set `output_chars` to the measured response length. Set `tool_calls` to the count of tool invocations if available from the response metadata, otherwise null. Set `actual_model` to the model observed by the harness when available; otherwise leave it null. The last entry for a given `seq` is authoritative (append-only, no in-place rewrite — this preserves crash safety).
 3. **After compaction:** If the last entry for a `seq` still shows `"dispatched"`, treat as needs-re-dispatch (conservative default)
 
-**Measurement failure handling:** If the dispatch file is unreadable at measurement time (race condition, permission error), set `input_chars` to null for that entry. If the subagent response length is unavailable (agent crashed, timeout), set `output_chars` to null. Measurement failure must never block pipeline execution — the pipeline proceeds normally with null efficiency fields.
+**Measurement failure handling:** If the dispatch file is unreadable at measurement time (race condition, permission error), set `input_chars` to null for that entry. If the subagent response length is unavailable (agent crashed, timeout), set `output_chars` to null. If the requested profile has no harness mapping or the actual model cannot be observed, record the requested value and null actual model. Measurement and model-bookkeeping failures must never block pipeline execution — the pipeline proceeds normally with null efficiency/model fields, following `shared/model-tier-policy.md`'s no-stop resolution rules.
 
 ### Entry Format
 
 ```jsonl
-{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves","input_chars":12840,"output_chars":8200,"model_tier":"opus","tool_calls":5}
+{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves","input_chars":12840,"output_chars":8200,"model_tier":"high","model_profile":"high","actual_model":null,"tool_calls":5}
 ```
 
 **Fields:**
@@ -398,13 +398,15 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 - `summary` — one-line result from subagent output
 - `input_chars` — dispatch file size in characters, measured before dispatch (null for pre-enrichment entries or measurement failure)
 - `output_chars` — subagent response length in characters, measured after completion (null for pre-enrichment entries, in-flight dispatches, or crashed subagents)
-- `model_tier` — "opus", "sonnet", or "haiku" (null for pre-enrichment entries)
+- `model_tier` — requested profile, legacy alias, or harness/provider label: `high`, `standard`, `fast`, `opus`, `sonnet`, `haiku`, `inherit`, or an arbitrary actual label (null for pre-enrichment entries or when unknown)
+- `model_profile` — normalized profile from `model_tier` (`high`, `standard`, `fast`, or `inherit`); null for unknown labels or pre-enrichment entries
+- `actual_model` — model observed by the harness after dispatch; null when unavailable or unmeasured
 - `tool_calls` — count of tool invocations by the subagent (null if unavailable)
 - `replay_of` — seq number of the original dispatch being replayed (null or absent for non-replay entries)
 - `replay_session` — session ID of the replay run (null or absent for non-replay entries)
 - `mutation` — template mutation applied during replay, e.g. `"original.md -> replacement.md"` (null or absent for non-replay or faithful replay entries)
 
-**Backward compatibility:** Entries without efficiency fields (`input_chars`, `output_chars`, `model_tier`, `tool_calls`) or replay fields (`replay_of`, `replay_session`, `mutation`) are valid. Consumers must handle missing/null values gracefully.
+**Backward compatibility:** Entries without efficiency/model fields (`input_chars`, `output_chars`, `model_tier`, `model_profile`, `actual_model`, `tool_calls`) or replay fields (`replay_of`, `replay_session`, `mutation`) are valid. Consumers must handle missing/null values gracefully. Legacy `opus`/`sonnet`/`haiku` values remain valid `model_tier` labels and normalize to `high`/`standard`/`fast`.
 
 ### Re-dispatch Safety
 
@@ -445,7 +447,8 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 - `total_output_chars = sum(output_chars)` across all entries (skip nulls)
 - `est_input_tokens = total_input_chars / 4` (rounded)
 - `est_output_tokens = total_output_chars / 4` (rounded)
-- `dispatches_by_tier = count of entries grouped by model_tier` (skip nulls)
+- `dispatches_by_tier = count of entries grouped by model_tier` (skip nulls; this preserves raw requested labels, so aliases such as `opus` and `high` remain separate groups)
+- For comparable profile counts across legacy and neutral labels, group by `model_profile` instead; keep raw `model_tier` counts separately when provider-label detail matters.
 
 **Rework analysis:** For any `seq` with multiple manifest entries where an earlier entry has `status: "failed"` or `status: "error"`, the subsequent retry's `input_chars + output_chars` count as rework. Compute separately:
 - `rework_input_chars = sum(input_chars)` for retry entries only

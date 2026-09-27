@@ -9,19 +9,27 @@ Invocation (from repo root; cwd-independent):
 
     dispatch.py seq        --dir <dispatch-dir>
     dispatch.py before     --dir <D> --seq N --file <dispatch-file> --role <r> \
-                           [--phase P] [--task K] --model-tier <opus|sonnet|haiku>
+                           [--phase P] [--task K] [--model-tier <profile-or-label>]
     dispatch.py after      --dir <D> --seq N --status <completed|failed|error|skipped> \
-                           [--summary ".."] [--output-chars C] [--tool-calls K] [--duration S]
+                           [--summary ".."] [--output-chars C] [--tool-calls K] [--duration S] \
+                           [--actual-model <observed-model-label>]
     dispatch.py cleanup    --dir <D> --scratch <s> [--failed]
 
 `before` measures the dispatch file's size and appends the `status:"dispatched"`
 entry. `after` appends the authoritative completion entry for the same seq,
 copying the dispatched entry's context fields (file/role/phase/task/model_tier/
-input_chars) so the last entry per seq is self-sufficient — matching the
-convention's completed-entry example — and refuses to run if that dispatched
-entry is absent (no fabricated history). Entries are kept under POSIX PIPE_BUF
-(4096 bytes, measured on the UTF-8 encoded line) by shrinking `summary`, so a
-single `write()` append stays atomic under concurrent access.
+model_profile/input_chars) so the last entry per seq is self-sufficient —
+matching the convention's completed-entry example — and refuses to run if that
+dispatched entry is absent (no fabricated history). Entries are kept under
+POSIX PIPE_BUF (4096 bytes, measured on the UTF-8 encoded line) by shrinking
+`summary`, so a single `write()` append stays atomic under concurrent access.
+
+Model bookkeeping is advisory and must never block a dispatch: `--model-tier`
+accepts a neutral profile (`high`, `standard`, `fast`), a legacy alias
+(`opus`, `sonnet`, `haiku`), `inherit`, or an arbitrary harness/provider label.
+Known aliases are normalized into `model_profile`; unknown labels are recorded
+verbatim with `model_profile: null`. `after --actual-model` records the model
+observed by the harness when available, otherwise leaves it null.
 
 Deliberately NOT here: token/rework aggregation (`summary`) — forge owns that
 aggregation; a third implementation would be a drift surface, not a win.
@@ -39,7 +47,24 @@ MANIFEST = "manifest.jsonl"
 RECEIPT_LEDGER = "receipt-ledger.jsonl"
 
 STATUSES = {"completed", "failed", "error", "skipped"}
-TIERS = {"opus", "sonnet", "haiku"}
+PROFILE_ALIASES = {
+    "high": "high",
+    "standard": "standard",
+    "fast": "fast",
+    "opus": "high",
+    "sonnet": "standard",
+    "haiku": "fast",
+    "inherit": "inherit",
+}
+
+def normalize_model_profile(value):
+    """Map a requested model label to a neutral profile when one is known."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return PROFILE_ALIASES.get(text.lower())
 
 
 def _manifest_path(d):
@@ -76,25 +101,37 @@ def _serialize(entry):
 def _append(dirpath, entry):
     line = _serialize(entry)
     if len(line.encode("utf-8")) + 1 > PIPE_BUF:
-        summary = entry.get("summary")
-        if summary is not None:
-            # binary-search the largest summary prefix (bytes) that fits
-            fixed = dict(entry)
-            fixed["summary"] = None
-            overhead = len(_serialize(fixed).encode("utf-8"))
-            budget = PIPE_BUF - 1 - overhead
-            ell = "..."
-            lo, hi, best = 0, len(summary), 0
-            while lo <= hi:
-                mid = (lo + hi) // 2
-                entry["summary"] = summary[:mid] + (ell if mid < len(summary) else "")
-                if len(_serialize(entry).encode("utf-8")) + 1 <= PIPE_BUF:
-                    best = mid
-                    lo = mid + 1
-                else:
-                    hi = mid - 1
-            entry["summary"] = summary[:best] + (ell if best < len(summary) else "")
+        fields = sorted(
+            (field for field in ("model_tier", "actual_model")
+             if entry.get(field) is not None),
+            key=lambda field: len(str(entry[field]).encode("utf-8")),
+            reverse=True,
+        )
+        for field in fields:
+            entry[field] = None
             line = _serialize(entry)
+            if len(line.encode("utf-8")) + 1 <= PIPE_BUF:
+                break
+        if len(line.encode("utf-8")) + 1 > PIPE_BUF:
+            summary = entry.get("summary")
+            if summary is not None:
+                # binary-search the largest summary prefix (bytes) that fits
+                fixed = dict(entry)
+                fixed["summary"] = None
+                overhead = len(_serialize(fixed).encode("utf-8"))
+                budget = PIPE_BUF - 1 - overhead
+                ell = "..."
+                lo, hi, best = 0, len(summary), 0
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    entry["summary"] = summary[:mid] + (ell if mid < len(summary) else "")
+                    if len(_serialize(entry).encode("utf-8")) + 1 <= PIPE_BUF:
+                        best = mid
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                entry["summary"] = summary[:best] + (ell if best < len(summary) else "")
+                line = _serialize(entry)
         if len(line.encode("utf-8")) + 1 > PIPE_BUF:
             print(f"[dispatch WARN] entry for seq {entry.get('seq')} still exceeds "
                   f"PIPE_BUF after summary truncation (fixed fields too large); "
@@ -124,9 +161,12 @@ def cmd_before(args):
         # measurement failure must never block dispatch — proceed with null
         print(f"[dispatch WARN] cannot read dispatch file {fp}: {e}; "
               f"input_chars set to null", file=sys.stderr)
-    if args.model_tier not in TIERS:
-        print(f"dispatch before: model-tier must be one of {sorted(TIERS)}", file=sys.stderr)
-        return 2
+    requested = getattr(args, "model_tier", None)
+    if requested is not None:
+        requested = str(requested).strip() or None
+    if requested is None:
+        print("[dispatch WARN] model-tier omitted; recording null model bookkeeping",
+              file=sys.stderr)
     entry = {
         "seq": args.seq,
         "file": os.path.basename(fp),
@@ -138,7 +178,8 @@ def cmd_before(args):
         "summary": None,
         "input_chars": input_chars,
         "output_chars": None,
-        "model_tier": args.model_tier,
+        "model_tier": requested,
+        "model_profile": normalize_model_profile(requested),
         "tool_calls": None,
     }
     _append(args.dir, entry)
@@ -147,6 +188,9 @@ def cmd_before(args):
 
 
 def cmd_after(args):
+    actual_model = getattr(args, "actual_model", None)
+    if actual_model is not None:
+        actual_model = str(actual_model).strip() or None
     if args.status not in STATUSES:
         print(f"dispatch after: status must be one of {sorted(STATUSES)}", file=sys.stderr)
         return 2
@@ -171,6 +215,8 @@ def cmd_after(args):
         "input_chars": prev.get("input_chars"),
         "output_chars": args.output_chars,
         "model_tier": prev.get("model_tier"),
+        "model_profile": prev.get("model_profile"),
+        "actual_model": actual_model,
         "tool_calls": args.tool_calls,
     }
     _append(args.dir, entry)
@@ -218,7 +264,7 @@ def main(argv):
     b.add_argument("--role", required=True)
     b.add_argument("--phase", default=None)
     b.add_argument("--task", type=int, default=None)
-    b.add_argument("--model-tier", required=True)
+    b.add_argument("--model-tier", default=None)
 
     a = sub.add_parser("after")
     a.add_argument("--dir", required=True)
@@ -228,6 +274,7 @@ def main(argv):
     a.add_argument("--output-chars", type=int, default=None)
     a.add_argument("--tool-calls", type=int, default=None)
     a.add_argument("--duration", type=int, default=None)
+    a.add_argument("--actual-model", default=None)
 
     c = sub.add_parser("cleanup")
     c.add_argument("--dir", required=True)

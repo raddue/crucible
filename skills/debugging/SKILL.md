@@ -1017,7 +1017,7 @@ At completion, read the metrics log and manifest, then compute and report:
 
 Additional debugging metric: **hypothesis cycles** (number of hypothesis → investigate → implement cycles before resolution).
 
-**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the debugging completion report alongside existing metrics.
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count comparable dispatches grouped by `model_profile`; report raw `model_tier` separately when useful. Include these in the debugging completion report alongside existing metrics.
 
 ### Pipeline Decision Journal
 

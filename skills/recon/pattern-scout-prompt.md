@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Pattern Scout in Phase 2. This agent discovers conventions, naming patterns, test patterns, existing abstractions, and prior art relevant to the task. Feeds `existing_patterns` + `prior_art` core fields.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Agent tool (subagent_type: Explore, model: sonnet):
   description: "Pattern Scout: discover conventions and prior art for [task summary]"
