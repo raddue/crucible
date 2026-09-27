@@ -4,6 +4,8 @@
 
 Use this template when dispatching an acceptance test writer subagent in Phase 1, Step 3. These tests define "done" at the feature level — the build pipeline starts RED and ends GREEN.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Write acceptance tests for [feature]"

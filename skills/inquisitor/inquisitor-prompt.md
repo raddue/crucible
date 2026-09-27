@@ -5,6 +5,8 @@
 
 Use this template when dispatching each of the 5 inquisitor dimension subagents. The orchestrator fills in the dimension-specific sections.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Inquisitor [DIMENSION_NAME] dimension"

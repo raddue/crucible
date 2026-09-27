@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Blast Radius Mapper agent in Phase 2.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Agent tool (subagent_type: general-purpose, model: sonnet):
   description: "Map blast radius for migration: [MIGRATION_DESCRIPTION]"

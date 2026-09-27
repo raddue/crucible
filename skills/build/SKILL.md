@@ -20,6 +20,8 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
 
+**Models:** Build dispatches request model-agnostic profiles. Implementers, plan writers, and gate-critical reviewers generally request `high`; bounded mechanical work and some reviewers may request `standard` under the existing complexity heuristics. Prompt templates show current Claude Code reference aliases; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
 **Session index event:** At startup, if session indexing is active (session index path discoverable via glob), emit a `skill_start` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_start","summary":"Starting /build for <user goal>","detail":{"skill":"build","goal":"<user goal>"}}`. See `skills/shared/session-index-convention.md` for the outbox pattern.
 
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.

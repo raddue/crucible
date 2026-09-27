@@ -6,6 +6,8 @@
 
 Use this template when dispatching the Fresh Attacker agent. The orchestrator fills in the bracketed sections.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Siege fresh attacker on [target]"
