@@ -5,6 +5,8 @@
 
 Use this template when the orchestrator dispatches the Phase 4 implementation subagent. This is the ONLY agent that modifies code. It receives a confirmed hypothesis and creates a failing test, implements the fix, and verifies the broader suite.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Implement fix: [one-line summary of hypothesis]"

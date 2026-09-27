@@ -7,6 +7,8 @@
 
 Use this template when dispatching the Phase 1 scoping agent as a fallback when /recon with subsystem-manifest fails. The orchestrator fills in the bracketed sections.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Agent tool (subagent_type: Explore, model: sonnet):
   description: "Audit subsystem scoping"

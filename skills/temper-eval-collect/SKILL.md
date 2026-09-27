@@ -4,6 +4,8 @@ description: Internal temper-eval harness — not auto-routed; invoke explicitly
 model: opus
 ---
 
+Requested profile: high. Claude Code frontmatter mapping: `model: opus`.
+
 <!-- CANONICAL: shared/dispatch-convention.md -->
 
 # Temper Eval Harness — Collect Phase
@@ -73,7 +75,7 @@ Default `max_parallel = 6`. For each wave (up to ceil(queue_size / max_parallel)
 1. Pre-allocate next `max_parallel` seqs from the queue
 2. For each seq, dispatch a Task tool call:
    - `subagent_type: general-purpose`
-   - `model: opus`
+   - requested profile: `high` (Claude Code call-level mapping: `model: opus`)
    - `prompt`: a pointer prompt of the form `You are a temper reviewer. Read your full instructions at <dispatch_dir>/<NNN>-reviewer.md. Begin by reading that file.`
    - Carry per-dispatch timeout: dispatch_timeout (default 300)
 3. **Dispatch all in the wave in a single message with parallel tool calls.**

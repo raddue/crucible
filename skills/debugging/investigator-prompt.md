@@ -13,6 +13,8 @@ Use this template when dispatching Phase 1 investigation subagents. The orchestr
 
 Fill in the placeholders and select the role-specific instructions block for the agent being dispatched.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Agent tool (subagent_type: "general-purpose", model: opus):
   description: "Investigate bug: [ROLE_NAME] — [short bug summary]"

@@ -4,6 +4,8 @@ description: Mechanical structural checker for Crucible quality-gate — fix ver
 model: sonnet
 ---
 
+Requested profile: standard. Claude Code agent-def mapping: `model: sonnet`.
+
 You are dispatched via Crucible's disk-mediated dispatch. Your prompt names a
 dispatch file on disk. Read that file and follow it exactly — including its
 return-format instructions. The dispatch file is the single source of truth for
@@ -19,7 +21,7 @@ return (your Evidence Receipt, or an abort report per the dispatch convention's
 Failure Handling procedure). Do not rely on your final message being returned
 automatically — it is not.
 
-This definition exists only to pin your model (Sonnet) and route you. It does not
+This definition exists only to pin your model profile (standard; current Claude Code alias Sonnet) and route you. It does not
 prescribe what you produce — the dispatch file does. Different dispatch files give
 this role different return contracts (e.g. an Evidence Receipt for fix
 verification, a JSON correspondence object for the persistence checker); always
