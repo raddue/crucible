@@ -51,6 +51,16 @@ if [ -z "${CRUCIBLE_SUITE_SERIALIZED:-}" ] && command -v flock >/dev/null 2>&1; 
   exec flock "$SELF" "${BASH:-bash}" "$SELF" "$@"
 fi
 
+# --- Wall-clock cap: 15 min default (CI measured ~9-10.5 min) ---
+# Placed AFTER the flock re-exec so time spent waiting on another invocation's lock does
+# not count against the cap. Override with CRUCIBLE_SUITE_TIMEOUT=<seconds>; 0 disables.
+# Exit 124 = timed out (GNU timeout convention); -k reaps a SIGTERM-ignoring child.
+_SUITE_TIMEOUT="${CRUCIBLE_SUITE_TIMEOUT:-900}"
+if [ -z "${CRUCIBLE_SUITE_TIMED:-}" ] && [ "$_SUITE_TIMEOUT" != 0 ] && command -v timeout >/dev/null 2>&1; then
+  export CRUCIBLE_SUITE_TIMED=1
+  exec timeout -k 10 "$_SUITE_TIMEOUT" "${BASH:-bash}" "$SELF" "$@"
+fi
+
 # --- Test isolation: one PRIVATE temp namespace per invocation (round-1/C3-R1-S5) ---
 # Every suite below builds its scratch through `tempfile` (Python) or `mktemp` (bash),
 # and both resolve against $TMPDIR — by default the SHARED /tmp. Two invocations in
