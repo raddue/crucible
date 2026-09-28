@@ -35,9 +35,13 @@ Fable-family session. Repo-side enforcement is static-only; this part is operato
 Model strength for security work is no longer repo-bound, so the orchestrator makes the residual
 visible instead of letting a security PASS imply a model guarantee. Before any security-sensitive leg
 (`siege`, `dependency-audit`, a `quality-gate` red-team round on a security surface, or a
-`crucible-red-team` dispatch) reports PASS, it records one line naming the model actually in use, as
-the **first line of that leg's findings artifact** — receipt grammar allows no free prose, so the line
-lives in the artifact, not in the receipt:
+`crucible-red-team` dispatch) reports PASS, it records one line naming the model actually in use at
+the **top of that leg's findings artifact** — receipt grammar allows no free prose, so the line lives
+in the artifact, not in the receipt. Position: line 1 where the artifact has no mandated first line
+(`siege`); otherwise the line immediately after the mandated one — a `quality-gate` red-team findings
+file keeps `SEVERITY-COUNTS: fatal=… significant=… minor=…` on line 1 (its receipt cites `#L1-L1`)
+and takes the preflight line directly beneath it; `audit-results.md` takes it above its
+`# Dependency Audit` heading:
 
 ```
 SECURITY-PREFLIGHT: model=<id|unknown> host=<harness> -- strength not repo-bound; guardrail static-only
@@ -45,5 +49,10 @@ SECURITY-PREFLIGHT: model=<id|unknown> host=<harness> -- strength not repo-bound
 
 Non-blocking when `<id>` is `unknown` or any non-Fable model: record the line and proceed. Blocking
 when `<id>` is Fable-family: refuse the leg (`BLOCKED`, never PASS) — security-surface work does not
-run on a Fable-family model. A PASS whose findings artifact carries no preflight line is a protocol
-violation, not a silent success.
+run on a Fable-family model.
+
+Acceptance check: the leg's receipt must cite the artifact range containing the line, and a
+security-surface PASS whose findings artifact carries no `SECURITY-PREFLIGHT` line is `BLOCKED`, not
+PASS — including when the round ran on the `general-purpose` fallback or as a look-harder
+re-dispatch. The blocking branch outranks any skip or result-ordering rule in the consuming skill
+(e.g. dependency-audit's `skip_blocking`): a hard-out model blocks regardless.
