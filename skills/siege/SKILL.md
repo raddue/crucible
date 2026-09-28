@@ -14,6 +14,8 @@ Full-lifecycle security audit. Dispatches six parallel agents across distinct at
 
 **Dispatch roles:** Run every security-analysis role specified below. The host harness and operator select models; Crucible does not set model tiers.
 
+**Security-surface preflight (mandatory):** before any PASS verdict, emit the `SECURITY-PREFLIGHT` line naming the model in use, and refuse (`BLOCKED`, never PASS) if it is a hard-out model. Canonical rule: `shared/model-tier-policy.md`.
+
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
