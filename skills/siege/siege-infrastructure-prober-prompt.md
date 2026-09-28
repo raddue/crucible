@@ -7,7 +7,7 @@
 Use this template when dispatching the Infrastructure Prober agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Siege infrastructure prober on [target]"
   prompt: |
     You are an attacker probing the deployment, configuration, and supply chain.

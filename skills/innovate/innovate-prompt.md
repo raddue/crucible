@@ -6,7 +6,7 @@
 Use this template when dispatching an innovation subagent.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Innovate on [artifact type] for [feature]"
   prompt: |
     You are a creative technologist. Your job is to find the single most impactful addition to this artifact — the one thing that would make it dramatically better.

@@ -5,7 +5,7 @@
 Use this template when dispatching a de-sloppify cleanup agent in Phase 3.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "De-sloppify cleanup for task N"
   prompt: |
     You are a cleanup agent. Your job is to review the implementer's changes and remove unnecessary code that adds complexity without value.

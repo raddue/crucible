@@ -3,10 +3,10 @@
 
 # Retrospective Analyst — Dispatch Template
 
-Dispatch a Sonnet subagent after task completion using this template.
+Dispatch a subagent after task completion using this template.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Forge retrospective for [task name]"
   prompt: |
     You are a retrospective analyst. Your job is to compare what was planned
@@ -40,7 +40,6 @@ Task tool (general-purpose, model: sonnet):
     If no decision journal exists (pre-migration session), note: "No decision journal available — pre-migration session." and skip calibration analysis.]
 
     When analyzing the decision journal, cross-reference decisions against outcomes:
-    - Did model selection choices (Opus vs Sonnet for reviewers) correlate with review quality?
     - Were quality gate round counts appropriate, or did some gates end too early/late?
     - Were escalation decisions timely and well-reasoned?
     - Did investigator dispatch counts match the complexity of the bug?

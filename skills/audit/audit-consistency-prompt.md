@@ -10,7 +10,7 @@ The Consistency lens uses a two-agent protocol. The orchestrator dispatches Agen
 Receives the Tier 1 overview and cartographer conventions. Identifies files that may contain inconsistencies.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit consistency lens (Agent A: pattern scan)"
   prompt: |
     You are an auditor scanning for pattern inconsistencies in an existing
@@ -129,7 +129,7 @@ Task tool (general-purpose, model: opus):
 Receives full source for Agent A's flagged files. Confirms or rejects suspected inconsistencies.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit consistency lens (Agent B: deep inspection)"
   prompt: |
     You are an auditor confirming or rejecting suspected pattern

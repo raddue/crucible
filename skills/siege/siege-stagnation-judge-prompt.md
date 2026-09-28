@@ -4,10 +4,10 @@
 
 # Siege: Stagnation Judge Prompt Template
 
-Use this template when dispatching the stagnation judge during Phase 4 Security Gate. The judge is a Sonnet agent performing semantic comparison of findings across rounds.
+Use this template when dispatching the stagnation judge during Phase 4 Security Gate. The judge performs semantic comparison of findings across rounds.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Siege stagnation judge round [N]"
   prompt: |
     You are a stagnation judge for a security audit gate. You receive findings

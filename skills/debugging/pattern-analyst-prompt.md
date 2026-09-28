@@ -9,7 +9,7 @@ Use this template when dispatching a pattern analysis subagent during Phase 2 of
 **Dispatch after:** Synthesis agent has produced a root-cause analysis. Skip this agent if the synthesis report already identifies an obvious, high-confidence root cause with no ambiguity.
 
 ```
-Agent tool (subagent_type: "general-purpose", model: opus):
+Agent tool (subagent_type: "general-purpose"):
   description: "Pattern analysis: compare broken code against working references"
   prompt: |
     You are a pattern analyst investigating a bug. Your job is to find WORKING

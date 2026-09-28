@@ -47,9 +47,9 @@ The skill receives from the caller:
 ## How It Works
 
 1. **Size check:** If the combined diff + test file content exceeds 2,000 lines, split the audit into multiple dispatches by test file grouping. Each dispatch gets the full diff but a subset of test files. When merging, check each dispatch's "Audit Coverage" line — if any dispatch reports unaudited files (context exhaustion), re-dispatch those files in a new batch.
-2. Dispatch a **Test Audit Agent** (Opus) using `./test-audit-prompt.md`
+2. Dispatch a **Test Audit Agent** using `./test-audit-prompt.md`
 3. The agent reads the diff and affected test files, then produces a structured report
-4. If findings in categories 1-2 exist (tests to update or delete): dispatch **Test Fix Agent(s)** (Opus) using `./test-fix-prompt.md`. If the audit was split (step 1), dispatch one fix agent per audit batch **sequentially** (not in parallel) to isolate revert scope. Sequential execution prevents file clobber when multiple batches have findings in shared test utilities (helpers, fixtures, conftest). Each fix agent checks `git status` before starting to confirm the tree is in the expected state. A failure in one batch does not discard successful fixes from other batches.
+4. If findings in categories 1-2 exist (tests to update or delete): dispatch **Test Fix Agent(s)** using `./test-fix-prompt.md`. If the audit was split (step 1), dispatch one fix agent per audit batch **sequentially** (not in parallel) to isolate revert scope. Sequential execution prevents file clobber when multiple batches have findings in shared test utilities (helpers, fixtures, conftest). Each fix agent checks `git status` before starting to confirm the tree is in the expected state. A failure in one batch does not discard successful fixes from other batches.
 5. Each fix agent reads the current source files (not just the diff) to determine correct new behavior, makes test changes, and runs affected tests
 6. If modified tests fail: the fix agent reverts its own batch's changes and reports the failure
 7. If modified tests pass: the orchestrator commits the batch's changes (`test: batch N alignment fixes`) before dispatching the next batch. This ensures clean revert targets for subsequent batches and prevents revert clobber of prior successes. The caller may squash these commits per its own protocol.
@@ -57,7 +57,7 @@ The skill receives from the caller:
 
 ### Test Audit Agent
 
-Dispatch: `Agent tool (subagent_type: "general-purpose", model: opus)`
+Dispatch: `Agent tool (subagent_type: "general-purpose")`
 
 The audit agent receives the code diff, affected test files (full source), and optional context. It checks three categories:
 
@@ -84,7 +84,7 @@ The audit agent receives the code diff, affected test files (full source), and o
 
 ### Test Fix Agent
 
-If the audit agent reports findings in categories 1-2, dispatch a fix agent (Opus) that receives:
+If the audit agent reports findings in categories 1-2, dispatch a fix agent that receives:
 - The audit report
 - The affected test files (full source)
 - The code diff

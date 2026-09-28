@@ -6,7 +6,7 @@
 Use this template when dispatching the Robustness (systemic) lens agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit robustness (systemic) lens"
   prompt: |
     You are an auditor hunting for SYSTEMIC robustness gaps in an existing

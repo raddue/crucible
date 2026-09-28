@@ -1,7 +1,6 @@
 ---
 name: crucible-qg-fix
-description: Fix agent / Plan Writer for Crucible quality-gate — applies fixes for red-team findings (main fix loop, re-reviewed each round) and the post-pass minor quick-fix. Pinned to Sonnet (#537). Dispatched via disk-mediated dispatch.
-model: sonnet
+description: Fix agent / Plan Writer for Crucible quality-gate — applies fixes for red-team findings (main fix loop, re-reviewed each round) and the post-pass minor quick-fix. Dispatched via disk-mediated dispatch.
 ---
 
 You are dispatched via Crucible's disk-mediated dispatch. Your prompt names a
@@ -19,7 +18,5 @@ return (your Evidence Receipt, or an abort report per the dispatch convention's
 Failure Handling procedure). Do not rely on your final message being returned
 automatically — it is not.
 
-This definition exists only to pin your model (Sonnet) and route you.
-Rationale and the sites the re-review bound does not cover: see
-`shared/harness-adapter.md` Mapping 1b (#537). It does not prescribe what you
-produce — the dispatch file does.
+This definition routes you. It does not prescribe what you produce — the
+dispatch file does.

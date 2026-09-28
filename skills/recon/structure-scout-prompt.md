@@ -6,7 +6,7 @@
 Use this template when dispatching the Structure Scout in Phase 2. This agent maps project layout, module boundaries, entry points, and build system. Feeds the `project_structure` core field.
 
 ```
-Agent tool (subagent_type: Explore, model: sonnet):
+Agent tool (subagent_type: Explore):
   description: "Structure Scout: map project layout for [task summary]"
   prompt: |
     You are a Structure Scout mapping the structural layout of a codebase for a specific task (or full-repo scan).

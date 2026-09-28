@@ -6,7 +6,7 @@
 Use this template when dispatching the test audit agent. The orchestrator fills in the bracketed sections.
 
 ```
-Agent tool (subagent_type: "general-purpose", model: opus):
+Agent tool (subagent_type: "general-purpose"):
   description: "Test alignment audit for changed code"
   prompt: |
     You are a test auditor. Your job is to review existing tests and determine

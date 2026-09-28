@@ -6,7 +6,7 @@
 Use this template when dispatching an adversarial tester subagent in the build pipeline (Phase 3) or standalone.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Adversarial test task N: [task name]"
   prompt: |
     You are an adversarial tester. Your job is to find the top 5 ways this

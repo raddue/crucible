@@ -87,7 +87,7 @@ After any significant exploration — the agent read 5+ files, traced a call cha
 
 ### The Process
 
-1. Dispatch a **Cartographer Recorder** subagent (Sonnet) using `./recorder-prompt.md`
+1. Dispatch a **Cartographer Recorder** subagent using `./recorder-prompt.md`
 2. Provide: list of files explored, what was learned, any surprises or gotchas discovered
 3. Subagent returns structured updates for the relevant files
 4. Write or update the appropriate files:
@@ -260,13 +260,13 @@ digraph deps {
 
 ### Defect Signature Recording
 
-**Trigger:** After debugging Phase 4.5 "Where Else?" scan completes with 1+ candidates evaluated. The debugging orchestrator dispatches a Sonnet cartographer recorder agent.
+**Trigger:** After debugging Phase 4.5 "Where Else?" scan completes with 1+ candidates evaluated. The debugging orchestrator dispatches a cartographer recorder agent.
 
 **Skip condition:** Do not write a signature when Phase 4.5 reports "No analogous locations found" (0 candidates evaluated).
 
 **Responsibility split:**
 - **Orchestrator (debugging skill):** Owns dedup detection, pruning, count enforcement, post-recorder validation, and `update_path` file rename. See `crucible:debugging` Phase 4.5 for full orchestrator flow.
-- **Recorder agent (Sonnet):** Writes exactly one signature file and one companion non-match file. Enforces per-file caps (30-entry sibling cap, 100-entry non-match cap). Does NOT manage count, pruning, dedup, or cross-file validation.
+- **Recorder agent:** Writes exactly one signature file and one companion non-match file. Enforces per-file caps (30-entry sibling cap, 100-entry non-match cap). Does NOT manage count, pruning, dedup, or cross-file validation.
 
 **Input to recorder:**
 - Phase 4.5 scan report (generalized pattern, confirmed siblings with justifications, reverted siblings with revert reasons, confirmed non-matches with reasons)
@@ -431,11 +431,11 @@ maintains no call graph and should not replicate one.
 
 ## Quick Reference
 
-| Mode | Trigger | Model | Template | Orchestrator Cost |
-|------|---------|-------|----------|-------------------|
-| Record | After exploration | Sonnet | `recorder-prompt.md` | ~800 tokens (result only) |
-| Consult | Task begins | None (direct read) | N/A | ~4K tokens (map.md) |
-| Load | Subagent dispatch | None (direct read) | N/A | 0 (subagent context only) |
+| Mode | Trigger | Template | Orchestrator Cost |
+|------|---------|----------|-------------------|
+| Record | After exploration | `recorder-prompt.md` | ~800 tokens (result only) |
+| Consult | Task begins | None (direct read) | ~4K tokens (map.md) |
+| Load | Subagent dispatch | None (direct read) | 0 (subagent context only) |
 
 ## Red Flags
 
@@ -447,7 +447,7 @@ maintains no call graph and should not replicate one.
 - Load `landmines.md` into implementers (biases toward fear, not action)
 - Load `conventions.md` into reviewers (they should judge what IS, not what SHOULD be)
 - Record speculative decisions ("we might switch to X later") -- only record decisions actually made with evidence
-- Put operational routing decisions (model selection, gate rounds) in Key Decisions -- those belong in forge
+- Put operational routing decisions (gate rounds) in Key Decisions -- those belong in forge
 
 **Always:**
 - Read existing file before updating (merge, don't replace)

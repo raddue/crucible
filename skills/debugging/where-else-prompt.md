@@ -7,7 +7,7 @@ Use this template when the orchestrator dispatches the Phase 4.5 "Where Else?" s
 Fill in the placeholders before dispatching.
 
 ```
-Agent tool (subagent_type: "general-purpose", model: opus):
+Agent tool (subagent_type: "general-purpose"):
   description: "Where Else? scan: find and fix sibling locations for [one-line summary of the fix]"
   prompt: |
     You are the "Where Else?" scan agent for a systematic debugging session.

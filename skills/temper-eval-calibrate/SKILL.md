@@ -1,7 +1,6 @@
 ---
 name: temper-eval-calibrate
 description: Internal temper-eval harness — not auto-routed; invoke explicitly via /temper-eval-calibrate. Wrapper skill that runs k iterations of (stage → collect-behavior → score) for #290 calibration sweeps. Replaces bash for-loops that cannot invoke session skills. Default k=3. Inlines collect-dispatch behavior per iteration. Idempotent resume via per-iteration sentinels under skills/temper/evals/.calibrate-state/.
-model: opus
 ---
 
 <!-- CANONICAL: shared/dispatch-convention.md -->

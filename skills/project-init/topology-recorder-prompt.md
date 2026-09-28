@@ -3,10 +3,10 @@
 
 # Topology Recorder — Dispatch Template
 
-Dispatch a Sonnet subagent during Tier 2 fan-in to synthesize neighbor scan results into a cross-repo topology map.
+Dispatch a subagent during Tier 2 fan-in to synthesize neighbor scan results into a cross-repo topology map.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Topology recording — synthesizing [N] neighbor scans"
   prompt: |
     You are a topology recorder. Your job is to synthesize neighbor scan

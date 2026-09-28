@@ -7,7 +7,7 @@
 Use this template when dispatching the Insider Threat agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Siege insider threat on [target]"
   prompt: |
     You are an authenticated user with legitimate but limited access. You have

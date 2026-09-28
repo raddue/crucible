@@ -16,7 +16,7 @@ Explores a codebase organically, surfaces architectural friction, and proposes c
 
 **Purpose:** Discover structural improvement opportunities in a codebase. Distinct from audit (which finds bugs in a specific subsystem) -- prospector finds what could be better across the entire codebase. Audit finds what's broken. Prospector finds what could be better.
 
-**Model:** Opus (orchestrator, organic explorer, competing design agents). Sonnet (genealogists, structured analysis). If the orchestrator session is not running Opus, warn: "Prospector requires Opus-level reasoning for exploration and design phases. Results may be degraded."
+Model selection belongs to the host harness and operator.
 
 ## Invocation
 
@@ -54,12 +54,12 @@ Every status update must include:
 ## Agent Budget
 
 **Total budget: ~24 agents.** Worst case with 8 friction points (typically 3-4 High-severity):
-- 1 explorer (Opus)
-- 8 genealogists (Sonnet) — enhanced with change metrics
-- 3-4 root cause agents (Sonnet) — parallel with genealogists, High-severity findings only
-- 8 analysis agents (Sonnet) — enhanced, 2000-line hard cap
-- 3 design agents (Opus) — enhanced with root cause integration
-- 0-1 just-in-time root cause agent (Sonnet) — dispatched only if user selects a Limited candidate
+- 1 explorer
+- 8 genealogists — enhanced with change metrics
+- 3-4 root cause agents — parallel with genealogists, High-severity findings only
+- 8 analysis agents — enhanced, 2000-line hard cap
+- 3 design agents — enhanced with root cause integration
+- 0-1 just-in-time root cause agent — dispatched only if user selects a Limited candidate
 
 **Concurrency:** Maximum 5 concurrent agents. Genealogy and root cause agents share this budget during their parallel execution window. The orchestrator dispatches them in round-robin fashion (e.g., 3 genealogy + 2 root cause, then backfill as each completes). Once both tracks complete, analysis agents use the full concurrency budget.
 
@@ -150,7 +150,7 @@ At run start, write `scratch/<run-id>/invocation.md` containing:
 
 ### The Organic Explorer
 
-Dispatch: `Agent tool (subagent_type: Explore, model: Opus)` using `./explorer-prompt.md`
+Dispatch: `Agent tool (subagent_type: Explore)` using `./explorer-prompt.md`
 
 The explorer receives:
 - Cartographer data (if available) — module map, conventions, landmines
@@ -222,7 +222,7 @@ After user approves exploration results, trace the causal origin of each approve
 
 ### Genealogist Agents
 
-Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
+Dispatch: One agent per approved friction point, parallel (max 5), via `Agent tool (subagent_type: general-purpose)` using `./genealogist-prompt.md`. Note: `general-purpose` (not `Explore`) because genealogists run git commands (`git log`, `git blame`, `git show`) which require Bash tool access.
 
 ### Enhanced Output: Change Metrics
 
@@ -269,7 +269,7 @@ Root cause agents are dispatched only for **High-severity** friction points. In 
 
 ### Agent Spec
 
-Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose, model: Sonnet)` using `./root-cause-prompt.md`.
+Dispatch: One agent per approved High-severity friction point, parallel with genealogy (shares max-5 concurrency budget with genealogists, dispatched in round-robin fashion), via `Agent tool (subagent_type: general-purpose)` using `./root-cause-prompt.md`.
 
 Each agent receives:
 - Friction point description and file locations
@@ -301,7 +301,7 @@ Each agent uses the competing causal hypotheses method: generates 2-3 plausible 
 
 After all root cause agents and genealogy agents complete, the orchestrator checks whether multiple friction points share the same root cause. When they do, it collapses them into a single "friction cluster" with a unified remediation scope. This prevents producing interfering partial fixes for what is really a single architectural problem.
 
-**No agent dispatch** — this is orchestrator-local work (Opus reads N root-cause files, groups them, writes one file).
+**No agent dispatch** — this is orchestrator-local work: read N root-cause files, group them, and write one file.
 
 ### How It Works
 
@@ -332,7 +332,7 @@ Before writing the draft, the orchestrator also checks whether any Medium/Low-se
 
 ## Phase 3: Structured Analysis (Enhanced)
 
-The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose, model: Sonnet)` using `./analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
+The orchestrator reads explorer findings, genealogy results, root cause outputs, and convergence data from disk, then dispatches **Structured Analysis Agents** via `Task tool (general-purpose)` using `./analysis-prompt.md`. One agent per friction point or convergence cluster, dispatched in parallel (max 5 concurrent).
 
 ### Trajectory Context Loading
 
@@ -452,7 +452,7 @@ When a candidate's root cause type is "Other / Constraint-driven," the candidate
 
 ### Just-in-Time Root Cause for Limited Candidates
 
-If the user selects a `[Limited -- no root cause]` candidate for design, the orchestrator dispatches a just-in-time root cause agent for that finding before proceeding to design agent dispatch. This single Sonnet dispatch is cheap compared to dispatching three Opus design agents without root cause data.
+If the user selects a `[Limited -- no root cause]` candidate for design, the orchestrator dispatches a just-in-time root cause agent for that finding before proceeding to design agent dispatch. This single dispatch is cheap compared to dispatching three design agents without root cause data.
 
 After the JIT root cause agent completes, the orchestrator compares its output against existing root-cause files and convergence clusters. If the JIT root cause matches an existing cluster's shared root cause, the orchestrator warns the user: "This finding appears to share a root cause with [cluster X]. Continue separately, merge into cluster X, or skip?" The user decides before design agents are dispatched.
 
@@ -469,7 +469,7 @@ Before spawning competing design agents, write a user-facing explanation:
 
 Write to `scratch/<run-id>/problem-frame.md`.
 
-**USER GATE:** Present the problem framing to the user and wait for confirmation before dispatching design agents. The framing directly determines the constraint selection in Phase 6 — dispatching 3 Opus agents with wrong inputs is expensive. User may adjust constraints, dependencies, or dependency category before proceeding.
+**USER GATE:** Present the problem framing to the user and wait for confirmation before dispatching design agents. The framing directly determines the constraint selection in Phase 6 — dispatching three design agents with wrong inputs is expensive. User may adjust constraints, dependencies, or dependency category before proceeding.
 
 ## Phase 6: Competing Designs (Contextual Constraints)
 
@@ -521,7 +521,7 @@ The decision journal must log which constraint set was selected and which overri
 
 ### Design Agent Dispatch
 
-Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose, model: Opus)` using `./design-competitor-prompt.md`.
+Spawn 3 agents in parallel via `Agent tool (subagent_type: general-purpose)` using `./design-competitor-prompt.md`.
 
 Each agent receives (subject to 2000-line hard cap):
 - Technical brief from the analysis output (interface surface, caller patterns, structural summary)
@@ -619,7 +619,7 @@ After saving the design doc, ask the user:
 
 **Option (c):** Done. Design doc is committed and available for future reference.
 
-**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (3 Opus design agents). New candidate's design doc saved alongside the first.
+**Option (d):** Return to Phase 4 (candidate selection). Reuse existing exploration and analysis results from disk — no re-exploration needed. Budget resets for Phases 5-7 only (three design agents). New candidate's design doc saved alongside the first.
 
 ### End-of-Run Cleanup
 
@@ -712,13 +712,13 @@ After context compaction:
 
 ## Subagent Dispatch Summary
 
-| Agent | Model | Dispatch | Prompt Template |
-|-------|-------|----------|-----------------|
-| Organic Explorer | Opus | Agent tool (Explore) | `./explorer-prompt.md` |
-| Genealogist (per friction point) | Sonnet | Agent tool (general-purpose) | `./genealogist-prompt.md` |
-| Root Cause (per High-severity friction point) | Sonnet | Agent tool (general-purpose) | `./root-cause-prompt.md` |
-| Structured Analysis (per friction point or cluster) | Sonnet | Task tool (general-purpose) | `./analysis-prompt.md` |
-| Competing Design Agents (x3) | Opus | Agent tool (general-purpose) | `./design-competitor-prompt.md` |
+| Agent | Dispatch | Prompt Template |
+|-------|----------|-----------------|
+| Organic Explorer | Agent tool (Explore) | `./explorer-prompt.md` |
+| Genealogist (per friction point) | Agent tool (general-purpose) | `./genealogist-prompt.md` |
+| Root Cause (per High-severity friction point) | Agent tool (general-purpose) | `./root-cause-prompt.md` |
+| Structured Analysis (per friction point or cluster) | Task tool (general-purpose) | `./analysis-prompt.md` |
+| Competing Design Agents (x3) | Agent tool (general-purpose) | `./design-competitor-prompt.md` |
 
 ## Prompt Templates
 

@@ -35,7 +35,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 |---|---|
 | `/delve` | Instance-bug review of a diff or path — parallel finder angles + verify gate, prints ranked, verified defects with reproductions. Report-only (no merge verdict, no fix loop; `--fix` / `--comment` are opt-in). Use when "find bugs in this diff", "scan this file for defects", or you want concrete reproducible bugs. |
 | `/audit` | **Systemic** review of an existing subsystem or non-code artifact (design / plan / concept) — recurring patterns, structural drift, absences with no single reproduction. Four lenses per artifact type, find-and-report only (does not fix). Instance bugs route to `/delve` via `--bugs`; complexity to `/prospector`. Use when "this has accumulated cruft nobody's looked at in months." |
-| `/siege` | Security audit. Six parallel attacker-perspective Opus agents, iterates until zero Critical/High. Heavy — reserve for security PRs, scheduled reviews, or post-incident. |
+| `/siege` | Security audit. Six parallel attacker-perspective agents; iterates until zero Critical/High. Heavy — reserve for security PRs, scheduled reviews, or post-incident. |
 | `/recon` | Codebase investigation. Layered Investigation Brief with structure / patterns / scope / prior-art. Use before any task that needs codebase understanding you don't have. |
 | `/prospector` | Architectural friction finder. Explores the codebase for refactor candidates and proposes competing redesigns. Use when "what should I refactor next?" |
 

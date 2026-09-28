@@ -2,7 +2,7 @@
 
 This addendum is concatenated to `red-team-prompt.md` body by the quality-gate orchestrator **before Task dispatch**, conditional on either:
 
-1. **Look-harder verification** (Component 1) — first clean round of a chunk gets a same-model re-dispatch under tightened rubric to guard against false-positive PASS verdicts.
+1. **Look-harder verification** (Component 1) — first clean round of a chunk gets a fresh red-team re-dispatch under tightened rubric to guard against false-positive PASS verdicts.
 2. **Tail-rubric** (Component 2) — once `suppression_threshold ≥ 5` AND LOCAL round ≥ `ceil(suppression_threshold * 0.6)`, every red-team dispatch carries this addendum to suppress late-round severity inflation.
 
 The addendum is the **single source of truth** for tightened-rubric semantics. Both mechanisms reference this file; do not fork the content.

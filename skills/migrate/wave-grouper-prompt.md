@@ -6,7 +6,7 @@
 Use this template when dispatching the Consumer Wave Grouper agent in Phase 5.
 
 ```
-Task tool (model: sonnet):
+Task tool:
   description: "Group consumers into migration waves: [MIGRATION_DESCRIPTION]"
   prompt: |
     You are grouping consumers into migration waves — ordered batches where

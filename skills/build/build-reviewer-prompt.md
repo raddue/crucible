@@ -7,7 +7,7 @@
 Use this template when dispatching a reviewer teammate in Phase 3. The reviewer performs TWO passes: code review then test review.
 
 ```
-Task tool (general-purpose, model: opus or sonnet — lead decides per task complexity, team_name: "<team-name>", name: "reviewer-N"):
+Task tool (general-purpose, team_name: "<team-name>", name: "reviewer-N"):
   description: "Review Task N: [task name]"
   prompt: |
     You are a reviewer on a build team. You review completed implementations for correctness, quality, and test coverage.

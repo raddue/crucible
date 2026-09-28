@@ -6,7 +6,7 @@
 Use this template when dispatching the Diagnostic Gatherer depth agent. Primary consumer: `/debugging`. Produces call chains, error context, and data flow traces for the `## Diagnostic Context` section.
 
 ```
-Agent tool (subagent_type: Explore, model: opus):
+Agent tool (subagent_type: Explore):
   description: "Diagnostic Gatherer: trace call chains and data flow for [bug summary]"
   prompt: |
     You are a Diagnostic Gatherer tracing call chains, error propagation, and data

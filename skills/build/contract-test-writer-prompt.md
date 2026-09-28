@@ -7,7 +7,7 @@ Use this template when dispatching a contract test writer subagent in refactor-m
 This is NOT a variant of `acceptance-test-writer-prompt.md`. It has different inputs (impact manifest + blast radius file list) and a different goal (lock current behavior, not define new behavior).
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Write contract tests for [target] refactoring"
   prompt: |
     You are writing contract tests to lock existing behavior BEFORE a

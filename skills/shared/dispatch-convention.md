@@ -126,8 +126,7 @@ allowed file set was pinnable but the work inside those files is not mechanicall
 constrained — i.e. intra-file expansion is a plausible failure mode that a named-section
 inspection was not run against.
 
-Dispatch **one** judge after the work completes — model tier **sonnet**, the same tier as
-quality-gate's fix verifier — using `shared/scope-judge-prompt.md`. It receives **only**:
+Dispatch **one** judge after the work completes using `shared/scope-judge-prompt.md`. The host selects the model. It receives **only**:
 
 - (a) the original task / finding / hypothesis text, verbatim, and
 - (b) the resulting diff.
@@ -202,10 +201,7 @@ threshold (e.g. debugging's Phase 4.4: `>1 non-test file OR >40 changed lines in
 non-test files`) is the operative rule wherever it and "trivially small" could disagree
 on a specific diff.
 
-**Cost (measured, #562):** these figures and the threshold above assume a Sonnet judge;
-no agent def binds that tier today (`harness-adapter.md` Mapping 1b — prose model words
-are descriptive, not binding), so an orchestrator running on a larger model pays
-proportionally more and the threshold is correspondingly miscalibrated. All six run-1
+**Cost (measured, #562):** these figures and the threshold above were measured for one judge dispatch. Runtime cost varies by host-selected model, so treat the measured figures as historical estimates, not a universal cost guarantee. All six run-1
 dispatches now have a retained token/wall
 figure — P1/P2/N1/N2 captured at run time, P3/N3 recovered from the session transcript's
 per-dispatch `<usage>` records and cross-validated (that field matches the four
@@ -218,7 +214,7 @@ most expensive case, while diff size varies 4.7x. Diff-size dependence beyond th
 about half the size of P1's yet costs more tokens and over 3x the wall time (58,678
 tokens/81.7s vs. 56,422 tokens/23.9s) — confirming, on all six points rather than four,
 that a fixed floor dominates and diff-size dependence past it is not characterized. One
-sonnet dispatch per case; the one-turn/one-tool-call characterization was observed at
+judge dispatch per case; the one-turn/one-tool-call characterization was observed at
 spike time but is not itself a retained, citable figure (see the write-up's Cost
 section). 14-82s wall across the six cases, fully parallelizable against other post-work
 checks. Run 2's cost (P3 = 58,513 tokens/58.4s, N3 = 58,422 tokens/78.7s) was also
@@ -373,7 +369,7 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 
 ### Protocol: Write Before Dispatch
 
-1. **Before dispatching:** Measure the dispatch file size in characters (e.g., read the file, count characters). Append entry with `status: "dispatched"` and `input_chars` set to the measured character count. Include `model_tier` based on the dispatch decision (opus/sonnet/haiku). Set `output_chars` and `tool_calls` to null (not yet available).
+1. **Before dispatching:** Measure the dispatch file size in characters (e.g., read the file, count characters). Append entry with `status: "dispatched"` and `input_chars` set to the measured character count. Set `output_chars` and `tool_calls` to null (not yet available).
 2. **After dispatch returns:** Measure the subagent response length in characters. Append a new entry with the same `seq` and updated status/duration/summary. Set `output_chars` to the measured response length. Set `tool_calls` to the count of tool invocations if available from the response metadata, otherwise null. The last entry for a given `seq` is authoritative (append-only, no in-place rewrite — this preserves crash safety).
 3. **After compaction:** If the last entry for a `seq` still shows `"dispatched"`, treat as needs-re-dispatch (conservative default)
 
@@ -382,7 +378,7 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 ### Entry Format
 
 ```jsonl
-{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves","input_chars":12840,"output_chars":8200,"model_tier":"opus","tool_calls":5}
+{"seq":1,"file":"1-plan-writer.md","role":"plan-writer","phase":"2","task":null,"status":"completed","duration_s":83,"summary":"Plan written: 8 tasks, 3 waves","input_chars":12840,"output_chars":8200,"tool_calls":5}
 ```
 
 **Fields:**
@@ -396,13 +392,12 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 - `summary` — one-line result from subagent output
 - `input_chars` — dispatch file size in characters, measured before dispatch (null for pre-enrichment entries or measurement failure)
 - `output_chars` — subagent response length in characters, measured after completion (null for pre-enrichment entries, in-flight dispatches, or crashed subagents)
-- `model_tier` — "opus", "sonnet", or "haiku" (null for pre-enrichment entries)
 - `tool_calls` — count of tool invocations by the subagent (null if unavailable)
 - `replay_of` — seq number of the original dispatch being replayed (null or absent for non-replay entries)
 - `replay_session` — session ID of the replay run (null or absent for non-replay entries)
 - `mutation` — template mutation applied during replay, e.g. `"original.md -> replacement.md"` (null or absent for non-replay or faithful replay entries)
 
-**Backward compatibility:** Entries without efficiency fields (`input_chars`, `output_chars`, `model_tier`, `tool_calls`) or replay fields (`replay_of`, `replay_session`, `mutation`) are valid. Consumers must handle missing/null values gracefully.
+**Backward compatibility:** Entries without efficiency fields (`input_chars`, `output_chars`, `tool_calls`) or replay fields (`replay_of`, `replay_session`, `mutation`) are valid. Consumers must handle missing/null values gracefully.
 
 ### Re-dispatch Safety
 
@@ -433,17 +428,16 @@ The manifest's `input_chars` and `output_chars` fields enable token estimation u
 **Accuracy:** +/-30% overall (+/-20% for pure prose, +/-25% for code, worse for mixed content with extended thinking or system prompt overhead). Estimates are directionally correct and suitable for relative comparison across runs. They are NOT suitable for billing or exact cost calculation.
 
 **Known blind spots:**
-- **Extended thinking tokens** — Opus subagents may use extended thinking, which consumes tokens not captured in the dispatch file or response. This causes underestimation of total token consumption for Opus dispatches.
 - **Prompt cache effects** — Subagents share prompt caches. Cache-warm dispatches consume fewer actual tokens than estimated. This causes overestimation of cost for cache-warm subagents.
 - **Context carry-forward** — Orchestrator context grows across dispatches. The orchestrator's own token consumption is not captured per-dispatch.
-- **System prompt overhead** — Each subagent has a system prompt (~2000 tokens Opus, ~1500 Sonnet, ~800 Haiku) not reflected in `input_chars`.
+- **System prompt overhead** — Subagent system prompts are not reflected in `input_chars`.
 
 **Aggregation:** At pipeline completion, compute totals from the manifest:
 - `total_input_chars = sum(input_chars)` across all entries (skip nulls)
 - `total_output_chars = sum(output_chars)` across all entries (skip nulls)
 - `est_input_tokens = total_input_chars / 4` (rounded)
 - `est_output_tokens = total_output_chars / 4` (rounded)
-- `dispatches_by_tier = count of entries grouped by model_tier` (skip nulls)
+- `dispatch_count = count of distinct seq values` (each dispatch may have multiple append-only entries)
 
 **Rework analysis:** For any `seq` with multiple manifest entries where an earlier entry has `status: "failed"` or `status: "error"`, the subsequent retry's `input_chars + output_chars` count as rework. Compute separately:
 - `rework_input_chars = sum(input_chars)` for retry entries only

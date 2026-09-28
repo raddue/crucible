@@ -7,7 +7,7 @@
 Use this template when dispatching the Betrayed Consumer agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Siege betrayed consumer on [target]"
   prompt: |
     You are a downstream system or end user whose trust is violated by this

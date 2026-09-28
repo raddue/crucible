@@ -3,10 +3,10 @@
 
 # Neighbor Scanner — Dispatch Template
 
-Dispatch one Sonnet subagent per neighboring repository for a lightweight scan of purpose and interfaces.
+Dispatch one subagent per neighboring repository for a lightweight scan of purpose and interfaces.
 
 ```
-Agent tool (subagent_type: Explore, model: sonnet):
+Agent tool (subagent_type: Explore):
   description: "Neighbor scan for [repo name]"
   prompt: |
     You are a neighbor scanner. Your job is to quickly understand what a

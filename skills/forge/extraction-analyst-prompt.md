@@ -3,11 +3,11 @@
 
 # Skill Extraction Analyst -- Dispatch Template
 
-Dispatch a Sonnet subagent when trigger heuristics detect a skill-worthy workflow
+Dispatch a subagent when trigger heuristics detect a skill-worthy workflow
 in a retrospective entry.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Forge skill extraction analysis for [task name]"
   prompt: |
     You are a skill extraction analyst. Your job is to evaluate whether a

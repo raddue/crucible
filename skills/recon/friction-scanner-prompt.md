@@ -6,7 +6,7 @@
 Use this template when dispatching the Friction Scanner depth agent. Primary consumer: `/prospector`. Produces friction points with severity, frequency, and file locations for the `## Friction Scan` section.
 
 ```
-Agent tool (subagent_type: Explore, model: opus):
+Agent tool (subagent_type: Explore):
   description: "Friction Scanner: identify architectural friction in [scope]"
   prompt: |
     You are a Friction Scanner identifying areas of architectural friction, developer

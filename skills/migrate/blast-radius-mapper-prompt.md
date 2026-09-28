@@ -6,7 +6,7 @@
 Use this template when dispatching the Blast Radius Mapper agent in Phase 2.
 
 ```
-Agent tool (subagent_type: general-purpose, model: sonnet):
+Agent tool (subagent_type: general-purpose):
   description: "Map blast radius for migration: [MIGRATION_DESCRIPTION]"
   prompt: |
     You are mapping the blast radius of a migration — every file, module,

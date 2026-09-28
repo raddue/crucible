@@ -39,7 +39,7 @@ mkdir -p ~/.claude/agents
 ln -sf ~/repos/crucible/agents/* ~/.claude/agents/
 ```
 
-Or, when available on the marketplace: `claude plugin install raddue/crucible`. Note: the per-role model pins are currently delivered by the symlink install above — under a plugin install the agent types are namespaced (`crucible:…`) and bare-name dispatch resolution is unconfirmed (see [harness-adapter §8](skills/shared/harness-adapter.md#8-per-harness-install-manifest)).
+Or, when available on the marketplace: `claude plugin install raddue/crucible`. Note: the named agent types are currently delivered by the symlink install above — under a plugin install they are namespaced (`crucible:…`) and bare-name dispatch resolution is unconfirmed (see [harness-adapter §8](skills/shared/harness-adapter.md#8-per-harness-install-manifest)).
 
 ### Cursor / OpenAI Codex / Amp / Cline
 

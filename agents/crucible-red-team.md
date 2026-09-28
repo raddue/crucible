@@ -1,7 +1,6 @@
 ---
 name: crucible-red-team
-description: Adversarial reviewer (Devil's Advocate) for Crucible quality-gate and red-team. Pinned to Opus because recall-critical adversarial review degrades on weaker models. Dispatched via disk-mediated dispatch.
-model: opus
+description: Adversarial reviewer (Devil's Advocate) for Crucible quality-gate and red-team. Dispatched via disk-mediated dispatch.
 ---
 <!-- MODEL-TIER: security-hard-out -->
 
@@ -20,5 +19,5 @@ return (your Evidence Receipt, or an abort report per the dispatch convention's
 Failure Handling procedure). Do not rely on your final message being returned
 automatically — it is not.
 
-This definition exists only to pin your model (Opus) and route you. It does not
-prescribe what you produce — the dispatch file does.
+This definition routes you. It does not prescribe what you produce — the
+dispatch file does.

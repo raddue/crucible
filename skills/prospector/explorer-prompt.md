@@ -6,7 +6,7 @@
 Use this template when dispatching the Phase 1 organic exploration agent. The orchestrator fills in the bracketed sections.
 
 ```
-Agent tool (subagent_type: Explore, model: opus):
+Agent tool (subagent_type: Explore):
   description: "Organic exploration for [codebase/directory name]"
   prompt: |
     You are a senior developer joining this codebase for the first time.

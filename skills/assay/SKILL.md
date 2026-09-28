@@ -15,7 +15,7 @@ Evaluate competing approaches against codebase constraints. Returns a structured
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
 **Models:**
-- Evaluator agent: Opus (synthesis/judgment work needs the best model)
+- Evaluator agent: synthesis and judgment role; host selects model
 - Orchestrator: runs on whatever model the session uses
 
 **Announce at start:** "I'm using the assay skill to evaluate competing approaches."
@@ -65,7 +65,7 @@ When context contains unrecognized keys, the evaluator treats them as additional
 
 ### Phase 2: Dispatch Evaluator
 
-Dispatch a single Opus agent using `skills/assay/assay-evaluator-prompt.md`.
+Dispatch a single evaluator agent using `skills/assay/assay-evaluator-prompt.md`.
 
 Fill template placeholders before writing the dispatch file:
 - `{{QUESTION}}` — the decision question
@@ -227,7 +227,7 @@ Spec consumes assay output autonomously: high confidence = accept, medium = term
 
 ### Dispatches
 
-- Evaluator agent (Opus) via `skills/assay/assay-evaluator-prompt.md`
+- Evaluator agent via `skills/assay/assay-evaluator-prompt.md`
 
 ### Does NOT
 

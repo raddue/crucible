@@ -15,7 +15,7 @@ eval harness. `stage` fills the dimension-specific slots from the matching
 `## Dimension Reference` block.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Inquisitor [DIMENSION_NAME] dimension"
   prompt: |
     You are an inquisitor — a relentless hunter of cross-component bugs. Your

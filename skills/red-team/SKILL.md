@@ -127,7 +127,7 @@ The ledger is emitted every round regardless of `cost_cap_threshold` / `dr_signa
 | Documentation | Fix subagent |
 | Standalone invocation | Caller decides |
 
-The fix / Plan-Writer dispatch runs on the inherited session model (no agent-def pin) — unlike quality-gate's `crucible-qg-fix`, which is pinned to Sonnet (#537). Operator convention: do not run red-team's full-loop fix dispatch — standalone or driven by a non-interactive caller such as `finish` — on a Fable session; see `shared/model-tier-policy.md` residual (a) and #538.
+The fix / Plan-Writer dispatch uses the caller's host-selected model, like other Crucible dispatches. Crucible does not select models; see `shared/model-tier-policy.md` for the security-marker guardrail.
 
 ### 2. Dispatch Devil's Advocate
 
@@ -136,17 +136,9 @@ Use the `red-team-prompt.md` template in this directory. Provide:
 - Project context (existing systems, constraints, tech stack)
 - What the artifact is supposed to accomplish
 
-Dispatched as the `crucible-red-team` agent type, which pins the model to **Opus** —
-adversarial analysis needs the best model (see `agents/crucible-red-team.md`). The pin
-is enforced by the agent def regardless of the orchestrator's own model; do not pass a
-call-level `model:`.
+Dispatch as the `crucible-red-team` agent type. The host harness and operator select the model.
 
-If `subagent_type: crucible-red-team` fails to resolve (the agent defs are not installed —
-see `shared/harness-adapter.md` §8), fall back to `general-purpose` on the inherited model
-and emit a one-time visible warning ("agent type `crucible-red-team` not installed; the
-red-team is running on the inherited/session model — recall guarantee NOT enforced; install
-per harness-adapter §8") rather than degrading silently. The trigger is the observable
-type-resolution failure, not a transcript/metadata read.
+If `subagent_type: crucible-red-team` fails to resolve, fall back to `general-purpose` on the inherited model and emit a one-time visible warning that the named agent definition is unavailable.
 
 ### 3. Process findings
 
@@ -175,7 +167,7 @@ Dispatch a NEW Devil's Advocate subagent (fresh, no prior context, `subagent_typ
 
 ## Depth Calibration
 
-If a reviewer returns fewer findings than expected, the review is likely shallow. Dispatch a second reviewer (`subagent_type: crucible-red-team`, same Opus pin) with the instruction: "A prior reviewer found N issues. Find what they missed."
+If a reviewer returns fewer findings than expected, the review is likely shallow. Dispatch a fresh second reviewer (`subagent_type: crucible-red-team`) with the instruction: "A prior reviewer found N issues. Find what they missed."
 
 | Artifact | Expected findings (Fatal + Significant) | Minimum dimensions covered |
 |---|---|---|

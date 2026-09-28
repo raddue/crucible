@@ -6,7 +6,7 @@
 Use this template when dispatching the Architecture lens agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit architecture lens"
   prompt: |
     You are an auditor evaluating the structural health of an existing

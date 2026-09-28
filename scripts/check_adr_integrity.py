@@ -39,7 +39,7 @@ REJECTED_RE = re.compile(r"^\s*[-*]?\s*Rejected:")
 FALSIFY_RE = re.compile(
     r"^Recon claim falsified: L-\d+ from brief \S+ — .+$")
 FALSIFY_LOOSE = re.compile(r"Recon claim falsified:")
-SUPERSEDED_RE = re.compile(r"^SUPERSEDED by ADR-\d{4}$")
+SUPERSEDED_RE = re.compile(r"^SUPERSEDED by ADR-(\d{4})$")
 SUPERSEDES_RE = re.compile(r"^Supersedes ADR-\d{4}$")
 RENUMBERED_RE = re.compile(r"^Renumbered-from ADR-\d{4}$")
 
@@ -249,6 +249,8 @@ def selftest() -> int:
        bool(REJECTED_RE.match("- Rejected: x")))
     ok("REJECTED_RE matches plain", bool(REJECTED_RE.match("Rejected: x")))
     ok("SUPERSEDED_RE", bool(SUPERSEDED_RE.match("SUPERSEDED by ADR-0009")))
+    ok("SUPERSEDED_RE captures the target number (used by check() I6 mirror)",
+       SUPERSEDED_RE.match("SUPERSEDED by ADR-0009").group(1) == "0009")
     ok("RENUMBERED_RE", bool(RENUMBERED_RE.match("Renumbered-from ADR-0001")))
 
     if failures:

@@ -3,10 +3,10 @@
 
 # Init Recorder — Dispatch Template
 
-Dispatch a Sonnet subagent for Tier 1 fan-in — merges multiple partition explorer outputs into cartographer format.
+Dispatch a subagent for Tier 1 fan-in — merges multiple partition explorer outputs into cartographer format.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Init recording — merging [N] partition reports into cartographer format"
   prompt: |
     You are an init recorder. Your job is to merge multiple partition

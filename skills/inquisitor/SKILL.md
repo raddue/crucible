@@ -11,7 +11,7 @@ Hunt cross-component bugs by dispatching 5 parallel adversarial dimensions again
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Model:** Opus (orchestrating parallel adversarial subagents requires precise coordination)
+Model selection belongs to the host harness and operator.
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
@@ -117,7 +117,7 @@ If the diff is empty or contains only non-behavioral files (`.md`, `.json`, `.ya
 
 ### Step 2: Dispatch 5 Parallel Inquisitor Subagents
 
-For each dimension, dispatch a fresh subagent (Opus) using `./inquisitor-prompt.md`:
+For each dimension, dispatch a fresh subagent using `./inquisitor-prompt.md`:
 
 - Pass the full diff
 - Pass the dimension name and its focus areas (from the dimension definitions above)
@@ -146,7 +146,7 @@ Status update format:
 
 For each dimension with FAIL results:
 
-1. Dispatch a **Fixer** subagent (Opus) with:
+1. Dispatch a **Fixer** subagent with:
    - The failing test(s) and their attack vector descriptions
    - The relevant source files identified in the failure
    - Fix guidance from the inquisitor's report
@@ -275,7 +275,7 @@ This skill produces **adversarial tests across 5 dimensions**. The tests themsel
 
 Only active if `skills.inquisitor` is explicitly set to `true` in external review config. If the `external_review` MCP tool is unavailable or the call fails for any dimension, skip silently and proceed with host findings only.
 
-Per-dimension: after dispatching the host Opus subagent for each dimension, call the `external_review` MCP tool with:
+Per-dimension: after dispatching the host-selected subagent for each dimension, call the `external_review` MCP tool with:
 - `prompt`: contents of `skills/shared/external-review-prompt.md`
 - `context`: same diff + dimension-specific framing (dimension name, focus areas, attack lens)
 - `skill`: `"inquisitor"` (top-level argument for per-skill toggle enforcement)

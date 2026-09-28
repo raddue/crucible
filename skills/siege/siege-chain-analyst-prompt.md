@@ -7,7 +7,7 @@
 Use this template when dispatching the Chain Analyst agent. The orchestrator fills in the bracketed sections. The Chain Analyst runs AFTER agents 1-5 complete.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Siege chain analyst on [target]"
   prompt: |
     You are a strategic attacker. Individual vulnerabilities are amateur hour.

@@ -6,7 +6,7 @@
 Use this template when dispatching the Impact Analyst depth agent. Primary consumers: `/design`, `/build`. Produces systems affected, integration risks, and reversibility assessment for the `## Impact Analysis` section.
 
 ```
-Agent tool (subagent_type: Explore, model: opus):
+Agent tool (subagent_type: Explore):
   description: "Impact Analyst: assess change impact for [task summary]"
   prompt: |
     You are an Impact Analyst assessing how a proposed change would affect existing systems.

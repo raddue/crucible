@@ -201,15 +201,15 @@ After any skill that completes a significant task reports success. The calling s
 
    If trajectory capture is disabled, skip this step.
 
-1. Dispatch a **Retrospective Analyst** subagent (Sonnet) using `./retrospective-prompt.md`
+1. Dispatch a **Retrospective Analyst** subagent using `./retrospective-prompt.md`
 2. Provide: task description, the plan (if any), actual execution summary, skills used, duration estimate
 3. Subagent returns structured retrospective entry
 4. Write entry to `~/.claude/projects/<project-hash>/memory/forge/retrospectives/YYYY-MM-DD-HHMMSS-<slug>.md`
 5. Update `patterns.md` — read current file, merge new findings, rewrite
-6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent (Opus). Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer-skill` (record mode) with `dead_ends` and `diagnostic_path` fields. Tag dead-end entries with `(source: debugging)`.
+6. For debugging sessions, the retrospective also extracts diagnostic patterns using a dedicated extraction subagent. Dispatch using `./diagnostic-extraction-prompt.md`. Patterns are written to cartographer's landmines via `crucible:cartographer-skill` (record mode) with `dead_ends` and `diagnostic_path` fields. Tag dead-end entries with `(source: debugging)`.
 6b. For build sessions with QG fix journals: glob for `~/.claude/projects/<project-hash>/memory/quality-gate/fix-journal-*.md`. For each handoff file found:
     a. Read `landmines.md` and check for existing entries matching the same module + same failed approach (same file path AND same module AND 3+ non-stopword shared terms). If matching entries exist, skip extraction — handoff was already processed. Delete the handoff file.
-    b. If no match: dispatch the diagnostic extraction subagent (Opus) using `./diagnostic-extraction-prompt.md` with the QG-specific addendum (see that file's "Source Context: Quality Gate Fix Journal" section). Tag dead-end entries with `(source: qg)`.
+    b. If no match: dispatch the diagnostic extraction subagent using `./diagnostic-extraction-prompt.md` with the QG-specific addendum (see that file's "Source Context: Quality Gate Fix Journal" section). Tag dead-end entries with `(source: qg)`.
     c. Write extracted dead ends to cartographer's landmines via `crucible:cartographer-skill` (record mode).
     d. Delete the handoff file after successful extraction.
     e. **Cap-pressure behavior:** If `landmines.md` is within 10 lines of its 100-line cap, write only Fatal-severity dead ends. At cap, skip and emit a chronicle signal: `{ "event": "dead_end_cap_skip", "module": "<module>", "source": "qg" }`.
@@ -265,7 +265,7 @@ After any skill that completes a significant task reports success. The calling s
          - `total_output_chars`: sum of all `output_chars` values (skip nulls)
          - `est_input_tokens`: `total_input_chars / 4` (rounded to nearest integer)
          - `est_output_tokens`: `total_output_chars / 4` (rounded to nearest integer)
-         - `dispatches_by_tier`: count of dispatches grouped by `model_tier` (e.g., `{"opus": 5, "sonnet": 8, "haiku": 2}`) — skip null tiers
+         - `dispatch_count`: number of distinct `seq` values in the manifest
          - `est_rework_tokens`: for any `seq` with a failed/errored entry followed by a retry, sum the retry's `(input_chars + output_chars) / 4`. `0` if no retries occurred.
          - `rework_pct`: `est_rework_tokens / (est_input_tokens + est_output_tokens) * 100`, rounded to 1 decimal
          - `active_work_m`: from existing metrics log computation (overlapping parallel intervals merged)
@@ -278,7 +278,7 @@ After any skill that completes a significant task reports success. The calling s
 
    **Example signal (with efficiency):**
    ```jsonl
-   {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false,"efficiency":{"total_input_chars":128400,"total_output_chars":82000,"est_input_tokens":32100,"est_output_tokens":20500,"est_rework_tokens":4200,"rework_pct":8.0,"dispatches_by_tier":{"opus":5,"sonnet":8,"haiku":2},"active_work_m":28,"wall_clock_m":42}}}
+   {"v":1,"ts":"2026-03-25T10:00:00Z","skill":"build","outcome":"success","duration_m":42,"branch":"feat/auth-refactor","files_touched":["src/auth/token.ts","src/auth/refresh.ts"],"metrics":{"mode":"feature","tasks":5,"tasks_passed":5,"qg_rounds":3,"review_rounds":2,"stagnation":false,"efficiency":{"total_input_chars":128400,"total_output_chars":82000,"est_input_tokens":32100,"est_output_tokens":20500,"dispatch_count":23,"est_rework_tokens":4200,"rework_pct":8.0,"active_work_m":28,"wall_clock_m":42}}}
    ```
 
    **Example signal (without efficiency — pre-enrichment or no manifest data):**
@@ -311,7 +311,7 @@ After any skill that completes a significant task reports success. The calling s
 
 9. **Skill extraction check (all sessions):** Evaluate the just-produced
    retrospective entry against the following trigger heuristics. If ANY
-   trigger fires, dispatch a Skill Extraction Analyst subagent (Sonnet)
+   trigger fires, dispatch a Skill Extraction Analyst subagent
    using `./extraction-analyst-prompt.md`.
 
    **Trigger heuristics (ANY fires = dispatch analyst):**
@@ -440,7 +440,7 @@ Before `crucible:design`, `crucible:planning`, or `crucible:build` begins its co
     d. If 0 matching entries: skip
     e. If 1+ matching entries: extract the matching entries (both `source: qg` and `source: debugging`). Pass to the Feed-Forward Advisor in Step 4 under the "Dead-End Context" section.
     **Note:** Forge scans `landmines.md` directly rather than routing through Cartographer Mode 3 Load to avoid coupling — feed-forward works even when no Cartographer consult runs in the current session.
-4. Dispatch a **Feed-Forward Advisor** subagent (Sonnet) using `./feed-forward-prompt.md`
+4. Dispatch a **Feed-Forward Advisor** subagent using `./feed-forward-prompt.md`
 4b. **Trajectory context** (if trajectory capture is enabled):
     Also read `~/.claude/projects/<hash>/memory/trajectories/failed_trajectories.jsonl`
     and extract the 5 most recent failure entries for the upcoming skill type.
@@ -473,7 +473,7 @@ When `patterns.md` shows 10+ total retrospectives AND recurring patterns (3+ occ
 ### The Process
 
 1. Read `patterns.md` and ALL individual retrospective files in `retrospectives/`
-2. Dispatch a **Mutation Analyst** subagent (Opus) using `./mutation-proposal-prompt.md`
+2. Dispatch a **Mutation Analyst** subagent using `./mutation-proposal-prompt.md`
 3. Provide: the full patterns file, all retrospective entries, and a list of current skill names
 4. Subagent analyzes patterns and proposes concrete skill edits
 5. Write proposals to `~/.claude/projects/<project-hash>/memory/forge/mutation-proposals/YYYY-MM-DD-<topic>.md`
@@ -514,11 +514,11 @@ descriptions from the skill directories to check for overlap.
 
 ## Quick Reference
 
-| Mode | Trigger | Model | Template | Output |
-|------|---------|-------|----------|--------|
-| Retrospective | Task completes | Sonnet | `retrospective-prompt.md` | Entry file + patterns.md update |
-| Feed-Forward | Task begins | Sonnet | `feed-forward-prompt.md` | 3-5 targeted warnings |
-| Mutation | 10+ retros + manual | Opus | `mutation-proposal-prompt.md` | Proposal doc for human review |
+| Mode | Trigger | Template | Output |
+|------|---------|----------|--------|
+| Retrospective | Task completes | `retrospective-prompt.md` | Entry file + patterns.md update |
+| Feed-Forward | Task begins | `feed-forward-prompt.md` | 3-5 targeted warnings |
+| Mutation | 10+ retros + manual | `mutation-proposal-prompt.md` | Proposal doc for human review |
 
 ## Red Flags
 

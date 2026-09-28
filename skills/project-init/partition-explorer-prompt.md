@@ -3,10 +3,10 @@
 
 # Partition Explorer — Dispatch Template
 
-Dispatch one Sonnet subagent per source directory partition to scan and produce a structured inventory.
+Dispatch one subagent per source directory partition to scan and produce a structured inventory.
 
 ```
-Agent tool (subagent_type: Explore, model: sonnet):
+Agent tool (subagent_type: Explore):
   description: "Partition exploration for [partition name]"
   prompt: |
     You are a partition explorer. Your job is to scan a single directory

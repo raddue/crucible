@@ -5,7 +5,7 @@
 Use this template when dispatching a plan writer subagent in Phase 2.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Write implementation plan for [feature]"
   prompt: |
     You are writing an implementation plan for a feature.

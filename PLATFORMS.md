@@ -31,11 +31,11 @@ These skills depend on either subagent dispatch (for parallelism or fresh-perspe
 | parallel | Subagent dispatch for independent tasks | Tasks run sequentially |
 | adversarial-tester | Subagent dispatch for test writing | Agent writes tests in-context |
 | anvil | Subagent dispatch for blind A/B skill evals | Eval runs sequentially in-context; quantitative benchmarking skipped |
-| assay | Subagent dispatch for approach evaluation (Opus evaluator) | Evaluates approaches in-context |
-| test-coverage | Subagent dispatch for the test-audit agent (Opus) | Audits tests in-context |
+| assay | Subagent dispatch for approach evaluation | Evaluates approaches in-context |
+| test-coverage | Subagent dispatch for the test-audit agent | Audits tests in-context |
 | debugging | Multiple subagent types (investigator, analyst, synthesis) | Agent runs all phases in-context |
 | design | Subagent dispatch for parallel investigation + Challenger | Investigation/challenge run in-context |
-| innovate | Subagent dispatch for the Innovation proposer (Opus) | Proposal generated in-context |
+| innovate | Subagent dispatch for the Innovation proposer | Proposal generated in-context |
 | finish | `git` + forge CLI (`gh`) for completion; subagent dispatch for code review | Manual completion + in-context review |
 | worktree | Git worktree creation | Standard branch-based isolation |
 | stocktake | Subagent dispatch for skill auditing | Agent audits sequentially |
@@ -104,9 +104,6 @@ The following Claude Code-specific references appear in skill instructions. Thes
 |----------------------|---------|-------|
 | `subagent_type="general-purpose"` | Full-capability subagent | Default on most platforms |
 | `subagent_type="Explore"` | Fast, read-only codebase search | May not have direct equivalent |
-| `model: opus` | Use strongest model for complex work | Platform selects model; skill still works |
-| `model: sonnet` | Use mid-tier model for routine reviews | Platform selects model; skill still works |
-| `model: haiku` | Use fast model for simple lookups | Platform selects model; skill still works |
 
 ### Skill Invocation
 

@@ -220,23 +220,9 @@ Use for ANY technical issue:
 
 All investigation and implementation is delegated to subagents via the Agent tool. The orchestrator handles hypothesis formation, dispatch decisions, and escalation -- nothing else.
 
-### Subagent Model Selection
+### Subagent Dispatch
 
-| Phase | Agent | Model | Rationale |
-|-------|-------|-------|-----------|
-| Phase 1 | Error Analysis | Opus | Deep code reading and call-chain tracing |
-| Phase 1 | Change Analysis | Opus | Cross-file diff analysis |
-| Phase 1 | Evidence Gathering | Opus | Multi-component data flow tracing |
-| Phase 1 | Reproduction | Opus | Complex reproduction requires reasoning |
-| Phase 1 | Deep Dive (any) | Opus | Specialized investigation |
-| Synthesis | Consolidation | Opus | Cross-referencing, contradiction detection, and causal reasoning — not just summarization |
-| Phase 2 | Pattern Analysis | Opus | Exhaustive comparison requires depth |
-| Phase 4 | Implementation | Opus | TDD + root cause fix |
-| Phase 4.4 | Scope judge | Sonnet | Semantic traceability check — hypothesis text vs. fix diff, no repo context |
-| Phase 4.5 | "Where Else?" scan | Opus | Cross-codebase pattern matching and sibling fixing |
-| Phase 5 | Red-team | Opus | Adversarial analysis |
-| Phase 5 | Code review | Opus or Sonnet | Lead decides by fix complexity |
-| Phase 5 | Test gap writer | Opus | Test authoring requires reasoning |
+Dispatch roles according to workflow needs; model selection belongs to the host harness and operator.
 
 ### Workflow Overview
 
@@ -312,7 +298,7 @@ Before any dispatch work, check for a crashed prior debugging session:
 
 ### Phase 0: Load Codebase Context
 
-**Repro & scope coherence gate (runs first, before context load).** Before spending the cartographer load and a 3–6-way parallel Opus investigation, confirm the report carries the minimum signal to aim it. This is a cheap, orchestrator-local check — no subagent — against the bug report / user description for three coherence signals:
+**Repro & scope coherence gate (runs first, before context load).** Before spending the cartographer load and a 3–6-way parallel investigation, confirm the report carries the minimum signal to aim it. This is a cheap, orchestrator-local check — no subagent — against the bug report / user description for three coherence signals:
 
 1. **Symptom** — a concrete, observable wrong behavior (a specific incorrect output, a crash, a failing assertion), not a bare "it's broken" / "doesn't work".
 2. **Reproduction** — a failing test, an error message / stack trace, or repro steps — OR an explicit statement that the bug is intermittent / not-yet-reproduced.
@@ -345,7 +331,7 @@ The gate routes toward debugging's own Phase 1 Reproduction investigator from th
 
 **Grudge pre-flight (regression-oracle, #271):** Also query the **Book of Grudges** for the files under investigation and include any matches in the investigators' dispatch files — a past regression on these files is a prime hypothesis. Resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and run `python3 "$plugin_root/scripts/grudge_query.py" <files under investigation…>`. Best-effort: if unresolved, emit a one-line stderr warning and continue — never block the investigation. See `skills/grudge/SKILL.md`.
 
-If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`, model: haiku) to map the relevant directories and note key files. Include its findings in investigator prompts.
+If cartographer data doesn't exist for the relevant area, dispatch a quick Explore agent (`subagent_type="Explore"`) to map the relevant directories and note key files. Include its findings in investigator prompts.
 
 ### Domain Detection
 
@@ -390,7 +376,7 @@ Before dispatching investigation agents:
 
 **Prompt template:** `./investigator-prompt.md`
 
-Dispatch 3-6 investigation subagents in parallel using the Agent tool in a single message. All subagents use `subagent_type="general-purpose"`, `model: opus`. Pass all known context (error messages, stack traces, file paths, user description, and cartographer module context from Phase 0) verbatim to each agent -- do not make them search for context you already have.
+Dispatch 3-6 investigation subagents in parallel using the Agent tool in a single message. All subagents use `subagent_type="general-purpose"`. Pass all known context (error messages, stack traces, file paths, user description, and cartographer module context from Phase 0) verbatim to each agent -- do not make them search for context you already have.
 
 **Bias toward MORE agents, not fewer.** Each investigator is cheap. Missing a root cause is expensive. When in doubt about whether to dispatch an additional agent, dispatch it.
 
@@ -432,7 +418,7 @@ Every investigation subagent prompt MUST include the context self-monitoring blo
 
 **Prompt template:** `./synthesis-prompt.md`
 
-After all Phase 1 agents report back, dispatch a single Synthesis agent (model: opus) that receives all Phase 1 reports verbatim.
+After all Phase 1 agents report back, dispatch a single Synthesis agent that receives all Phase 1 reports verbatim.
 
 **Trust-but-verify:** The synthesis agent does NOT take investigator claims at face value. It cross-references findings between agents, flags contradictions, and identifies claims that lack concrete evidence (file paths, line numbers, stack traces). Speculative findings are downgraded. Concrete artifacts outrank plausible theories.
 
@@ -722,17 +708,15 @@ test file plus one source file on every fix, so counting test files toward the t
 would make the "below this, skip" branch unreachable. Below the threshold the judge's
 fixed cost outweighs what it can find — skip it, writing `SKIPPED-BELOW-THRESHOLD` to
 `scope-check-<cycle>.md` rather than skipping silently, so a resumed run knows why no
-judge ran this cycle. This threshold assumes a Sonnet judge; no agent def binds that tier
-today (`harness-adapter.md` Mapping 1b — prose model words are descriptive, not binding),
-so an orchestrator on a larger model pays proportionally more and the threshold is
-correspondingly miscalibrated (see `shared/dispatch-convention.md`'s Cost paragraph).
+judge ran this cycle. The threshold is based on the scope judge's measured cost; actual
+runtime cost varies with the host-selected model (see `shared/dispatch-convention.md`).
 
 **Ordering is load-bearing: Phase 4.4 runs AFTER the Phase 4 WIP commit and BEFORE Phase
 4.5.** Phase 4.5 fixes analogous siblings *by design*; a judge shown only the original
 hypothesis would flag every sibling commit as unrequested expansion. Judge the Phase 4
 fix alone.
 
-Dispatch one judge (model tier **sonnet**) using `shared/scope-judge-prompt.md`, disk-
+Dispatch one judge using `shared/scope-judge-prompt.md`, disk-
 mediated per `shared/dispatch-convention.md`. It receives exactly two substitutions and
 nothing else:
 
@@ -901,7 +885,7 @@ When count of existing signatures would exceed 20 after writing:
 4. Write-before-delete ordering: dispatch the recorder first, then delete pruned files after the recorder succeeds
 
 **Step 3: Dispatch recorder (orchestrator)**
-Dispatch a Sonnet cartographer recorder agent using `crucible:cartographer-skill` recorder-prompt.md with the "Record defect signature" directive. Provide:
+Dispatch a cartographer recorder agent using `crucible:cartographer-skill` recorder-prompt.md with the "Record defect signature" directive. Provide:
 - Phase 4.5 scan report (generalized pattern, confirmed siblings, reverted siblings, skipped siblings)
 - Original fix metadata (file path, commit SHA, commit message summary, issue number)
 - Cartographer module names from Phase 0 (or directory prefix fallbacks)
@@ -966,14 +950,14 @@ If `crucible:test-coverage` is not available, skip this step. The test gap write
 
 The test-coverage skill handles its own fix dispatch and revert-on-failure logic internally. It returns a structured report with actions taken.
 
-**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent (Opus) using `./test-gap-writer-prompt.md`. Input: reviewer gap findings + fix diff + test-coverage audit report (if available from Step 2.5). The agent writes tests only for gaps specifically flagged in the review — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit). Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
+**Step 3: Test gap writer** — If the code reviewer or red-teamer identified missing test coverage for the fix, dispatch a Test Gap Writer agent using `./test-gap-writer-prompt.md`. Input: reviewer gap findings + fix diff + test-coverage audit report (if available from Step 2.5). The agent writes tests only for gaps specifically flagged in the review — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit). Tests should PASS immediately since the behavior already exists from the fix. The agent reports per-test PASS/FAIL results. Skipped when reviews report zero coverage gaps.
 
 **If all tests PASS:** Debugging workflow is complete.
 
 **Record the grudge (regression-oracle, #271).** Once the root cause is confirmed and the fix is verified, record a grudge so this bug can never silently re-ship. Best-effort (a failed record logs to stderr and never fails the workflow): resolve the helper by absolute path from the plugin root — `plugin_root="$(realpath "<this-skill-base-dir>/../..")"` — and record with the **store identity** (DEC-4: the git-common-dir parent, shared across linked worktrees, NOT this worktree's root which would lose the record when the worktree is removed): `store_root="$(dirname "$(realpath "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"` `store_key="$(basename "$store_root" 2>/dev/null)"`, then run `python3 "$plugin_root/scripts/grudge_append.py" --symptom "<observable failure>" --root-cause "<confirmed cause>" --files="<path 1>" --files="<path 2>" --signature "<optional regex/snippet fingerprint>" --commit "$(git rev-parse HEAD)" --repo-root "$store_root" --repo "$store_key" --repro "<minimal repro>" --why "<why it kept happening>"`. See `skills/grudge/SKILL.md`.
 
 **If some tests FAIL** (gaps reveal incomplete fix coverage):
-1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, gap descriptions, and the original bug context (hypothesis, root cause)
+1. Dispatch a fresh implementer with the failing test(s), their failure messages, gap descriptions, and the original bug context (hypothesis, root cause)
 2. Implementer fixes the incomplete coverage, re-runs ALL test gap writer tests (not just failures — catches regressions from the fix)
 3. If all tests pass after fix: commit (`fix: address test gap failures for debugging fix`), debugging workflow is complete
 4. If tests still fail after one fix attempt: **escalate to user** with:
@@ -997,14 +981,14 @@ This is user-gated, not automatic. The orchestrator does not decide whether to l
 Throughout the debugging session, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log`.
 
 **Dispatch measurement protocol:** On every subagent dispatch, the orchestrator follows the enriched manifest protocol from `shared/dispatch-convention.md`:
-- **Before dispatching:** Measure the dispatch file size in characters. Record `input_chars` and `model_tier` in the manifest entry.
+- **Before dispatching:** Measure the dispatch file size in characters. Record `input_chars` in the manifest entry.
 - **After dispatch returns:** Measure the subagent response length in characters. Record `output_chars` and `tool_calls` (if available) in the manifest completion entry.
 
 At completion, read the metrics log and manifest, then compute and report:
 
 ```
 -- Debugging Complete ---------------------------------------
-  Subagents dispatched:  12 (8 Opus, 4 Sonnet)
+  Subagents dispatched:  12
   Active work time:      1h 15m
   Wall clock time:       3h 42m
   Hypothesis cycles:     3
@@ -1017,7 +1001,7 @@ At completion, read the metrics log and manifest, then compute and report:
 
 Additional debugging metric: **hypothesis cycles** (number of hypothesis → investigate → implement cycles before resolution).
 
-**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the debugging completion report alongside existing metrics.
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Include these in the debugging completion report alongside existing metrics.
 
 ### Pipeline Decision Journal
 
@@ -1060,7 +1044,7 @@ After the Implementation agent reports back, the orchestrator evaluates four pos
 
 **Fix does not resolve the issue** -- Before looping back:
 1. Log the failure in the hypothesis log with metrics (see Stagnation Detection below)
-2. **Test triage:** Dispatch a quick Opus subagent to read the test and the hypothesis log, then decide: keep the test (if it validly reproduces the bug regardless of the failed fix) or remove it (if it was hypothesis-specific and doesn't reproduce the actual bug). The orchestrator does not make this judgment directly — it requires reading code.
+2. **Test triage:** Dispatch a quick subagent to read the test and the hypothesis log, then decide: keep the test (if it validly reproduces the bug regardless of the failed fix) or remove it (if it was hypothesis-specific and doesn't reproduce the actual bug). The orchestrator does not make this judgment directly — it requires reading code.
 3. **Revert the WIP commit** using `git revert <wip-sha-cycle>` (this cycle's recorded SHA; see Commit Strategy above). This cleanly undoes all Phase 4 changes including any new files created during refactoring. If Phase 4.5 ran (sibling commits exist): use `git revert <pre-4.5-sha>..HEAD` instead of `git revert <wip-sha-cycle>` to revert all sibling commits plus the original WIP commit.
    - If triage decided **"keep the test"**: dispatch a subagent to recover the test file from the reverted commit (`git checkout <wip-sha-cycle> -- <test-file-path>`) and commit it separately (`test: preserve reproduction test from cycle N`).
    - If triage decided **"remove the test"**: no further action — the revert already removed it.
@@ -1121,17 +1105,17 @@ This is NOT a failed hypothesis -- this is a wrong architecture. Discuss with yo
 | Phase | Agent(s) | Key Activities | Success Criteria |
 |-------|----------|---------------|------------------|
 | **0. Context** | Cartographer + optional Explore | Load module context for investigators | Codebase context ready for prompts |
-| **1. Investigation** | 3-6 parallel subagents (Opus) | Read errors, check changes, gather evidence, deep dive, reproduce | Raw findings collected |
-| **Synthesis** | 1 subagent (Opus) | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
-| **2. Pattern** | 1 subagent (Opus, skippable) | Find working examples, compare exhaustively | Differences identified |
+| **1. Investigation** | 3-6 parallel subagents | Read errors, check changes, gather evidence, deep dive, reproduce | Raw findings collected |
+| **Synthesis** | 1 subagent | Consolidate, cross-reference, rank by evidence quality | Concise root-cause analysis |
+| **2. Pattern** | 1 subagent (skippable) | Find working examples, compare exhaustively | Differences identified |
 | **3. Hypothesis** | Orchestrator (no subagent) | Form hypothesis, check log | Specific testable hypothesis |
 | **3.5 Red-Team** | Quality gate (on hypothesis) | Challenge hypothesis completeness | Hypothesis survives or is reformed |
-| **4. Implementation** | 1 subagent (Opus) | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
-| **4.4. Scope Check** | 1 subagent (Sonnet, advisory) | Judge whether the Phase 4 fix stayed inside the hypothesis (sub-phase of 4→4.5; skipped on small fixes) | Verdict recorded to disk; never blocks on the judge's verdict (halts if the Phase 4 WIP commit was never created, or if HEAD cannot be confirmed against phase-state.md's wip-sha-<cycle>:) |
-| **4.5. Where Else?** | 1 subagent (Opus) + 1 recorder (Sonnet) | Find and fix sibling locations; persist defect signature | Siblings fixed, signature written (if 1+ candidates) |
+| **4. Implementation** | 1 subagent | TDD fix cycle with evidence log | Bug resolved, tests pass, TDD log |
+| **4.4. Scope Check** | 1 advisory subagent | Judge whether the Phase 4 fix stayed inside the hypothesis (sub-phase of 4→4.5; skipped on small fixes) | Verdict recorded to disk; never blocks on the judge's verdict (halts if the Phase 4 WIP commit was never created, or if HEAD cannot be confirmed against phase-state.md's wip-sha-<cycle>:) |
+| **4.5. Where Else?** | 1 subagent + 1 recorder | Find and fix sibling locations; persist defect signature | Siblings fixed, signature written (if 1+ candidates) |
 | **5. Quality Gate** | Red-team + code review | Adversarial review, quality check | Both pass clean |
 | **5b. Test Audit** | Test coverage skill (conditional) | Audit existing tests for staleness after fix | Stale tests updated/removed |
-| **5c. Test Gaps** | Test gap writer (Opus, conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
+| **5c. Test Gaps** | Test gap writer (conditional) | Write tests for reviewer-flagged gaps | All gap tests pass |
 
 ---
 

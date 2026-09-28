@@ -6,7 +6,7 @@
 Use this template when dispatching each of the 5 inquisitor dimension subagents. The orchestrator fills in the dimension-specific sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Inquisitor [DIMENSION_NAME] dimension"
   prompt: |
     You are an inquisitor — a relentless hunter of cross-component bugs. Your

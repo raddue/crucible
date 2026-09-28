@@ -15,7 +15,7 @@ Adversarial review of code subsystems or non-code artifacts. Dispatches parallel
 
 **Code path is SYSTEMIC-ONLY.** On the `code` artifact type, audit reports **systemic health** — recurring patterns, structural properties, and absences across the subsystem, with **no single reproduction**. A defect with one concrete reproduction (even across multiple files) is an **instance bug** and belongs to `/delve`, not audit; audit routes it there (via the opt-in `--bugs` sub-path) or surfaces it under an explicit out-of-scope stub when `/delve` is absent. Maintainability/complexity/hotspot depth delegates to `/prospector`. See **The Systemic-Only Rule** below — it governs every code-path lens. (The non-code paths — design / plan / concept — are unchanged.)
 
-**Model:** Opus (orchestrator and analysis agents). Sonnet (scoping exploration). If the orchestrator session is not running Opus, warn: "Audit requires Opus-level reasoning for synthesis. Results may be degraded."
+Model selection belongs to the host harness and operator. Preserve separate scoping and synthesis roles.
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
@@ -391,7 +391,7 @@ Read `scratch/<run-id>/artifact-type.md`. If present and not `code`, follow non-
 
    Parse the subsystem manifest from recon's brief to produce the file list + role descriptions for the USER GATE. Write to `scratch/<run-id>/manifest.md` in the same format the scoping agent produces (file paths + brief role descriptions). This format compatibility ensures all downstream code (Phase 2, compaction recovery) works without modification.
 
-   **On recon failure:** "Recon failed: [reason]. Falling back to scoping exploration agent." Dispatch the fallback scoping agent: `Agent tool (subagent_type: Explore, model: sonnet)` using `audit-scoping-prompt.md` (existing behavior).
+   **On recon failure:** "Recon failed: [reason]. Falling back to scoping exploration agent." Dispatch the fallback scoping agent: `Agent tool (subagent_type: Explore)` using `audit-scoping-prompt.md` (existing behavior).
 
 4. If the subsystem cannot be cleanly scoped (files share no common dependency chain, naming convention, or functional cohesion), report the scoping difficulty to the user and ask for clarification or a file list.
 5. **Output:** A manifest of files belonging to the subsystem (paths + brief role descriptions). Write to `scratch/<run-id>/manifest.md`.
@@ -465,7 +465,7 @@ No scoping agent needed — the artifact IS the scope. The orchestrator:
 
 ### Non-Code Dispatch (artifact_type: design | plan | concept)
 
-Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel, using `audit-noncode-lens-prompt.md` with lens-specific instruction injection.
+Dispatch: `Task tool (general-purpose)` per lens, in parallel, using `audit-noncode-lens-prompt.md` with lens-specific instruction injection.
 
 For each of the 4 lenses matching the artifact type (see Artifact Types table):
 1. Fill the template placeholders: `{{LENS_NAME}}`, `{{LENS_QUESTION}}`, `{{LENS_FOCUS_AREAS}}`, `{{LENS_EXCLUSIONS}}`, `{{ARTIFACT_TYPE}}`, and `{{DISPATCH_CONTEXT_PATH}}` (the absolute path to `scratch/<run-id>/dispatch-context.md`). The artifact content, supporting context, and operating environment are **not** inlined per-lens — they live once in the shared dispatch-context bundle (assembled in Phase 1 step 4.5) and each lens reads them from that file. This keeps the artifact/context bytes out of every lens dispatch (read once from the bundle, not copy-pasted once per lens). For `design` artifacts where Phase 1 skipped the operating-environment gather, the bundle's Operating Environment section is the stub `(skipped — design artifact, predicate-determined no-op)` — the prompt template handles this no-op case.
@@ -482,7 +482,7 @@ After all 4 lenses complete, proceed to Phase 2.5 (non-code blind-spots).
 
 ### Code Dispatch (artifact_type: code)
 
-Dispatch: `Task tool (general-purpose, model: opus)` per lens, in parallel (matching inquisitor pattern). Fallback if parallel dispatch fails: dispatch sequentially via `Task tool (general-purpose, model: opus)`, with a one-time note to user: "Parallel dispatch unavailable -- running analysis lenses sequentially."
+Dispatch: `Task tool (general-purpose)` per lens, in parallel (matching inquisitor pattern). Fallback if parallel dispatch fails: dispatch sequentially via `Task tool (general-purpose)`, with a one-time note to user: "Parallel dispatch unavailable -- running analysis lenses sequentially."
 
 **Write-on-complete:** As each agent completes, immediately write its findings to `scratch/<run-id>/<lens>-findings.md`. Do not wait for Phase 3. For the Consistency lens, use distinct filenames: `consistency-a-findings.md` for Agent A's triage output, `consistency-b-findings.md` for Agent B's confirmed findings.
 
@@ -565,7 +565,7 @@ All lenses output structured findings with these common fields: `{severity, file
 
 ### Non-Code Blind-Spots (artifact_type: design | plan | concept)
 
-Dispatch: `Task tool (general-purpose, model: opus)` using `audit-noncode-blindspots-prompt.md`. Runs AFTER all Phase 2 non-code lenses have reported, BEFORE Phase 3 synthesis.
+Dispatch: `Task tool (general-purpose)` using `audit-noncode-blindspots-prompt.md`. Runs AFTER all Phase 2 non-code lenses have reported, BEFORE Phase 3 synthesis.
 
 **No coverage map needed** — all lenses see the full artifact. Instead, the orchestrator builds a **lens summary** with this format:
 
@@ -581,7 +581,7 @@ The blind-spots agent reads the full artifact from the shared dispatch-context b
 
 ### Code Blind-Spots (artifact_type: code)
 
-Dispatch: `Task tool (general-purpose, model: opus)` using `audit-blindspots-prompt.md`. Runs AFTER all Phase 2 lenses have reported (including Consistency Agent B), BEFORE Phase 3 synthesis.
+Dispatch: `Task tool (general-purpose)` using `audit-blindspots-prompt.md`. Runs AFTER all Phase 2 lenses have reported (including Consistency Agent B), BEFORE Phase 3 synthesis.
 
 **Purpose:** The four lenses share structural blind spots -- issues that fall between lenses, emerge from combinations of findings, or belong to categories no single lens covers (security, performance, concurrency, silent failures). A fresh agent hunts specifically in those gaps.
 
@@ -714,18 +714,18 @@ At the end of the audit's report/output (Phase 4, after the ranked findings are 
 
 ### Code Audit Templates
 
-- `audit-scoping-prompt.md` -- Phase 1 subsystem scoping dispatch (`Agent tool, subagent_type: Explore, model: sonnet`)
+- `audit-scoping-prompt.md` -- Phase 1 subsystem scoping dispatch (`Agent tool, subagent_type: Explore`)
 
-Analysis lens templates (all use `Task tool, general-purpose, model: opus`; all carry the Systemic-Only Rule and emit the `sites` field):
+Analysis lens templates (all use `Task tool, general-purpose`; all carry the Systemic-Only Rule and emit the `sites` field):
 - `audit-architecture-prompt.md` -- Architecture lens dispatch
 - `audit-consistency-prompt.md` -- Consistency lens dispatch (documents two-agent protocol)
 - `audit-robustness-prompt.md` -- Robustness (systemic) lens dispatch — subsystem-wide patterns/absences only
 - `audit-testhealth-prompt.md` -- Test-health lens dispatch — systemic coverage gaps, diagnose + prioritize only
 
-Opt-in mode template (`Task tool, general-purpose, model: opus`):
+Opt-in mode template (`Task tool, general-purpose`):
 - `audit-drift-prompt.md` -- Drift / Intent dispatch, used ONLY under `--drift intent=<path>` (carries the Systemic-Only Rule; consumes the explicit intent artifact)
 
-Blind-spots template (`Task tool, general-purpose, model: opus`):
+Blind-spots template (`Task tool, general-purpose`):
 - `audit-blindspots-prompt.md` -- Phase 2.5 gap-hunting dispatch (receives coverage map; carries the Systemic-Only Rule)
 
 > The instance `Correctness` lens and its `audit-correctness-prompt.md` template were **removed** in the systemic-only reshape — single-site correctness/robustness bugs route to `/delve` via `--bugs`.
@@ -736,7 +736,7 @@ Blind-spots template (`Task tool, general-purpose, model: opus`):
 - `audit-noncode-blindspots-prompt.md` -- Non-code blind-spots dispatch (receives lens summary; reads the artifact from the shared dispatch-context bundle, not coverage map)
 
 Each analysis template includes:
-- Dispatch metadata (for orchestrator reference): `Task tool (general-purpose, model: opus)`
+- Dispatch metadata (for orchestrator reference): `Task tool (general-purpose)`
 - The lens definition and what to look for
 - Placeholders for: Tier 1 overview, Tier 2 source partition
 - Output format with common fields (`severity, file, line_range, evidence, description`) plus lens-specific fields

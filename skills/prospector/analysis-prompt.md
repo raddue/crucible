@@ -6,7 +6,7 @@
 Use this template when dispatching the structured analysis agent for a friction point. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Structured analysis for friction point [N]: [brief title]"
   prompt: |
     You are a structural analysis agent. Your job is to evaluate a specific friction point — classify its type, identify the applicable architectural philosophy, assess blast radius, and produce a design brief that competing design agents can consume without reading raw source code.

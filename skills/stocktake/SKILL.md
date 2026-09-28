@@ -55,13 +55,13 @@ Present inventory table:
 - `python3 scripts/check_qg_stagnation_minor.py` — the Minor-aware stagnation judge contract: asserts `quality-gate/stagnation-judge-prompt.md` carries the Step-3 Mixed-branch Minor-accumulation rule + the `Consecutive recurring-Minor rounds` counter + the `DR-Cause` enum; that `quality-gate/SKILL.md`'s Minor prose is reconciled (the bare "do not count toward stagnation" claim is gone; path-pinned, literal match); and that the convergence-log `dr_cause` value set (`minor-accumulation | structural-saturation | consensus | null`) is documented. Added #260.
 - `python3 scripts/check_crossref.py` — the cross-reference invariant: every live `crucible:<token>` in a git-tracked `*.md` resolves to a real `skills/<token>/` dir. Plugin-namespaced agent types (the `crucible-*` namespace, e.g. `crucible-red-team`) are resolved against `agents/<token>.md` (so a typo'd agent ref is still caught); documented template placeholders (`skill-name`/`old-name`/`new-name`) are blanket-exempt. `docs/plans/`, `docs/prds/`, and `docs/handoffs/` are gitignored and thus naturally excluded since `git ls-files` lists tracked files only (so new files under those paths are not scanned — **except** `docs/plans/2026-08-21-488-c1-name-space-reduced.md`, the #488 c1 name-space ruling, which `.gitignore` negates and which IS scanned); tracked surfaces — `skills/**`, top-level `docs/*.md`, `docs/research/`, etc. — ARE scanned. `--selftest` runs the resolution-logic regression cases. Added #365.
 - `python3 scripts/catalog.py check` — the generated skill-catalog contract: asserts `docs/skills.md`'s `<!-- CATALOG:START/END -->` rows are in bijection with `skills/*/SKILL.md` frontmatter names (no omission, no bogus entry, no naming mismatch), every on-disk skill is in `CATEGORIES` (and vice-versa, no dangling category), and every registered count token (README, workshop, plugin.json) equals the runtime skill count `n`. Added #364.
-- `python3 scripts/check_model_pins.py` — the model-tier guardrail: no fable-family pin (`fable`/`claude-fable-5`, case-insensitive, across frontmatter `model:` + inline `Task tool`/`Agent tool` forms) on any `<!-- MODEL-TIER: security-hard-out -->`-marked file, AND every file in the security-surface set (`skills/siege/**`, `skills/dependency-audit/**`, `agents/crucible-red-team.md`, plus narrow offensive/CVE name-stems gated match-then-check-for-pin; `audit`/`test-coverage`/`stocktake` carved out) carries the marker (default-deny). Static tracked-`*.md` pins only — `inherit`/session-model roles and untracked consensus config are disclosed residuals (see `skills/shared/model-tier-policy.md`). `--selftest` runs the detection-logic cases. Added #392.
+- `python3 scripts/check_model_pins.py` — the Fable security-marker guardrail: rejects Fable-family selectors (`fable`/`claude-fable-5`, case-insensitive) in frontmatter or inline `Task`/`Agent` calls on marked files, and requires `<!-- MODEL-TIER: security-hard-out -->` on every security-surface file in its allowlist (default-deny). Scans tracked Markdown only; does not inspect runtime host configuration. `--selftest` runs detection-logic cases. Added #392.
 
 (Other tracked checkers under `scripts/check_*.py` may be run here too as they are brought into alignment.)
 
 ### Phase 2 — Quality Evaluation
 
-Dispatch an Opus Explore agent with all skill contents and the evaluation checklist.
+Dispatch an Explore agent with all skill contents and the evaluation checklist.
 
 Each skill is evaluated against:
 
@@ -107,8 +107,9 @@ Triggered by `/stocktake efficiency` or by forge feed-forward when 10+ chronicle
 1. Read `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
 2. If the file is missing or empty: report "No efficiency data available. Run a pipeline with enriched manifest tracking to begin collecting data." and stop.
 3. Filter to signals that have a `metrics.efficiency` sub-object.
-4. If fewer than 3 signals have efficiency data: report available data with caveat: "Insufficient data for trend analysis. N signals available, 3+ recommended for meaningful comparison."
-5. Report: "N of M total signals include efficiency data." (where M is total signals, N is signals with efficiency).
+4. Normalize dispatch counts: signals recorded before `dispatch_count` existed carry `dispatches_by_tier` instead — when `dispatch_count` is absent, derive it as the sum of that object's values. A signal carrying neither contributes no dispatch-based metric (Steps 2–4 show "—" for it).
+5. If fewer than 3 signals have efficiency data: report available data with caveat: "Insufficient data for trend analysis. N signals available, 3+ recommended for meaningful comparison."
+6. Report: "N of M total signals include efficiency data." (where M is total signals, N is signals with efficiency).
 
 ### Step 2: Per-Skill Summary
 
@@ -116,7 +117,7 @@ Group filtered signals by `skill`. For each skill, compute:
 - **Runs**: count of signals
 - **Avg Est. Tokens (in+out)**: average of `(est_input_tokens + est_output_tokens)` across runs
 - **Avg Duration**: average `duration_m`
-- **Avg Dispatches**: average total dispatches (sum of `dispatches_by_tier` values)
+- **Avg Dispatches**: average `dispatch_count` across runs
 - **Rework %**: average `rework_pct` across runs. If `rework_pct` is missing (pre-rework-tracking signal), display "—"
 - **Trend**: compare last 3 runs vs prior 3 runs — "improving" (fewer tokens), "stable" (within 10%), or "increasing" (more tokens). "insufficient data" if fewer than 4 runs.
 
@@ -135,29 +136,12 @@ Output:
 |-------|------|--------------------------|----------|--------------|----------------|-------|
 ```
 
-### Step 3: Dispatch Breakdown
-
-For each skill, compute dispatch tier distribution and categorize dispatches as review vs. implementation:
-- **Opus/Sonnet/Haiku %**: from `dispatches_by_tier` averaged across runs
-- **Review %**: dispatches with role containing "reviewer", "red-team", "quality-gate", "adversarial" as a percentage of total
-- **Impl %**: remaining dispatches as a percentage of total
-
-Note: Review vs. implementation breakdown requires reading manifest entries (role field). If manifests are not available (only chronicle signals), report "N/A" for these columns.
-
-Output:
-
-```
-### Dispatch Breakdown
-| Skill | Opus % | Sonnet % | Haiku % | Review % | Impl % |
-|-------|--------|----------|---------|----------|--------|
-```
-
-### Step 4: Structural Efficiency
+### Step 3: Structural Efficiency
 
 For each skill, compute:
-- **Avg Input/Dispatch**: average `total_input_chars / total dispatches` — measures context per subagent
+- **Avg Input/Dispatch**: average `total_input_chars / dispatch_count` — measures context per subagent
 - **Context Distribution**: qualitative assessment — "focused" (<5000 chars avg/dispatch), "moderate" (5000-15000), "heavy" (>15000)
-- **Quality Overhead %**: `review dispatches / total dispatches * 100` — what fraction of work is quality assurance (requires manifest data; "N/A" if unavailable)
+- **Quality Overhead %**: `review dispatches / dispatch_count * 100` — what fraction of work is quality assurance (requires manifest data; "N/A" if unavailable)
 
 Output:
 
@@ -167,13 +151,13 @@ Output:
 |-------|--------------------|-----------------------|--------------------|
 ```
 
-### Step 5: Baseline Comparison (Structural)
+### Step 4: Baseline Comparison (Structural)
 
 For each skill with sufficient data (3+ runs):
 - **Avg Total Context**: average `(total_input_chars + total_output_chars)` per run — total context the pipeline touched
-- **Avg Input/Dispatch**: average `total_input_chars / total dispatches` per run — how much context each subagent receives on average
+- **Avg Input/Dispatch**: average `total_input_chars / dispatch_count` per run — how much context each subagent receives on average
 - **Context Focus Ratio**: `avg input per dispatch / avg total context` — lower values mean each subagent sees a smaller slice of the total, indicating effective context distribution
-- **Quality Investment**: `review dispatches / total dispatches` — fraction of dispatches dedicated to quality assurance (requires manifest data; "N/A" if only chronicle signals available)
+- **Quality Investment**: `review dispatches / dispatch_count` — fraction of dispatches dedicated to quality assurance (requires manifest data; "N/A" if only chronicle signals available)
 
 Output:
 
@@ -189,7 +173,7 @@ comparisons, not cost savings claims — they measure how the skill distributes 
 a monolithic alternative would cost.
 ```
 
-### Step 6: Cache Results
+### Step 5: Cache Results
 
 Save efficiency report data to `skills/stocktake/results.json` under a new `efficiency` key (separate from the skill verdict cache):
 

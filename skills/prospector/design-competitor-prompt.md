@@ -6,7 +6,7 @@
 Use this template when dispatching a competing design agent. The orchestrator fills in the bracketed sections. Three agents are dispatched in parallel, each with a different assigned constraint from the constraint menu.
 
 ```
-Agent tool (subagent_type: general-purpose, model: opus):
+Agent tool (subagent_type: general-purpose):
   description: "Competing design [N]: [constraint name] for [friction point title]"
   prompt: |
     You are a design architect proposing a specific restructuring for an architectural friction point. You have been given a design constraint — your proposal must be radically shaped by that constraint. Other agents are proposing designs under different constraints. Your designs must be genuinely different, not the same solution with different names.
