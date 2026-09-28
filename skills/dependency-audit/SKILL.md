@@ -130,6 +130,8 @@ The audit produces two files under its scratch directory `scratch/<run-id>/`:
 
 This file is **not updated after execution begins**. It is the immutable record of what the scan discovered.
 
+**Security-surface preflight.** `audit-results.md` carries the `SECURITY-PREFLIGHT` line (model + host) as its first line, because dependency-audit is a security-surface leg; a hard-out model makes the overall result `BLOCKED`, never PASS. Canonical rule: `shared/model-tier-policy.md`.
+
 **`audit-results.md`** — Execution-time output. Written incrementally as each ecosystem completes. Contains:
 - Tool availability results (discovered at execution time)
 - Per-manifest findings with normalized severity

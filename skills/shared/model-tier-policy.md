@@ -35,7 +35,9 @@ Fable-family session. Repo-side enforcement is static-only; this part is operato
 Model strength for security work is no longer repo-bound, so the orchestrator makes the residual
 visible instead of letting a security PASS imply a model guarantee. Before any security-sensitive leg
 (`siege`, `dependency-audit`, a `quality-gate` red-team round on a security surface, or a
-`crucible-red-team` dispatch) reports PASS, emit one line naming the model actually in use:
+`crucible-red-team` dispatch) reports PASS, it records one line naming the model actually in use, as
+the **first line of that leg's findings artifact** — receipt grammar allows no free prose, so the line
+lives in the artifact, not in the receipt:
 
 ```
 SECURITY-PREFLIGHT: model=<id|unknown> host=<harness> -- strength not repo-bound; guardrail static-only
@@ -43,5 +45,5 @@ SECURITY-PREFLIGHT: model=<id|unknown> host=<harness> -- strength not repo-bound
 
 Non-blocking when `<id>` is `unknown` or any non-Fable model: record the line and proceed. Blocking
 when `<id>` is Fable-family: refuse the leg (`BLOCKED`, never PASS) — security-surface work does not
-run on a Fable-family model. A PASS with no preflight line is a protocol violation, not a silent
-success.
+run on a Fable-family model. A PASS whose findings artifact carries no preflight line is a protocol
+violation, not a silent success.
