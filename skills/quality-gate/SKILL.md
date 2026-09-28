@@ -606,6 +606,13 @@ The `suppressed-signal` and `no-op-fix` fields are copied from `round-N-score.md
 After each fix agent completes and before the next red-team round, dispatch a **Fix Verifier** — a dedicated Sonnet agent that checks whether each fix actually resolves its stated finding. No re-fix sub-loop; the verifier checks once, and its output feeds into the fix journal for the next round.
 
 **Dispatch method:** Task tool, `subagent_type: crucible-qg-verifier` (the agent def pins **Sonnet** — `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator includes all input in the dispatch file directly.
+**If `subagent_type: crucible-qg-verifier` fails to resolve (agent defs not installed —
+see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose`
+on the orchestrator's inherited model and the Sonnet pin is not enforced; emit a
+one-time visible warning of its own ("agent type `crucible-qg-verifier` not
+installed; the verifier is running on the inherited/session model — the Sonnet pin
+is NOT enforced; install per harness-adapter §8") rather than degrading silently.**
+
 
 **Input the orchestrator provides:**
 1. Round N findings (the findings the fix agent was asked to address)
@@ -711,6 +718,9 @@ The orchestrator dispatches a **persistence checker** between a non-clean red-te
 **Verifier-error rounds** (where the round-N fix-verifier dispatch failed or its `### Verifier Assessment` sub-section is malformed/absent) implicitly skip the persistence checker per fail-open semantics — the `≥1 Unresolved` gate is vacuous, so the trigger does not fire. The F1 promotion is also skipped (vacuous gating on condition (d) below).
 
 **Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Task with `subagent_type: crucible-qg-verifier` (reused — both the fix verifier and the persistence checker are Sonnet mechanical structural checks; the agent def pins **Sonnet**, `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`) and `persistence-checker-prompt.md` as the prompt. The persistence checker emits a JSON correspondence object, not an Evidence Receipt — the shared `crucible-qg-verifier` def is deliberately return-format-neutral so it does not conflict with that (the persistence checker is not a receipt-bearing role — its JSON is consumed directly by the orchestrator, written to `round-(N+1)-persistence.md` per the flow below, and is NOT run through the receipt linter; this is a pre-existing exemption that #352 does not change). Inputs supplied verbatim by the orchestrator:
+(Same resolution-failure fallback and warning as the fix-verifier dispatch above —
+see Fix Verifier's Dispatch method.)
+
 
 1. `round-N-findings.md` (prior round's findings)
 2. `round-(N+1)-findings.md` (current round's findings)
@@ -739,6 +749,9 @@ The persistence checker (above) catches a finding that *survives* a fix. This ch
 **Simpler decomposition considered (round 3, S5).** Folding this judgment into the existing persistence-checker dispatch — adding the fix diff as a fourth input to `persistence-checker-prompt.md`, with `fix_generated | ambiguous | pre-existing` as a per-correspondence field — was considered and NOT adopted this round. The two checks' triggers differ: persistence requires ≥1 round-N Unresolved finding, while this check must also fire on fully-Resolved rounds. A merged checker would need the persistence half to short-circuit to an empty correspondence list on the fully-Resolved branch (computed in-process instead of serialized through the `persistence_status` enum) — a real but small redesign, left to a follow-up rather than re-cut here so the reasoning is not lost if the merge is picked up later.
 
 **Dispatch.** Reuses `subagent_type: crucible-qg-verifier` (Sonnet — same mechanical-check role as the fix verifier and persistence checker; do not pass a call-level `model:`) with `fix-generated-defect-prompt.md` as the agent's instructions. Inputs supplied verbatim:
+(Same resolution-failure fallback and warning as the fix-verifier dispatch above —
+see Fix Verifier's Dispatch method.)
+
 
 1. `round-(N+1)-findings.md` (current round's findings) — <!-- CONTRACT:qg-fan-out-population-scope:START -->the checker's in-scope population is **every Fatal/Significant-severity finding entry in this file, regardless of which section it appears under** — including entries in a required `### Second Pass Findings` section (`skills/red-team/red-team-prompt.md`'s mandated fourth section, which also carries Fatal/Significant entries under the full steel-man protocol). Only Minor/Nit-severity entries are out of scope. (Round 3, F1 originally narrowed this to the `### Fatal Challenges`/`### Significant Challenges` headings only, to keep the completeness invariant below arithmetically satisfiable against the orchestrator's #366 Score-source count. Round 5, F3 widened it back: the narrower scope made the checker permanently blind to exactly the late-round, second-pass-surfaced defects #488 c1's evidence is made of, and round 3's own fix already demoted the completeness audit from a voiding `status: error` check to a non-voiding narration-log flag — so the arithmetic no longer needs to close against #366's population for `fix_generated_count` to be trusted. See the completeness-audit paragraph below, which decouples this checker's comparand from the #366 count instead of re-narrowing the population.)<!-- CONTRACT:qg-fan-out-population-scope:END -->.
 2. The round-N fix diff — `artifact-(N-1).md` before round N's fix vs. `artifact-N.md` after it, uniformly for all N ≥ 1 (round 1's "before" side is `artifact-0.md`, written per-chunk at Artifact Preparation before that chunk's first red-team dispatch — see the Round History file list) — plus the **full** `## Round N Fix` fix-journal entry (all fields, matching what the persistence checker receives per `## Stagnation Detection > Persistence Check`) as supporting context. The diff is the primary evidence; the journal entry supplies the fix's own account of intent. **Orchestrator-side oversized-diff interception (round 6, F1).** The orchestrator measures the diff's size BEFORE dispatch — the same disposition round 5 S4 chose for `persistence_status` — and if it is too large for the dispatch, does NOT dispatch the checker: it writes the fail-open `status: error` object itself, with <!-- CONTRACT:qg-fan-out-oversized-diff-error-cause:START -->`error_cause: "oversized-diff"`<!-- CONTRACT:qg-fan-out-oversized-diff-error-cause:END --> (see `fix-generated-defect-prompt.md`'s Fail-open schema and `fix-generated-error-cause` under Round History below), rather than capping the diff or falling back to the journal entry alone — a truncated diff is not ground truth (round 5, S1). The prompt's own "diff too large to process" fail-open clause (see Failure modes below) is retained only as defense-in-depth for the residual case where the checker is dispatched anyway (e.g. a future refactor) and independently finds the diff unworkable. **Size measurement and interception order (round 7, S4).** The orchestrator records the measured diff size in `round-(N+1)-score.md` as `fix-generated-diff-bytes:` on every round the checker's trigger fires, regardless of outcome (see Round History), so `fan_out_oversized_count` is interpretable against the size distribution that produced it rather than remaining an uncalibrated counter that can silently read low or zero for the same reason round 6's F1 was filed; "too large" means the diff would not fit the dispatch's input budget alongside inputs #1 and #3. When both pre-dispatch interception conditions hold on the same round (the diff is oversized AND `persistence_status` resolves to `verifier-error`/`error`/`absent`), <!-- CONTRACT:qg-fan-out-interception-order:START -->`error_cause` is `oversized-diff` — the size measurement is orchestrator-local and always available, so it is checked first — and `persistence-unknown` is the residual cause, recorded only when the diff was not oversized.<!-- CONTRACT:qg-fan-out-interception-order:END -->
@@ -787,6 +800,13 @@ For thresholds 3-5 the short window means no silent-seed pass is feasible; the j
 **At round `suppression_threshold` and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool, `subagent_type: crucible-qg-judge` (the agent def pins **Sonnet** — `agents/crucible-qg-judge.md`; do not pass a call-level `model:`). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
+**If `subagent_type: crucible-qg-judge` fails to resolve (agent defs not installed
+— see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose`
+on the orchestrator's inherited model and the Sonnet pin is not enforced; emit a
+one-time visible warning of its own ("agent type `crucible-qg-judge` not installed;
+the judge is running on the inherited/session model — the Sonnet pin is NOT
+enforced; install per harness-adapter §8") rather than degrading silently.**
+
 
 **Input the orchestrator provides:**
 1. The content of `round-N-findings.md` (current round)
