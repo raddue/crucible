@@ -435,6 +435,160 @@ def check_model_req_hardfail(rel: str, text: str) -> list[str]:
     return fails
 
 
+# S1 (round 15): the executor is driven by the PUBLISHED map, not by a second hardcoded
+# alternative list. A brand added to BRAND_RUNG (the documented single-line update procedure)
+# must resolve through this same map, so the two cannot silently drift apart.
+# repo's live raw-id convention is `claude-<brand>-<digit...>` with an optional bracketed
+# suffix. The id part MUST start with a digit so lookalike prefixes (`claude-opus-proxy`) do
+    # not resolve; the brand is matched against BRAND_RUNG's own keys (S5, round 17),
+    # so the raw-id path and the published-table path agree on which brands exist.
+WHOLE_CLAUDE_ID_RE = re.compile(
+    r"^claude-(?P<brand>[a-z][a-z0-9.\-]*?)-\d[\w.\-]*(?:\[[^\]]*\])?$")
+
+def resolve_rung(model_pin_value: str) -> str | None:
+    """Brand -> rung per model-tier-policy.md's brand->rung table, driven by the published
+    `BRAND_RUNG` map itself (S1, round 15: a second, hardcoded alternative list would let a
+    newly published brand pass the table assertion while resolving to `None` here). v1
+    resolves ONLY a whole, single value (S2, round 3): a bare brand alias present in the map,
+    or a whole raw dated Claude id (digit-initial, optional bracketed suffix, e.g.
+    `claude-opus-4-8[1m]`) whose brand is looked up in the same map. It never scans tokens
+    and picks out the recognized ones - doing that guessed a rung for
+    `opus or some-custom-model-v2` and for the lookalike `claude-opus-proxy`. ANY additional
+    token, unrecognized alternative, or multi-brand disjunction resolves to None
+    (indeterminate), so T5 can never report agreement for a pin whose other possible
+    resolution is unknown."""
+    v = model_pin_value.strip().strip("\"'").lower()
+    if v in BRAND_RUNG:
+        return BRAND_RUNG[v]
+    if not WHOLE_CLAUDE_ID_RE.match(v):
+        return None
+    # S5 (round 17): the brand is matched against the published table's OWN keys, longest
+    # first, so a digit-bearing brand (`claude-gpt-5-2026` once `gpt-5` is published)
+    # resolves exactly as its table form does. A wider capture alphabet would not do this:
+    # a lazy capture still yields `gpt`, and a greedy one turns the documented
+    # `claude-opus-4-8[1m]` into `opus-4`. The digit-initial id guard below is unchanged, so
+    # the lookalike `claude-opus-proxy` still resolves to None (indeterminate).
+    rest = v[len("claude-"):]
+    if "[" in rest:
+        rest = rest[:rest.index("[")]
+    for _b in sorted(BRAND_RUNG, key=len, reverse=True):
+        tail = rest[len(_b):]
+        if rest.startswith(_b) and tail[:1] == "-" and tail[1:2].isdigit():
+            return BRAND_RUNG[_b]
+    return None
+
+# S1 (round 15): the map -> executor coupling is asserted, not assumed. Task 12's `--selftest`
+# gate runs this same check, so a brand published in BRAND_RUNG without a resolver path fails
+# immediately instead of resolving to `indeterminate` in production.
+assert BRAND_RUNG, "the published brand->rung table is empty"
+for _brand, _rung in BRAND_RUNG.items():
+    assert resolve_rung(_brand) == _rung, (
+        "brand %r is published as %s but the executor resolves it to %r - the published "
+        "table and the resolver have drifted apart" % (_brand, _rung, resolve_rung(_brand)))
+assert resolve_rung("some-unknown-brand") is None, (
+    "an unpublished brand resolved to a rung")
+
+def frontmatter_model_pins(text: str) -> list[str]:
+    """Live `model:` pin values from the file's LEADING YAML frontmatter
+    block ONLY (SP1, round 3). The fable-ban scan intentionally reads the
+    whole document (inline examples included), but T5 asks "what binds",
+    and Claude Code binds only the frontmatter `model:`. A body-line
+    `model:` with no frontmatter pin must therefore resolve to
+    indeterminate, not be mistaken for a live binding (FRONTMATTER_PIN_RE
+    itself is unchanged and still used by the fable-pin scan)."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return []
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            fm = "\n".join(lines[1:i])
+            return [v.strip() for v in FRONTMATTER_PIN_RE.findall(fm)]
+    return []
+
+def check_model_req_report_only(rel: str, text: str) -> list[str]:
+    """T3 (accepts-offensive-security resolves indeterminate, never attested,
+    in v1 — always fires, disclosed by design), the design's other two named
+    unsatisfiable capability×trust pairs ({R2, egress=none}, {R2,
+    no-retention} — design §3.3/§12, F3), T5 (requirement<->resolution
+    agreement against the file's own model: pin), T17 (role-class's own
+    declared rung vs. its floor). Advisory only — never changes exit code.
+    Also reports (S6) when a MODEL-REQ-bearing file's own model: pin
+    resolves to no rung at all — T5 cannot run against it, and that skip is
+    now visible rather than silent."""
+    reports = []
+    stripped = strip_fences(text)
+    pin_values = frontmatter_model_pins(stripped)
+    file_rung = resolve_rung(pin_values[0]) if pin_values else None
+    lines = model_req_lines(stripped)
+    if lines and not pin_values:
+        reports.append(
+            f"{rel}: MODEL-REQ present but the file has no `model:` pin in "
+            f"its LEADING YAML frontmatter — T5 requirement/resolution "
+            f"agreement cannot run, and the live binding is indeterminate "
+            f"(SP1, round 3)")
+    elif lines and file_rung is None:
+        reports.append(
+            f"{rel}: file's own frontmatter model: pin {pin_values[0]!r} "
+            f"resolves to no rung (indeterminate) — the MODEL-REQ "
+            f"requirement/resolution agreement check (T5) cannot run "
+            f"against it, made visible here rather than silently skipped "
+            f"(S6)")
+    for raw in lines:
+        try:
+            f = parse_model_req(raw)
+        except ValueError:
+            continue  # already hard-failed by check_model_req_hardfail
+        selector, rung = f["selector"], f.get("rung")
+        if "accepts-offensive-security" in f["flags"]:
+            reports.append(
+                f"{rel}: accepts-offensive-security capability resolves "
+                f"`indeterminate` (the #392 boundary-verification probe has "
+                f"never been run), never `attested` (fixture-based "
+                f"attestation is design #493 §2.4, out of scope for v1) — "
+                f"disclosed, not a defect: `{raw}`")
+        # Design §8 caps security-surface roles at egress=first-party. Runtime
+        # egress enforcement is out of v1 scope, but the DECLARED token pair in
+        # a tracked security-surface file is an authoring-time consistency
+        # check the checker can already make (it reads is_security_surface()
+        # for the on-unknown rule) — a future siege/dependency-audit
+        # declaration must not be certified with a third-party ceiling
+        # (S5, round 5). Report-Only; no exit-code change.
+        if (is_security_surface(rel, text) and f.get("egress")
+                and f["egress"] in EGRESS_LEVELS and EGRESS_LEVELS.index(f["egress"]) >
+                EGRESS_LEVELS.index("first-party")):
+            reports.append(
+                f"{rel}: security-surface role declares egress="
+                f"{f['egress']} — design §8 caps security-surface roles at "
+                f"egress=first-party or stricter (report-only in v1; runtime egress "
+                f"enforcement is out of scope, S5, round 5): `{raw}`")
+        floor = MIN_RUNG_FOR_ROLE_CLASS.get(selector)
+        if rung and floor and RUNG_ORDER[rung] < RUNG_ORDER[floor]:
+            reports.append(
+                f"{rel}: role-class {selector} declares rung {rung}, below "
+                f"its own floor {floor}: `{raw}`")
+        # S1 (round 18): the deferred `unclassified` rung must not drive pair reports either.
+        # Task 1 leaves that rung meaning unapproved, so reporting {R2, egress=none} or
+        # {R2, no-retention} for such a role asserts a policy the plan has not adopted, even
+        # report-only: the reviewer executed the parser and saw the advisory appear for a
+        # declaration whose rung semantics are explicitly deferred.
+        if selector != "unclassified" and rung == "R2" and f.get("egress") == "none":
+            reports.append(
+                f"{rel}: unsatisfiable capability×trust pair "
+                f"{{R2, egress=none}} (design §3.3/§12): `{raw}`")
+        if selector != "unclassified" and rung == "R2" and "no-retention" in f["flags"]:
+            reports.append(
+                f"{rel}: unsatisfiable capability×trust pair "
+                f"{{R2, no-retention}} (design §3.3/§12): `{raw}`")
+        # S3 (round 17): the rung of an `unclassified` declaration is explicitly deferred
+        # (Task 1), so this comparison must not interpret it - reporting an unmet rung for a
+        # role whose rung meaning is unresolved asserts a policy the plan has not adopted.
+        if (rung and file_rung and selector != "unclassified"
+                and RUNG_ORDER[file_rung] < RUNG_ORDER[rung]):
+            reports.append(
+                f"{rel}: MODEL-REQ requires rung {rung} but the file's own "
+                f"model: pin resolves (asserted, brand-table) to "
+                f"{file_rung} — requirement/resolution disagreement: `{raw}`")
+    return reports
 def pins_in(text: str) -> list[str]:
     """All id-shaped tokens across the value regions of the three static
     pin-surface forms.
@@ -537,13 +691,24 @@ def tracked_md() -> list[pathlib.Path]:
 
 def main() -> int:
     errs: list[str] = []
+    reports: list[str] = []
     for path in tracked_md():
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         rel = path.relative_to(ROOT).as_posix()
-        errs.extend(check_file(rel, text))
+        file_errs = check_file(rel, text)
+        errs.extend(file_errs)
+        # SP1 (round 15): never run the advisory interpreter over a file that already
+        # hard-failed. A malformed declaration (e.g. `egress=banana`) must produce the
+        # authored-token failure list, not an uncaught ValueError from the advisory pass.
+        if not file_errs:
+            reports.extend(check_model_req_report_only(rel, text))
+    if reports:
+        print("MODEL-REQ REPORT-ONLY (advisory — does not fail the gate):")
+        for r in reports:
+            print(f"  {r}")
     if errs:
         print("MODEL-TIER GUARDRAIL VIOLATIONS:")
         for e in errs:
@@ -556,6 +721,132 @@ def main() -> int:
     return 0
 
 
+REPORT_ONLY_CASES = [
+    # (relpath, text, expect_nonempty, reason)
+    ("agents/crucible-red-team.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "accepts-offensive-security egress=first-party on-unknown=refuse -->\n",
+     True, "accepts-offensive-security always resolves indeterminate, never "
+           "attested, in v1 (T3) — always Report-Only-flagged by design"),
+    ("agents/crucible-qg-judge.md",
+     "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "egress=first-party on-unknown=refuse -->\n",
+     True, "declared rung R2 vs. the file's own sonnet pin (asserted R1) "
+           "is a requirement/resolution disagreement (T5)"),
+    ("agents/crucible-qg-fix.md",
+     "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+     "egress=first-party on-unknown=degrade-with-disclosure "
+     "bounded-by=model-tier-policy.md:51 -->\n",
+     False, "declared rung R1 matches the file's own sonnet pin (asserted "
+            "R1) — no T5 disagreement"),
+    ("agents/x.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: generative-checked R0 "
+     "egress=first-party on-unknown=degrade-with-disclosure "
+     "bounded-by=x.md:1 -->\n",
+     True, "a generative-checked declaration with rung R0 is below its own "
+           "floor R1 (T17), independent of the file's actual pin"),
+    ("agents/x.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: mechanical-predicate R0 "
+     "egress=first-party on-unknown=proceed -->\n",
+     False, "mechanical-predicate at its own floor R0, opus pin resolves "
+            "R2 >= R0 — clean on both T5 and T17"),
+    # --- F3: the design's other two named unsatisfiable pairs (§3.3/§12) ---
+    ("agents/x.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "egress=none on-unknown=refuse -->\n",
+     True, "{R2, egress=none} is the design's flagship unsatisfiable pair "
+           "(T3, §3.3/§12) — Report-Only, independent of accepts-"
+           "offensive-security"),
+    ("agents/x.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "no-retention egress=first-party on-unknown=refuse -->\n",
+     True, "{R2, no-retention} is the design's second named unsatisfiable "
+           "pair (T3, §3.3/§12)"),
+    ("agents/x.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "egress=first-party on-unknown=refuse -->\n",
+     False, "R2 + egress=first-party is satisfiable — the two new "
+            "unsatisfiable-pair rules must not over-fire on it (this is "
+            "the shape Task 6's real declarations use)"),
+    # --- S6: resolve_rung must match id-shaped tokens, not brand prefixes,
+    # and must never first-wins-guess a multi-brand region ---
+    ("agents/x.md",
+     "---\nmodel: claude-opus-4-8[1m]\n---\n<!-- MODEL-REQ: "
+     "recall-critical-review R2 egress=first-party on-unknown=refuse "
+     "-->\n",
+     False, "a bracket-suffixed raw dated opus id resolves correctly to R2 "
+            "via id-shaped matching, matching the declared R2 requirement "
+            "— clean, not falsely indeterminate (S6)"),
+    ("agents/x.md",
+     "---\nmodel: opus or sonnet\n---\n<!-- MODEL-REQ: generative-checked "
+     "R1 egress=first-party on-unknown=degrade-with-disclosure "
+     "bounded-by=x.md:1 -->\n",
+     True, "a disjunctive pin resolves to indeterminate, never "
+           "first-wins-guessed (S6); MODEL-REQ's presence on an "
+           "indeterminate-resolution file is now visibly reported rather "
+           "than silently unchecked"),
+    ("agents/x.md",
+     "---\nmodel: some-custom-model-v2\n---\n<!-- MODEL-REQ: "
+     "mechanical-predicate R0 egress=first-party on-unknown=proceed -->\n",
+     True, "an unrecognized model id resolves to indeterminate — visible "
+           "(S6), not silently skipped"),
+    # --- S2 (round 3): whole-value resolution only ---
+    ("agents/x.md",
+     "---\nmodel: opus or some-custom-model-v2\n---\n<!-- MODEL-REQ: "
+     "mechanical-predicate R0 egress=first-party on-unknown=proceed -->\n",
+     True, "a known brand disjoined with an UNKNOWN alternative resolves to "
+           "indeterminate, never R2 — whole-value resolution, not "
+           "token-picking (S2, round 3)"),
+    ("agents/x.md",
+     "---\nmodel: claude-opus-proxy\n---\n<!-- MODEL-REQ: "
+     "mechanical-predicate R0 egress=first-party on-unknown=proceed -->\n",
+     True, "a lookalike `claude-opus-proxy` (non-digit id part) does NOT "
+           "resolve to opus/R2 — indeterminate (S2, round 3)"),
+    # --- SP1 (round 3): only the leading frontmatter `model:` binds ---
+    ("agents/x.md",
+     "No frontmatter block at all.\n\nmodel: opus\n<!-- MODEL-REQ: "
+     "mechanical-predicate R0 egress=first-party on-unknown=proceed -->\n",
+     True, "a body-only `model:` with no frontmatter pin resolves to "
+           "indeterminate — T5 must not mistake a body example for a live "
+           "binding (SP1, round 3)"),
+    # --- S5 (round 5): security-surface trust ceiling is an authoring check ---
+    ("skills/siege/SKILL.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "egress=third-party on-unknown=refuse -->\n",
+     True, "a security-surface declaration with egress=third-party breaks "
+           "design §8's first-party ceiling — Report-Only, since runtime "
+           "egress enforcement is out of v1 scope (S5, round 5)"),
+    ("skills/siege/SKILL.md",
+     "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+     "egress=first-party on-unknown=refuse -->\n",
+     False, "the same security-surface shape at egress=first-party is within "
+            "the ceiling — the new rule must not over-fire (S5, round 5)"),
+         ("skills/siege/SKILL.md",
+          "---\nmodel: haiku\n---\n<!-- MODEL-REQ: mechanical-predicate R0 "
+          "egress=none on-unknown=refuse -->\n",
+          False, "a security-surface declaration egress=none is stricter than the "
+          "first-party ceiling, not a violation — §8 is an at-most ceiling, so "
+          "egress=none must not be reported (S1, round 8; R0 avoids the separate "
+          "{R2, egress=none} unsatisfiable-pair rule so only the ceiling is under "
+          "test)"),
+]
+
+
+def selftest_report_only() -> int:
+    """T3/T5/T17 are advisory — verify they fire/don't-fire on their own
+    channel, never touching check_file's hard-fail return."""
+    failures = []
+    for rel, text, expect_nonempty, reason in REPORT_ONLY_CASES:
+        got = check_model_req_report_only(rel, text)
+        if bool(got) != expect_nonempty:
+            failures.append(f"  {rel}: expected nonempty={expect_nonempty} "
+                            f"({reason}), got {got!r}")
+    if failures:
+        print("REPORT-ONLY SELFTEST FAILED:")
+        print("\n".join(failures))
+        return 1
+    print("REPORT-ONLY SELFTEST OK.")
+    return 0
 def selftest() -> int:
     """Built-in regression cases for the detection logic (no filesystem)."""
     m = MARKER
@@ -1073,5 +1364,8 @@ def selftest() -> int:
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv[1:]:
-        sys.exit(selftest())
+        # `|`, not `or` — both selftests must run even if the first is
+        # nonzero, so a hard-fail regression never hides a Report-Only one
+        # in the same run (M7).
+        sys.exit(selftest() | selftest_report_only())
     sys.exit(main())
