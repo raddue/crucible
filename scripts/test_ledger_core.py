@@ -476,5 +476,242 @@ class Uuid7Test(unittest.TestCase):
                              for i in range(len(ts_ints) - 1)))
 
 
+# S4 (round 7): the only roles design §9/§12 tie to a MODEL-REQ-bearing agent def.
+# An out-of-scope dispatch in the round (e.g. `siege`, `quality-gate/SKILL.md:976`)
+# must not silently acquire a ledger entry: the reference populator rejects any
+# role outside this set rather than copying the whole round-dispatch map.
+MODEL_RESOLUTION_ROLES = {
+    "red-team",
+    "qg-fix",
+    "qg-verifier",
+    "qg-judge",
+}
+
+
+def build_model_resolution(round_summary):
+    """Reference implementation of the Task 10 populator contract.
+
+    round_summary keys:
+      roles             -> {role: [<nominal entry>, ...], ...} — the NOMINAL
+                           per-dispatch entries are counted, never recorded: design
+                           §9's `ran` is endpoint-reported-id|unknown and v1 has no
+                           endpoint report, so every emitted entry is uniform
+                           unknown/indeterminate/intent (S2, round 6)
+      review_per_model  -> per_model list from consensus_query(mode="review"), or None
+      review_used       -> True only when that review result was completed/partial
+                           AND actually used for this round (S1, round 5); an
+                               a used review whose list was not retained makes
+                               the whole result `None` (S3, round 8)
+                           unavailable result can carry a nonempty per_model list
+      verdict_per_model -> per_model list from consensus_query(mode="verdict"), or None
+
+    Returns the object (never `{}`); None when nothing contributed.
+    """
+    out = {}
+    for role, entries in round_summary.get("roles", {}).items():
+        # S4 (round 7): fail loud on an undeclared role rather than emitting an
+        # entry design §9 never authorizes.
+        if role not in MODEL_RESOLUTION_ROLES:
+            raise ValueError(
+                f"undeclared role {role!r} in roles map — only "
+                f"{sorted(MODEL_RESOLUTION_ROLES)} may contribute")
+        if not entries:
+            continue
+        out[role] = [
+            # S2, round 6: design §9's `ran` is endpoint-reported-id|unknown and no
+            # endpoint report exists in v1, so EVERY entry — including a
+            # type-resolution failure (S1, round 4) — is uniform unknown/
+            # indeterminate/intent. The role KEY and the array LENGTH carry the
+            # attribution; the nominal pin does not.
+            {"ran": "unknown", "basis": "indeterminate", "prov": "intent"}
+            for _ in entries
+        ]
+    rm = round_summary.get("review_per_model")
+    if round_summary.get("review_used") and not rm:
+        # SP2 (round 15): `not rm` covers the missing list AND the EMPTY list.
+        # A used review with zero recorded members is not a completed review:
+        # publishing {"consensus": []} would advertise a populated reviewer key
+        # while attesting no member at all - that is the data-loss branch below,
+        # not a review, and it must not masquerade as one after recovery.
+        # S3 (round 8): a used consensus review whose membership list was NOT
+        # retained cannot be attributed. Returning a partly-sampled object here
+        # (e.g. only qg-judge plus the accepted fixer) would advertise a populated
+        # review record while hiding the reviewer that actually decided the
+        # verdict — indistinguishable from a genuinely reviewer-free round. The
+        # documented data-loss branch is therefore `None`, whole-row.
+        return None
+    if rm and round_summary.get("review_used"):
+        # S2/S7 (round 4): config-derived ids are not endpoint-observed, so
+        # EVERY consensus member is unknown/indeterminate; the array's
+        # LENGTH still attests the review call's membership.
+        out["consensus"] = [
+            {"ran": "unknown", "basis": "indeterminate", "prov": "intent"}
+            for _ in rm
+        ]
+    return out or None
+
+
+def select_review_record(findings_root, chunk, local_round, dispatch_id):
+    """Resolve the persisted review record for one round, deterministically (S4, round 13).
+
+    A filename is not an identity: the same local round number exists under every chunk,
+    and `cross-chunk` is a coordinate of its own (S4/S5, round 12). Absence, a wrong
+    coordinate, or a record written by another dispatch is an error — never a silent
+    pick, because a wrong pick is invisible in the emitted row.
+    """
+    # `findings_root` is the ACTIVE root — `<scratch>/chunk-K`, `<scratch>/cross-chunk`,
+    # or `<scratch>` for a flat gate — i.e. the directory that already carries the chunk
+    # coordinate and IS the linter's second root. Joining `chunk` again double-prefixed it
+    # and found nothing whenever the documented caller passed the real root (F1, round 14).
+    # The chunk is therefore checked from the record's own field below, never the path.
+    path = os.path.join(findings_root, "round-%d-review-result.json" % local_round)
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(findings_root):
+        raise ValueError("record path %s does not sit directly in the active findings "
+                         "root %s" % (path, findings_root))
+    try:
+        with open(path) as fh:
+            rec = json.load(fh)
+    except FileNotFoundError:
+        raise FileNotFoundError("no review record at %s" % path)
+    if rec.get("chunk") != chunk or rec.get("local_round") != local_round:
+        raise ValueError("record at %s carries the wrong coordinate (%r, %r)"
+                         % (path, rec.get("chunk"), rec.get("local_round")))
+    # Fail closed without a dispatch id (S3, round 14): a missing id is NOT a wildcard.
+    # An abandoned attempt's record at the expected path would otherwise be consumed
+    # silently after a checkpoint drops the in-memory dispatch bookkeeping.
+    if not dispatch_id:
+        raise ValueError("select_review_record needs the current dispatch id to consume "
+                         "%s; refusing to accept a record without one" % path)
+    if rec.get("dispatch_id") != dispatch_id:
+        raise ValueError("record at %s was written by dispatch %r, not %r"
+                         % (path, rec.get("dispatch_id"), dispatch_id))
+    return path
+
+MR_ENTRY = {"ran": "unknown", "basis": "indeterminate", "prov": "intent"}
+
+
+class TestModelResolution(unittest.TestCase):
+    """The fourteen acceptance cases, plus the persisted-record selector (S2/S4, round 13)."""
+
+    def _row(self, **kw):
+        summary = {"roles": {}, "review_per_model": None, "review_used": False,
+                   "verdict_per_model": None}
+        summary.update(kw)
+        return build_model_resolution(summary)
+
+    def test_case01_review_not_verdict_membership(self):
+        row = self._row(review_used=True, review_per_model=["a", "b", "c"],
+                        verdict_per_model=["d"])
+        self.assertEqual(row, {"consensus": [MR_ENTRY] * 3})
+
+    def test_case02_unavailable_consensus_records_no_nominal_pin(self):
+        row = self._row(roles={"red-team": [{"ran": "opus", "basis": "asserted"}]})
+        self.assertEqual(row, {"red-team": [MR_ENTRY]})
+
+    def test_case03_mixed_bridged_and_failed_members(self):
+        row = self._row(review_used=True,
+                        review_per_model=[{"responded": True}, {"responded": True},
+                                          {"responded": False}])
+        self.assertEqual(row, {"consensus": [MR_ENTRY] * 3})
+
+    def test_case04_consensus_only_round_is_non_null(self):
+        row = self._row(review_used=True, review_per_model=["a"])
+        self.assertIsNotNone(row)
+        self.assertEqual(list(row), ["consensus"])
+
+    def test_case05_terminal_round_only(self):
+        row = self._row(roles={"red-team": [{"ran": "opus", "basis": "asserted"}]})
+        self.assertEqual(list(row), ["red-team"])
+
+    def test_case06_type_resolution_fallback(self):
+        row = self._row(roles={"qg-verifier": [{"resolution_failed": True}]})
+        self.assertEqual(row, {"qg-verifier": [MR_ENTRY]})
+
+    def test_case07_alias_request_versus_response_name(self):
+        row = self._row(review_used=True,
+                        review_per_model=[{"model_id": "cfg-a",
+                                           "reported": "endpoint-b"}])
+        self.assertEqual(row["consensus"], [MR_ENTRY])
+
+    def test_case08_unused_nonempty_list_must_not_key_the_row(self):
+        row = self._row(roles={"red-team": [{"ran": "opus", "basis": "asserted"}]},
+                        review_per_model=[{"failed": True}, {"failed": True}])
+        self.assertEqual(list(row), ["red-team"])
+
+    def test_case09_two_call_threshold_invents_no_judge_key(self):
+        row = self._row(review_used=True, review_per_model=["a", "b", "c"],
+                        verdict_per_model=["j"])
+        self.assertEqual(list(row), ["consensus"])
+        self.assertEqual(len(row["consensus"]), 3)
+
+    def test_case10_look_harder_dispatch_is_not_pooled(self):
+        row = self._row(review_used=True, review_per_model=["a", "b", "c"],
+                        roles={"red-team": [{"ran": "opus", "basis": "asserted"}]})
+        self.assertEqual(sorted(row), ["consensus", "red-team"])
+        self.assertEqual(len(row["consensus"]), 3)
+        self.assertEqual(len(row["red-team"]), 1)
+
+    def test_case11_out_of_scope_role_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._row(roles={"siege": [{"ran": "sonnet"}]})
+
+    def test_case12_partial_consensus_is_attempted_membership(self):
+        row = self._row(review_used=True,
+                        review_per_model=[{"responded": True}, {"responded": False},
+                                          {"responded": True}])
+        self.assertEqual(len(row["consensus"]), 3)
+
+    def test_case13_pre_projection_join_leaves_one_qg_fix_entry(self):
+        # Dispatch-level identity is asserted against the EMITTED ROW by the retained
+        # gate-real script; the helper-side invariant is that the pre-projection join
+        # hands it exactly the accepted fixer.
+        row = self._row(roles={"qg-fix": [{"dispatch_id": "accepted"}],
+                               "red-team": [{"ran": "opus", "basis": "asserted"}]})
+        self.assertEqual(row["qg-fix"], [MR_ENTRY])
+        self.assertEqual(len(row["qg-fix"]), 1)
+
+    def test_case14_unattributable_used_review_is_whole_row_null(self):
+        row = self._row(roles={"qg-judge": [{"ran": "sonnet"}]}, review_used=True,
+                        review_per_model=None)
+        self.assertIsNone(row)
+
+    def test_selector_resolves_the_coordinate_and_rejects_collisions(self):
+        # The caller passes the ACTIVE findings root — the dir that already carries the
+        # chunk coordinate (F1, round 14) — so chunk-1 and cross-chunk each get their
+        # own root, and a flat gate passes its root directly.
+        with tempfile.TemporaryDirectory() as scratch:
+            for chunk, dispatch in (("chunk-1", "d1"), ("cross-chunk", "d2")):
+                root = os.path.join(scratch, chunk)
+                os.makedirs(root)
+                with open(os.path.join(root, "round-1-review-result.json"), "w") as fh:
+                    json.dump({"chunk": chunk, "local_round": 1,
+                               "dispatch_id": dispatch}, fh)
+                self.assertEqual(
+                    select_review_record(root, chunk, 1, dispatch),
+                    os.path.join(root, "round-1-review-result.json"))
+            chunk1 = os.path.join(scratch, "chunk-1")
+            with self.assertRaises(ValueError):
+                select_review_record(chunk1, "chunk-1", 1, "d2")   # foreign dispatch
+            with self.assertRaises(FileNotFoundError):
+                select_review_record(chunk1, "chunk-1", 2, "d1")   # absent round
+            # S3 (round 14): a record written by an abandoned attempt must NOT be
+            # consumed when the caller has no current dispatch id — no wildcard.
+            stale = os.path.join(scratch, "cross-chunk")
+            with open(os.path.join(stale, "round-3-review-result.json"), "w") as fh:
+                json.dump({"chunk": "cross-chunk", "local_round": 3,
+                           "dispatch_id": "old"}, fh)
+            with self.assertRaises(ValueError):
+                select_review_record(stale, "cross-chunk", 3, None)
+            with self.assertRaises(ValueError):
+                select_review_record(stale, "cross-chunk", 3, "old-other")
+            # a flat gate keeps its record directly in the root it passes
+            flat = os.path.join(scratch, "flat")
+            os.makedirs(flat)
+            with open(os.path.join(flat, "round-1-review-result.json"), "w") as fh:
+                json.dump({"chunk": "solo", "local_round": 1,
+                           "dispatch_id": "d9"}, fh)
+            self.assertEqual(select_review_record(flat, "solo", 1, "d9"),
+                             os.path.join(flat, "round-1-review-result.json"))
+
 if __name__ == "__main__":
     unittest.main()
