@@ -107,7 +107,7 @@ Triggered by `/stocktake efficiency` or by forge feed-forward when 10+ chronicle
 1. Read `~/.claude/projects/<hash>/memory/chronicle/signals.jsonl`
 2. If the file is missing or empty: report "No efficiency data available. Run a pipeline with enriched manifest tracking to begin collecting data." and stop.
 3. Filter to signals that have a `metrics.efficiency` sub-object.
-4. Normalize dispatch counts: signals recorded before `dispatch_count` existed carry `dispatches_by_tier` instead — when `dispatch_count` is absent, derive it as the sum of that object's values. A signal carrying neither contributes no dispatch-based metric (Steps 2–4 show "—" for it).
+4. Normalize dispatch counts: signals recorded before `dispatch_count` existed carry `dispatches_by_tier` instead. That legacy object counted manifest **entries** grouped by tier — one dispatch appends a dispatched row and a completion row under a single `seq` — and omitted dispatches with no recorded tier, so its sum is **not** a distinct-`seq` dispatch count and is neither a lower nor an upper bound on one. Treat legacy-derived values as approximate: mark them "≈" in Steps 2–4 and exclude those signals from `Avg Dispatches` and per-dispatch cost comparisons rather than mixing eras. A signal carrying neither field contributes no dispatch-based metric (Steps 2–4 show "—" for it).
 5. If fewer than 3 signals have efficiency data: report available data with caveat: "Insufficient data for trend analysis. N signals available, 3+ recommended for meaningful comparison."
 6. Report: "N of M total signals include efficiency data." (where M is total signals, N is signals with efficiency).
 

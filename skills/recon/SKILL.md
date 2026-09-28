@@ -86,13 +86,15 @@ Directory constraint. When provided, overrides scout scope suggestions entirely 
 
 ### Cost Profile
 
-| Configuration | Agents | Relative Cost |
+| Configuration | Agents | Relative Effort |
 |---|---|---|
 | Core only | 2 | Low |
 | Core + 1 mechanical module | 3 | Low |
 | Core + 1 judgment module | 3 | Medium |
 | Core + 2 modules (mixed) | 4 | Medium-High |
 | Full repo, no task | 2 | Low (but slower) |
+
+Effort tracks agent count and task size, not model price — models are host-selected (`shared/model-tier-policy.md`).
 
 ## Communication Requirements (Non-Negotiable)
 
