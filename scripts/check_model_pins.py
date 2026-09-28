@@ -88,7 +88,7 @@ write such notes outside the parens, after a `#` (form 1), or in a fence.
 Exits 0 if clean, 1 with a per-violation list otherwise. Stdlib only.
 """
 from __future__ import annotations
-import pathlib, re, subprocess, sys
+import collections, pathlib, re, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "<!-- MODEL-TIER: security-hard-out -->"
@@ -721,6 +721,102 @@ def main() -> int:
     return 0
 
 
+def report_rule_id(msg: str) -> str:
+    """Stable category id for a Report-Only message (S5, round 4). A
+    per-file COUNT alone accepted a one-for-one REPLACEMENT of a known
+    finding (e.g. qg-judge's pin flipped to `inherit` swaps its T5
+    disagreement for an S6/SP1 indeterminate-pin notice — same file, same
+    count, wholly different disclosure). Rule ids pin the CATEGORY, never
+    the full message prose, so diagnostic wording can still change freely."""
+    for needle, rid in (
+        ("accepts-offensive-security capability resolves",
+         "T3-offensive-indeterminate"),
+        ("unsatisfiable capability×trust pair {R2, egress=none}",
+         "T3-pair-r2-egress-none"),
+        ("unsatisfiable capability×trust pair {R2, no-retention}",
+         "T3-pair-r2-no-retention"),
+        ("declares rung", "T17-floor"),
+        ("MODEL-REQ requires rung", "T5-disagreement"),
+        ("resolves to no rung", "S6-indeterminate-pin"),
+        ("no `model:` pin in its LEADING YAML frontmatter",
+         "SP1-no-frontmatter-pin"),
+    ):
+        if needle in msg:
+            return rid
+    return "unclassified"
+
+def _day_one_pairs_ok(got_pairs) -> bool:
+    """Pure comparison of live `(path, rule-id)` pairs against the known
+    day-one set, so the one-for-one replacement case is unit-testable
+    without touching the tracked tree (S5, round 4). Uses COUNTS rather than a
+    set (S3, round 10): set semantics collapse two findings of the SAME rule
+    on the SAME file into one pair, so an extra advisory warning on an
+    already-flagged path would leave this green while the docstring below
+    claims exactly one finding per file. Counter equality pins multiplicity too."""
+    want = collections.Counter({
+        ("agents/crucible-red-team.md", "T3-offensive-indeterminate"): 1,
+        # maintainer-pending — see _known_day_one_disclosures docstring
+        ("agents/crucible-qg-judge.md", "T5-disagreement"): 1,
+    })
+    return collections.Counter(got_pairs) == want
+
+def _known_day_one_disclosures() -> int:
+    """S11 (round-2 fix: S3 replaced a file-SET comparison over 4 hardcoded
+    paths — which could not see a second finding on an already-flagged file,
+    or any finding outside those 4 paths — with a per-file finding COUNT (S5, round 4: replaced by stable `(path, rule-id)` PAIRS in `_day_one_pairs_ok`)
+    derived from the whole tracked tree via tracked_md()). The live
+    Report-Only set must be exactly ONE finding on crucible-red-team.md
+    (accepts-offensive-security) and ONE on crucible-qg-judge.md (its
+    R2-vs-sonnet-R1 rung disagreement), and ZERO on every other tracked
+    file. Any other pair set means a real, previously-unseen disagreement has
+    appeared since Task 6 — the whole point of pinning this is to turn that
+    from silent folded-CI-log drift into a red selftest the moment it
+    happens.
+
+    MAINTAINER-PENDING MEMBER (S8): the qg-judge entry below is not an
+    invariant — it is the design's disclosed, not-yet-resolved disagreement
+    between qg-judge's recall-critical-review/R2 declaration and its own
+    `model: sonnet` pin (design doc role taxonomy; this plan's 'Known
+    day-one disclosures' #2). If the maintainer resolves it (uprates the
+    pin to opus, or re-declares the role `unclassified` per design §2.3),
+    this finding legitimately disappears — that is the sanctioned outcome
+    of a decision this plan handed the maintainer, not a regression to
+    investigate. When that happens, remove the "agents/crucible-qg-
+    judge.md" entry below and the corresponding Known day-one disclosure at
+    the top of this plan. Tracked in the qg-judge pin-decision follow-up
+    issue (Task 13) so this edit has an owner."""
+    # S3 (round 10) negative control: multiplicity matters. The SAME pair twice must
+    # fail — which the previous frozenset comparison could not detect, since both
+    # spellings of two identical findings collapse to one element.
+    assert not _day_one_pairs_ok([
+        ("agents/crucible-red-team.md", "T3-offensive-indeterminate"),
+        ("agents/crucible-red-team.md", "T3-offensive-indeterminate"),
+        ("agents/crucible-qg-judge.md", "T5-disagreement"),
+    ]), "duplicate advisory category on a flagged file must fail the day-one gate"
+    # A list, not a set: duplicates must be countable.
+    # (Add `import collections` at the top of check_model_pins.py if not already imported.)
+    got_pairs = []
+    for path in tracked_md():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        for msg in check_model_req_report_only(rel, text):
+            got_pairs.append((rel, report_rule_id(msg)))
+    if not _day_one_pairs_ok(got_pairs):
+        print(f"REPORT-ONLY SELFTEST FAILED: live (path, rule-id) pairs "
+              f"{sorted(got_pairs)} != known day-one pairs (see "
+              f"_day_one_pairs_ok) — a live agent-def "
+              f"Report-Only finding appeared, disappeared, or was "
+              f"REPLACED by a different rule on the same file; "
+              f"investigate before continuing, UNLESS this is the "
+              f"maintainer-pending qg-judge entry disappearing on purpose "
+              f"(see this function's docstring and the qg-judge "
+              f"pin-decision issue)")
+        return 1
+    return 0
+
 REPORT_ONLY_CASES = [
     # (relpath, text, expect_nonempty, reason)
     ("agents/crucible-red-team.md",
@@ -845,6 +941,19 @@ def selftest_report_only() -> int:
         print("REPORT-ONLY SELFTEST FAILED:")
         print("\n".join(failures))
         return 1
+    if _known_day_one_disclosures():
+        return 1
+    # S5 (round 4): pin the one-for-one REPLACEMENT case directly — same
+    # file, same count, different rule id must fail; the exact known pair
+    # set must pass.
+    assert not _day_one_pairs_ok({
+        ("agents/crucible-red-team.md", "T3-offensive-indeterminate"),
+        ("agents/crucible-qg-judge.md", "SP1-no-frontmatter-pin"),
+    }), "a one-for-one disclosure replacement must fail the day-one pin"
+    assert _day_one_pairs_ok({
+        ("agents/crucible-red-team.md", "T3-offensive-indeterminate"),
+        ("agents/crucible-qg-judge.md", "T5-disagreement"),
+    }), "the exact known day-one pair set must pass"
     print("REPORT-ONLY SELFTEST OK.")
     return 0
 def selftest() -> int:
