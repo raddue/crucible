@@ -88,7 +88,7 @@ emit normally — that data is the entire point. Only set the env var when
 running against test fixtures, eval corpora, or CI smoke tests that would
 otherwise pollute the ledger. See `docs/CONTRIBUTING-CALIBRATION.md`.
 
-## Schema v2 (23 fields)
+## Schema v2 (24 fields)
 
 v2 adds one nullable provenance field, `repo`, to v1 (#270). Readers stay
 backward-compatible: v1 rows (no `repo`, `schema_version: 1`) read fine and
@@ -104,7 +104,7 @@ caller-set, so direct callers like the v1 backfill (moved to
   "run_id": "<UUIDv7 — sortable, millisecond-precision, unique>",
   "skill": "<emitting skill name; open set — any skill carrying a CANONICAL shared/ledger-append.md emit block (e.g. quality-gate, siege, temper, red-team, audit, inquisitor, delve, review-feedback, test-coverage, verify)>",
   "repo": "<basename of git toplevel; cwd basename fallback; 'unknown' on v1 rows>",
-    "model_resolution": null,
+  "model_resolution": null,
   "tier": "A | B",
   "artifact_type": "code | design | plan | hypothesis | mockup | translation | other",
   "verdict": "PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION",
@@ -238,7 +238,7 @@ an `{"elided": N}` marker between a retained head and tail — that element is n
 `{ran, basis, prov}`, so it silently broke the uniform-array contract readers are
 promised, and no reader was scoped to special-case it.) The unbounded-size residual
 design §9's round-6 M5 already discloses is retained rather than masked:
-`append()`'s 16384-byte row cap (`ledger_append.py:282`) **drops** an oversize row
+`append()`'s 16384-byte row cap (`ledger_append.py:299`) **drops** an oversize row
 outright, and `_truncate_payload` does not cover `model_resolution`. If a row is
 dropped that way, that is the design's disclosed residual, reported through
 `append()`'s existing drop behavior — not papered over by an undocumented sentinel.
