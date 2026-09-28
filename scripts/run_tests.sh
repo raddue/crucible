@@ -89,11 +89,16 @@ run python3 scripts/check_qg_minor_advisory.py
 run python3 scripts/check_qg_second_pass_score.py --selftest
 run python3 scripts/check_qg_second_pass_score.py
 run python3 scripts/run_second_pass_evals.py
+run python3 scripts/test_second_pass_scorer.py
 run python3 scripts/check_qg_fan_out.py --selftest
 run python3 scripts/check_qg_fan_out.py
 run python3 scripts/check_crossref.py --selftest
 run python3 scripts/check_crossref.py
+run python3 scripts/check_canonical_links.py --selftest
+run python3 scripts/check_canonical_links.py
 run python3 scripts/catalog.py check
+run python3 scripts/check_adr_integrity.py --selftest
+run python3 scripts/check_adr_integrity.py
 
 # --- graphify-consult convention structural check (ai-rack#93) ---
 run python3 scripts/check_dispatch_graphify_consult.py --selftest
@@ -103,6 +108,10 @@ run python3 scripts/check_dispatch_graphify_consult.py
 run python3 scripts/check_handoff_stop_contract.py --selftest
 run python3 scripts/check_handoff_stop_contract.py
 
+# --- tracked-app-config execution surface (#604, siege S-1) ---
+run python3 scripts/check_settings_surface.py --selftest
+run python3 scripts/check_settings_surface.py
+
 # --- warden structural checks (#464) ---
 run python3 scripts/check_warden_structure.py --selftest
 run python3 scripts/check_warden_structure.py
@@ -110,6 +119,11 @@ run python3 scripts/check_build_clean_tree_contract.py --selftest
 run python3 scripts/check_build_clean_tree_contract.py
 run python3 scripts/check_warden_integration.py --selftest
 run python3 scripts/check_warden_integration.py
+
+# --- deterministic change-bundling (#630) ---
+run python3 scripts/test_change_bundling.py
+run python3 scripts/check_change_bundling.py --selftest
+run python3 scripts/check_change_bundling.py
 
 # --- Receipt-verify (rcpt_verify) ---
 run python3 scripts/rcpt_verify.py --selftest
@@ -139,6 +153,13 @@ run python3 scripts/test_central_store.py
 # --- Path-aware glob single-source-of-truth (#401) ---
 run python3 scripts/test_pathmatch.py
 
+# --- Zero-token vulnerability pattern matcher (#629) ---
+run python3 scripts/test_vuln_ruleset.py
+
+# --- Deterministic comment-position verification (#628) ---
+run python3 scripts/verify_comment_positions.py --selftest
+run python3 scripts/test_verify_comment_positions.py
+
 # --- crucible-qg-fix model-pin regression (#537) ---
 run python3 scripts/test_qg_fix_pin.py
 
@@ -147,6 +168,15 @@ run python3 scripts/test_compass.py
 
 # --- Lock state machines + crash recovery (#398 Phase 2) ---
 run python3 scripts/test_locks.py
+
+# --- Layer 3 cairn Phase Entry Check + Reconciliation Pass (#643) ---
+run python3 scripts/test_cairn.py
+
+# --- Dispatch manifest bookkeeping (#643) ---
+run python3 scripts/test_dispatch.py
+
+# --- Ambient pipeline status writer (#643) ---
+run python3 scripts/test_pipeline_status.py
 
 # --- Central-store mutators: grudge / atomic_write (#398 Phase 3) ---
 run python3 scripts/test_stores.py
@@ -226,12 +256,16 @@ run python3 -m pytest skills/warden/evals/ -q
 run python3 scripts/check_warden_helper_drift.py --selftest
 run python3 scripts/check_warden_helper_drift.py
 
+# --- AACR-Bench review-gate measurement core (#631) ---
+run python3 scripts/test_aacr_bench_measure.py
+
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
 
 # --- Build-routing advisor + reconcile hooks ---
 run bash hooks/tests/test-build-routing-advisor.sh
 run bash hooks/tests/test-gate-ledger-guard.sh
+run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
 
 # --- Summary ---

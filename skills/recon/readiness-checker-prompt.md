@@ -5,6 +5,8 @@
 
 Use this template when dispatching the Readiness Checker depth agent. Primary consumer: `/build`. Discovers test, lint, and CI verification commands for the `## Execution Readiness` section.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Agent tool (subagent_type: Explore, model: sonnet):
   description: "Readiness Checker: discover verification commands"

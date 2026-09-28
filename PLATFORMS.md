@@ -104,9 +104,9 @@ The following Claude Code-specific references appear in skill instructions. Thes
 |----------------------|---------|-------|
 | `subagent_type="general-purpose"` | Full-capability subagent | Default on most platforms |
 | `subagent_type="Explore"` | Fast, read-only codebase search | May not have direct equivalent |
-| `model: opus` | Use strongest model for complex work | Platform selects model; skill still works |
-| `model: sonnet` | Use mid-tier model for routine reviews | Platform selects model; skill still works |
-| `model: haiku` | Use fast model for simple lookups | Platform selects model; skill still works |
+| `model: opus` (requested profile `high`) | Use a high-profile model for complex work | Platform selects an operator-permitted supported model; non-restricted skills continue, while restricted security work with no permitted route stays pending per `shared/model-tier-policy.md` |
+| `model: sonnet` (requested profile `standard`) | Use a standard-profile model for routine reviews | Platform selects an operator-permitted supported model; non-restricted skills continue, while restricted security work with no permitted route stays pending per `shared/model-tier-policy.md` |
+| `model: haiku` (requested profile `fast`) | Use a fast-profile model for simple lookups | Platform selects an operator-permitted supported model; non-restricted skills continue, while restricted security work with no permitted route stays pending per `shared/model-tier-policy.md` |
 
 ### Skill Invocation
 

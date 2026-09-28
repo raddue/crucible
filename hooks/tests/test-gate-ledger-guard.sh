@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/tests/test-gate-ledger-guard.sh
 # Test suite for the gate-ledger-guard.sh PreToolUse hook.
-# Runs 17 test cases validating allow/block behavior.
+# Runs 27 test cases validating allow/block behavior.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ HOOK="$SCRIPT_DIR/../gate-ledger-guard.sh"
 
 PASSED=0
 FAILED=0
-TOTAL=20
+TOTAL=27
 
 # ── Setup temp directory ────────────────────────────────────────────────
 TMPDIR_BASE="$(mktemp -d)"
@@ -80,14 +80,35 @@ EOF
 }
 
 # ── Helper: build Write JSON ────────────────────────────────────────────
+# SIEGE-CA-1: canonical field names (tool_name/tool_input) — this is the
+# actual shape Claude Code sends. The suite used to build every fixture in
+# the legacy .tool/.input shape, which certified the hook green while the
+# canonical shape it never rejects any live payload. Test 21 below covers
+# the legacy fallback explicitly.
 make_json() {
+  local file_path="$1"
+  local content="$2"
+  jq -nc --arg fp "$file_path" --arg c "$content" '{"tool_name":"Write","tool_input":{"file_path":$fp,"content":$c}}'
+}
+
+# ── Helper: build Edit JSON ────────────────────────────────────────────
+make_edit_json() {
+  local file_path="$1"
+  local old_string="$2"
+  local new_string="$3"
+  jq -nc --arg fp "$file_path" --arg os "$old_string" --arg ns "$new_string" \
+    '{"tool_name":"Edit","tool_input":{"file_path":$fp,"old_string":$os,"new_string":$ns}}'
+}
+
+# ── Helper: build LEGACY-shape Write JSON (.tool/.input) ────────────────
+make_legacy_json() {
   local file_path="$1"
   local content="$2"
   jq -nc --arg fp "$file_path" --arg c "$content" '{"tool":"Write","input":{"file_path":$fp,"content":$c}}'
 }
 
-# ── Helper: build Edit JSON ────────────────────────────────────────────
-make_edit_json() {
+# ── Helper: build LEGACY-shape Edit JSON (.tool/.input) ─────────────────
+make_legacy_edit_json() {
   local file_path="$1"
   local old_string="$2"
   local new_string="$3"
@@ -421,7 +442,7 @@ Status: PASS" \
 
 ## Phase 2: Plan
 Status: PASS" \
-  '{"tool":"Edit","input":{"file_path":$fp,"old_string":$old,"new_string":$new}}')"
+  '{"tool_name":"Edit","tool_input":{"file_path":$fp,"old_string":$old,"new_string":$new}}')"
 set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
 check 19 "Edit multi-phase old_string PASS masking blocked" 2 "$RC"
 
@@ -454,10 +475,168 @@ JSON="$(make_json "$LEDGER_PATH" "$INDENTED_CONTENT")"
 set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
 check 20 "Indented Status line blocked" 2 "$RC"
 
+# ========================================================================
+# Test 21: LEGACY-shape (.tool/.input) PASS write with no verdict marker
+# still blocked — SIEGE-CA-1 fallback-preservation check (exit 2)
+# ========================================================================
+reset_state
+EXISTING="$(make_ledger "build-test-021" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+mkdir -p "$VERDICT_DIR"
+CONTENT="$(make_ledger "build-test-021" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_legacy_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 21 "Legacy .tool/.input PASS write with no verdict marker blocked" 2 "$RC"
+
+# ========================================================================
+# Test 22: LEGACY-shape (.tool/.input) non-PASS write still allowed —
+# proves the fallback isn't a blanket-block, it genuinely parses (exit 0)
+# ========================================================================
+reset_state
+CONTENT="$(make_ledger "build-test-022" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_legacy_json "$LEDGER_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 22 "Legacy .tool/.input non-PASS write allowed" 0 "$RC"
+
+# ========================================================================
+# Test 23: CHAIN-N1 (PR #583 warden gate) — Edit old_string is an INDENTED
+# partial line (the ordinary real-world Edit shape), introducing a new PASS
+# with no verdict marker. The prior whole-line-equality awk matcher failed
+# to match this shape, silently reverted CONTENT to the pre-edit file, and
+# allowed the write (exit 0) even though it introduces an unverified PASS.
+# Must now be BLOCKED (exit 2).
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+EXISTING="$(make_ledger "build-test-023" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+EDIT_JSON="$(make_edit_json "$LEDGER_PATH" "  Status: IN_PROGRESS" "  Status: PASS")"
+# Rewrite the ledger to have an indented Status line under Phase 1 so the
+# indented old_string is present and unique in the file.
+printf '%s\n' "# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-023
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+  Status: IN_PROGRESS
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED" > "$LEDGER_PATH"
+set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
+check 23 "CHAIN-N1: indented old_string PASS-introducing edit blocked" 2 "$RC"
+
+# ========================================================================
+# Test 24: R2BA-1 (PR #583 warden gate) — Edit old_string contains a
+# backslash. The prior `-v`-assigned awk matcher underwent awk's own
+# escape-sequence processing on the value, silently failing to match any
+# old_string containing a backslash and allowing the write (exit 0). Must
+# now be BLOCKED (exit 2).
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+printf '%s\n' "# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-024
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: IN_PROGRESS \\ (pending review)
+
+## Phase 2: Plan
+Status: NOT_STARTED
+
+## Phase 3: Execute
+Status: NOT_STARTED
+
+## Phase 4: Completion
+Status: NOT_STARTED" > "$LEDGER_PATH"
+EDIT_JSON="$(make_edit_json "$LEDGER_PATH" 'Status: IN_PROGRESS \ (pending review)' "Status: PASS")"
+set +e; run_hook "$EDIT_JSON" 2>/dev/null; RC=$?; set -e
+check 24 "R2BA-1: backslash-containing old_string PASS-introducing edit blocked" 2 "$RC"
+
+# ========================================================================
+# Test 25: R2BA-3 (PR #583 warden gate) — phase header with a DOUBLE space
+# (`## Phase  4`) introducing a new PASS with no verdict marker. The prior
+# exact-single-space regex silently failed to recognize the phase header at
+# all, so INCOMING_PHASES stayed empty and the write was allowed (exit 0)
+# even though a human/LLM reader sees it as a normal Phase 4 PASS. Must now
+# be BLOCKED (exit 2).
+# ========================================================================
+reset_state
+mkdir -p "$VERDICT_DIR"
+EXISTING="$(make_ledger "build-test-025" "PASS" "PASS" "COMPLETE" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+DOUBLE_SPACE_CONTENT="# Build Gate Ledger
+Run: 2026-04-13T14:00:00
+PipelineID: build-test-025
+Goal: Test goal
+Mode: feature
+
+## Phase 1: Design
+Status: PASS
+
+## Phase 2: Plan
+Status: PASS
+
+## Phase 3: Execute
+Status: COMPLETE
+
+## Phase  4: Completion
+Status: PASS"
+JSON="$(make_json "$LEDGER_PATH" "$DOUBLE_SPACE_CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 25 "R2BA-3: double-space phase header PASS-introducing write blocked" 2 "$RC"
+
+# ========================================================================
+# Test 26: LEGACY-shape (.tool/.input) Edit introducing a PASS, no verdict
+# marker — blocked (exit 2). Exercises the Edit-path legacy fallback
+# (EDIT_OLD/EDIT_NEW via .tool_input.old_string // .input.old_string and
+# .tool_input.new_string // .input.new_string), which test 22 (Write-path
+# legacy fallback only) does not cover. Genuine discriminating power: with
+# the .input fallback removed, a legacy-shape Edit payload resolves
+# EDIT_NEW empty, the hook takes the "exit 0" early-return, and this test
+# fails.
+# ========================================================================
+reset_state
+EXISTING="$(make_ledger "build-test-026" "IN_PROGRESS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+echo "$EXISTING" > "$LEDGER_PATH"
+mkdir -p "$VERDICT_DIR"
+JSON="$(make_legacy_edit_json "$LEDGER_PATH" "Status: IN_PROGRESS" "Status: PASS")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 26 "Legacy .tool/.input Edit PASS introduction blocked" 2 "$RC"
+
+# ========================================================================
+# Test 27: build-gate-ledger.md OUTSIDE the canonical
+# .claude/projects/<hash>/memory/ layout (e.g. a repo/doc file literally
+# named build-gate-ledger.md) with a forged PASS — must be IGNORED (exit 0),
+# not hard-blocked. The hook only enforces the canonical ledger location;
+# before this fix the empty PROJECT_HASH path hard-blocked (exit 2) any such
+# unrelated file for every plugin user.
+# ========================================================================
+reset_state
+NONCANON_PATH="$TMPDIR_BASE/elsewhere/build-gate-ledger.md"
+CONTENT="$(make_ledger "build-test-027" "PASS" "NOT_STARTED" "NOT_STARTED" "NOT_STARTED")"
+JSON="$(make_json "$NONCANON_PATH" "$CONTENT")"
+set +e; run_hook "$JSON" 2>/dev/null; RC=$?; set -e
+check 27 "Non-canonical build-gate-ledger.md PASS write ignored" 0 "$RC"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
 
+if [ "$((PASSED + FAILED))" -ne "$TOTAL" ]; then
+  echo "FATAL: $((PASSED + FAILED)) tests recorded a result (PASSED=$PASSED, FAILED=$FAILED) but TOTAL=$TOTAL — a test silently did not run." >&2
+  exit 1
+fi
 if [ "$FAILED" -gt 0 ]; then
   exit 1
 fi

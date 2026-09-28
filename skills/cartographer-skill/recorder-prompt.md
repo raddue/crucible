@@ -5,6 +5,8 @@
 
 Dispatch a Sonnet subagent after significant codebase exploration to capture what was learned.
 
+Requested profile: standard. Claude Code call-level model mapping: `model: sonnet`.
+
 ```
 Task tool (general-purpose, model: sonnet):
   description: "Cartographer recording for [area explored]"

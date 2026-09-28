@@ -338,7 +338,11 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Write a spec for a webhook retry queue, implement it, and open a PR.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "spec", "design"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "spec",
+        "design"
+      ],
       "context": "Build-shaped: spec + implement + ship in one prompt.",
       "reasoning": "Combination of spec + implement + PR is the canonical build-shaped dispatch per #174 routing guidance. /build owns the full design-through-execution pipeline. A raw Task subagent or /spec alone would skip build's QG/red-team/innovate phases.",
       "difficulty": "easy"
@@ -349,9 +353,13 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Spec out the new audit-log endpoint, implement it with tests, and push a PR.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "spec", "test-driven-development"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "spec",
+        "test-driven-development"
+      ],
       "context": "Build-shaped: spec + implement + PR, with test emphasis.",
-      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG — invoking TDD or spec directly would bypass build's orchestration.",
+      "reasoning": "All three build-triggering components are present: spec, implement, PR. /build internally dispatches design/spec/planning/TDD/QG \u2014 invoking TDD or spec directly would bypass build's orchestration.",
       "difficulty": "easy"
     },
     {
@@ -360,7 +368,11 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "I need a spec plus working implementation plus a PR for the CSV importer feature.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "spec", "planning"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "spec",
+        "planning"
+      ],
       "context": "Build-shaped: explicit spec + implement + PR combination, restated form.",
       "reasoning": "The 'spec + implementation + PR' triplet is the exact signature /build was designed to orchestrate per Part 1 of getting-started. Dispatching spec or planning standalone drops build's quality gates.",
       "difficulty": "easy"
@@ -371,9 +383,12 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Implement a rate limiter for the public API and open a PR.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "test-driven-development"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "test-driven-development"
+      ],
       "context": "Build-shaped: implement + PR in one prompt.",
-      "reasoning": "Implement + PR together is a build-shaped dispatch — the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
+      "reasoning": "Implement + PR together is a build-shaped dispatch \u2014 the work crosses design, test-first, QG, and PR creation, which are all orchestrated inside /build. A raw Task subagent for 'just implement it' skips QG.",
       "difficulty": "easy"
     },
     {
@@ -382,7 +397,10 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Implement SSO login via OIDC and open a PR when it's ready.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "design"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "design"
+      ],
       "context": "Build-shaped: implement + PR, non-trivial feature.",
       "reasoning": "Non-trivial feature work that explicitly ends in a PR is the canonical /build trigger. Design alone stops short of implementation; raw dispatch skips the full pipeline.",
       "difficulty": "easy"
@@ -393,7 +411,10 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Please implement the CSV export endpoint and raise a pull request for review.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "test-driven-development"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "test-driven-development"
+      ],
       "context": "Build-shaped: implement + PR, polite phrasing with 'raise a pull request'.",
       "reasoning": "Phrasing variant ('raise a pull request' vs 'open a PR') still signals the implement-to-shipped pipeline /build owns. The routing should not depend on surface wording.",
       "difficulty": "medium"
@@ -404,9 +425,13 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Build the notification preferences feature end-to-end.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "design", "planning"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "design",
+        "planning"
+      ],
       "context": "Build-shaped: explicit 'build end-to-end' framing.",
-      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build — it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
+      "reasoning": "'Build ... end-to-end' is the most direct verbal trigger for /build \u2014 it requests design-through-execution in one phrase. Design or planning alone covers only the upstream portion.",
       "difficulty": "easy"
     },
     {
@@ -415,7 +440,11 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Take the new analytics dashboard from idea to working code end-to-end.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "design", "planning"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "design",
+        "planning"
+      ],
       "context": "Build-shaped: idea-to-code end-to-end framing.",
       "reasoning": "'From idea to working code' is verbatim build's description triggers. The full-pipeline framing rules out any single upstream skill.",
       "difficulty": "easy"
@@ -426,7 +455,10 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Design and ship the new passwordless auth flow.",
       "expected_skill": "build",
-      "common_mistakes": ["design", "raw-dispatch"],
+      "common_mistakes": [
+        "design",
+        "raw-dispatch"
+      ],
       "context": "Boundary case: 'design and ship' reads like design but 'ship' implies full pipeline through PR.",
       "reasoning": "'Ship' means land a PR, which combined with 'design' covers the full /build pipeline. Routing to /design alone would stop at the design doc and never implement or ship.",
       "difficulty": "medium"
@@ -437,9 +469,12 @@
       "boundary": "build-vs-raw-dispatch",
       "prompt": "Refactor the storage layer to use the new blob adapter and open a PR.",
       "expected_skill": "build",
-      "common_mistakes": ["raw-dispatch", "simplify"],
+      "common_mistakes": [
+        "raw-dispatch",
+        "simplify"
+      ],
       "context": "Boundary case: refactor + PR. Refactor reads like /simplify but scope + PR makes it build-shaped.",
-      "reasoning": "Refactor with explicit PR at the end is still design-through-execution — particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
+      "reasoning": "Refactor with explicit PR at the end is still design-through-execution \u2014 particularly for a cross-cutting layer swap that needs design, test coverage, QG, and PR. /simplify targets localized changed-code cleanup, not full layer migrations.",
       "difficulty": "medium"
     },
     {
@@ -452,7 +487,7 @@
         "mock-to-unity"
       ],
       "context": "Implementation exists; the ask is to compare it against a mockup and report drift, not to build or change it.",
-      "reasoning": "ui-verify produces a drift/delta report comparing implemented Unity UI against a mockup — exactly 'does it match the screenshot'. mock-to-unity is for turning a mock into USS/C#, i.e. implementing, which is already done here. The signal is verify-against-reference, not implement.",
+      "reasoning": "ui-verify produces a drift/delta report comparing implemented Unity UI against a mockup \u2014 exactly 'does it match the screenshot'. mock-to-unity is for turning a mock into USS/C#, i.e. implementing, which is already done here. The signal is verify-against-reference, not implement.",
       "difficulty": "easy"
     },
     {
@@ -466,14 +501,14 @@
         "build"
       ],
       "context": "A mockup exists and must be turned into Unity UI Toolkit code from scratch. Nothing to verify yet.",
-      "reasoning": "mock-to-unity turns a mockup/HTML reference into USS/C#. ui-verify would be wrong — there is no implementation yet to compare against the mock. build is the full idea→PR pipeline, heavier than this scoped UI translation.",
+      "reasoning": "mock-to-unity turns a mockup/HTML reference into USS/C#. ui-verify would be wrong \u2014 there is no implementation yet to compare against the mock. build is the full idea\u2192PR pipeline, heavier than this scoped UI translation.",
       "difficulty": "easy"
     },
     {
       "id": "ui-implement-vs-verify-negative-01",
       "dimension": "negative",
       "boundary": "ui-implement-vs-verify",
-      "prompt": "The spacing is off and the layout doesn't look like the design — fix it.",
+      "prompt": "The spacing is off and the layout doesn't look like the design \u2014 fix it.",
       "expected_skill": "mock-to-unity",
       "common_mistakes": [
         "ui-verify"
@@ -492,7 +527,7 @@
         "mock-to-unity"
       ],
       "context": "Same 'UI looks wrong' surface phrase as a fix request, but the ask is to identify/report what drifted, not to fix it.",
-      "reasoning": "When the request is to CHECK what's drifted (identify and report), it is ui-verify — its delta report names the drift. If the ask were 'fix it', the same surface phrase would route to mock-to-unity. The deciding context is check-and-report vs implement-a-fix.",
+      "reasoning": "When the request is to CHECK what's drifted (identify and report), it is ui-verify \u2014 its delta report names the drift. If the ask were 'fix it', the same surface phrase would route to mock-to-unity. The deciding context is check-and-report vs implement-a-fix.",
       "difficulty": "hard"
     },
     {
@@ -506,7 +541,7 @@
         "project-init"
       ],
       "context": "Explicit request for a catalog/tour of the skill suite and guidance on which tool fits which task.",
-      "reasoning": "workshop is the on-demand tour of the Crucible workshop — 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. project-init is codebase onboarding, not skill-suite onboarding.",
+      "reasoning": "workshop is the on-demand tour of the Crucible workshop \u2014 'what skills are available / which should I use for X' is its exact trigger. getting-started is the silent conversation-start bootstrap protocol, not a user-facing catalog. project-init is codebase onboarding, not skill-suite onboarding.",
       "difficulty": "easy"
     },
     {
@@ -520,7 +555,7 @@
         "getting-started"
       ],
       "context": "First-time onboarding to an unfamiliar codebase; wants whole-repo structural context, no specific task yet.",
-      "reasoning": "project-init deep-scans an unfamiliar repo for full structural context and cross-repo topology — first-time whole-repo onboarding. recon is task-scoped investigation (no specific task here). getting-started is conversation bootstrap, not codebase onboarding.",
+      "reasoning": "project-init deep-scans an unfamiliar repo for full structural context and cross-repo topology \u2014 first-time whole-repo onboarding. recon is task-scoped investigation (no specific task here). getting-started is conversation bootstrap, not codebase onboarding.",
       "difficulty": "medium"
     },
     {
@@ -546,7 +581,7 @@
         "recon",
         "workshop"
       ],
-      "context": "Onboarding to a codebase (not the skill suite) before any specific task — whole-repo structural context.",
+      "context": "Onboarding to a codebase (not the skill suite) before any specific task \u2014 whole-repo structural context.",
       "reasoning": "project-init owns codebase onboarding for full structural context before the first task. recon is task-scoped (there is no specific task yet). workshop tours the skill suite, not the codebase. The 'unfamiliar codebase, before the first real task' framing is project-init verbatim.",
       "difficulty": "medium"
     },
@@ -561,7 +596,7 @@
         "prospector"
       ],
       "context": "Task-scoped investigation of one subsystem (auth) in service of a specific upcoming task (add OAuth).",
-      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches — 'investigate how auth works before I add OAuth' is exactly task-scoped recon. project-init is first-time whole-repo onboarding (not scoped to a task). prospector hunts architectural friction/improvements, not how-it-works investigation.",
+      "reasoning": "recon is standalone investigation scoped to the surface a specific task touches \u2014 'investigate how auth works before I add OAuth' is exactly task-scoped recon. project-init is first-time whole-repo onboarding (not scoped to a task). prospector hunts architectural friction/improvements, not how-it-works investigation.",
       "difficulty": "easy"
     },
     {
@@ -575,21 +610,21 @@
         "audit"
       ],
       "context": "Open-ended hunt for architectural friction and refactor opportunities across the codebase.",
-      "reasoning": "prospector explores a codebase for architectural friction and proposes redesigns — 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
+      "reasoning": "prospector explores a codebase for architectural friction and proposes redesigns \u2014 'where are the structural problems / what should I refactor' is its exact trigger. recon investigates to understand (not to find improvements). audit adversarially reviews a specified subsystem, not an open-ended improvement hunt.",
       "difficulty": "medium"
     },
     {
       "id": "explore-vs-improve-negative-01",
       "dimension": "negative",
       "boundary": "explore-vs-improve",
-      "prompt": "First time in this repo — map the whole thing and any sibling repos it depends on.",
+      "prompt": "First time in this repo \u2014 map the whole thing and any sibling repos it depends on.",
       "expected_skill": "project-init",
       "common_mistakes": [
         "recon",
         "prospector"
       ],
-      "context": "Whole-repo first-time mapping PLUS cross-repo topology — the distinguishing signal for project-init over recon.",
-      "reasoning": "project-init deep-scans a repo AND discovers cross-repo topology for first-time onboarding — 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). prospector is improvement discovery, not mapping.",
+      "context": "Whole-repo first-time mapping PLUS cross-repo topology \u2014 the distinguishing signal for project-init over recon.",
+      "reasoning": "project-init deep-scans a repo AND discovers cross-repo topology for first-time onboarding \u2014 'map the whole thing and sibling repos' is its signature. recon is task-scoped single-repo investigation (no task here, and recon does not do cross-repo topology). prospector is improvement discovery, not mapping.",
       "difficulty": "hard"
     },
     {
@@ -602,8 +637,8 @@
         "project-init",
         "prospector"
       ],
-      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module — task-scoped recon, not whole-repo onboarding.",
-      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. project-init would be wrong — this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. prospector hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
+      "context": "'Explore' with a specific task in view (touch the refund flow) and scoped to one module \u2014 task-scoped recon, not whole-repo onboarding.",
+      "reasoning": "Exploring one module to understand it before a specific change is task-scoped recon. project-init would be wrong \u2014 this is not first-time whole-repo onboarding; it is scoped to the payment module for an upcoming task. prospector hunts improvements, not understanding. The 'before I touch the refund flow' task anchor selects recon.",
       "difficulty": "medium"
     },
     {
@@ -617,7 +652,7 @@
         "test-coverage"
       ],
       "context": "A single completed implementation; the ask is to write tests that break that one component.",
-      "reasoning": "adversarial-tester reads one implementation and writes up to 5 tests designed to make it break — per-task, single component. inquisitor is for a fully-assembled multi-component feature hunting cross-component bugs, not one function. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
+      "reasoning": "adversarial-tester reads one implementation and writes up to 5 tests designed to make it break \u2014 per-task, single component. inquisitor is for a fully-assembled multi-component feature hunting cross-component bugs, not one function. test-coverage audits existing tests for staleness, not adversarial break-it tests.",
       "difficulty": "medium"
     },
     {
@@ -689,6 +724,98 @@
       "context": "'review my changes' overlaps temper, but the trailing 'before merging' is a push-gate cue ceded from temper to warden.",
       "reasoning": "'before merging' is the push-gate phrasing #464 removed from temper's description and assigned to warden. Attached to 'review my changes' it routes to warden's whole-set pre-push gate, not temper's single-reviewer pass. temper keeps only bare 'review my changes' / 'is this ready to ship'.",
       "difficulty": "hard"
+    },
+    {
+      "id": "decision-record-direct-01",
+      "dimension": "direct",
+      "boundary": "decision-record",
+      "prompt": "Write an ADR for our choice to use PostgreSQL over MySQL",
+      "expected_skill": "adr",
+      "common_mistakes": [
+        "design"
+      ],
+      "context": "A decision has already been made; the user asks to record it as an ADR.",
+      "reasoning": "adr writes Architecture Decision Records for decisions already made. design explores decisions that have not been made yet.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "decision-record-design-01",
+      "dimension": "context-dependent",
+      "boundary": "decision-record",
+      "prompt": "I need to decide between Postgres and Mongo for our primary store",
+      "expected_skill": "design",
+      "common_mistakes": [
+        "adr"
+      ],
+      "context": "The decision has not been made yet; the user needs to explore and choose.",
+      "reasoning": "design explores and decides. adr only records decisions already made \u2014 it refuses on an unsettled decision.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "decision-record-handoff-01",
+      "dimension": "negative",
+      "boundary": "decision-record",
+      "prompt": "Write up what we decided this session for whoever picks this up next",
+      "expected_skill": "handoff",
+      "common_mistakes": [
+        "adr"
+      ],
+      "context": "The user wants a session-to-session handoff note, not a durable architectural decision record.",
+      "reasoning": "handoff writes session handoff docs. adr writes durable ADRs, whose eligibility bar and durable-format requirements make it wrong for ephemeral session notes.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "decision-record-grudge-01",
+      "dimension": "negative",
+      "boundary": "decision-record",
+      "prompt": "Record this bug so we don't repeat it",
+      "expected_skill": "grudge",
+      "common_mistakes": [
+        "adr"
+      ],
+      "context": "A bug was fixed; the user wants regression memory, not an architectural decision record.",
+      "reasoning": "grudge is the book of grudges \u2014 bug regression memory. adr records decisions with alternatives, not bugs.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "decision-record-finish-01",
+      "dimension": "negative",
+      "boundary": "decision-record",
+      "prompt": "The PR just landed, let's wrap this up",
+      "expected_skill": "finish",
+      "common_mistakes": [
+        "adr",
+        "merge-pr"
+      ],
+      "context": "The work is complete and the user wants to integrate it.",
+      "reasoning": "finish wraps up completed work. adr is reached only by explicit write-an-ADR phrasing, not completion-shaped language.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "decision-record-finish-02",
+      "dimension": "negative",
+      "boundary": "decision-record",
+      "prompt": "We merged the persistence change, record where we ended up",
+      "expected_skill": "finish",
+      "common_mistakes": [
+        "adr"
+      ],
+      "context": "Completion-shaped wrap-up language after a merge.",
+      "reasoning": "'record where we ended up' is completion framing. adr requires explicit write-an-ADR/record-this-decision intent, not 'we shipped X'.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "decision-record-recall-01",
+      "dimension": "negative",
+      "boundary": "decision-record",
+      "prompt": "Why did we choose X for the ledger?",
+      "expected_skill": "recall",
+      "common_mistakes": [
+        "adr"
+      ],
+      "context": "A question seeking an answer about a past decision, not a request to record one.",
+      "reasoning": "recall/recon own the read side (they mine docs/decisions/). adr writes and refuses on a settled decision \u2014 it has no answer output.",
+      "difficulty": "medium"
     }
   ]
 }

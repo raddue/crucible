@@ -179,11 +179,28 @@ _RED_FLAG_PIN = "ignoring Fatal/Significant entries under `### Second Pass Findi
 # bare substring intact — e.g. "(NOT the same population...)" still contains
 # "same population". `[^.]{0,40}` keeps the check within the same clause (not
 # crossing a sentence boundary into unrelated prose).
-_NEGATION_TOKENS = r"(?:not|never|excluding|except|ignor\w*)"
+_NEGATION_TOKENS = (
+    r"(?:not|never|excluding|except|ignor\w*|less|minus|omitting|"
+    r"apart\s+from|other\s+than)"
+)
+# FA2-2 (PR #583 warden gate): the pre-existing closed vocabulary (not/never/
+# excluding/except/ignor*) was trivially evaded by "less"/"minus"/"omitting"/
+# "apart from"/"other than" — verified live: replacing "plus any Fatal/
+# Significant..." with "less any..." in red-team/SKILL.md inverts the
+# polarity of #561's entire thesis and every checker relying on this
+# vocabulary still PASSed. Not a full fix for the general "oracle-pattern
+# vocabulary-only pin" class (tracked separately) — a narrower vocabulary
+# expansion for this specific, verified evasion.
 
 
 def _negates(anchor: str, scope: str) -> bool:
-    return re.search(rf"(?i)\b{_NEGATION_TOKENS}\b[^.]{{0,40}}{re.escape(anchor)}", scope) is not None
+    """#561 fresh round 12 S3: a negation token immediately followed by a
+    hyphen is part of a compound term (e.g. "NOT-SATISFIABLE"), not a
+    negation of whatever follows it in prose — without the `(?!-)` guard,
+    the literal state name "NOT-SATISFIABLE" false-positives every polarity
+    check on an anchor phrase appearing anywhere in the same clause after
+    it (mirrors check_rt_receipt_contract.py's own `_negates()` guard)."""
+    return re.search(rf"(?i)\b{_NEGATION_TOKENS}\b(?!-)[^.]{{0,40}}{re.escape(anchor)}", scope) is not None
 
 
 # Anchors that must each occur EXACTLY ONCE in the Section-location clause —
@@ -333,10 +350,28 @@ def check_skill(text: str) -> list[str]:
     # Locate the CONTRACT block first — assertion (a) is scoped to a bounded
     # window around it, not the whole file (S1: a whole-file grep is
     # decoy-satisfiable by unrelated prose that mentions the same headings).
+    start_hits = re.findall(rf"<!-- CONTRACT:{CONTRACT_NAME}:START.*?-->", text, re.DOTALL)
+    end_hits = re.findall(rf"<!-- CONTRACT:{CONTRACT_NAME}:END.*?-->", text, re.DOTALL)
     start_m = re.search(rf"<!-- CONTRACT:{CONTRACT_NAME}:START.*?-->", text, re.DOTALL)
     end_m = re.search(rf"<!-- CONTRACT:{CONTRACT_NAME}:END.*?-->", text, re.DOTALL)
 
-    if start_m is None or end_m is None or end_m.start() < start_m.start():
+    if len(start_hits) != 1 or len(end_hits) != 1:
+        # FA2-1 (PR #583 warden gate): a decoy CONTRACT:START/:END pair placed
+        # anywhere in the file previously let the first-match re.search silently
+        # extract whichever block happened to come first, while the real
+        # operative span could be emptied with no error raised. Assert exactly
+        # one occurrence of each marker before extracting, mirroring
+        # check_qg_fan_out.py's existing Verdict:/Reason: exactly-one-match
+        # discipline.
+        errs.append(
+            f"SKILL: {CONTRACT_NAME} CONTRACT block anchor must appear exactly "
+            f"once (found {len(start_hits)} START marker(s), {len(end_hits)} "
+            "END marker(s)) — a duplicate anchor can silently neutralize the "
+            "point-anchored pin (FA2-1)"
+        )
+        block = ""
+        scope = text
+    elif start_m is None or end_m is None or end_m.start() < start_m.start():
         errs.append(
             f"SKILL: {CONTRACT_NAME} CONTRACT block not found "
             f"(<!-- CONTRACT:{CONTRACT_NAME}:START --> … :END -->)"
@@ -1313,9 +1348,20 @@ def check_skill(text: str) -> list[str]:
     # checker as its enforcer but nothing here ever asserted its content
     # (#561 round 4 S1) — pin the score_population value-set and its
     # key-presence semantics so the marker's attribution is true.
+    pop_start_hits = re.findall(r"<!-- CONTRACT:qg-score-population:START.*?-->", text, re.DOTALL)
+    pop_end_hits = re.findall(r"<!-- CONTRACT:qg-score-population:END.*?-->", text, re.DOTALL)
     pop_start = re.search(r"<!-- CONTRACT:qg-score-population:START.*?-->", text, re.DOTALL)
     pop_end = re.search(r"<!-- CONTRACT:qg-score-population:END.*?-->", text, re.DOTALL)
-    if pop_start is None or pop_end is None or pop_end.start() < pop_start.start():
+    if len(pop_start_hits) != 1 or len(pop_end_hits) != 1:
+        # FA2-1 (PR #583 warden gate): see the sibling assertion above (e1) —
+        # same duplicate-anchor bypass, same fix.
+        errs.append(
+            "SKILL: qg-score-population CONTRACT block anchor must appear "
+            f"exactly once (found {len(pop_start_hits)} START marker(s), "
+            f"{len(pop_end_hits)} END marker(s)) — a duplicate anchor can "
+            "silently neutralize the point-anchored pin (FA2-1)"
+        )
+    elif pop_start is None or pop_end is None or pop_end.start() < pop_start.start():
         errs.append(
             "SKILL: qg-score-population CONTRACT block not found "
             "(<!-- CONTRACT:qg-score-population:START --> … :END -->)"
@@ -2618,6 +2664,52 @@ likewise recounting each round's Minor population and overwriting the correspond
         errs.append(
             "selftest: widening only the near-decoy's rule sentence did not clear "
             f"all errors ({fixed_errs}) — the decoy does not isolate assertion (a)"
+        )
+
+    # FA2-1 (PR #583 warden gate): a duplicate CONTRACT:START/:END anchor pair
+    # must now be rejected (exactly-once assertion), not silently resolved by
+    # the first-match re.search a decoy pair used to exploit.
+    dup_anchor_fixture = _GOOD_FIXTURE.replace(
+        "<!-- CONTRACT:qg-score-second-pass-population:END -->",
+        "<!-- CONTRACT:qg-score-second-pass-population:END -->\n"
+        "<!-- CONTRACT:qg-score-second-pass-population:START -->decoy"
+        "<!-- CONTRACT:qg-score-second-pass-population:END -->",
+        1,
+    )
+    dup_errs = check_skill(dup_anchor_fixture)
+    if not any("exactly once" in e for e in dup_errs):
+        errs.append(
+            "selftest: a duplicate qg-score-second-pass-population CONTRACT "
+            f"anchor pair did NOT trip the exactly-once assertion (FA2-1): {dup_errs}"
+        )
+
+    dup_pop_fixture = _GOOD_FIXTURE.replace(
+        "<!-- CONTRACT:qg-score-population:END -->",
+        "<!-- CONTRACT:qg-score-population:END -->\n"
+        "<!-- CONTRACT:qg-score-population:START -->decoy"
+        "<!-- CONTRACT:qg-score-population:END -->",
+        1,
+    )
+    dup_pop_errs = check_skill(dup_pop_fixture)
+    if not any("exactly once" in e for e in dup_pop_errs):
+        errs.append(
+            "selftest: a duplicate qg-score-population CONTRACT anchor pair did "
+            f"NOT trip the exactly-once assertion (FA2-1): {dup_pop_errs}"
+        )
+
+    # FA2-2 (PR #583 warden gate): "less"/"minus"/"omitting"/"apart from"/
+    # "other than" must now trip the polarity guard alongside not/never/etc. —
+    # verified live this gate run that "less" alone evaded the pre-fix
+    # vocabulary and inverted the Score source rule's polarity undetected.
+    less_negated = _GOOD_FIXTURE.replace(
+        "sections, plus\nany Fatal/Significant-severity entries under `### Second Pass Findings`.",
+        "sections, less\nany Fatal/Significant-severity entries under `### Second Pass Findings`.",
+    )
+    less_errs = check_skill(less_negated)
+    if not less_errs:
+        errs.append(
+            "selftest: replacing 'plus' with 'less' in the Score source rule "
+            "did NOT trip the polarity guard (FA2-2 — closed-vocabulary evasion)"
         )
 
     if errs:

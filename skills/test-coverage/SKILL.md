@@ -18,6 +18,8 @@ Audits whether existing tests need updating, removal, or modification after code
 
 **Technology-agnostic:** This skill works with any programming language and test framework. Examples use generic patterns. The audit agent adapts its checks to whatever language and testing conventions are present in the project.
 
+**Models:** Test audit and fix agents request `high`. The Claude Code examples use the current reference alias `model: opus`; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
 ## Why This Exists
 
 Code changes create three categories of test debt that pass silently:
@@ -47,9 +49,9 @@ The skill receives from the caller:
 ## How It Works
 
 1. **Size check:** If the combined diff + test file content exceeds 2,000 lines, split the audit into multiple dispatches by test file grouping. Each dispatch gets the full diff but a subset of test files. When merging, check each dispatch's "Audit Coverage" line — if any dispatch reports unaudited files (context exhaustion), re-dispatch those files in a new batch.
-2. Dispatch a **Test Audit Agent** (Opus) using `./test-audit-prompt.md`
+2. Dispatch a **Test Audit Agent** (requested profile `high`) using `./test-audit-prompt.md`
 3. The agent reads the diff and affected test files, then produces a structured report
-4. If findings in categories 1-2 exist (tests to update or delete): dispatch **Test Fix Agent(s)** (Opus) using `./test-fix-prompt.md`. If the audit was split (step 1), dispatch one fix agent per audit batch **sequentially** (not in parallel) to isolate revert scope. Sequential execution prevents file clobber when multiple batches have findings in shared test utilities (helpers, fixtures, conftest). Each fix agent checks `git status` before starting to confirm the tree is in the expected state. A failure in one batch does not discard successful fixes from other batches.
+4. If findings in categories 1-2 exist (tests to update or delete): dispatch **Test Fix Agent(s)** (requested profile `high`) using `./test-fix-prompt.md`. If the audit was split (step 1), dispatch one fix agent per audit batch **sequentially** (not in parallel) to isolate revert scope. Sequential execution prevents file clobber when multiple batches have findings in shared test utilities (helpers, fixtures, conftest). Each fix agent checks `git status` before starting to confirm the tree is in the expected state. A failure in one batch does not discard successful fixes from other batches.
 5. Each fix agent reads the current source files (not just the diff) to determine correct new behavior, makes test changes, and runs affected tests
 6. If modified tests fail: the fix agent reverts its own batch's changes and reports the failure
 7. If modified tests pass: the orchestrator commits the batch's changes (`test: batch N alignment fixes`) before dispatching the next batch. This ensures clean revert targets for subsequent batches and prevents revert clobber of prior successes. The caller may squash these commits per its own protocol.

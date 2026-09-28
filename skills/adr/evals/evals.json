@@ -1,0 +1,88 @@
+{
+  "skill_name": "adr",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Record a decision: we chose PostgreSQL over MySQL for our primary store, after seriously considering MySQL and SQLite. The choice is costly to reverse (data migration). Write the ADR.",
+      "expected_output": "A full ADR following the six-section template, with every alternative carrying a `Rejected:` reason written in timeless language.",
+      "files": [],
+      "expectations": [
+        "Creates `docs/decisions/NNNN-kebab-title.md` with a `# ADR-NNNN: <title>` H1",
+        "Status is `ACCEPTED` with a `## Date` in YYYY-MM-DD form",
+        "Records at least one seriously-considered alternative with a `Rejected:` line stating the specific reason, not 'worse'",
+        "Decision stated in imperative, timeless form",
+        "Does not invent a rejected alternative when none can be sourced"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Write an ADR for the decision to use 2-space indentation in the new module. The alternative (4-space) was not seriously evaluated.",
+      "expected_output": "The skill refuses, names the failed eligibility condition, and writes no file.",
+      "files": [],
+      "expectations": [
+        "Writes no ADR file",
+        "States which eligibility condition failed (no real seriously-considered alternative, and/or trivially reversible)",
+        "Treats refusal as a correct outcome, does not apologize or fabricate"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Record a decision in a repo that already has `docs/adr/ADR-004-Foo.rst` using headings Status/Context/Decision/Consequences only (no Alternatives Considered section), numbered sequentially.",
+      "expected_output": "Continues the existing scheme — `.rst`, the existing headings, the next number — and folds the rejected-alternatives content into Context.",
+      "files": [],
+      "expectations": [
+        "Does NOT create `docs/decisions/0001-*.md`",
+        "Uses the existing `.rst` extension and heading set",
+        "Continues the numbering (ADR-005, not restarting at 1)",
+        "The rejected alternatives and their reasons still appear, folded under an 'Alternatives considered:' lead-in in Context",
+        "Narrates the adaptation"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "A new decision reverses an existing `ACCEPTED` ADR: we are moving the cache from Redis back to in-memory. Write the new ADR that supersedes the old one.",
+      "expected_output": "Both the new ADR and an edit to the old ADR's Status, with both links present.",
+      "files": [],
+      "expectations": [
+        "Writes a new ADR whose `## Status` carries a `Supersedes ADR-NNNN` line below its state token",
+        "Edits the old ADR's state token to `SUPERSEDED by ADR-MMMM`",
+        "Both edits happen together (no one-sided link)",
+        "Old ADR content (Decision/Context/Alternatives) is not rewritten"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "`.adr-dir` points at `doc/adr` but the on-disk decision files live in `docs/decisions`. Record a new decision.",
+      "expected_output": "The skill surfaces the conflict and asks, without silently picking a location.",
+      "files": [],
+      "expectations": [
+        "Detects the disagreement between config and on-disk files",
+        "Asks the user which convention to follow rather than silently choosing",
+        "Does not write any ADR before the conflict is resolved"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "A multi-dimension Crucible design doc (4-5 `### Dn` sections, each with a `Rejected — …` block, in-house format) reaches the design hook. Multiple dimensions pass eligibility.",
+      "expected_output": "At most one ADR — the highest-rank dimension by the D1 tiebreak — with the rest declined-by-cap by name.",
+      "files": [],
+      "expectations": [
+        "Writes at most one ADR",
+        "Picks the highest-rank dimension by the reversal-cost ordering (data migration > interface break > re-training > re-run)",
+        "Declines the rest by name, citing the cap, not an eligibility failure",
+        "Narrates the tiebreak when two dimensions fall in the same kind"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "A design doc has two cap-eligible dimensions. Hook 1 already wrote one at design time; now the branch reaches finish with a diff that implements the second dimension.",
+      "expected_output": "Hook 2 writes the declined-by-cap dimension it now implements — two ADRs total across the whole build is the correct outcome, not a cap violation.",
+      "files": [],
+      "expectations": [
+        "Recognizes the design-time ADR via idempotence and does not duplicate it",
+        "Writes (or re-declines) the second dimension only because the diff implements it",
+        "Does not treat 'one ADR per hook firing' as a whole-build ceiling of one"
+      ]
+    }
+  ]
+}

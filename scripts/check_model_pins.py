@@ -33,21 +33,24 @@ Pin-surface forms (all case-insensitive — the tree has real casing drift,
 e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
 or single/double-quoted, indented (form 1 — nested config is a live
 convention, see skills/consensus/SKILL.md), or bracket-suffixed
-(`claude-fable-5[1m]`, this repo's own live pin convention). EVERY
-id-shaped token in the value region is checked, not just the first — the
-repo's live disjunction convention (`model: opus or sonnet — lead
-decides`, see skills/build/build-reviewer-prompt.md) would otherwise hide
-a second-position fable (gate round 3, S1). Value-region boundaries:
+(`claude-fable-5[1m]`, this repo's own live pin convention). The neutral
+`model_profile:` key introduced by the model-agnostic dispatch policy is
+scanned alongside `model:` so a security-named file cannot evade the
+marker requirement by migrating to profile vocabulary. EVERY id-shaped
+token in the value region is checked, not just the first — the repo's live
+disjunction convention (`model: opus or sonnet — lead decides`, see
+skills/build/build-reviewer-prompt.md) would otherwise hide a
+second-position fable (gate round 3, S1). Value-region boundaries:
 form 1 ends at the first `#` or end-of-line, so `model: opus  # never
 fable` is a non-fable pin whose comment merely MENTIONS fable; forms 2-3
 end at the FIRST closing paren (`[^)]*`) — prose after the id but inside
 the parens is part of the region (accepted over-match, see below).
-Accepted limitation: a nested parenthetical BEFORE `model:` inside a
-tool form closes the region early and truncates the scan (the known
-nested-paren Minor, accepted for v1)):
-  1. line-anchored `model: <value>` (frontmatter or any indented line)
-  2. inline `Task tool (... model: <value> ...)`
-  3. inline `Agent tool (... model: <value> ...)`
+Accepted limitation: a nested parenthetical BEFORE the key inside a tool
+form closes the region early and truncates the scan (the known nested-paren
+Minor, accepted for v1)):
+  1. line-anchored `model:`/`model_profile: <value>` (frontmatter or any indented line)
+  2. inline `Task tool (... model:`/`model_profile: <value> ...)`
+  3. inline `Agent tool (... model:`/`model_profile: <value> ...)`
 
 <!-- CANONICAL: shared/model-tier-policy.md -->
 Enforcement boundary (see skills/shared/model-tier-policy.md): static pins in
@@ -102,11 +105,10 @@ CARVE_OUTS = ("skills/audit/", "skills/test-coverage/", "skills/stocktake/")
 # Each regex captures the VALUE REGION after `model:`, not a single token:
 # form 1 to the first `#` or end-of-line, forms 2-3 to the closing paren.
 FRONTMATTER_PIN_RE = re.compile(
-    r"^[ \t]*model:([^\n#]*)", re.IGNORECASE | re.MULTILINE)
-TASK_TOOL_PIN_RE = re.compile(
-    r"Task tool\s*\([^)]*model:([^)]*)", re.IGNORECASE)
-AGENT_TOOL_PIN_RE = re.compile(
-    r"Agent tool\s*\([^)]*model:([^)]*)", re.IGNORECASE)
+    r"^[ \t]*(?:model_profile|model):([^\n#]*)", re.IGNORECASE | re.MULTILINE)
+TASK_TOOL_GROUP_RE = re.compile(r"Task tool\s*\(([^)]*)", re.IGNORECASE)
+AGENT_TOOL_GROUP_RE = re.compile(r"Agent tool\s*\(([^)]*)", re.IGNORECASE)
+TOOL_PIN_KEY_RE = re.compile(r"\b(?:model_profile|model)\s*:", re.IGNORECASE)
 ID_TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
 ROLE_CLASSES = {"recall-critical-review", "generative-checked", "mechanical-predicate"}
 RUNGS = ("R0", "R1", "R2")
@@ -603,9 +605,15 @@ def pins_in(text: str) -> list[str]:
     the token scan skips over — they never void a match (gate rounds 1-2);
     connective words come back as tokens, which is harmless: is_fable
     filters them and rule (b) only needs truthiness."""
-    regions = (FRONTMATTER_PIN_RE.findall(text)
-               + TASK_TOOL_PIN_RE.findall(text)
-               + AGENT_TOOL_PIN_RE.findall(text))
+    regions = FRONTMATTER_PIN_RE.findall(text)
+    for group_re in (TASK_TOOL_GROUP_RE, AGENT_TOOL_GROUP_RE):
+        for group in group_re.finditer(text):
+            body = group.group(1)
+            keys = list(TOOL_PIN_KEY_RE.finditer(body))
+            regions.extend(
+                body[key.end():keys[i + 1].start() if i + 1 < len(keys) else len(body)]
+                for i, key in enumerate(keys)
+            )
     return [tok for region in regions for tok in ID_TOKEN_RE.findall(region)]
 
 
@@ -972,6 +980,13 @@ def selftest() -> int:
                "caught (the enumeration-bypass case)"),
         ("skills/payloads/injection-vuln-notes.md", "prose, no pin\n",
          False, "stem-match without a pin is spared (match-then-check)"),
+        ("skills/payloads/injection-threat-prompt.md",
+         "Agent tool (subagent_type: Explore, model_profile: high):\n",
+         True, "neutral profile metadata on an unmarked security-named file "
+               "still demands the marker"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nTask tool (general-purpose, model_profile: fable):\n",
+         True, "fable-family value is caught even under the neutral profile key"),
         ("skills/shared/security-signals.md", "shared signals prose\n",
          False, "the real no-pin stem-matcher is NOT flagged"),
         ("agents/crucible-red-team.md", f"---\nmodel: fable\n---\n{m}\nbody\n",
@@ -994,6 +1009,18 @@ def selftest() -> int:
         ("skills/siege/SKILL.md",
          f"{m}\nAgent tool (subagent_type: general-purpose, model: fable)\n",
          True, "the Agent-tool pin form is covered"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nTask tool (general-purpose, model_profile: fable, model: high)\n",
+         True, "Task tool scans the profile value before a later model key"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nTask tool (general-purpose, model: fable, model_profile: high)\n",
+         True, "Task tool scans the model value before a later profile key"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nAgent tool (general-purpose, model_profile: fable, model: high)\n",
+         True, "Agent tool scans the profile value before a later model key"),
+        ("skills/siege/SKILL.md",
+         f"{m}\nAgent tool (general-purpose, model: fable, model_profile: high)\n",
+         True, "Agent tool scans the model value before a later profile key"),
         ("skills/siege/SKILL.md",
          f"---\nmodel: claude-fable-5\n---\n{m}\n",
          True, "raw id `claude-fable-5` is fable-family"),

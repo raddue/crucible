@@ -5,6 +5,8 @@
 
 Use this template when dispatching an adversarial tester subagent in the build pipeline (Phase 3) or standalone.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Adversarial test task N: [task name]"

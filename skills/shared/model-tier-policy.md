@@ -1,21 +1,69 @@
 # Model-tier policy
 
-Status: v1 (#392). Canonical home for which subagent roles may run which model
-tier, why, and exactly what the guardrail does and does not enforce. Skills
-that pin a non-default tier link here — link, never copy (CLAUDE.md).
+Status: v2 (#392; model-agnostic dispatch slice). Canonical home for role
+dispatch profiles, trust restrictions, fallback behavior, and exactly what the
+static guardrail does and does not enforce. Skills should request a profile
+rather than a provider-specific model ID wherever practical; legacy provider
+aliases remain valid during incremental migration. Link here — never copy
+(CLAUDE.md).
+
+## Canonical dispatch profiles
+
+| Profile | Intended work | Current Claude Code reference alias |
+|---|---|---|
+| `high` | Complex analysis, adversarial review, architecture/design judgment | `opus` |
+| `standard` | Routine review, synthesis, mechanical fixes, bounded recording | `sonnet` |
+| `fast` | Narrow lookup/structural mapping where speed dominates judgment | `haiku` |
+| `inherit` | Caller/session model decides; no profile preference | `inherit` |
+
+The role tables below preserve current provider aliases and measured history.
+Read `opus`, `sonnet`, and `haiku` there as today's Claude Code mapping of
+`high`, `standard`, and `fast`, not as universal runtime requirements. Other
+harnesses map profiles through `shared/harness-adapter.md`; where a harness has
+no supported mapping, omit the model parameter and use the operator/session
+default rather than inventing a provider-specific ID.
+
+## No-stop dispatch resolution
+
+Runtime model routing is a recommendation and trust constraint, never a new
+pipeline failure gate:
+
+1. Honor an explicit operator/harness model override.
+2. Otherwise map the requested profile through the harness's configured model.
+3. Otherwise use the session/harness default.
+4. If the requested model or effort is unsupported, omit that unsupported field
+   and continue on the best permitted available model.
+5. On transient provider faults, retry within the existing dispatch/replay
+   protocol, then use another permitted model where available.
+6. If no permitted model is available, preserve the pending dispatch and
+   continue independent work; do not terminate or restart the whole autonomous
+   pipeline solely because one model route failed.
+
+Record the requested profile and actual observed model when the harness exposes
+it; `null` actual model means unmeasured, not unauthorized. Calibration claims
+must distinguish measured from unmeasured routing and must not fabricate an
+actual model. Security/trust and data-egress restrictions still apply: never
+route restricted material to an unpermitted provider/model merely to avoid a
+fault. If no permitted route exists for restricted work, preserve that work and
+continue unrelated tasks.
+
+`scripts/check_model_pins.py` is an author-time repository check; it is not a
+runtime dispatch gate and must not be used to stop a live dispatch.
 
 ## TL;DR
 
-- **Opus 4.8 is the default** for every reasoning role except three roles
+- **The `high` profile is the default** for every reasoning role except three roles
   that are not Opus-pinned — `crucible-qg-fix` (Sonnet, below), the
   standalone `/red-team` fix dispatch, and dependency-audit's inline path
-  (the latter two unpinned/session, residual (a)); Sonnet for cheap
+  (the latter two unpinned/session, residual (a)); the `standard` profile for cheap
   mechanical checks (`crucible-qg-judge` /
   `crucible-qg-verifier`) and for the fix agent (`crucible-qg-fix` — the
   main-loop fix output is re-reviewed on single-model rounds that reach a
   subsequent red-team; **not** bounded on the post-pass quick-fix, the
   fix-agent terminal exits, or any escalation exit — see the row below;
-  #537). **Fable 5 nowhere**, except behind an eval-gated pilot.
+  #537). Current Claude Code aliases: `high` → Opus 4.8, `standard` → Sonnet.
+  **Restricted-trust models are nowhere**, except behind an eval-gated pilot;
+  the current static checker maps that restriction to the Fable family.
 - **Eval-before-default:** no role flips model tier without its own A/B eval
   showing a lift that justifies Fable's **~2.6× effective cost** (2× sticker
   price × ~1.3× tokenizer overhead — Fable uses the Opus-4.7 tokenizer).
@@ -69,11 +117,14 @@ pilot's keep/revert evidence requirements live in issue #392 (item 4 + AC3).
 a PR-time gate, not an author-time one).
 
 **It ENFORCES:** fable-family pins (`fable`, any `claude-fable-*` id,
-case-insensitive) in the three static pin-surface forms — frontmatter
-`model:`, inline `Task tool (... model: ...)`, inline
-`Agent tool (... model: ...)` — under the two rules above (marked-file pin
-ban + default-deny marker requirement on the security-surface set). That is
-the entire enforcement surface.
+case-insensitive) in the static pin-surface forms — line-anchored
+`model:`/`model_profile:`, inline `Task tool (... model:`/`model_profile: ...)`,
+inline `Agent tool (... model:`/`model_profile: ...)` — under the two rules
+above (marked-file pin ban + default-deny marker requirement on the
+security-surface set). The neutral `model_profile:` key is scanned so migrating
+a security-named file to profile vocabulary cannot evade the marker
+requirement. That is the entire author-time enforcement surface; it is not a
+runtime dispatch gate.
 
 **It does NOT enforce (disclosed residuals — operator convention, not
 checker guarantee):**

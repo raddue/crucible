@@ -25,6 +25,8 @@ When the source is a QG fix journal (not a debugging session), prepend this cont
 
 ---
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Extract diagnostic patterns from debugging session"

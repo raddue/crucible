@@ -252,14 +252,27 @@ PERSISTENCE = ROOT / "skills/quality-gate/persistence-checker-prompt.md"
 
 def _anchored(text: str, anchor: str) -> str | None:
     """Return the content inside a `<!-- CONTRACT:<anchor>:START -->` … `:END -->`
-    point-anchor, or None if the anchor is absent. Point-anchoring (round-3 M4,
-    extended round-4 S1) is what lets a check assert a phrase lives at its
-    OPERATIVE site rather than being satisfied by an index-table/Red-Flags
-    restatement of the same phrase elsewhere in the file.
+    point-anchor, or None if the anchor is absent OR does not occur exactly once.
+    Point-anchoring (round-3 M4, extended round-4 S1) is what lets a check assert
+    a phrase lives at its OPERATIVE site rather than being satisfied by an
+    index-table/Red-Flags restatement of the same phrase elsewhere in the file.
+
+    FA2-1 (PR #583 warden gate): a decoy `<!-- CONTRACT:<anchor>:START -->
+    … :END -->` pair placed anywhere in the file previously let the first-match
+    `re.search` silently extract whichever block happened to come first, while
+    the real operative span could be emptied with no error raised — every one
+    of this checker's ~30 `_anchored()` call sites inherited the bypass. Assert
+    exactly one occurrence of each marker before extracting, mirroring this
+    file's own Verdict:/Reason: exactly-one-match discipline (round-2 M3).
     """
+    esc = re.escape(anchor)
+    start_hits = re.findall(rf"<!-- CONTRACT:{esc}:START.*?-->", text, re.DOTALL)
+    end_hits = re.findall(rf"<!-- CONTRACT:{esc}:END.*?-->", text, re.DOTALL)
+    if len(start_hits) != 1 or len(end_hits) != 1:
+        return None
     m = re.search(
-        rf"<!-- CONTRACT:{re.escape(anchor)}:START.*?-->(.*?)"
-        rf"<!-- CONTRACT:{re.escape(anchor)}:END",
+        rf"<!-- CONTRACT:{esc}:START.*?-->(.*?)"
+        rf"<!-- CONTRACT:{esc}:END",
         text, re.DOTALL,
     )
     return m.group(1) if m else None
@@ -1428,6 +1441,31 @@ def selftest() -> int:
             rf"<!-- CONTRACT:{re.escape(anchor)}:END -->",
             f"<!-- CONTRACT:{anchor}:START --><!-- CONTRACT:{anchor}:END -->",
             fixture, flags=re.DOTALL,
+        )
+
+    # FA2-1 (PR #583 warden gate): a decoy CONTRACT:START/:END pair placed
+    # anywhere in the file previously let `_anchored()`'s first-match
+    # `re.search` silently return the real block's content (or the decoy's,
+    # depending on placement) with NO error raised — the exact bypass the
+    # exactly-once assertion above (round-2 M3) already closes for the plain
+    # Verdict:/Reason: lines, but every `_anchored()` call site inherited
+    # unpatched. Appending a second, well-formed anchor pair for one call
+    # site's anchor must now trip that site's own "not found" error (since
+    # `_anchored` returns None on a non-unique anchor), not silently pass.
+    def _dup(anchor: str, fixture: str) -> str:
+        m = re.search(
+            rf"<!-- CONTRACT:{re.escape(anchor)}:START -->.*?"
+            rf"<!-- CONTRACT:{re.escape(anchor)}:END -->",
+            fixture, flags=re.DOTALL,
+        )
+        assert m, f"selftest setup: anchor {anchor!r} not found in fixture"
+        return fixture + "\n" + m.group(0)
+
+    dup_marker_fields = _dup("qg-fan-out-marker-fields", _GOOD_SKILL_FIXTURE)
+    if not check_skill(dup_marker_fields):
+        errs.append(
+            "selftest: a duplicate qg-fan-out-marker-fields CONTRACT anchor pair "
+            "did NOT trip _anchored()'s exactly-once assertion (FA2-1)"
         )
 
     for anchor, label in (

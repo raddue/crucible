@@ -55,7 +55,18 @@ FAIL_MARKER = "<!-- worked-example: FAIL -->"
 # population", and "explicitly EXCLUDING ... Second Pass Findings" still
 # contains "Second Pass Findings". `[^.]{0,40}` keeps the check within the
 # same clause.
-_NEGATION_TOKENS = r"(?:not|never|excluding|except|ignor\w*)"
+_NEGATION_TOKENS = (
+    r"(?:not|never|excluding|except|ignor\w*|less|minus|omitting|"
+    r"apart\s+from|other\s+than)"
+)
+# FA2-2 (PR #583 warden gate): the pre-existing closed vocabulary (not/never/
+# excluding/except/ignor*) was trivially evaded by "less"/"minus"/"omitting"/
+# "apart from"/"other than" — verified live: replacing "plus any Fatal/
+# Significant..." with "less any..." in red-team/SKILL.md inverts the
+# polarity of #561's entire thesis and every checker relying on this
+# vocabulary still PASSed. Not a full fix for the general "oracle-pattern
+# vocabulary-only pin" class (tracked separately) — a narrower vocabulary
+# expansion for this specific, verified evasion.
 
 
 def _negates(anchor: str, scope: str) -> bool:
@@ -1952,6 +1963,22 @@ def _selftest_a6() -> list[str]:
     a6c_severity_negated_errs = [e for e in check_rt_prompt(a6c_severity_negated) if e.startswith("[A6c]")]
     if not a6c_severity_negated_errs:
         errs.append("selftest: negating 'begins with' in the severity-value sentence did NOT trip [A6c] (polarity-blind)")
+
+    # FA2-2 (PR #583 warden gate): "less"/"minus"/"omitting"/"apart from"/
+    # "other than" must now trip the same polarity guard as not/never/etc. —
+    # verified live this gate run that "less" alone evaded the pre-fix
+    # closed vocabulary across 5 checkers.
+    a6c_severity_less = _A6_GOOD_RT_PROMPT.replace(
+        "a value that begins with `Fatal`",
+        "a value that less begins with `Fatal`",
+    )
+    assert a6c_severity_less != _A6_GOOD_RT_PROMPT, "selftest setup: A6c severity-value 'less' needle not found"
+    a6c_severity_less_errs = [e for e in check_rt_prompt(a6c_severity_less) if e.startswith("[A6c]")]
+    if not a6c_severity_less_errs:
+        errs.append(
+            "selftest: inserting 'less' before 'begins with' in the severity-value "
+            "sentence did NOT trip [A6c] (FA2-2 — closed-vocabulary evasion)"
+        )
 
     a6c_malformed_negated = _A6_GOOD_RT_PROMPT.replace(
         "is scored as Significant by default",

@@ -1209,6 +1209,38 @@ class TestEditWroteHashDeliberateNonGate(unittest.TestCase):
         self.assertEqual(rv.lint_receipt(self._inject("EDIT", "src/secrets.env")), "PASS")
 
 
+class TestEditWroteHashCheckIsLinear(unittest.TestCase):
+    """SIEGE-BA-1 (PR #583 warden gate): the EDIT/WROTE hash membership check
+    used to rebuild `{a["hash"] for a in artifacts.values()}` INSIDE the
+    `for entry in trace:` loop — O(artifacts x trace-entries). A receipt
+    declaring N artifacts and N matching EDIT lines was measured at 9.5s CPU
+    for a 2.9MB receipt (N=16000), reachable through the unbounded
+    SubagentStop hook (hooks/rcpt-verify-hook.sh feeds --tier1 - directly).
+    Pins linear-ish wall time at a size that would be seconds under the old
+    quadratic behavior."""
+
+    def test_many_declared_artifacts_and_matching_edits_completes_quickly(self):
+        rv = _import_rv()
+        n = 10000
+        hashes = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(n)]
+        text = _receipt(
+            "grep:a0.md  expect-fail=/boom/  ran=UNRUNNABLE:tooling-absent",
+            verdict="BLOCKED",
+            artifacts=[(f"a{i}.md", h, "10") for i, h in enumerate(hashes)],
+            trace=[f"EDIT  a{i}.md  sha256:{h}" for i, h in enumerate(hashes)],
+        )
+        started = time.monotonic()
+        rv.lint_receipt(text)  # verdict/exceptions irrelevant — timing is the assertion
+        elapsed = time.monotonic() - started
+        # O(n) at n=10000 completes in well under a second (measured ~0.05s);
+        # the old O(n^2) behavior measured ~1.5s at n=6000, so n=10000 scales
+        # to ~4s under the regression — 2.0s is a bound the fix clears
+        # comfortably and the regression reliably trips.
+        self.assertLess(elapsed, 2.0,
+                         "lint_receipt took too long — the artifact-hash set "
+                         "may have regressed to being rebuilt per trace entry")
+
+
 class TestTraceRefGuard(unittest.TestCase):
     """#440: a malformed `TRACE#<non-digits>` reference (attacker-influenced
     receipt text) must lint-FAIL cleanly (LintError), NOT raise a raw ValueError
@@ -3060,15 +3092,14 @@ class TestWitnessBoundIsInTier2Witness(unittest.TestCase):
         test of disposition disagreement.
         """
         note_body = "UNRESOLVED items remain\n"
+        note_hash = hashlib.sha256(note_body.encode()).hexdigest()
         rec = {"dispatch-id": "xcheck-1",
                "receipt": _receipt(
                    "grep:verify-note.md#L1-L1  pattern=/UNRESOLVED/  "
                    "expect-fail=match  ran=TRACE#1",
                    verdict="PASS",
-                   artifacts=[("verify-note.md",
-                               hashlib.sha256(note_body.encode()).hexdigest(),
-                               str(len(note_body)))],
-                   trace=[f"WROTE  verify-note.md  sha256:{'0' * 64}"],
+                   artifacts=[("verify-note.md", note_hash, str(len(note_body)))],
+                   trace=[f"WROTE  verify-note.md  sha256:{note_hash}"],
                    skill="quality-gate/9-fix-verifier")}
         bodies = {"verify-note.md": note_body}
 
@@ -6188,7 +6219,7 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
         reads = []
         real_read_from_fd = rv._read_from_fd
 
-        def spy(fd, budget, label):
+        def spy(fd, budget, label, owner=None):
             # F1 STRUCTURAL FIX — every name's fd now opens during the RESOLVE phase
             # (via `_open_nofollow_walk`, one `os.open` per DISTINCT NAME STRING,
             # whether or not that name's bytes ever get consumed), so counting
@@ -6200,8 +6231,13 @@ class TestTheCarryIsKeyedOnIdentityNotSpelling(_InqBase):
             # the witness leg's fallback read when the carry does NOT apply), so
             # counting calls to it is the direct measurement of "did this leg
             # actually read the file", independent of how many names resolved to it.
+            #
+            # #583 inquisitor AV4 — `owner` must be forwarded, not dropped: it is how
+            # `_read_from_fd` clears the caller's `rec["fd"]` at the moment it takes
+            # ownership, and a spy that swallowed it would leave the record pointing at
+            # an fd this call already closed (a double close at cache disposal).
             reads.append(label)
-            return real_read_from_fd(fd, budget, label)
+            return real_read_from_fd(fd, budget, label, owner=owner)
 
         cache = _cache_for(rv, arts, trace, wit, "PASS", [self.base])
         verified = {}
@@ -6331,8 +6367,70 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         os.chmod(repo, 0o777)
         out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(r))
         self.assertEqual(out.returncode, 1, out.stderr)
-        self.assertIn("world-writable git toplevel", out.stderr)
+        self.assertIn("world-writable (o+w) git toplevel", out.stderr)
         self.assertIn(str(repo), out.stderr)
+
+    def test_a_group_writable_toplevel_is_diagnosed_group_writable(self):
+        """#601 — a `g+w`-only git toplevel (the `drwxrwsr-x` worktree shape, 0o2775) is
+        still REFUSED, but the diagnosis must name the bit that actually fired. The old
+        wording called it "world-writable" and told the operator to "make it
+        non-world-writable" — a remedy already in place for `g+w`-only, so nothing
+        changed and the real cause stayed invisible."""
+        repo, r = self._repo()
+        os.chmod(repo, 0o2775)                       # setgid group-writable, no o+w
+        self.addCleanup(os.chmod, repo, 0o755)
+        if not (repo.stat().st_mode & 0o020):
+            self.skipTest("filesystem does not honour chmod; cannot set g+w")
+        out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(r))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("group-writable (g+w) git toplevel", out.stderr)
+        self.assertIn(str(repo), out.stderr)
+        self.assertNotIn("world-writable", out.stderr)
+        self.assertIn("non-group-writable", out.stderr)
+
+    def test_the_diagnosis_uses_the_mode_the_refusal_used(self):
+        """#615 — the refusal (`_git_toplevel`) and the wording (`_writability_notes`)
+        used to `stat()` the directory INDEPENDENTLY, so a mode change between the two
+        made the message contradict the decision that produced it: an `o+w` directory
+        could be reported as merely `g+w` (understating the threat), and a first stat that
+        failed closed followed by a second that succeeded could point a 0755 directory at
+        `chmod g-w` — a remedy already satisfied, the #601 class over again. One stat,
+        carried in `_RefusedBase`, cannot disagree with itself."""
+        rv = _import_rv()
+        d = self.base / "toctou"; d.mkdir()
+        _plant_git_dir(d)
+        os.chmod(d, 0o777)
+        self.addCleanup(os.chmod, d, 0o755)
+        if not (d.stat().st_mode & 0o002):
+            self.skipTest("filesystem does not honour chmod; cannot set o+w")
+        refused = []
+        self.assertIsNone(rv._git_toplevel(d, refused))
+        os.chmod(d, 0o755)                 # the race: mode moves after the decision
+        clause = rv._refused_clause(refused)
+        self.assertIn("world-writable (o+w) git toplevel", clause)
+        self.assertNotIn("group-writable", clause)
+
+    def test_two_refused_directories_are_separable(self):
+        """#615 — `; ` was both the intra-entry separator (threat from remedy) and the
+        inter-entry one, so two refused directories rendered as four semicolon-separated
+        clauses with nothing marking where one directory ended."""
+        rv = _import_rv()
+        dirs = []
+        for nm in ("a", "b"):
+            d = self.base / nm; d.mkdir()
+            _plant_git_dir(d)
+            os.chmod(d, 0o777)
+            self.addCleanup(os.chmod, d, 0o755)
+            if not (d.stat().st_mode & 0o002):
+                self.skipTest("filesystem does not honour chmod; cannot set o+w")
+            dirs.append(d)
+        refused = []
+        for d in dirs:
+            self.assertIsNone(rv._git_toplevel(d, refused))
+        clause = rv._refused_clause(refused)
+        self.assertEqual(len(clause.split(" | ")), 2, clause)
+        for d in dirs:
+            self.assertIn(str(d), clause)
 
     def test_an_absolute_cited_name_is_diagnosed_too(self):
         """The shape a refusal blocks through the CONTAINMENT UNION rather than through
@@ -6358,7 +6456,7 @@ class TestARefusedProbeBaseIsDiagnosable(_InqBase):
         os.chmod(repo, 0o777)
         out = self.cli("--tier2", "--strict", "--root", str(repo / "work"), str(p))
         self.assertEqual(out.returncode, 1, out.stderr)
-        self.assertIn("world-writable git toplevel", out.stderr)
+        self.assertIn("world-writable (o+w) git toplevel", out.stderr)
         # Non-vacuity: the ABSOLUTE name is the one being diagnosed.
         self.assertIn(absname, out.stderr)
 
@@ -6834,7 +6932,7 @@ class TestTheWorldWritableRefusalIsMonotone(_InqBase):
         self.assertIn("refused as probe base", hostile.stderr)
 
     def test_a_group_writable_toplevel_is_refused_too(self):
-        """`_is_world_writable` tested `0o002` alone while its callers, and
+        """The writability check tested `0o002` alone while its callers, and
         quality-gate/SKILL.md:41, both claim "any local uid could have planted" — 0775 and
         0770 are exactly that claim's case and were accepted."""
         rv = _import_rv()
@@ -8940,6 +9038,442 @@ class TestSiegeR4BA5LegacyHeaderCannotDisarmTheConsequent(_InqBase):
         # class is (the witness-evidence requirement, not this detector) — the
         # point is it is NOT rejected via the legacy-header path this class tests.
         self.assertNotIn("declares `RCPT v1`", out.stderr)
+
+
+class TestResolvePhaseNameCeiling(unittest.TestCase):
+    """#583 inquisitor / State & Lifecycle AV1, refined by SIEGE finding S11 (PR #583
+    warden gate) — MAX_RESOLVE_NAMES bounds the ACTUAL open-fd count during the
+    resolve loop (checked dynamically per name), not the raw declared-name count.
+    A name that fails to resolve opens zero fds and so no longer counts against the
+    ceiling; MAX_DECLARED_NAMES is a separate, much higher, coarse backstop against a
+    pathological declared count regardless of fd cost. Neither check touches F1's
+    fd-holding mechanism itself."""
+
+    def test_unresolvable_names_do_not_trip_the_fd_ceiling(self):
+        rv = _import_rv()
+        # 3x MAX_RESOLVE_NAMES declared names, none of which resolve (nonexistent
+        # root) — S11's fix: since an unresolvable name opens zero fds, this must
+        # succeed cleanly even though it would have tripped the old declared-count
+        # ceiling by a wide margin.
+        n = rv.MAX_RESOLVE_NAMES * 3
+        artifacts = {
+            f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
+            for i in range(n)
+        }
+        cache = {}
+        rv._build_identity_cache(artifacts, [], [], "PASS",
+                                  pathlib.Path("/nonexistent-root"), cache)
+        self.assertEqual(len(cache) - 3, n)  # -3 for the sentinel keys
+        for i in range(n):
+            self.assertIsNone(cache[f"f{i}.txt"]["realpath"])
+            self.assertIsNone(cache[f"f{i}.txt"]["fd"])
+
+    def test_resolvable_names_over_fd_ceiling_rejected(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            _plant_git_dir(repo)
+            n = rv.MAX_RESOLVE_NAMES + 1
+            names = [f"f{i}.txt" for i in range(n)]
+            for nm in names:
+                (repo / nm).write_text("x")
+            artifacts = {
+                nm: {"hash": "sha256:" + "0" * 64, "size": 1, "meta": ""}
+                for nm in names
+            }
+            with self.assertRaises(rv.LintError) as ctx:
+                rv._build_identity_cache(artifacts, [], [], "PASS", repo, {})
+            self.assertIn(str(rv.MAX_RESOLVE_NAMES), str(ctx.exception))
+            self.assertIn("file descriptors", str(ctx.exception))
+
+    def test_at_ceiling_resolves_normally(self):
+        rv = _import_rv()
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            _plant_git_dir(repo)
+            names = [f"f{i}.txt" for i in range(rv.MAX_RESOLVE_NAMES)]
+            for nm in names:
+                (repo / nm).write_text("x")
+            artifacts = {
+                nm: {"hash": "sha256:" + "0" * 64, "size": 1, "meta": ""}
+                for nm in names
+            }
+            cache = {}
+            rv._build_identity_cache(artifacts, [], [], "PASS", repo, cache)
+            for nm in names:
+                self.assertIsNotNone(cache[nm]["realpath"], nm)
+                self.assertIsNotNone(cache[nm]["fd"], nm)
+
+    def test_declared_name_ceiling_still_rejects_pathological_count(self):
+        rv = _import_rv()
+        artifacts = {
+            f"f{i}.txt": {"hash": "sha256:" + "0" * 64, "size": 0, "meta": ""}
+            for i in range(rv.MAX_DECLARED_NAMES + 1)
+        }
+        # `root` is never consulted — the coarse declared-count check raises before
+        # resolve_base is ever called for any name.
+        with self.assertRaises(rv.LintError) as ctx:
+            rv._build_identity_cache(artifacts, [], [], "PASS",
+                                      pathlib.Path("/nonexistent-root"), {})
+        self.assertIn(str(rv.MAX_DECLARED_NAMES), str(ctx.exception))
+
+
+class TestSupersedesReferentialIntegrity(_InqBase):
+    """#584 (SIEGE-IT-1, warden gate on PR #583) — the SUPERSEDES witness-evidence rule
+    (TestSupersedesRequiresAnEvaluatedWitness) proves properties of the CITING receipt's
+    own witness; it proves nothing about whether the predecessor it retires ever
+    existed. Before this fix, a fabricated, nonexistent 12-hex prefix with an otherwise-
+    conformant witness passed the mandated `--tier2 --strict --ledger` command line
+    cleanly, retiring a predecessor that was never real."""
+
+    PREFIX = "21a1b2c3d4e5"
+
+    def _v11_receipt(self, name, supersedes=PREFIX):
+        h, size = self.plant(self.base, "evidence.log", b"clean run\n")
+        body = _receipt(
+            "grep:evidence.log  expect-fail=/zzz-absent/  ran=TRACE#1",
+            skill="build/21-implementer",
+            artifacts=[("evidence.log", h, size)],
+            trace=["READ  evidence.log"],
+            claims=[f"fix-verified=true  from={supersedes}#L1-L10"])
+        p = self.base / name
+        p.write_text(body.replace("RCPT v1 ", "RCPT v1.1 ", 1)
+                     + "TRIPWIRE:  claims-touch(auth/**)\n"
+                       f"SUPERSEDES: {supersedes}\n")
+        return p
+
+    def _ledger_file(self, entries):
+        p = self.base / "receipt-ledger.jsonl"
+        p.write_text("".join(json.dumps(e) + "\n" for e in entries))
+        return p
+
+    def test_fabricated_prefix_is_rejected_when_ledger_supplied(self):
+        p = self._v11_receipt("fab.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "unrelated-1", "phase": "p", "rcpt_sha256": "ab" * 32,
+             "verdict": "PASS"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("SUPERSEDES cites unknown prefix", out.stderr)
+
+    def test_real_prefix_still_passes_when_ledger_supplied(self):
+        p = self._v11_receipt("real.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "unrelated-1", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "0" * (64 - len(self.PREFIX)),
+             "verdict": "FAIL"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_ambiguous_prefix_is_rejected(self):
+        p = self._v11_receipt("ambig.rcpt")
+        led = self._ledger_file([
+            {"dispatch_id": "d1", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "1" * (64 - len(self.PREFIX)), "verdict": "FAIL"},
+            {"dispatch_id": "d2", "phase": "p",
+             "rcpt_sha256": self.PREFIX + "2" * (64 - len(self.PREFIX)), "verdict": "FAIL"},
+        ])
+        out = self.cli("--tier2", "--root", str(self.base), "--ledger", str(led), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("SUPERSEDES prefix ambiguous", out.stderr)
+
+    def test_no_ledger_is_advisory_not_fatal(self):
+        """Absent --ledger stays advisory (mirrors the DISPATCHED-binding precedent) so
+        the pre-existing witness-evidence test corpus, which deliberately runs `--tier2`
+        with no `--ledger` to isolate that dimension, is unaffected by this fix."""
+        p = self._v11_receipt("noledger.rcpt")
+        out = self.cli("--tier2", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("UNVERIFIABLE: SUPERSEDES referential-integrity", out.stderr)
+
+
+class TestSupersedesExistenceCheckIsLinear(unittest.TestCase):
+    """SIEGE-BA-2 (PR #583 warden gate): `tier2_supersedes_existence` (added by #584 /
+    SIEGE-IT-1, this same gate run) used to rescan the WHOLE ledger from scratch for
+    EVERY SUPERSEDES prefix — O(prefixes x ledger-entries), with both dimensions
+    receipt/ledger-controlled (a receipt's comma-separated SUPERSEDES list is unbounded;
+    the ledger grows over a project's lifetime), reachable through the same unbounded
+    SubagentStop path as SIEGE-BA-1. Measured before this fix: 0.55s / 2.1s / 8.1s at
+    (prefixes=500,ledger=20000) / (1000,40000) / (2000,80000) — a clean 4x-per-doubling
+    curve. Pins near-linear wall time at a size that would be seconds under the old
+    quadratic behavior."""
+
+    def test_many_prefixes_against_large_ledger_completes_quickly(self):
+        rv = _import_rv()
+        n_ledger = 40000
+        n_prefixes = 1000
+        hashes = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(n_ledger)]
+        with tempfile.NamedTemporaryFile(
+                "w", suffix=".jsonl", delete=False) as f:
+            for h in hashes:
+                f.write(json.dumps({"rcpt_sha256": h}) + "\n")
+            ledger_path = f.name
+        try:
+            supersedes = ",".join(hashes[i][:12] for i in range(n_prefixes))
+            started = time.monotonic()
+            rv.tier2_supersedes_existence(supersedes, ledger_path)
+            elapsed = time.monotonic() - started
+        finally:
+            os.unlink(ledger_path)
+        # O(ledger log ledger + prefixes) at this size completes in well under a
+        # second (measured ~0.2s); the old O(prefixes x ledger) behavior measured
+        # ~2.1s at this exact (prefixes, ledger) pair — 1.5s is a bound the fix
+        # clears comfortably and the regression reliably trips.
+        self.assertLess(elapsed, 1.5,
+                         "tier2_supersedes_existence took too long — the ledger "
+                         "sha256 set may have regressed to being rescanned per prefix")
+
+
+class Test571DegenerateHashLint(unittest.TestCase):
+    """#571 fix (1) — an all-zero or all-f sha256 on a TRACE WROTE/EDIT line is never a
+    real digest and must hard-FAIL at Tier-1, before any disk read is attempted."""
+
+    def setUp(self):
+        self.rv = _import_rv()
+
+    def test_wrote_all_zero_hash_rejected(self):
+        text = _receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"WROTE  f.txt  sha256:{'0' * 64}"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertIn("degenerate", str(cm.exception))
+
+    def test_wrote_all_f_hash_rejected(self):
+        text = _receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"WROTE  f.txt  sha256:{'f' * 64}"])
+        with self.assertRaises(self.rv.LintError) as cm:
+            self.rv.lint_receipt(text)
+        self.assertIn("degenerate", str(cm.exception))
+
+    def test_edit_all_zero_hash_rejected(self):
+        text = _receipt("exec:`x`  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"EDIT  f.txt  sha256:{'0' * 64}"])
+        with self.assertRaises(self.rv.LintError):
+            self.rv.lint_receipt(text)
+
+    def test_wrote_with_ordinary_hash_still_lint_passes(self):
+        # H64 = "ab"*32 — an ordinary, non-degenerate placeholder; #412's own
+        # non-gate (an undeclared EDIT/WROTE hash is provenance, not verified) is
+        # unaffected by the new degenerate-value check.
+        text = _receipt("grep:  expect-fail=/BOOM/  ran=TRACE#1",
+                        trace=[f"WROTE  f.txt  sha256:{H64}"])
+        self.assertEqual(self.rv.lint_receipt(text), "PASS")
+
+
+class Test571TraceHashDiskVerification(_InqBase):
+    """#571 fix (2) — for a TRACE READ/WROTE/EDIT citing a path that resolves under a
+    declared --root, Tier-2 hashes the file and compares against the receipt's own
+    claim; mismatch is a hard FAIL. A path outside every declared root stays
+    unverifiable, exactly as an unresolved ARTIFACTS entry does. Each receipt keeps
+    the WITNESS pointed at an inert EXEC TRACE#1 entry whose out= artifact never
+    contains `BOOM`, so tier2_witness's own read is clean and the outcome is decided
+    by the new leg alone."""
+
+    def setUp(self):
+        super().setUp()
+        self.inert_hash, self.inert_size = self.plant(self.base, "inert.log", b"quiet\n")
+        self.inert_artifact = ("inert.log", self.inert_hash, self.inert_size)
+        self.inert_exec = "EXEC  `x`  exit=0  dur=0.1s  out=inert.log#L1-L1"
+
+    def test_wrote_correct_hash_on_real_file_passes(self):
+        h, _ = self.plant(self.base, "f.txt", b"real content\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  f.txt  sha256:{h}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_wrote_wrong_but_well_formed_hash_on_real_file_fails(self):
+        self.plant(self.base, "f.txt", b"real content\n")
+        wrong = ("a" * 63) + "b"          # syntactically valid, does not match disk
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_read_wrong_hash_on_real_file_fails(self):
+        self.plant(self.base, "f.txt", b"real content\n")
+        wrong = ("a" * 63) + "b"
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"READ  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_edit_wrong_hash_on_real_file_fails(self):
+        self.plant(self.base, "f.txt", b"real content\n")
+        wrong = ("a" * 63) + "b"
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"EDIT  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_wrote_citing_a_path_outside_every_root_stays_unverifiable(self):
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  nowhere.txt  sha256:{H64}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # Every RCPT v1 run also emits its own unrelated `UNVERIFIABLE: v1.1 Layer-2
+        # …` line, so a bare substring match on "UNVERIFIABLE" alone would pass even
+        # if this leg emitted nothing at all — pin the exact line this leg owns.
+        self.assertIn("UNVERIFIABLE: TRACE WROTE nowhere.txt (no file under root)",
+                      out.stderr)
+
+    def test_wrote_matching_the_declared_artifacts_hash_is_unaffected(self):
+        """The fabricated-hash class this backstop closes is orthogonal to #412's own
+        non-gate: a WROTE line whose hash matches the real file (and happens to equal
+        the ARTIFACTS declaration too) still passes cleanly."""
+        h, s = self.plant(self.base, "f.txt", b"real content\n")
+        p = self.rcpt(artifacts=[self.inert_artifact, ("f.txt", h, s)],
+                      trace=[self.inert_exec, f"WROTE  f.txt  sha256:{h}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_pre_edit_read_hash_is_not_checked_against_the_post_edit_file(self):
+        """return-convention.md's own worked example is a READ (the pre-edit
+        observation) followed by an EDIT (the post-edit hash) of the SAME path —
+        two legitimately different hashes, of which only the file's FINAL state is
+        still on disk to compare against. Checking the READ's hash against current
+        (post-edit) bytes would be an unconditional false FAIL on this ordinary
+        shape."""
+        pre = hashlib.sha256(b"before\n").hexdigest()
+        post, _ = self.plant(self.base, "f.txt", b"after\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec,
+                             f"READ  f.txt  sha256:{pre}",
+                             f"EDIT  f.txt  sha256:{post}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_the_last_of_two_edits_is_the_one_checked_and_a_wrong_one_still_fails(self):
+        post, _ = self.plant(self.base, "f.txt", b"final\n")
+        wrong = ("a" * 63) + "b"
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec,
+                             f"EDIT  f.txt  sha256:{H64}",
+                             f"EDIT  f.txt  sha256:{wrong}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("sha256 mismatch", out.stderr)
+
+    def test_a_degenerate_read_hash_on_a_real_file_stays_inert(self):
+        """Tier-1 hard-rejects a degenerate EDIT/WROTE (Test571DegenerateHashLint),
+        but never gated READ at all — a `READ … sha256:0000…` placeholder is legal
+        at Tier-1 and used in the wild (e.g. a fix-verifier reading `artifact-N.md`).
+        This leg must not turn that legal placeholder into a hard FAIL just because
+        the named file happens to resolve."""
+        self.plant(self.base, "f.txt", b"real content\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"READ  f.txt  sha256:{'0' * 64}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_an_ambiguous_trace_only_name_is_disclosed_and_raises_under_strict(self):
+        """A TRACE citation naming no ARTIFACTS entry and not cited by the WITNESS
+        has no other leg to disclose its ambiguity — this leg owns it alone, and
+        must not let a receipt opt a fabricated hash out of the backstop for free
+        by planting a duplicate basename under two roots."""
+        other = self.base.parent / "second-root"
+        other.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, other, True)
+        self.plant(self.base, "dup.txt", b"one\n")
+        (other / "dup.txt").write_bytes(b"two\n")
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[self.inert_exec, f"WROTE  dup.txt  sha256:{H64}"])
+        out = self.cli("--tier2", "--strict", "--root", str(self.base),
+                       "--root", str(other), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("is ambiguous across roots", out.stderr)
+
+    def test_an_ambiguous_witness_cited_name_still_defers_to_the_witness_leg(self):
+        """The one exception: when the ambiguous name is the exact one the WITNESS
+        `ran=` citation resolves to, tier2_witness's own note-before-raise handling
+        owns the disclosure (TestTheWitnessLegsWalkNoteSurvivesTheStrictAmbiguityRaise
+        pins that ordering) — this leg must not raise for it first and silence that
+        note."""
+        other = self.base.parent / "second-root"
+        other.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, other, True)
+        body = b"dup body\n"
+        h, s = self.plant(self.base, "dup.txt", body)
+        (other / "dup.txt").write_bytes(body)
+        p = self.rcpt(artifacts=[self.inert_artifact],
+                      trace=[f"WROTE  dup.txt  sha256:{h}"],
+                      witness="grep:  expect-fail=/quiet/  ran=TRACE#1")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base),
+                       "--root", str(other), str(p))
+        # tier2_witness's own note-before-raise still fires; this leg does not
+        # preempt it with its OWN raise for the same name.
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("witness artifact", out.stderr)
+        self.assertIn("is ambiguous across roots", out.stderr)
+
+
+class Test572ExpectAbsentWitness(_InqBase):
+    """#572 — a correctly-framed WITNESS on a find-and-report FAIL pre-commits a
+    FALSIFIER: a signature whose PRESENCE would contradict the FAIL finding. The new
+    `expect-absent=` clause names that polarity explicitly; `expect-fail=` keeps its
+    existing meaning (a signature that must be PRESENT) unchanged on both verdicts."""
+
+    def _fail_receipt(self, body, expect_absent, name="p.rcpt"):
+        h, s = self.plant(self.base, "probe.log", body)
+        text = _receipt(
+            f'exec:bash  expect-absent={expect_absent}  ran=TRACE#1',
+            verdict="FAIL",
+            artifacts=[("probe.log", h, s)],
+            trace=[f"EXEC  `bash probe.sh`  exit=0  dur=0.1s  out=probe.log#L1-L1"])
+        p = self.base / name
+        p.write_text(text)
+        return p
+
+    def test_absent_signature_correctly_missing_passes(self):
+        p = self._fail_receipt(b"Stop 4: rc=1 ctr=1 degraded=0\n",
+                               '"Stop 4: rc=0 ctr= degraded=1"')
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_absent_signature_that_wrongly_appears_still_fails(self):
+        p = self._fail_receipt(b"Stop 4: rc=0 ctr= degraded=1\n",
+                               '"Stop 4: rc=0 ctr= degraded=1"')
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("falsifying signature present", out.stderr)
+
+    def test_empty_body_does_not_vacuously_confirm_absence(self):
+        p = self._fail_receipt(b"", '"Stop 4: rc=0 ctr= degraded=1"')
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("no evidence of absence", out.stderr)
+
+    def test_expect_absent_on_pass_verdict_is_a_lint_error(self):
+        rv = _import_rv()
+        text = _receipt(
+            'exec:bash  expect-absent="Stop 4: rc=0 ctr= degraded=1"  ran=TRACE#1',
+            verdict="PASS",
+            artifacts=[("probe.log", H64, "10")],
+            trace=["EXEC  `bash probe.sh`  exit=0  dur=0.1s  out=probe.log#L1-L1"])
+        with self.assertRaises(rv.LintError) as cm:
+            rv.lint_receipt(text)
+        # Several distinct lint messages mention "expect-absent" (the mutual-
+        # exclusion check, the exit-clause-form restriction); pin the one this
+        # test actually exercises so a regression in message ROUTING, not just
+        # message PRESENCE, still fails.
+        self.assertIn("only meaningful on a FAIL verdict", str(cm.exception))
+
+    def test_expect_absent_and_expect_fail_together_is_a_lint_error(self):
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError):
+            rv.parse_witness(
+                ['exec:bash  expect-fail=/x/  '
+                 'expect-absent="Stop 4: rc=0 ctr= degraded=1"  ran=TRACE#1'])
+
+    def test_expect_absent_exit_clause_form_is_a_lint_error(self):
+        rv = _import_rv()
+        with self.assertRaises(rv.LintError):
+            rv.parse_witness(["exec:bash  expect-absent=exit!=0  ran=TRACE#1"])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ Use this template when dispatching a contract test writer subagent in refactor-m
 
 This is NOT a variant of `acceptance-test-writer-prompt.md`. It has different inputs (impact manifest + blast radius file list) and a different goal (lock current behavior, not define new behavior).
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Write contract tests for [target] refactoring"

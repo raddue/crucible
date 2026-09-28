@@ -242,6 +242,12 @@ Raise critical gaps with the user before saving.
   source: "design"     # Provenance tracking — distinguishes from /spec-authored docs
   ---
   ```
+- **ADR hook (before committing):** If any `### Dn — …` decision dimension in the
+  just-written design doc passes the `adr` skill's D1 eligibility test, run
+  `crucible:adr` for the single most-durable surviving dimension; it writes the
+  ADR with status `PROPOSED`. Commit the ADR in the same commit as the design
+  doc (`git add docs/decisions/NNNN-*.md`), so no untracked ADR is left behind
+  to trip warden's clean-tree assert. Say in one line when no dimension passes.
 - Commit the design document
 
 ### Contract Emission

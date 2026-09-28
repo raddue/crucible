@@ -4,6 +4,8 @@ description: Internal temper-eval harness — not auto-routed; invoke explicitly
 model: opus
 ---
 
+Requested profile: high. Claude Code frontmatter mapping: `model: opus`.
+
 <!-- CANONICAL: shared/dispatch-convention.md -->
 
 # Temper Eval Harness — Calibrate Wrapper

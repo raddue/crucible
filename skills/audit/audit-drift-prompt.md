@@ -5,6 +5,8 @@
 
 Use this template ONLY when the audit was invoked with `--drift intent=<path>`. The orchestrator reads the explicit intent artifact at `<path>`, fills in the bracketed sections, and dispatches this lens. The Drift lens is never run, produced, or advertised when `--drift` was not passed. Its findings fold into Phase 3 synthesis under a "Drift / Intent" theme.
 
+Requested profile: high. Claude Code call-level model mapping: `model: opus`.
+
 ```
 Task tool (general-purpose, model: opus):
   description: "Audit drift / intent lens"

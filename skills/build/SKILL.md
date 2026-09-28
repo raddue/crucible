@@ -20,6 +20,8 @@ End-to-end development pipeline: interactive design, autonomous planning with ad
 
 **Announce at start:** "I'm using the build skill to run the full development pipeline."
 
+**Models:** Build dispatches request model-agnostic profiles. Implementers, plan writers, and gate-critical reviewers generally request `high`; bounded mechanical work and some reviewers may request `standard` under the existing complexity heuristics. Prompt templates show current Claude Code reference aliases; other harnesses map supported profiles or omit unsupported model fields per `shared/model-tier-policy.md`.
+
 **Session index event:** At startup, if session indexing is active (session index path discoverable via glob), emit a `skill_start` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_start","summary":"Starting /build for <user goal>","detail":{"skill":"build","goal":"<user goal>"}}`. See `skills/shared/session-index-convention.md` for the outbox pattern.
 
 **Guiding principle:** Quality over velocity. This pipeline produces correct, well-integrated, maintainable output — even if slower. Parallel execution is available for independent work, but sequential with quality gates is the default.
@@ -333,6 +335,9 @@ Quality gates are unconditional at all three gate points:
 **This requirement exists because:** Quality gates consistently find issues the pipeline misses regardless of task size. There is no category of task that is immune. In observed runs, tasks self-assessed as "trivial" had the same defect rate as complex tasks. The only way to skip a quality gate is with explicit user approval — an unambiguous instruction specifically referencing the gate, not general feedback like "looks good" or "move on."
 
 ## Pipeline Status
+
+<!-- CANONICAL: shared/pipeline-status-convention.md (shared header, health state machine, events buffer, inline CLI, compaction recovery; build keeps only its skill-specific body + YELLOW/RED triggers) -->
+**Runtime tool (preferred — the format below is the skill-specific reference).** Compose the shared header/health/events with `python3 scripts/pipeline_status.py write --skill build --phase … --health … [--event …] --body-file <skill-body.md>` (see `shared/pipeline-status-convention.md`); hand-compose only build's skill-specific body (`## Task Progress`, `## Quality Gates`, `## Checkpoints`, `## Compression State`).
 
 Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
 
@@ -1279,7 +1284,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Estimated input tokens (sum of `input_chars` from manifest / 4)
 - Estimated output tokens (sum of `output_chars` from manifest / 4)
 
-**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the pipeline completion report alongside existing metrics.
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count comparable dispatches grouped by `model_profile`; report raw `model_tier` separately when useful. Include these in the pipeline completion report alongside existing metrics.
 
 **Gate tracking verification:** Before compiling the pipeline summary (Phase 4 Step 9), verify that all three gate categories (design, plan, implementation) show round count >= 1 with clean final rounds (0 Fatal, 0 Significant). If any gate was skipped with explicit user approval, record it as `USER_SKIP` in the metrics. A zero without user approval indicates a gate was dropped — report this in the summary.
 

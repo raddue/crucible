@@ -113,6 +113,32 @@ because routing/structure regressions in this repo are caught by
 (temper/delve/red-team), not by inquisitor's executable cross-component tests, which
 have no target in an all-docs diff.
 
+## Large-diff bundling coverage (#630)
+
+<!-- CANONICAL: shared/change-bundling-convention.md -->
+
+On a **many-file diff**, prompt-driven review reliably skips files — warden's
+legs each re-derive "the changed files" from their own reading of the diff, so
+coverage is whatever each leg's prompt happened to emphasize. warden replaces
+that with the deterministic step from the **change-bundling convention**
+(`scripts/change_bundling.py`, the single source of truth): enumerate every
+changed path → select the reviewable ones (`deleted` / `binary` are explicit
+skips, never silent) → bundle locale siblings / same-directory files → emit a
+per-file coverage report that assigns **every changed file to exactly one
+bundle** (or names the explicit skip; a file with neither is a defect and the
+engine raises).
+
+**Dispatch:** warden dips the entry diff's file set through the bundling step
+**once, before the first leg runs**, and hands **one review bundle per worker** —
+each leg's dispatch context names its exact bundle file list, never "the diff,
+review it". All bundles dispatch **concurrently**; the union of every leg's
+coverage markers must equal the coverage report's `bundled` set at the end, and
+a bundle whose leg dies is **fail-closed** (its files surface as uncovered —
+the dead-leg rule: an unrun gate is not a pass). Every changed file is therefore
+**covered exactly once**, and the per-file coverage report is the proof — warden
+does not trust any reviewer's natural-language "I covered everything". Small
+diffs (1–3 files) collapse to one bundle and behave exactly as before.
+
 ## Fix behavior
 
 Each leg's fix path is **not** uniform — the earlier "warden drives each

@@ -11,7 +11,10 @@ Invocation (from repo root):
 leave the spec to see the real code. Those copies can silently go stale when
 the module changes underneath them (the exact #460 round-4 S4 bug: the
 `default_repo` copy was missing the #401 `os.path.realpath(top)` call and its
-comment). This check catches that class of drift mechanically.
+comment). This check catches that class of drift mechanically. Since #643 removed the
+verbatim prose copies (the single source of truth is now the module itself),
+the steady state is *no* reference blocks: the check passes on an absent set
+and re-activates the drift machinery automatically if a copy reappears.
 
 **Exact statement match by default; subsequence only for declared abridgments.**
 Most reference blocks are full copies of their module and must match it
@@ -177,8 +180,11 @@ def main() -> int:
     doc_text = DOC_PATH.read_text(encoding="utf-8")
     blocks = extract_reference_blocks(doc_text)
     if not blocks:
-        print(f"NO reference blocks found in {DOC_PATH} — regex may be stale.")
-        return 1
+        print(f"OK — no `## Reference Python` prose copies in "
+              f"{DOC_PATH.relative_to(ROOT)} (removed #643; scripts are the "
+              f"single source of truth). If a copy is re-added it will be "
+              f"drift-checked again below.")
+        return 0
 
     all_drift = []
     skipped = []
@@ -225,6 +231,12 @@ def selftest() -> int:
     doc_text = DOC_PATH.read_text(encoding="utf-8")
     blocks = extract_reference_blocks(doc_text)
     failures = []
+
+    if not blocks:
+        print("SELFTEST OK — no reference blocks present in the doc (the #643 "
+              "steady state); the drift machinery re-activates automatically if "
+              "a `## Reference Python` copy is re-added.")
+        return 0
 
     if "ledger_append.py" not in blocks:
         failures.append("positive: ledger_append.py reference block not found "

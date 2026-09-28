@@ -46,7 +46,7 @@ TRACE
 CLAIMS
   <key>=<value>  from=<citation>  [pattern=<regex>]
   ...
-WITNESS    <kind>:<payload>  expect-fail=<signature>  ran=<TRACE#N|SKIPPED:reason|UNRUNNABLE:reason>
+WITNESS    <kind>:<payload>  expect-fail=<signature>|expect-absent=<signature>  ran=<TRACE#N|SKIPPED:reason|UNRUNNABLE:reason>
 SUSPICION  <N.NN>  [ (<one-line note>) ]
 NEXT       <one-line re-verification hint>  [; <hint>]
 ```
@@ -139,6 +139,17 @@ The `WITNESS` line pre-commits the single cheapest verification whose result wou
 - Literal fragment: `"…"` whose content is ≥ 4 characters.
 - The bare token `match` — used with `kind=grep` to mean *"the pattern declared on the grep line matches the body"*. Failing world: the pattern matches. No length constraint because the pattern itself is already on the WITNESS line. It **requires a ranged payload** (`grep:<artifact>#<range>`), which is the form the `Kinds` grammar already defines: a rangeless payload turns off the artifact-membership, span and empty-body rules, so `match` on one would name no file it is checked against.
 
+### `expect-absent=<signature>` — the FAIL-verdict inverse
+
+`expect-fail=` and its signature forms above all read one way: the signature must be **PRESENT** for the witness to have fired. On a `VERDICT FAIL` for a find-and-report finding, a correctly-framed witness instead pre-commits a **falsifier** — a signature whose presence would *contradict* the finding — so the passing state is that signature's **absence**, not its presence. `expect-absent=<signature>` names that inverted polarity explicitly, closing GH #512's directional gap (see *Witness-evidence requirement*, below) for any receipt that uses it:
+
+- Mutually exclusive with `expect-fail=` on the same WITNESS line (a Tier-1 lint failure to carry both).
+- **Only meaningful on `VERDICT FAIL`** — a Tier-1 lint failure on `PASS`/`BLOCKED`, since `expect-fail=` already means "must be present" there.
+- Restricted to the `/regex/` and `"literal"` signature forms — the exit-clause and bare-`match` forms have no well-defined *absent* reading (an exit code or a grep-line match is not a body signature to negate).
+- Tier-2 rejects the FAIL if the signature is **present** in the cited evidence ("falsifying signature present"), and rejects it if the cited range delivers **no content at all** to check against (an empty or blank body proves nothing about absence) — it passes only when the signature is verifiably, non-vacuously absent.
+
+Example: `WITNESS  exec:bash  expect-absent="Stop 4: rc=0 ctr= degraded=1"  ran=TRACE#4` on a `FAIL` receipt reporting that Stop 4's guard is broken — the FAIL stands only if a fresh probe run does **not** reproduce the exact healthy-looking signature the finding claims is missing.
+
 ### `ran=` disposition
 
 - **`ran=TRACE#N`** — subagent already executed the witness. `TRACE#N` must be the matching verb for the kind: `EXEC` for `exec:`; `EXEC`/`READ`/`WROTE` for `grep:` (any verb that touches or produces the artifact being grepped); **any verb** for `lint:` (the citation points at the TRACE entry that most directly produced the state the rule targets — the rule itself is re-applied to the receipt, independent of the cited verb). Tier-2 will read the cited range for `exec:`/`grep:`; for `lint:` Tier-2 re-applies the named rule.
@@ -184,7 +195,21 @@ for each EXEC in TRACE:
   fail if out= byte-range exceeds 4 KiB
 
 for each EDIT / WROTE in TRACE:
-  fail if sha256:<hex64> is missing   # the hash is provenance, NOT verified vs ARTIFACTS (0000… placeholders are normal); effects are verified via declared ARTIFACTS + WITNESS + ledger, never this hash. Deliberate — see #412.
+  fail if sha256:<hex64> is missing
+  fail if sha256:<hex64> is all-zero or all-f — never a real digest, always a
+    fabricated-hash shape (#571). Unlike the ARTIFACTS-membership rule just below,
+    this is unconditional: `0000…`/`ffff…` is no longer an accepted placeholder on
+    EDIT/WROTE (it still is on READ, which this rule does not cover — READ's hash
+    is a bare observation, not #412's non-gate below). Tier-2, separately, hashes
+    the file for ANY TRACE READ/WROTE/EDIT citation that resolves under a declared
+    `--root` and hard-FAILs on a mismatch against the receipt's own claim — so a
+    well-formed but wrong hash on a real, resolvable file is caught even though
+    Tier-1 cannot tell it from a legitimate one. Only the chronologically LAST
+    citation of a given file is checked (an earlier READ/EDIT of the same path is a
+    claim about a state no longer on disk).
+  # the hash is otherwise provenance, NOT verified vs ARTIFACTS membership; effects are
+  # verified via declared ARTIFACTS + WITNESS + ledger, never this hash's membership.
+  # Deliberate — see #412.
 
 for each DISPATCHED in TRACE:
   fail if rcpt-sha256:<hex64> is missing
@@ -359,6 +384,22 @@ Any counter for which reason codes were recorded carries them as a sorted, de-du
 > rules `_allowed_bases` already applies. It makes the fact **audible**, which is the whole of what
 > it claims.
 
+**`not-reached (<code>)` — the closed set.** `tier1-reject` is not the only code the census renders in place of the counters. Nine values exist and **this is the complete list**; a `--tier2` run that ends before (or instead of) Tier-2 emits exactly one of them, and no other spelling is legal. Whatever the code, the meaning is the same one thing — **Tier-2 did not run, so nothing on this receipt was verified against disk** — and the orchestrator's disposition is the same one thing: treat the receipt as structurally `BLOCKED`. **None of these is the tool-unavailable signal**, and in particular the exit-2 half must not be read as "you invoked a tool that isn't there" and answered with the in-context pseudocode fallback, which does zero disk verification. The **remedy** differs by code, which is why the list must stay complete:
+
+| code | exit | what produces it | remedy |
+| --- | --- | --- | --- |
+| `tier1-reject` | 1 | Tier-1 rejected the receipt, so Tier-2 was never entered. | Fix the receipt and re-dispatch. |
+| `root-absent` | 1 | A supplied `--root` names a directory that does not exist — the normal pre-write state of a findings root the reviewed subagent creates, and also what a crash, a timeout or a wrong output path produces. Tier-1 ran; Tier-2 did not. | Create the directory before the lint (see `quality-gate/SKILL.md`), then re-run. |
+| `root-collapse` | 1 | Two **differently spelled** `--root` tokens resolve to one directory, so the cross-root ambiguity check could not fire. Tier-1 ran; Tier-2 did not. | Inspect the findings root for a symlink before re-running. |
+| `root-invalid` | 2 | A supplied `--root` is the **empty string**, or names an existing **non-directory** (the `<findings-root>` vs `[FINDINGS_OUTPUT_PATH]` one-token slip, or a swallowed shell substitution). Nothing ran, Tier-1 included. | Fix the command line. |
+| `root-missing-value` | 2 | `--root` was the **final** token — a substitution expanded to nothing and ate the root. | Fix the command line. |
+| `ledger-missing-value` | 2 | `--ledger` was the **final** token, same shape. | Fix the command line. |
+| `two-positionals` | 2 | A **second** receipt path was supplied; the linter cannot know which receipt was meant. | Fix the command line. |
+| `unknown-flag` | 2 | An unrecognised `--flag` — the other way a mangled substitution terminates the run. | Fix the command line. |
+| `receipt-unreadable` | 2 | The receipt path itself could not be read (missing, not a regular file, or over the read cap). | Supply a readable receipt path. |
+
+The six exit-2 codes are all **mandated-command-line construction errors**: the argv the orchestrator built is wrong, and the run must be re-issued with a corrected command line rather than abandoned to the fallback. `--tier1` emits no census line in any configuration, and neither does `--eval`, so none of these codes appears there.
+
 **`PROVENANCE-ONLY:` — the TRACE-provenance advisory (#488 T2).** On every `--tier2` run,
 `rcpt_verify.py` prints one `PROVENANCE-ONLY: <name> (declared in TRACE, not verified)` line to
 stderr for each `READ`/`EDIT`/`WROTE` `TRACE` entry whose basename matches no `ARTIFACTS`
@@ -399,7 +440,7 @@ ARTIFACTS
 TRACE
   1  READ   src/foo.ts  sha256:22abdd8cde1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b
   2  EDIT   src/foo.ts  sha256:33cdee1fa2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9
-  3  EXEC   `bun test src/foo.test.ts`  exit=0  dur=4.2s  out=test-output.log#L1-L220
+  3  EXEC   `bun test src/foo.test.ts`  exit=0  dur=4.2s  out=test-output.log#L200-L220
 CLAIMS
   tests-ran=true    from=TRACE#3
   tests-pass=true   from=test-output.log#L200-L220  pattern="220 pass"
@@ -417,7 +458,7 @@ VERDICT  PASS  conf=0.85
 ARTIFACTS
   review.md  sha256:b2e7c3a4d5f6e7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2  3120
 TRACE
-  1  READ   docs/plans/foo-design.md  sha256:dd8cef1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9
+  1  READ   docs/plans/foo-design.md  sha256:dd8cef1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c90
   2  WROTE  review.md  sha256:b2e7c3a4d5f6e7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2
 CLAIMS
   severity-max=minor  from=review.md#L40-L55  pattern="severity: minor"
@@ -437,7 +478,7 @@ ARTIFACTS
   test-output.log  sha256:ff8091a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0  6240
 TRACE
   1  EDIT   src/bar.ts  sha256:4455667788aabbccddeeff00112233445566778899aabbccddeeff0011223344
-  2  EXEC   `bun test src/bar.test.ts`  exit=1  dur=3.1s  out=test-output.log#L1-L180
+  2  EXEC   `bun test src/bar.test.ts`  exit=1  dur=3.1s  out=test-output.log#L170-L180
 CLAIMS
   tests-ran=true   from=TRACE#2
   tests-pass=false from=test-output.log#L170-L180  pattern="3 fail"
@@ -529,7 +570,7 @@ Tier-1 rules:
 - A cited predecessor MUST NOT already carry `SUPERSEDED_BY=*` in the manifest (supersession is a DAG, never a thicket).
 - **Witness-evidence requirement:** if any cited predecessor had `VERDICT=FAIL` OR `SUSPICION ≥ 0.30`, then `N`'s WITNESS MUST have `kind ∈ {exec, grep}` (not `lint`) AND `ran=TRACE#N` (not `SKIPPED:` / `UNRUNNABLE:`). Tier-2 then verifies the witness normally — supersession only survives if the witness demonstrably does NOT match `expect-fail` (i.e., the original concern no longer reproduces). This closes the circular-supersession attack — with one declared hole per leg, both stated below and neither closed by this rule's letter. **"Demonstrably" means the predicate's result was allowed to decide, not merely that it was computed.** A witness the census reports as `discarded` — the `FAIL` leg ran the predicate against real bytes and then threw the result away, under either reason code — demonstrates nothing about the predecessor and does **not** satisfy this requirement, whichever token the cited entry happened to carry. Neither, **on the `FAIL` leg**, does an `expect-fail` that is an **exit clause** (`exit!=0` / `exit=<N>`): no body predicate is derived from it at all, the census bills it `not-applicable (exit-clause-not-a-body-predicate)`, and that leg rejects it whichever exit code the cited entry carries (GH #501 / QG-r2 — until then this arm was the one-token evasion of the rule **on that leg**). **On the `PASS` leg the same arm is still open, and that is where the population is.** A `kind=exec` witness whose exit-clause `expect-fail` cites an entry that *does* carry an exit code has that exit code compared against the clause, so the `PASS` leg sets `evaluated` at its own site and the supersession survives at exit 0 — the census still bills it `not-applicable (exit-clause-not-a-body-predicate)`, because that code is about the absence of a **body** predicate, not about the absence of evidence. That is what keeps the mandated `run-tests` fix-agent witness (`quality-gate/SKILL.md` › *Fix-agent superseding-witness by artifact class*) working, and it is also the evasion, unclosed: measured over the three enumerated frozen corpora, **all 21** of the 68 receipts carrying a non-`none` `SUPERSEDES` are `PASS` (`{'n': 68, 'sup': 21, 'supfail': 0, 'fail': 19}`), so the closure above covers none of the measured population. Tracked on **GH #511**; do not read the `FAIL`-leg closure as closing the arm.
 
-  So on a `FAIL` receipt **whose witness sourced an artifact**, exactly one shape gets past this consequent: a cited entry with `exit=0` whose body **matches** `expect-fail`. Read that for what it is rather than as satisfaction of the requirement — it is the shape whose witness **fired**. This leg raises at exactly one site, `exit=0 AND the body does not match expect-fail`, so what Tier-2 establishes here is that the predicate was **consulted**; it cannot establish the rule's **direction**. The directional half — "demonstrably does **NOT** match" — is **unenforced on `FAIL`**, one of that leg's residual evidential gaps (GH #512; **not** #510, which is the `ran=SKIPPED:` deferral). Do not engineer a matching witness to get past this: for the shape `quality-gate/SKILL.md` › *Fix-agent superseding-witness by artifact class* mandates for the dominant QG case, a matching body means the superseded finding-anchor is **still present**. A fix agent on this leg should **drop the `SUPERSEDES:` line** and let the finding stand into the next round.
+  So on a `FAIL` receipt **whose witness sourced an artifact**, exactly one shape gets past this consequent: a cited entry with `exit=0` whose body **matches** `expect-fail`. Read that for what it is rather than as satisfaction of the requirement — it is the shape whose witness **fired**. This leg raises at exactly one site, `exit=0 AND the body does not match expect-fail`, so what Tier-2 establishes here is that the predicate was **consulted**; it cannot establish the rule's **direction**. The directional half — "demonstrably does **NOT** match" — is **unenforced on `FAIL`**, one of that leg's residual evidential gaps (GH #512; **not** #510, which is the `ran=SKIPPED:` deferral). Do not engineer a matching witness to get past this: for the shape `quality-gate/SKILL.md` › *Fix-agent superseding-witness by artifact class* mandates for the dominant QG case, a matching body means the superseded finding-anchor is **still present**. A fix agent on this leg should **drop the `SUPERSEDES:` line** and let the finding stand into the next round. A witness written with `expect-absent=` instead of `expect-fail=` (see *`expect-absent=<signature>`* above) DOES enforce the directional half — its FAIL leg raises on the falsifier's presence, not its absence — so a receipt that adopts it closes GH #512 for itself; the gap above describes `expect-fail=`'s existing behavior, unchanged, and remains open for any FAIL witness that keeps using it.
 
   One residual, stated rather than implied: a `FAIL` witness that sourced **no** artifact at all — no range to open and no EXEC output-range citation to fall back to — is exempt from this requirement, because no witness that receipt could have written would set the flag and blocking it would be a structural BLOCK with no in-receipt remedy. A `PASS` receipt's exit code is unaffected by the `FAIL`-leg re-key above, but do not read that as "the `PASS` leg always consults its predicate": a ranged `kind=grep` payload whose `expect-fail` is an exit clause derives no body predicate, and a `kind=exec` exit clause whose cited entry carries **no** exit code never reaches the comparison — both set no flag and are hard-BLOCKed here, on that leg, exactly as before #501.
 
@@ -594,6 +635,8 @@ After every Task return, and before the orchestrator may dispatch again:
    next subagent.
 ```
 
+**Step 3 on a `RCPT v1` receipt.** Step 3 gives the orchestrator no check of its own precisely because the linter is supposed to have done it — which is why a `v1` header carrying a non-`none` `SUPERSEDES:` never reaches this step at all: **Tier-2 hard-FAILs it** (see *Version handling*), so step 1 has already treated the receipt as `BLOCKED` and step 3 is not run. The orchestrator therefore still processes `SUPERSEDES:` unconditionally here, on the receipts that get this far, and never has to version-dispatch on its own.
+
 ### Linter extension (Tier-1 additions for v1.1 receipts)
 
 ```
@@ -626,7 +669,7 @@ parse TRIPWIRE-CHILD line (if present)
 
 ### Version handling
 
-- `RCPT v1 …` receipts follow Layer 1 rules only; TRIPWIRE/SUPERSEDES/TRIPWIRE-CHILD are not required (and not evaluated if present).
+- `RCPT v1 …` receipts follow Layer 1 rules only; TRIPWIRE/SUPERSEDES/TRIPWIRE-CHILD are not required. **`TRIPWIRE:` and `TRIPWIRE-CHILD:` are not evaluated if present — but `SUPERSEDES:` is, and it is the one carve-out.** A `SUPERSEDES:` line on a `v1` header whose body is anything other than `none` is a **hard FAIL at Tier-2** (exit 1), unconditionally and whatever the receipt's verdict or witness. The v1.1 Layer-2 supersession rules — uniqueness, CLAIMS justification, no-already-superseded, the witness-evidence requirement — are exactly what a `v1` header opts out of being checked against, so granting the supersession would let the older, less-checked header format buy a retirement the newer one has to earn: the header format is chosen by the reviewed subagent that writes it, which makes "declare `v1`" a one-token bypass rather than a version choice. **Remedy:** emit `SUPERSEDES: none` (a `v1` receipt that claims no supersession is untouched and still exits 0), or declare `RCPT v1.1` and satisfy the Layer-2 rules. Do **not** read "not evaluated if present" as covering this field.
 - `RCPT v1.1 …` receipts require all Layer 2 sections. Pilot skills updated by this PR emit v1.1; mixed-version runs are supported.
 - **Mixed-version semantics:** a v1 receipt has no TRIPWIRE of its own and thus never contributes firings as the *prior* entry in the manifest. However, a v1 receipt's arrival DOES trigger the sweep over prior v1.1 entries — its TRACE/CLAIMS paths are evaluated against prior v1.1 tripwires normally. This is the intended behavior: once Layer 2 is active, every later dispatch is a potential trigger, regardless of whether it emits its own tripwires.
 
@@ -659,14 +702,14 @@ SUPERSEDES: none
 RCPT v1.1 build/42-implementer
 VERDICT  PASS  conf=0.92
 ARTIFACTS
-  patch.diff       sha256:bb33aa22ff11ee00dd99cc88bb77aa66998877665544332211009988776655443  1820
-  test-output.log  sha256:cc44bb33aa22ff11ee00dd99cc88bb77669988776655443322110099887766554  2400
+  patch.diff       sha256:bb33aa22ff11ee00dd99cc88bb77aa6699887766554433221100998877665544  1820
+  test-output.log  sha256:cc44bb33aa22ff11ee00dd99cc88bb7766998877665544332211009988776655  2400
 TRACE
   1  EDIT  src/auth/token.ts  sha256:ee55dd44cc33bb22aa1199887766554433221100ffeeddccbbaa998877665544
-  2  EXEC  `bun test src/auth/`  exit=0  dur=3.1s  out=test-output.log#L60-L120
+  2  EXEC  `bun test src/auth/`  exit=0  dur=3.1s  out=test-output.log#L70-L120
 CLAIMS
   tests-pass=true   from=TRACE#2
-  fix-verified      from=21a1b2c3d4e5#L1-L10  pattern="token rotation"
+  fix-verified=true from=21a1b2c3d4e5#L1-L10  pattern="token rotation"
 WITNESS    exec:`bun test src/auth/`  expect-fail=/\d+ fail/  ran=TRACE#2
 SUSPICION  0.05
 NEXT       (none)
@@ -695,4 +738,4 @@ Each pilot skill's dispatch prompt template and orchestrator body must:
 ## Version History
 
 - **v1** (2026-04-20) — Initial. Pilot in `/build`, `/quality-gate`, `/siege`. Bulk rollout across the other 39 skills is a follow-up after eval (see issue #202).
-- **v1.1** (2026-04-20) — Tripwire Manifest (#203). Adds `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:` mandatory sections, the closed predicate vocabulary, the in-context manifest format, the dispatch-loop sweep clause, and supersession rules. v1 and v1.1 receipts coexist in a single run; v1 receipts contribute no forward-check firings.
+- **v1.1** (2026-04-20) — Tripwire Manifest (#203). Adds `TRIPWIRE:`, `SUPERSEDES:`, and (when applicable) `TRIPWIRE-CHILD:` mandatory sections, the closed predicate vocabulary, the in-context manifest format, the dispatch-loop sweep clause, and supersession rules. v1 and v1.1 receipts coexist in a single run; v1 receipts contribute no forward-check firings — **but a v1 receipt carrying a non-`none` `SUPERSEDES:` is a Tier-2 hard FAIL** (see *Version handling*), so the coexistence does not extend to claiming a supersession from a v1 header.

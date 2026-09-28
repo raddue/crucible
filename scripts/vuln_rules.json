@@ -1,0 +1,162 @@
+{
+  "languages": {
+    "python": {
+      "ext": [".py", ".pyi", ".pyw"],
+      "rules": [
+        {
+          "id": "py-sqli-execute",
+          "category": "sql-injection",
+          "severity": "critical",
+          "pattern": "execute\\s*\\(\\s*(?:f[\"']|[^)]*?\\bf[\"'])",
+          "message": "SQL built via f-string into execute()"
+        },
+        {
+          "id": "py-eval-exec",
+          "category": "code-injection",
+          "severity": "critical",
+          "pattern": "\\b(?:eval|exec)\\s*\\(",
+          "message": "eval()/exec() on dynamic input"
+        },
+        {
+          "id": "py-pickle-load",
+          "category": "insecure-deserialization",
+          "severity": "critical",
+          "pattern": "pickle\\s*\\.\\s*loads?\\s*\\(",
+          "message": "pickle.load/s unsafe on untrusted data"
+        },
+        {
+          "id": "py-shell-true",
+          "category": "command-injection",
+          "severity": "high",
+          "pattern": "shell\\s*=\\s*True",
+          "message": "shell=True creates a shell — injectable"
+        },
+        {
+          "id": "py-assert-freeze",
+          "category": "auth-bypass",
+          "severity": "medium",
+          "pattern": "assert\\s+",
+          "message": "assert stripped under -O — unusable as a security gate"
+        }
+      ]
+    },
+    "javascript": {
+      "ext": [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"],
+      "rules": [
+        {
+          "id": "js-xss-innerhtml",
+          "category": "xss",
+          "severity": "critical",
+          "pattern": "\\.innerHTML\\s*=",
+          "message": "innerHTML assignment without sanitization"
+        },
+        {
+          "id": "js-eval",
+          "category": "code-injection",
+          "severity": "critical",
+          "pattern": "\\b(?:eval|new\\s+Function)\\s*\\(",
+          "message": "eval()/Function() on dynamic input"
+        },
+        {
+          "id": "js-sqli-templatelit",
+          "category": "sql-injection",
+          "severity": "critical",
+          "pattern": "(?:query|executeQuery)\\s*\\([^;;]*\\$\\{",
+          "message": "SQL operand interpolated via template literal"
+        },
+        {
+          "id": "js-execa-unchecked",
+          "category": "command-injection",
+          "severity": "high",
+          "pattern": "child_process\\.[a-zA-Z]*exec[a-zA-Z]*\\s*\\(",
+          "message": "child_process exec without shell/arg escaping"
+        }
+      ]
+    },
+    "go": {
+      "ext": [".go"],
+      "rules": [
+        {
+          "id": "go-sqli-sprintf",
+          "category": "sql-injection",
+          "severity": "critical",
+          "pattern": "(?:\\.Query(?:Row)?|\\.Exec)\\s*\\(\\s*fmt\\.Sprintf\\s*\\(",
+          "message": "SQL query built with fmt.Sprintf — injectable"
+        },
+        {
+          "id": "go-format-dynamic",
+          "category": "command-injection",
+          "severity": "high",
+          "pattern": "exec\\.Command(?:Context)?\\s*\\(\\s*(?:fmt|strings)\\.[A-Za-z]+\\([^)]*?\\+[^)]*\\)",
+          "message": "Command args built by string concatenation"
+        },
+        {
+          "id": "go-println-data",
+          "category": "information-disclosure",
+          "severity": "low",
+          "pattern": "log\\.(?:Println|Printf|Print)\\s*\\([^)]*err",
+          "message": "error logged — confirm no sensitive payload"
+        }
+      ]
+    },
+    "java": {
+      "ext": [".java"],
+      "rules": [
+        {
+          "id": "java-cmd-exec",
+          "category": "command-injection",
+          "severity": "critical",
+          "pattern": "Runtime\\s*\\.\\s*getRuntime\\s*\\(\\s*\\)\\s*\\.\\s*exec\\s*\\(",
+          "message": "Runtime.exec() — injectable when input-derived"
+        },
+        {
+          "id": "java-sql-concat",
+          "category": "sql-injection",
+          "severity": "critical",
+          "pattern": "(?:createStatement|executeQuery|executeUpdate)\\s*\\([^)]*?\\+[^)]*\\)",
+          "message": "SQL via string concatenation instead of a PreparedStatement"
+        },
+        {
+          "id": "java-npe-deref",
+          "category": "null-pointer",
+          "severity": "medium",
+          "pattern": "\\.get\\([^)]*\\)\\s*\\.\\s*[a-zA-Z_$][\\w$]*\\s*(?:\\(|\\[|\\.|/)",
+          "message": "chained dereference after .get() — potential NPE"
+        },
+        {
+          "id": "java-shared-singleton-field",
+          "category": "thread-safety",
+          "severity": "medium",
+          "pattern": "(?:static\\s+final\\s+)?\\b(?:HashMap|ArrayList|HashSet|SimpleDateFormat)\\b[^;]*static\\s+",
+          "message": "static mutable collection/format — check thread safety"
+        }
+      ]
+    },
+    "php": {
+      "ext": [".php", ".phtml"],
+      "rules": [
+        {
+          "id": "php-sqli-superglobal",
+          "category": "sql-injection",
+          "severity": "critical",
+          "pattern": "(?:query|mysqli?_query|pg_query)\\s*\\([^)]*\\$_(?:GET|POST|REQUEST)",
+          "message": "SQL built from a request superglobal"
+        },
+        {
+          "id": "php-eval",
+          "category": "code-injection",
+          "severity": "critical",
+          "pattern": "\\beval\\s*\\([^)]*\\$[A-Za-z_]",
+          "message": "eval() on a variable"
+        },
+        {
+          "id": "php-echo-superglobal",
+          "category": "xss",
+          "severity": "high",
+          "pattern": "(?:echo|print)\\s*\\(?\\s*\\$_(?:GET|POST|REQUEST)",
+          "message": "request value echoed without htmlspecialchars()"
+        }
+      ]
+    }
+  }
+}

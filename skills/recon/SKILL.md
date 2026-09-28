@@ -10,6 +10,9 @@ description: "Standalone codebase investigation. Produces a layered Investigatio
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
 
+<!-- CANONICAL: shared/model-tier-policy.md -->
+Dispatch profiles (`high`, `standard`, `fast`) are recommendations resolved per harness; missing mappings must not stop a live dispatch. See `shared/model-tier-policy.md` for resolution, fallback, and trust rules.
+
 <!-- Trust framework: see [skills/getting-started/trust-hierarchy.md](../getting-started/trust-hierarchy.md). -->
 
 Structured, parallel codebase investigation with a layered output model. Produces a core Investigation Brief that all consumers share, plus optional depth modules for consumer-specific needs.
@@ -17,9 +20,10 @@ Structured, parallel codebase investigation with a layered output model. Produce
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
 **Models:**
-- Core scouts: Sonnet (via Explore agents)
-- Judgment depth agents (impact-analysis, friction-scan, diagnostic-context): Opus
-- Mechanical depth agents (consumer-registry, subsystem-manifest, execution-readiness): Sonnet
+- Core scouts: standard (via Explore agents)
+- Judgment depth agents (impact-analysis, friction-scan, diagnostic-context): high
+- Mechanical depth agents (consumer-registry, subsystem-manifest, execution-readiness): standard
+- Claude Code tool calls map `standard` to `model: sonnet` and `high` to `model: opus`; other harnesses use supported mappings or omit unsupported model fields per `shared/model-tier-policy.md`.
 - Orchestrator: runs on whatever model the session uses
 
 **Announce at start:** "Running recon [with task: X / full repo scan] [scope: Y / full repo]."
@@ -62,12 +66,12 @@ List of depth modules to produce after core synthesis. Valid values:
 
 | Module | Agent | Model | Primary Consumer |
 |---|---|---|---|
-| `impact-analysis` | Impact Analyst | Opus | `/design`, `/build` |
-| `consumer-registry` | Consumer Mapper | Sonnet | `/migrate` |
-| `friction-scan` | Friction Scanner | Opus | `/prospector` |
-| `subsystem-manifest` | Manifest Builder | Sonnet | `/audit` |
-| `diagnostic-context` | Diagnostic Gatherer | Opus | `/debugging` |
-| `execution-readiness` | Readiness Checker | Sonnet | `/build` |
+| `impact-analysis` | Impact Analyst | high | `/design`, `/build` |
+| `consumer-registry` | Consumer Mapper | standard | `/migrate` |
+| `friction-scan` | Friction Scanner | high | `/prospector` |
+| `subsystem-manifest` | Manifest Builder | standard | `/audit` |
+| `diagnostic-context` | Diagnostic Gatherer | high | `/debugging` |
+| `execution-readiness` | Readiness Checker | standard | `/build` |
 
 Most invocations request 0-1 depth modules. Omit for core-only output (cheapest).
 
@@ -90,13 +94,15 @@ Directory constraint. When provided, overrides scout scope suggestions entirely 
 
 ### Cost Profile
 
-| Configuration | Agents | Models | Relative Cost |
+| Configuration | Agents | Profile mix | Routing intent |
 |---|---|---|---|
-| Core only | 2 | 2x Sonnet | Low |
-| Core + 1 mechanical module | 3 | 3x Sonnet | Low |
-| Core + 1 judgment module | 3 | 2x Sonnet + 1x Opus | Medium |
-| Core + 2 modules (mixed) | 4 | 2-3x Sonnet + 1-2x Opus | Medium-High |
-| Full repo, no task | 2 | 2x Sonnet | Low (but slower) |
+| Core only | 2 | 2x standard | Lower-cost profile mix |
+| Core + 1 mechanical module | 3 | 3x standard | Lower-cost profile mix |
+| Core + 1 judgment module | 3 | 2x standard + 1x high | More judgment capacity |
+| Core + 2 modules (mixed) | 4 | 2-3x standard + 1-2x high | More judgment capacity |
+| Full repo, no task | 2 | 2x standard | Lower-cost profile mix (but slower) |
+
+These profiles describe routing intent, not portable billed cost; each harness can map them to different models.
 
 ## Communication Requirements (Non-Negotiable)
 
@@ -161,7 +167,7 @@ Pattern Scout always runs fresh — its output varies with cascading context.
 
 ### Dispatch
 
-Dispatch both scouts in parallel (or just Pattern Scout if Structure Scout is cached):
+Dispatch both scouts in parallel (or just Pattern Scout if Structure Scout is cached). These snippets show Claude Code's native call-level `model:` parameter; retain the neutral profile labels in bookkeeping, map profiles per `shared/harness-adapter.md` on other harnesses, and omit unsupported model fields.
 
 **Structure Scout:**
 ```
@@ -515,14 +521,14 @@ auto-inclusion — the empty list signals "core only, no auto-detection."
 
 When multiple modules are requested, dispatch them in parallel. Each depth agent receives the assembled core Investigation Brief via the `[CORE_BRIEF]` placeholder.
 
-| Module | Agent | Dispatch | Template |
-|---|---|---|---|
-| `impact-analysis` | Impact Analyst | `Agent tool (subagent_type: Explore, model: opus)` | `./impact-analyst-prompt.md` |
-| `consumer-registry` | Consumer Mapper | `Agent tool (subagent_type: Explore, model: sonnet)` | `./consumer-mapper-prompt.md` |
-| `friction-scan` | Friction Scanner | `Agent tool (subagent_type: Explore, model: opus)` | `./friction-scanner-prompt.md` |
-| `subsystem-manifest` | Manifest Builder | `Agent tool (subagent_type: Explore, model: sonnet)` | `./manifest-builder-prompt.md` |
-| `diagnostic-context` | Diagnostic Gatherer | `Agent tool (subagent_type: Explore, model: opus)` | `./diagnostic-gatherer-prompt.md` |
-| `execution-readiness` | Readiness Checker | `Agent tool (subagent_type: Explore, model: sonnet)` | `./readiness-checker-prompt.md` |
+| Module | Agent | Profile | Claude Code dispatch | Template |
+|---|---|---|---|---|
+| `impact-analysis` | Impact Analyst | high | `Agent tool (subagent_type: Explore, model: opus)` | `./impact-analyst-prompt.md` |
+| `consumer-registry` | Consumer Mapper | standard | `Agent tool (subagent_type: Explore, model: sonnet)` | `./consumer-mapper-prompt.md` |
+| `friction-scan` | Friction Scanner | high | `Agent tool (subagent_type: Explore, model: opus)` | `./friction-scanner-prompt.md` |
+| `subsystem-manifest` | Manifest Builder | standard | `Agent tool (subagent_type: Explore, model: sonnet)` | `./manifest-builder-prompt.md` |
+| `diagnostic-context` | Diagnostic Gatherer | high | `Agent tool (subagent_type: Explore, model: opus)` | `./diagnostic-gatherer-prompt.md` |
+| `execution-readiness` | Readiness Checker | standard | `Agent tool (subagent_type: Explore, model: sonnet)` | `./readiness-checker-prompt.md` |
 
 ### Placeholder Filling
 
@@ -621,7 +627,7 @@ updates are both passed to the SAME recorder dispatch if one occurs — do
 not dispatch the recorder twice.
 
 1. **Check for new information:** Compare scout findings against cartographer context provided in Phase 1.
-2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder:
+2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder (standard profile; Claude Code uses `model: sonnet`):
    ```
    Task tool (general-purpose, model: sonnet):
      description: "Cartographer recording for recon findings"
@@ -834,6 +840,10 @@ recon scratch brief files — they record falsifications in handoff docs
 under their own control, which the next `/recon` run surfaces via Phase 5
 falsification-grep and doc-mining.
 
+In a repo with an ADR corpus (`docs/decisions/`), record the falsification
+sentence under a trailing `## Falsifications` heading (created on first append),
+so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsification-home -->
+
 ### For recon maintainers
 
 - Ledger format and assembly: see Phase 3 `### Ledger Assembly`.
@@ -851,7 +861,7 @@ falsification-grep and doc-mining.
 - **Evidence-grounded** — produces constraints and evidence, not opinions
 - **Prior art is first-class** — finding existing patterns to follow is the single biggest quality lever
 - **Assumptions are explicit** — annotated inline on relevant findings, not in a standalone block
-- **Token-efficient** — structured markdown, no JSON boilerplate, Sonnet for mechanical work
+- **Token-efficient** — structured markdown, no JSON boilerplate, standard for mechanical work
 
 ## Guardrails / Red Flags
 
@@ -867,14 +877,14 @@ falsification-grep and doc-mining.
 ## Integration
 
 **Dispatches:**
-- `structure-scout-prompt.md` — Structure Scout (Sonnet, Explore)
-- `pattern-scout-prompt.md` — Pattern Scout (Sonnet, Explore)
-- `impact-analyst-prompt.md` — Impact Analyst (Opus)
-- `consumer-mapper-prompt.md` — Consumer Mapper (Sonnet)
-- `friction-scanner-prompt.md` — Friction Scanner (Opus)
-- `manifest-builder-prompt.md` — Manifest Builder (Sonnet)
-- `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer (Opus)
-- `readiness-checker-prompt.md` — Readiness Checker (Sonnet)
+- `structure-scout-prompt.md` — Structure Scout (standard, Explore)
+- `pattern-scout-prompt.md` — Pattern Scout (standard, Explore)
+- `impact-analyst-prompt.md` — Impact Analyst (high)
+- `consumer-mapper-prompt.md` — Consumer Mapper (standard)
+- `friction-scanner-prompt.md` — Friction Scanner (high)
+- `manifest-builder-prompt.md` — Manifest Builder (standard)
+- `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer (high)
+- `readiness-checker-prompt.md` — Readiness Checker (standard)
 
 **Consults:** `crucible:cartographer-skill` (consult mode — direct file read of `map.md`)
 
