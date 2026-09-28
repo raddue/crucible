@@ -44,10 +44,12 @@ receipt-citation contract is disturbed:
 scratch/<run-id>/security-preflight.md    # dependency-audit, which has no dispatch dir
 ```
 
-One line per leg per round, appended (never overwritten):
+One line per leg per round, appended (never overwritten). The `dispatch=` field is the dispatch-file
+ID (`<seq>-<template-name>` per `shared/dispatch-convention.md`) — without it, one dispatch's line can
+certify another's:
 
 ```
-SECURITY-PREFLIGHT: round=<n> leg=<siege|dependency-audit|red-team|...> model=<id|unknown> host=<harness> -- strength not repo-bound; guardrail static-only
+SECURITY-PREFLIGHT: dispatch=<seq>-<template-name> round=<n> leg=<siege|dependency-audit|red-team|...> model=<id|unknown> host=<harness> -- strength not repo-bound; guardrail static-only
 ```
 
 Non-blocking when `<id>` is `unknown` or any non-Fable model: append the line and proceed. Blocking
@@ -55,7 +57,11 @@ when `<id>` is Fable-family: refuse the leg (`BLOCKED`, never PASS) — security
 run on a Fable-family model.
 
 Acceptance check: the **consuming orchestrator** reads that file before accepting a security-surface
-PASS — a missing file, or a missing line for the round being accepted, is `BLOCKED`, not PASS.
+PASS, and matches the record to the return it is accepting — same `dispatch=` ID, same `round`, same
+`leg` — then evaluates **that record's** `model=` for hard-out. A missing file, a missing line for
+that dispatch, or a line whose ID/round/leg does not match is `BLOCKED`, not PASS: a sibling leg's
+line (siege beside red-team in round 1 shares the parent dispatch dir) and a look-harder
+re-dispatch (which shares `round` and `leg`) must not satisfy each other's check.
 Nothing here asks a receipt to cite a range it was never shaped to cite, and no leg has to move a
 line another contract already owns. This holds for the `general-purpose` fallback and look-harder
 re-dispatches too. The blocking branch outranks any skip or result-ordering rule in the consuming
