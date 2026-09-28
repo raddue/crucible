@@ -108,6 +108,331 @@ TASK_TOOL_PIN_RE = re.compile(
 AGENT_TOOL_PIN_RE = re.compile(
     r"Agent tool\s*\([^)]*model:([^)]*)", re.IGNORECASE)
 ID_TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
+ROLE_CLASSES = {"recall-critical-review", "generative-checked", "mechanical-predicate"}
+RUNGS = ("R0", "R1", "R2")
+RUNG_ORDER = {r: i for i, r in enumerate(RUNGS)}
+ON_UNKNOWN_VALUES = {"refuse", "degrade-with-disclosure", "proceed"}
+EGRESS_LEVELS = ("none", "first-party", "third-party")
+BRAND_RUNG = {"opus": "R2", "sonnet": "R1", "haiku": "R0"}
+MIN_RUNG_FOR_ROLE_CLASS = {
+    "recall-critical-review": "R2",
+    "generative-checked": "R1",
+    "mechanical-predicate": "R0",
+}
+# The four agent defs design §12/§11 names as MODEL-REQ carriers. Each must
+# carry exactly one complete standalone declaration (S1) — a malformed,
+# duplicated, or missing wrapper is an authoring error, not an absent
+# requirement the checker silently ignores.
+BINDING_AGENT_DEFS = {
+    "agents/crucible-red-team.md",
+    "agents/crucible-qg-fix.md",
+    "agents/crucible-qg-judge.md",
+    "agents/crucible-qg-verifier.md",
+}
+# design §12 (S3, round 11; S7, round 12): `<citation>` is EITHER a file:line OR a
+# role name naming the downstream check. Both alternatives are honored, and the file
+# alternative does NOT require punctuation in the filename — design §12 says
+# `file:line`, and `Makefile:1` is as valid a citation as
+# `model-tier-policy.md:51`. A bare file, a bare line, a zero/negative line, or any
+# nonempty junk still fails: only the SHAPE is checked here (existence is a Task 6
+# semantic assertion).
+BOUNDED_BY_RE = re.compile(
+    r"[a-z][a-z0-9-]*"                # role name, e.g. red-team, crucible-qg-fix
+    r"|[^\s:]+:[1-9]\d*"              # file:line, e.g. model-tier-policy.md:51, Makefile:1
+)
+# Indent-tolerant (S7 — mirrors has_marker()'s standalone-line pattern, which
+# accepts leading whitespace via line.strip()): a MODEL-REQ line one column
+# off zero must still be checked, never silently skipped.
+MODEL_REQ_LINE_RE = re.compile(r"^[ \t]*<!-- MODEL-REQ:(.+?)-->[ \t]*$", re.MULTILINE)
+
+def binding_decl_placement_ok(text: str) -> bool:
+    """True iff the file's leading YAML frontmatter block is followed
+    (blank lines skipped — **unlimited blank lines are permitted** (M2, round 11):
+    "adjacent" means no *content* intervenes, not zero blank lines — and the existing
+    adjacent MODEL-TIER marker
+    tolerated) by the standalone MODEL-REQ declaration within a small
+    window — design §5's "standalone comment immediately after
+    frontmatter" placement (SP3, round 3). A declaration embedded deep in
+    body prose therefore fails, which the exactly-one presence rule alone
+    could not detect. A binding path with NO leading frontmatter block is
+    not an agent-def layout and is not placement-checked here (every real
+    binding agent def does carry frontmatter)."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        return False
+    # Skip blank lines, tolerate AT MOST the single adjacent MODEL-TIER
+    # marker, then require the very next non-blank line to be the complete
+    # MODEL-REQ declaration (S6, round 4). A fixed non-blank window was too
+    # permissive: a body heading (e.g. "# Instructions") immediately after
+    # frontmatter would have been skipped and a body declaration certified
+    # as "adjacent".
+    after = lines[end + 1:]
+    i = 0
+    while i < len(after) and not after[i].strip():
+        i += 1
+    if i < len(after) and after[i].strip().startswith("<!-- MODEL-TIER"):
+        i += 1
+        while i < len(after) and not after[i].strip():
+            i += 1
+    if i >= len(after):
+        return False
+    return bool(MODEL_REQ_LINE_RE.match(after[i]))
+
+def model_req_lines(text: str) -> list[str]:
+    """Standalone MODEL-REQ declaration line bodies. Caller decides whether to
+    scan raw or fence-stripped text (mirrors has_marker/pins_in split)."""
+    return [m.group(1).strip() for m in MODEL_REQ_LINE_RE.finditer(text)]
+
+def parse_model_req(body: str) -> dict:
+    """Tokenize one MODEL-REQ line body against design §12's grammar
+    (`<role-class> <rung> [flags] ...`, no leading vocabulary-version token).
+    Raises ValueError with a human-readable reason on any malformed token —
+    callers turn that into a hard-fail line."""
+    tokens = body.split()
+    if not tokens:
+        raise ValueError("empty MODEL-REQ body")
+    selector = tokens[0]
+    if selector not in ROLE_CLASSES and selector != "unclassified":
+        raise ValueError(f"unknown role-class {selector!r} (expected one of "
+                         f"{sorted(ROLE_CLASSES)} or 'unclassified')")
+    fields: dict = {"selector": selector, "flags": set()}
+    rest = tokens[1:]
+    if not rest or rest[0] not in RUNGS:
+        raise ValueError(f"{selector!r} requires a mandatory rung (R0/R1/R2)")
+    fields["rung"] = rest[0]
+    # design §12 (S1, round 12): the grammar is POSITIONAL —
+    # `[<flag>…] [ctx>=N] egress= on-unknown= [bounded-by=]`. Order is enforced
+    # below, not merely displayed: accepting permutations would be a *different*
+    # grammar from the one this plan claims to implement verbatim.
+    SLOT_RANK = {"flag": 0, "ctx": 1, "egress": 2, "on_unknown": 3, "bounded_by": 4}
+    last_slot = -1
+    for tok in rest[1:]:
+        kind = ("flag" if tok in ("accepts-offensive-security", "no-retention",
+                                  "no-training")
+                else "ctx" if tok.startswith("ctx>=")
+                else "egress" if tok.startswith("egress=")
+                else "on_unknown" if tok.startswith("on-unknown=")
+                else "bounded_by" if tok.startswith("bounded-by=")
+                else None)
+        if kind is not None:
+            if SLOT_RANK[kind] < last_slot:
+                raise ValueError(
+                    f"{tok!r} is out of design §12's declared token order "
+                    f"(`<role-class> <rung> [<flag>…] [ctx>=N] egress=<class> "
+                    f"on-unknown=<policy> [bounded-by=<citation>]`) — the grammar "
+                    f"is positional and is enforced (S1, round 12)")
+            last_slot = SLOT_RANK[kind]
+        # Singleton tokens and flags are closed-vocabulary: a repeated token is
+        # an authoring error, NOT a last-wins override (S1, round 2). A second
+        # `egress=` must not silently relax a declared trust ceiling, and a
+        # second `on-unknown=` must not silently replace an earlier obligation.
+        if tok == "accepts-offensive-security":
+            if tok in fields["flags"]:
+                raise ValueError("duplicate accepts-offensive-security flag")
+            fields["flags"].add(tok)
+        elif tok in ("no-retention", "no-training"):
+            if tok in fields["flags"]:
+                raise ValueError(f"duplicate {tok} flag")
+            fields["flags"].add(tok)
+        elif tok.startswith("ctx>="):
+            if "ctx" in fields:
+                raise ValueError("duplicate ctx>= token")
+            n = tok[len("ctx>="):]
+            if not re.fullmatch(r"\d+[kKmM]?", n):
+                raise ValueError(f"ctx>= must be a number optionally "
+                                 f"suffixed k/m, got {n!r}")
+            fields["ctx"] = n
+        elif tok.startswith("egress="):
+            if "egress" in fields:
+                raise ValueError("duplicate egress= token — a second trust "
+                                 "token cannot override the first")
+            level = tok[len("egress="):]
+            if level not in EGRESS_LEVELS:
+                raise ValueError(f"egress= must be one of {EGRESS_LEVELS}, "
+                                 f"got {level!r}")
+            fields["egress"] = level
+        elif tok.startswith("on-unknown="):
+            if "on_unknown" in fields:
+                raise ValueError("duplicate on-unknown= token")
+            fields["on_unknown"] = tok[len("on-unknown="):]
+        elif tok.startswith("bounded-by="):
+            if "bounded_by" in fields:
+                raise ValueError("duplicate bounded-by= token")
+            fields["bounded_by"] = tok[len("bounded-by="):]
+        else:
+            raise ValueError(f"unrecognized MODEL-REQ token {tok!r}")
+    return fields
+
+def leading_frontmatter(text: str):
+    """Return the body of the file's LEADING closed YAML frontmatter block, or
+    None when the file does not open with `---` ... `---` (S2, round 5)."""
+    s = text.lstrip()
+    if not s.startswith("---"):
+        return None
+    end = s.find("\n---", 3)
+    return None if end == -1 else s[3:end]
+
+# design §12 (S1, round 12): the published grammar is POSITIONAL —
+# `<role-class> <rung> [<flag>…] [ctx>=N] egress=<class> on-unknown=<policy>
+# [bounded-by=<citation>]`. Token order is ENFORCED in `parse_model_req` below, so
+# the checker accepts exactly §12's language. Earlier rounds parsed the tokens
+# order-insensitively and documented that latitude as deliberate; that parse accepted
+# a *superset* — a different grammar from the one this plan claims to implement
+# verbatim — so the round-8 fixtures that pinned a permuted declaration as clean are
+# now hard-fail cases.
+def check_model_req_hardfail(rel: str, text: str) -> list[str]:
+    """T2 (well-formedness/closed egress+ctx vocab), T18 (bounded-by mandatory
+    iff, and only if, degrade-with-disclosure, and `<file>:<line>` shaped), T16
+    (role-class <-> on-unknown legality), plus S1 (exactly one complete
+    standalone declaration on each binding agent-def path; malformed or
+    duplicate declarations hard-fail). Scans FENCE-STRIPPED text: an
+    illustrative MODEL-REQ example inside a fenced block (model-tier-
+    policy.md's worked examples) is documentation, not a live declaration —
+    same convention as the fable-pin rule."""
+    fails = []
+    stripped = strip_fences(text)
+    bodies = []
+    for lineno, line in enumerate(stripped.splitlines(), 1):
+        s = line.strip()
+        # A declaration candidate is a line that opens an HTML comment and
+        # mentions MODEL-REQ. Inline prose backtick mentions and fenced
+        # examples are not candidates (S1/S7).
+        if not s.startswith("<!--") or "MODEL-REQ" not in s:
+            continue
+        m = MODEL_REQ_LINE_RE.match(line)
+        if not m:
+            fails.append(f"{rel}:{lineno}: malformed MODEL-REQ declaration — "
+                         f"not a complete standalone `<!-- MODEL-REQ: ... -->` "
+                         f"line (missing terminator or trailing text): `{s}`")
+            continue
+        bodies.append((lineno, m.group(1).strip()))
+    if len(bodies) > 1:
+        fails.append(f"{rel}: {len(bodies)} MODEL-REQ declarations present — "
+                     f"exactly one is allowed per file (duplicates hard-fail, "
+                     f"S1)")
+    if rel in BINDING_AGENT_DEFS and len(bodies) != 1:
+        fails.append(f"{rel}: binding agent-def path must carry exactly one "
+                     f"MODEL-REQ declaration, found {len(bodies)} (S1)")
+    if rel in BINDING_AGENT_DEFS:
+        # S2 (round 5): a binding agent-def's declared role binds through the
+        # frontmatter `model:` pin, so a binding path with no leading closed
+        # frontmatter (or no single `model:` pin in it) is a HARD fail — not a
+        # weaker advisory. The old `startswith("---")` guard let a def that
+        # lost its frontmatter skip the placement check entirely and still
+        # exit 0.
+        fm = leading_frontmatter(stripped)
+        if fm is None:
+            fails.append(f"{rel}: binding agent-def path must open with a "
+                         f"closed YAML frontmatter block — without it the "
+                         f"role cannot bind any `model:` pin, whatever the "
+                         f"MODEL-REQ declaration says (S2, round 5)")
+        else:
+            fm_pins = FRONTMATTER_PIN_RE.findall(fm)
+            if len(fm_pins) != 1:
+                fails.append(f"{rel}: binding agent-def path must carry "
+                             f"exactly one `model:` pin in its frontmatter, "
+                             f"found {len(fm_pins)} (S2, round 5)")
+            elif (len(bodies) == 1
+                    and not binding_decl_placement_ok(stripped)):
+                fails.append(f"{rel}: the MODEL-REQ declaration must sit "
+                             f"immediately after the closing YAML frontmatter "
+                             f"(optionally after the adjacent MODEL-TIER "
+                             f"marker), not embedded in body prose (SP3, "
+                             f"round 3)")
+    # S1 (round 14): placement binds the DECLARATION, not the path. design §12 requires a
+    # standalone MODEL-REQ to be adjacent to the frontmatter, and §2.3 lets an author declare
+    # `unclassified` on a role this repo does not otherwise declare — so a frontmatter-carrying
+    # non-binding file that buries its declaration in body prose must hard-fail too. A file with
+    # no leading frontmatter block cannot satisfy §12's adjacency rule at all; that case stays
+    # governed by the exactly-one rule (unchanged, S1 round 14).
+    if (rel not in BINDING_AGENT_DEFS and len(bodies) == 1
+            and leading_frontmatter(stripped) is not None
+            and not binding_decl_placement_ok(stripped)):
+        fails.append(f"{rel}: the standalone MODEL-REQ declaration must sit immediately "
+                     f"after the closing YAML frontmatter (optionally after the adjacent "
+                     f"MODEL-TIER marker), not embedded in body prose (S1, round 14)")
+    # S3 (round 19): a file with NO leading frontmatter cannot satisfy design section 12 adjacency
+    # at all, so a real (unfenced, standalone) declaration there is a hard fail - otherwise an
+    # author gets green validation for an inert, unplaced declaration.
+    if (rel not in BINDING_AGENT_DEFS and len(bodies) == 1
+            and leading_frontmatter(stripped) is None):
+        fails.append(f"{rel}: a standalone MODEL-REQ declaration requires a leading YAML "
+                     f"frontmatter block to be adjacent to (design section 12) (S3, round 19)")
+    for lineno, raw in bodies:
+        try:
+            f = parse_model_req(raw)
+        except ValueError as e:
+            fails.append(f"{rel}:{lineno}: malformed MODEL-REQ ({e}): `{raw}`")
+            continue
+        selector = f["selector"]
+        # design §12 (S5, round 12): `unclassified` is a LEGAL role-class — `<rung>` is
+        # mandatory and `on-unknown=refuse` is its only legal policy. Rejecting the
+        # declaration outright made the checker recognise a NARROWER language than the
+        # approved grammar, and that hard-fail was unconditional, so no maintainer
+        # approval could have lifted it. The unresolved item is the rung's MEANING, not
+        # the syntax: the rung is not interpreted on an `unclassified` line, and
+        # authoring one still waits on Task 1's approval checkpoint. The declaration
+        # therefore falls through to the ordinary checks below (mandatory `egress=`,
+        # forced `on-unknown=refuse`, `bounded-by=` illegal).
+        if not f.get("egress"):
+            fails.append(f"{rel}:{lineno}: MODEL-REQ missing mandatory "
+                         f"egress=<level>: `{raw}`")
+        on_unknown = f.get("on_unknown")
+        if on_unknown is None:
+            fails.append(f"{rel}:{lineno}: MODEL-REQ missing mandatory "
+                         f"on-unknown=: `{raw}`")
+            continue
+        if on_unknown not in ON_UNKNOWN_VALUES:
+            fails.append(f"{rel}:{lineno}: unknown on-unknown value "
+                         f"{on_unknown!r}: `{raw}`")
+            continue
+        # Design §4.1: EVERY security-surface role must refuse on an unknown
+        # resolution — not only the roles whose selector/flag happens to force
+        # it (S1, round 3). The four in-scope declarations mask this gap because
+        # red-team is simultaneously recall-critical and offensive-flagged; the
+        # first declared siege/dependency-audit path would otherwise be
+        # certified while violating the approved security policy, so consult
+        # is_security_surface() directly rather than inferring from the token.
+        forces_refuse = (selector in ("recall-critical-review", "unclassified")
+                          or "accepts-offensive-security" in f["flags"]
+                          or is_security_surface(rel, text))
+        if forces_refuse and on_unknown != "refuse":
+            fails.append(f"{rel}:{lineno}: {selector!r} (or "
+                         f"accepts-offensive-security, or a security-surface "
+                         f"file) requires on-unknown=refuse, got "
+                         f"{on_unknown!r}: `{raw}`")
+        if on_unknown == "degrade-with-disclosure":
+            if selector != "generative-checked":
+                fails.append(f"{rel}:{lineno}: on-unknown=degrade-with-"
+                             f"disclosure is only legal for generative-checked, "
+                             f"got {selector!r}: `{raw}`")
+            bound = f.get("bounded_by")
+            if not bound:
+                fails.append(f"{rel}:{lineno}: on-unknown=degrade-with-"
+                             f"disclosure requires mandatory "
+                             f"bounded-by=<citation>: `{raw}`")
+            elif not BOUNDED_BY_RE.fullmatch(bound):
+                fails.append(f"{rel}:{lineno}: bounded-by= must be a "
+                             f"file:line citation or a role name (got "
+                             f"{bound!r}), not an arbitrary nonempty token — "
+                             f"the named check's existence is asserted at "
+                             f"Task 6, not checked here (S3, round 11): `{raw}`")
+        if on_unknown == "proceed" and selector != "mechanical-predicate":
+            fails.append(f"{rel}:{lineno}: on-unknown=proceed is only legal "
+                         f"for mechanical-predicate, got {selector!r}: `{raw}`")
+        if on_unknown != "degrade-with-disclosure" and "bounded_by" in f:
+            fails.append(f"{rel}:{lineno}: bounded-by= is only legal with "
+                         f"on-unknown=degrade-with-disclosure, got "
+                         f"on-unknown={on_unknown!r} (illegal and meaningless "
+                         f"otherwise, T18): `{raw}`")
+    return fails
 
 
 def pins_in(text: str) -> list[str]:
@@ -199,6 +524,7 @@ def check_file(rel: str, text: str) -> list[str]:
                      f"(model-tier hard-out): {fable_pins}")
     if is_security_surface(rel, text) and not marked:
         fails.append(f"{rel}: security-surface file lacks marker `{MARKER}`")
+    fails.extend(check_model_req_hardfail(rel, text))
     return fails
 
 
@@ -251,7 +577,7 @@ def selftest() -> int:
         ("agents/crucible-red-team.md", f"---\nmodel: fable\n---\n{m}\nbody\n",
          True, "fable flip of red-team IS caught (calibration-critical "
                "explicit entry)"),
-        ("agents/crucible-red-team.md", f"---\nmodel: opus\n---\n{m}\nbody\n",
+        ("agents/crucible-red-team.md", f"---\nmodel: opus\n---\n{m}\n<!-- MODEL-REQ: recall-critical-review R2 accepts-offensive-security egress=first-party on-unknown=refuse -->\nbody\n",
          False, "red-team stamped with its opus pin is clean"),
         ("agents/crucible-red-team.md", f"---\nmodel: opus\n---\nbody\n",
          True, "red-team WITHOUT the marker is caught (explicit entry)"),
@@ -294,7 +620,7 @@ def selftest() -> int:
                "stamped file is still caught (the value capture stops at "
                "the comment boundary)"),
         ("agents/crucible-red-team.md",
-         f"---\nmodel: opus  # keep\n---\n{m}\nbody\n",
+         f"---\nmodel: opus  # keep\n---\n{m}\n<!-- MODEL-REQ: recall-critical-review R2 accepts-offensive-security egress=first-party on-unknown=refuse -->\nbody\n",
          False, "trailing `# comment` after a non-fable frontmatter value is "
                 "captured-then-tolerated: `opus` still parses, rule (a) does "
                 "not fire"),
@@ -343,7 +669,7 @@ def selftest() -> int:
          True, "quoted bracket-suffixed fable id on a marked file is caught "
                "(gate round 2, S1)"),
         ("agents/crucible-red-team.md",
-         f"---\nmodel: claude-opus-4-8[1m]\n---\n{m}\nbody\n",
+         f"---\nmodel: claude-opus-4-8[1m]\n---\n{m}\n<!-- MODEL-REQ: recall-critical-review R2 accepts-offensive-security egress=first-party on-unknown=refuse -->\nbody\n",
          False, "bracket-suffixed NON-fable id on a marked file stays clean "
                 "(suffix tolerance does not over-fire)"),
         ("skills/siege/SKILL.md",
@@ -404,7 +730,332 @@ def selftest() -> int:
                "an exact byte-for-byte line match (line.strip() == MARKER), "
                "so the dir-allowlist file counts as un-stamped and rule (b) "
                "fires (minor pass QF4 regression pin, no behavior change)"),
+        # --- #493 MODEL-REQ hard-fail rules (T2/T16/T18, S1/S2/S3) ---
+        # S1 (round 12): design §12's token order is ENFORCED — the first case is a
+        # clean canonical declaration, the second a permuted one that must now FAIL,
+        # so a future order-insensitive parser cannot land without turning red.
+        ("agents/x.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "ctx>=200k egress=first-party on-unknown=degrade-with-disclosure "
+         "bounded-by=model-tier-policy.md:51 -->\n",
+         False, "canonical (design §12 display) token order is clean"),
+        ("agents/x.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "egress=first-party on-unknown=degrade-with-disclosure "
+         "bounded-by=Makefile:1 -->\n",
+         False, "a dotless filename is a valid file:line citation (S7, round 12)"),
+        ("agents/x.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "egress=first-party on-unknown=degrade-with-disclosure "
+         "bounded-by=red-team -->\n",
+         False, "a role name is a valid citation per design §12 (S3, round 11)"),
+        ("agents/x.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "bounded-by=model-tier-policy.md:51 egress=first-party "
+         "on-unknown=degrade-with-disclosure ctx>=200k -->\n",
+         True, "a permuted token order is a HARD FAIL (S1, round 12): design §12's "
+         "grammar is positional and the checker now enforces it — a permuted "
+         "declaration is outside the approved language"),
+        ("agents/x.md",
+         "---\nname: x\n---\n<!-- MODEL-REQ: generative-checked R1 ctx>=200k egress=first-party "
+         "on-unknown=degrade-with-disclosure "
+         "bounded-by=model-tier-policy.md:51 -->\n",
+         False, "a well-formed generative-checked declaration with its "
+                "mandatory bounded-by= is clean"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure -->\n",
+         True, "degrade-with-disclosure without bounded-by= is a hard fail (T18)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure "
+         "bounded-by=model-tier-policy.md -->\n",
+         True, "bounded-by= must carry the `<file>:<positive line>` shape — a "
+               "bare file with no line is a hard fail, not accepted as a "
+               "nonempty token (S2)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure "
+         "bounded-by=model-tier-policy.md:0 -->\n",
+         True, "bounded-by= line must be a positive integer — :0 is malformed "
+               "(S2)"),
+        ("agents/x.md",
+         "---\nname: x\n---\n<!-- MODEL-REQ: recall-critical-review R2 egress=first-party "
+         "on-unknown=refuse -->\n",
+         False, "recall-critical-review paired with on-unknown=refuse is clean"),
+        ("agents/crucible-qg-judge.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: recall-critical-review R2 egress=first-party "
+         "on-unknown=proceed -->\n",
+         True, "recall-critical-review MUST use on-unknown=refuse (T16)"),
+        ("agents/x.md",
+         "---\nname: x\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure "
+         "bounded-by=quality-gate/SKILL.md:289 -->\n",
+         False, "generative-checked paired with on-unknown=degrade-with-"
+                "disclosure and a shape-valid downstream-check citation (citation SHAPE only — that the cited check is real is Task 6's semantic assertion, not this parser's; S3 residual, round-11 verifier) is clean — "
+                "qg-verifier is generative-checked (design §2.3's round-3 "
+                "reclassification), and its disclosure is bounded by the next "
+                "round's fresh red-team re-review, cited at "
+                "`quality-gate/SKILL.md:289` (S2 — the earlier draft cited "
+                "`model-tier-policy.md:50`, a taxonomy row that names no "
+                "downstream check at all)"),
+        ("agents/crucible-qg-verifier.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=proceed -->\n",
+         True, "on-unknown=proceed is illegal outside mechanical-predicate "
+               "(T16)"),
+        ("agents/x.md",
+         "<!-- MODEL-REQ: mechanical-predicate R0 egress=first-party "
+         "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         True, "on-unknown=degrade-with-disclosure is illegal outside "
+               "generative-checked (T16)"),
+        ("agents/crucible-red-team.md",
+         f"---\nmodel: opus\n---\n{m}\n<!-- MODEL-REQ: recall-critical-review R2 "
+         "accepts-offensive-security egress=first-party on-unknown=refuse "
+         "-->\n",
+         False, "with the file's own required MODEL-TIER marker present "
+                "(crucible-red-team.md is a hard-out EXPLICIT_FILES member — "
+                "rule (b) fires independent of MODEL-REQ), "
+                "accepts-offensive-security combined with the mandatory "
+                "refuse is clean (T16)"),
+        ("agents/crucible-red-team.md",
+         f"---\nmodel: opus\n---\n{m}\n<!-- MODEL-REQ: recall-critical-review R2 "
+         "accepts-offensive-security egress=first-party on-unknown=proceed "
+         "-->\n",
+         True, "with the marker present (isolating the T16 violation from "
+               "rule (b)'s own marker requirement), accepts-offensive-security "
+               "MUST use on-unknown=refuse (T16)"),
+        ("agents/x.md", "<!-- MODEL-REQ: bogus-role R1 egress=first-party "
+         "on-unknown=refuse -->\n",
+         True, "unknown role-class is a hard fail (T2)"),
+        ("agents/x.md", "<!-- MODEL-REQ: unclassified egress=first-party "
+         "on-unknown=refuse -->\n",
+         True, "unclassified with no rung is a hard fail — design §12 makes "
+               "<rung> mandatory, and unclassified's rung semantics are an "
+               "unresolved maintainer decision (S3)"),
+        ("agents/x.md", "---\nname: x\n---\n<!-- MODEL-REQ: unclassified R0 egress=first-party "
+         "on-unknown=refuse -->\n",
+         False, "even WITH a rung token, an `unclassified` declaration is now "
+               "ACCEPTED syntactically (S5, round 12): its rung is simply not "
+               "interpreted, and authoring one still waits on the approval "
+               "checkpoint (S3, round 11; S5, round 12)"),
+        ("agents/x.md", "<!-- MODEL-REQ: generative-checked -->\n",
+         True, "role-class missing its mandatory rung is a hard fail (T2)"),
+        ("agents/x.md", "<!-- MODEL-REQ: generative-checked R1 -->\n",
+         True, "missing mandatory egress= is a hard fail (S2/T2 — egress is "
+               "unbracketed, i.e. mandatory, in design §12's grammar)"),
+        ("agents/x.md", "<!-- MODEL-REQ: generative-checked R1 egress=banana "
+         "on-unknown=refuse -->\n",
+         True, "egress= must be a closed-ladder value "
+               "(none/first-party/third-party) — an out-of-ladder value is "
+               "a hard fail, not silently accepted (S3)"),
+        ("agents/x.md", "<!-- MODEL-REQ: generative-checked R1 "
+         "ctx>=lots egress=first-party on-unknown=degrade-with-disclosure "
+         "bounded-by=x.md:1 -->\n",
+         True, "ctx>= must be a number optionally suffixed k/m — a "
+               "non-numeric payload is a hard fail, not silently accepted "
+               "(S3)"),
+        ("agents/x.md", "<!-- MODEL-REQ: generative-checked R1 "
+         "egress=first-party on-unknown=refuse bounded-by=x.md:1 -->\n",
+         True, "bounded-by= is illegal (and meaningless) on any line not "
+               "carrying on-unknown=degrade-with-disclosure — accepting it "
+               "silently was the other half of T18 the checker did not "
+               "enforce (S3)"),
+        ("skills/shared/model-tier-policy.md",
+         "Example:\n```\n<!-- MODEL-REQ: generative-checked R1 "
+         "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n```\n",
+         False, "a FENCED illustrative MODEL-REQ example (the policy doc's "
+                "own worked example) is not a live declaration and does not "
+                "trip T2/T16/T18 — same fence-immunity convention as the "
+                "fable-pin rule"),
+        ("agents/x.md",
+         " <!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=proceed -->\n",
+         True, "an INDENTED MODEL-REQ declaration is still matched and "
+               "hard-failed, not silently skipped — has_marker-style indent "
+               "tolerance (S7); on-unknown=proceed is illegal for "
+               "generative-checked (T16)"),
+        ("agents/x.md",
+         "See the grammar: `<!-- MODEL-REQ: generative-checked R1 "
+         "on-unknown=proceed -->` for details.\n",
+         False, "a MODEL-REQ mentioned INLINE in a prose sentence is not a "
+                "standalone line and must NOT fire, even though its content "
+                "would otherwise hard-fail (S7)"),
+        # --- S1: malformed / duplicate / missing declaration presence ---
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse -- >\n",
+         True, "a malformed terminator (`-- >`) is a missing-close authoring "
+               "error — it must hard-fail, not read as an absent declaration "
+               "(S1)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse --> trailing text\n",
+         True, "trailing text after the terminator means the declaration is "
+               "not standalone — a hard fail (S1)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse -->\n"
+         "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse -->\n",
+         True, "two declarations in one file is a duplicate hard fail (S1)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\nno declaration here\n",
+         True, "a binding agent-def path with ZERO declarations is a hard "
+               "fail — exactly one standalone declaration is required (S1)"),
+        ("agents/x.md",
+         "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse -->\n",
+         True, "a non-binding path with NO frontmatter cannot satisfy design "
+               "section 12 adjacency, so a standalone declaration there is a hard fail (S3, round 19)"),
+        ("agents/x.md",
+         "---\nname: x\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse -->\n",
+         False, "a single well-formed declaration on a non-binding path WITH frontmatter "
+                "is clean — the exactly-one rule binds only the four binding agent defs (S1)"),
+        ("agents/x.md",
+         "---\nmodel: sonnet\n---\n\n" + ("filler instructional line\n" * 40)
+         + "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+           "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         True, "S1 (round 14): placement binds the DECLARATION, not the path — a "
+               "non-binding frontmatter-carrying file that buries its declaration in "
+               "body prose hard-fails exactly like a binding agent def (design §12)"),
+        ("agents/x.md",
+         "<!-- MODEL-REQ: recall-critical-review R2 egress=none "
+         "egress=first-party on-unknown=refuse -->\n",
+         True, "a repeated egress= token is a hard fail, NOT a last-wins "
+               "override — a second trust ceiling cannot silently relax the "
+               "first (S1, round 2)"),
+        ("agents/x.md",
+         "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=refuse on-unknown=degrade-with-disclosure "
+         "bounded-by=skills/shared/model-tier-policy.md:51 -->\n",
+         True, "a repeated on-unknown= token is a hard fail — a later token "
+               "cannot replace an earlier obligation (S1, round 2)"),
+        ("agents/x.md",
+         "<!-- MODEL-REQ: mechanical-predicate R0 egress=first-party "
+         "on-unknown=proceed no-training no-training -->\n",
+         True, "a repeated flag is a hard fail (S1, round 2)"),
+        # --- S1 (round 3): security-surface files must refuse regardless of selector ---
+        ("skills/siege/SKILL.md",
+         "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         True, "a security-surface file declaring generative-checked degrade "
+               "is a hard fail — design §4.1 requires on-unknown=refuse for "
+               "EVERY security-surface role, not only recall-critical/offensive "
+               "(S1, round 3)"),
+        ("agents/x.md",
+         "---\nname: x\n---\n<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         False, "the non-security generative control stays clean — the "
+                "security-surface refusal rule does not over-fire (S1, round 3)"),
+        # --- SP3 (round 3): a binding declaration must be adjacent to frontmatter ---
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n\n" + ("filler instructional line\n" * 40)
+         + "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+           "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         True, "a binding agent-def MODEL-REQ buried in body prose fails the "
+               "frontmatter-adjacency rule (SP3, round 3)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n# Instructions\nDo something else\n"
+         "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         True, "a body heading immediately after frontmatter does NOT make a "
+               "following declaration 'adjacent' — only blank lines and the "
+               "single MODEL-TIER marker may precede it (S6, round 4)"),
+        # --- S2 (round 5): a binding path must KEEP its frontmatter model: pin ---
+        ("agents/crucible-red-team.md",
+         f"{m}\n<!-- MODEL-REQ: recall-critical-review R2 "
+         "accepts-offensive-security egress=first-party on-unknown=refuse "
+         "-->\n",
+         True, "a binding agent-def that LOST its leading YAML frontmatter "
+               "(no `model: opus` pin) is a hard fail — the old "
+               "`startswith(\"---\")` guard let it skip the placement check "
+               "and exit 0 while the role bound nothing (S2, round 5)"),
+        ("agents/crucible-qg-fix.md",
+         "---\n# frontmatter present, but no model: pin\n---\n"
+         "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
+         "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
+         True, "a binding agent-def with frontmatter but no `model:` pin in it "
+               "is a hard fail — exactly one binding pin is required (S2, "
+               "round 5)"),
     ]
+    # Bound-specific diagnostic (S3, round 7): both T18 rules emit a reason
+    # containing the literal `bounded-by`; assert on the reason text so a
+    # deleted bound rule cannot keep these fixtures green via another rule.
+    for _rel, _text, _label in (
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "egress=first-party on-unknown=degrade-with-disclosure -->\n",
+         "missing mandatory bounded-by="),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "egress=first-party on-unknown=degrade-with-disclosure "
+         "bounded-by=model-tier-policy.md -->\n",
+         "malformed bounded-by= (bare file, no line)"),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: generative-checked R1 "
+         "egress=first-party on-unknown=degrade-with-disclosure "
+         "bounded-by=model-tier-policy.md:0 -->\n",
+         "malformed bounded-by="),
+        ("agents/crucible-qg-fix.md",
+         "---\nmodel: sonnet\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
+         "egress=first-party on-unknown=refuse bounded-by= -->\n",
+         "bounded-by= present but EMPTY on a non-degradation line"),
+    ):
+        got = check_model_req_hardfail(_rel, _text)
+        assert any("bounded-by" in f for f in got), (
+            f"{_label}: expected a bound-specific diagnostic, got {got!r}")
+    # SP2 (round 8): the published brand->rung table is the policy SOURCE and
+    # BRAND_RUNG is its EXECUTOR; without a tie an approved table revision can
+    # leave the checker stale with a green suite. Parse the canonical table and
+    # assert equality — a one-line policy edit with no checker edit turns red. The
+# comparison is over the FULL parsed mapping and must NOT filter by the checker's
+# current keys (SP1, round 9): filtering would let a newly published brand row drift
+# silently, leaving the checker resolving that brand as indeterminate while this guard
+# stayed green. A fourth policy row without executor support therefore FAILS here.
+    def _published_brand_rung(path: str) -> dict:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+        # M2 (round 10): bound the parse to the named brand->rung section. Scanning the
+        # whole document would let any later illustrative two-column table trip the guard.
+        head = re.search(r"^#{1,6}[^\n]*[Bb]rand[^\n]*[Rr]ung[^\n]*$", text, re.M)
+        if head is None:
+            raise AssertionError("brand->rung table section heading not found")
+        body = text[head.end():]
+        nxt = re.search(r"^#{1,6} ", body, re.M)
+        if nxt is not None:
+            body = body[:nxt.start()]
+        rows = {}
+        seen_sep = False
+        for _line in body.splitlines():
+            if not _line.strip().startswith("|"):
+                continue
+            cells = [c.strip() for c in _line.strip().strip("|").split("|")]
+            if not seen_sep:
+                # rows above the header separator are the header itself
+                if all(c and set(c) <= set("-: ") for c in cells):
+                    seen_sep = True
+                continue
+            # S4 (round 14): parse EVERY data row and REJECT what does not parse.
+            # Matching only `[a-z]+` silently ignored a published brand carrying a digit
+            # or hyphen (e.g. `gpt-5`), leaving this guard green while the checker
+            # resolved that brand as indeterminate.
+            m = re.fullmatch(r"`([a-z][a-z0-9.-]*)`", cells[0])
+            if m is None:
+                raise AssertionError(
+                    "unparseable brand row in the published table: %r" % _line)
+            if not re.fullmatch(r"R[0-9]", cells[1]):
+                raise AssertionError(
+                    "unparseable rung cell in the published table row: %r" % _line)
+            if m.group(1) in rows:
+                raise AssertionError(
+                    "duplicate brand row in the published table: %r" % _line)
+            rows[m.group(1)] = cells[1]
+        return rows
+
+    assert _published_brand_rung(
+        "skills/shared/model-tier-policy.md") == BRAND_RUNG, (
+        "published brand->rung table drifted from the checker's BRAND_RUNG")
     failures = []
     for rel, text, expect_fail, reason in cases:
         got = check_file(rel, text)
