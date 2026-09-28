@@ -60,6 +60,7 @@ subtasks. Nothing in the authored body changes — only the frontmatter is re-ex
 of these frontmatter fields — it lives as a column-0 body line under a `## Dispatch` heading (see §7),
 so that no harness's frontmatter loader parses or strips it.
 
+<!-- CANONICAL: shared/model-tier-policy.md -->
 ## 2b. Mapping 1b — Per-role model tiers (recall-critical dispatch model enforcement)
 
 The quality-gate / red-team loop is **recall-critical**: an Opus reviewer finds Fatals a Sonnet
