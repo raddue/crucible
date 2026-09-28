@@ -51,3 +51,22 @@ asserted; measured cost and quality evidence for the old tiers stays in
 `docs/evals.md` and the eval fixtures as historical record. The guardrail that
 remains checks marker coverage and rejects Fable-family selectors — it does not
 inspect runtime host configuration.
+
+Accepted risk: the pins used to bind review strength on recall-critical and
+security-surface roles; nothing repo-side does now. A security or recall-critical
+dispatch can therefore run on a model too weak for the work, and a gate can PASS
+on findings a stronger model would have caught. Mitigation is disclosure plus
+operator discipline — `skills/shared/model-tier-policy.md` carries the operator
+rule (no Fable-family session for `quality-gate`, `build`, `siege`,
+`dependency-audit`, or a security `consensus` panel), why the marker exists, the
+checker's documented gaps, and the statement that it is a static gate rather than
+a runtime guarantee.
+
+A mechanical `SECURITY-PREFLIGHT` record was tried and removed: over four review
+rounds it collided with contracts other files already own — the red-team findings
+file's mandated `SEVERITY-COUNTS:` first line and its `#L1-L1` receipt citations,
+dependency-audit's `audit-results.md` schema, siege's `report.md` template,
+cross-certification between sibling dispatches sharing a dispatch dir, and a
+missing dispatch ID for directly invoked (non-dispatched) runs — while adding no
+enforcement the prose rules do not already claim. Recorded here so the next author
+does not re-derive it.

@@ -28,41 +28,6 @@ or marker requirement.
 ## Operator rule
 
 Do not run `quality-gate`, `build`, `siege`, `dependency-audit`, or a security `consensus` panel on a
-Fable-family session. Repo-side enforcement is static-only; this part is operator-owned.
-
-## Security-surface preflight
-
-Model strength for security work is no longer repo-bound, so the orchestrator makes the residual
-visible instead of letting a security PASS imply a model guarantee. Before any security-sensitive leg
-(`siege`, `dependency-audit`, a `quality-gate` red-team round on a security surface, or a
-`crucible-red-team` dispatch) reports PASS, it appends one line naming the model actually in use to
-**its own preflight artifact** — a separate file, so no findings-artifact first-line, schema, or
-receipt-citation contract is disturbed:
-
-```
-<dispatch-dir>/security-preflight.md      # legs dispatched through shared/dispatch-convention.md
-scratch/<run-id>/security-preflight.md    # dependency-audit, which has no dispatch dir
-```
-
-One line per leg per round, appended (never overwritten). The `dispatch=` field is the dispatch-file
-ID (`<seq>-<template-name>` per `shared/dispatch-convention.md`) — without it, one dispatch's line can
-certify another's:
-
-```
-SECURITY-PREFLIGHT: dispatch=<seq>-<template-name> round=<n> leg=<siege|dependency-audit|red-team|...> model=<id|unknown> host=<harness> -- strength not repo-bound; guardrail static-only
-```
-
-Non-blocking when `<id>` is `unknown` or any non-Fable model: append the line and proceed. Blocking
-when `<id>` is Fable-family: refuse the leg (`BLOCKED`, never PASS) — security-surface work does not
-run on a Fable-family model.
-
-Acceptance check: the **consuming orchestrator** reads that file before accepting a security-surface
-PASS, and matches the record to the return it is accepting — same `dispatch=` ID, same `round`, same
-`leg` — then evaluates **that record's** `model=` for hard-out. A missing file, a missing line for
-that dispatch, or a line whose ID/round/leg does not match is `BLOCKED`, not PASS: a sibling leg's
-line (siege beside red-team in round 1 shares the parent dispatch dir) and a look-harder
-re-dispatch (which shares `round` and `leg`) must not satisfy each other's check.
-Nothing here asks a receipt to cite a range it was never shaped to cite, and no leg has to move a
-line another contract already owns. This holds for the `general-purpose` fallback and look-harder
-re-dispatches too. The blocking branch outranks any skip or result-ordering rule in the consuming
-skill (e.g. dependency-audit's `skip_blocking`): a hard-out model blocks regardless.
+Fable-family session. Repo-side enforcement is static-only; this part is operator-owned. Nothing
+repo-side binds review strength any more — `docs/decisions/0003-host-selected-models.md` records
+that as an accepted risk, with the mitigation and the reason no mechanical preflight check ships.

@@ -122,15 +122,13 @@ If a finding has no CVSS score (advisory-only, no CVE assigned), it is treated a
 
 ## Output Model
 
-The audit produces three files under its scratch directory `scratch/<run-id>/`:
+The audit produces two files under its scratch directory `scratch/<run-id>/`:
 
 **`preflight-audit.md`** — Scan-time plan. Written before any audit tool runs. Contains **only scan-time information**:
 - Run ID and `generated-at` timestamp (ISO-8601)
 - Manifest list with path, ecosystem, and deduplication/workspace decisions
 
 This file is **not updated after execution begins**. It is the immutable record of what the scan discovered.
-
-**Security-surface preflight.** The third file, `scratch/<run-id>/security-preflight.md`, takes the appended `SECURITY-PREFLIGHT` record (dependency-audit has no dispatch dir); write it before reporting an overall result. A hard-out model makes the overall result `BLOCKED`, never PASS — and that outranks `skip_blocking` and the `Result:` ordering below. The `audit-results.md` schema is unchanged, and `preflight-audit.md` stays the immutable scan-time plan — neither carries this line. Canonical rule: `shared/model-tier-policy.md`.
 
 **`audit-results.md`** — Execution-time output. Written incrementally as each ecosystem completes. Contains:
 - Tool availability results (discovered at execution time)
