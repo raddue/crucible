@@ -221,8 +221,8 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 - **Dispatch:** Task / Agent tool, disk-mediated per `shared/dispatch-convention.md` (Mapping 3).
   Named agent types select roles; the host selects models.
 - **Degrades:** not for dispatch parallelism — the parallel primitive is present. Model strength is
-  not repo-bound on any harness; see `shared/model-tier-policy.md` (security-surface preflight +
-  operator rule) for what that leaves to the operator.
+  not repo-bound on any harness; see `shared/model-tier-policy.md` (the security marker's scope and
+  the operator rule) for what that leaves to the operator.
 - **Comments:** forge CLI rows in Mapping 5 (§6) via shell; paste-mode otherwise.
 
 ### OpenCode *(runtime validation: non-gating follow-up #337 — BYO reference harness)*
