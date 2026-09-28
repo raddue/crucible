@@ -49,6 +49,7 @@ nested-paren Minor, accepted for v1)):
   2. inline `Task tool (... model: <value> ...)`
   3. inline `Agent tool (... model: <value> ...)`
 
+<!-- CANONICAL: shared/model-tier-policy.md -->
 Enforcement boundary (see skills/shared/model-tier-policy.md): static pins in
 tracked *.md ONLY. This checker does NOT cover (a) `inherit`/session-model
 roles (dependency-audit's inline-on-session path; crucible-qg-fix left this
