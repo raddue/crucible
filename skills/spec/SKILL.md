@@ -508,7 +508,7 @@ On re-invocation of `/spec` with the same epic URL:
 
 **Every quality gate in this pipeline MUST run to completion.** This is NOT optional — you may NOT self-assess whether a quality gate is "needed" based on ticket size, complexity, or scope. Spec dispatches quality gates on every committed ticket (potentially dozens), which creates strong temptation to skip on "simple" tickets. Do not yield to this temptation.
 
-**Fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a clean verification round (0 Fatal, 0 Significant on a fresh review). Spec is the highest-volume gate dispatcher — the short-circuit temptation is strongest here.
+**Fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a mode-clean fresh reverify (`0 Fatal` in default `standard`; `0 Fatal, 0 Significant` when the caller passes `mode: full`). Standard residual Significant/Minor findings must be disclosed. Spec is the highest-volume gate dispatcher — the short-circuit temptation is strongest here.
 
 **The only valid skip** is an unambiguous user instruction specifically referencing the gate. General feedback is not skip approval.
 
@@ -522,8 +522,8 @@ After all waves complete and all tickets are in terminal states, run a two-phase
 
 For each committed ticket, dispatch two standard quality gate passes using existing artifact types:
 
-1. **Design doc gate:** **(Non-negotiable — see Quality Gate Requirement.)** Dispatch `crucible:quality-gate` with artifact type `design` on the ticket's design doc. Review scope: Are decisions well-reasoned? Are acceptance criteria testable? Is the current-state analysis accurate?
-2. **Implementation plan gate:** **(Non-negotiable — see Quality Gate Requirement.)** Dispatch `crucible:quality-gate` with artifact type `plan` on the ticket's implementation plan. Review scope: Are tasks concrete? Do they align with the design doc? Are dependencies between tasks identified?
+1. **Design doc gate:** **(Non-negotiable — see Quality Gate Requirement.)** Dispatch `crucible:quality-gate` with artifact type `design` and explicit `mode: standard` (or caller-requested `full`) on the ticket's design doc. Persist the selected mode across retries/resume. Review scope: Are decisions well-reasoned? Are acceptance criteria testable? Is the current-state analysis accurate?
+2. **Implementation plan gate:** **(Non-negotiable — see Quality Gate Requirement.)** Dispatch `crucible:quality-gate` with artifact type `plan` and the same immutable mode on the ticket's implementation plan. Persist the selected mode across retries/resume. Review scope: Are tasks concrete? Do they align with the design doc? Are dependencies between tasks identified?
 
 These use the quality gate's existing iterative fix loop. Each gate runs within normal context budgets (one document per gate invocation). Per-document gates can run in parallel across tickets (via Agent Teams, or sequentially via Agent tool fallback).
 

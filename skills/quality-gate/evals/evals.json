@@ -415,6 +415,30 @@
         "States round 16's weighted score is 3, not 1",
         "States round 16 is NOT a clean pass / candidate-clean"
       ]
+    },
+    {
+      "id": 29,
+      "prompt": "You're the quality-gate orchestrator in default standard mode. The first fresh red-team round reports `SEVERITY-COUNTS: fatal=0 significant=1 minor=0` and one Significant finding. Does the gate pass immediately, or what work is mandatory?",
+      "expected_output": "The first 0 Fatal / 1 Significant round is actionable, not PASS. Dispatch the fix agent and verifier, then run a distinct fresh red-team reverify. Only that required post-fix reverify may close standard at 0 Fatal; disclose any remaining Significant/Minor residuals.",
+      "files": [],
+      "expectations": [
+        "Does not treat first-round 0 Fatal / 1 Significant as PASS",
+        "Requires fix agent and verifier",
+        "Requires a distinct fresh red-team reverify receipt",
+        "Allows residual Significant/Minor only on required standard reverify and requires disclosure"
+      ]
+    },
+    {
+      "id": 30,
+      "prompt": "You're the quality-gate orchestrator with explicit `mode: full`. The fresh red-team round reports `SEVERITY-COUNTS: fatal=0 significant=1 minor=0`. Can full mode close, and what must the marker say?",
+      "expected_output": "Full mode cannot close: Significant remains blocking, so the round is non-clean and follows fix + verifier + fresh reverify. PASS requires 0 Fatal / 0 Significant. The terminal marker records `Mode: full` and `ResidualSignificant: 0` on PASS.",
+      "files": [],
+      "expectations": [
+        "Rejects 0 Fatal / 1 Significant as full-mode candidate-clean",
+        "Requires fix and verifier before fresh reverify",
+        "Requires full PASS at 0 Fatal / 0 Significant",
+        "Requires explicit full mode and zero residual Significant on full PASS"
+      ]
     }
   ]
 }
