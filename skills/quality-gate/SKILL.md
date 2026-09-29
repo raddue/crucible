@@ -1233,7 +1233,8 @@ partial consensus REVIEW result for this round** — the
   round. On that reachable path the key must be `red-team` — the model that
   actually reviewed — not `consensus`. Never key from calendar/config
   eligibility alone. The fallback is recorded via the single-model rule below
-  (the red-team agent def's own pin), and on that path `consensus` must be
+  (the red-team agent def's own `MODEL-REQ` declaration — #651 removed its
+  `model:` pin, so there is no nominal model to record), and on that path `consensus` must be
   **absent**: an unavailable result still carries a nonempty `per_model` of
   attempted-but-failed members (`mcp-servers/crucible-consensus/aggregator.py:179-205`
   builds `per_model` from **all** attempted responses), so keying from the list's
@@ -1403,25 +1404,28 @@ adapter observes the endpoint-reported model name).
 **Type-resolution fallback (S1, round 4).** When the harness cannot resolve an
 agent type and the dispatch runs as `general-purpose` on the inherited/session
 model (`skills/quality-gate/SKILL.md:244,535`, plus Task 9's new qg-verifier and
-qg-judge warnings), the named agent def was **not** dispatched. Recording its
-nominal `model:` pin as `ran` would log an inherited Opus verifier as `sonnet`,
-or an inherited Sonnet red-team as `opus` — precisely the model flip this feature
-exists to expose. For any dispatch that hit a type-resolution failure, write
-`{"ran": "unknown", "basis": "indeterminate", "prov": "intent"}` (or an actual
-fallback model ID, if one is observed) — never the absent def's pin. The one-time
+qg-judge warnings), the named agent def was **not** dispatched. Recording a
+*nominal* model as `ran` would log an inherited Opus verifier as `sonnet`, or an
+inherited Sonnet red-team as `opus` — precisely the model flip this feature exists
+to expose. Since #651 no agent def carries a `model:` pin, so there is no nominal
+value to be tempted by and the rule is unchanged in force. For any dispatch that
+hit a type-resolution failure, write `{"ran": "unknown", "basis": "indeterminate",
+"prov": "intent"}` (or an actual fallback model ID, if one is observed) — never an
+inferred or declared model. The one-time
 fallback warning does not retro-correct stored `model_resolution`.
 
 For each **single-model** dispatch: `ran` is `unknown` and `basis`
 `indeterminate` in v1 — design §9 defines `ran` as an endpoint-reported id or
-`unknown`, and the dispatch's static `model:` pin (e.g. `opus`, `sonnet`) is
-*requested*, not observed: no `RESOLVED:` producer or transcript oracle ships
-(design §6.2). Recording the alias would pool a silent provider-side fallback with
-the requested model, so the requested pin is not carried in `ran` at all (S2,
-round 6). `basis` becomes `asserted` (brand→rung table,
+`unknown`, and any model a dispatch asks for — whether an agent def once pinned it or the
+host chose it — is *requested*, not observed: no `RESOLVED:` producer or
+transcript oracle ships (design §6.2). Recording the alias would pool a silent
+provider-side fallback with the requested model, so no requested model is carried
+in `ran` at all (S2, round 6). `basis` becomes `asserted` (brand→rung table,
 `skills/shared/model-tier-policy.md` §6.1) only when an observed resolution exists
 to back it. `prov` is `intent` in v1, unconditionally, for every entry: the only
-available source is the agent def's static pin and the brand table — exactly the
-manifest-derived path design §9 classifies as `intent`, not `receipt`. Do not write
+available source is the agent def's `MODEL-REQ` role declaration and the brand
+table — exactly the manifest-derived path design §9 classifies as `intent`, not
+`receipt`. Do not write
 `prov: "receipt"`; it becomes reachable only once the `RESOLVED:`-producer follow-up
 (Task 13) ships.
 

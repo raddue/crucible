@@ -97,7 +97,7 @@ Four states, each with a different remedy:
 | State | Meaning |
 |---|---|
 | `attested` | Verified against a real fixture. Not produced by anything in v1. |
-| `asserted` | Taken on faith from the brand→rung table. What every Claude Code declaration produces today. |
+| `asserted` | Taken on faith from the brand→rung table — and only when an observed resolution exists to back it. Nothing in this repo produces it today: #651 removed every `model:` pin, so no declaration resolves to a brand at all. |
 | `unsatisfied` | The resolved rung is below the declaration's requirement. |
 | `indeterminate` | The harness or brand is not one this table covers. |
 
@@ -177,8 +177,8 @@ A named, versioned literal (design §3.3/§12) — three pairs, checked by
 `check_model_req_report_only()` (Task 5):
 
 - `{R2, egress=none}` — unsatisfiable on most racks today (design §3.3). This is the
-  *driver's future local-orchestrator endgame* pin, not what this plan's own
-  declarations use in Task 6 (which pin each role to its actual deployment's
+  *driver's future local-orchestrator endgame* posture, not what this plan's own
+  declarations use in Task 6 (which declare each role at its actual deployment's
   `egress=first-party`, per design §8) — so it is Report-Only-checked but does not
   fire against this plan's four declarations on day one.
 - `{R2, no-retention}` — unsatisfiable under some vendor postures (design §3.3). Same
