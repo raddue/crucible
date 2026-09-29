@@ -222,8 +222,7 @@ closure paths): precheck verified resolved size, then `fstat` the opened fd, rej
 its size exceeds either remaining budget or per-file limit, and read at most the allowed
 bytes plus one to detect growth/incomplete reads. Reject a short/incomplete read or
 any cap overflow before JSON parsing; close fd, mark the scope's probe failed →
-`unknown` + warning, and refuse npm `dev` tokens across recorded scopes. No wall-clock
-bound is claimed for this walk; these manifest caps do not replace the lockfile cap.
+`unknown` + warning, and refuse npm `dev` tokens across recorded scopes. The closure walk is additionally bounded by a fixed node/edge ceiling (at most 1,000,000 nodes visited and 1,000,000 edges traversed; exceeding either → probe failed → `unknown` + warning and refuse npm `dev` tokens across recorded scopes), and the pinned closure-walk subcommand runs under a fixed 60-second wall-clock timeout; a non-zero exit, signal, or timeout is a run-global probe failure → `unknown` + warning that trips the all-scope npm gate for **every** recorded scope (R-4), never only the affected scope. These manifest caps do not replace the lockfile cap, the node/edge ceiling, or the timeout.
 **Hardening applies to every manifest open, not just the guard's cold path (FA-2 / R6-02).** The
 realpath-containment + per-component symlink refusal + verified-size + printable-ASCII intake
 hardening of this paragraph (and §4.3's Python equivalent) applies to **all** opens of
@@ -232,10 +231,10 @@ reads on the normal non-empty path (whose paths come from the validated scan, no
 attacker keys), the census's Python manifests — identically. A checker verifying only
 §4.1's empty-closure-guard reads while the every-day member-open path stays unhardened
 satisfies AC-12's letter but not its intent.
-**fd-based read, no TOCTOU (BA-3).** The validate-then-open sequence is specified on an open
+**fd-based read, final-component TOCTOU closed (BA-3).** The validate-then-open sequence is specified on an open
 file descriptor, not a path string: `os.open(path, O_RDONLY|O_NOFOLLOW)`, then `fstat` on the
-fd (size and symlink status re-verified *after* open), then read from the fd — so a path
-component swapped to a symlink between lstat and open cannot defeat containment. Where the
+fd (size and symlink status re-verified *after* open), then read from the fd — so a final-component
+swap to a symlink between lstat and open cannot defeat containment (R7-09). Where the
 design says “realpath then open”, the realpath containment is a pre-filter and the
 fd-based fstat is the binding check; a checkout is additionally assumed not to be mutated
 mid-classification; §7.6 detects observed input changes across compaction recovery.
@@ -417,7 +416,7 @@ it did not author), so it passes the printable-ASCII whitelist before rendering.
 Extras are `unknown` on purpose: an extra is just as often a shipped optional feature
 (`mypackage[postgres]`) as it is a dev convenience (`mypackage[test]`). Guessing would
 break DEC-2's fail-safe. The `requirements.txt` / `pyproject.toml` reads use the same
-`realpath` containment + per-component symlink refusal + verified-size intake validation as
+`realpath` containment + per-component symlink refusal + verified-size + bounded-read intake validation (1 MiB per Python manifest, 64 MiB aggregate of Python manifest bytes; an over-cap or short/incomplete read is a probe failure → `unknown` + warning, never `dev`) as
 §4.1's lockfile — a hygiene-pinned subcommand of §2's first-party script (R5-01), since
 `realpath`/`lstat`/`stat` cannot be done with Read/Glob alone. A path containing any
 non-printable-ASCII character (e.g. an embedded newline that could forge a line-start marker)
@@ -676,8 +675,7 @@ agent leaves a stale `## Triage` in place.
 ## 9. Failure modes this design must not have
 These become Red Flags in the skill:
 1. **Silent downgrade on a failed classification.** A malformed lockfile, an empty
-   closure despite recorded production declarations, an unresolved production seed, or a
-   resource-bound trip must never make findings `dev`. It makes them `unknown`, which triages
+   closure despite recorded production declarations, an unresolved production seed, a resource-bound trip, or a closure-walk subprocess that is killed, times out, or exits non-zero must never make findings `dev`. It makes them `unknown`, which triages
    as `prod`. An empty closure with no recorded production declarations is valid and may mint
    `absent-from-prod-closure` when all other gates pass (eval 1b).
 2. **Claiming call-graph reachability.** Reporting `prod` as "the vulnerable code
@@ -796,7 +794,7 @@ required by AC-14.
     regenerates `## Summary` **and** `## Triage`, discarding any existing `## Triage`
     rather than appending; and `skills/quality-gate/SKILL.md`'s duplicated recovery
     paragraph is updated in the same change (else canonical drift).
-12. Trust and recovery contracts are stated: scope is declaration-faithful and not a security boundary; no checkout-steerable subprocess is added; callers may pass canonical `checkout_root` provenance from trusted invocation context alongside `scope_root`; missing or unequal provenance blocks demotion, and existing parent callers are not assumed to provide it; each first-party interpreter invocation uses the hygiene invariant; bounded fd-based reads and sanitization apply as specified. The npm closure walk enforces separate 64-MiB lockfile and 1-MiB-per-`package.json`/64-MiB-aggregate manifest ceilings, including non-empty closure paths; unsupported or missing placed seeds/edges and cap trips refuse demotion. PEP 735 and non-main Poetry groups are `unknown` by default, irrespective of group name. Python demotion requires a successful bounded checkout-root census, no production-mapped declaration or extras table in discovered supported manifests, no supported `[project].dynamic` declaration containing `dependencies` or `optional-dependencies`, and no finite-pattern plausible-but-unscanned Python metadata detected within census traversal. Unreadable candidates, unparseable supported manifests, and unsupported declaration syntax refuse demotion. Census exclusions and fixed 10,000-entry/64-MiB/10-second bounds are explicit. Recovery re-discovers directory entry inventories and candidates independently of the immutable audit-tool manifest list; differences invalidate dependent sections selected by stored structured census metadata, never parsed `Reachability:` text. Directory digests detect entry changes; candidate digests detect selected-file content changes only. Disclose finite-pattern misses (R7-08), digests detect changes rather than truth, and no census proves omitted declarations absent.
+12. Trust and recovery contracts are stated: scope is declaration-faithful and not a security boundary; no checkout-steerable subprocess is added; callers may pass canonical `checkout_root` provenance from trusted invocation context alongside `scope_root`; missing or unequal provenance blocks demotion, and existing parent callers are not assumed to provide it; each first-party interpreter invocation uses the hygiene invariant; bounded fd-based reads and sanitization apply as specified. The npm closure walk enforces separate 64-MiB lockfile and 1-MiB-per-`package.json`/64-MiB-aggregate manifest ceilings plus a fixed 1,000,000-node/1,000,000-edge ceiling and a fixed 60-second wall-clock subprocess timeout, including non-empty closure paths; unsupported or missing placed seeds/edges and any cap/timeout trip refuse demotion, and a non-zero exit, signal, or timeout of the pinned closure-walk subcommand trips the all-scope npm gate for every recorded scope (R-4), not only the affected scope. PEP 735 and non-main Poetry groups are `unknown` by default, irrespective of group name. Python demotion requires a successful bounded checkout-root census, no production-mapped declaration or extras table in discovered supported manifests, no supported `[project].dynamic` declaration containing `dependencies` or `optional-dependencies`, and no finite-pattern plausible-but-unscanned Python metadata detected within census traversal. Unreadable candidates, unparseable supported manifests, and unsupported declaration syntax refuse demotion. Census exclusions and fixed 10,000-entry/64-MiB/10-second bounds are explicit; the §4.3 Python manifest reads cap each `requirements.txt`/`pyproject.toml` at 1 MiB and their aggregate at 64 MiB, with over-cap or short/incomplete reads refusing demotion. Recovery re-discovers directory entry inventories and candidates independently of the immutable audit-tool manifest list; differences invalidate dependent sections selected by stored structured census metadata, never parsed `Reachability:` text. Directory digests detect entry changes; candidate digests detect selected-file content changes only. Disclose finite-pattern misses (R7-08), digests detect changes rather than truth, and no census proves omitted declarations absent.
 13. AC-13 checks the evidence/source-class table in §3.0, with source class (`checkout-consistency`, `format/integrity`, or `external-trust`), supported claim, and limitation. Caller-provided canonical `checkout_root` is the sole `external-trust` input and supports only scope-root equality; it does not prove checkout truth or scan completeness. npm manifest/lockfile checks are checkout consistency; directory/file digests detect changes in observed inputs only; fixed grammar and sanitization provide format integrity. Self-tests reject missing/duplicate sources, mislabelling in-checkout evidence as external trust, same-checkout reads called independent proof, caller provenance overstated as checkout truth, and digests claimed as truth verification. The checker does not prove census completeness.
 
 14. AC-14 requires one runnable stdlib fixture-driven test of the actual first-party
