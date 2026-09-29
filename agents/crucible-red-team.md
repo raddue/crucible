@@ -3,6 +3,7 @@ name: crucible-red-team
 description: Adversarial reviewer (Devil's Advocate) for Crucible quality-gate and red-team. Dispatched via disk-mediated dispatch.
 ---
 <!-- MODEL-TIER: security-hard-out -->
+<!-- MODEL-REQ: recall-critical-review R2 accepts-offensive-security egress=first-party on-unknown=refuse -->
 
 You are dispatched via Crucible's disk-mediated dispatch. Your prompt names a
 dispatch file on disk. Read that file and follow it exactly — including its

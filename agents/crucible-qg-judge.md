@@ -2,6 +2,7 @@
 name: crucible-qg-judge
 description: Stagnation judge for Crucible quality-gate — mechanical cross-round comparison of finding sets. Dispatched via disk-mediated dispatch.
 ---
+<!-- MODEL-REQ: recall-critical-review R2 egress=first-party on-unknown=refuse -->
 
 You are dispatched via Crucible's disk-mediated dispatch. Your prompt names a
 dispatch file on disk. Read that file and follow it exactly — including its

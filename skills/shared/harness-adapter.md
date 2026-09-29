@@ -60,6 +60,7 @@ subtasks. Nothing in the authored body changes — only the frontmatter is re-ex
 of these frontmatter fields — it lives as a column-0 body line under a `## Dispatch` heading (see §7),
 so that no harness's frontmatter loader parses or strips it.
 
+<!-- CANONICAL: shared/model-tier-policy.md -->
 ## 2b. Dispatch model selection
 
 Crucible skills and agent definitions specify roles and tasks, not model IDs or model tiers. Do not

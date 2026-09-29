@@ -88,7 +88,7 @@ emit normally — that data is the entire point. Only set the env var when
 running against test fixtures, eval corpora, or CI smoke tests that would
 otherwise pollute the ledger. See `docs/CONTRIBUTING-CALIBRATION.md`.
 
-## Schema v2 (23 fields)
+## Schema v2 (24 fields)
 
 v2 adds one nullable provenance field, `repo`, to v1 (#270). Readers stay
 backward-compatible: v1 rows (no `repo`, `schema_version: 1`) read fine and
@@ -104,6 +104,7 @@ caller-set, so direct callers like the v1 backfill (moved to
   "run_id": "<UUIDv7 — sortable, millisecond-precision, unique>",
   "skill": "<emitting skill name; open set — any skill carrying a CANONICAL shared/ledger-append.md emit block (e.g. quality-gate, siege, temper, red-team, audit, inquisitor, delve, review-feedback, test-coverage, verify)>",
   "repo": "<basename of git toplevel; cwd basename fallback; 'unknown' on v1 rows>",
+  "model_resolution": null,
   "tier": "A | B",
   "artifact_type": "code | design | plan | hypothesis | mockup | translation | other",
   "verdict": "PASS | FAIL | STAGNATION | ESCALATED | ARCHITECTURAL | SUSTAINED_REGRESSION",
@@ -144,6 +145,7 @@ branch on missing keys. The required explicit-nulls on Tier B stubs are:
 - `chunk_hash: null`
 - `rounds: null`
 - `predicted_falsifier: null`
+- `model_resolution: null`
 
 Tier B stubs also set `gated_files_truncated: 0` (explicit) and `comment: null`.
 
@@ -176,6 +178,74 @@ The mapping at emit time:
 Severity-Histogram / Gated-Files / Highest-Finding ride alongside the marker
 as additive fields (post-`MarkerVersion: 2`) and map 1:1 to the
 corresponding `snake_case` ledger keys.
+
+### `model_resolution` shape (#493, additive nullable)
+
+An object keyed by role name (e.g. `"red-team"`, `"qg-fix"`, `"qg-verifier"`,
+`"qg-judge"`), each value a JSON array of `{ran, basis, prov}` objects — one entry
+per dispatch of that role within the round, oldest first. **On a consensus-eligible
+round the reviewer key is `consensus` instead of `red-team`**, holding one
+`{ran, basis, prov}` entry per polled member (design §9, T19) — the key name alone
+carries the consensus/single distinction; never infer it from array length (a
+consensus round polling one member yields a single-element array, indistinguishable
+by length from the ordinary case):
+
+```json
+{
+  "qg-fix": [{"ran": "unknown", "basis": "indeterminate", "prov": "intent"}],
+  "red-team": [{"ran": "unknown", "basis": "indeterminate", "prov": "intent"}]
+}
+```
+
+- `ran` — **`unknown` for every entry in v1 (S2, round 6).** Design §9 defines the
+  value as `<endpoint-reported-id|unknown>`; no producer emits a `RESOLVED:` line and
+  no transcript oracle ships (design §6.2), so no endpoint-reported ID exists for any
+  dispatch. The agent def's static `model:` pin (e.g. `opus`) is *requested*, not
+  observed — recording it in `ran` would pool a provider-side retarget or silent
+  fallback with the requested alias, the exact confusion this field exists to prevent.
+- `basis` — `indeterminate` for every entry in v1: nothing endpoint-observed backs a
+  rung. `asserted` (brand→rung table, `skills/shared/model-tier-policy.md` §6.1)
+  becomes reachable only when a `RESOLVED:` producer supplies an observed resolution.
+- `prov` — **`intent` in v1, for every entry** (design §9): the only available source
+  is manifest/config intent, never a receipt. `prov: "receipt"` becomes reachable only
+  once the `RESOLVED:`-producer follow-up (Task 13) ships and a role's own receipt can
+  be re-read for a receipt-grade value.
+
+`null` (not `{}`) **iff the round contributed no reviewer data at all** (SP2,
+round 3) — i.e. it dispatched none of the four `MODEL-REQ`-bearing single-model
+roles **and** did not use a completed/partial review-mode consensus result. A
+
+**Data-loss condition, added (S2, round 18).** `null` ALSO results when a round **did** use a
+review-mode consensus result whose membership list was lost or empty: the populator returns the
+whole-row `None` above rather than advertising a partly-attributed reviewer set (a bare `null`
+must never be read as "no reviewer"). The row alone cannot distinguish the two, so a round that
+emits that `null` while `review_used` was true MUST retain a separate data-loss signal
+(`review_per_model_lost: true` in `<findings-root>/round-<N>-review-result.json` and the
+round coverage file), and recovery must report absent membership and empty membership
+separately. Where that signal cannot be retained, the row is BLOCKED rather than written.
+consensus-eligible clean round dispatches **no** red-team agent def (consensus
+replaces it) yet **does** contribute a `consensus` reviewer key, so it must be
+**non-null**; keying `null` off the four defs alone would wrongly erase that
+comparability data. `{}` would falsely claim "checked, found nothing" rather than
+"not applicable this round." Only `quality-gate` populates this field in v1 — the only
+one of the three Tier A writers (`quality-gate`/`siege`/`temper`) that dispatches a
+`MODEL-REQ`-bearing role.
+
+**Uniform shape preserved — no alien element (S7/S4).** Every element of every role
+array stays exactly `{ran, basis, prov}` (design §9/T19); the populator does **not**
+insert a second element type. (An earlier draft capped each array at 32 entries with
+an `{"elided": N}` marker between a retained head and tail — that element is not
+`{ran, basis, prov}`, so it silently broke the uniform-array contract readers are
+promised, and no reader was scoped to special-case it.) The unbounded-size residual
+design §9's round-6 M5 already discloses is retained rather than masked:
+`append()`'s 16384-byte row cap (`ledger_append.py:299`) **drops** an oversize row
+outright, and `_truncate_payload` does not cover `model_resolution`. If a row is
+dropped that way, that is the design's disclosed residual, reported through
+`append()`'s existing drop behavior — not papered over by an undocumented sentinel.
+Producers keep each entry minimal so the array's serialized size stays as small as
+the honest data allows; the plan does not add a count-based cap it cannot make safe
+(a 32-entry cap does not bound total bytes across roles or long `ran` identifiers
+anyway).
 
 ### `predicted_falsifier` protocol (predicted-falsifier prediction market, Phase 7)
 
@@ -939,6 +1009,8 @@ def _cli_emit(ledger_arg: str, entry: dict) -> int:
     # unconditionally (an emitter sending the stale `1` must not produce a
     # hybrid v1+repo row). Fill `repo` when absent OR explicitly null/empty —
     # setdefault would miss the null case, silently voiding provenance.
+    if not entry.get("model_resolution"):
+        entry["model_resolution"] = None
     if not entry.get("repo"):
         entry["repo"] = default_repo()
     entry["schema_version"] = SCHEMA_VERSION

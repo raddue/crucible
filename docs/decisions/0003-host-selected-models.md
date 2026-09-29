@@ -70,3 +70,19 @@ cross-certification between sibling dispatches sharing a dispatch dir, and a
 missing dispatch ID for directly invoked (non-dispatched) runs — while adding no
 enforcement the prose rules do not already claim. Recorded here so the next author
 does not re-derive it.
+
+Merging #493's capability/trust vocabulary (`MODEL-REQ` declarations plus
+`scripts/check_model_pins.py`'s authoring-time consistency rules) into this
+branch forced one checker edit, and it is recorded here because it is a
+consequence of this decision rather than of #493: #493's `S2 (round 5)` rule
+hard-failed any binding agent-def whose frontmatter carried no `model:` pin, and
+its `SP1 (round 3)` advisory reported a `MODEL-REQ`-bearing file with no pin as
+an indeterminate live binding. Both assert repo-side model selection, which this
+ADR removes, so both are gone — `S2` keeps only the frontmatter-presence and
+declaration-placement halves, and `SP1` is deleted outright (`T5`'s
+declared-vs-resolved rung comparison simply does not run on an unpinned file).
+Everything else #493 added survives untouched: `MODEL-TIER` marker coverage
+(default-deny), Fable-family rejection, the `MODEL-REQ` grammar and its
+Report-Only consistency checks, and the day-one disclosure pin — whose expected
+set legitimately shrank by the `crucible-qg-judge` rung/pin disagreement, the
+maintainer-pending finding this ADR made impossible.
