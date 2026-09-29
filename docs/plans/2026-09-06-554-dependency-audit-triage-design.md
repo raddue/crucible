@@ -587,8 +587,8 @@ beside them:
 ```
 Result: CLEAN | FINDINGS | BLOCKED | INCONCLUSIVE | FAILED
 Critical: N  High: N  Moderate: N  Low: N  Informational: N
-Triage: FIX_NOW: N  FIX_NEXT_CYCLE: N  DEFER_TRACK: N  TRACK_ONLY: N
-Reachability: prod: N  dev: N  unknown: N   (gating: advisory | strict)
+Triage totals: FIX_NOW: N  FIX_NEXT_CYCLE: N  DEFER_TRACK: N  TRACK_ONLY: N
+Reachability totals: prod: N  dev: N  unknown: N   (gating: advisory | strict)
 ```
 When npm coverage is incomplete, add a sanitized warning identifying skipped/failed recorded scope(s); count blocked demotions under `unknown` and derive global triage from effective merged values (§4.1).
 ### 7.4 The interactive prompt
@@ -667,7 +667,7 @@ covers any remaining path class without naming each one:
 - **Structural markers are line-start-anchored with closed-set values.** `status: complete`,
   `Reachability:`, and `Triage:` are recognized **only** when they begin a line. Their values
   are closed-set for the markers that have a fixed alphabet (`status: complete` verbatim;
-  `Triage:` one of the four buckets (`FIX_NOW | FIX_NEXT_CYCLE | DEFER_TRACK | TRACK_ONLY`, §7.1); a `dev` `Reachability:` value a DEC-9 token). The one
+  `Triage:` one of the four buckets (`FIX_NOW | FIX_NEXT_CYCLE | DEFER_TRACK | TRACK_ONLY`, §7.1); a `dev` `Reachability:` value carries one or more DEC-9 tokens, comma-space separated and sorted in a single bracket, with per-source tokens never deduplicated). The one
   free-text value — `unknown`'s bracketed reason — is permitted **only because it is
   whitelist-sanitized** (no line terminator survives), so it cannot forge a line-start marker
   despite being drawn from no closed set (R5-05's marker-integrity point). Attacker-controlled
@@ -675,7 +675,7 @@ covers any remaining path class without naming each one:
   own field, never at a marker's line-start, so `… Reachability: dev […]` forged mid-field is
   inert: the reader does not treat it as a marker.
 This keeps the "Result vocabulary is untouched" promise at the parser level while making the
-per-finding fields, the extended sentinel, and the prompt safe against hostile input.
+per-finding fields, the extended sentinel, and the prompt safe against hostile input at the parser level — line-termination breakout and marker forgery — not against every presentation risk: printable ASCII keeps Markdown-active symbols such as `|`, `<`, and `>`, which R7-10 discloses.
 **Downstream-reader contract (CA-2).** The line-start + closed-set marker convention of this section is the contract for *every* reader that interprets `audit-results.md` structurally — including the downstream consumer §7.7 names, `build`'s gate ledger. `build` consumes the `Result:` line only (per §7.3 the vocabulary is unchanged), so hostile `Reachability:`/`Triage:`/`status: complete` text inside a finding field is inert for it; any *other* reader that parses per-finding `Reachability:`/`Triage:` values must apply the same line-start-anchored first-token matching this section specifies, or state its own. The artifact does not extend the line-anchoring convention to readers that do not adopt it; a reader that substring-scans a finding field for `Triage:` is outside this contract and is told so. This reservation belongs to the §8 table row for Output Model, so it is not silently assumed.
 ## 8. Where this lands in the skill
 | SKILL.md section | Change |
@@ -798,9 +798,9 @@ required by AC-14.
 9. A structural checker enforces these invariants, wired into `scripts/run_tests.sh`
     (`bash scripts/run_tests.sh` is green): the DEC-9 token set is present and closed; the
     untokened-`dev`→`unknown` rule is present; the §3.0 recorded-graph completeness rule is present; every
-    `Reachability: dev` example carries a bracketed token from the set, matching **both**
-    renderings — the per-finding field form `Reachability: dev [<token>]` and the triage
-    column form `— dev [<token>] —` — scoped to lines beginning with `Reachability:` or
+    `Reachability: dev` example carries one or more bracketed tokens from the set — comma-space separated, sorted, single bracket, per-source duplicates kept — matching **both**
+    renderings — the per-finding field form `Reachability: dev [<token>(, <token>)*]` and the triage
+    column form `— dev [<token>(, <token>)*] —` — scoped to lines beginning with `Reachability:` or
     `- `, with the single Output Model schema-template line exempt and at least one
     non-exempt positive asserted (AC-8); `reachability_gating` defaults
     to `advisory` (AC-3) and its precedence is mode-conditional — under `advisory` the
