@@ -189,17 +189,30 @@ subcommand below, and no other new subprocess**:
 **Recorded prod closure.** The seed set is the **production declarations in the paths
 recorded by the audit's on-disk manifest scan**: the root `package.json`'s `dependencies` +
 `optionalDependencies` + `peerDependencies`, unioned with the same three fields of each
-recorded workspace-member `package.json`. Lockfile `packages`-map keys do not select workspace
+recorded workspace-member `package.json`. Root `peerDependencies`/`optionalDependencies`
+seeding is an unverified, fail-safe over-approximation — the §4.5 fixtures verify a
+*dependency's* auto-installed peer (V3), not a root peer/optional as an independent prod seed —
+and must not be removed, since dropping a real prod seed can shrink the closure and mint a
+false `dev` (M2/R-8). Lockfile `packages`-map keys do not select workspace
 membership; they resolve and crawl dependency seeds only. Thus a member deleted from the map
 cannot silently vanish from the recorded seed, and a scanned member under `apps/web` or
-`libs/x` does not need a literal `packages/` prefix. This same-checkout source does not prove
+`libs/x` does not need a literal `packages/` prefix. **Scope partition (S1).** The scan
+partitions every scanned `package.json` into exactly one npm scope before seeding: each manifest
+belongs to the nearest workspace root whose `workspaces` glob patterns match its on-disk path
+(the closest enclosing root `package.json` that declares a matching `workspaces` glob), and the
+root is its own workspace. A manifest matched by no root's `workspaces` pattern is **not
+dropped** — it forms its own single-manifest scope, seeded and gated like any other; an
+independent lockfile-less sub-project is a recorded scope whose missing lockfile is a skipped
+scope. `workspaces` patterns are checkout-controlled, so a glob edit can only move a manifest
+between scopes, never drop it from seeding or from the all-scanned-npm-scope gate (R-2). This
+same-checkout source does not prove
 that scan omitted no member before the run (R7-02). The lockfile is used only to **resolve and
 crawl** those seeds: resolve each seed through the lockfile's `packages`
 map (the node for that name) and traverse **each** of that node's `dependencies`,
 `optionalDependencies`, and `peerDependencies` fields to the transitive closure (npm
 auto-installs peers — npm 7+ records them as lock nodes flagged `peer: true` in the depender's
 `peerDependencies`, not `dependencies`; and `optionalDependencies` are installed-and-shipped
-packages such as platform binaries, so they must be in the closure too). **A seed that resolves to no lock node (R5-04/R6-08) is a probe failure**, not a silent skip: the manifest declares a production dependency the lockfile does not contain, so the closure cannot be trusted to cover it → `unknown` + warning for that manifest's findings. There is no lockfile "members table" and no lockfile-derived membership cross-check. An unreadable scanned member `package.json` is a probe failure → `unknown` + warning. A seed recorded in a scanned manifest but absent from the lockfile is likewise `unknown`. These are same-checkout consistency checks, not independent evidence that scan membership or declarations are truthful. A finding whose package is in the recorded closure is `prod`. A `dev` token is refused unless the parent supplies trusted canonical `checkout_root` and it equals canonical `scope_root`; never infer checkout root from repository-controlled files or commands. Missing or unequal roots make a would-be `dev` contribution `unknown`; a package already established as `prod` remains `prod` (CA-3).
+packages such as platform binaries, so they must be in the closure too). **`packages` map required (S2).** The walk reads the lockfile's `packages` map, so lockfileVersion 2–3 closures are unambiguous; a lockfile with no `packages` map (a v1 `lockfileVersion`) leaves every seed unresolved and yields `unknown` + a warning naming `lockfileVersion`, never `dev`. **A seed that resolves to no lock node (R5-04/R6-08) is a probe failure**, not a silent skip: the manifest declares a production dependency the lockfile does not contain, so the closure cannot be trusted to cover it → `unknown` + warning for that manifest's findings. There is no lockfile "members table" and no lockfile-derived membership cross-check. An unreadable scanned member `package.json` is a probe failure → `unknown` + warning. A seed recorded in a scanned manifest but absent from the lockfile is likewise `unknown`. These are same-checkout consistency checks, not independent evidence that scan membership or declarations are truthful. A finding whose package is in the recorded closure is `prod`. A `dev` token is refused unless the parent supplies trusted canonical `checkout_root` and it equals canonical `scope_root`; never infer checkout root from repository-controlled files or commands. Missing or unequal roots make a would-be `dev` contribution `unknown`; a package already established as `prod` remains `prod` (CA-3).
 **All-scanned-npm-scope demotion gate.** Record every npm scope identified by the audit's own manifest scan, including skipped scopes (for example, missing lockfile) and audit errors. Before any npm `dev` token or merge, require every recorded npm scope to finish successfully with a valid audit result and readable, valid required declaration/closure inputs. A skipped, failed, invalid, or incomplete scope blocks *all* npm `dev` tokens, even without an overlapping package or any findings. Keep independently established `prod`; turn every would-be npm `dev` contribution into `unknown` with a sanitized warning identifying the unavailable recorded scope (§7.7). Recompute merge, triage, and strict blocking from effective values. Existing overall-result precedence for audit failure/skip remains unchanged (§6); where existing result rules permit `BLOCKED`, Critical/High `unknown` blocks under `strict`. This gate covers only scanned/recorded scopes, not manifests omitted before scan (R7-02).
 **Intake validation and resource bounds.** The walk opens the lockfile only after
 `os.path.realpath()` containment against the scan scope root (a `package-lock.json` symlink
@@ -284,7 +297,12 @@ alias target), then traverse that target's recorded edges.
 Missing target, unscanned target, out-of-root target, contradictory or cyclic link, or
 unsupported link shape fails closed. Lockfile keys do not add workspace members. The
 resolved names of traversed nodes form the closure membership set; a finding is `prod`
-iff its resolved name is in that set. This is a walk of recorded placements, not proof
+iff its resolved name is in that set. **Name-match floor (S9).** A finding whose reported name
+matches **no lock-node resolved name** in its scope is a name-space mismatch, not a proven
+absence: it yields `unknown` + a warning, never `dev` and never `absent-from-prod-closure` — an
+`npm audit` finding keyed by a declaration alias or a node-path suffix rather than a resolved
+name would otherwise fall out of the closure and mint a false demotion (R-3). This is a walk of
+recorded placements, not proof
 of npm runtime resolution or of declarations/edges omitted before the run (R7-05).
 **Empty-closure consistency check (not independent proof):** when the computed closure
 is empty, compare it with the production declarations in the `package.json` paths the audit's
@@ -446,7 +464,8 @@ cargo probe — cargo is now `unknown`, no probe to verify.)
 | V2 | `request@2.88.2` in **both** keys, with vulnerable transitives (`form-data`, `qs`, `tough-cookie`) | lockfile flags **47/47** nodes `dev: true` | The dual-declaration mis-flags the whole subtree; walking the lockfile graph (not trusting the flag) keeps the subtree `prod`. Motivates the closure walk |
 | V3 | `react-dom@18.3.1` in **both** keys, with `react` as its auto-installed peer (`peer: true`) | `react` is reached only via `react-dom`'s `peerDependencies`, not its `dependencies` | The closure must traverse `peerDependencies`, or an auto-installed peer of a dual-declared prod dep is silently demoted |
 | V4 | lockfileVersion-3 nodes, aliased vs non-aliased (`"logger": "npm:itoa@1"` vs plain `request`) | alias node carries `name`; non-aliased node carries **no** `name` (name lives only in the map key) | `node.get('name')` is `None` for every non-aliased node → empty closure. Motivates the field-or-key-suffix rule + empty-closure guard in §4.1 |
-V1–V4 are the findings that shaped §4.1. All are false-`dev` downgrades — the one direction
+| V5 | aliased `"logger": "npm:underscore@1.12.1"` with lock node `node_modules/logger` carrying `name: "underscore"`; `npm audit --json` on npm 11.16.0 | the finding is reported under the **resolved** name `underscore` (the lock node's `name`), while its `nodes` field carries the alias installation path `node_modules/logger` | the finding side must be matched on lock-node **resolved** names, never the declaration alias key or the node-path suffix; §4.1's name-match floor turns any name-mismatched finding into `unknown`, never `dev` (S9/R-3) |
+V1–V5 are the findings that shaped §4.1. All are false-`dev` downgrades — the one direction
 §9.1 forbids; none was visible from reading tool documentation alone.
 ## 5. The triage tree
 Six rows, because the ticket's four have a hole in them.
@@ -731,7 +750,7 @@ decision:
 | 4b | npm closure walk yields an empty closure in a manifest whose `package.json` declares prod deps | Probe defective → `unknown` + warning; no downgrade (the empty-closure guard's cross-check branch) |
 | 5 | Non-overclaim | Output describes scope, not executed code; a request to report "which vulnerable functions are actually called" is answered with the explicit non-goal rather than a fabricated call-graph claim (DEC-1) |
 | 6 | npm package declared in **both** `dependencies` and `devDependencies` **with a vulnerable transitive, an auto-installed peer, and an alias** (V2/V3/V4 fixtures) | The dual-declared package, its transitive subtree **and its peer** classify `prod` via the lockfile-closure walk (dep+optional+peer edges), not `dev`; an npm alias (`"logger": "npm:winston@3.8.0"`) and a non-aliased node both resolve to their **single canonical name space** — the resolved name `winston`/`request` on **both** the closure side and the finding side (R5-02); a lock node whose `name` disagrees with its key suffix without a matching direct or transitive incoming `npm:` alias target is rejected → `unknown`; an empty closure with non-empty findings is a probe failure → `unknown` |
-| 6a | nested npm alias: prod lock node has `"logger": "npm:winston@3.8.0"` and `node_modules/prod/node_modules/logger` has `name: "winston"`; variants have absent, malformed, or mismatched incoming target | Valid edge traverses and vulnerable `winston` is `prod`; invalid alias fails closed to `unknown` + warning, never a `dev` token (§4.1) |
+| 6a | nested npm alias: prod lock node has `"logger": "npm:winston@3.8.0"` and `node_modules/prod/node_modules/logger` has `name: "winston"`; variants have absent, malformed, or mismatched incoming target | Valid edge traverses and vulnerable `winston` is `prod`; invalid alias fails closed to `unknown` + warning, never a `dev` token; a finding name that matches no lock-node resolved name in its scope yields `unknown` + warning, never `dev` (name-match floor, S9/R-3) (§4.1) |
 | 6b | an `apps/web`-style monorepo (`workspaces: ["apps/*"]`, vulnerable prod dep declared only in `apps/web/package.json`, one unrelated root prod dep) | Membership comes from the **audit's on-disk manifest scan**, so `apps/web/package.json` (found on disk, no literal `packages/` prefix needed) is a member and its dep enters the closure — `prod`, not `dev [absent-from-prod-closure]`; workspace membership comes from scanned manifest paths, not lockfile keys; deleting only a lock key cannot rewrite that scan result (R6-02). This same-checkout consistency is not proof that a member was not omitted before scan (R7-02) |
 | 6c | npm dual-declared subtree, single lockfile-edge deletion (V2 fixture, R6-01) | Demonstrate R7-05: edge pruning in a non-empty graph can mint `dev [absent-from-prod-closure]`. This is an accepted false-demotion residual, not desired behavior; disclose it explicitly, alongside omitted-manifest R7-02. Do not claim that recorded-graph completeness proves true production scope. |
 | 6d | Python repo with a `setup.py` (or `Pipfile`/`requirements/*.txt`) and a named-group dep | Census detects plausible-but-unscanned metadata and refuses token → `unknown` (R6-04); named groups remain `unknown` even with complete census; a subdir-scoped audit or invocation without trusted `checkout_root` cannot permit demotion (CA-3/R7-06) | 
@@ -745,7 +764,8 @@ decision:
 | 6j | root `dependencies.x` with only `node_modules/dev-tool/node_modules/x` in lockfile; control adds correctly placed `node_modules/x`; transitive nested alias edge uses ancestor lookup | Wrong nested node cannot satisfy root seed; failed placement means `unknown` and no npm `dev` token even when other closure nodes exist. Correct placement traverses actual production `x` and its recorded edges; alias matching uses selected incoming edge (S2). |
 | 6k | non-empty npm prod closure with a scanned workspace `package.json` larger than 1 MiB, or aggregate manifests larger than 64 MiB | Both caps fail the normal closure walk to `unknown` + warning with no npm `dev` token, regardless of small valid lockfile (S3). |
 | 6l | compaction changes active Python virtualenv between completed `pyproject.toml` audit and resume, leaving manifest/census bytes identical; `requirements.txt` section unchanged | Always discard and re-audit environment-backed `pyproject.toml`; retain unchanged requirements section; new pyproject results replace old and global dedup/Summary/Triage regenerated without stale findings (S4). |
-Per this repo's *Eval before you publish* rule, these twenty-two cases run before the PR.
+| 6m | a root npm scope plus an independent lockfile-less sub-project manifest (`vendor/tool/package.json`) not matched by any root `workspaces` pattern | The unmatched manifest forms its own scope, seeded and gated like the root; its missing lockfile is a skipped scope that blocks all npm `dev` tokens via the all-scanned-npm-scope gate — no scanned manifest is ever dropped from seeding or gating regardless of `workspaces` edits (S1/R-2) |
+Per this repo's *Eval before you publish* rule, these twenty-three cases run before the PR.
 Prompt evals check user-visible behavior; they do not replace the runtime code-path test
 required by AC-14.
 ## 12. Acceptance criteria
@@ -760,8 +780,8 @@ required by AC-14.
 6. Every new `.md` under `skills/dependency-audit/` carries the standalone
    `<!-- MODEL-TIER: security-hard-out -->` marker (`scripts/check_model_pins.py`
    dir-allowlist requires it for *every* `.md` in this directory, pin or no pin).
-7. `skills/dependency-audit/evals/evals.json` exists and covers all twenty-two cases in §11
-   (1, 1b, 2, 3, 4, 4b, 5, 6, 6a, 6b, 6c, 6d, 6e, 6f, 6g, 6h, 6i, 6j, 6k, 6l, 7, 8).
+7. `skills/dependency-audit/evals/evals.json` exists and covers all twenty-three cases in §11
+   (1, 1b, 2, 3, 4, 4b, 5, 6, 6a, 6b, 6c, 6d, 6e, 6f, 6g, 6h, 6i, 6j, 6k, 6l, 6m, 7, 8).
 8. The DEC-9 demotion-token set is documented as a closed set, the §3.0 recorded-graph completeness rule is
     stated, including the distinction between an empty closure with recorded production declarations (`unknown`)
     and a valid empty closure with none (eligible for `dev` only under §4.1 and all other DEC-9 gates); the
@@ -800,7 +820,9 @@ required by AC-14.
 14. AC-14 requires one runnable stdlib fixture-driven test of the actual first-party
     classifier/parser/census/digest implementation, wired into `bash scripts/run_tests.sh`.
     Direct executable/code-path assertions cover npm recorded direct, transitive, optional,
-    peer, and direct/nested alias closure (including wrong/absent alias target), and failed or
+    peer, and direct/nested alias closure (including wrong/absent alias target), a finding whose
+    reported name matches no lock-node resolved name refusing demotion (`unknown`, never `dev`),
+    and failed or
     skipped scope inputs refusing all npm `dev` tokens even without name overlap. Python
     assertions cover dynamic `optional-dependencies`, static extras, successful census and
     incomplete candidate/directory reads refusing demotion. Recovery assertions cover
@@ -833,3 +855,5 @@ The supplied R7 report closed in `mode: standard` with 0 Fatal and records 6 Sig
 - **R7-11 (Low):** affected-section recovery selection must use stored structured provenance/digests, never parse prior `Reachability:` text.
 
 The supplied R7 report contains a count discrepancy: its verdict says 6 Significant/High, 5 Medium, 3 Low (14 total), while its numbered R7-01…R7-11 list contains 3 High, 5 Medium, 3 Low (11 total). Preserve both statements and require fresh review/QG to resolve or disclose the mismatch; do not invent unlisted findings or severities. The report remains source of truth for its finding text. Process caveat: its 3-agent review was self-dispatched without receipts; the report states it is not claiming a receipt-lint blocker on that review. Preserve that limitation; do not treat the report's review process as receipt-verified or invent a blocker it disclaims. No claim of independent verification, true-graph superset, or malicious-checkout detection is permitted.
+
+**Adjudication residual (S2):** a v1 lockfile with no `packages` map leaves every seed unresolved — fail-safe `unknown` plus a warning naming `lockfileVersion`, never `dev` (§4.1).
