@@ -130,7 +130,7 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 |---|---|---|
 | "This task is small/simple/trivial, the quality gate would just find nits." | Small changes have the same bug density per line as large ones. QG has never run on a Crucible artifact without finding at least one real issue. | Run the quality gate on every phase artifact, regardless of size. |
 | "Phase N looks fine, I can skip the gate and move on." | Self-assessment of artifact quality is exactly the bias the gate exists to counter. "Looks fine" is the failure mode, not a pass criterion. | Phase transitions are BLOCKED without a verified PASS verdict marker for the prior phase. |
-| "The fix agent addressed the findings, so the gate is done." | Fixing is not passing. Fix rounds routinely introduce new issues or incompletely resolve old ones. A clean verification round is required. | The gate is only complete after a fresh red-team round returns 0 Fatal, 0 Significant. |
+| "The fix agent addressed the findings, so the gate is done." | Fixing is not passing. Fix rounds routinely introduce new issues or incompletely resolve old ones. A fresh verification round is required. | The gate is only complete after a mode-clean fresh reverify: `0 Fatal` in default `standard`, or `0 Fatal, 0 Significant` when the caller passes `mode: full`. A truly clean first round (`0 Fatal / 0 Significant`) may use normal candidate-clean handling; first-round `0 Fatal / >0 Significant` is actionable. Standard residual Significant/Minor findings must be disclosed. |
 | "The user said 'looks good' / 'move on' — that's approval to skip the gate." | General feedback is not skip approval. Only an unambiguous instruction that explicitly references the gate counts. | Require literal `SKIP GATE` (or equivalent explicit phrase) before recording `Status: SKIPPED`. |
 | "I can fix this one finding myself instead of dispatching a fix agent." | Orchestrator-applied fixes conflate coordination with remediation and bypass the fix journal. Every fix — even trivial — goes through a fix agent. | Orchestrator never edits the artifact directly; always dispatch the fix agent. |
 | "Innovate/red-team seem redundant on top of the quality gate, I'll skip them." | They are not redundant. Innovate is divergent; red-team is adversarial; QG is iterative remediation. Skipping any one of them is a documented regression (`feedback_never_skip_gates`). | Run innovate and red-team on every artifact, every time. |
@@ -160,6 +160,7 @@ Run: <ISO-8601 timestamp>
 PipelineID: <build-YYYYMMDD-HHMMSS>
 Goal: <user request>
 Mode: <feature | refactor>
+QualityGateMode: <standard | full>
 
 ## Phase 1: Design
 Status: NOT_STARTED
@@ -187,10 +188,10 @@ Runs during build startup, after mode detection but before Phase 1 begins:
 
 1. Check for existing ledger at canonical path
 2. If found: run Run Isolation checks (see below)
-3. If not found (or user chose "start fresh"): write new ledger including `Run`, `PipelineID`, `Goal`, and `Mode` header fields, then all four phases with `Status: NOT_STARTED`
+3. If not found (or user chose "start fresh"): write new ledger including `Run`, `PipelineID`, `Goal`, `Mode`, and `QualityGateMode` header fields, then all four phases with `Status: NOT_STARTED`. `QualityGateMode` is `standard` unless the caller explicitly selected `full`; reject any other value before dispatch.
 4. The ledger MUST exist before Phase 1 transitions to `IN_PROGRESS`
 
-After writing any ledger (fresh or reconstructed), immediately re-read the ledger header to extract the PipelineID into the active in-memory state. This is a defensive consistency practice — ensures the in-memory value always matches the persisted value.
+After writing any ledger (fresh or reconstructed), immediately re-read the ledger header to extract the PipelineID and `QualityGateMode` into active in-memory state. This is a defensive consistency practice — ensures in-memory values always match persisted values. Every quality-gate retry, compaction recovery, and resume reuses that immutable `QualityGateMode`; never silently defaults an explicit `full` run to `standard`.
 
 ### Run Isolation
 
@@ -328,7 +329,7 @@ Quality gates are unconditional at all three gate points:
 - "This is trivial / simple / straightforward"
 - "This is just a config change / documentation update / one-liner"
 - "The quality gate won't find anything on something this simple"
-- "I fixed the findings, so the gate is done" — **fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a clean verification round (0 Fatal, 0 Significant on a fresh review). Fix agents introduce new issues or incompletely resolve old ones — that is why fresh-eyes re-review exists.
+- "I fixed the findings, so the gate is done" — **fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a mode-clean fresh reverify (`0 Fatal` in default `standard`; `0 Fatal, 0 Significant` with `mode: full`). Standard residual Significant/Minor findings must be disclosed. Fix agents introduce new issues or incompletely resolve old ones — that is why fresh-eyes re-review exists.
 
 **This requirement exists because:** Quality gates consistently find issues the pipeline misses regardless of task size. There is no category of task that is immune. In observed runs, tasks self-assessed as "trivial" had the same defect rate as complex tasks. The only way to skip a quality gate is with explicit user approval — an unambiguous instruction specifically referencing the gate, not general feedback like "looks good" or "move on."
 
@@ -642,7 +643,7 @@ After the user approves the design and before starting Phase 2:
 
 1. **Innovate:** Dispatch `crucible:innovate` on the design doc. Plan Writer incorporates the proposal.
 2. **Write Phase 1 IN_PROGRESS** to the gate ledger (after ledger initialization).
-3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design". Include in the dispatch context: `Phase: design` and `PipelineID: <current PipelineID>`. Iterates until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
+3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) design doc with artifact type "design" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: design`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 4. If the quality gate requires changes, the Plan Writer updates the design doc and re-commits.
 5. **Verify verdict marker and write Phase 1 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 6. Design doc is now finalized — proceed to acceptance tests.
@@ -792,7 +793,7 @@ Use `./plan-reviewer-prompt.md` template for the dispatch prompt.
 
 1. **Write Phase 2 IN_PROGRESS** to the gate ledger.
 2. **Innovate:** Dispatch `crucible:innovate` on the approved plan. Plan Writer incorporates the proposal into the plan.
-3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan". Include in the dispatch context: `Phase: plan` and `PipelineID: <current PipelineID>`. Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
+3. **REQUIRED SUB-SKILL:** Use crucible:quality-gate on the (potentially updated) plan with artifact type "plan" and explicit `mode: standard` (unless caller explicitly requests `full`). Include in the dispatch context: `Phase: plan`, `PipelineID: <current PipelineID>`, and the immutable mode. Persist selected QG mode in the phase handoff/cairn state and reuse it on retries, compaction recovery, and resume; never infer or downgrade it. Provides the plan and design doc as context. **(Non-negotiable — see Quality Gate Requirement.)**
 4. **Verify verdict marker and write Phase 2 PASS** to the gate ledger (see Verdict Marker Verification). Delete the verdict marker after writing the ledger entry.
 
 The quality gate handles the iterative red-team loop — fresh review each round, weighted stagnation detection, 15-round safety limit, escalation. See `crucible:quality-gate` for details.

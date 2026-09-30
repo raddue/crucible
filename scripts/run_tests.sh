@@ -352,6 +352,8 @@ run_expect "selftest OK" python3 scripts/grudge_guard_doctor.py --grudge-guard -
 # --- R5 outcome witness: wiring + executability fence (T-x, criterion 8) ---
 run python3 scripts/check_grudge_guard_witness_wiring.py --selftest
 run python3 scripts/check_grudge_guard_witness_wiring.py
+run python3 scripts/check_qg_closure_modes.py --selftest
+run python3 scripts/check_qg_closure_modes.py
 
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
