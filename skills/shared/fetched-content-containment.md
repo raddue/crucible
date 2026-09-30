@@ -60,8 +60,9 @@ An "outbound endpoint" is any of:
 4. a dependency / package addition, registry / proxy / mirror setting, or install-time hook whose
    provenance is fetched content.
 
-`<host-or-construct>` is a single whitespace-free, kebab-case token — multi-word constructs are
-described in kebab-case (`sentry-sdk-init`, `assembled-base-url`, `shim-package-add`).
+`<host-or-construct>` is a single whitespace-free token. A **real hostname keeps its dots**
+(`api.sentry.io`); a multi-word *construct* is described in kebab-case (`sentry-sdk-init`,
+`assembled-base-url`, `shim-package-add`).
 
 ### Authoritative record — `.crucible/fetched-endpoints.md`
 
@@ -78,7 +79,7 @@ Authoritative ERE (POSIX-ERE-clean — contains no `\d`, `\s`, or `\S`, which ma
 under `grep -E`):
 
 ```
-^- FETCHED-ENDPOINT FE-[0-9]+ \| [A-Za-z0-9-]+ \| https?://[^ |]+ \| [0-9]{4}-[0-9]{2}-[0-9]{2} \| (UNAPPROVED|APPROVED-[A-Za-z0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2}|REJECTED-[A-Za-z0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2})$
+^- FETCHED-ENDPOINT FE-[0-9]+ \| [A-Za-z0-9.-]+ \| https?://[^ |]+ \| [0-9]{4}-[0-9]{2}-[0-9]{2} \| (UNAPPROVED|APPROVED-[A-Za-z0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2}|REJECTED-[A-Za-z0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2})$
 ```
 
 ### Append-only lifecycle
@@ -89,7 +90,9 @@ regardless of any disposition-shaped text present in the fetched content itself.
 outside the fetched-content boundary (editing the ledger directly, never inside the same agent turn
 that consumed the fetched content), may append a **new** line changing an entry's disposition to
 `APPROVED-<initials>-<date>` or `REJECTED-<initials>-<date>`, referencing the same `FE-<n>`. A grep for
-`FE-<n>.*UNAPPROVED` with no later `FE-<n>.*APPROVED|REJECTED` line is the "currently open" set.
+`FE-<n>.*UNAPPROVED` with no later `FE-<n>.*(APPROVED-|REJECTED-)` line is the "currently open"
+set — the trailing `-` (mandatory in the ERE's `APPROVED-<initials>-<date>` /
+`REJECTED-<initials>-<date>` form) is what keeps `APPROVED` from matching `UNAPPROVED` as a substring.
 
 **Approving actor — caught by human review, not a mechanical control.** `<initials>`/`<date>` are
 attribution, not authentication; approval provenance is **not** a cryptographic control, and there is no

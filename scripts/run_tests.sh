@@ -141,6 +141,10 @@ run python3 scripts/check_crossref.py --selftest
 run python3 scripts/check_crossref.py
 run python3 scripts/check_canonical_links.py --selftest
 run python3 scripts/check_canonical_links.py
+
+# --- fetched-content containment contract (#641) ---
+run python3 scripts/check_fetched_containment.py --selftest
+run python3 scripts/check_fetched_containment.py
 run python3 scripts/catalog.py check
 run python3 scripts/check_adr_integrity.py --selftest
 run python3 scripts/check_adr_integrity.py

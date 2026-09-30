@@ -5,6 +5,8 @@ description: Enforces the Detect → Fetch → Implement → Cite protocol when 
 
 # Source-Driven Development
 
+<!-- CANONICAL: shared/fetched-content-containment.md -->
+
 Agents routinely implement against deprecated, renamed, or re-signatured external APIs using stale training-data recall. The logic looks right, the gates pass, and the bug surfaces at runtime — or worse, silently. This skill forces a four-phase loop that replaces recall with current official documentation, then records a citation so a future reader can detect doc drift.
 
 **Protocol:** Detect Stack → Fetch Official Docs → Implement → Cite.

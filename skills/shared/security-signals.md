@@ -9,7 +9,9 @@ version: 1
 
 ## Signal Categories
 
-Seven categories of security-sensitive content. Each category is independently matched — one keyword hit per category is sufficient to count that category as detected.
+Eight categories of security-sensitive content. Categories 1–7 are keyword-matched — one
+keyword hit per category is sufficient to count that category as detected. Category 8 is
+structurally detected (see §8), not keyword-scanned.
 
 ### 1. Authentication / Authorization
 
@@ -93,7 +95,7 @@ or emits a "did not copy" decline signal), not by this trigger.
 | Matched Categories | Action |
 |---|---|
 | 0 | No security review needed. Silent skip. |
-| 1 | `security_review: recommended` in contract. Build logs but does not dispatch siege. |
+| 1 | `security_review: recommended` in contract. Build logs but does not dispatch siege. **Exception:** a single Category-8 match is `required` — it dispatches siege (see §8 single-match trigger). |
 | 2+ | `security_review: required` in contract. Build dispatches siege automatically. |
 
 ## Scanning Targets
@@ -127,9 +129,9 @@ security_review:
 
 | Field | Required | Description |
 |---|---|---|
-| `status` | Yes | `required` (2+ signals) or `recommended` (1 signal) |
+| `status` | Yes | `required` (2+ signals, or a single Category-8 match) or `recommended` (1 signal otherwise) |
 | `signals_detected` | Yes | Non-empty array of matched categories with evidence text |
-| `signals_detected[].category` | Yes | One of: `auth`, `crypto`, `external_input`, `secrets`, `network`, `pii_data`, `dependencies` |
+| `signals_detected[].category` | Yes | One of: `auth`, `crypto`, `external_input`, `secrets`, `network`, `pii_data`, `dependencies`, `destination` |
 | `signals_detected[].evidence` | Yes | Brief description of what triggered this category |
 | `deployment_context` | No | Flows to siege's `deployment_context` parameter if present |
 

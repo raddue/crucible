@@ -23,6 +23,7 @@ All subagent returns (the 6 attacker-perspective agents, synthesis, fix agents, 
 **Siege-specific obligation:** WITNESS for attacker agents is the attack one-liner (or pattern) that would succeed if the defender's claimed fix is incomplete. SKIPPED/UNRUNNABLE receipts (e.g. `zap-cli unavailable`) defer to Cairn for re-dispatch with tooling.
 
 <!-- CANONICAL: shared/cairn-convention.md -->
+<!-- CANONICAL: shared/fetched-content-containment.md -->
 **Tier 2 — Witness verification:** PASS + TRACE#N → Read cited range (≤ 4 KiB); fail if witness would match `expect-fail`. FAIL + TRACE#N → reject only if no evidence of attack success is visible. SKIPPED/UNRUNNABLE → no read; record deferred obligation (e.g. `zap-cli unavailable` → orchestrator re-dispatches with tooling).
 
 ## Cairn (Layer 3)
@@ -98,8 +99,9 @@ Siege activates when the orchestrator (build, audit, or user session) encounters
 5. **Network boundaries** -- inter-service communication, webhook handlers, CORS, proxy config
 6. **Data persistence with PII** -- user data storage, logging of sensitive fields, retention policies
 7. **Dependency introduction** -- new packages, version changes, native bindings
+8. **Destination-Bearing Construct** -- a diff that introduces a new outbound host (new host literal, SDK init, webhook/DSN base-URL, registry/proxy/mirror/dependency-add). <!-- CONTRACT:siege-activation-cat8-exception -->
 
-A single signal is insufficient -- too many false positives. Two or more signals, or any signal combined with user confirmation, activates Siege at full force.
+A single signal is insufficient -- too many false positives. Two or more signals, or any signal combined with user confirmation, activates Siege at full force. **Category 8 is the sole exception:** a single bounded destination-bearing match fires alone (see `skills/shared/security-signals.md` §8) — it is `security_review: required`, dispatching siege regardless of the 2-of-7 threshold.
 
 ### Parameters
 
@@ -556,6 +558,8 @@ destination-bearing construct (whether traceable to the Step-1 intelligence summ
 shaped by it) carries a `.crucible/fetched-endpoints.md` entry before the commit, per
 `skills/shared/fetched-content-containment.md` (DEC-6 schema, append-only lifecycle, anti-copy rule) --
 the same ledger-tier obligation as SDD's Phase 3 implementer.
+
+**Ledger-monotonicity check (before each Phase 4 fix self-commit — siege self-commits).** <!-- CONTRACT:siege-ledger-monotonicity --> Before each fix agent's self-commit, diff `.crucible/fetched-endpoints.md` against its content at the start of that fix round. If any previously-present line is missing or altered (append-only violated), abort the commit and escalate to the user. Separately, any `APPROVED-*` / `REJECTED-*` disposition line appended during the fix round is definitionally agent-authored: if such a line appears without an out-of-boundary human commit, abort and escalate rather than conferring forged "out-of-boundary" provenance.
 
 **Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason 'pre-siege-fix-round-N'.
 
