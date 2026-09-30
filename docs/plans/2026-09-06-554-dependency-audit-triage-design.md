@@ -5,6 +5,9 @@ status: "design"
 skill: "dependency-audit"
 ---
 # Design — dependency-audit: severity × dependency-scope triage tree
+
+**Identifier legend.** Parenthetical tags throughout this document (`R5-NN`, `R6-NN`, `BA-N`, `FA-N`, `R-N`, `S1`–`S10`, `R7-NN`, `SP1`) are cross-references to the quality-gate review and canonical-adjudication rounds that motivated the surrounding text; none is itself a normative requirement. `R7-NN` tags are enumerated in §13; `SP1` is restated inline at its use in AC-9.
+
 ## 1. Problem
 `skills/dependency-audit/SKILL.md` normalizes every ecosystem's severity vocabulary
 onto one scale (Critical / High / Moderate / Low / Informational) and then reports a
@@ -488,8 +491,9 @@ reachable, Moderate + prod, Moderate + dev, and Low. It never says what
 **Critical/High + dev-only** is; that case falls through the tree as written. It is
 assigned **FIX_NEXT_CYCLE**, not DEFER_TRACK: a Critical in a dev or build-time
 dependency is still a live supply-chain risk — build-time arbitrary code execution and
-CI credential theft are exactly how `event-stream` and `ua-parser-js` did damage, and
-neither needed to reach production. It is not drop-everything, but it is not
+CI credential theft are exactly how `event-stream` and `ua-parser-js` did damage —
+both executed their payloads at install and build time, independently of whether the
+package ships to production. It is not drop-everything, but it is not
 "defer and track" either.
 Existing severity rules flow into the tree unchanged:
 - `[no-cvss]` findings are already normalized to **Moderate**; they enter the tree as
@@ -794,6 +798,7 @@ required by AC-14.
    dir-allowlist requires it for *every* `.md` in this directory, pin or no pin).
 7. `skills/dependency-audit/evals/evals.json` exists and covers all twenty-three cases in §11
    (1, 1b, 2, 3, 4, 4b, 5, 6, 6a, 6b, 6c, 6d, 6e, 6f, 6g, 6h, 6i, 6j, 6k, 6l, 6m, 7, 8).
+   Cases 6k (a >1 MiB scanned `package.json` / 64 MiB aggregate fixture) and the recovery cases 6e/6l (multi-step compaction state) are prompted as described-state scenarios — the prompt harness carries no `files` fixture for them — so their resource-cap and recovery assertions are delegated to AC-14's fixture-driven runtime test, not claimed from prompt output.
 8. The DEC-9 demotion-token set is documented as a closed set, the §3.0 recorded-graph completeness rule is
     stated, including the distinction between an empty closure with recorded production declarations (`unknown`)
     and a valid empty closure with none (eligible for `dev` only under §4.1 and all other DEC-9 gates); the
@@ -811,10 +816,11 @@ required by AC-14.
     `- `, with the single Output Model schema-template line exempt and at least one
     non-exempt positive asserted (AC-8); `reachability_gating` defaults
     to `advisory` (AC-3) and its precedence is mode-conditional — under `advisory` the
-    chain is byte-for-byte today's (SP1); the `description` frontmatter is byte-identical
+    chain is byte-for-byte today's — `skip_blocking` > `min_blocking_severity`, with no
+    `reachability_gating` term (SP1); the `description` frontmatter is byte-identical
     (AC-5). Prose-shaped
     invariants are pinned via `CONTRACT:` anchors per `scripts/CHECKER_CONVENTIONS.md`
-    rather than verbatim English; the checker is stdlib-only, exits 0 clean / 1 with a
+    rather than verbatim English. Closed-set enums and fixed-token values — the DEC-9 demotion-token set, the four `Triage:` buckets, and the `reachability_gating`/`min_blocking_severity` argument names and accepted values — are routed to the verbatim pin class (AC-3/AC-5/AC-8), not to prose `CONTRACT:` anchors. The checker is stdlib-only, exits 0 clean / 1 with a
     `- <error>` list, ships a `--selftest`, and gets both lines in `scripts/run_tests.sh`,
     matching the existing `check_*.py` shape; the checker also verbatim-pins the exact hygiene invocation form — `python3 -I <absolute-first-party-script-path>` with the fixed allowlisted child env (`env -i` plus fixed `PATH`) — so a drift to `-c`/`-m`, a relative script path, or a checkout-sourced env fails the check.
 10. `python3 scripts/catalog.py check` and `python3 scripts/check_crossref.py` pass.
@@ -852,7 +858,7 @@ required by AC-14.
 
 ## 13. Accepted residuals
 
-The supplied R7 report closed in `mode: standard` with 0 Fatal and records 6 Significant, 5 Medium, and 3 Low residuals. Design revision does not claim these are solved. Preserve these concrete limitations in the skill, evals, reviews, QG disclosure, and final report:
+The supplied R7 report closed in `mode: standard` with 0 Fatal. Its enumerated R7-01…R7-11 list is the source of truth for the residuals below: 3 High, 5 Medium, and 3 Low (11 total). Design revision does not claim these are solved. Preserve these concrete limitations in the skill, evals, reviews, QG disclosure, and final report:
 
 - **R7-01 (High):** remove §7.5's stale lockfile-key membership rule and nonexistent "members table". Scanned `package.json` paths seed npm; in-checkout membership checks do not prove scan completeness.
 - **R7-02 (High):** deleting a workspace manifest before scan can shrink seeds undetected. Scope-root equality does not detect same-root omission; false declaration-faithful `dev` remains possible.
@@ -866,7 +872,7 @@ The supplied R7 report closed in `mode: standard` with 0 Fatal and records 6 Sig
 - **R7-10 (Low):** printable ASCII includes Markdown-active symbols; human-reader presentation risk remains.
 - **R7-11 (Low):** affected-section recovery selection must use stored structured provenance/digests, never parse prior `Reachability:` text.
 
-The supplied R7 report contains a count discrepancy: its verdict says 6 Significant/High, 5 Medium, 3 Low (14 total), while its numbered R7-01…R7-11 list contains 3 High, 5 Medium, 3 Low (11 total). Preserve both statements and require fresh review/QG to resolve or disclose the mismatch; do not invent unlisted findings or severities. The report remains source of truth for its finding text. Process caveat: its 3-agent review was self-dispatched without receipts; the report states it is not claiming a receipt-lint blocker on that review. Preserve that limitation; do not treat the report's review process as receipt-verified or invent a blocker it disclaims. No claim of independent verification, true-graph superset, or malicious-checkout detection is permitted.
+The supplied R7 report's summary verdict records 6 Significant/High, 5 Medium, and 3 Low (14 total), which does not reconcile with its enumerated R7-01…R7-11 list (3 High, 5 Medium, 3 Low = 11 total). This design adopts the 11-item list as the residual count; the 14-item summary figure is recorded as unreconciled and fresh review/QG must resolve or disclose the mismatch. Do not invent unlisted findings or severities. The report remains source of truth for its finding text. Process caveat: its 3-agent review was self-dispatched without receipts; the report states it is not claiming a receipt-lint blocker on that review. Preserve that limitation; do not treat the report's review process as receipt-verified or invent a blocker it disclaims. No claim of independent verification, true-graph superset, or malicious-checkout detection is permitted.
 
 **Adjudication residual (S2):** a v1 lockfile with no `packages` map leaves every seed unresolved — fail-safe `unknown` plus a warning naming `lockfileVersion`, never `dev` (§4.1).
 
