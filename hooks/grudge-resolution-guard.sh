@@ -578,46 +578,34 @@ _journal_read_group() {
 # locate it), that member is UNMEASURABLE (§3.2) — echo UNMEASURABLE.
 _journal_ordinal() {
   local nonce="$1"; shift
-  local m n mx=0 found=1
-  for m in "$@"; do
-    n=$(_ordinal_of "$m" "$nonce")
-    [ -z "$n" ] && { echo UNMEASURABLE; return 0; }
-    [ "$n" -gt "$mx" ] && mx="$n"
-  done
-  echo "$mx"
-}
-
-# _ordinal_of <sha> <nonce> — per-member helper: this Stop's own position, or ""
-# when the nonce line cannot be found in the member's BLOCK history.
-_ordinal_of() {
-  local sha="$1" nonce="$2"
-  _journal_pass "$sha"
+  # #603: ONE validity pass + ONE scan for the whole group, never two full-log
+  # passes per member — member count is attacker-multiplied.
+  _journal_pass "$@"
   if [ "$JR_UNMEASURABLE" -eq 1 ] || [ "$JR_ABSENT" -eq 1 ]; then
-    echo ""
-    return 0
+    echo UNMEASURABLE; return 0
   fi
-  # Re-scan for the exact nonce line for this member and count BLOCK lines since
-  # the last CLEAR up to and including it.
-  local line f1 f2 f3 f4 cnt=0 own=0 last=""
+  # Per member: BLOCK lines since its last CLEAR/GIVEUP, up to and including
+  # the line carrying this Stop's own nonce (ORD, "" = nonce line not found).
+  local -A want=() cnt=() ord=()
+  local m line f1 f2 f3 f4 mx=0
+  for m in "$@"; do want["k$m"]=1; done
   while IFS= read -r line || [ -n "$line" ]; do
     IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
+    [ -n "${want["k$f3"]:-}" ] || continue
+    [ -z "${ord["k$f3"]:-}" ] || continue
     case "$f2" in
       BLOCK)
-        [ "$f3" = "$sha" ] || continue
-        [ "$last" = "CLEAR" ] && cnt=0
-        [ "$last" = "GIVEUP" ] && cnt=0
-        cnt=$((cnt + 1))
-        last=BLOCK
-        if [ "$f4" = "$nonce" ]; then echo "$cnt"; return 0; fi
+        cnt["k$f3"]=$(( ${cnt["k$f3"]:-0} + 1 ))
+        [ "$f4" = "$nonce" ] && ord["k$f3"]="${cnt["k$f3"]}"
         ;;
-      CLEAR|GIVEUP)
-        [ "$f3" = "$sha" ] || continue
-        cnt=0
-        last="$f2"
-        ;;
+      CLEAR|GIVEUP) cnt["k$f3"]=0 ;;
     esac
   done < "$JOURNAL_FILE"
-  echo ""
+  for m in "$@"; do
+    [ -n "${ord["k$m"]:-}" ] || { echo UNMEASURABLE; return 0; }
+    [ "${ord["k$m"]}" -gt "$mx" ] && mx="${ord["k$m"]}"
+  done
+  echo "$mx"
 }
 
 # C-q (§3.2): the SINGLE named exception to C-a. Rename (never rewrite or
@@ -798,18 +786,18 @@ _overlap() {
   # compare squaring the files-per-commit — the pure-CPU half of issue #603.
   # The clock is a bash builtin, so this check is arithmetic, not a subprocess.
   _budget_ok || _budget_out
-  # ponytail: the check gates the CALL, not each path pair — one candidate
-  # pair whose file lists are both enormous can run past the budget in a
-  # single call. Moving the check into the inner loop would bound even that,
-  # at the cost of an arithmetic op per string compare on the hot path; the
-  # measured 362 s case (500 candidates x 30 files) trips between calls.
+  # Linear, not Fa*Fb: the budget gates the CALL, so one call must be cheap
+  # even when both file lists are huge (a nested compare loop ran 17 s past a
+  # 1 s budget on a single 2x3000-file pair, #603). The `k` key prefix keeps
+  # every path — any byte but NUL — a valid, non-empty subscript.
   local a b
+  local -A _seen=()
   declare -n _aa="F_$1" _bb="F_$2"
   for a in "${_aa[@]}"; do
-    [ -z "$a" ] && continue
-    for b in "${_bb[@]}"; do
-      [ "$a" = "$b" ] && { unset -n _aa _bb; return 0; }
-    done
+    [ -n "$a" ] && _seen["k$a"]=1
+  done
+  for b in "${_bb[@]}"; do
+    [ -n "${_seen["k$b"]:-}" ] && { unset -n _aa _bb; return 0; }
   done
   unset -n _aa _bb
   return 1
@@ -1254,17 +1242,15 @@ done
 # blocks(m)); it is never read back as the bound (OBS-1). Every group that
 # still has members mapped (in-scope, blocked, cleared, or merged) is
 # refreshed, so a durable CLEAR this Stop re-reads its members as COUNT(0).
-for _g in "${!SHA_GROUP[@]}"; do
-  BLACK=(); _g_black=" "
-  for _m in "${!SHA_GROUP[@]}"; do
-    [ "${SHA_GROUP[$_m]}" = "${SHA_GROUP[$_g]}" ] || continue
-    case " $_g_black " in *" $_m "*) continue ;; esac
-    _g_black="$_g_black $_m "
-    BLACK+=("$_m")
-  done
-  [ "${#BLACK[@]}" -gt 0 ] || continue
-  BLOCK_COUNTS["${SHA_GROUP[$_g]}"]="$(_display_count "${BLACK[@]}")"
+# #603: ONE journal pass for every group (not one pass per sha, plus an
+# O(n^2) member re-collection) — this step runs after the last budget check.
+_journal_pass "${!SHA_GROUP[@]}"
+declare -A _DISP=()
+for _m in "${!SHA_GROUP[@]}"; do
+  _g="${SHA_GROUP[$_m]}"
+  [ "${JB[$_m]:-0}" -gt "${_DISP[$_g]:--1}" ] && _DISP["$_g"]="${JB[$_m]:-0}"
 done
+for _g in "${!_DISP[@]}"; do BLOCK_COUNTS["$_g"]="${_DISP[$_g]}"; done
 
 # ── 16. Checkpoint advance (§3.2 C-p) ────────────────────────────────────
 # last_checked_sha = parent of `git merge-base --octopus` of the in-scope set;
@@ -1275,8 +1261,8 @@ done
 # ("ROOT") when the merge-base is a parentless root. Transient (by-files)
 # clears never advance — a by-files member is ¬done and stays in scope.
 IN_SCOPE=()
+_journal_pass "${IS_SHA[@]}"   # one pass, not one per candidate (#603)
 for s in "${IS_SHA[@]}"; do
-  _journal_pass "$s"
   last_record="${JBLAST[$s]:-}"
   if [ "$last_record" != "CLEAR" ] && [ "$last_record" != "GIVEUP" ]; then
     IN_SCOPE+=("$s")

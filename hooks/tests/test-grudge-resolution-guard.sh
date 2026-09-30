@@ -2505,6 +2505,50 @@ check 364 "a zero-padded budget spends nothing and prints no budget note — con
   no "$(has "$ERR" "budget")"
 HOOK_ENV=""
 
+# The budget is checked BETWEEN steps, so any step whose cost is superlinear
+# in an attacker-chosen input can still run past it. Work bound, not wall time
+# (a timing assertion would flake on a loaded CI box): the journal-pass count
+# of one Stop must NOT grow with the candidate count. Before the fix the step
+# 14b display refresh, the step 16 checkpoint and the ordinal re-read each did
+# one full journal pass PER candidate (3n+3; 27 s for 500 candidates at an 8 s
+# budget, all of it after the last budget check).
+# contract:hook:inv-t28 checks=2
+t28_passes() {
+  # t28_passes <n-candidates> -> echo the journal-pass count of one Stop
+  hook_case "t28p$1"
+  echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+  local i
+  for (( i=1; i<=$1; i++ )); do
+    echo "VALUE = $i" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): fix $i"
+  done
+  HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE=$HC_ROOT/trace"
+  run_hook "s28p$1"
+  HOOK_ENV=""
+  wc -l < "$HC_ROOT/trace" | tr -d ' '
+}
+T28P2="$(t28_passes 2)"; T28P2_RC="$RC"
+T28P12="$(t28_passes 12)"; T28P12_RC="$RC"
+check 388 "premise: the 12-candidate Stop really blocks (did the full work) — contract:hook:inv-t28" 2 "$T28P12_RC"
+check 389 "journal passes per Stop do not grow with candidate count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
+  "$T28P2" "$T28P12"
+
+# _overlap compared every path of one candidate with every path of the other
+# (Fa*Fb string compares) and the budget gated only the CALL, so ONE pair of
+# huge-file commits ran unbounded past it (2x3000 files: 17 s at a 1 s
+# budget). Linear-time overlap finishes this pair far inside the default
+# budget, so the hook does its real job — blocks — instead of degrading.
+# contract:hook:inv-t28 checks=2
+hook_case t28wide
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+mkdir -p "$HC_REPO/a" "$HC_REPO/b"
+for (( i=0; i<4000; i++ )); do : > "$HC_REPO/a/$i.py"; done
+commit_all "$HC_REPO" "fix(a): wide a"
+for (( i=0; i<4000; i++ )); do : > "$HC_REPO/b/$i.py"; done
+commit_all "$HC_REPO" "fix(b): wide b"
+run_hook s28wide
+check 390 "two 4000-file disjoint candidates are grouped inside the default budget and block — contract:hook:inv-t28" 2 "$RC"
+check 391 "the wide-candidate Stop never degrades on the budget — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
+
 # ========================================================================
 # INV-T29 (#608) — a by-files clearance must not persist a counter reset
 #
@@ -2665,7 +2709,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=399
+EXPECTED_CHECKS=403
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
