@@ -51,6 +51,18 @@ The **compass** skill maintains per-repo arc-state in `docs/compass.md` (current
 
 The **grudge** skill and the calibration ledger together make Crucible's quality claims falsifiable and let past defects guard future ones. The **calibration ledger** is the epistemic backbone: Tier-A gate verdicts are appended to a machine-local central store (`~/.claude/crucible/ledger/`, never committed) by every gating skill's emit step. Reconciliation (walking merged fix/hotfix branches to falsify verdicts, computing per-skill Brier scores) and reporting (the weekly "Crucible caught N silent bugs" render) have **moved out of this repo** to the private `raddue/crucible-eval` repo (#460), which reads the same central store and, **as of #460**, vendors this repo's emission-side helpers by content hash — so a change to `ledger_append.py`, `atomic_write.py`, `pathmatch.py`, `grudge_append.py`, `grudge_query.py` or `uuid7.py` needs a manual re-sync there, which nothing here can check. The **grudge** skill (the Book of Grudges) is the complementary regression memory: every fixed bug is recorded as a machine-local, per-repo grudge, and skills query it for the files in scope before touching code, surfacing past regressions as forced "DO NOT REPEAT" context.
 
+## Trust boundary on gate state
+
+Crucible's gate integrity is anchored in the maintainer reading the transcript and in durable deterministic evidence — **not** in any in-band mechanism (#585; full analysis in [the #585 design](plans/2026-09-06-585-auth-boundary-design.md)).
+
+1. The orchestrator and every dispatched subagent run as the same OS user with the same filesystem access. No file the orchestrator writes is out of a subagent's reach.
+2. Every file-based check in the pipeline — the quality-gate verdict marker (`gate-verdict-<run-id>.md`, read by `hooks/gate-ledger-guard.sh`), the `receipt-ledger.jsonl` dispatch binding (`rcpt_verify.py --ledger`), `build-gate-ledger.md`, the convergence log — is **tamper-evidence and coordination, not authentication**. A reviewed subagent can write any of them.
+3. No cost-raiser currently exists on either edge. The harness's `agent_id` field could cost-raise the subagent `Write`/`Edit` path only, and even then a subagent with `Bash` can issue the write from a nested `claude -p` it spawns, unstamped. The orchestrator edge is not closable in-band at all. Per-run tokens, shared secrets and signing were rejected: there is nowhere to keep the key out of the subagent's reach.
+4. The only sound closure for either edge is OS-level separation, which the harness must provide.
+5. Enforcement liveness is not established by any shipped mechanism. Absence of a block is not evidence of enforcement.
+
+Treat a green gate as "no subagent-visible check objected", never as proof that the verdict was written by the orchestrator.
+
 ## Token efficiency
 
 Token efficiency tracking enriches dispatch manifests with character-count estimates (chars/4 ≈ tokens). The `/stocktake efficiency` command reads chronicle signals to produce per-skill cost breakdowns, dispatch tier distribution, and structural baseline comparisons.

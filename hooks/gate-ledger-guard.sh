@@ -13,6 +13,12 @@
 # (S1/CHAIN-N5, PR #583 warden gate: use an ABSOLUTE path, never repo-relative):
 #   "hooks": { "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bash /absolute/path/to/crucible/hooks/gate-ledger-guard.sh", "timeout": 500 }] }] }
 
+# TRUST BOUNDARY (#585): this guard is tamper-evidence, NOT authentication. It
+# receives no caller-identity signal it can trust, and a reviewed subagent runs as
+# the same user with the same filesystem access (it can write the verdict marker or
+# route the write through Bash / a nested harness). See docs/architecture.md
+# "Trust boundary on gate state". Do not describe this hook as enforcing who writes.
+
 # Disable errexit — this hook must never fail fatally
 set +e
 
