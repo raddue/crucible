@@ -14,6 +14,8 @@ docs/plans/*
 # It is a permanent repo artifact: #586's design cites it by section, and its §9 boundary
 # sentence is a cross-document commitment quoted verbatim there.
 !docs/plans/2026-09-06-585-auth-boundary-design.md
+# #586 — SUPERSEDES trust-redesign design, negated under the same rule (design-first ticket).
+!docs/plans/2026-09-30-586-supersedes-trust-redesign-design.md
 docs/prds/
 docs/compass.md
 # Transient compass lockdir (#408 F12: lock-beside-data); only present mid-write,
