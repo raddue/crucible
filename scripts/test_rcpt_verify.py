@@ -9476,5 +9476,52 @@ class Test572ExpectAbsentWitness(_InqBase):
             rv.parse_witness(["exec:bash  expect-absent=exit!=0  ran=TRACE#1"])
 
 
+class Test599OutReferenceIntegrity(_InqBase):
+    """#599 — `out=<artifact>#<range>` was validated only for ARTIFACTS membership, so
+    one evidence range could be declared the output of N unrelated EXEC entries, and an
+    EXEC could declare `exit=1` next to a cited range printing `EXIT=0`."""
+
+    WIT = "exec:`x`  expect-fail=/BOOM/  ran=TRACE#1"
+
+    def test_duplicate_out_range_across_exec_entries_is_a_lint_error(self):
+        rv = _import_rv()
+        text = _receipt(self.WIT, artifacts=[("o.log", H64, "10")],
+                        trace=["EXEC  `a`  exit=0  dur=0.1s  out=o.log#L1-L2",
+                               "EXEC  `b`  exit=0  dur=0.1s  out=o.log#L1-L2"])
+        with self.assertRaises(rv.LintError) as cm:
+            rv.lint_receipt(text)
+        self.assertIn("same out= range", str(cm.exception))
+
+    def test_distinct_ranges_in_one_artifact_still_lint_clean(self):
+        rv = _import_rv()
+        text = _receipt(self.WIT, artifacts=[("o.log", H64, "10")],
+                        trace=["EXEC  `a`  exit=0  dur=0.1s  out=o.log#L1-L2",
+                               "EXEC  `b`  exit=0  dur=0.1s  out=o.log#L3-L4"])
+        self.assertEqual(rv.lint_receipt(text), "PASS")
+
+    def _two_exec(self, declared_exit, second_body):
+        h1, s1 = self.plant(self.base, "a.log")
+        h2, s2 = self.plant(self.base, "b.log", second_body)
+        return self.rcpt(artifacts=[("a.log", h1, s1), ("b.log", h2, s2)],
+                         trace=["EXEC  `x`  exit=0  dur=0.1s  out=a.log#L1-L1",
+                                f"EXEC  `y`  exit={declared_exit}  dur=0.1s  out=b.log#L1-L1"],
+                         witness=self.WIT)
+
+    def test_declared_exit_contradicting_cited_EXIT_token_fails_tier2(self):
+        p = self._two_exec(1, b"selftest OK: golden-string EXIT=0\n")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 1, out.stderr)
+        self.assertIn("contradicts", out.stderr)
+
+    def test_declared_exit_matching_cited_EXIT_token_passes(self):
+        p = self._two_exec(0, b"selftest OK: golden-string EXIT=0\n")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_range_without_EXIT_token_is_not_judged(self):
+        p = self._two_exec(1, b"FAILED 3 tests\n")
+        out = self.cli("--tier2", "--strict", "--root", str(self.base), str(p))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
 if __name__ == "__main__":
     unittest.main()

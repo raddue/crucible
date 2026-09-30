@@ -193,6 +193,10 @@ for each EXEC in TRACE:
   fail if out= artifact is absent from ARTIFACTS
   fail if out= byte-range is negative (b < a, e.g. `#L5-L1`)
   fail if out= byte-range exceeds 4 KiB
+  fail if out= artifact#range is identical to another EXEC's out= (#599 —
+    one range cannot be the output of two commands)
+  Tier-2: fail if exit=N contradicts an EXIT=<M> token printed in the
+    hash-verified cited range (no EXIT token ⇒ not judged; #599)
 
 for each EDIT / WROTE in TRACE:
   fail if sha256:<hex64> is missing

@@ -1106,6 +1106,11 @@ def lint_receipt(text):
     # timer on this path, reachable through the unbounded SubagentStop hook.
     # Hoisted out of the loop: built once, O(artifacts + trace-entries) total.
     _artifact_hashes = {a["hash"] for a in artifacts.values()}
+    # #599 — out= is a REFERENCE the receipt asserts is this command's output. Two
+    # distinct EXEC entries citing the byte-identical artifact#range cannot both be
+    # true (the live repro had 5 EXECs share one range, one declaring exit=1 beside a
+    # cited `EXIT=0`). Disk-free, verdict-independent: a Tier-1 hard fail.
+    _out_seen = {}
     for entry in trace:
         if entry["verb"] == "EXEC":
             check_exec_range_bound(entry["args"])
@@ -1113,6 +1118,14 @@ def lint_receipt(text):
             if r and r.artifact not in artifacts:
                 raise LintError(
                     f"EXEC out= artifact not in ARTIFACTS: {_show_path(r.artifact)}")
+            if r:
+                if r in _out_seen:
+                    raise LintError(
+                        f"EXEC TRACE#{entry['n']} declares the same out= range as "
+                        f"TRACE#{_out_seen[r]} ({_show_path(r.artifact)}#{r.kind}"
+                        f"{r.start}-{r.kind}{r.end}); one range cannot be the output of "
+                        f"two commands")
+                _out_seen[r] = entry["n"]
         elif entry["verb"] in {"EDIT", "WROTE"}:
             m = re.search(r"sha256:([0-9a-f]{64})", entry["args"])
             if not m:
@@ -4320,6 +4333,51 @@ def tier2_trace_hashes(trace, root, strict, notes_out, *, cache, verified,
                 f"receipt={claimed[:12]})")
 
 
+# #599 — an `EXIT=<N>` token a command prints into its own captured output.
+_EXIT_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])EXIT=(-?\d+)(?![0-9])")
+
+def tier2_exec_exit_consistency(trace, cache, verified):
+    """#599 fix (2) — an EXEC's declared `exit=N` must not contradict an `EXIT=<M>`
+    token printed in its own cited out= range. Reads ONLY bytes the ARTIFACTS leg
+    already hash-verified (`verified`), so no new I/O and no unverified bytes judged.
+    A range with no EXIT token, or an out= name that did not verify, is not judged.
+
+    ponytail: contradiction = the range carries EXIT tokens and NONE equals the declared
+    exit (a script echoing sub-step EXIT=0 lines then exiting with one of them still
+    passes). Only the literal `EXIT=` spelling is recognised; widen the token set if
+    producers adopt other exit-echo conventions."""
+    for entry in trace:
+        if entry["verb"] != "EXEC":
+            continue
+        em = re.search(r"exit=(-?\d+)", entry["args"])
+        r = parse_out_range(entry["args"])
+        if not em or not r:
+            continue
+        rec = cache.get(r.artifact)
+        if not rec or rec["realpath"] is None:
+            continue
+        raw = verified.get((rec["realpath"], rec["dev_ino"]))
+        if raw is None:
+            continue
+        # Decoded leniently HERE (EXIT tokens are ASCII): a non-UTF-8 range is the
+        # witness leg's to classify (partial census), not this leg's to raise on.
+        a = max(r.start, 1)
+        if r.kind == "L":
+            text = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8",
+                                    errors="replace").read()
+            body = "".join(text.splitlines(keepends=True)[a - 1:r.end])
+        else:
+            body = raw[a - 1:r.end].decode("utf-8", errors="replace")
+        printed = {_receipt_int(m.group(1), "out= EXIT token")
+                   for m in _EXIT_TOKEN_RE.finditer(body)}
+        declared = _receipt_int(em.group(1), "TRACE exit=")
+        if printed and declared not in printed:
+            raise LintError(
+                f"Tier-2: EXEC TRACE#{entry['n']} declares exit={declared} but its cited "
+                f"out= range {_show_path(r.artifact)}#{r.kind}{r.start}-{r.kind}{r.end} "
+                f"prints EXIT={','.join(str(x) for x in sorted(printed))}; the declared "
+                f"exit contradicts the output it cites")
+
 def derive_art_name(cited, verdict):
     """Derive the body-lookup artifact name from the cited TRACE entry, EXACTLY as
     lint.py's tier2_verify (PASS: EXEC out= OR READ/WROTE cited path) and
@@ -6933,6 +6991,7 @@ def _verify_single(text, mode, root, strict, ledger=None, root_error=None) -> in
                     tier2_trace_hashes(trace, root, strict, notes,
                                        cache=cache, verified=verified,
                                        witness_cited_name=witness_cited_name)
+                    tier2_exec_exit_consistency(trace, cache, verified)
                     _finalize_identity_degenerate(cache, verified)
                     wit_probe = {}
                     if verdict in {"PASS", "FAIL"}:
