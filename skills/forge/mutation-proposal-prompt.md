@@ -3,10 +3,10 @@
 
 # Mutation Analyst — Dispatch Template
 
-Dispatch an Opus subagent when 10+ retrospectives have accumulated and recurring patterns emerge. This produces proposals for human review — it NEVER directly modifies skills.
+Dispatch a subagent when 10+ retrospectives have accumulated and recurring patterns emerge. This produces proposals for human review — it NEVER directly modifies skills.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Forge mutation analysis — propose skill improvements"
   prompt: |
     You are a skill mutation analyst. Your job is to analyze retrospective

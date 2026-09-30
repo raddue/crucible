@@ -16,11 +16,7 @@ Structured, parallel codebase investigation with a layered output model. Produce
 
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
-**Models:**
-- Core scouts: Sonnet (via Explore agents)
-- Judgment depth agents (impact-analysis, friction-scan, diagnostic-context): Opus
-- Mechanical depth agents (consumer-registry, subsystem-manifest, execution-readiness): Sonnet
-- Orchestrator: runs on whatever model the session uses
+**Model selection:** Roles and tasks are specified below; the host harness and operator select models.
 
 **Announce at start:** "Running recon [with task: X / full repo scan] [scope: Y / full repo]."
 
@@ -60,14 +56,14 @@ Enables cross-invocation caching within a session. When provided, the Structure 
 **`modules`** (optional)
 List of depth modules to produce after core synthesis. Valid values:
 
-| Module | Agent | Model | Primary Consumer |
-|---|---|---|---|
-| `impact-analysis` | Impact Analyst | Opus | `/design`, `/build` |
-| `consumer-registry` | Consumer Mapper | Sonnet | `/migrate` |
-| `friction-scan` | Friction Scanner | Opus | `/prospector` |
-| `subsystem-manifest` | Manifest Builder | Sonnet | `/audit` |
-| `diagnostic-context` | Diagnostic Gatherer | Opus | `/debugging` |
-| `execution-readiness` | Readiness Checker | Sonnet | `/build` |
+| Module | Agent | Primary Consumer |
+|---|---|---|
+| `impact-analysis` | Impact Analyst | `/design`, `/build` |
+| `consumer-registry` | Consumer Mapper | `/migrate` |
+| `friction-scan` | Friction Scanner | `/prospector` |
+| `subsystem-manifest` | Manifest Builder | `/audit` |
+| `diagnostic-context` | Diagnostic Gatherer | `/debugging` |
+| `execution-readiness` | Readiness Checker | `/build` |
 
 Most invocations request 0-1 depth modules. Omit for core-only output (cheapest).
 
@@ -90,13 +86,15 @@ Directory constraint. When provided, overrides scout scope suggestions entirely 
 
 ### Cost Profile
 
-| Configuration | Agents | Models | Relative Cost |
-|---|---|---|---|
-| Core only | 2 | 2x Sonnet | Low |
-| Core + 1 mechanical module | 3 | 3x Sonnet | Low |
-| Core + 1 judgment module | 3 | 2x Sonnet + 1x Opus | Medium |
-| Core + 2 modules (mixed) | 4 | 2-3x Sonnet + 1-2x Opus | Medium-High |
-| Full repo, no task | 2 | 2x Sonnet | Low (but slower) |
+| Configuration | Agents | Relative Effort |
+|---|---|---|
+| Core only | 2 | Low |
+| Core + 1 mechanical module | 3 | Low |
+| Core + 1 judgment module | 3 | Medium |
+| Core + 2 modules (mixed) | 4 | Medium-High |
+| Full repo, no task | 2 | Low (but slower) |
+
+Effort tracks agent count and task size, not model price — models are host-selected (`shared/model-tier-policy.md`).
 
 ## Communication Requirements (Non-Negotiable)
 
@@ -165,7 +163,7 @@ Dispatch both scouts in parallel (or just Pattern Scout if Structure Scout is ca
 
 **Structure Scout:**
 ```
-Agent tool (subagent_type: Explore, model: sonnet):
+Agent tool (subagent_type: Explore):
   description: "Structure Scout: map project layout for [task summary]"
 ```
 - Template: `./structure-scout-prompt.md`
@@ -177,7 +175,7 @@ Agent tool (subagent_type: Explore, model: sonnet):
 
 **Pattern Scout:**
 ```
-Agent tool (subagent_type: Explore, model: sonnet):
+Agent tool (subagent_type: Explore):
   description: "Pattern Scout: discover conventions and prior art for [task summary]"
 ```
 - Template: `./pattern-scout-prompt.md`
@@ -517,12 +515,12 @@ When multiple modules are requested, dispatch them in parallel. Each depth agent
 
 | Module | Agent | Dispatch | Template |
 |---|---|---|---|
-| `impact-analysis` | Impact Analyst | `Agent tool (subagent_type: Explore, model: opus)` | `./impact-analyst-prompt.md` |
-| `consumer-registry` | Consumer Mapper | `Agent tool (subagent_type: Explore, model: sonnet)` | `./consumer-mapper-prompt.md` |
-| `friction-scan` | Friction Scanner | `Agent tool (subagent_type: Explore, model: opus)` | `./friction-scanner-prompt.md` |
-| `subsystem-manifest` | Manifest Builder | `Agent tool (subagent_type: Explore, model: sonnet)` | `./manifest-builder-prompt.md` |
-| `diagnostic-context` | Diagnostic Gatherer | `Agent tool (subagent_type: Explore, model: opus)` | `./diagnostic-gatherer-prompt.md` |
-| `execution-readiness` | Readiness Checker | `Agent tool (subagent_type: Explore, model: sonnet)` | `./readiness-checker-prompt.md` |
+| `impact-analysis` | Impact Analyst | `Agent tool (subagent_type: Explore)` | `./impact-analyst-prompt.md` |
+| `consumer-registry` | Consumer Mapper | `Agent tool (subagent_type: Explore)` | `./consumer-mapper-prompt.md` |
+| `friction-scan` | Friction Scanner | `Agent tool (subagent_type: Explore)` | `./friction-scanner-prompt.md` |
+| `subsystem-manifest` | Manifest Builder | `Agent tool (subagent_type: Explore)` | `./manifest-builder-prompt.md` |
+| `diagnostic-context` | Diagnostic Gatherer | `Agent tool (subagent_type: Explore)` | `./diagnostic-gatherer-prompt.md` |
+| `execution-readiness` | Readiness Checker | `Agent tool (subagent_type: Explore)` | `./readiness-checker-prompt.md` |
 
 ### Placeholder Filling
 
@@ -623,7 +621,7 @@ not dispatch the recorder twice.
 1. **Check for new information:** Compare scout findings against cartographer context provided in Phase 1.
 2. **If scouts discovered new information not in the map:** Dispatch cartographer recorder:
    ```
-   Task tool (general-purpose, model: sonnet):
+   Task tool (general-purpose):
      description: "Cartographer recording for recon findings"
    ```
    Use the existing `crucible:cartographer-skill` skill's `recorder-prompt.md` template (at `skills/cartographer-skill/recorder-prompt.md`). Note: this is `Task tool`, not `Agent tool (Explore)` — the recorder needs write access to the memory directory. Pass scout findings as input following the recorder's expected format.
@@ -855,7 +853,7 @@ so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsific
 - **Evidence-grounded** — produces constraints and evidence, not opinions
 - **Prior art is first-class** — finding existing patterns to follow is the single biggest quality lever
 - **Assumptions are explicit** — annotated inline on relevant findings, not in a standalone block
-- **Token-efficient** — structured markdown, no JSON boilerplate, Sonnet for mechanical work
+- **Token-efficient** — structured markdown, no JSON boilerplate, structured output for mechanical work
 
 ## Guardrails / Red Flags
 
@@ -871,14 +869,14 @@ so it cannot land under `## Status` or `## Decision`. <!-- CONTRACT:adr-falsific
 ## Integration
 
 **Dispatches:**
-- `structure-scout-prompt.md` — Structure Scout (Sonnet, Explore)
-- `pattern-scout-prompt.md` — Pattern Scout (Sonnet, Explore)
-- `impact-analyst-prompt.md` — Impact Analyst (Opus)
-- `consumer-mapper-prompt.md` — Consumer Mapper (Sonnet)
-- `friction-scanner-prompt.md` — Friction Scanner (Opus)
-- `manifest-builder-prompt.md` — Manifest Builder (Sonnet)
-- `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer (Opus)
-- `readiness-checker-prompt.md` — Readiness Checker (Sonnet)
+- `structure-scout-prompt.md` — Structure Scout (Explore)
+- `pattern-scout-prompt.md` — Pattern Scout (Explore)
+- `impact-analyst-prompt.md` — Impact Analyst
+- `consumer-mapper-prompt.md` — Consumer Mapper
+- `friction-scanner-prompt.md` — Friction Scanner
+- `manifest-builder-prompt.md` — Manifest Builder
+- `diagnostic-gatherer-prompt.md` — Diagnostic Gatherer
+- `readiness-checker-prompt.md` — Readiness Checker
 
 **Consults:** `crucible:cartographer-skill` (consult mode — direct file read of `map.md`)
 

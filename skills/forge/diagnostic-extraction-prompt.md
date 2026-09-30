@@ -26,7 +26,7 @@ When the source is a QG fix journal (not a debugging session), prepend this cont
 ---
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Extract diagnostic patterns from debugging session"
   prompt: |
     You are a diagnostic pattern extractor. Given a debugging session's artifacts, extract patterns that would help future debugging sessions avoid dead ends and find root causes faster.

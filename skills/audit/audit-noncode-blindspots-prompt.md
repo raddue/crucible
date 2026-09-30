@@ -6,7 +6,7 @@
 Use this template when dispatching the Phase 2.5 blind-spots agent for non-code artifacts. The orchestrator fills in the bracketed sections. This agent runs AFTER all four non-code lenses have reported, BEFORE Phase 3 synthesis.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit non-code blind-spots review"
   prompt: |
     You are a second-opinion auditor. Four specialist reviewers have

@@ -1,18 +1,18 @@
 ---
 name: siege
-description: "Security audit of design docs, implementation plans, and code. Dispatches 6 parallel Opus agents across attacker perspectives, iterates until zero Critical + zero High findings, and maintains a persistent threat model. Triggers on 'siege', 'security audit', 'security review', 'threat model', or when audit detects security-relevant surfaces."
+description: "Security audit of design docs, implementation plans, and code. Dispatches six parallel attacker-perspective agents, iterates until zero Critical + zero High findings, and maintains a persistent threat model. Triggers on 'siege', 'security audit', 'security review', 'threat model', or when audit detects security-relevant surfaces."
 ---
 <!-- MODEL-TIER: security-hard-out -->
 
 # Siege
 
-Full-lifecycle security audit. Dispatches 6 parallel Opus agents across distinct attacker perspectives, synthesizes findings, iterates until zero Critical + zero High, and maintains a persistent threat model that accumulates across sessions.
+Full-lifecycle security audit. Dispatches six parallel agents across distinct attacker perspectives, synthesizes findings, iterates until zero Critical + zero High, and maintains a persistent threat model that accumulates across sessions.
 
 **Announce at start:** "Running Siege on [target name]. Commit anchor: [short SHA]."
 
 **Skill type:** Rigid -- follow exactly, no shortcuts.
 
-**Model:** All SECURITY ANALYSIS agents are Opus, no exceptions. Orchestrator, all 6 attacker-perspective agents, synthesis, and fix dispatch are Opus. Support functions (manifest scoping, stagnation judging, fix verification) may use Sonnet where the task is mechanical rather than analytical. If the session is not running Opus, refuse: "Siege requires Opus for all security analysis agents. Cannot proceed on a lesser model."
+**Dispatch roles:** Run every security-analysis role specified below. The host harness and operator select models; Crucible does not set model tiers.
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
 All subagent dispatches use disk-mediated dispatch. See `shared/dispatch-convention.md` for the full protocol.
@@ -214,13 +214,13 @@ Determine the artifact type and build the target manifest.
 | Code (source files, diffs) | `code` | Agents examine implementation for vulnerabilities, injection points, auth bypasses. |
 | Mixed (design + code, plan + code) | `mixed` | Agents receive both. Design/plan context as Tier 1, code as Tier 2. |
 
-**Manifest construction:** Same pattern as audit Phase 1. Dispatch a Sonnet exploration agent to identify security-relevant files if the user did not specify a scope. Write manifest to `scratch/<run-id>/manifest.md`.
+**Manifest construction:** Same pattern as audit Phase 1. Dispatch an exploration agent to identify security-relevant files if the user did not specify a scope. Write manifest to `scratch/<run-id>/manifest.md`.
 
 **USER GATE:** Present the manifest and intelligence summary to the user. "Siege scope: [N files]. Intelligence: [summary of findings]. Proceed?" User may adjust scope. Write `scratch/<run-id>/gate-approved.md` on confirmation.
 
 ### Step 2.5: Attack Surface Enumeration (Outside-In Recon)
 
-Before agents are dispatched, enumerate the application's externally reachable endpoints via static pattern matching. This builds an "actually exposed" map independent of the file manifest, then cross-references the two to surface coverage gaps. Runs at orchestrator level (Sonnet) -- no agent dispatch.
+Before agents are dispatched, enumerate the application's externally reachable endpoints via static pattern matching. This builds an "actually exposed" map independent of the file manifest, then cross-references the two to surface coverage gaps. Runs at orchestrator level -- no agent dispatch.
 
 **Artifact-type guard:** Step 2.5 requires source files to grep. Skip entirely for `design` and `plan` artifact types (no code to scan). Run only for `code` and `mixed`. Note in scope limitations: "Attack surface enumeration skipped -- artifact type [design|plan] has no source files to scan."
 
@@ -335,7 +335,7 @@ Pass relevant sections to agents as "prior threat context" (budget: 30 lines max
 
 ## Phase 2: Dispatch Architecture (6 Agents)
 
-All 6 agents are dispatched in parallel using `Task tool (general-purpose, model: opus)`. Fallback if parallel dispatch fails: sequential dispatch with user notification.
+All 6 agents are dispatched in parallel using `Task tool (general-purpose)`. Fallback if parallel dispatch fails: sequential dispatch with user notification.
 
 ### Context Management (Tier 1 / Tier 2)
 
@@ -442,7 +442,7 @@ Each agent receives a structured prompt template and outputs findings in the ini
 
 **Prompt:** `siege-fresh-attacker-prompt.md`
 **Perspective:** Attacker with zero prior knowledge. Sees the codebase for the first time with no context from other agents.
-**Purpose:** Breaks epistemic closure. The other 4 role-based agents share Opus's training-data blind spots. The Fresh Attacker receives ONLY the Tier 1 overview and a random 40% sample of Tier 2 files (no security-domain partitioning). Its prompt explicitly instructs: "Ignore conventional vulnerability categories. What looks wrong, unusual, or exploitable to you?"
+**Purpose:** Breaks epistemic closure. The other role-based agents may share training-data blind spots. The Fresh Attacker receives ONLY the Tier 1 overview and a random 40% sample of Tier 2 files (no security-domain partitioning). Its prompt explicitly instructs: "Ignore conventional vulnerability categories. What looks wrong, unusual, or exploitable to you?"
 **Receives (Tier 2):** Random sample of manifest files, not security-partitioned. Selection is deterministic per run: seed = hash(run-id + manifest content hash). This ensures different samples when the manifest changes and different samples on re-runs even within the same timestamp (since run-id includes a unique component).
 **Dispatch:** Single agent.
 
@@ -545,9 +545,9 @@ In addition to prior-round comparison, track the lowest score achieved in any pr
 
 | Artifact Type | Fix Agent | Action |
 |---|---|---|
-| `design` | Plan Writer subagent (Opus) | Revises design to close the vulnerability |
-| `plan` | Plan Writer subagent (Opus) | Adds security tasks, reorders to close gaps |
-| `code` | Fix subagent (Opus, new instance) | Patches the vulnerability with verification criteria |
+| `design` | Plan Writer subagent | Revises design to close the vulnerability |
+| `plan` | Plan Writer subagent | Adds security tasks, reorders to close gaps |
+| `code` | Fix subagent (new instance) | Patches the vulnerability with verification criteria |
 
 Design and plan fix agents write the revised artifact back to its original path (the design doc or plan file). Review agents read from the same path. Anti-anchoring is maintained because the revised doc contains no revision marks -- the fix agent produces a clean replacement.
 
@@ -563,9 +563,9 @@ After each fix agent commits, update `expected-head.md` with the new HEAD SHA (c
 
 The fix agent writes `expected-head.md` as its final action before returning results to the orchestrator, not the orchestrator after receiving results. This closes the timing gap between commit and HEAD tracking. If compaction occurs during a fix round and `expected-head.md` is stale, recovery should compare HEAD against the most recent fix journal entry's 'Files changed' field -- if the diff matches a plausible fix commit, proceed rather than abort.
 
-**Fix verification:** After each fix agent completes, dispatch a verification check using the finding's Verification Criteria (from the finding format). If the verification criteria specify a concrete check (e.g., grep for parameterized query, confirm endpoint requires auth token, verify header is set), run the check. Use Sonnet for verification -- this is mechanical confirmation, not analytical reasoning. Dispatch using verification criteria from the finding. The verifier checks mechanically: does the fix satisfy the stated verification condition? If the fix does not satisfy the verification criteria, flag the finding as "unresolved" in the fix journal with the failed verification output. Unresolved findings remain in the gate score for the next round.
+**Fix verification:** After each fix agent completes, dispatch a verification check using the finding's Verification Criteria (from the finding format). If the verification criteria specify a concrete check (e.g., grep for parameterized query, confirm endpoint requires auth token, verify header is set), run the check. Use a verification agent for this mechanical confirmation, not analytical reasoning. Dispatch using verification criteria from the finding. The verifier checks mechanically: does the fix satisfy the stated verification condition? If the fix does not satisfy the verification criteria, flag the finding as "unresolved" in the fix journal with the failed verification output. Unresolved findings remain in the gate score for the next round.
 
-**Unresolved escalation:** Critical-severity Unresolved: flag as binding with one-round grace. If the same Critical is Unresolved again (persistent verifier disagreement), the binding downgrades to informational -- Sonnet should not permanently override Opus. High-severity Unresolved: appended to fix journal as informational context.
+**Unresolved escalation:** Critical-severity Unresolved: flag as binding with one-round grace. If the same Critical is Unresolved again (persistent verifier disagreement), the binding downgrades to informational -- the verifier should not override red-team severity. High-severity Unresolved: appended to fix journal as informational context.
 
 **Fix journal:** Same as quality-gate's fix journal pattern. Maintained in `scratch/<run-id>/fix-journal.md`. Fix agents receive full journal on round 2+. Red-team reviewers NEVER receive the journal (anti-anchoring preserved).
 
@@ -575,7 +575,7 @@ The fix agent writes `expected-head.md` as its final action before returning res
 2. Standardized framing. The dispatch prompt for review agents uses the same framing every round. Do not mention prior rounds, what was fixed, or how many rounds have run.
 3. No findings forwarding. Prior round findings are never passed to review agents.
 
-**Stagnation detection:** Same two-layer system as quality-gate. Orchestrator scoring first pass, then Sonnet stagnation judge for semantic comparison. Judge prompt includes security-specific context: "Is the fix addressing the root cause or just the symptom? Is the vulnerability being moved rather than eliminated?"
+**Stagnation detection:** Same two-layer system as quality-gate. Orchestrator scoring first pass, then a stagnation judge for semantic comparison. Judge prompt includes security-specific context: "Is the fix addressing the root cause or just the symptom? Is the vulnerability being moved rather than eliminated?"
 
 Siege uses its own stagnation judge prompt (`./siege-stagnation-judge-prompt.md`) with security-specific semantics. The three verdicts:
 - **PROGRESS:** Fix addressed root cause; new findings are in different security domains.
@@ -1030,7 +1030,7 @@ Siege effectiveness is measured by:
 **Include this section verbatim in every Siege report under "Scope Limitations."**
 
 1. **No dynamic analysis.** Siege performs static review only. It cannot detect vulnerabilities that require runtime behavior (timing attacks, memory corruption in native code, race conditions that depend on system load).
-2. **Model blind spots.** All 6 agents are Opus instances. They share training-data blind spots. The Fresh Attacker and consensus integration (when available) mitigate but do not eliminate this. Novel vulnerability classes not in training data will be missed.
+2. **Model blind spots.** All six agents can share training-data blind spots. The Fresh Attacker and consensus integration (when available) mitigate but do not eliminate this. Novel vulnerability classes not in training data will be missed.
 3. **No penetration testing.** Siege does not execute exploits, send malicious payloads, or interact with running systems. Findings are analytical, not proven.
 4. **Dependency scanning depth.** Dependency audit tools report known CVEs only. Zero-day vulnerabilities in dependencies are invisible.
 5. **Intelligence staleness.** Training-data knowledge of OWASP/SANS/CISA may be outdated. WebFetch supplements this when available but is not guaranteed.

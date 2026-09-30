@@ -6,7 +6,7 @@
 Use this template when dispatching the Compatibility Layer Designer agent in Phase 4.
 
 ```
-Task tool (model: opus):
+Task tool:
   description: "Design compatibility layer for migration: [MIGRATION_DESCRIPTION]"
   prompt: |
     You are designing the compatibility layer that allows old and new code

@@ -6,7 +6,7 @@
 Use this template when dispatching the Migration Analyzer agent in Phase 1.
 
 ```
-Agent tool (subagent_type: Explore, model: opus):
+Agent tool (subagent_type: Explore):
   description: "Analyze migration target: [MIGRATION_DESCRIPTION]"
   prompt: |
     You are analyzing a migration target to understand what is changing,

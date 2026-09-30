@@ -53,7 +53,7 @@ The **grudge** skill and the calibration ledger together make Crucible's quality
 
 ## Token efficiency
 
-Token efficiency tracking enriches dispatch manifests with character-count estimates (chars/4 ≈ tokens). The `/stocktake efficiency` command reads chronicle signals to produce per-skill cost breakdowns, dispatch tier distribution, and structural baseline comparisons.
+Token efficiency tracking enriches dispatch manifests with character-count estimates (chars/4 ≈ tokens). The `/stocktake efficiency` command reads chronicle signals to produce per-skill cost breakdowns and structural baseline comparisons.
 
 The **distill** skill converts heavy documents (PDF, Word, Excel, PowerPoint) to token-efficient Markdown/CSV with a digest pass — reducing context budget by ~80% for document-heavy workflows.
 

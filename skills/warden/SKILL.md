@@ -38,7 +38,7 @@ The "Runs" column is split by **reviewer-set** (the dispatch parameter
 | temper | always | always | `T = {CONFIRMED,PLAUSIBLE} × {Critical,Important}` non-empty | the merge-verdict loop |
 | delve | always | always | any kept finding at `{CONFIRMED,PLAUSIBLE} × {Critical,Important}` (trio scale; `PLAUSIBLE@Crit/Imp` is a real regression per contract) | delve is **report-only with no fix loop** — warden applies the predicate to delve's kept findings and owns the fix path (see Fix behavior) |
 | red-team (via quality-gate) | always | always | quality-gate verdict ≠ PASS (Fatal>0 ∨ Significant>0) | delegates to existing `crucible:quality-gate` on the `code` artifact to reuse its red-team loop, invoked so the QG leg **re-dispatches siege** exactly as build's Step-6 gate does (warden does **not** suppress the QG-internal siege) — the second of warden's two siege passes (I-W4 / S-A); the leg's marker is **not** build-tagged (see §Verdict marker ownership / I-W7) — warden owns the aggregate verdict marker; it writes **no** calibration ledger entry (each leg self-emits its native entry, I-W8) |
-| siege | conditional — security-surface diff (reuse build's existing Step 5.5 trigger) | conditional — same security-surface trigger | Critical>0 ∨ High>0 | heavy 6-agent Opus audit; not run on non-security diffs. **siege is warden's own native leg on its own CVSS scale** (disjunction-of-native-gates, a LOCKED decision). warden sieges **twice**, **coverage-equal to build's two sieges (position redistributed across the two passes)**: warden's own siege leg at step-1 HEAD (≈ build Step 5.5), and the QG red-team leg's internal siege auto-dispatch at `SHA_pre_redteam` (≈ build Step 6) — the QG leg is invoked so it **re-dispatches** its internal siege as build does (warden does **not** suppress it) (I-W4 / S-A). **Fail-safe:** if the destination-bearing-construct detector reports "cannot conclusively classify" (`security-signals.md` category 8), siege **runs** (unknown → run, mirroring the inquisitor escalator's fail-safe). |
+| siege | conditional — security-surface diff (reuse build's existing Step 5.5 trigger) | conditional — same security-surface trigger | Critical>0 ∨ High>0 | six-agent security audit; not run on non-security diffs. **siege is warden's own native leg on its own CVSS scale** (disjunction-of-native-gates, a LOCKED decision). warden sieges **twice**, **coverage-equal to build's two sieges (position redistributed across the two passes)**: warden's own siege leg at step-1 HEAD (≈ build Step 5.5), and the QG red-team leg's internal siege auto-dispatch at `SHA_pre_redteam` (≈ build Step 6) — the QG leg is invoked so it **re-dispatches** its internal siege as build does (warden does **not** suppress it) (I-W4 / S-A). **Fail-safe:** if the destination-bearing-construct detector reports "cannot conclusively classify" (`security-signals.md` category 8), siege **runs** (unknown → run, mirroring the inquisitor escalator's fail-safe). |
 | inquisitor | **always (unconditional)** — preserves build Phase 4 Step 4 coverage | conditional — risk-aware predicate (escalators → run; pure-doc-only → skip; else `>1 changed file OR >1 top-level module`). See *Standalone inquisitor-inclusion predicate*. | any adversarial test `Result: FAIL` | heavy 5-dim fan-out. In the `full` set it stays unconditional so a single-file build does **not** lose the inquisitor pass it gets today; the standalone diff-shape trigger is the risk-aware *Standalone inquisitor-inclusion predicate* subsection, where per-push cost matters |
 
 temper and delve share the trio contract scale, so their two legs use one
@@ -50,7 +50,7 @@ unconditionally today. Making it conditional everywhere would silently narrow
 the strongest orchestrator's review coverage on single-file builds. So the
 trigger is split by reviewer-set: **unconditional in `full`** (no build
 regression), **conditional (multi-file / cross-module) in `standalone`** where
-the per-push Opus fan-out cost is the dominant concern. T-W8 asserts the `full`
+the per-push reviewer fan-out cost is the dominant concern. T-W8 asserts the `full`
 behavior. Multi-file / cross-module is only block 3 of the richer standalone
 trigger — see the *Standalone inquisitor-inclusion predicate* subsection for the
 authoritative spec.
@@ -323,8 +323,8 @@ frozen HEAD) and inquisitor runs **once** at its step-1 HEAD — accepted cost t
   and (b) the **quality-gate red-team leg's internal siege auto-dispatch** at the
   red-team HEAD (`SHA_pre_redteam`, parallel with red-team round 1 — ≈ build Step 6). The
   second siege covers the **step-2 scoped re-temper commits** and delve's `--fix` edits,
-  mirroring build's Step-6 siege over its Step-5.5.e re-temper. Re-running the 6-agent
-  Opus siege on *every* fix commit would be prohibitively expensive, so neither pass
+  mirroring build's Step-6 siege over its Step-5.5.e re-temper. Re-running the six-agent
+  siege on *every* fix commit would be prohibitively expensive, so neither pass
   binds the **frozen** HEAD: the only window either misses is the **red-team leg's own
   fix rounds** — and build's Step-6 siege runs parallel with red-team round 1, so build
   misses that window too. warden's siege coverage is therefore **coverage-equal to build's
@@ -499,7 +499,7 @@ Enforcement teeth:
 - **Standalone `/warden` (honored, not intercepting):** a slash command cannot
   intercept `git push`; standalone warden emits a `BLOCKED` verdict the user
   honors — same enforcement strength finish's soft gate has today, but now
-  named and consistent. No git hook (rejected: per-push Opus fan-out cost +
+  named and consistent. No git hook (rejected: per-push six-agent fan-out cost +
   install friction; may revisit as an opt-in follow-up).
 
 ## Verdict marker ownership (F2 — single build-tagged emitter)

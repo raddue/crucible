@@ -1,7 +1,6 @@
 ---
 name: crucible-qg-judge
-description: Stagnation judge for Crucible quality-gate — mechanical cross-round comparison of finding sets. Pinned to Sonnet (cheap mechanical check). Dispatched via disk-mediated dispatch.
-model: sonnet
+description: Stagnation judge for Crucible quality-gate — mechanical cross-round comparison of finding sets. Dispatched via disk-mediated dispatch.
 ---
 <!-- MODEL-REQ: recall-critical-review R2 egress=first-party on-unknown=refuse -->
 
@@ -20,5 +19,5 @@ return (your Evidence Receipt, or an abort report per the dispatch convention's
 Failure Handling procedure). Do not rely on your final message being returned
 automatically — it is not.
 
-This definition exists only to pin your model (Sonnet) and route you. It does not
-prescribe what you produce — the dispatch file does.
+This definition routes you. It does not prescribe what you produce — the
+dispatch file does.

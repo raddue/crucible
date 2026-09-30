@@ -5,7 +5,7 @@
 Use this template when dispatching a test gap writer after Pass 2 (Test Review) identifies missing coverage.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Write tests for coverage gaps in task N"
   prompt: |
     You are a test writer. Your job is to write tests for behaviors that were discovered during implementation but aren't covered by the existing test suite.

@@ -6,7 +6,7 @@
 Use this template when dispatching a Phase 2 root cause analysis agent. The orchestrator fills in the bracketed sections — one agent per High-severity friction point.
 
 ~~~
-Agent tool (subagent_type: general-purpose, model: sonnet):
+Agent tool (subagent_type: general-purpose):
   description: "Root cause analysis for friction point [N]: [brief title]"
   prompt: |
     You are a root cause analyst. Your job is to determine WHY a specific

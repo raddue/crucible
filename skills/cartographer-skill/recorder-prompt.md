@@ -3,10 +3,10 @@
 
 # Cartographer Recorder — Dispatch Template
 
-Dispatch a Sonnet subagent after significant codebase exploration to capture what was learned.
+Dispatch a subagent after significant codebase exploration to capture what was learned.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Cartographer recording for [area explored]"
   prompt: |
     You are a cartographer recorder. Your job is to distill codebase
@@ -298,7 +298,7 @@ Task tool (general-purpose, model: sonnet):
     ### Your Job
 
     Extract substantive design decisions and write them into the appropriate
-    cartographer files. You do NOT extract operational decisions (model selection,
+    cartographer files. You do NOT extract operational decisions (dispatch routing,
     gate rounds, task grouping).
 
     ### Extraction Criteria
@@ -312,7 +312,7 @@ Task tool (general-purpose, model: sonnet):
     Do NOT persist:
     - High-confidence implementation details (loop style, variable naming)
     - Decisions fully captured in contract `ambiguity_resolutions` (avoid duplication)
-    - Routing/operational decisions (reviewer model, gate round counts)
+    - Routing/operational decisions (reviewer roles, gate round counts)
 
     ### Module Mapping Rules
 

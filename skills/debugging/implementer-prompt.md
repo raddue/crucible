@@ -6,7 +6,7 @@
 Use this template when the orchestrator dispatches the Phase 4 implementation subagent. This is the ONLY agent that modifies code. It receives a confirmed hypothesis and creates a failing test, implements the fix, and verifies the broader suite.
 
 ```
-Agent tool (subagent_type: "general-purpose", model: opus):
+Agent tool (subagent_type: "general-purpose"):
   description: "Implement fix: [one-line summary of hypothesis]"
   prompt: |
     You are the implementation agent for a systematic debugging session.

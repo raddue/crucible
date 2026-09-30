@@ -132,16 +132,16 @@ After compaction, before re-writing the status file:
 3. Write the updated status file
 4. Output inline status to CLI
 
-## Model Allocation
+## Agent Roles and Dispatch
 
-| Agent | Model | Dispatch Method |
-|-------|-------|-----------------|
-| Orchestrator | Opus | -- |
-| Migration Analyzer | Opus | Agent tool (Explore) |
-| Blast Radius Mapper | Sonnet | Agent tool (general-purpose) |
-| Phase Planner | Opus | Task tool |
-| Compatibility Layer Designer | Opus | Task tool |
-| Consumer Wave Grouper | Sonnet | Task tool |
+| Agent | Dispatch Method |
+|-------|-----------------|
+| Orchestrator | -- |
+| Migration Analyzer | Agent tool (Explore) |
+| Blast Radius Mapper | Agent tool (general-purpose) |
+| Phase Planner | Task tool |
+| Compatibility Layer Designer | Task tool |
+| Consumer Wave Grouper | Task tool |
 
 ## Scratch Directory
 
@@ -218,7 +218,7 @@ Before any agent dispatch:
 
 ## Phase 1: Analyze Migration Target
 
-Dispatch the **Migration Analyzer** (Opus, Agent tool, Explore subagent) using `./migration-analyzer-prompt.md`.
+Dispatch the **Migration Analyzer** (Agent tool, Explore subagent) using `./migration-analyzer-prompt.md`.
 
 **Input:**
 - Migration description from user
@@ -243,7 +243,7 @@ Dispatch the **Migration Analyzer** (Opus, Agent tool, Explore subagent) using `
 
 ## Phase 2: Map Blast Radius
 
-Dispatch the **Blast Radius Mapper** (Sonnet, Agent tool, general-purpose) using `./blast-radius-mapper-prompt.md`.
+Dispatch the **Blast Radius Mapper** (Agent tool, general-purpose) using `./blast-radius-mapper-prompt.md`.
 
 **Input:** Migration analysis from Phase 1, cartographer module data (if available), recon consumer registry (if available from Phase 0).
 
@@ -272,7 +272,7 @@ Dispatch the **Blast Radius Mapper** (Sonnet, Agent tool, general-purpose) using
 
 ## Phase 3: Decompose into Phases
 
-Dispatch the **Phase Planner** (Opus, Task tool) using `./phase-planner-prompt.md`.
+Dispatch the **Phase Planner** (Task tool) using `./phase-planner-prompt.md`.
 
 **Input:** Migration analysis + blast radius + consumer registry.
 
@@ -316,7 +316,7 @@ The planner must verify the phase plan against these operational patterns. These
 
 ## Phase 4: Design Compatibility Layer
 
-Dispatch the **Compatibility Layer Designer** (Opus, Task tool) using `./compatibility-designer-prompt.md`.
+Dispatch the **Compatibility Layer Designer** (Task tool) using `./compatibility-designer-prompt.md`.
 
 **Input:** Migration analysis (API delta) + phase plan (which phases need coexistence).
 
@@ -333,7 +333,7 @@ Dispatch the **Compatibility Layer Designer** (Opus, Task tool) using `./compati
 
 ## Phase 5: Plan Consumer Waves
 
-Dispatch the **Consumer Wave Grouper** (Sonnet, Task tool) using `./wave-grouper-prompt.md`.
+Dispatch the **Consumer Wave Grouper** (Task tool) using `./wave-grouper-prompt.md`.
 
 **Input:** Consumer registry from Phase 2 + phase plan from Phase 3.
 

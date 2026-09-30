@@ -5,7 +5,7 @@
 Use this template when dispatching an acceptance test writer subagent in Phase 1, Step 3. These tests define "done" at the feature level — the build pipeline starts RED and ends GREEN.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Write acceptance tests for [feature]"
   prompt: |
     You are writing acceptance tests for a feature BEFORE it is implemented.

@@ -6,7 +6,7 @@
 Use this template when dispatching the Test-health lens agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit test-health lens"
   prompt: |
     You are an auditor assessing the SYSTEMIC test health of an existing

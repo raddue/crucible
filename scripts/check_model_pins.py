@@ -321,25 +321,20 @@ def check_model_req_hardfail(rel: str, text: str) -> list[str]:
         fails.append(f"{rel}: binding agent-def path must carry exactly one "
                      f"MODEL-REQ declaration, found {len(bodies)} (S1)")
     if rel in BINDING_AGENT_DEFS:
-        # S2 (round 5): a binding agent-def's declared role binds through the
-        # frontmatter `model:` pin, so a binding path with no leading closed
-        # frontmatter (or no single `model:` pin in it) is a HARD fail — not a
-        # weaker advisory. The old `startswith("---")` guard let a def that
-        # lost its frontmatter skip the placement check entirely and still
-        # exit 0.
+        # S2 (round 5) required a binding agent-def to carry exactly one
+        # frontmatter `model:` pin. #651 / ADR-0003 removed repo-side model
+        # selection entirely — the host harness and operator choose — so the
+        # pin-presence half of that rule is gone with it. What still binds is
+        # the frontmatter block's presence (the declaration's placement anchor,
+        # design §12) and the declaration's position (SP3, round 3).
         fm = leading_frontmatter(stripped)
         if fm is None:
             fails.append(f"{rel}: binding agent-def path must open with a "
                          f"closed YAML frontmatter block — without it the "
-                         f"role cannot bind any `model:` pin, whatever the "
-                         f"MODEL-REQ declaration says (S2, round 5)")
+                         f"MODEL-REQ declaration has no frontmatter to sit "
+                         f"adjacent to, whatever it says (S2, round 5)")
         else:
-            fm_pins = FRONTMATTER_PIN_RE.findall(fm)
-            if len(fm_pins) != 1:
-                fails.append(f"{rel}: binding agent-def path must carry "
-                             f"exactly one `model:` pin in its frontmatter, "
-                             f"found {len(fm_pins)} (S2, round 5)")
-            elif (len(bodies) == 1
+            if (len(bodies) == 1
                     and not binding_decl_placement_ok(stripped)):
                 fails.append(f"{rel}: the MODEL-REQ declaration must sit "
                              f"immediately after the closing YAML frontmatter "
@@ -520,13 +515,11 @@ def check_model_req_report_only(rel: str, text: str) -> list[str]:
     pin_values = frontmatter_model_pins(stripped)
     file_rung = resolve_rung(pin_values[0]) if pin_values else None
     lines = model_req_lines(stripped)
-    if lines and not pin_values:
-        reports.append(
-            f"{rel}: MODEL-REQ present but the file has no `model:` pin in "
-            f"its LEADING YAML frontmatter — T5 requirement/resolution "
-            f"agreement cannot run, and the live binding is indeterminate "
-            f"(SP1, round 3)")
-    elif lines and file_rung is None:
+    # SP1 (round 3) reported a MODEL-REQ-bearing file with no frontmatter pin.
+    # Under #651 / ADR-0003 no repo file carries a pin at all — that state is
+    # the designed one, not a disclosure — so the advisory is gone and T5
+    # simply does not run. S6 still fires for a pin that resolves to no rung.
+    if lines and pin_values and file_rung is None:
         reports.append(
             f"{rel}: file's own frontmatter model: pin {pin_values[0]!r} "
             f"resolves to no rung (indeterminate) — the MODEL-REQ "
@@ -738,8 +731,6 @@ def report_rule_id(msg: str) -> str:
         ("declares rung", "T17-floor"),
         ("MODEL-REQ requires rung", "T5-disagreement"),
         ("resolves to no rung", "S6-indeterminate-pin"),
-        ("no `model:` pin in its LEADING YAML frontmatter",
-         "SP1-no-frontmatter-pin"),
     ):
         if needle in msg:
             return rid
@@ -755,8 +746,11 @@ def _day_one_pairs_ok(got_pairs) -> bool:
     claims exactly one finding per file. Counter equality pins multiplicity too."""
     want = collections.Counter({
         ("agents/crucible-red-team.md", "T3-offensive-indeterminate"): 1,
-        # maintainer-pending — see _known_day_one_disclosures docstring
-        ("agents/crucible-qg-judge.md", "T5-disagreement"): 1,
+        # The former second member — crucible-qg-judge's T5 rung/pin
+        # disagreement, disclosed as maintainer-pending — is gone by design:
+        # #651 / ADR-0003 removed every `model:` pin, so T5 has nothing to
+        # disagree with. That is the sanctioned disappearance the old
+        # docstring anticipated, not a regression.
     })
     return collections.Counter(got_pairs) == want
 
@@ -902,9 +896,10 @@ REPORT_ONLY_CASES = [
     ("agents/x.md",
      "No frontmatter block at all.\n\nmodel: opus\n<!-- MODEL-REQ: "
      "mechanical-predicate R0 egress=first-party on-unknown=proceed -->\n",
-     True, "a body-only `model:` with no frontmatter pin resolves to "
-           "indeterminate — T5 must not mistake a body example for a live "
-           "binding (SP1, round 3)"),
+     False, "a body-only `model:` is not a live binding, and #651 / ADR-0003 "
+            "removed repo-side pins altogether — so the former SP1 "
+            "no-frontmatter-pin advisory no longer fires; T5 simply does "
+            "not run on an unpinned file"),
     # --- S5 (round 5): security-surface trust ceiling is an authoring check ---
     ("skills/siege/SKILL.md",
      "---\nmodel: opus\n---\n<!-- MODEL-REQ: recall-critical-review R2 "
@@ -947,12 +942,10 @@ def selftest_report_only() -> int:
     # file, same count, different rule id must fail; the exact known pair
     # set must pass.
     assert not _day_one_pairs_ok({
-        ("agents/crucible-red-team.md", "T3-offensive-indeterminate"),
-        ("agents/crucible-qg-judge.md", "SP1-no-frontmatter-pin"),
+        ("agents/crucible-qg-judge.md", "S6-indeterminate-pin"),
     }), "a one-for-one disclosure replacement must fail the day-one pin"
     assert _day_one_pairs_ok({
         ("agents/crucible-red-team.md", "T3-offensive-indeterminate"),
-        ("agents/crucible-qg-judge.md", "T5-disagreement"),
     }), "the exact known day-one pair set must pass"
     print("REPORT-ONLY SELFTEST OK.")
     return 0
@@ -1376,9 +1369,10 @@ def selftest() -> int:
          "---\n# frontmatter present, but no model: pin\n---\n"
          "<!-- MODEL-REQ: generative-checked R1 egress=first-party "
          "on-unknown=degrade-with-disclosure bounded-by=x.md:1 -->\n",
-         True, "a binding agent-def with frontmatter but no `model:` pin in it "
-               "is a hard fail — exactly one binding pin is required (S2, "
-               "round 5)"),
+         False, "a binding agent-def with frontmatter but no `model:` pin is "
+                "the designed state since #651 / ADR-0003 removed repo-side "
+                "model selection — the S2 (round 5) pin-presence hard fail "
+                "is gone; only a MISSING frontmatter block still hard-fails"),
     ]
     # Bound-specific diagnostic (S3, round 7): both T18 rules emit a reason
     # containing the literal `bounded-by`; assert on the reason text so a

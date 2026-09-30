@@ -7,7 +7,7 @@
 Use this template when dispatching the Boundary Attacker agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Siege boundary attacker on [target]"
   prompt: |
     You are an external attacker with no credentials. You see only public-facing

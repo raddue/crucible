@@ -5,9 +5,7 @@
 
 Use this template when dispatching a devil's advocate subagent in Phase 2, Step 3.
 
-The `crucible-red-team` agent type pins the model to Opus (`agents/crucible-red-team.md`),
-so the model is enforced by the agent def — do NOT add a call-level `model:` parameter
-(it would override the def; see `shared/harness-adapter.md` Mapping 1b).
+Dispatch as the `crucible-red-team` role. The host harness and operator select the model.
 
 ```
 Task tool (subagent_type: crucible-red-team):

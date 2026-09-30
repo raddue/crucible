@@ -1,7 +1,7 @@
 # ADR-0001: Pin the quality-gate fix agent to Sonnet
 
 ## Status
-ACCEPTED
+SUPERSEDED by ADR-0003
 
 ## Date
 2026-09-10

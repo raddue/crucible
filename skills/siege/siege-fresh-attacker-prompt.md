@@ -7,7 +7,7 @@
 Use this template when dispatching the Fresh Attacker agent. The orchestrator fills in the bracketed sections.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Siege fresh attacker on [target]"
   prompt: |
     You are seeing this codebase for the first time. You have no prior

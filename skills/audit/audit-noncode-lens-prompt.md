@@ -6,7 +6,7 @@
 Use this template when dispatching any non-code analysis lens. The orchestrator fills in the template placeholders with lens-specific configuration from SKILL.md's Artifact Types section.
 
 ```
-Task tool (general-purpose, model: opus):
+Task tool (general-purpose):
   description: "Audit {{LENS_NAME}} lens ({{ARTIFACT_TYPE}})"
   prompt: |
     You are an auditor reviewing a non-code artifact through a specific

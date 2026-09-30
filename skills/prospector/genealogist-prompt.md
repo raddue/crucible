@@ -6,7 +6,7 @@
 Use this template when dispatching a Phase 1.5 git archaeology agent. The orchestrator fills in the bracketed sections — one agent per friction point.
 
 ```
-Agent tool (subagent_type: general-purpose, model: sonnet):
+Agent tool (subagent_type: general-purpose):
   description: "Genealogy for friction point [N]: [brief title]"
   prompt: |
     You are a git archaeologist. Your job is to trace the causal origin

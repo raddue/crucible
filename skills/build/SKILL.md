@@ -622,7 +622,6 @@ Before running interactive design, check whether `/spec` (or a prior `/build` ru
 
 ---
 
-- **Model:** Opus (creative/architectural work needs the best model)
 - **Mode:** Interactive with the user
 - **RECOMMENDED SUB-SKILL:** Use crucible:forge (feed-forward mode) — consult past lessons before starting
 - **RECOMMENDED SUB-SKILL:** Use crucible:cartographer-skill (consult mode) — review codebase map for structural awareness
@@ -651,7 +650,7 @@ After the user approves the design and before starting Phase 2:
 
 Before planning, define "done" with executable tests:
 
-1. Dispatch an **Acceptance Test Writer** subagent (Opus) using `./acceptance-test-writer-prompt.md`
+1. Dispatch an **Acceptance Test Writer** subagent using `./acceptance-test-writer-prompt.md`
    - Input: finalized design doc (especially acceptance criteria)
    - Output: integration-level test file(s) that verify feature behavior end-to-end
 2. Run the acceptance tests — verify they **FAIL** (the feature doesn't exist yet)
@@ -752,7 +751,7 @@ Before dispatching the Plan Writer, verify the gate ledger and write a handoff m
 
 ### Step 1: Write the Plan
 
-Dispatch a **Plan Writer** subagent (Opus):
+Dispatch a **Plan Writer** subagent:
 
 - Read the design doc produced in Phase 1 and the acceptance tests from Step 3
 - Write an implementation plan following the `crucible:planning` format
@@ -766,11 +765,6 @@ Use `./plan-writer-prompt.md` template for the dispatch prompt.
 ### Step 2: Review the Plan
 
 Dispatch a **Plan Reviewer** subagent:
-
-Reviewer model selection:
-- Plan touches **4+ systems** or has **10+ tasks** → Opus
-- Plan touches **1-3 systems** with **<10 tasks** → Sonnet
-- When in doubt → Opus
 
 Review protocol (iterative):
 - Dispatch Plan Reviewer to check plan against design doc
@@ -878,7 +872,7 @@ Before dispatching:
 1. Map the dependency graph from plan task metadata
 2. Identify independent tasks (no shared files, no sequential dependencies)
 3. Group into execution waves — independent tasks parallel, dependent tasks sequential
-4. Assess complexity per task for reviewer model selection
+4. Assess complexity per task to choose review approach
 
 ### Step 3: Execute Tasks
 
@@ -887,7 +881,7 @@ For each task (or wave of parallel tasks):
 **RECOMMENDED SUB-SKILL:** Before dispatching each execution wave, use crucible:checkpoint — create checkpoint with reason "pre-wave-N" (where N is the wave number). This captures the working directory state after the prior wave's verification gate passed.
 
 1. Mark task `in_progress` via `TaskUpdate`
-2. Spawn **Implementer** teammate (Opus) via Task tool with `team_name` and `subagent_type="general-purpose"`
+2. Spawn **Implementer** teammate via Task tool with `team_name` and `subagent_type="general-purpose"`
    - Use `./build-implementer-prompt.md` template
    - Pass full task text, file paths, project conventions
    - **Contract-aware dispatch (when a contract exists for this ticket):** Include the contract YAML alongside the design doc and task description. See "Contract-Aware Implementer Guidance" below.
@@ -896,7 +890,7 @@ For each task (or wave of parallel tasks):
 4. After cleanup completes, spawn **Reviewer** teammate
    - Use `./build-reviewer-prompt.md` template
 5. **Tier-aware review routing:** Read the task's `Review-Tier` from plan metadata.
-   - **Tier 1:** Dispatch single-pass code reviewer (Sonnet). If Clean or Minor-only: task complete. If Critical/Important: dispatch implementer fix, then task complete. If Architectural Concern: escalate.
+   - **Tier 1:** Dispatch single-pass code reviewer. If Clean or Minor-only: task complete. If Critical/Important: dispatch implementer fix, then task complete. If Architectural Concern: escalate.
    - **Tier 2:** Dispatch iterative code review (per existing loop). Then dispatch single-pass test reviewer. If test review surfaces Critical findings, escalate to Tier 3. Then dispatch adversarial tester (per existing logic). Task complete.
    - **Tier 3:** Follow current full pipeline (no changes to existing flow).
 
@@ -920,21 +914,12 @@ After the implementer reports completion and before dispatching the reviewer:
 **RECOMMENDED:** Use crucible:checkpoint — create checkpoint with reason "pre-cleanup-task-N" before dispatching the cleanup agent. If cleanup removes something needed, restore to this checkpoint.
 
 1. Record the pre-cleanup commit SHA
-2. Dispatch a fresh **Cleanup Agent** (Opus) using `./cleanup-prompt.md`
+2. Dispatch a fresh **Cleanup Agent** using `./cleanup-prompt.md`
    - Input: `git diff <pre-task-sha>..HEAD` (the implementer's committed changes)
    - The orchestrator provides the pre-task commit SHA to the cleanup agent
 3. Cleanup agent reviews changes, removes unnecessary code (see allowlist), runs tests
 4. If cleanup made changes, commits separately: `refactor: cleanup task N implementation`
 5. If cleanup found nothing to remove, reports "No cleanup needed" and proceeds
-
-#### Reviewer Model Selection (Lead Decides Per-Task)
-
-| Task Complexity | Reviewer Model |
-|----------------|----------------|
-| Low (1-3 files, straightforward) | Sonnet |
-| Medium (3-6 files, some cross-system) | Lead decides (default Opus) |
-| High (6+ files, refactoring, deep chains) | Opus |
-| When in doubt | Opus |
 
 #### Two-Pass Review Cycle
 
@@ -1025,7 +1010,7 @@ The test-coverage skill audits existing tests for staleness (wrong assertions, m
 
 #### Test Gap Writer
 
-After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (Opus) using `./test-gap-writer-prompt.md`:
+After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** using `./test-gap-writer-prompt.md`:
 
 1. Input: Pass 2 test reviewer's missing coverage findings + implementer's changes + test-coverage audit report (if available)
 2. The test gap writer writes tests ONLY for gaps the reviewer identified — no scope creep. Before writing a new test for a flagged gap, verify no existing test already covers this path (it may have been updated by the test-coverage audit).
@@ -1036,7 +1021,7 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 **If all tests PASS:** Continue to adversarial tester.
 
 **If some tests FAIL** (gaps reveal genuinely missing implementation):
-1. Dispatch a fresh implementer (Opus) with the failing test(s), their failure messages, and the gap descriptions from the reviewer
+1. Dispatch a fresh implementer with the failing test(s), their failure messages, and the gap descriptions from the reviewer
 2. Implementer fixes the missing behavior, then re-runs ALL test gap writer tests (not just the failures — catches regressions from the fix)
 3. If all tests pass after fix: commit (`fix: address test gap failures for task N`), continue to adversarial tester
 4. If tests still fail after one fix attempt: **escalate to user** with:
@@ -1049,7 +1034,7 @@ After test-coverage completes (or is skipped), dispatch a **Test Gap Writer** (O
 
 #### Adversarial Tester
 
-After the test gap writer completes (or is skipped), dispatch an **Adversarial Tester** (Opus) using `skills/adversarial-tester/break-it-prompt.md`:
+After the test gap writer completes (or is skipped), dispatch an **Adversarial Tester** using `skills/adversarial-tester/break-it-prompt.md`:
 
 1. Input: Full diff of the task's changes (`git diff <pre-task-sha>..HEAD`), project test conventions, cartographer module context (if available)
 2. The adversarial tester identifies the top 5 most likely failure modes, writes one test per mode, and runs them
@@ -1250,14 +1235,14 @@ After all tasks complete:
 Throughout the pipeline, the orchestrator appends timestamped entries to `/tmp/crucible-metrics-<session-id>.log` on each subagent dispatch and completion.
 
 **Dispatch measurement protocol:** On every subagent dispatch, the orchestrator follows the enriched manifest protocol from `shared/dispatch-convention.md`:
-- **Before dispatching:** Measure the dispatch file size in characters. Record `input_chars` and `model_tier` in the manifest entry.
+- **Before dispatching:** Measure the dispatch file size in characters. Record `input_chars` in the manifest entry.
 - **After dispatch returns:** Measure the subagent response length in characters. Record `output_chars` and `tool_calls` (if available) in the manifest completion entry.
 
 At completion (before reporting to user, i.e. step 9), read the metrics log and manifest, then compute:
 
 ```
 -- Pipeline Complete ----------------------------------------
-  Subagents dispatched:  23 (14 Opus, 7 Sonnet, 2 Haiku)
+  Subagents dispatched:  23
   Active work time:      2h 47m
   Wall clock time:       11h 13m
   Quality gate rounds:   4 (design: 2, plan: 1, impl: 1)
@@ -1271,7 +1256,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 ```
 
 **Metrics tracked:**
-- Total subagents dispatched (by type and model tier: Opus/Sonnet/Haiku)
+- Total subagents dispatched (by role)
 - Active work time (merge overlapping parallel intervals — NOT naive sum)
 - Wall clock time (first dispatch to final completion)
 - Quality gate rounds (per gate: design, plan, implementation)
@@ -1279,7 +1264,7 @@ At completion (before reporting to user, i.e. step 9), read the metrics log and 
 - Estimated input tokens (sum of `input_chars` from manifest / 4)
 - Estimated output tokens (sum of `output_chars` from manifest / 4)
 
-**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Count dispatches grouped by `model_tier`. Include these in the pipeline completion report alongside existing metrics.
+**Efficiency summary computation:** Read `manifest.jsonl` from the dispatch directory. Sum `input_chars` and `output_chars` across all completed entries (skip nulls). Divide each by 4 for token estimates. Include these in the pipeline completion report alongside existing metrics.
 
 **Gate tracking verification:** Before compiling the pipeline summary (Phase 4 Step 9), verify that all three gate categories (design, plan, implementation) show round count >= 1 with clean final rounds (0 Fatal, 0 Significant). If any gate was skipped with explicit user approval, record it as `USER_SKIP` in the metrics. A zero without user approval indicates a gate was dropped — report this in the summary.
 
@@ -1292,7 +1277,6 @@ Alongside the metrics log, maintain a decision journal at `/tmp/crucible-decisio
 ```
 
 Decision types to capture:
-- `reviewer-model` — why Opus vs Sonnet for this reviewer
 - `review-tier` -- tier assignment read from plan, runtime escalation reason if applicable
 - `gate-round` — issue count, severity shifts, progress/stagnation per round
 - `escalation` — why the orchestrator escalated to user (and user's decision)
@@ -1314,7 +1298,7 @@ Decision types to capture:
 ## What the Lead Should NOT Do
 
 - Implement code (dispatch implementers)
-- Read large files (spawn Haiku researcher)
+- Read large files with a focused research dispatch
 - Debug failing tests (dispatch implementer)
 - Make architectural decisions (escalate to user)
 

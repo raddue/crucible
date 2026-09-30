@@ -8,7 +8,7 @@
 Use this template when dispatching the Phase 1 scoping agent as a fallback when /recon with subsystem-manifest fails. The orchestrator fills in the bracketed sections.
 
 ```
-Agent tool (subagent_type: Explore, model: sonnet):
+Agent tool (subagent_type: Explore):
   description: "Audit subsystem scoping"
   prompt: |
     You are a scoping agent identifying which files belong to a named

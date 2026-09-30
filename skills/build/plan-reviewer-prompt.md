@@ -5,7 +5,7 @@
 Use this template when dispatching a plan reviewer subagent in Phase 2.
 
 ```
-Task tool (general-purpose, model: opus or sonnet — see build skill for decision heuristic):
+Task tool (general-purpose):
   description: "Review implementation plan for [feature]"
   prompt: |
     You are reviewing an implementation plan against its design document.

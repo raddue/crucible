@@ -3,10 +3,10 @@
 
 # Feed-Forward Advisor — Dispatch Template
 
-Dispatch a Sonnet subagent before starting a new task using this template.
+Dispatch a subagent before starting a new task using this template.
 
 ```
-Task tool (general-purpose, model: sonnet):
+Task tool (general-purpose):
   description: "Forge feed-forward for [upcoming task]"
   prompt: |
     You are a feed-forward advisor. Your job is to surface relevant lessons
@@ -92,7 +92,6 @@ Task tool (general-purpose, model: sonnet):
 
     If past retrospectives have accumulated decision calibration data in patterns.md, surface relevant calibration patterns:
 
-    - Model selection accuracy: "In X/Y past tasks of this complexity, [model] reviewers [missed/caught] issues that [other model] found"
     - Quality gate round predictions: "Design docs in this project average N rounds; plans average M rounds"
     - Debugging dispatch efficiency: "For [bug pattern], N investigators were sufficient in X/Y past sessions"
 

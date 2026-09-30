@@ -39,7 +39,7 @@ Per `shared/cairn-convention.md`. Innovate-specific bindings:
 ## The Process
 
 1. Generate a `<run-id>` and write `invocation.md` to scratch
-2. Dispatch an Innovation subagent (Opus) with the artifact and context
+2. Dispatch an Innovation subagent with the artifact and context
 3. Subagent proposes the single most impactful addition plus a "Why This Over Alternatives" narrative
 4. Write the subagent's output to scratch: `proposal.md` + `alternatives.md`
 5. Incorporate the proposal into the artifact (Plan Writer or equivalent)
@@ -150,7 +150,7 @@ Use the `innovate-prompt.md` template in this directory. Provide:
 - What the artifact is trying to accomplish
 - If `sweep-id` is set: the "Prior Proposals in This Sweep" section (see Sweep Mode above)
 
-Model: **Opus** (creative/architectural work needs the best model)
+Model selection is left to the host harness and operator.
 
 ### 3. Persist and process the proposal
 

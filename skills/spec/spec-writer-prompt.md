@@ -6,7 +6,7 @@
 Use this template when dispatching a teammate (or sequential sub-agent) to process a single ticket during `/spec` execution. The orchestrator fills in all `[PLACEHOLDER]` injection points before dispatch.
 
 ```
-Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: "spec-writer-[TICKET_NUMBER]"):
+Task tool (general-purpose, team_name: "spec-[EPIC_NUMBER]", name: "spec-writer-[TICKET_NUMBER]"):
   description: "Spec ticket [TICKET_NUMBER]: [TICKET_TITLE]"
   prompt: |
     You are a Spec Writer teammate processing ticket [TICKET_NUMBER] for epic [EPIC_NUMBER].

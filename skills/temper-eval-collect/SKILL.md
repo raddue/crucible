@@ -1,7 +1,6 @@
 ---
 name: temper-eval-collect
 description: Internal temper-eval harness — not auto-routed; invoke explicitly via /temper-eval-collect. Live-dispatch phase of temper eval harness. Reads stage-manifest.json from a pre-staged dispatch dir; fans Task-tool reviewer dispatches in parallel (max 6); writes per-seq result files; exits. Single bounded session. Pairs with `python -m skills.temper.evals.run_evals stage` and `score`.
-model: opus
 ---
 
 <!-- CANONICAL: shared/dispatch-convention.md -->
@@ -67,13 +66,12 @@ If the queue is empty, jump to Step 8.
 
 ### Step 7: Dispatch in waves of max_parallel
 
-**M-R7-4 cross-reference:** Task-tool parallel-dispatch limits at 6-way fanout for opus subagents are empirically untested within crucible — see the "Task-tool parallel-dispatch limits" entry in the "Risks + Mitigations" section near the end of this plan. The wave-based dispatch keeps surface bounded; `max_parallel` is operator-tunable via CLI flag without code changes if the 6-way default proves unreliable.
+**M-R7-4 cross-reference:** Task-tool parallel-dispatch limits at 6-way fanout are empirically untested within crucible — see the "Task-tool parallel-dispatch limits" entry in the "Risks + Mitigations" section near the end of this plan. The wave-based dispatch keeps surface bounded; `max_parallel` is operator-tunable via CLI flag without code changes if the 6-way default proves unreliable.
 
 Default `max_parallel = 6`. For each wave (up to ceil(queue_size / max_parallel) waves):
 1. Pre-allocate next `max_parallel` seqs from the queue
 2. For each seq, dispatch a Task tool call:
    - `subagent_type: general-purpose`
-   - `model: opus`
    - `prompt`: a pointer prompt of the form `You are a temper reviewer. Read your full instructions at <dispatch_dir>/<NNN>-reviewer.md. Begin by reading that file.`
    - Carry per-dispatch timeout: dispatch_timeout (default 300)
 3. **Dispatch all in the wave in a single message with parallel tool calls.**

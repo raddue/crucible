@@ -15,8 +15,8 @@ Convert heavy document formats to token-efficient representations (Markdown, CSV
 **Skill type:** Rigid — follow exactly, no shortcuts.
 
 **Models:**
-- PDF structuring agent: Sonnet
-- Digest agent: Sonnet
+- PDF structuring agent
+- Digest agent
 - Orchestrator: runs on whatever model the session uses
 
 **Announce at start:** "I'm using the distill skill to convert documents to token-efficient formats."
@@ -176,7 +176,7 @@ PAGES=$(pdfinfo "$INPUT_PATH" 2>/dev/null | grep "^Pages:" | awk '{print $2}')
 ```
 If `pdfinfo` is unavailable, estimate pages from `pdftotext` output (count form-feed characters). If average chars/page < 50, report: "This PDF appears to be scanned/image-based. Text extraction produced minimal content. Consider OCR processing externally before distilling." Skip structuring pass. Clean up temp `.txt` file.
 
-**Step 2 — Structure:** Dispatch a Sonnet agent using `skills/distill/pdf-structurer-prompt.md` to transform the raw pdftotext output into clean Markdown with recovered headings, lists, tables, and code blocks. Write result to `OUTPUT_PATH`. Clean up temp `.txt` file.
+**Step 2 — Structure:** Dispatch an agent using `skills/distill/pdf-structurer-prompt.md` to transform the raw pdftotext output into clean Markdown with recovered headings, lists, tables, and code blocks. Write result to `OUTPUT_PATH`. Clean up temp `.txt` file.
 
 #### Tier 3: Python Venv
 
@@ -226,7 +226,7 @@ After all conversions complete, run the digest pass on eligible files.
 - Word count > 500 words
 - Word count ≤ 50,000 words (hard cap — report "File exceeds 50K word limit for digest pass. Consider splitting the document." for larger files)
 
-**Dispatch:** For each eligible file, dispatch a Sonnet digest agent using `skills/distill/digest-prompt.md`. Before dispatching, fill template placeholders: replace `{{ORIGINAL_WORDS}}` with the converted file's word count and `{{TARGET_WORDS}}` with 25% of that count. The raw pdftotext output (for `pdf-structurer-prompt.md`) or converted `.md` content (for `digest-prompt.md`) is included as a content block below the prompt template in the dispatch file.
+**Dispatch:** For each eligible file, dispatch a digest agent using `skills/distill/digest-prompt.md`. Before dispatching, fill template placeholders: replace `{{ORIGINAL_WORDS}}` with the converted file's word count and `{{TARGET_WORDS}}` with 25% of that count. The raw pdftotext output (for `pdf-structurer-prompt.md`) or converted `.md` content (for `digest-prompt.md`) is included as a content block below the prompt template in the dispatch file.
 
 **Quality check:** After the digest agent returns, count words in the digest:
 - If digest is 15-35% of input word count: accept
@@ -307,7 +307,7 @@ pandoc -f $FORMAT -t markdown --wrap=none $INPUT_PATH -o $OUTPUT_PATH
 - User directly when preparing documents for LLM consumption
 
 **Dispatches:**
-- PDF structuring agent (Sonnet) via `skills/distill/pdf-structurer-prompt.md`
-- Digest agent (Sonnet) via `skills/distill/digest-prompt.md`
+- PDF structuring agent via `skills/distill/pdf-structurer-prompt.md`
+- Digest agent via `skills/distill/digest-prompt.md`
 
 **Does not dispatch:** No quality gate, no red-team, no review loop. Distill is a utility skill — it converts and compresses. Quality is ensured by the digest quality metric (word count check + one retry).

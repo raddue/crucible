@@ -93,7 +93,7 @@ Split the repository into partitions for parallel exploration:
 Dispatch parallel Explore subagents, one per partition:
 
 ```
-Agent tool (subagent_type: Explore, model: sonnet)
+Agent tool (subagent_type: Explore)
 ```
 
 Use the prompt template at `./partition-explorer-prompt.md`. Fill in the template variables:
@@ -109,7 +109,7 @@ Use the prompt template at `./partition-explorer-prompt.md`. Fill in the templat
 Dispatch the Init Recorder to merge all partition reports into cartographer format:
 
 ```
-Task tool (general-purpose, model: sonnet)
+Task tool (general-purpose)
 ```
 
 Use the prompt template at `./init-recorder-prompt.md`. Fill in the template variables:
@@ -238,7 +238,7 @@ Wait for user confirmation. Do not scan repos the user did not confirm.
 Dispatch parallel Explore subagents, one per confirmed neighbor:
 
 ```
-Agent tool (subagent_type: Explore, model: sonnet)
+Agent tool (subagent_type: Explore)
 ```
 
 Use the prompt template at `./neighbor-scanner-prompt.md`. Fill in the template variables:
@@ -264,7 +264,7 @@ After all neighbor scans complete, the orchestrator assigns relevance:
 Dispatch the Topology Recorder to synthesize neighbor scans:
 
 ```
-Task tool (general-purpose, model: sonnet)
+Task tool (general-purpose)
 ```
 
 Use the prompt template at `./topology-recorder-prompt.md`. Fill in the template variables:
@@ -313,12 +313,12 @@ The orchestrator appends accepted content to the project's CLAUDE.md (creating t
 
 ## Subagent Dispatch Summary
 
-| Agent | Model | Dispatch | Prompt Template |
-|-------|-------|----------|-----------------|
-| Partition Explorer | Sonnet | Agent tool (Explore) | `./partition-explorer-prompt.md` |
-| Init Recorder | Sonnet | Task tool (general-purpose) | `./init-recorder-prompt.md` |
-| Neighbor Scanner | Sonnet | Agent tool (Explore) | `./neighbor-scanner-prompt.md` |
-| Topology Recorder | Sonnet | Task tool (general-purpose) | `./topology-recorder-prompt.md` |
+| Agent | Dispatch | Prompt Template |
+|-------|----------|-----------------|
+| Partition Explorer | Agent tool (Explore) | `./partition-explorer-prompt.md` |
+| Init Recorder | Task tool (general-purpose) | `./init-recorder-prompt.md` |
+| Neighbor Scanner | Agent tool (Explore) | `./neighbor-scanner-prompt.md` |
+| Topology Recorder | Task tool (general-purpose) | `./topology-recorder-prompt.md` |
 
 Explorers are dispatched via the Agent tool with the specified `subagent_type`. Recorders are dispatched via the Task tool (general-purpose). Use the prompt templates verbatim, filling in only the bracketed template variables.
 

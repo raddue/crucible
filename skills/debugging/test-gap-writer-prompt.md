@@ -5,7 +5,7 @@
 Use this template when dispatching a test gap writer after Phase 5 (red-team + code review) identifies missing test coverage for a fix.
 
 ```
-Agent tool (subagent_type: "general-purpose", model: opus):
+Agent tool (subagent_type: "general-purpose"):
   description: "Write tests for coverage gaps in debugging fix"
   prompt: |
     You are a test writer. Your job is to write tests for behaviors related to the bug fix that aren't covered by the existing test suite.

@@ -526,7 +526,7 @@ The "Runs" column is split by reviewer-set: full | standalone.
 | temper | always | always | T non-empty | the merge-verdict loop |
 | delve | always | always | any kept finding | report-only, warden owns the fix |
 | red-team | always | always | quality-gate ≠ PASS | via quality-gate |
-| siege | conditional | conditional | Critical>0 | 6-agent Opus audit |
+| siege | conditional | conditional | Critical>0 | six-agent security audit |
 | inquisitor | always (unconditional) | conditional | any FAIL | stays unconditional in full |
 
 ## Standalone inquisitor-inclusion predicate

@@ -1,6 +1,6 @@
 # Severity Rubric
 
-Canonical severity definitions for adversarial review across crucible skills (quality-gate, red-team, siege, audit, inquisitor, build). Anchor for both Opus and Sonnet roles so finding severities are interpreted consistently across models.
+Canonical severity definitions for adversarial review across crucible skills (quality-gate, red-team, siege, audit, inquisitor, build). Defines severity consistently across reviewer and verifier roles.
 
 ## Three-tier Scale
 
@@ -43,11 +43,11 @@ Minor contributes **0 points** to the weighted score.
 
 ## Adjudication Rules (cross-model)
 
-When a Sonnet agent (stagnation judge, fix verifier) reads severity labels assigned by an Opus agent (red-team, fix agent), apply these rules:
+When a judge or fix verifier reads severity labels assigned by a red-team or fix agent, apply these rules:
 
 1. **Trust the source-of-truth label.** The red-team agent that produced the finding owns its severity. Do not silently re-score.
 2. **Flag disagreements explicitly.** If the consuming agent (judge, verifier) reads a label that disagrees with its own assessment, surface the disagreement in its receipt: `severity-disagreement: <finding-id> labeled=<X> assessed=<Y> reason=<sentence>`. Do not override.
-3. **Sonnet does not permanently override Opus.** When verifier marks a Fatal as Unresolved twice running, the verdict downgrades to informational (per quality-gate's Fix Verification rules). The same principle applies to the stagnation judge: if the judge's STAGNATION verdict contradicts the orchestrator's score-strictly-improving signal, prefer the orchestrator.
+3. **The verifier does not override red-team severity.** When verifier marks a Fatal as Unresolved twice running, the verdict downgrades to informational (per quality-gate's Fix Verification rules). The same principle applies to the stagnation judge: if the judge's STAGNATION verdict contradicts the orchestrator's score-strictly-improving signal, prefer the orchestrator.
 
 ## Edge Cases
 
