@@ -88,6 +88,15 @@ detector-reachable** and emits zero shape tokens. It is covered by the disclosur
 fourth-class declaration makes the shim destination-bearing, so a conforming author mints a ledger entry
 or emits a "did not copy" decline signal), not by this trigger.
 
+**Detector reach.** Category 8 is structurally detected over a `git diff` host baseline — it needs
+**changed code** (a diff), not prose. Prose-only consumers — spec's Step 3.5 scan (ticket/design
+content) and quality-gate's keyword heuristic over design/plan artifacts — therefore **cannot** fire
+category 8 themselves. They still honour `destination`: the contract enum accepts it (a
+diff-capable stage — build's implementation-diff scan or siege's own activation — supplies it), and
+wherever category 8 *can* fire, a single bounded match is `required`, not `recommended`. This
+asymmetry is deliberate: no consumer downgrades a category-8 signal it receives; the only gap is which
+stage can *generate* it.
+
 ## Activation Threshold
 
 **2+ distinct categories** must match to activate siege. A single category match is insufficient (too many false positives). Category 8 (Destination-Bearing Construct) is the sole exception: a single bounded match there fires alone.
@@ -95,7 +104,7 @@ or emits a "did not copy" decline signal), not by this trigger.
 | Matched Categories | Action |
 |---|---|
 | 0 | No security review needed. Silent skip. |
-| 1 | `security_review: recommended` in contract. Build logs but does not dispatch siege. **Exception:** a single Category-8 match is `required` — it dispatches siege (see §8 single-match trigger). |
+| 1 | `security_review: recommended` in contract. Build logs but does not dispatch siege. **Exception:** a single Category-8 match is `required` — it dispatches siege (see §8 single-match trigger). <!-- CONTRACT:signals-cat8-action-table --> |
 | 2+ | `security_review: required` in contract. Build dispatches siege automatically. |
 
 ## Scanning Targets
@@ -129,7 +138,7 @@ security_review:
 
 | Field | Required | Description |
 |---|---|---|
-| `status` | Yes | `required` (2+ signals, or a single Category-8 match) or `recommended` (1 signal otherwise) |
+| `status` | Yes | `required` (2+ signals, or a single Category-8 match) or `recommended` (1 signal otherwise) <!-- CONTRACT:signals-cat8-status-row --> |
 | `signals_detected` | Yes | Non-empty array of matched categories with evidence text |
 | `signals_detected[].category` | Yes | One of: `auth`, `crypto`, `external_input`, `secrets`, `network`, `pii_data`, `dependencies`, `destination` |
 | `signals_detected[].evidence` | Yes | Brief description of what triggered this category |

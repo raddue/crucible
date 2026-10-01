@@ -254,13 +254,18 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
 
     1. **Scan targets:** ticket body (`[TICKET_BODY]`), your investigation findings, and
        the design doc content you are about to write.
-    2. **Match categories:** For each of the 7 signal categories in `security-signals.md`,
+    2. **Match categories:** For each of the 8 signal categories in `security-signals.md`,
        check if any keyword from that category appears in the scan targets (case-insensitive).
-       Count distinct categories matched — one hit per category is sufficient.
+       Count distinct categories matched — one hit per category is sufficient. Categories 1–7
+       are keyword-matched; category 8 (destination-bearing construct) is structurally detected
+       (see the "Detector reach" note) and does **not** fire from prose — the contract still
+       accepts `destination` if a diff-capable stage supplies it.
     3. **Determine status:**
        - **2+ categories matched:** Include `security_review` in the contract with
          `status: required`. List matched categories with brief evidence snippets.
-       - **1 category matched:** Include `security_review` in the contract with
+       - **A single Category-8 match (when a structural detector supplied `destination`):**
+         `status: required` — a single bounded destination-bearing match fires alone, never `recommended`.
+       - **1 category matched (categories 1–7):** Include `security_review` in the contract with
          `status: recommended`. List the single matched category with evidence.
        - **0 categories matched:** Omit the `security_review` field entirely.
     4. **Deployment context:** If the ticket or design implies a deployment environment
@@ -457,9 +462,9 @@ Task tool (general-purpose, model: opus, team_name: "spec-[EPIC_NUMBER]", name: 
     # Omit entirely if no signals detected.
     # See shared/security-signals.md for signal categories and threshold rules.
     security_review:                           # OPTIONAL — omit if 0 signals
-      status: "required"                       # required (2+ signals) | recommended (1 signal)
+      status: "required"                       # required (2+ signals, or a single Category-8 match) | recommended (1 signal)
       signals_detected:
-        - category: "auth"                     # one of: auth, crypto, external_input, secrets, network, pii_data, dependencies
+        - category: "auth"                     # one of: auth, crypto, external_input, secrets, network, pii_data, dependencies, destination
           evidence: "ticket mentions login flow and JWT token handling"
         - category: "external_input"
           evidence: "design doc includes REST API endpoint definitions"

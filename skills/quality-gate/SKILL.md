@@ -1013,6 +1013,9 @@ Set `security_surface: detected` if ANY of the following signals fires:
 - Password / token comparisons not using constant-time (`==` against secret material)
 - Cryptographic primitives invoked directly (use of `hashlib`, `cryptography`, `crypto` libraries)
 
+**Destination-bearing construct (category 8 — structural, diff-required):**
+- A diff that introduces a new outbound host — a host literal not in the comparison-base host baseline, an SDK init (Sentry/PostHog/Datadog/…), a webhook/DSN/base-URL constant, or a registry/proxy/mirror/dependency-add whose destination is a host literal visible in the diff. See `skills/shared/security-signals.md` §8. A **single bounded match fires** `security_surface: detected` on its own; this arm is only reachable on **code** artifacts (structural detection needs a `git diff` host baseline, so prose-only design/plan bodies cannot structurally detect it — see the "Detector reach" note in `security-signals.md`).
+
 **Design / plan / hypothesis keywords:**
 - Single-word match in artifact body: `authentication`, `authorization`, `cryptographic`, `cryptography`, `session token`, `API key`, `permission boundary`, `trust boundary`, `sandbox`, `privilege`, `RBAC`, `OAuth`, `SAML`, `JWT`, `CSRF`, `XSS`, `SQL injection`, `RCE`, `deserialization`, `path traversal`
 - Two-word phrases: `user-supplied input`, `untrusted input`, `external input`, `attack surface`, `threat model`
@@ -1021,7 +1024,7 @@ Set `security_surface: detected` if ANY of the following signals fires:
 
 **Standalone invocation note:** Standalone `/quality-gate` does not run `crucible:dependency-audit` (extracted to the parent orchestrator). Therefore the dependency-audit-promotes-security-surface path does NOT fire in standalone mode. Users wanting this signal should either: (a) invoke `/dependency-audit` first and pass `force_siege: true` to `/quality-gate` if it reports findings, or (b) use `/build`, which dispatches both skills.
 
-**Confidence threshold:** Keyword matches in design/plan/hypothesis artifacts are noisy. Require either ≥2 distinct keyword categories OR 1 keyword + an explicit "## Security" section. A single mention of "authentication" in passing does not trigger detection.
+**Confidence threshold:** Keyword matches in design/plan/hypothesis artifacts are noisy. Require either ≥2 distinct keyword categories OR 1 keyword + an explicit "## Security" section. A single mention of "authentication" in passing does not trigger detection. **Category 8 is the sole exception:** a single bounded destination-bearing match fires `security_surface: detected` on its own, irrespective of the keyword threshold.
 
 ### Decision and Dispatch
 

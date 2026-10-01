@@ -471,7 +471,7 @@ After generating the contract YAML, validate against the schema. The rules below
 3. **Security review field validation (when present):**
    - `security_review.status` must be one of: `required`, `recommended`
    - `security_review.signals_detected` must be a non-empty array
-   - Each entry must have `category` (one of: `auth`, `crypto`, `external_input`, `secrets`, `network`, `pii_data`, `dependencies`) and `evidence` (non-empty string)
+   - Each entry must have `category` (one of: `auth`, `crypto`, `external_input`, `secrets`, `network`, `pii_data`, `dependencies`, `destination`) and `evidence` (non-empty string)
    - `security_review.deployment_context` (if present) must be one of: `public`, `intranet`, `hybrid`
 4. **Integration point validation:** For each entry in `integration_points`, verify that the referenced contract file exists in `docs/plans/` or the scratch directory's `contracts/` folder. If the referenced contract does not yet exist (upstream ticket not yet processed), log a warning but do not block.
 4. **On validation failure:** Report specific errors. Re-dispatch the contract generation step with the validation errors as feedback. If the second attempt also fails, log the errors, mark the contract as having validation warnings, and continue -- do not block the entire run on a malformed contract.

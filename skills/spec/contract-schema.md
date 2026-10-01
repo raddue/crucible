@@ -64,9 +64,9 @@ integration_points:
 # during spec writing. Consumed by /build Phase 4 Step 5.5 to dispatch siege.
 # Omit entirely if no signals detected. See shared/security-signals.md.
 security_review:                           # OPTIONAL
-  status: "required"                       # required (2+ signals) | recommended (1 signal)
+  status: "required"                       # required (2+ signals, or a single Category-8 match) | recommended (1 signal)
   signals_detected:
-    - category: "auth"                     # auth | crypto | external_input | secrets | network | pii_data | dependencies
+    - category: "auth"                     # auth | crypto | external_input | secrets | network | pii_data | dependencies | destination
       evidence: "ticket mentions login flow and JWT tokens"
     - category: "external_input"
       evidence: "design doc includes API endpoint definitions"
