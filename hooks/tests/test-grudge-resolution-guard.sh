@@ -2550,6 +2550,56 @@ check 390 "two 4000-file disjoint candidates are grouped inside the default budg
 check 391 "the wide-candidate Stop never degrades on the budget — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
 
 # ========================================================================
+# #582 — concurrent Stops must not break the MAX_BLOCKS bound. A Stop that
+# reads COUNT>=MAX appends GIVEUP while a racing Stop is still appending its
+# BLOCK line; when GIVEUP RESET the per-member count, that late BLOCK read
+# ordinal 1 and blocked again, re-arming the member (measured 5-7 blocks in
+# one round of 8, up to 9 total). GIVEUP retires; only CLEAR resets. Lock-free
+# on purpose: a lock that cannot be taken must still allow (never fail closed).
+# ========================================================================
+# Deterministic shape: the journal a lost race leaves behind — 3 BLOCKs, the
+# give-up, then one racing Stop's late BLOCK. The next Stop must not block.
+# contract:hook:inv-t23 checks=4
+hook_case t582late
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+T582="$(sha_of "$HC_REPO" HEAD)"
+mkdir -p "$(guard_dir "$HC_REPO")"
+printf '1\tBLOCK\t%s\t%s\n2\tBLOCK\t%s\t%s\n3\tBLOCK\t%s\t%s\n4\tGIVEUP\t%s\n5\tBLOCK\t%s\t%s\n' \
+  "$T582" aaaaaaaaaaaaaaaa "$T582" bbbbbbbbbbbbbbbb "$T582" cccccccccccccccc \
+  "$T582" "$T582" dddddddddddddddd > "$(guard_dir "$HC_REPO")/s582late.journal"
+run_hook s582late true
+check 392 "a BLOCK landing after GIVEUP does not re-arm the member: the Stop allows — contract:hook:inv-t23" 0 "$RC"
+check 393 "it prints no fresh block attempt — contract:hook:inv-t23" no "$(has "$ERR" "attempt (")"
+
+# Live race: rounds of 8 concurrent Stops on one group. Total blocks across
+# every round stay <= MAX_BLOCKS, and the last round allows every Stop (the
+# session terminates — the bound is not bought with a wedge).
+hook_case t582race
+echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
+echo "VALUE = 1" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "fix(widget): in-window fix"
+T582_BLOCKS=0; T582_LAST=0; T582_VALID=0
+for (( r=1; r<=4; r++ )); do
+  T582_ACTIVE=false; [ "$r" -gt 1 ] && T582_ACTIVE=true
+  printf '{"session_id":"s582race","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":%s}' \
+    "$HC_TRANSCRIPT" "$HC_CWD" "$T582_ACTIVE" > "$HC_ROOT/p582.json"
+  for (( i=1; i<=8; i++ )); do
+    ( cd "$HC_CWD" && env HOME="$HC_HOME" CLAUDE_PROJECT_DIR="$REPO_ROOT" CRUCIBLE_GRUDGE_DIR="$HC_STORE" \
+        timeout --kill-after=2 20 bash "$HOOK" <"$HC_ROOT/p582.json" >"$HC_ROOT/out.$r.$i" 2>&1 && rc=0 || rc=$?; echo "$rc" > "$HC_ROOT/rc.$r.$i" ) &
+  done
+  wait
+  T582_LAST="$(cat "$HC_ROOT"/rc."$r".* | grep -c '^2$' || true)"
+  T582_BLOCKS=$(( T582_BLOCKS + T582_LAST ))
+  T582_VALID=$(( T582_VALID + $(cat "$HC_ROOT"/rc."$r".* | grep -cE '^(0|2)$' || true) ))
+  echo "INFO: #582 round $r: $T582_LAST blocks"
+done
+echo "INFO: #582 concurrent blocks over 4x8 Stops = $T582_BLOCKS"
+check 394 "8-way concurrent Stops over 4 rounds block at most MAX_BLOCKS times in total — contract:hook:inv-t23" \
+  yes "$(if [ "$T582_VALID" -eq 32 ] && [ "$T582_BLOCKS" -le 3 ] && [ "$T582_BLOCKS" -ge 1 ]; then echo yes; else echo "no ($T582_BLOCKS blocks, $T582_VALID valid exits)"; fi)"
+check 395 "the final concurrent round allows every Stop (no wedge) — contract:hook:inv-t23" 8 \
+  "$(cat "$HC_ROOT"/rc.4.* | grep -c '^0$' || true)"
+
+# ========================================================================
 # INV-T29 (#608) — a by-files clearance must not persist a counter reset
 #
 # A clearance zeroes the group's PERSISTED block counter, but the two lookup
@@ -2709,7 +2759,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=403
+EXPECTED_CHECKS=407
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

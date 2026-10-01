@@ -148,7 +148,7 @@ COVERAGE_MAP: dict[str, dict] = {
     "contract:group:inv-t20": {"kind": "bash", "carriers": [_G], "checks": 13},
     "contract:group:inv-t21": {"kind": "bash", "carriers": [_G], "checks": 45},
     "contract:hook:inv-t22": {"kind": "bash", "carriers": [_G], "checks": 19},
-    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 93},
+    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 97},
     "contract:hook:inv-t24": {"kind": "bash", "carriers": [_G], "checks": 22},
     "contract:worktree:inv-t25": {"kind": "bash", "carriers": [_G], "checks": 20},
     "contract:cli:inv-t26": {"kind": "bash", "carriers": [_G], "checks": 7},

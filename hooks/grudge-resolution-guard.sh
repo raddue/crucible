@@ -489,7 +489,8 @@ _journal_append_group() {
 #
 # Globals after the pass (for the given names):
 #   JR_ABSENT / JR_UNMEASURABLE / JR_COUNT  — exactly one is 1
-#   JB[<sha>]  — blocks(m): BLOCK lines since the last CLEAR/GIVEUP for m
+#   JB[<sha>]  — blocks(m): BLOCK lines since the last CLEAR for m
+#   GIVEUP retires a member without erasing its block history (#582).
 #   JBLAST[<sha>] — CLEAR | GIVEUP | BLOCK | "" ("" = no record for m yet)
 _journal_pass() {
   JR_ABSENT=0; JR_UNMEASURABLE=0; JR_COUNT=0
@@ -522,15 +523,16 @@ _journal_pass() {
         case "$f1" in ''|*[!0-9]*) JR_UNMEASURABLE=1; return 0 ;; esac
         case "$f3" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; return 0 ;; esac
         case "$f4" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        [ "${JBLAST[$f3]:-}" = "CLEAR" ] && JB[$f3]=0
-        [ "${JBLAST[$f3]:-}" = "GIVEUP" ] && JB[$f3]=0
+        # #582: only CLEAR resets. GIVEUP RETIRES (JBLAST) but keeps the count,
+        # so a racing Stop's BLOCK landing after a GIVEUP reads MAX+1 and loses
+        # the ordinal race instead of re-arming the member to a fresh 1/3.
         JB[$f3]=$(( ${JB[$f3]:-0} + 1 ))
         JBLAST[$f3]=BLOCK
         ;;
       CLEAR|GIVEUP)
         case "$f1" in ''|*[!0-9]*) JR_UNMEASURABLE=1; return 0 ;; esac
         case "$f3" in ''|*[!0-9a-fA-F]*) JR_UNMEASURABLE=1; return 0 ;; esac
-        JB[$f3]=0
+        [ "$f2" = "CLEAR" ] && JB[$f3]=0
         JBLAST[$f3]=$f2
         ;;
       *)
@@ -584,7 +586,7 @@ _journal_ordinal() {
   if [ "$JR_UNMEASURABLE" -eq 1 ] || [ "$JR_ABSENT" -eq 1 ]; then
     echo UNMEASURABLE; return 0
   fi
-  # Per member: BLOCK lines since its last CLEAR/GIVEUP, up to and including
+  # Per member: BLOCK lines since its last CLEAR, up to and including
   # the line carrying this Stop's own nonce (ORD, "" = nonce line not found).
   local -A want=() cnt=() ord=()
   local m line f1 f2 f3 f4 mx=0
@@ -598,7 +600,7 @@ _journal_ordinal() {
         cnt["k$f3"]=$(( ${cnt["k$f3"]:-0} + 1 ))
         [ "$f4" = "$nonce" ] && ord["k$f3"]="${cnt["k$f3"]}"
         ;;
-      CLEAR|GIVEUP) cnt["k$f3"]=0 ;;
+      CLEAR) cnt["k$f3"]=0 ;;   # GIVEUP retires, never resets (#582)
     esac
   done < "$JOURNAL_FILE"
   for m in "$@"; do
@@ -1239,7 +1241,8 @@ done
 # ── 14b. Display refresh — `.block_counts` is a DISPLAY-only value (§3.1/§8):
 # the (n/3) message and the state-JSON `block_counts` are computed from the
 # journal AFTER this Stop's own appends, per group (max over members of
-# blocks(m)); it is never read back as the bound (OBS-1). Every group that
+# blocks(m), excluding retired members); never read back as the bound (OBS-1).
+# Every group that
 # still has members mapped (in-scope, blocked, cleared, or merged) is
 # refreshed, so a durable CLEAR this Stop re-reads its members as COUNT(0).
 # #603: ONE journal pass for every group (not one pass per sha, plus an
@@ -1248,7 +1251,11 @@ _journal_pass "${!SHA_GROUP[@]}"
 declare -A _DISP=()
 for _m in "${!SHA_GROUP[@]}"; do
   _g="${SHA_GROUP[$_m]}"
-  [ "${JB[$_m]:-0}" -gt "${_DISP[$_g]:--1}" ] && _DISP["$_g"]="${JB[$_m]:-0}"
+  _count="${JB[$_m]:-0}"
+  # A retired member retains its arbitration count, not a display contribution.
+  # Otherwise an exhausted sibling hides a fresh bridge member's (1/3).
+  case "${JBLAST[$_m]:-}" in CLEAR|GIVEUP) _count=0 ;; esac
+  [ "$_count" -gt "${_DISP[$_g]:--1}" ] && _DISP["$_g"]="$_count"
 done
 for _g in "${!_DISP[@]}"; do BLOCK_COUNTS["$_g"]="${_DISP[$_g]}"; done
 
