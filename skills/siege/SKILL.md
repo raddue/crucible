@@ -90,7 +90,7 @@ Audit finds bugs, robustness gaps, and architecture issues. Quality-gate iterate
 
 ### Content-Aware Detection
 
-Siege activates when the orchestrator (build, audit, or user session) encounters **two or more** of these high-risk signals in the target artifact:
+Siege activates when the orchestrator (build, audit, or user session) encounters **two or more** of these high-risk signals in the target artifact (Category 8 is the sole exception — a single bounded match fires alone, see below):
 
 1. **Authentication / authorization logic** -- login, session, token, RBAC, permission checks
 2. **Cryptographic operations** -- hashing, encryption, signing, key management
@@ -99,9 +99,9 @@ Siege activates when the orchestrator (build, audit, or user session) encounters
 5. **Network boundaries** -- inter-service communication, webhook handlers, CORS, proxy config
 6. **Data persistence with PII** -- user data storage, logging of sensitive fields, retention policies
 7. **Dependency introduction** -- new packages, version changes, native bindings
-8. **Destination-Bearing Construct** -- a diff that introduces a new outbound host (new host literal, SDK init, webhook/DSN base-URL, registry/proxy/mirror/dependency-add). <!-- CONTRACT:siege-activation-cat8-exception -->
+8. **Destination-Bearing Construct** -- a diff that introduces a new outbound host (new host literal, SDK init, webhook/DSN base-URL, registry/proxy/mirror/dependency-add).
 
-A single signal is insufficient -- too many false positives. Two or more signals, or any signal combined with user confirmation, activates Siege at full force. **Category 8 is the sole exception:** a single bounded destination-bearing match fires alone (see `skills/shared/security-signals.md` §8) — it is `security_review: required`, dispatching siege regardless of the 2-of-7 threshold.
+A single signal is insufficient -- too many false positives. Two or more signals, or any signal combined with user confirmation, activates Siege at full force. **Category 8 is the sole exception:** a single bounded destination-bearing match fires alone (see `skills/shared/security-signals.md` §8) — it is `security_review: required`, dispatching siege regardless of the 2-of-7 threshold. <!-- CONTRACT:siege-activation-cat8-exception -->
 
 ### Parameters
 
@@ -137,9 +137,9 @@ When `true`: Chain Analyst annotates chain steps with MITRE ATT&CK technique IDs
 ## Pipeline Integration
 
 <!-- CANONICAL: shared/security-signals.md -->
-Siege integrates with orchestrator skills via `shared/security-signals.md`, which codifies the 7-category activation heuristic in a consumption-optimized format:
+Siege integrates with orchestrator skills via `shared/security-signals.md`, which codifies the 8-category activation heuristic in a consumption-optimized format:
 
-- **crucible:build** — Phase 4 Step 5.5 checks for siege activation signals in the implementation diff and design doc. If 2+ signals detected (or contract specifies `security_review: required`), siege is dispatched automatically. Critical/High findings block the pipeline identically to quality-gate Fatal/Significant.
+- **crucible:build** — Phase 4 Step 5.5 checks for siege activation signals in the implementation diff and design doc. If 2+ signals are detected — or a single Category-8 match fires — or the contract specifies `security_review: required`, siege is dispatched automatically. Critical/High findings block the pipeline identically to quality-gate Fatal/Significant.
 - **crucible:spec** — Step 3.5 scans ticket content for signals during contract generation. Adds `security_review: required|recommended` to the contract YAML, which build consumes.
 - **crucible:audit** — Existing recommendation behavior unchanged. Audit may still recommend siege when it detects security surfaces.
 
@@ -531,7 +531,7 @@ Adopts quality-gate's iterative pattern with security-specific scoring.
    | 1 | [SIEGE-BA-1] SQL injection | Parameterized query | UserController.cs | abc1234 |
    | 2 | [SIEGE-IT-3] IDOR on /api/records | Added ownership check | RecordService.cs | def5678 |
 
-   **To reject a fix:** `git revert <commit-sha>` (each fix is a separate commit)
+   **To reject a fix:** `git revert <commit-sha>` (each fix is a separate commit). A user-driven revert between rounds may remove a ledger line the round appended — that is a human out-of-boundary action, **not** an append-only violation: the next round's monotonicity baseline is re-taken from the post-revert `expected-head`, so the ledger check compares against the post-revert ledger state.
    **To accept all:** No action needed — fixes are already applied.
    ```
 
@@ -559,7 +559,7 @@ shaped by it) carries a `.crucible/fetched-endpoints.md` entry before the commit
 `skills/shared/fetched-content-containment.md` (DEC-6 schema, append-only lifecycle, anti-copy rule) --
 the same ledger-tier obligation as SDD's Phase 3 implementer.
 
-**Ledger-monotonicity check (before each Phase 4 fix self-commit — siege self-commits).** <!-- CONTRACT:siege-ledger-monotonicity --> Before each fix agent's self-commit, diff `.crucible/fetched-endpoints.md` against its content at the start of that fix round. If any previously-present line is missing or altered (append-only violated), abort the commit and escalate to the user. Separately, any `APPROVED-*` / `REJECTED-*` disposition line appended during the fix round is definitionally agent-authored: if such a line appears without an out-of-boundary human commit, abort and escalate rather than conferring forged "out-of-boundary" provenance.
+**Ledger-monotonicity check (orchestrator, before accepting each Phase 4 fix self-commit).** <!-- CONTRACT:siege-ledger-monotonicity --> The fix agent self-commits; the **orchestrator** verifies the ledger before accepting the new head, not the fix agent that wrote it. Before updating `expected-head`, run `git diff <round-start expected-head>..HEAD -- .crucible/fetched-endpoints.md` and confirm the only change is **appended `UNAPPROVED` lines**: any previously-present line missing or altered (append-only violated), or any `APPROVED-*` / `REJECTED-*` disposition line appended during the round, is agent-authored tampering — abort acceptance, do not advance `expected-head`, and escalate to the user. **Prose-only:** this is an orchestrator-followed prose obligation, not a hook — there is no machine enforcement (the same strength as warden's ledger check; see `warden/SKILL.md`).
 
 **Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason 'pre-siege-fix-round-N'.
 
