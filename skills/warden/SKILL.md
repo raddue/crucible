@@ -37,7 +37,7 @@ The "Runs" column is split by **reviewer-set** (the dispatch parameter
 |---|---|---|---|---|
 | temper | always | always | `T = {CONFIRMED,PLAUSIBLE} × {Critical,Important}` non-empty | the merge-verdict loop |
 | delve | always | always | any kept finding at `{CONFIRMED,PLAUSIBLE} × {Critical,Important}` (trio scale; `PLAUSIBLE@Crit/Imp` is a real regression per contract) | delve is **report-only with no fix loop** — warden applies the predicate to delve's kept findings and owns the fix path (see Fix behavior) |
-| red-team (via quality-gate) | always | always | quality-gate verdict ≠ PASS (Fatal>0 ∨ Significant>0) | delegates to existing `crucible:quality-gate` on the `code` artifact to reuse its red-team loop, invoked so the QG leg **re-dispatches siege** exactly as build's Step-6 gate does (warden does **not** suppress the QG-internal siege) — the second of warden's two siege passes (I-W4 / S-A); the leg's marker is **not** build-tagged (see §Verdict marker ownership / I-W7) — warden owns the aggregate verdict marker; it writes **no** calibration ledger entry (each leg self-emits its native entry, I-W8) |
+| red-team (via quality-gate) | always | always | quality-gate `mode: full` verdict ≠ PASS (Fatal>0 ∨ Significant>0) | delegates to existing `crucible:quality-gate` on the `code` artifact with `mode: full` to retain warden's strict pre-push bar, invoked so the QG leg **re-dispatches siege** exactly as build's Step-6 gate does (warden does **not** suppress the QG-internal siege) — the second of warden's two siege passes (I-W4 / S-A); the leg's marker is **not** build-tagged (see §Verdict marker ownership / I-W7) — warden owns the aggregate verdict marker; it writes **no** calibration ledger entry (each leg self-emits its native entry, I-W8) |
 | siege | conditional — security-surface diff (reuse build's existing Step 5.5 trigger) | conditional — same security-surface trigger | Critical>0 ∨ High>0 | six-agent security audit; not run on non-security diffs. **siege is warden's own native leg on its own CVSS scale** (disjunction-of-native-gates, a LOCKED decision). warden sieges **twice**, **coverage-equal to build's two sieges (position redistributed across the two passes)**: warden's own siege leg at step-1 HEAD (≈ build Step 5.5), and the QG red-team leg's internal siege auto-dispatch at `SHA_pre_redteam` (≈ build Step 6) — the QG leg is invoked so it **re-dispatches** its internal siege as build does (warden does **not** suppress it) (I-W4 / S-A). **Fail-safe:** if the destination-bearing-construct detector reports "cannot conclusively classify" (`security-signals.md` category 8), siege **runs** (unknown → run, mirroring the inquisitor escalator's fail-safe). |
 | inquisitor | **always (unconditional)** — preserves build Phase 4 Step 4 coverage | conditional — risk-aware predicate (escalators → run; pure-doc-only → skip; else `>1 changed file OR >1 top-level module`). See *Standalone inquisitor-inclusion predicate*. | any adversarial test `Result: FAIL` | heavy 5-dim fan-out. In the `full` set it stays unconditional so a single-file build does **not** lose the inquisitor pass it gets today; the standalone diff-shape trigger is the risk-aware *Standalone inquisitor-inclusion predicate* subsection, where per-push cost matters |
 
@@ -513,7 +513,7 @@ verdicts, and build's most-recent-by-Timestamp verification
 (`skills/build/SKILL.md:231-243`) would resolve the ambiguity only by timing luck.
 So:
 
-- warden invokes the quality-gate red-team leg with **warden's own run-id** as the
+- warden invokes the quality-gate red-team leg with **`mode: full`** and **warden's own run-id** as the
   PipelineID (and `Phase: code`), **not** build's PipelineID. A PipelineID is
   present, so the leg stays **non-interactive** — quality-gate does not drop into
   standalone between-rounds check-in mode (`quality-gate/SKILL.md:1111`; this
@@ -654,7 +654,7 @@ The boundary is asserted by selection-eval prompts in `skills/skill-selection-ev
   - Returns: sectioned-per-reviewer report + `PASS`/`BLOCKED` verdict + RCPT v1 receipt.
 - `Use crucible:warden` (sub-skill) with dispatch context: `PipelineID: <id>`,
   `Phase: code`, `reviewer-set: <full|standalone>`, `dispatch-dir: <path>`.
-- warden invokes its **internal quality-gate red-team leg** with `Phase: code` and
+- warden invokes its **internal quality-gate red-team leg** with `mode: full`, `Phase: code` and
   warden's own run-id as `PipelineID` (non-interactive, not build-tagged), and **lets the
   QG leg re-dispatch its internal siege** (warden does **not** suppress it) — warden's
   **second** siege pass, mirroring build's Step-6 siege. warden sieges **twice** per run
