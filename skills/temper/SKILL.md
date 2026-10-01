@@ -37,7 +37,7 @@ Temper reviews **code diffs only**. Use a different skill for:
 
 Temper and quality-gate share a loop shape (fresh reviewer each round, stagnation detection, escalate on architectural concerns). They differ in scope and caller:
 
-- **`/quality-gate`** is the generic iterative red-team loop over *any* artifact (design, plan, code, hypothesis, mockup). It is invoked **by artifact-producing skills** as their terminal gate.
+- **`/quality-gate`** is the generic iterative red-team loop over *any* artifact (design, plan, code, hypothesis). It is invoked **by artifact-producing skills** as their terminal gate.
 - **`/temper`** is the code-diff-specific instance — same loop shape, plus forge integration (PR metadata, optional post-back), plus the fix-verification convergence model. It is **user-facing** for ad-hoc review and is called by build / debugging / finish on diffs.
 
 temper **drives `shared/delve-engine.md`** for its finding enumeration — it is the engine's fix-verification *loop* driver, in contrast to `/delve`, which runs the same engine **once** and never loops or emits a merge verdict.

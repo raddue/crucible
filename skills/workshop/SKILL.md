@@ -26,7 +26,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 |---|---|
 | `/temper` | Iterative code review on a PR or `<base>..<head>` range. Loops fresh-eyes reviewers until clean. Forge-agnostic (GitHub / GitLab / Bitbucket / self-hosted). Renamed from `/code-review` on 2026-05-17. |
 | `/debugging` | Any bug, test failure, or unexpected behavior. Hypothesis loop, fix dispatch, verification. |
-| `/quality-gate` | Iterative red-team on any artifact (design doc, plan, code, hypothesis, mockup). Loops until clean or stagnation. Invoked by other orchestrators; invoke directly when the artifact is standalone. |
+| `/quality-gate` | Iterative red-team on any artifact (design doc, plan, code, hypothesis). Loops until clean or stagnation. Invoked by other orchestrators; invoke directly when the artifact is standalone. |
 | `/migrate` | Framework upgrade, API version bump, major dependency change, deprecation removal. Produces a phased migration plan and optionally executes it via build's refactor mode. |
 
 ### Inspection and discovery
