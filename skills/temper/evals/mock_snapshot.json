@@ -12,6 +12,8 @@
     "issues-found-new-admit": "PASS",
     "max-rounds-drip": "PASS",
     "member-admission-gate": "PASS",
+    "pr-discussion-already-raised": "PASS",
+    "pr-discussion-injection": "PASS",
     "stagnation-genuinely-stuck": "PASS",
     "stagnation-real": "N/A",
     "surgical-real": "N/A"

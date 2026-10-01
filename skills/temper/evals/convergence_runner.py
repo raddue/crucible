@@ -362,6 +362,19 @@ def findings_count_at_least(output: str, n: int) -> Result:
     return ("FAIL", f"only {actual} finding(s), need ≥ {n}")
 
 
+def findings_count_at_most(output: str, n: int, round: int | None = None) -> Result:
+    """FAIL if more than `n` findings parsed (optionally within one round) —
+    catches a point already raised in PR discussion re-reported as a second,
+    unattributed member (#682 AC4)."""
+    findings = _parse_findings(output)
+    if round is not None:
+        findings = [f for f in findings if f["round"] == round]
+    actual = len(findings)
+    if actual <= n:
+        return ("PASS", f"{actual} finding(s) ≤ {n} allowed")
+    return ("FAIL", f"{actual} finding(s), allowed ≤ {n}")
+
+
 def finding_body_does_not_contain(
     output: str,
     patterns: list[str],
@@ -737,6 +750,7 @@ _CHECK_REGISTRY = {
     # Reused / generic
     "all-findings-have-file-line": all_findings_have_file_line,
     "findings-count-at-least": findings_count_at_least,
+    "findings-count-at-most": findings_count_at_most,
     "finding-body-does-not-contain": finding_body_does_not_contain,
     "finding-body-contains": finding_body_contains,
     "report-has-block": report_has_block,

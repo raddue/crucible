@@ -1,0 +1,34 @@
+### Pre-flight
+- Diff is substantive: 1 file changed, cache eviction reworked.
+- PR discussion: fetched (3 items, excluded temper posts: 1 marker-tagged prior temper post).
+- Open thread src/cache.py:30 (reviewer alice): eviction loop mutates the dict while iterating.
+- Resolved thread src/cache.py:70 (reviewer bob): stale size counter after clear(); author fixed it in a later commit.
+
+### Round 1
+- Round-Verdict: Issues-Found
+
+1. eviction loop mutates dict during iteration
+   - File: src/cache.py:30
+   - Summary: eviction loop mutates dict during iteration
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Readjudicated: false
+   - Raised-in: alice review-thread src/cache.py:30 (open)
+
+### Round 2
+- Round-Verdict: Clean
+
+1. eviction loop mutates dict during iteration
+   - File: src/cache.py:30
+   - Summary: eviction loop mutates dict during iteration
+   - Severity: Critical
+   - Verdict: CONFIRMED
+   - Admitted: 1
+   - Outcome: RESOLVED
+   - Readjudicated: true
+   - Raised-in: alice review-thread src/cache.py:30 (open)
+
+### Verdict
+- Final-Verdict: Clean
+- The open-thread defect was independently verified and reported once, attributed to the thread. The resolved thread at src/cache.py:70 was not re-opened: the verify gate found no defect there in the current code.
