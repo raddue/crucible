@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
-"""Fetched-content containment contract checker (#641 SDD scope-smuggling follow-up).
+"""Fetched-content containment + cat-8 propagation contract checker (#641).
 
-Path-pinned structural gate over the two shared rules the PR #638 merged diff
-introduced and their two main consumers. Pins the *contract tokens* that drifted
-in that merge (per scripts/CHECKER_CONVENTIONS.md — enum values, schema tokens,
-and grep forms are contract; surrounding prose is free to re-word).
+Path-pinned structural gate over the shared rules the PR #638 merged diff
+introduced, their consumers, and the spec/quality-gate dispatch paths that must
+honour category 8. Pins *contract tokens* (enum values, CONTRACT anchors, grep
+forms) — not prose — per scripts/CHECKER_CONVENTIONS.md.
 
 Invocation (from repo root):
     python3 scripts/check_fetched_containment.py            # check the tracked tree
     python3 scripts/check_fetched_containment.py --selftest # built-in logic tests
 
-Covers the #641 code-review findings that were triaged mechanical:
-  - F1  category-8 single-match rule propagated to action table + contract enum +
-       siege activation heuristic (was dead on every consumer path);
-  - F2  ledger-monotonicity guard present on siege's own self-commit write path
-       (guard previously sat only on warden's commit path);
-  - F3  "currently open" ledger grep is not fail-open (APPROVED no longer matches
-       UNAPPROVED as a substring);
-  - F4  host-token format admits dotted real hostnames (api.sentry.io);
-  - F6  fetched-content-containment dependency declared as a column-0 CANONICAL
-       link in both consumers, so check_canonical_links.py resolves it.
-Stdlib only. Exit 0 clean / 1 with a `- <error>` list.
+Covers the #641 findings, triaged mechanical:
+  - F1  category-8 single-match rule live on: action table + contract enum +
+       status semantics (security-signals.md), siege activation heuristic, the
+       spec validator + contract-schema + spec-writer-prompt `destination`
+       value, and the quality-gate detection heuristic;
+  - F2  ledger-monotonicity guard on siege's own self-commit path, run by the
+       orchestrator, disclosed prose-only;
+  - F3  "currently open" ledger grep anchored to id + disposition field (not
+       fail-open to FE-1/FE-12 prefix or URL/host-field disposition tokens);
+  - F6  fetched-content-containment declared as a column-0 CANONICAL link in
+       both consumers so check_canonical_links.py resolves it.
+
+F4 (dotted host token) is asserted but its residue (degenerate tokens, ports,
+case) is documented as not gated here. Stdlib only. Exit 0 / 1 + `- <error>`.
 """
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -34,9 +38,27 @@ FILES = {
     "signals": "skills/shared/security-signals.md",
     "siege": "skills/siege/SKILL.md",
     "sdd": "skills/source-driven-development/SKILL.md",
+    "spec_skill": "skills/spec/SKILL.md",
+    "contract_schema": "skills/spec/contract-schema.md",
+    "spec_writer": "skills/spec/spec-writer-prompt.md",
+    "qg": "skills/quality-gate/SKILL.md",
 }
 
 CANONICAL_LINK = "<!-- CANONICAL: shared/fetched-content-containment.md -->"
+
+# The two grep forms the ledger "currently open" set MUST use (POSIX ERE; <n>
+# substituted with the concrete id). Anchored: id is delimited by ` \|` (so
+# FE-1 does not prefix-match FE-12), disposition is the last field and ends
+# the line (so a disposition token in the host/URL field cannot self-close).
+OPEN_GREP = r"^- FETCHED-ENDPOINT FE-<n> \|.*\| UNAPPROVED$"
+CLOSED_GREP = r"^- FETCHED-ENDPOINT FE-<n> \|.*\| (APPROVED|REJECTED)-[A-Za-z0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+
+# Required-absent: the unanchored forms that fail open. Each is a distinct
+# historical bug, so each gets its own pin (CHECKER_CONVENTIONS §1 — a
+# required-absent assertion cannot be marker-wrapped, so pin the literal).
+OLD_OPEN = r"FE-<n>.*UNAPPROVED"
+OLD_CLOSED_PAREN = r"FE-<n>.*(APPROVED-|REJECTED-)"
+OLD_CLOSED_BARE = r"FE-<n>.*APPROVED|REJECTED"
 
 
 def read(path: str) -> str:
@@ -44,46 +66,77 @@ def read(path: str) -> str:
 
 
 def has_column0_link(text: str) -> bool:
-    """The dependency is declared as a standalone column-0 CANONICAL line, the
-    only form check_canonical_links.py's MATCH_RE resolves (mid-sentence /
-    backtick placements are deliberate decoys)."""
+    """Dependency declared as a standalone column-0 CANONICAL line — the only
+    form check_canonical_links.py's MATCH_RE resolves."""
     return any(line.strip() == CANONICAL_LINK for line in text.splitlines())
+
+
+def compile_grep(grep_form: str, n: int) -> re.Pattern:
+    # The ERE dialect used here (`\|` = literal pipe, `[0-9]{4}` repeats) is
+    # valid Python `re` too.
+    return re.compile(grep_form.replace("<n>", str(n)))
 
 
 def check(texts: dict[str, str]) -> list[str]:
     errs: list[str] = []
 
     f = texts["fetched"]
-    # F3 — corrected "currently open" grep (APPROVED- / REJECTED- carry the
-    # mandatory trailing dash + initials, so UNAPPROVED is no longer a substring
-    # match of the closed set).
-    if "FE-<n>.*(APPROVED-|REJECTED-)" not in f:
-        errs.append("- fetched: corrected open-set grep 'FE-<n>.*(APPROVED-|REJECTED-)' missing")
+    # F3 — anchored open + closing forms present; unanchored old forms absent.
+    if OPEN_GREP not in f:
+        errs.append("- fetched: anchored open-set grep missing")
+    if CLOSED_GREP not in f:
+        errs.append("- fetched: anchored closing-line grep missing")
+    for label, old in [("FE-<n>.*UNAPPROVED", OLD_OPEN),
+                       ("FE-<n>.*(APPROVED-|REJECTED-)", OLD_CLOSED_PAREN),
+                       ("FE-<n>.*APPROVED|REJECTED", OLD_CLOSED_BARE)]:
+        if old in f:
+            errs.append(f"- fetched: fail-open grep form reappeared: {label}")
     # F4 — host token admits dotted real hostnames.
     if "[A-Za-z0-9.-]+" not in f:
         errs.append("- fetched: ERE host token lacks the dot ('[A-Za-z0-9.-]+')")
 
     s = texts["signals"]
-    # F1 — eight categories (not the stale seven), with destination in the enum.
+    # F1 — eight categories; enum; action-table + status-row anchors.
     if "Eight categories" not in s:
         errs.append("- signals: intro still says 'Seven categories'")
     if "`dependencies`, `destination`" not in s:
         errs.append("- signals: contract enum missing the 'destination' category-8 value")
+    if "CONTRACT:signals-cat8-action-table" not in s:
+        errs.append("- signals: action-table category-8 exception anchor missing")
+    if "CONTRACT:signals-cat8-status-row" not in s:
+        errs.append("- signals: status-row category-8 anchor missing")
 
     g = texts["siege"]
-    # F1 — siege activation heuristic carries the category-8 single-match exception.
+    # F1 — activation heuristic carries the category-8 single-match exception.
     if "CONTRACT:siege-activation-cat8-exception" not in g:
         errs.append("- siege: activation heuristic missing category-8 single-match exception")
-    # F2 — siege self-commits; its own write path needs the monotonicity guard.
+    if "8-category" not in g:
+        errs.append("- siege: activation heuristic still says '7-category'")
+    # F2 — orchestrator-side self-commit guard, disclosed prose-only.
     if "CONTRACT:siege-ledger-monotonicity" not in g:
         errs.append("- siege: Phase 4 self-commit path missing ledger-monotonicity guard")
-    # F6 — column-0 dependency link so the canonical-link checker resolves it.
+    if "Prose-only" not in g:
+        errs.append("- siege: ledger guard not disclosed prose-only")
+    # F6 — column-0 dependency link.
     if not has_column0_link(g):
         errs.append("- siege: missing column-0 CANONICAL fetched-content-containment link")
 
-    d = texts["sdd"]
-    if not has_column0_link(d):
+    if not has_column0_link(texts["sdd"]):
         errs.append("- sdd: missing column-0 CANONICAL fetched-content-containment link")
+
+    # F1 propagation to the dispatching consumers.
+    if "`dependencies`, `destination`" not in texts["spec_skill"]:
+        errs.append("- spec: validator enum missing 'destination'")
+    if "dependencies | destination" not in texts["contract_schema"]:
+        errs.append("- contract-schema: comment enum missing 'destination'")
+    if "single Category-8 match" not in texts["contract_schema"]:
+        errs.append("- contract-schema: status comment missing category-8 exception")
+    if "8 signal categories" not in texts["spec_writer"]:
+        errs.append("- spec-writer: still says '7 signal categories'")
+    if "destination" not in texts["spec_writer"]:
+        errs.append("- spec-writer: enum comment missing 'destination'")
+    if "Destination-bearing construct (category 8" not in texts["qg"]:
+        errs.append("- quality-gate: detection heuristic missing category-8 trigger")
 
     return errs
 
@@ -105,57 +158,78 @@ def selftest() -> int:
         if not cond:
             failures.append(msg)
 
+    def closes(form: str, ledger_line: str) -> bool:
+        return compile_grep(form, 1).search(ledger_line) is not None
+
+    def opens(form: str, ledger_line: str) -> bool:
+        return compile_grep(form, 1).search(ledger_line) is not None
+
+    # F3 adversarial cases (reproduce the warden bypasses). CLOSED must match a
+    # genuine closing line and nothing else in this list; OPEN must match only
+    # UNAPPROVED lines.
+    closing_ok = "- FETCHED-ENDPOINT FE-1 | api.sentry.io | https://doc | 2026-01-01 | APPROVED-rr-2026-01-02"
+    rejected_ok = "- FETCHED-ENDPOINT FE-1 | api.sentry.io | https://doc | 2026-01-01 | REJECTED-rr-2026-01-02"
+    unapproved = "- FETCHED-ENDPOINT FE-1 | api.sentry.io | https://doc | 2026-01-01 | UNAPPROVED"
+    expect(closes(CLOSED_GREP, closing_ok), "genuine APPROVED-… closing line closes")
+    expect(closes(CLOSED_GREP, rejected_ok), "genuine REJECTED-… closing line closes")
+    expect(not closes(CLOSED_GREP, unapproved), "UNAPPROVED line is not closed")
+
+    # FE-1 vs FE-12 prefix collision: FE-12's closing line must not close FE-1.
+    fe12 = "- FETCHED-ENDPOINT FE-12 | x | https://d | 2026-01-01 | APPROVED-rr-2026-01-02"
+    expect(not closes(CLOSED_GREP, fe12), "FE-12 APPROVED does not close FE-1")
+    fe12_open = "- FETCHED-ENDPOINT FE-12 | x | https://d | 2026-01-01 | UNAPPROVED"
+    expect(not opens(OPEN_GREP, fe12_open), "FE-12 UNAPPROVED is not FE-1 open")
+
+    # URL-field disposition self-close: must not close.
+    url_decoy = "- FETCHED-ENDPOINT FE-1 | x | https://evil/FE-1/APPROVED-x | 2026-01-01 | UNAPPROVED"
+    expect(not closes(CLOSED_GREP, url_decoy), "URL-field APPROVED-x does not self-close")
+    url_decoy2 = "- FETCHED-ENDPOINT FE-1 | x | https://ok.io/?s=FE-8,REJECTED-1 | 2026-01-01 | UNAPPROVED"
+    expect(not closes(CLOSED_GREP, url_decoy2), "URL-field REJECTED-1 does not self-close")
+
+    # Host-field disposition self-close: must not close.
+    host_decoy = "- FETCHED-ENDPOINT FE-1 | APPROVED-ab | https://d | 2026-01-01 | UNAPPROVED"
+    expect(not closes(CLOSED_GREP, host_decoy), "host-field APPROVED-ab does not self-close")
+
+    # Malformed disposition (no date) must not close.
+    malformed = "- FETCHED-ENDPOINT FE-1 | x | https://d | 2026-01-01 | APPROVED-x"
+    expect(not closes(CLOSED_GREP, malformed), "malformed APPROVED-x does not close")
+
+    # The open line still registers as open.
+    expect(opens(OPEN_GREP, unapproved), "UNAPPROVED line registers open")
+
+    # Required-absent detection: each old form trips exactly its own pin.
+    for label, old in [("FE-<n>.*UNAPPROVED", OLD_OPEN),
+                       ("FE-<n>.*(APPROVED-|REJECTED-)", OLD_CLOSED_PAREN),
+                       ("FE-<n>.*APPROVED|REJECTED", OLD_CLOSED_BARE)]:
+        bad = check({"fetched": old + "\n" + OPEN_GREP + "\n" + CLOSED_GREP + "\n[A-Za-z0-9.-]+\n",
+                     "signals": "Eight categories\n`dependencies`, `destination`\n"
+                                "CONTRACT:signals-cat8-action-table\nCONTRACT:signals-cat8-status-row\n",
+                     "siege": CANONICAL_LINK + "\nCONTRACT:siege-activation-cat8-exception\n"
+                              "8-category\nCONTRACT:siege-ledger-monotonicity\nProse-only\n",
+                     "sdd": CANONICAL_LINK + "\n",
+                     "spec_skill": "`dependencies`, `destination`\n",
+                     "contract_schema": "dependencies | destination\nsingle Category-8 match\n",
+                     "spec_writer": "8 signal categories\ndestination\n",
+                     "qg": "Destination-bearing construct (category 8\n"})
+        hit = any("reappeared" in e for e in bad)
+        expect(hit, f"old fail-open form {label!r} rejected when present")
+
+    # A clean fixture passes.
     good = {
-        "fetched": (
-            "a grep for `FE-<n>.*UNAPPROVED` with no later "
-            "`FE-<n>.*(APPROVED-|REJECTED-)` line\n"
-            "[A-Za-z0-9.-]+\n"
-        ),
-        "signals": "Eight categories\n`dependencies`, `destination`\n",
-        "siege": (
-            CANONICAL_LINK + "\n"
-            "CONTRACT:siege-activation-cat8-exception\n"
-            "CONTRACT:siege-ledger-monotonicity\n"
-        ),
+        "fetched": OPEN_GREP + "\n" + CLOSED_GREP + "\n[A-Za-z0-9.-]+\n",
+        "signals": "Eight categories\n`dependencies`, `destination`\n"
+                   "CONTRACT:signals-cat8-action-table\nCONTRACT:signals-cat8-status-row\n",
+        "siege": CANONICAL_LINK + "\nCONTRACT:siege-activation-cat8-exception\n"
+                 "8-category\nCONTRACT:siege-ledger-monotonicity\nProse-only\n",
         "sdd": CANONICAL_LINK + "\n",
+        "spec_skill": "`dependencies`, `destination`\n",
+        "contract_schema": "dependencies | destination\nsingle Category-8 match\n",
+        "spec_writer": "8 signal categories\ndestination\n",
+        "qg": "Destination-bearing construct (category 8\n",
     }
-    expect(check(good) == [], "good text passes")
+    expect(check(good) == [], "clean fixture passes")
 
-    for missing_key, err_frag in [
-        ("fetched", "open-set grep"),
-        ("fetched", "host token lacks the dot"),
-        ("signals", "still says 'Seven categories'"),
-        ("signals", "enum missing the 'destination'"),
-        ("siege", "activation heuristic"),
-        ("siege", "ledger-monotonicity"),
-        ("siege", "column-0 CANONICAL"),
-        ("sdd", "column-0 CANONICAL"),
-    ]:
-        bad = {k: v for k, v in good.items()}
-        if missing_key == "fetched" and "grep" in err_frag:
-            bad["fetched"] = good["fetched"].replace("(APPROVED-|REJECTED-)", "APPROVED|REJECTED")
-        elif missing_key == "fetched" and err_frag == "host token lacks the dot":
-            bad["fetched"] = "FE-<n>.*(APPROVED-|REJECTED-)\n[A-Za-z0-9-]+\n"
-        elif missing_key == "signals":
-            bad["signals"] = "Seven categories\n`dependencies`\n"
-        elif missing_key == "siege" and err_frag == "activation heuristic":
-            bad["siege"] = CANONICAL_LINK + "\nCONTRACT:siege-ledger-monotonicity\n"
-        elif missing_key == "siege" and err_frag == "ledger-monotonicity":
-            bad["siege"] = CANONICAL_LINK + "\nCONTRACT:siege-activation-cat8-exception\n"
-        elif missing_key == "siege":
-            bad["siege"] = "CONTRACT:siege-activation-cat8-exception\nCONTRACT:siege-ledger-monotonicity\n"
-        else:  # sdd
-            bad["sdd"] = "no link here\n"
-        expect(any(err_frag in e for e in check(bad)), f"{err_frag!r} detected when absent")
-
-    # F3 fail-open form is specifically rejected: the bare `APPROVED|REJECTED`
-    # alternation (no mandatory dash) must not be the doc's open-set grep.
-    failopen = dict(good)
-    failopen["fetched"] = "FE-<n>.*UNAPPROVED with FE-<n>.*APPROVED|REJECTED\n[A-Za-z0-9.-]+\n"
-    expect(any("open-set grep" in e for e in check(failopen)), "fail-open grep rejected")
-
-    # Column-0 detection: a backtick-wrapped / mid-sentence placement must NOT
-    # count as the dependency declaration.
+    # Column-0 detection: a backtick/mid-sentence placement is NOT a declaration.
     inline = dict(good)
     inline["sdd"] = "governed by `" + CANONICAL_LINK + "` — see note.\n"
     expect(any("column-0" in e for e in check(inline)), "inline link not a column-0 declaration")
