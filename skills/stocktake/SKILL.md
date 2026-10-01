@@ -142,7 +142,7 @@ Output:
 For each skill, compute:
 - **Avg Input/Dispatch**: average `total_input_chars / dispatch_count` — measures context per subagent
 - **Context Distribution**: qualitative assessment — "focused" (<5000 chars avg/dispatch), "moderate" (5000-15000), "heavy" (>15000)
-- **Quality Overhead %**: `review dispatches / dispatch_count * 100` — what fraction of work is quality assurance (requires manifest data; "N/A" if unavailable)
+- **Quality Overhead %**: `review dispatches / dispatch_count * 100` — what fraction of work is quality assurance. A review dispatch is a manifest entry whose role contains "reviewer", "red-team", "quality-gate", or "adversarial" (requires manifest data; "N/A" if unavailable)
 
 Output:
 
@@ -158,7 +158,7 @@ For each skill with sufficient data (3+ runs):
 - **Avg Total Context**: average `(total_input_chars + total_output_chars)` per run — total context the pipeline touched
 - **Avg Input/Dispatch**: average `total_input_chars / dispatch_count` per run — how much context each subagent receives on average
 - **Context Focus Ratio**: `avg input per dispatch / avg total context` — lower values mean each subagent sees a smaller slice of the total, indicating effective context distribution
-- **Quality Investment**: `review dispatches / dispatch_count` — fraction of dispatches dedicated to quality assurance (requires manifest data; "N/A" if only chronicle signals available)
+- **Quality Investment**: `review dispatches / dispatch_count` (review dispatches as defined in Step 3) — fraction of dispatches dedicated to quality assurance (requires manifest data; "N/A" if only chronicle signals available)
 
 Output:
 

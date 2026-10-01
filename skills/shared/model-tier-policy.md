@@ -159,16 +159,16 @@ are removed — this plan implements design §12 verbatim, not a variant of it.)
   `file:line` **or** a role name naming the downstream check the disclosure claims
   bounds it — design §12's two alternatives, both accepted (S3, round 11): a role
   name `[a-z][a-z0-9-]*` (e.g. `red-team`, `crucible-qg-verifier`) or a path with a
-  **positive** line (`model-tier-policy.md:51`). The checker verifies the
+  **positive** line (shape only, e.g. `path/to/file.md:42`). The checker verifies the
   citation's **shape** only; that the named check exists and actually bounds the
   disclosure is a semantic claim asserted at Task 6, **not** mechanically verified
   here (S3, round 11) — a `file:line` that names no real check is still an
   authoring defect Task 6 owns.
 
-Example (`crucible-qg-fix`'s own declaration, Task 6):
+Example (illustrative `degrade-with-disclosure` declaration for a `generative-checked` fix role bounded by red-team re-review; no live agent def currently uses this form):
 
 ```
-<!-- MODEL-REQ: generative-checked R1 ctx>=200k egress=first-party on-unknown=degrade-with-disclosure bounded-by=model-tier-policy.md:51 -->
+<!-- MODEL-REQ: generative-checked R1 ctx>=200k egress=first-party on-unknown=degrade-with-disclosure bounded-by=red-team -->
 ```
 
 ### Unsatisfiable pairs disclosed for v1

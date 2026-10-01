@@ -25,18 +25,17 @@ Security-surface set (evaluated on the repo-relative path):
     pure-prose stem-matcher like skills/shared/security-signals.md cannot host
     a fable pin, so it is not forced to carry a marker);
   - carve-outs (never security-surface): skills/audit/**,
-    skills/test-coverage/**, skills/stocktake/** — the general audit skill's
-    lenses are ELIGIBLE-PENDING-VERIFICATION in the model-tier policy, so
-    forcing a hard-out marker onto them would contradict the taxonomy.
+    skills/test-coverage/**, skills/stocktake/** — general-purpose review
+    lenses, not security-only roles, so a hard-out marker is not demanded.
 
 Pin-surface forms (all case-insensitive — the tree has real casing drift,
-e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
+e.g. historical `model: Sonnet` pins (all removed by #651 / ADR-0003). Values may be bare
 or single/double-quoted, indented (form 1 — nested config is a live
 convention, see skills/consensus/SKILL.md), or bracket-suffixed
 (`claude-fable-5[1m]`, this repo's own live pin convention). EVERY
 id-shaped token in the value region is checked, not just the first — the
-repo's live disjunction convention (`model: opus or sonnet — lead
-decides`, see skills/build/build-reviewer-prompt.md) would otherwise hide
+repo's former disjunction convention (`model: opus or sonnet — lead
+decides`, pre-#651) would otherwise hide
 a second-position fable (gate round 3, S1). Value-region boundaries:
 form 1 ends at the first `#` or end-of-line, so `model: opus  # never
 fable` is a non-fable pin whose comment merely MENTIONS fable; forms 2-3
@@ -50,7 +49,7 @@ nested-paren Minor, accepted for v1)):
   3. inline `Agent tool (... model: <value> ...)`
 
 <!-- CANONICAL: shared/model-tier-policy.md -->
-Enforcement boundary (see skills/shared/model-tier-policy.md): static pins in
+Enforcement boundary (see skills/shared/model-tier-policy.md, Security marker): static pins in
 tracked *.md ONLY. This checker does NOT cover (a) `inherit`/session-model
 roles (dependency-audit's inline-on-session path; crucible-qg-fix left this
 residual when #537 pinned it to sonnet; the standalone-or-finish-driven /red-team
@@ -706,8 +705,9 @@ def main() -> int:
         print("MODEL-TIER GUARDRAIL VIOLATIONS:")
         for e in errs:
             print(f"  {e}")
-        print("\nSee skills/shared/model-tier-policy.md — marker convention, "
-              "security-surface set, and what this checker does NOT cover.")
+        print("\nSee skills/shared/model-tier-policy.md (Security marker) and "
+              "this checker's docstring — security-surface set, and what this "
+              "checker does NOT cover.")
         return 1
     print("OK — no fable pin on marked files; every security-surface file "
           "carries the MODEL-TIER marker.")
@@ -760,25 +760,14 @@ def _known_day_one_disclosures() -> int:
     or any finding outside those 4 paths — with a per-file finding COUNT (S5, round 4: replaced by stable `(path, rule-id)` PAIRS in `_day_one_pairs_ok`)
     derived from the whole tracked tree via tracked_md()). The live
     Report-Only set must be exactly ONE finding on crucible-red-team.md
-    (accepts-offensive-security) and ONE on crucible-qg-judge.md (its
-    R2-vs-sonnet-R1 rung disagreement), and ZERO on every other tracked
-    file. Any other pair set means a real, previously-unseen disagreement has
-    appeared since Task 6 — the whole point of pinning this is to turn that
-    from silent folded-CI-log drift into a red selftest the moment it
-    happens.
+    (accepts-offensive-security) and ZERO on every other tracked file. Any
+    other pair set means a real, previously-unseen disagreement has
+    appeared — the whole point of pinning this is to turn that from silent
+    folded-CI-log drift into a red selftest the moment it happens.
 
-    MAINTAINER-PENDING MEMBER (S8): the qg-judge entry below is not an
-    invariant — it is the design's disclosed, not-yet-resolved disagreement
-    between qg-judge's recall-critical-review/R2 declaration and its own
-    `model: sonnet` pin (design doc role taxonomy; this plan's 'Known
-    day-one disclosures' #2). If the maintainer resolves it (uprates the
-    pin to opus, or re-declares the role `unclassified` per design §2.3),
-    this finding legitimately disappears — that is the sanctioned outcome
-    of a decision this plan handed the maintainer, not a regression to
-    investigate. When that happens, remove the "agents/crucible-qg-
-    judge.md" entry below and the corresponding Known day-one disclosure at
-    the top of this plan. Tracked in the qg-judge pin-decision follow-up
-    issue (Task 13) so this edit has an owner."""
+    The former second member (crucible-qg-judge's T5 rung-vs-pin
+    disagreement, maintainer-pending) disappeared by design when #651 /
+    ADR-0003 removed every `model:` pin; see _day_one_pairs_ok."""
     # S3 (round 10) negative control: multiplicity matters. The SAME pair twice must
     # fail — which the previous frozenset comparison could not detect, since both
     # spellings of two identical findings collapse to one element.
@@ -804,10 +793,7 @@ def _known_day_one_disclosures() -> int:
               f"_day_one_pairs_ok) — a live agent-def "
               f"Report-Only finding appeared, disappeared, or was "
               f"REPLACED by a different rule on the same file; "
-              f"investigate before continuing, UNLESS this is the "
-              f"maintainer-pending qg-judge entry disappearing on purpose "
-              f"(see this function's docstring and the qg-judge "
-              f"pin-decision issue)")
+              f"investigate before continuing")
         return 1
     return 0
 
