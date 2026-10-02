@@ -321,9 +321,7 @@ _load_maps() {
   while IFS=$'\t' read -r k v; do
     [ -n "$k" ] && BLOCK_COUNTS["$k"]="$v"
   done < <(jq -r '(.block_counts // {}) | to_entries[] | "\(.key)\t\(.value)"' "$STATE_FILE" 2>/dev/null)
-  # The per-sha touched-file list lives ONLY in the NUL-delimited
-  # `$STATE_DIR/<sha>.files` artifacts (§5/S-2/INV-C12) — never in the JSON.
-  _load_files
+  # Touched files are loaded only when a candidate or overlap needs them.
 }
 
 # C-o (SIEGE-R2-H6): a candidate sha used to build a bash identifier.
@@ -350,8 +348,7 @@ _sha_array_set() {
 }
 
 _sha_array_has() {
-  # 0 iff the per-sha array F_$1 is already loaded (a persisted candidate's
-  # paths were restored at hook start from its `<sha>.files` artifact).
+  # 0 iff the per-sha array F_$1 was loaded on demand from git this Stop.
   declare -n _ah="F_$1"
   local n=0
   [ "${#_ah[@]}" -gt 0 ] && n=1
@@ -360,23 +357,18 @@ _sha_array_has() {
 }
 
 _load_files() {
-  local f sha p _files=()
-  for sha in "${!SHA_GROUP[@]}"; do
-    _budget_ok || _budget_out
-    _sha_key_ok "$sha" || continue
-    f="$STATE_DIR/$sha.files"
-    [ -f "$f" ] || continue
-    _files=()
-    while IFS= read -r -d '' p; do
-      _budget_ok || _budget_out
-      _files+=("$p")
-    done < "$f"
-    # C-o: the sha from the FILENAME is validated inside the funnel before
-    # it can name an array; a crafted name (`deadbeef[$(...)].files`) is
-    # skipped, never concatenated into `declare -a "F_$sha"`.
-    _sha_array_set "$sha" "${_files[@]}"
-  done
-  return 0
+  # Re-derive ONLY the SHA needed for this candidate/overlap from git. An
+  # oversized persisted <sha>.files must not restart an eager read on every
+  # Stop before candidate scanning (#603/S4); git supplies the same raw paths.
+  local sha="$1" p _files=()
+  _sha_key_ok "$sha" || return 1
+  # A finite per-commit cap avoids the same prefix exhausting the clock on
+  # every Stop. This is a loud, durable give-up, never a silent clearance.
+  while IFS= read -r -d '' p; do
+    _files+=("$p")
+    [ "${#_files[@]}" -le 4096 ] || return 3
+  done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$sha")
+  _sha_array_set "$sha" "${_files[@]}"
 }
 
 # SIEGE-R2-H3 / S-17 shape: EVERY hook-side write to an attacker-derivable or
@@ -750,6 +742,10 @@ _has_non_md() {
 }
 
 IS_SHA=(); IS_AT=()
+# A capped SHA can recur while an older unresolved commit keeps the scan floor
+# behind it. Consult its durable GIVEUP once rather than re-reading all paths.
+_journal_pass
+[ "$JR_BUDGET" -eq 0 ] || _budget_out
 while IFS= read -r line; do
   # One `git diff-tree` subprocess may follow per candidate — the first of the
   # two attacker-multiplied fan-outs this budget bounds.
@@ -763,6 +759,9 @@ while IFS= read -r line; do
   case "$c_at" in ''|*[!0-9]*) continue ;; esac
   printf '%s' "$c_subj" | grep -qE '^fix[(:]' || continue
   [ "$c_at" -ge "$SEEDED_AT" ] || continue
+  if [ "${JBLAST[$c_sha]:-}" = GIVEUP ]; then
+    continue   # previously capped, durably retired with a loud note
+  fi
   if ! _sha_array_has "$c_sha"; then
     # `-z` (NUL-delimited RAW paths) is load-bearing, not a style choice.
     # Without it `diff-tree --name-only` prints git's DISPLAY form, which
@@ -777,21 +776,33 @@ while IFS= read -r line; do
     # The NUL delimiter is kept end to end, into an ARRAY. Translating it to a
     # newline first (`tr '\0' '\n'`) only swaps one impossible delimiter for
     # another: NUL is the single byte a path cannot contain, a newline is not.
-    c_paths=()
-    while IFS= read -r -d '' c_p; do
-      c_paths+=("$c_p")
-    done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$c_sha")
+    _load_files "$c_sha"
+    load_rc=$?
+    if [ "$load_rc" -eq 3 ]; then
+      # A real commit exceeding the path cap cannot be checked within a Stop.
+      # Retire it ONCE, durably and loudly; do not repeatedly budget-out before
+      # reaching later candidates. No success claim about grudge compliance.
+      if ! _record_line GIVEUP "" "$c_sha"; then
+        echo "grudge-resolution-guard: cannot record oversized candidate $c_sha; allowing Stop without checkpoint, grudge compliance NOT enforced" >&2
+        exit 0
+      fi
+      SHA_GROUP["$c_sha"]="$c_sha"
+      _witness_outcome GIVEUP "-"
+      echo "grudge-resolution-guard: candidate $c_sha has too many paths (>4096); retiring without grudge enforcement, NOT enforced. Subsequent Stops continue past it." >&2
+      continue
+    fi
+    [ "$load_rc" -eq 0 ] || continue
+    declare -n _cp="F_$c_sha"
+    c_paths=("${_cp[@]}")
+    unset -n _cp
     [ "${#c_paths[@]}" -eq 0 ] && continue
     _has_non_md "${c_paths[@]}" || continue
-    # C-o funnel: only a hex-validated sha may name an in-hook array.
-    _sha_array_set "$c_sha" "${c_paths[@]}" || continue
     # Persist the path list ONCE, byte-exact, as the NUL-delimited
     # `$STATE_DIR/<sha>.files` artifact (§5/S-2/S6) — never a delimited JSON
     # field. Bounded write (SIEGE-R2-H3): a mkfifo'd target holds the open for
     # the 1s timeout, never for the hook's own timeout ceiling. The artifact is
-    # content-addressed (sha -> path list is deterministic), so a fresh session
-    # whose `_load_files` never restored this candidate (its JSON state file is
-    # per-session) must NOT re-append a second copy — guard on existence.
+    # content-addressed. A fresh session recomputes paths from git but must
+    # NOT append a second copy — guard on existence.
     if [ -e "$STATE_DIR/$c_sha.files" ]; then
       :  # artifact already persisted (previous session), content is correct
     else
@@ -808,11 +819,9 @@ done < <(printf '%s\n' "$LOG")
 # ── 12. Grouping / join / merge / re-arm ────────────────────────────────
 _overlap() {
   # _overlap <sha-a> <sha-b> -> 0 iff their touched-file sets share a path.
-  # Both sides are the per-sha F_<sha> argument vectors (loaded fresh or from
-  # the `.files` artifacts) — never a comma- or newline-joined string (DEC-5).
-  # A real array carries every byte a path can hold; a delimited string cannot.
-  # The step-12 grouping hotspot: called once per candidate pair (~n^2), each
-  # compare squaring the files-per-commit — the pure-CPU half of issue #603.
+  # The current SHA's F_<sha> array carries raw paths; a mapped historical
+  # SHA is checked against literal git pathspecs, not persisted .files.
+  # Called once per candidate pair (~n^2); avoid quadratic path comparison.
   # The clock is a bash builtin, so this check is arithmetic, not a subprocess.
   _budget_ok || _budget_out
   # Linear, not Fa*Fb: the budget gates the CALL, so one call must be cheap
@@ -821,14 +830,32 @@ _overlap() {
   # every path — any byte but NUL — a valid, non-empty subscript.
   local a b
   local -A _seen=()
-  declare -n _aa="F_$1" _bb="F_$2"
+  declare -n _aa="F_$1"
   for a in "${_aa[@]}"; do
     [ -n "$a" ] && _seen["k$a"]=1
   done
-  for b in "${_bb[@]}"; do
-    [ -n "${_seen["k$b"]:-}" ] && { unset -n _aa _bb; return 0; }
-  done
-  unset -n _aa _bb
+  if _sha_array_has "$2"; then
+    declare -n _bb="F_$2"
+    for b in "${_bb[@]}"; do
+      [ -n "${_seen["k$b"]:-}" ] && { unset -n _aa _bb; return 0; }
+    done
+    unset -n _bb
+  else
+    # An old mapped SHA can have an enormous .files artifact. Ask git ONLY for
+    # changed paths matching this candidate's literal paths, not the whole
+    # historical list. Verify exact equality: git's literal directory pathspec
+    # also selects descendants. No persisted artifact scan before every Stop.
+    local specs=()
+    for a in "${_aa[@]}"; do specs+=(":(literal)$a"); done
+    while IFS= read -r -d '' b; do
+      if [ -n "${_seen["k$b"]:-}" ]; then
+        unset -n _aa
+        return 0
+      fi
+    done < <(_git "$SESSION_ROOT" diff-tree --root --no-commit-id --name-only -r -z "$2" -- "${specs[@]}")
+    _budget_ok || _budget_out
+  fi
+  unset -n _aa
   return 1
 }
 
@@ -836,9 +863,8 @@ _overlap() {
 for (( gi=${#IS_SHA[@]}-1; gi>=0; gi-- )); do
   _budget_ok || _budget_out
   n_sha="${IS_SHA[$gi]}"
-  # The per-sha array was set in filter (c) (fresh scan) or restored from its
-  # `<sha>.files` artifact at hook start; never recomputed, never cleared —
-  # the join test needs it after the SHA leaves scope.
+  # The in-scope SHA's paths were loaded from git by filter (c). Historical
+  # SHAs are queried lazily in _overlap, never read from persisted .files.
   [ -n "${SHA_GROUP[$n_sha]}" ] && continue
 
   bridged=""
@@ -1203,19 +1229,23 @@ _giveup_loud() {
   # stay in scope (FATAL-2 / §3.6 with per-member done(m)).
   local g="$1"; shift
   local m
+  local -A retiring=()
   _journal_pass "$@"
   [ "$JR_BUDGET" -eq 0 ] && [ "$JR_UNMEASURABLE" -eq 0 ] && [ "$JR_ABSENT" -eq 0 ] || return 0
   for m in "$@"; do
     [ "${JB[$m]:-0}" -ge "$MAX_BLOCKS" ] || continue
-    GIVEUP_SHAS[$m]="${JB[$m]}"
+    retiring[$m]="${JB[$m]}"
   done
-  [ "${#GIVEUP_SHAS[@]}" -gt 0 ] || return 0
-  _journal_append_group GIVEUP "" "${!GIVEUP_SHAS[@]}"
-  # Witness GIVEUP (healthy terminal event, §5b.2): the nonce of the last BLOCK
-  # line this group's give-up resolves, when one was recorded this session.
+  [ "${#retiring[@]}" -gt 0 ] || return 0
+  _journal_append_group GIVEUP "" "${!retiring[@]}"
   if [ "$APPEND_OK" -ne 1 ]; then
-    echo "grudge-resolution-guard: give-up journal batch incomplete (budget or write failure); reporting attempted retirements, unretired members remain eligible for rescan" >&2
+    # A partially landed batch stays on disk. No terminal witness or success
+    # message: neither implies that every selected member actually retired.
+    echo "grudge-resolution-guard: retirement incomplete (budget or write failure) for ${!retiring[*]}; zero or more GIVEUP rows may have landed, but the batch was not confirmed. Allowing Stop; unjournaled members remain in scope." >&2
+    return 0
   fi
+  for m in "${!retiring[@]}"; do GIVEUP_SHAS[$m]="${retiring[$m]}"; done
+  # Only a fully journaled batch earns a terminal witness and retirement text.
   _witness_outcome GIVEUP "${LAST_BLOCK_NONCE[$g]:--}"
   return 0
 }

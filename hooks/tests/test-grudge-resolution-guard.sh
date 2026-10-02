@@ -2749,6 +2749,16 @@ check 386 "the shadowed worktree candidate clears — contract:group:inv-t29" 0 
 check 387 "a transient by-files hit cannot shadow the SAME member's by-commit evidence — contract:group:inv-t29" 0 \
   "$(st "$T608C_WT" s608c ".block_counts[.sha_group[\"$T608C_FIX\"]]")"
 
+# #581: failed/partial GIVEUP must not claim terminal retirement in witness or
+# message; #603: oversized mapped file lists must not starve successive Stops.
+# Both subprocess fixtures use deterministic clock/append failures, not wall time.
+# contract:hook:inv-t23 checks=1
+check 396 "failed/partial GIVEUP keeps witness and message non-terminal — contract:hook:inv-t23" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_failed_giveup_matches_journal_witness_and_message >/dev/null 2>&1; echo $?)"
+# contract:hook:inv-t28 checks=1
+check 397 "mapped oversized files do not starve repeated Stops — contract:hook:inv-t28" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_oversized_active_mapped_artifact_advances_on_repeated_stops Warden.test_oversized_retired_mapped_artifact_does_not_starve_new_candidate Warden.test_real_oversized_candidate_retires_loudly_and_advances >/dev/null 2>&1; echo $?)"
+
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASSED/$TOTAL passed"
@@ -2761,7 +2771,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=407
+EXPECTED_CHECKS=409
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then

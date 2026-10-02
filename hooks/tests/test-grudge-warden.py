@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Deterministic Warden regressions; inject clocks/failures, never long stalls."""
+import json
 import os
 from pathlib import Path
 import re
@@ -52,6 +53,120 @@ class Warden(unittest.TestCase):
                 self.assertFalse(Path(fx.guard_dir, "sess.json").exists(),
                                  "budget-limited pass must not advance checkpoint")
 
+    def test_failed_giveup_matches_journal_witness_and_message(self):
+        for succeeds in (0, 1):
+            with self.subTest(successful_appends=succeeds), tempfile.TemporaryDirectory() as d:
+                fx = HookFixture(d)
+                fx.ensure_store()
+                shas = [fx.commit(["shared.py"]) for _ in range(2)]
+                os.makedirs(fx.guard_dir, exist_ok=True)
+                journal = Path(fx.guard_dir, "sess.journal")
+                journal.write_text("".join(f"1\tBLOCK\t{s}\t{n:016x}\n"
+                                          for s in shas for n in range(3)))
+                # Fail real journal writes after zero/one successful GIVEUP rows.
+                text = HOOK.read_text().replace('_record_line() {',
+                    '_record_line() {\n'
+                    '  if [ "$1" = GIVEUP ]; then\n'
+                    f'    [ "${{giveup_writes:-0}}" -lt {succeeds} ] || return 1\n'
+                    '    giveup_writes=$(( ${giveup_writes:-0} + 1 ))\n'
+                    '  fi')
+                copy = Path(d, "hook.sh")
+                copy.write_text(text)
+                r = subprocess.run(["bash", str(copy)], input=fx.payload("sess"),
+                    text=True, capture_output=True, cwd=fx.repo, env=fx.env(), timeout=20)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                rows = journal.read_text().splitlines()
+                retired = {row.split("\t")[2] for row in rows if "\tGIVEUP\t" in row}
+                self.assertEqual(len(retired), succeeds)
+                witness = Path(fx.home, ".claude/crucible/grudge-guard/outcomes.tsv")
+                self.assertNotIn("\tGIVEUP\t", witness.read_text() if witness.exists() else "")
+                self.assertNotIn("giving up after", r.stderr)
+                self.assertIn("retirement incomplete", r.stderr)
+                for sha in set(shas) - retired:
+                    self.assertIn(sha, r.stderr)
+
+    def test_oversized_active_mapped_artifact_advances_on_repeated_stops(self):
+        with tempfile.TemporaryDirectory() as d:
+            fx = HookFixture(d)
+            fx.ensure_store()
+            sha = fx.commit(["app.py"])
+            first = fx.run("sess")
+            self.assertEqual(first.returncode, 2, first.stderr)
+            state = Path(fx.guard_dir, "sess.json")
+            self.assertIn(sha, state.read_text())
+            # A mapped, still-in-scope artifact used to restart its 2000-path
+            # scan at the first record each Stop. Git owns immutable commit
+            # paths, so this oversized stale cache need not be read at all.
+            Path(fx.guard_dir, f"{sha}.files").write_bytes(b"unneeded.py\0" * 2000)
+            text = re.sub(r"^_budget_ok\(\) \{\n.*?^\}", '''_budget_ok() {
+  budget_calls=$(( ${budget_calls:-0} + 1 ))
+  [ "$budget_calls" -lt 150 ]
+}''', HOOK.read_text(), count=1, flags=re.M | re.S)
+            copy = Path(d, "hook.sh")
+            copy.write_text(text)
+            for attempt in (2, 3):
+                r = subprocess.run(["bash", str(copy)], input=fx.payload("sess", True),
+                    text=True, capture_output=True, cwd=fx.repo, env=fx.env(), timeout=20)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(f"({attempt}/3)", r.stderr)
+                self.assertNotIn("budget", r.stderr)
+                self.assertTrue(state.exists())
+
+    def test_real_oversized_candidate_retires_loudly_and_advances(self):
+        with tempfile.TemporaryDirectory() as d:
+            fx = HookFixture(d)
+            fx.ensure_store()
+            sha = fx.commit([f"wide/{i}.py" for i in range(4200)])
+            copy = Path(d, "hook.sh")
+            copy.write_text(HOOK.read_text())
+            for attempt in range(2):
+                r = subprocess.run(["bash", str(copy)], input=fx.payload("sess"),
+                    text=True, capture_output=True, cwd=fx.repo,
+                    env=fx.env(CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS="20"), timeout=30)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotIn("budget", r.stderr)
+                self.assertEqual(json.loads(Path(fx.guard_dir, "sess.json").read_text())
+                                 ["last_checked_sha"], sha)
+                if attempt == 0:
+                    self.assertIn("too many paths", r.stderr)
+                    self.assertIn("NOT enforced", r.stderr)
+                else:
+                    self.assertNotIn("too many paths", r.stderr,
+                                     "second Stop should not restart the same candidate")
+
+    def test_oversized_retired_mapped_artifact_does_not_starve_new_candidate(self):
+        with tempfile.TemporaryDirectory() as d:
+            fx = HookFixture(d)
+            fx.ensure_store()
+            sha = fx.commit([f"old/{i}.py" for i in range(150)])
+            first = fx.run("sess")
+            self.assertEqual(first.returncode, 2, first.stderr)
+            state = Path(fx.guard_dir, "sess.json")
+            artifact = Path(fx.guard_dir, f"{sha}.files")
+            self.assertEqual(artifact.read_bytes().count(b"\0"), 150)
+            # The mapped SHA remains in state but is durably retired and out of
+            # the scan range. Only the new, small commit needs path hydration.
+            fx.add_skip(sha)
+            cleared = fx.run("sess", True)
+            self.assertEqual(cleared.returncode, 0, cleared.stderr)
+            new_sha = fx.commit(["old/149.py"])
+            self.assertIn(sha, state.read_text())
+            text = re.sub(r"^_budget_ok\(\) \{\n.*?^\}", '''_budget_ok() {
+  budget_calls=$(( ${budget_calls:-0} + 1 ))
+  [ "$budget_calls" -lt 90 ]
+}''', HOOK.read_text(), count=1, flags=re.M | re.S)
+            copy = Path(d, "hook.sh")
+            copy.write_text(text)
+            for attempt in (1, 2):
+                r = subprocess.run(["bash", str(copy)], input=fx.payload("sess", True),
+                    text=True, capture_output=True, cwd=fx.repo, env=fx.env(), timeout=20)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(f"({attempt}/3)", r.stderr)
+                self.assertNotIn("budget", r.stderr)
+                groups = json.loads(state.read_text())["sha_group"]
+                self.assertEqual(groups[new_sha], groups[sha],
+                                 "lazy overlap must preserve historical group identity")
+
     def test_giveup_reads_once(self):
         r = shell(functions("_giveup_loud", "_journal_read") + '''
 MAX_BLOCKS=3; passes=0; declare -A GIVEUP_SHAS=() LAST_BLOCK_NONCE=() JB=()
@@ -102,21 +217,23 @@ printf '%s %s' "$attempts" "$APPEND_OK"
             self.assertEqual(r.returncode, 2, r.stderr)
             self.assertEqual(len(trace.read_text().splitlines()), 1)
 
-    def test_load_only_session_members(self):
+    def test_load_only_requested_sha_from_git(self):
         with tempfile.TemporaryDirectory() as d:
             Path(d, "aaaaaaaa.files").write_bytes(b"needed.py\0")
             Path(d, "bbbbbbbb.files").write_bytes(b"other-session.py\0")
             r = shell(functions("_load_files", "_sha_key_ok", "_sha_array_set") + f'''
-STATE_DIR={d!r}; declare -A SHA_GROUP=([aaaaaaaa]=aaaaaaaa)
+STATE_DIR={d!r}; SESSION_ROOT={d!r}; declare -A SHA_GROUP=([aaaaaaaa]=aaaaaaaa)
 _budget_ok() {{ return 0; }}
 _budget_out() {{ exit 99; }}
-_load_files
+_git() {{ printf 'needed.py\\0'; }}
+_load_files aaaaaaaa
 declare -p F_aaaaaaaa
 declare -p F_bbbbbbbb 2>/dev/null && exit 1
 exit 0
 ''')
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("needed.py", r.stdout)
+            self.assertNotIn("other-session.py", r.stdout)
 
     def test_journal_read_stops_at_budget_without_partial_retirement(self):
         with tempfile.TemporaryDirectory() as d:
