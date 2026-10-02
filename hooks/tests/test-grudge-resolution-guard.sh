@@ -2514,7 +2514,7 @@ HOOK_ENV=""
 # budget, all of it after the last budget check).
 # contract:hook:inv-t28 checks=2
 t28_passes() {
-  # t28_passes <n-candidates> -> echo the journal-pass count of one Stop
+  # t28_passes <n-candidates> -> T28_PASSES and RC in the caller shell
   hook_case "t28p$1"
   echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
   local i
@@ -2524,19 +2524,19 @@ t28_passes() {
   HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE=$HC_ROOT/trace"
   run_hook "s28p$1"
   HOOK_ENV=""
-  wc -l < "$HC_ROOT/trace" | tr -d ' '
+  T28_PASSES="$(wc -l < "$HC_ROOT/trace" | tr -d ' ')"
 }
-T28P2="$(t28_passes 2)"; T28P2_RC="$RC"
-T28P12="$(t28_passes 12)"; T28P12_RC="$RC"
+T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_RC="$RC"
+T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_RC="$RC"
 check 388 "premise: the 12-candidate Stop really blocks (did the full work) — contract:hook:inv-t28" 2 "$T28P12_RC"
-check 389 "journal passes per Stop do not grow with candidate count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
+check 389 "journal passes for one group do not grow with member count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
   "$T28P2" "$T28P12"
 
 # _overlap compared every path of one candidate with every path of the other
 # (Fa*Fb string compares) and the budget gated only the CALL, so ONE pair of
 # huge-file commits ran unbounded past it (2x3000 files: 17 s at a 1 s
-# budget). Linear-time overlap finishes this pair far inside the default
-# budget, so the hook does its real job — blocks — instead of degrading.
+# budget). The companion Warden test pins linear operation growth without a
+# clock. Give this end-to-end fixture a generous explicit budget under CI load.
 # contract:hook:inv-t28 checks=2
 hook_case t28wide
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
@@ -2545,8 +2545,10 @@ for (( i=0; i<4000; i++ )); do : > "$HC_REPO/a/$i.py"; done
 commit_all "$HC_REPO" "fix(a): wide a"
 for (( i=0; i<4000; i++ )); do : > "$HC_REPO/b/$i.py"; done
 commit_all "$HC_REPO" "fix(b): wide b"
+HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=60"
 run_hook s28wide
-check 390 "two 4000-file disjoint candidates are grouped inside the default budget and block — contract:hook:inv-t28" 2 "$RC"
+HOOK_ENV=""
+check 390 "two 4000-file disjoint candidates are grouped inside the test budget and block — contract:hook:inv-t28" 2 "$RC"
 check 391 "the wide-candidate Stop never degrades on the budget — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
 
 # ========================================================================
