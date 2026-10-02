@@ -262,16 +262,19 @@ printf '%s' "${{!SHA_GROUP[*]}}"
 
     def test_overlap_has_linear_work(self):
         def comparisons(n):
-            r = shell(functions("_overlap") + f'''
+            r = shell(functions("_overlap", "_sha_array_has") + f'''
 _budget_ok() {{ return 0; }}
 _budget_out() {{ exit 99; }}
+_git() {{ echo 'unexpected git fallback' >&2; exit 98; }}
 F_aaaa=(); F_bbbb=()
 for ((i=0;i<{n};i++)); do F_aaaa+=("a$i"); F_bbbb+=("b$i"); done
 set -x
 _overlap aaaa bbbb
 ''')
             self.assertEqual(r.returncode, 1, r.stderr)
-            return sum(line.startswith('+ [ ') for line in r.stderr.splitlines())
+            self.assertNotIn('unexpected git fallback', r.stderr)
+            return sum(line.startswith("+ '['") for line in r.stderr.splitlines())
+        self.assertGreater(comparisons(20), 0, "trace must observe array comparisons")
         self.assertLessEqual(comparisons(40), 2 * comparisons(20))
 
     def test_pass_count_premise_uses_child_status(self):
