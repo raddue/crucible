@@ -148,13 +148,13 @@ COVERAGE_MAP: dict[str, dict] = {
     "contract:group:inv-t20": {"kind": "bash", "carriers": [_G], "checks": 13},
     "contract:group:inv-t21": {"kind": "bash", "carriers": [_G], "checks": 45},
     "contract:hook:inv-t22": {"kind": "bash", "carriers": [_G], "checks": 19},
-    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 97},
+    "contract:hook:inv-t23": {"kind": "bash", "carriers": [_G], "checks": 98},
     "contract:hook:inv-t24": {"kind": "bash", "carriers": [_G], "checks": 22},
     "contract:worktree:inv-t25": {"kind": "bash", "carriers": [_G], "checks": 20},
     "contract:cli:inv-t26": {"kind": "bash", "carriers": [_G], "checks": 7},
     "contract:cli:inv-t27": {"kind": "bash", "carriers": [_G], "checks": 7},
     # issue #603: per-Stop wall-clock budget bounds the hook's attacker-chosen inputs
-    "contract:hook:inv-t28": {"kind": "bash", "carriers": [_G], "checks": 12},
+    "contract:hook:inv-t28": {"kind": "bash", "carriers": [_G], "checks": 13},
     # issue #608: by-files clearance must not spend the persisted block counter
     "contract:group:inv-t29": {"kind": "bash", "carriers": [_G], "checks": 23},
 }
