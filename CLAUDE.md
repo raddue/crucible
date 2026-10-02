@@ -31,7 +31,10 @@ lifecycle hooks; `docs/` is the catalog, architecture, and measured eval deltas.
   changing it changes routing. Test routing impact before loosening it.
 - **Link canonical conventions, never copy them.** Dispatch, return, and cairn
   rules live in `shared/` and are referenced via `<!-- CANONICAL: shared/x.md -->`.
-  Duplicating them into a skill causes drift — link instead.
+  Duplicating them into a skill causes drift — link instead. Other `shared/` docs
+  are consumed by direct `shared/x.md` path reference in prose, dispatch templates,
+  or hooks (e.g. `external-review-prompt.md`, `scope-judge-prompt.md`,
+  `session-index-convention.md`, `severity-rubric.md`) — never copy them either.
 - **Dispatch + return protocol is load-bearing.** Subagent dispatch is
   disk-mediated (`shared/dispatch-convention.md`); every subagent returns exactly
   one structured Evidence Receipt (`shared/return-convention.md`). Don't invent a

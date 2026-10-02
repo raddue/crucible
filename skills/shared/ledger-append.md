@@ -130,6 +130,7 @@ caller-set, so direct callers like the v1 backfill (moved to
 ### `artifact_type` enum (canonical)
 
 Exactly seven values: `['code', 'design', 'plan', 'hypothesis', 'mockup', 'translation', 'other']`.
+`mockup` and `translation` are historical only — retained so old ledger rows stay enum-valid; their producers were retired by #611 and no current emitter writes them.
 
 ### Tier-B null semantics
 

@@ -22,7 +22,7 @@ if ! command -v jq &>/dev/null; then
 fi
 
 # ── Extract tool name ───────────────────────────────────────────────────
-TOOL="$(echo "$INPUT" | jq -r '.tool // empty' 2>/dev/null)"
+TOOL="$(echo "$INPUT" | jq -r '.tool_name // .tool // empty' 2>/dev/null)"
 if [ -z "$TOOL" ]; then
   exit 0
 fi
@@ -98,7 +98,7 @@ EVENT_DETAIL=""
 
 classify_bash() {
   local command
-  command="$(echo "$INPUT" | jq -r '.input.command // empty' 2>/dev/null)"
+  command="$(echo "$INPUT" | jq -r '.tool_input.command // .input.command // empty' 2>/dev/null)"
   local exit_code
   exit_code="$(echo "$INPUT" | jq -r '.output.exit_code // .output.exitCode // "0"' 2>/dev/null)"
 
@@ -165,13 +165,13 @@ classify_bash() {
 
 case "$TOOL" in
   Edit)
-    local_file="$(echo "$INPUT" | jq -r '.input.file_path // empty' 2>/dev/null)"
+    local_file="$(echo "$INPUT" | jq -r '.tool_input.file_path // .input.file_path // empty' 2>/dev/null)"
     EVENT_TYPE="file_edit"
     EVENT_SUMMARY="Edited ${local_file##*/}"
     EVENT_DETAIL="$(jq -nc --arg file "$local_file" --arg tool "Edit" '{file: $file, tool: $tool}')"
     ;;
   Write)
-    local_file="$(echo "$INPUT" | jq -r '.input.file_path // empty' 2>/dev/null)"
+    local_file="$(echo "$INPUT" | jq -r '.tool_input.file_path // .input.file_path // empty' 2>/dev/null)"
     # Skip outbox writes — these are semantic event emissions, not user file edits
     case "$local_file" in */session-index/*/outbox.jsonl) exit 0 ;; esac
     # Note: file always exists by PostToolUse time, so file_create is not reliably distinguishable

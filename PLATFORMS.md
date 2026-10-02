@@ -71,16 +71,6 @@ These skills require features specific to Claude Code. They will not work on oth
 | temper-eval-collect | Task-tool parallel reviewer dispatch (Claude Code) | Live reviewer dispatch is harness-specific |
 | skill-selection-evals | Anthropic skill-creator eval harness (anvil's ancestor) | Eval-only; consumed by the blind A/B tooling, not invoked at runtime |
 
-### Tier 4 — Domain-Specific (Unity UI Toolkit)
-
-These skills work on any platform but are only useful for Unity UI Toolkit projects.
-
-| Skill | Domain |
-|-------|--------|
-| mockup-builder | HTML mockups constrained to Unity Theme.uss variables |
-| mock-to-unity | CSS-to-USS translation with Unity 6 bug workarounds |
-| ui-verify | Visual comparison of implemented UI against mockup |
-
 ## Platform-Specific References
 
 The following Claude Code-specific references appear in skill instructions. These are the items that would need adaptation for full cross-platform support.

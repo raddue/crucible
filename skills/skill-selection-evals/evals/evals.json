@@ -478,59 +478,6 @@
       "difficulty": "medium"
     },
     {
-      "id": "ui-implement-vs-verify-direct-01",
-      "dimension": "direct",
-      "boundary": "ui-implement-vs-verify",
-      "prompt": "I just implemented the settings panel in USS. Does it match the mockup screenshot I gave you?",
-      "expected_skill": "ui-verify",
-      "common_mistakes": [
-        "mock-to-unity"
-      ],
-      "context": "Implementation exists; the ask is to compare it against a mockup and report drift, not to build or change it.",
-      "reasoning": "ui-verify produces a drift/delta report comparing implemented Unity UI against a mockup \u2014 exactly 'does it match the screenshot'. mock-to-unity is for turning a mock into USS/C#, i.e. implementing, which is already done here. The signal is verify-against-reference, not implement.",
-      "difficulty": "easy"
-    },
-    {
-      "id": "ui-implement-vs-verify-direct-02",
-      "dimension": "direct",
-      "boundary": "ui-implement-vs-verify",
-      "prompt": "Here's the HTML mockup for the inventory grid. Build it in Unity UI Toolkit.",
-      "expected_skill": "mock-to-unity",
-      "common_mistakes": [
-        "ui-verify",
-        "build"
-      ],
-      "context": "A mockup exists and must be turned into Unity UI Toolkit code from scratch. Nothing to verify yet.",
-      "reasoning": "mock-to-unity turns a mockup/HTML reference into USS/C#. ui-verify would be wrong \u2014 there is no implementation yet to compare against the mock. build is the full idea\u2192PR pipeline, heavier than this scoped UI translation.",
-      "difficulty": "easy"
-    },
-    {
-      "id": "ui-implement-vs-verify-negative-01",
-      "dimension": "negative",
-      "boundary": "ui-implement-vs-verify",
-      "prompt": "The spacing is off and the layout doesn't look like the design \u2014 fix it.",
-      "expected_skill": "mock-to-unity",
-      "common_mistakes": [
-        "ui-verify"
-      ],
-      "context": "Surface phrases ('spacing is off', 'doesn't look like the design') overlap ui-verify's domain, but the imperative is to FIX the UI from the design.",
-      "reasoning": "A fix-imperative on UI-from-a-design routes to mock-to-unity, which owns implementing/fixing UI to match a mock. ui-verify's product is a drift report; the cold fix-imperatives belong to mock-to-unity (this is the A36/A56 disambiguation). The 'fix it' verb is the deciding signal over the drift-observation phrasing.",
-      "difficulty": "hard"
-    },
-    {
-      "id": "ui-implement-vs-verify-context-01",
-      "dimension": "context-dependent",
-      "boundary": "ui-implement-vs-verify",
-      "prompt": "The UI looks wrong compared to the mock. Check what's drifted.",
-      "expected_skill": "ui-verify",
-      "common_mistakes": [
-        "mock-to-unity"
-      ],
-      "context": "Same 'UI looks wrong' surface phrase as a fix request, but the ask is to identify/report what drifted, not to fix it.",
-      "reasoning": "When the request is to CHECK what's drifted (identify and report), it is ui-verify \u2014 its delta report names the drift. If the ask were 'fix it', the same surface phrase would route to mock-to-unity. The deciding context is check-and-report vs implement-a-fix.",
-      "difficulty": "hard"
-    },
-    {
       "id": "onboarding-entry-direct-01",
       "dimension": "direct",
       "boundary": "onboarding-entry",
