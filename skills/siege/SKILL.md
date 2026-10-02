@@ -172,7 +172,7 @@ At the start of every Siege run, record the current HEAD commit SHA:
 1. Run `git rev-parse HEAD` and write the result to `scratch/<run-id>/commit-anchor.md`
 2. Include the short SHA in the opening announcement
 3. **Phase 3→4 transition check:** Before entering Phase 4, verify HEAD matches the anchor: `git rev-parse HEAD` must equal the recorded SHA. This confirms no EXTERNAL changes occurred during analysis. If HEAD has moved, abort with "Codebase changed during Siege (anchor: [old], current: [new]). Re-run Siege on the current state." Do not attempt to diff and continue -- the threat model may be invalid.
-4. **Phase 4 expected-HEAD tracking:** During Phase 4, fix agents commit code, which intentionally changes HEAD. The orchestrator maintains an `expected-head` variable in the fix journal. After each fix commit, the orchestrator updates `expected-head` to the new commit SHA. Before each gate round dispatch, the orchestrator verifies `git rev-parse HEAD` matches `expected-head`. A mismatch means an EXTERNAL change occurred (someone else pushed, a hook fired, etc.) -- abort as above. Internal fix commits are expected and do not violate the anchor.
+4. **Phase 4 expected-HEAD tracking:** During Phase 4, fix agents commit code, which intentionally changes HEAD. The orchestrator tracks the accepted head in `scratch/<run-id>/expected-head.md` — written only after the ledger-monotonicity check passes — never in `fix-journal.md` (which the fix agent receives). Before each gate round dispatch, the orchestrator verifies `git rev-parse HEAD` matches `expected-head.md`. A mismatch means an EXTERNAL change occurred (someone else pushed, a hook fired, a user `git revert`) -- abort as above. Internal fix commits are expected and advance `expected-head.md` after their ledger check passes.
 
 The anchor protects against external changes to the branch, not internal fix commits made by Siege itself.
 
@@ -534,7 +534,7 @@ Adopts quality-gate's iterative pattern with security-specific scoring.
    **To accept all:** No action needed — fixes are already applied.
    ```
 
-   The pipeline does NOT pause. The next review round proceeds immediately with the current code state (fixes applied). If the user rejects a fix between rounds, the next review will re-find the vulnerability — this is correct behavior.
+   The pipeline proceeds with the current code state (fixes applied) after the orchestrator accepts each fix round's ledger check. Rejecting a fix between rounds means `git revert`, an external HEAD change that **aborts siege** (see the To-reject rule above) — the run does not silently continue; any remaining vulnerability is re-found when siege is re-run on the post-revert state.
 4. Dispatch a FRESH review round: 2 agents only (Boundary Attacker + one rotating agent). The rotating agent is selected based on the security domain of files modified by the fix agent: auth/RBAC changes → Insider Threat, data/logging changes → Betrayed Consumer, config/infra changes → Infrastructure Prober, multi-domain or ambiguous → Chain Analyst. On every 3rd round, the Fresh Attacker replaces the rotating domain agent (keeping the count at 2 review agents per round). When the Fresh Attacker is included in a Phase 4 round, it receives the full fix diff plus a random sample of unchanged files from the manifest (same 40% sampling strategy as Phase 2, re-seeded for this round). This preserves its 'fresh eyes on broader context' value -- it reviews the fix AND looks for new issues the fix may have exposed in surrounding code. Full 6-agent re-dispatch is disproportionate for incremental fixes.
 4. Score the new findings. Compare to prior round:
    - Strictly lower score = progress, loop again
@@ -559,13 +559,13 @@ shaped by it) carries a `.crucible/fetched-endpoints.md` entry before the commit
 `skills/shared/fetched-content-containment.md` (DEC-6 schema, append-only lifecycle, anti-copy rule) --
 the same ledger-tier obligation as SDD's Phase 3 implementer.
 
-**Ledger-monotonicity check (orchestrator, before accepting each Phase 4 fix self-commit).** <!-- CONTRACT:siege-ledger-monotonicity --> Before dispatching the fix agent, the **orchestrator** records the round-start SHA (`git rev-parse HEAD`) in orchestrator-owned scratch state (the `round-start-sha` line in `fix-journal.md`) — never in `expected-head.md`. The fix agent self-commits; the orchestrator then verifies the ledger before accepting the new head. Run `git diff <recorded round-start-sha>..HEAD -- .crucible/fetched-endpoints.md` and confirm the only change is **appended `UNAPPROVED` lines**: any previously-present line missing or altered (append-only violated), or any `APPROVED-*` / `REJECTED-*` disposition line appended during the round, is agent-authored tampering — abort acceptance, do not advance `expected-head`, and escalate to the user. **Prose-only:** this is an orchestrator-followed prose obligation, not a hook — there is no machine enforcement (the same strength as warden's ledger check; see `warden/SKILL.md`).
+**Ledger-monotonicity check (orchestrator, before accepting each Phase 4 fix self-commit).** <!-- CONTRACT:siege-ledger-monotonicity --> Before dispatching the fix agent, the **orchestrator** records the round-start SHA (`git rev-parse HEAD`) in `scratch/<run-id>/round-start-sha.md` — an orchestrator-only file the fix agent never receives (`fix-journal.md` IS handed to the fix agent, so the baseline must not live there). If the file is **missing, empty, or unparseable** (not one 40-hex SHA), **abort** the round: a vacant baseline would make `git diff <baseline>..HEAD -- .crucible/fetched-endpoints.md` fail open. The fix agent self-commits; the orchestrator then verifies the ledger before accepting the new head. Run `git diff <round-start-sha.md>..HEAD -- .crucible/fetched-endpoints.md` and confirm the only change is **appended `UNAPPROVED` lines**: any previously-present line missing or altered (append-only violated), or any `APPROVED-*` / `REJECTED-*` disposition line appended during the round, is agent-authored tampering — abort acceptance, do not advance `expected-head`, and escalate to the user. **Prose-only:** this is an orchestrator-followed prose obligation, not a hook — there is no machine enforcement (the same strength as warden's ledger check; see `warden/SKILL.md`).
 
 **Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason 'pre-siege-fix-round-N'.
 
 After the ledger check passes, the **orchestrator** — not the fix agent — writes `expected-head.md` with the new HEAD SHA (code artifacts only). For design and plan artifacts, Phase 4 integrity is maintained by the revised artifact at its original path rather than git HEAD tracking. The commit anchor check is skipped for non-code artifacts.
 
-Compaction during a fix round: `expected-head.md` may be stale. Recovery re-runs the ledger-monotonicity check against the recorded `round-start-sha` (from `fix-journal.md`), not the stale `expected-head.md`, before accepting any fix commit — see Compaction Recovery step 2.
+Compaction during a fix round: `expected-head.md` may be stale. Recovery re-runs the ledger-monotonicity check against the recorded `round-start-sha` in `scratch/<run-id>/round-start-sha.md`, not the stale `expected-head.md`, before accepting any fix commit — see Compaction Recovery step 2.
 
 **Fix verification:** After each fix agent completes, dispatch a verification check using the finding's Verification Criteria (from the finding format). If the verification criteria specify a concrete check (e.g., grep for parameterized query, confirm endpoint requires auth token, verify header is set), run the check. Use Sonnet for verification -- this is mechanical confirmation, not analytical reasoning. Dispatch using verification criteria from the finding. The verifier checks mechanically: does the fix satisfy the stated verification condition? If the fix does not satisfy the verification criteria, flag the finding as "unresolved" in the fix journal with the failed verification output. Unresolved findings remain in the gate score for the next round.
 
@@ -866,14 +866,15 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 | `round-N-findings.md` | Phase 4, per round | Findings per gate round |
 | `round-N-comparison.md` | Phase 4, when judge dispatched | Stagnation judge output |
 | `accepted-risks.md` | Phase 4, on user override | Accepted findings with rationale |
-| `expected-head.md` | Phase 4, after each fix commit | Current expected HEAD SHA after fix rounds |
+| `expected-head.md` | Phase 4, after ledger check passes | Current expected HEAD SHA after fix rounds |
+| `round-start-sha.md` | Phase 4, before each fix dispatch | Round-start baseline for the ledger check (orchestrator-only) |
 | `round-N-verification.md` | Phase 4, after every fix round | Fix verification results per round |
 
 ### Recovery Procedure
 
 After compaction:
 1. Glob for `active-run-*.md` to locate scratch directory
-2. Read `commit-anchor.md`. If `round-N-score.md` files exist (Phase 4 in progress), verify HEAD against `expected-head.md`, and re-run the ledger-monotonicity check against the recorded `round-start-sha` (from `fix-journal.md`) — not the stale `expected-head.md`. If no Phase 4 files exist, verify HEAD against commit-anchor.md. Mismatch = abort.
+2. Read `commit-anchor.md`. If `round-N-score.md` files exist (Phase 4 in progress): re-run the ledger-monotonicity check against `round-start-sha.md`. A stale `expected-head.md` does **not** abort mid-round by itself — if `expected-head.md` is missing or mismatched but the ledger check over `<round-start-sha.md>..HEAD` passes (append-only `UNAPPROVED` lines only), re-write `expected-head.md` to HEAD and resume; if the ledger check fails, abort. If no Phase 4 files exist, verify HEAD against commit-anchor.md. Mismatch = abort.
 3. Determine phase from file presence:
    - No `gate-approved.md` -> re-present manifest
    - `<agent>-findings.md` files -> count completed agents, dispatch remaining
