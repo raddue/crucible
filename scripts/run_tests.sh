@@ -310,6 +310,7 @@ run bash hooks/tests/test-gate-ledger-guard.sh
 run bash hooks/tests/test-plugin-manifest-hooks.sh
 run bash hooks/tests/tools/test-build-routing-reconcile.sh
 run bash hooks/tests/test-grudge-resolution-guard.sh
+run python3 hooks/tests/test-grudge-warden.py
 
 # --- Grudge eval suite (first eval/ wirings; #559) ---
 run python3 eval/grudge/test-grudge-core.py
