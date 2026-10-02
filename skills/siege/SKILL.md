@@ -23,7 +23,6 @@ All subagent returns (the 6 attacker-perspective agents, synthesis, fix agents, 
 **Siege-specific obligation:** WITNESS for attacker agents is the attack one-liner (or pattern) that would succeed if the defender's claimed fix is incomplete. SKIPPED/UNRUNNABLE receipts (e.g. `zap-cli unavailable`) defer to Cairn for re-dispatch with tooling.
 
 <!-- CANONICAL: shared/cairn-convention.md -->
-<!-- CANONICAL: shared/fetched-content-containment.md -->
 **Tier 2 — Witness verification:** PASS + TRACE#N → Read cited range (≤ 4 KiB); fail if witness would match `expect-fail`. FAIL + TRACE#N → reject only if no evidence of attack success is visible. SKIPPED/UNRUNNABLE → no read; record deferred obligation (e.g. `zap-cli unavailable` → orchestrator re-dispatches with tooling).
 
 ## Cairn (Layer 3)
@@ -139,7 +138,7 @@ When `true`: Chain Analyst annotates chain steps with MITRE ATT&CK technique IDs
 <!-- CANONICAL: shared/security-signals.md -->
 Siege integrates with orchestrator skills via `shared/security-signals.md`, which codifies the 8-category activation heuristic in a consumption-optimized format:
 
-- **crucible:build** — Phase 4 Step 5.5 checks for siege activation signals in the implementation diff and design doc. If 2+ signals are detected — or a single Category-8 match fires — or the contract specifies `security_review: required`, siege is dispatched automatically. Critical/High findings block the pipeline identically to quality-gate Fatal/Significant.
+- **crucible:build** — build's code gate detects siege activation signals in the implementation diff and design doc (category-8 included). If 2+ signals are detected — or a single Category-8 match fires — or the contract specifies `security_review: required`, siege is dispatched automatically. Critical/High findings block the pipeline identically to quality-gate Fatal/Significant. Build routes its code gate through warden; see `warden/SKILL.md`.
 - **crucible:spec** — Step 3.5 scans ticket content for signals during contract generation. Adds `security_review: required|recommended` to the contract YAML, which build consumes.
 - **crucible:audit** — Existing recommendation behavior unchanged. Audit may still recommend siege when it detects security surfaces.
 
@@ -531,7 +530,7 @@ Adopts quality-gate's iterative pattern with security-specific scoring.
    | 1 | [SIEGE-BA-1] SQL injection | Parameterized query | UserController.cs | abc1234 |
    | 2 | [SIEGE-IT-3] IDOR on /api/records | Added ownership check | RecordService.cs | def5678 |
 
-   **To reject a fix:** `git revert <commit-sha>` (each fix is a separate commit). A user-driven revert between rounds may remove a ledger line the round appended — that is a human out-of-boundary action, **not** an append-only violation: the next round's monotonicity baseline is re-taken from the post-revert `expected-head`, so the ledger check compares against the post-revert ledger state.
+   **To reject a fix:** `git revert <commit-sha>` (each fix is a separate commit). A user-driven revert is an external HEAD change, so it **aborts siege** per the Phase 4 expected-HEAD check — no silent re-baseline. To continue after a revert, restart Phase 4 from the post-revert HEAD; the orchestrator re-records the round-start SHA at that point.
    **To accept all:** No action needed — fixes are already applied.
    ```
 
@@ -553,19 +552,20 @@ In addition to prior-round comparison, track the lowest score achieved in any pr
 
 Design and plan fix agents write the revised artifact back to its original path (the design doc or plan file). Review agents read from the same path. Anti-anchoring is maintained because the revised doc contains no revision marks -- the fix agent produces a clean replacement.
 
+<!-- CANONICAL: shared/fetched-content-containment.md -->
 **Fetched-content containment (Phase 4 code fixes).** A Phase 4 fix commit that introduces a
 destination-bearing construct (whether traceable to the Step-1 intelligence summary or to a finding
 shaped by it) carries a `.crucible/fetched-endpoints.md` entry before the commit, per
 `skills/shared/fetched-content-containment.md` (DEC-6 schema, append-only lifecycle, anti-copy rule) --
 the same ledger-tier obligation as SDD's Phase 3 implementer.
 
-**Ledger-monotonicity check (orchestrator, before accepting each Phase 4 fix self-commit).** <!-- CONTRACT:siege-ledger-monotonicity --> The fix agent self-commits; the **orchestrator** verifies the ledger before accepting the new head, not the fix agent that wrote it. Before updating `expected-head`, run `git diff <round-start expected-head>..HEAD -- .crucible/fetched-endpoints.md` and confirm the only change is **appended `UNAPPROVED` lines**: any previously-present line missing or altered (append-only violated), or any `APPROVED-*` / `REJECTED-*` disposition line appended during the round, is agent-authored tampering — abort acceptance, do not advance `expected-head`, and escalate to the user. **Prose-only:** this is an orchestrator-followed prose obligation, not a hook — there is no machine enforcement (the same strength as warden's ledger check; see `warden/SKILL.md`).
+**Ledger-monotonicity check (orchestrator, before accepting each Phase 4 fix self-commit).** <!-- CONTRACT:siege-ledger-monotonicity --> Before dispatching the fix agent, the **orchestrator** records the round-start SHA (`git rev-parse HEAD`) in orchestrator-owned scratch state (the `round-start-sha` line in `fix-journal.md`) — never in `expected-head.md`. The fix agent self-commits; the orchestrator then verifies the ledger before accepting the new head. Run `git diff <recorded round-start-sha>..HEAD -- .crucible/fetched-endpoints.md` and confirm the only change is **appended `UNAPPROVED` lines**: any previously-present line missing or altered (append-only violated), or any `APPROVED-*` / `REJECTED-*` disposition line appended during the round, is agent-authored tampering — abort acceptance, do not advance `expected-head`, and escalate to the user. **Prose-only:** this is an orchestrator-followed prose obligation, not a hook — there is no machine enforcement (the same strength as warden's ledger check; see `warden/SKILL.md`).
 
 **Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason 'pre-siege-fix-round-N'.
 
-After each fix agent commits, update `expected-head.md` with the new HEAD SHA (code artifacts only). For design and plan artifacts, Phase 4 integrity is maintained by the revised artifact at its original path rather than git HEAD tracking. The commit anchor check is skipped for non-code artifacts.
+After the ledger check passes, the **orchestrator** — not the fix agent — writes `expected-head.md` with the new HEAD SHA (code artifacts only). For design and plan artifacts, Phase 4 integrity is maintained by the revised artifact at its original path rather than git HEAD tracking. The commit anchor check is skipped for non-code artifacts.
 
-The fix agent writes `expected-head.md` as its final action before returning results to the orchestrator, not the orchestrator after receiving results. This closes the timing gap between commit and HEAD tracking. If compaction occurs during a fix round and `expected-head.md` is stale, recovery should compare HEAD against the most recent fix journal entry's 'Files changed' field -- if the diff matches a plausible fix commit, proceed rather than abort.
+Compaction during a fix round: `expected-head.md` may be stale. Recovery re-runs the ledger-monotonicity check against the recorded `round-start-sha` (from `fix-journal.md`), not the stale `expected-head.md`, before accepting any fix commit — see Compaction Recovery step 2.
 
 **Fix verification:** After each fix agent completes, dispatch a verification check using the finding's Verification Criteria (from the finding format). If the verification criteria specify a concrete check (e.g., grep for parameterized query, confirm endpoint requires auth token, verify header is set), run the check. Use Sonnet for verification -- this is mechanical confirmation, not analytical reasoning. Dispatch using verification criteria from the finding. The verifier checks mechanically: does the fix satisfy the stated verification condition? If the fix does not satisfy the verification criteria, flag the finding as "unresolved" in the fix journal with the failed verification output. Unresolved findings remain in the gate score for the next round.
 
@@ -873,7 +873,7 @@ The `<run-id>` is a timestamp generated at the start of Phase 1 (e.g., `2026-03-
 
 After compaction:
 1. Glob for `active-run-*.md` to locate scratch directory
-2. Read `commit-anchor.md`. If `round-N-score.md` files exist (Phase 4 in progress), read `expected-head.md` and verify HEAD against that instead. If no Phase 4 files exist, verify HEAD against commit-anchor.md. Mismatch = abort.
+2. Read `commit-anchor.md`. If `round-N-score.md` files exist (Phase 4 in progress), verify HEAD against `expected-head.md`, and re-run the ledger-monotonicity check against the recorded `round-start-sha` (from `fix-journal.md`) — not the stale `expected-head.md`. If no Phase 4 files exist, verify HEAD against commit-anchor.md. Mismatch = abort.
 3. Determine phase from file presence:
    - No `gate-approved.md` -> re-present manifest
    - `<agent>-findings.md` files -> count completed agents, dispatch remaining
