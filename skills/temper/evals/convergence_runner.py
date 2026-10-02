@@ -365,10 +365,20 @@ def findings_count_at_least(output: str, n: int) -> Result:
 def findings_count_at_most(output: str, n: int, round: int | None = None) -> Result:
     """FAIL if more than `n` findings parsed (optionally within one round) —
     catches a point already raised in PR discussion re-reported as a second,
-    unattributed member (#682 AC4)."""
-    findings = _parse_findings(output)
-    if round is not None:
-        findings = [f for f in findings if f["round"] == round]
+    unattributed member (#682 AC4).
+
+    **Fails closed (#682 Blocker 4).** The bound is only meaningful against a
+    parsed member set: with no findings parsed, or with no `round` to scope the
+    comparison (a typo'd/absent `round` key in evals.json — which would otherwise
+    silently disable AC4's no-duplicate assertion), the check returns `N/A`, never
+    `PASS`. Mirrors the sibling guards' (`finding_body_contains` et al.)
+    unparseable handling.
+    """
+    if round is None:
+        return ("N/A", "no `round` given — bound cannot be scoped; check not evaluated")
+    findings = [f for f in _parse_findings(output) if f["round"] == round]
+    if not findings:
+        return ("N/A", f"no findings parsed in round {round} — check not evaluated")
     actual = len(findings)
     if actual <= n:
         return ("PASS", f"{actual} finding(s) ≤ {n} allowed")
@@ -816,9 +826,14 @@ def evaluate_expectation(
         return ("FAIL", f"unknown check {expectation.get('check')!r}")
 
     args = {**expectation.get("args", {}), **expectation.get("params", {})}
-    if check_name in _FIXTURE_AWARE_CHECKS:
-        return fn(reviewer_output, fixture, **args)
-    return fn(reviewer_output, **args)
+    try:
+        if check_name in _FIXTURE_AWARE_CHECKS:
+            return fn(reviewer_output, fixture, **args)
+        return fn(reviewer_output, **args)
+    except TypeError as exc:
+        # #682 Blocker 4: a typo'd/missing param key must fail closed, not crash
+        # the run — and never be silently read as an unevaluated PASS.
+        return ("FAIL", f"check {check_name!r} called with invalid params: {exc}")
 
 
 def aggregate_replicates(

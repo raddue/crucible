@@ -21,6 +21,7 @@ from skills.temper.evals.convergence_runner import (
     finding_body_contains,
     finding_body_does_not_contain,
     findings_count_at_least,
+    findings_count_at_most,
     member_discharged_refuted_after_fix,
     member_downgraded,
     member_enters_T,
@@ -1038,6 +1039,40 @@ def test_all_findings_have_file_line_na_when_no_findings():
 def test_findings_count_at_least():
     assert findings_count_at_least(CLEAN_AFTER_RESOLVE, 2)[0] == "PASS"
     assert findings_count_at_least(CLEAN_AFTER_RESOLVE, 5)[0] == "FAIL"
+
+
+# --- #682 Blocker 4: findings-count-at-most must fail closed -----------------
+
+def test_findings_count_at_most_fails_closed_on_empty_transcript():
+    """An empty/garbage transcript cannot evaluate the bound → N/A, never PASS."""
+    for transcript in ("", "\n\n", "not a transcript at all\n"):
+        verdict, reason = findings_count_at_most(transcript, n=1, round=1)
+        assert verdict == "N/A", f"{transcript!r} reported {verdict}: {reason}"
+
+
+def test_findings_count_at_most_fails_closed_on_missing_round():
+    """A missing/typo'd `round` param disables the comparison → N/A, never PASS."""
+    verdict, reason = findings_count_at_most(CLEAN_AFTER_RESOLVE, n=1)
+    assert verdict == "N/A", f"missing round reported {verdict}: {reason}"
+    # An unrelated round with no members is also unevaluable, not "0 ≤ n → PASS".
+    verdict, reason = findings_count_at_most(CLEAN_AFTER_RESOLVE, n=1, round=99)
+    assert verdict == "N/A", f"empty round reported {verdict}: {reason}"
+
+
+def test_findings_count_at_most_positive_and_negative():
+    assert findings_count_at_most(CLEAN_AFTER_RESOLVE, n=1, round=1)[0] == "PASS"
+    assert findings_count_at_most(CLEAN_AFTER_RESOLVE, n=0, round=1)[0] == "FAIL"
+
+
+def test_evaluate_expectation_missing_round_is_not_pass():
+    """End-to-end: a typo'd `round` key must not silently PASS the AC4 guard."""
+    expectation = {
+        "type": "mechanical",
+        "check": "findings-count-at-most",
+        "params": {"n": 1, "rond": 1},
+    }
+    verdict, _ = evaluate_expectation(expectation, CLEAN_AFTER_RESOLVE, {})
+    assert verdict != "PASS"
 
 
 def test_finding_body_contains():
