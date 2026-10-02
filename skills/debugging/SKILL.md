@@ -354,7 +354,6 @@ Check the project's CLAUDE.md for a `## Debugging Domains` table:
 ```markdown
 | Signal | Domain | Skills | Context |
 |--------|--------|--------|---------|
-| file paths contain `/UI/`, `USS`, `VisualElement` | ui | mockup-builder, mock-to-unity, ui-verify | docs/mockups/ |
 | error mentions `GridWorld`, `Tile`, `hex` | grid | - | grid system architecture |
 ```
 
