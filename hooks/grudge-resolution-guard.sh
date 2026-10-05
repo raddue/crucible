@@ -606,27 +606,25 @@ _journal_ordinal() {
   local -A want=() cnt=() ord=()
   local m line f1 f2 f3 f4 mx=0 rows=0
   for m in "$@"; do want["k$m"]=1; done
-  # T-cc instrumentation (inert in production): the ordinal scan is its own
-  # read of the file, downstream of _journal_pass, so it needs its OWN trace
-  # point or the pass count cannot see it. T-cc asserts this is a single
-  # `ordinal` line for the whole group, never one per member.
-  if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
-    printf "ordinal\n" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
-  fi
   while IFS= read -r line || [ -n "$line" ]; do
     IFS=$'\t' read -r f1 f2 f3 f4 <<< "$line"
     rows=$((rows + 1))
     _budget_ok || { echo BUDGET; return 0; }
     [ "$rows" -le "$JOURNAL_QUARANTINE_LINES" ] || { echo UNMEASURABLE; return 0; }
-    [ -n "${want["k$f3"]:-}" ] || continue
-    [ -z "${ord["k$f3"]:-}" ] || continue
-    case "$f2" in
-      BLOCK)
-        cnt["k$f3"]=$(( ${cnt["k$f3"]:-0} + 1 ))
-        [ "$f4" = "$nonce" ] && ord["k$f3"]="${cnt["k$f3"]}"
-        ;;
-      CLEAR) cnt["k$f3"]=0 ;;   # GIVEUP retires, never resets (#582)
-    esac
+    if [ -n "${want["k$f3"]:-}" ] && [ -z "${ord["k$f3"]:-}" ]; then
+      case "$f2" in
+        BLOCK)
+          cnt["k$f3"]=$(( ${cnt["k$f3"]:-0} + 1 ))
+          [ "$f4" = "$nonce" ] && ord["k$f3"]="${cnt["k$f3"]}"
+          ;;
+        CLEAR) cnt["k$f3"]=0 ;;   # GIVEUP retires, never resets (#582)
+      esac
+    fi
+    # T-cc: first row emits one marker immediately before the input loop ends.
+    # A per-member copy of this loop emits one marker per actual journal read.
+    if [ "$rows" -eq 1 ] && [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+      printf "ordinal\n" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
+    fi
   done < "$JOURNAL_FILE"
   for m in "$@"; do
     [ -n "${ord["k$m"]:-}" ] || { echo UNMEASURABLE; return 0; }
