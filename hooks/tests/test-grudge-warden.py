@@ -261,7 +261,13 @@ printf '%s' "${{!SHA_GROUP[*]}}"
             self.assertEqual(r.stdout, "dddd", r.stderr)
 
     def test_overlap_has_linear_work(self):
-        def comparisons(n):
+        # Count WORK, not one command's spelling. `comparisons()` used to sum
+        # only `+ '['` lines, so the same number of real comparisons written as
+        # `[[ "$a" == "$b" ]]` (traced as `+ [[`) scored 0 and the fence went
+        # green on a quadratic _overlap. Count every test/comparison command
+        # either way, plus the _seen hash writes, which are the other half of
+        # the per-path work.
+        def work(n):
             r = shell(functions("_overlap", "_sha_array_has") + f'''
 _budget_ok() {{ return 0; }}
 _budget_out() {{ exit 99; }}
@@ -273,9 +279,32 @@ _overlap aaaa bbbb
 ''')
             self.assertEqual(r.returncode, 1, r.stderr)
             self.assertNotIn('unexpected git fallback', r.stderr)
-            return sum(line.startswith("+ '['") for line in r.stderr.splitlines())
-        self.assertGreater(comparisons(20), 0, "trace must observe array comparisons")
-        self.assertLessEqual(comparisons(40), 2 * comparisons(20))
+            commands = sum(line.startswith("+ '['") or line.startswith("+ [[")
+                           for line in r.stderr.splitlines())
+            writes = sum("_seen[" in line for line in r.stderr.splitlines())
+            return commands + writes
+        # Measured on HEAD: 62 at n=20, 122 at n=40, 182 at n=60 — exactly 3
+        # per path plus a constant of 2. The bound is per-PATH and absolute,
+        # not a ratio: a 2x ratio cannot see a constant-factor slowdown by
+        # construction ((40k+c)/(20k+c) < 2 for every k), so doubling the
+        # per-element cost is invisible. 5 units per path leaves ~65% headroom
+        # over the measured 3.0, while a nested-loop _overlap costs n*n and
+        # blows through it from the first path.
+        measured = {n: work(n) for n in (20, 40, 60)}
+        for n, w in measured.items():
+            self.assertLessEqual(w, 5 * n,
+                                 f"{n} paths must cost O(n), not O(n^2)")
+        self.assertGreater(measured[20], 0, "trace must observe array comparisons")
+        # The absolute bound still shares slack with a fixed per-call overhead.
+        # Bound the SLOPE too, which cancels every constant term: no fixed
+        # number of extra operations can move it, only extra work per path.
+        # 3.5 per path is 17% above the measured 3.0 and far below the n^2
+        # mutant, so it sees a constant factor on any single unit of the
+        # per-element work that the 5n bound lets through.
+        slope = (measured[60] - measured[20]) / 40
+        self.assertLessEqual(slope, 3.5,
+                             f"per-path cost grew to {slope} (measured "
+                             f"{measured[20]}@20, {measured[60]}@60)")
 
     def test_pass_count_premise_uses_child_status(self):
         text = (ROOT / "hooks/tests/test-grudge-resolution-guard.sh").read_text()
@@ -300,5 +329,27 @@ printf '%s %s' "$JR_UNMEASURABLE" "${{#JBLAST[@]}}"
             self.assertEqual(r.stdout, "1 0", r.stderr)
 
 
+EXPECTED_TESTS = 15
+
+
+def _run_with_count_guard():
+    # A test method can be deleted without any other test noticing, so the
+    # count is pinned the way the sibling journal suite pins its own
+    # (#581/#603 fences were bypassed exactly this way once already). A named
+    # run (sys.argv) is exempt so the bash carrier can address one test.
+    result = unittest.main(exit=False, verbosity=2).result
+    rc = 0 if result.wasSuccessful() else 1
+    if len(sys.argv) > 1:
+        return rc
+    inert = (list(result.skipped) + list(result.expectedFailures)
+             + [(t, "unexpected success") for t in result.unexpectedSuccesses])
+    executed = result.testsRun - len(inert)
+    if executed != EXPECTED_TESTS:
+        print(f"ERROR: expected {EXPECTED_TESTS} warden tests, "
+              f"ran {executed}", file=sys.stderr)
+        rc = 1
+    return rc
+
+
 if __name__ == "__main__":
-    unittest.main()
+    sys.exit(_run_with_count_guard())
