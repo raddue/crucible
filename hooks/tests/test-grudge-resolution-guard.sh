@@ -2525,10 +2525,9 @@ t28_passes() {
   run_hook "s28p$1"
   HOOK_ENV=""
   T28_PASSES="$(wc -l < "$HC_ROOT/trace" | tr -d ' ')"
-  # The ordinal scan is a second read of the file, after _journal_pass, and
-  # carries its own trace point. Without counting it here the pass metric is
-  # blind to a per-member rescan of the ordinal scan (#603).
-  T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" | tr -d ' ')"
+  # The ordinal scan is a second read after _journal_pass; read-attached trace
+  # makes pass metric detect per-member rescans (#603).
+  T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" || true)"
 }
 T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_ORD="$T28_ORD"; T28P2_RC="$RC"
 T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_ORD="$T28_ORD"; T28P12_RC="$RC"

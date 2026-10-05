@@ -261,12 +261,11 @@ printf '%s' "${{!SHA_GROUP[*]}}"
             self.assertEqual(r.stdout, "dddd", r.stderr)
 
     def test_overlap_has_linear_work(self):
-        # Count WORK, not one command's spelling. `comparisons()` used to sum
-        # only `+ '['` lines, so the same number of real comparisons written as
-        # `[[ "$a" == "$b" ]]` (traced as `+ [[`) scored 0 and the fence went
-        # green on a quadratic _overlap. Count every test/comparison command
-        # either way, plus the _seen hash writes, which are the other half of
-        # the per-path work.
+        # Count every bash xtrace command emitted while _overlap and its
+        # callees run; no command-spelling census can miss `test`, `case`, etc.
+        # Accepted blind spots: code can suppress xtrace with `set +x`, trigger
+        # only above n=60, or hide work in the mapped-SHA `_git` branch (this
+        # fixture exercises current array-backed candidates).
         def work(n):
             r = shell(functions("_overlap", "_sha_array_has") + f'''
 _budget_ok() {{ return 0; }}
@@ -279,30 +278,23 @@ _overlap aaaa bbbb
 ''')
             self.assertEqual(r.returncode, 1, r.stderr)
             self.assertNotIn('unexpected git fallback', r.stderr)
-            commands = sum(line.startswith("+ '['") or line.startswith("+ [[")
-                           for line in r.stderr.splitlines())
-            writes = sum("_seen[" in line for line in r.stderr.splitlines())
-            return commands + writes
-        # Measured on HEAD: 62 at n=20, 122 at n=40, 182 at n=60 — exactly 3
-        # per path plus a constant of 2. The bound is per-PATH and absolute,
-        # not a ratio: a 2x ratio cannot see a constant-factor slowdown by
-        # construction ((40k+c)/(20k+c) < 2 for every k), so doubling the
-        # per-element cost is invisible. 5 units per path leaves ~65% headroom
-        # over the measured 3.0, while a nested-loop _overlap costs n*n and
-        # blows through it from the first path.
+            return sum(bool(re.match(r"^\++ ", line))
+                       for line in r.stderr.splitlines())
+        # Count all traced shell commands, regardless of spelling. The slope
+        # catches extra work per candidate while absolute bound catches spikes.
+        # 7 units per path leaves ~40% headroom over measured linear work;
+        # a nested-loop _overlap costs n*n and blows through it immediately.
         measured = {n: work(n) for n in (20, 40, 60)}
         for n, w in measured.items():
-            self.assertLessEqual(w, 5 * n,
+            self.assertLessEqual(w, 7 * n,
                                  f"{n} paths must cost O(n), not O(n^2)")
         self.assertGreater(measured[20], 0, "trace must observe array comparisons")
-        # The absolute bound still shares slack with a fixed per-call overhead.
-        # Bound the SLOPE too, which cancels every constant term: no fixed
-        # number of extra operations can move it, only extra work per path.
-        # 3.5 per path is 17% above the measured 3.0 and far below the n^2
-        # mutant, so it sees a constant factor on any single unit of the
-        # per-element work that the 5n bound lets through.
+        # The absolute bound still shares slack with fixed call overhead.
+        # The slope cancels every constant term and catches extra work per path.
+        # All shell syntax adds per-path work; 5.5 leaves headroom while
+        # rejecting one extra traced command per path.
         slope = (measured[60] - measured[20]) / 40
-        self.assertLessEqual(slope, 3.5,
+        self.assertLessEqual(slope, 5.5,
                              f"per-path cost grew to {slope} (measured "
                              f"{measured[20]}@20, {measured[60]}@60)")
 
