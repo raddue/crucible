@@ -2512,9 +2512,9 @@ HOOK_ENV=""
 # 14b display refresh, the step 16 checkpoint and the ordinal re-read each did
 # one full journal pass PER candidate (3n+3; 27 s for 500 candidates at an 8 s
 # budget, all of it after the last budget check).
-# contract:hook:inv-t28 checks=2
+# contract:hook:inv-t28 checks=4
 t28_passes() {
-  # t28_passes <n-candidates> -> T28_PASSES and RC in the caller shell
+  # t28_passes <n-candidates> -> T28_PASSES, T28_ORD and RC in the caller shell
   hook_case "t28p$1"
   echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
   local i
@@ -2525,12 +2525,26 @@ t28_passes() {
   run_hook "s28p$1"
   HOOK_ENV=""
   T28_PASSES="$(wc -l < "$HC_ROOT/trace" | tr -d ' ')"
+  # The ordinal scan is a second read of the file, after _journal_pass, and
+  # carries its own trace point. Without counting it here the pass metric is
+  # blind to a per-member rescan of the ordinal scan (#603).
+  T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" | tr -d ' ')"
 }
-T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_RC="$RC"
-T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_RC="$RC"
+T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_ORD="$T28_ORD"; T28P2_RC="$RC"
+T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_ORD="$T28_ORD"; T28P12_RC="$RC"
 check 388 "premise: the 12-candidate Stop really blocks (did the full work) — contract:hook:inv-t28" 2 "$T28P12_RC"
 check 389 "journal passes for one group do not grow with member count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
   "$T28P2" "$T28P12"
+# 389 alone is vacuous if the trace point it counts is never reached (the
+# `#603` regressor once passed every check for exactly that reason). Pin the
+# ordinal scan's own trace point: it must fire, and it must fire ONCE for the
+# group — one read of the log for the whole group, never one per member. Both
+# the 2- and the 12-member Stop must read once, so a per-member rescan of the
+# ordinal scan (12 reads for 12 members) fails 399.
+check 398 "premise: the ordinal scan really traced for a 2-member group (its metric is not vacuous) — contract:hook:inv-t28" \
+  1 "$T28P2_ORD"
+check 399 "the ordinal scan reads the journal once per group, not once per member (2 vs 12 members: $T28P2_ORD vs $T28P12_ORD reads) — contract:hook:inv-t28" \
+  1 "$T28P12_ORD"
 
 # _overlap compared every path of one candidate with every path of the other
 # (Fa*Fb string compares) and the budget gated only the CALL, so ONE pair of
@@ -2758,6 +2772,20 @@ check 396 "failed/partial GIVEUP keeps witness and message non-terminal — cont
 # contract:hook:inv-t28 checks=1
 check 397 "mapped oversized files do not starve repeated Stops — contract:hook:inv-t28" 0 \
   "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_oversized_active_mapped_artifact_advances_on_repeated_stops Warden.test_oversized_retired_mapped_artifact_does_not_starve_new_candidate Warden.test_real_oversized_candidate_retires_loudly_and_advances >/dev/null 2>&1; echo $?)"
+# The #603 _overlap linearity fence is named here so deleting that one test
+# method is a red diff instead of a silently smaller suite. Its own
+# EXPECTED_TESTS count guard in test-grudge-warden.py is the second lock; a
+# deleted test fails both, neither alone is load-bearing.
+# contract:hook:inv-t28 checks=1
+check 410 "the _overlap linearity fence runs and holds — contract:hook:inv-t28" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" Warden.test_overlap_has_linear_work >/dev/null 2>&1; echo $?)"
+# The whole python suite must report the pinned test count. Guards against a
+# deletion of any test that no other check names (the count guard inside the
+# suite is bypassed when tests are named on argv, so this is the argv-free
+# path).
+# contract:hook:inv-t28 checks=1
+check 411 "the warden suite runs its full pinned test count — contract:hook:inv-t28" 0 \
+  "$(python3 "$SCRIPT_DIR/test-grudge-warden.py" >/dev/null 2>&1; echo $?)"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 echo ""
@@ -2771,7 +2799,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=409
+EXPECTED_CHECKS=413
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
