@@ -56,7 +56,8 @@ python3 "$query" path/to/file1 path/to/file2 [--with-signatures] [--limit N]
 - Path match is always on. Add `--with-signatures` when you already have file
   contents in hand (it greps `anti_pattern_signature` regexes against file bodies).
 - Non-empty output = grudges held against these files. Treat each `☠` line as
-  **DO NOT REPEAT** — do not re-introduce that bug.
+  **DO NOT REPEAT** — do not re-introduce that bug. A `⛔ Already tried: …`
+  line is a dead end — that approach failed before, do not re-try it unchanged.
 - Maintenance: `--stats` (how many grudges held / recently written — spot
   starvation) and `--cull` (strike settled grudges whose files are all gone).
 - A stderr line `grudge: scanned=… matched=… skipped_stale=…` always prints so a
@@ -86,6 +87,25 @@ python3 "$append" \
   --repro "minimal repro steps" \
   --why "why this kept happening"
 ```
+
+### Dead ends — record an abandoned approach
+
+When an approach was **actually tried and abandoned** — nothing broke, so there is
+no symptom fingerprint, but re-trying it burns another session — record a
+**dead end** instead:
+
+```
+python3 "$append" \
+  --kind dead_end \
+  --approach "one-line approach that was tried" \
+  --reason-failed "why it failed" \
+  --files=src/a.py --files=src/b.py
+```
+
+- The dedupe key is the **approach** (a dead end has no symptom/signature).
+  Same approach + files → overwrite (last write wins).
+- `--symptom` is not needed (and ignored) for dead ends; an empty `--approach`
+  is skipped.
 
 ## Grudge schema
 
@@ -119,6 +139,32 @@ unknown keys and duplicates — never trust a line the writer cannot emit.
 `discriminator = anti_pattern_signature` when non-empty else `symptom`. Same key →
 overwrite (last write wins). A grudge with neither files nor a discriminator is
 rejected.
+
+A **dead end** (`--kind dead_end`) omits `fixed_in_commit`, `symptom`,
+`root_cause` and `anti_pattern_signature` entirely — a bug grudge's frontmatter
+never grows a `kind` key, so the existing on-disk shape is untouched. Its
+schema instead carries the abandoned approach and the reason it failed:
+
+```markdown
+---
+schema: 1
+hash: <sha256(repo_root|sorted-normalized(files)|approach)[:12]>
+repo: "<basename>"
+repo_root: "<abs realpath>"
+kind: "dead_end"
+approach: "<one-line approach tried>"
+reason_failed: "<why it failed>"
+files_touched: ["repo/rel/path", ...]
+date: "YYYY-MM-DD"
+---
+## Approach tried
+<approach>
+## Why it failed
+<reason>
+```
+
+`discriminator = approach`; same key → overwrite. A dead end with no files or no
+approach is rejected.
 
 ## Consumers (where the wiring lives)
 
