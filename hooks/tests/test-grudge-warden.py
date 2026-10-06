@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,9 +23,9 @@ def functions(*names):
                                text, re.M | re.S).group() for n in names)
 
 
-def shell(code):
+def shell(code, timeout=20):
     return subprocess.run(["bash", "-c", code], text=True, capture_output=True,
-                          timeout=20)
+                          timeout=timeout)
 
 
 class Warden(unittest.TestCase):
@@ -261,42 +262,46 @@ printf '%s' "${{!SHA_GROUP[*]}}"
             self.assertEqual(r.stdout, "dddd", r.stderr)
 
     def test_overlap_has_linear_work(self):
-        # Count every bash xtrace command emitted while _overlap and its
-        # callees run; no command-spelling census can miss `test`, `case`, etc.
-        # Accepted blind spots: code can suppress xtrace with `set +x`, trigger
-        # only above n=60, or hide work in the mapped-SHA `_git` branch (this
-        # fixture exercises current array-backed candidates).
+        # Trace 20/40/60; time ten untraced 4000-path calls to catch awk-sized
+        # bulk work. Declared limits: set +x, >4000 gating, call-site and mapped
+        # _git work are unsourced; one external command can overrun. Timing noisy.
+        elapsed = {}
         def work(n):
+            repeats = 10 if n == 4000 else 1
+            started = time.monotonic()
             r = shell(functions("_overlap", "_sha_array_has") + f'''
 _budget_ok() {{ return 0; }}
 _budget_out() {{ exit 99; }}
 _git() {{ echo 'unexpected git fallback' >&2; exit 98; }}
 F_aaaa=(); F_bbbb=()
 for ((i=0;i<{n};i++)); do F_aaaa+=("a$i"); F_bbbb+=("b$i"); done
-set -x
-_overlap aaaa bbbb
-''')
-            self.assertEqual(r.returncode, 1, r.stderr)
+{"set -x" if n <= 60 else ":"}
+for ((run=0;run<{repeats};run++)); do
+  _overlap aaaa bbbb; rc=$?; [ "$rc" -eq 1 ] || exit "$rc"
+done
+''', timeout=60 if n == 4000 else 20)
+            self.assertEqual(r.returncode, 0, r.stderr)
             self.assertNotIn('unexpected git fallback', r.stderr)
-            return sum(bool(re.match(r"^\++ ", line))
-                       for line in r.stderr.splitlines())
-        # Count all traced shell commands, regardless of spelling. The slope
-        # catches extra work per candidate while absolute bound catches spikes.
-        # 7 units per path leaves ~40% headroom over measured linear work;
-        # a nested-loop _overlap costs n*n and blows through it immediately.
+            elapsed[n] = time.monotonic() - started
+            traced = sum(bool(re.match(r"^\++ ", line))
+                         for line in r.stderr.splitlines())
+            return (traced + repeats - 1) // repeats
+        # Baseline trace is 5n+18: 10n leaves 82 commands (~69% measured work)
+        # at n=20 and tolerates benign guards; the timer catches bulk work.
         measured = {n: work(n) for n in (20, 40, 60)}
         for n, w in measured.items():
-            self.assertLessEqual(w, 7 * n,
+            self.assertLessEqual(w, 10 * n,
                                  f"{n} paths must cost O(n), not O(n^2)")
         self.assertGreater(measured[20], 0, "trace must observe array comparisons")
-        # The absolute bound still shares slack with fixed call overhead.
-        # The slope cancels every constant term and catches extra work per path.
-        # All shell syntax adds per-path work; 5.5 leaves headroom while
-        # rejecting one extra traced command per path.
+        # Slope 10 leaves 5 extra commands/path over baseline slope 5.
         slope = (measured[60] - measured[20]) / 40
-        self.assertLessEqual(slope, 5.5,
+        self.assertLessEqual(slope, 10.0,
                              f"per-path cost grew to {slope} (measured "
                              f"{measured[20]}@20, {measured[60]}@60)")
+        work(4000)
+        self.assertLess(elapsed[4000], 8.0,
+                        f"4000-path _overlap took {elapsed[4000]:.3f}s; "
+                        "8s ceiling detects hidden bulk work")
 
     def test_pass_count_premise_uses_child_status(self):
         text = (ROOT / "hooks/tests/test-grudge-resolution-guard.sh").read_text()

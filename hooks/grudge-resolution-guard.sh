@@ -620,12 +620,15 @@ _journal_ordinal() {
         CLEAR) cnt["k$f3"]=0 ;;   # GIVEUP retires, never resets (#582)
       esac
     fi
-    # T-cc: first row emits one marker immediately before the input loop ends.
-    # A per-member copy of this loop emits one marker per actual journal read.
-    if [ "$rows" -eq 1 ] && [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
+  done < <(
+    # T-cc: open the journal in this scan's input producer and emit its marker
+    # only after that open succeeds. Per-member copies run producer per read.
+    exec 3< "$JOURNAL_FILE" || exit
+    if [ -n "${CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE:-}" ]; then
       printf "ordinal\n" >> "$CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE" 2>/dev/null || :
     fi
-  done < "$JOURNAL_FILE"
+    cat <&3
+  )
   for m in "$@"; do
     [ -n "${ord["k$m"]:-}" ] || { echo UNMEASURABLE; return 0; }
     [ "${ord["k$m"]}" -gt "$mx" ] && mx="${ord["k$m"]}"
