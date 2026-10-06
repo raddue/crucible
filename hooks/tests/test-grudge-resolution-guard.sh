@@ -2512,7 +2512,7 @@ HOOK_ENV=""
 # 14b display refresh, the step 16 checkpoint and the ordinal re-read each did
 # one full journal pass PER candidate (3n+3; 27 s for 500 candidates at an 8 s
 # budget, all of it after the last budget check).
-# contract:hook:inv-t28 checks=4
+# contract:hook:inv-t28 checks=5
 t28_passes() {
   # t28_passes <n-candidates> -> T28_PASSES, T28_ORD and RC in the caller shell
   hook_case "t28p$1"
@@ -2524,16 +2524,19 @@ t28_passes() {
   HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_JOURNAL_TRACE=$HC_ROOT/trace"
   run_hook "s28p$1"
   HOOK_ENV=""
-  T28_PASSES="$(wc -l < "$HC_ROOT/trace" | tr -d ' ')"
+  T28_PASSES="$(wc -l < "$HC_ROOT/trace" 2>/dev/null | tr -d ' ' || true)"
   # The ordinal scan is a second read after _journal_pass; read-attached trace
   # makes pass metric detect per-member rescans (#603).
-  T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" || true)"
+  T28_ORD="$(grep -c '^ordinal$' "$HC_ROOT/trace" 2>/dev/null || true)"
 }
 T28P2=""; t28_passes 2; T28P2="$T28_PASSES"; T28P2_ORD="$T28_ORD"; T28P2_RC="$RC"
+T28P2_PASS_TRACE="$T28P2"
 T28P12=""; t28_passes 12; T28P12="$T28_PASSES"; T28P12_ORD="$T28_ORD"; T28P12_RC="$RC"
 check 388 "premise: the 12-candidate Stop really blocks (did the full work) — contract:hook:inv-t28" 2 "$T28P12_RC"
 check 389 "journal passes for one group do not grow with member count (2 vs 12: $T28P2 vs $T28P12) — contract:hook:inv-t28" \
   "$T28P2" "$T28P12"
+check 412 "premise: pass trace fired for 2-member group (metric is not vacuous) — contract:hook:inv-t28" \
+  8 "$T28P2_PASS_TRACE"
 # 389 alone is vacuous if the trace point it counts is never reached (the
 # `#603` regressor once passed every check for exactly that reason). Pin the
 # ordinal scan's own trace point: it must fire, and it must fire ONCE for the
@@ -2545,12 +2548,9 @@ check 398 "premise: the ordinal scan really traced for a 2-member group (its met
 check 399 "the ordinal scan reads the journal once per group, not once per member (2 vs 12 members: $T28P2_ORD vs $T28P12_ORD reads) — contract:hook:inv-t28" \
   1 "$T28P12_ORD"
 
-# _overlap compared every path of one candidate with every path of the other
-# (Fa*Fb string compares) and the budget gated only the CALL, so ONE pair of
-# huge-file commits ran unbounded past it (2x3000 files: 17 s at a 1 s
-# budget). The companion Warden test pins linear operation growth without a
-# clock. Give this end-to-end fixture a generous explicit budget under CI load.
-# contract:hook:inv-t28 checks=2
+# End-to-end clocked backstop measures the full 4000x4000 candidate pair;
+# Warden clock fixture covers one `_overlap` call in isolation.
+# contract:hook:inv-t28 checks=3
 hook_case t28wide
 echo "VALUE = 0" > "$HC_REPO/app.py"; commit_all "$HC_REPO" "chore: baseline"
 mkdir -p "$HC_REPO/a" "$HC_REPO/b"
@@ -2559,10 +2559,14 @@ commit_all "$HC_REPO" "fix(a): wide a"
 for (( i=0; i<4000; i++ )); do : > "$HC_REPO/b/$i.py"; done
 commit_all "$HC_REPO" "fix(b): wide b"
 HOOK_ENV="CRUCIBLE_GRUDGE_GUARD_MAX_SECONDS=60"
+T28_WIDE_STARTED=$EPOCHREALTIME
 run_hook s28wide
+T28_WIDE_SECONDS="$(python3 -c 'import sys; print(f"{float(sys.argv[2]) - float(sys.argv[1]):.3f}")' "$T28_WIDE_STARTED" "$EPOCHREALTIME")"
 HOOK_ENV=""
 check 390 "two 4000-file disjoint candidates are grouped inside the test budget and block — contract:hook:inv-t28" 2 "$RC"
 check 391 "the wide-candidate Stop never degrades on the budget — contract:hook:inv-t28" no "$(has "$ERR" "budget")"
+check 413 "the end-to-end overlap wall-time backstop stays under 8 seconds — contract:hook:inv-t28" \
+  yes "$(python3 -c 'import sys; print("yes" if float(sys.argv[1]) < 8 else "no")' "${T28_WIDE_SECONDS:-999}")"
 
 # ========================================================================
 # #582 — concurrent Stops must not break the MAX_BLOCKS bound. A Stop that
@@ -2798,7 +2802,7 @@ echo "Results: $PASSED/$TOTAL passed"
 # instead of failing. Pin the expected count so the loss is loud: only a root
 # uid may run fewer (the chmod-000 and chmod-500 fixtures, which root bypasses),
 # and even then it is announced.
-EXPECTED_CHECKS=413
+EXPECTED_CHECKS=415
 ROOT_SKIPPED_CHECKS=32
 if [ "$TOTAL" -ne "$EXPECTED_CHECKS" ]; then
   if [ "$(id -u)" -eq 0 ] && [ "$TOTAL" -eq "$((EXPECTED_CHECKS - ROOT_SKIPPED_CHECKS))" ]; then
