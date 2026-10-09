@@ -12,7 +12,7 @@ Invocation (from repo root; cwd-independent):
                            [--phase P] [--task K] [--model-tier <profile-or-label>]
     dispatch.py after      --dir <D> --seq N --status <completed|failed|error|skipped> \
                            [--summary ".."] [--output-chars C] [--tool-calls K] [--duration S] \
-                           [--actual-model <observed-model-label>]
+                           [--actual-model <observed-model-label>] [--dispatch-ref <run-id>] [--harness <pi|claude-code>]
     dispatch.py cleanup    --dir <D> --scratch <s> [--failed]
 
 `before` measures the dispatch file's size and appends the `status:"dispatched"`
@@ -189,6 +189,8 @@ def cmd_before(args):
 
 def cmd_after(args):
     actual_model = getattr(args, "actual_model", None)
+    dispatch_ref = getattr(args, "dispatch_ref", None)
+    harness = getattr(args, "harness", None)
     if actual_model is not None:
         actual_model = str(actual_model).strip() or None
     if args.status not in STATUSES:
@@ -217,6 +219,8 @@ def cmd_after(args):
         "model_tier": prev.get("model_tier"),
         "model_profile": prev.get("model_profile"),
         "actual_model": actual_model,
+        "dispatch_ref": dispatch_ref,
+        "harness": harness,
         "tool_calls": args.tool_calls,
     }
     _append(args.dir, entry)
@@ -275,6 +279,8 @@ def main(argv):
     a.add_argument("--tool-calls", type=int, default=None)
     a.add_argument("--duration", type=int, default=None)
     a.add_argument("--actual-model", default=None)
+    a.add_argument("--dispatch-ref", default=None)
+    a.add_argument("--harness", choices=("pi", "claude-code"), default=None)
 
     c = sub.add_parser("cleanup")
     c.add_argument("--dir", required=True)

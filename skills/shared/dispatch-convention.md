@@ -9,6 +9,13 @@ version: 1
 >
 > **This is a shared skill reference, not a CLAUDE.md directive.** CLAUDE.md must not duplicate dispatch rules.
 
+## Harness bindings
+
+| Harness | Dispatch |
+|---|---|
+| Claude Code | `Agent`/`Task` with `prompt` set to the pointer prompt below. |
+| Pi | `subagent({agent: "<roster-name>", task: "<pointer prompt>", context: "fresh"})`. Parallel fan-out uses one `subagent({workflow:true})` script with `runs.all([...])`, one entry per pre-allocated seq. Async completion wakes the parent; collect at the skill's barrier without polling. Record Pi `runId` as `dispatch_ref`, observed run `model` as `actual_model`, and `harness: "pi"` with `dispatch.py`. Invoke sub-skills in the same session by reading `~/.claude/skills/<name>/SKILL.md`. Pi gate-bearing roles fail closed: missing dispatch primitive → `BLOCKED: DISPATCH-UNAVAILABLE`; missing, shadowed, or unmapped role → `BLOCKED: DISPATCH-UNMAPPED:<role>`. Never substitute in-session self-review; label advisory review `NOT A GATE — in-session review, no dispatch provenance`. Invoking an orchestrator-tier Crucible skill authorizes exactly the dispatches prescribed by that skill, nothing more. |
+
 ## When to Use
 
 **Disk-mediated dispatch (default):** All Agent tool and Task tool subagent dispatches.
@@ -371,7 +378,7 @@ After compaction, skills can read `summary.md` from this path for narrative cont
 
 Every dispatch directory includes `manifest.jsonl` — a structured execution trace. Manifest entries must remain under 4096 bytes (POSIX PIPE_BUF) to ensure atomic appends under concurrent access.
 
-**Runtime tool (preferred — the steps below are the spec + fallback).** Use `python3 scripts/dispatch.py` for the mechanical bookkeeping: `seq --dir <D>` (crash-safe next seq = last manifest `seq` + 1), `before --dir <D> --seq N --file <dispatch-file> --role <r> [--phase P] [--task K] [--model-tier <profile-or-label>]` (measures `input_chars` and appends the `dispatched` entry), `after --dir <D> --seq N --status <completed|failed|error|skipped> [--summary …] [--output-chars C] [--tool-calls K] [--duration S] [--actual-model <observed-label>]` (appends the authoritative completion entry, copying the dispatched entry's context fields), and `cleanup --dir <D> --scratch <s> [--failed]` (## Cleanup). Token/rework aggregation stays in forge's Step 8.5 (single owner — no third copy). The steps below remain the canonical spec.
+**Runtime tool (preferred — the steps below are the spec + fallback).** Use `python3 scripts/dispatch.py` for the mechanical bookkeeping: `seq --dir <D>` (crash-safe next seq = last manifest `seq` + 1), `before --dir <D> --seq N --file <dispatch-file> --role <r> [--phase P] [--task K] [--model-tier <profile-or-label>]` (measures `input_chars` and appends the `dispatched` entry), `after --dir <D> --seq N --status <completed|failed|error|skipped> [--summary …] [--output-chars C] [--tool-calls K] [--duration S] [--actual-model <observed-label>] [--dispatch-ref <run-id>] [--harness <pi|claude-code>]` (appends the authoritative completion entry, copying the dispatched entry's context fields), and `cleanup --dir <D> --scratch <s> [--failed]` (## Cleanup). Token/rework aggregation stays in forge's Step 8.5 (single owner — no third copy). The steps below remain the canonical spec.
 
 ### Protocol: Write Before Dispatch
 
@@ -401,6 +408,8 @@ Every dispatch directory includes `manifest.jsonl` — a structured execution tr
 - `model_tier` — requested profile, legacy alias, or harness/provider label: `high`, `standard`, `fast`, `opus`, `sonnet`, `haiku`, `inherit`, or an arbitrary actual label (null for pre-enrichment entries or when unknown)
 - `model_profile` — normalized profile from `model_tier` (`high`, `standard`, `fast`, or `inherit`); null for unknown labels or pre-enrichment entries
 - `actual_model` — model observed by the harness after dispatch; null when unavailable or unmeasured
+- `dispatch_ref` — harness run identifier (Pi `runId`; null on Claude Code in this Pi-first change)
+- `harness` — dispatch host (`pi` or `claude-code`)
 - `tool_calls` — count of tool invocations by the subagent (null if unavailable)
 - `replay_of` — seq number of the original dispatch being replayed (null or absent for non-replay entries)
 - `replay_session` — session ID of the replay run (null or absent for non-replay entries)
