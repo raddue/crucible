@@ -135,6 +135,18 @@ for t in cat bash; do ln -sf "$(command -v $t)" "$FAKEBIN/"; done
 run_hook "$REPO_ROOT" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")" "$FAKEBIN"
 check "missing jq → silent" 0 0
 
+# (c) python3 present on PATH but NOT runnable — the Windows Microsoft Store
+# App Execution Alias shape: a real `python3.exe` file that exits non-zero.
+# `command -v` alone passed it, so the exec failure surfaced as a bogus
+# "structural lint failed" advisory blaming the receipt (#690). Silent + exit 0.
+STUBBIN="$TMPDIR_BASE/stubbin"
+mkdir -p "$STUBBIN"
+for t in cat jq bash dirname awk head; do ln -sf "$(command -v $t)" "$STUBBIN/"; done
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 9009\n' > "$STUBBIN/python3"
+chmod +x "$STUBBIN/python3"
+run_hook "$REPO_ROOT" "$(printf '{"transcript_path":"%s/bad.jsonl"}' "$TMPDIR_BASE")" "$STUBBIN"
+check "python3 present but not runnable → silent (no bogus lint advisory)" 0 0
+
 # (c) SIEGE-CA-4/IP-1: cwd outside any git repo → the linter is resolved from
 # THIS HOOK's own installed location (dirname "$0"), never from cwd, so a
 # malformed receipt still produces an advisory even when cwd has no repo at
