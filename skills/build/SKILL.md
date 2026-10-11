@@ -140,7 +140,7 @@ NEVER skip quality gate steps. Every artifact must pass its quality gate before 
 
 Tamper-evident audit trail for phase transitions and gate verdicts. This is defense-in-depth — it raises the cost of gate-skipping from zero to nonzero by requiring structured state to be maintained and verified. An external enforcement hook (`gate-ledger-guard.sh`) provides mechanical enforcement by blocking unauthorized PASS writes.
 
-**File location:** `~/.claude/projects/<project-hash>/memory/build-gate-ledger.md`
+**File location:** `<build-scratch>/build-gate-ledger.md`, where `<build-scratch>` is `~/.claude/projects/<project-hash>/memory/builds/<worktree-key>/`. Derive `<worktree-key>` as the full hex digest output by `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -d' ' -f1`. This keys state to the worktree path, including detached worktrees and branch switches.
 
 **Relationship to pipeline-status.md:** pipeline-status.md is ambient user awareness (overwritten at every narration point). build-gate-ledger.md is the gate verdict audit trail (updated per phase as gates pass). Both are needed; neither replaces the other.
 
@@ -186,9 +186,9 @@ Status: NOT_STARTED
 
 Runs during build startup, after mode detection but before Phase 1 begins:
 
-1. Check for existing ledger at canonical path
+1. Check for existing ledger at `<build-scratch>/build-gate-ledger.md`
 2. If found: run Run Isolation checks (see below)
-3. If not found (or user chose "start fresh"): write new ledger including `Run`, `PipelineID`, `Goal`, `Mode`, and `QualityGateMode` header fields, then all four phases with `Status: NOT_STARTED`. `QualityGateMode` is `standard` unless the caller explicitly selected `full`; reject any other value before dispatch.
+3. If not found (or user chose "start fresh"): write new ledger at `<build-scratch>/build-gate-ledger.md` including `Run`, `PipelineID`, `Goal`, `Mode`, and `QualityGateMode` header fields, then all four phases with `Status: NOT_STARTED`. `QualityGateMode` is `standard` unless the caller explicitly selected `full`; reject any other value before dispatch.
 4. The ledger MUST exist before Phase 1 transitions to `IN_PROGRESS`
 
 After writing any ledger (fresh or reconstructed), immediately re-read the ledger header to extract the PipelineID and `QualityGateMode` into active in-memory state. This is a defensive consistency practice — ensures in-memory values always match persisted values. Every quality-gate retry, compaction recovery, and resume reuses that immutable `QualityGateMode`; never silently defaults an explicit `full` run to `standard`.
@@ -198,16 +198,12 @@ After writing any ledger (fresh or reconstructed), immediately re-read the ledge
 Stale detection prevents cross-run contamination:
 
 1. **Compaction recovery (same run):** If pipeline-status.md `Started` timestamp matches the ledger's `Run` timestamp, this is the same build run recovering from compaction. Auto-resume without prompting.
-2. **New session with existing ledger:** If the ledger exists but pipeline-status.md is missing or its `Started` timestamp doesn't match the ledger's `Run`, prompt: "Found existing ledger for '[goal]' (started [timestamp], Phase N [status]). Resume this run? [y/n]". On "no", archive the old ledger via Bash `mv` to `build-gate-ledger-<old-timestamp>.md`. If the target filename already exists, append a counter suffix (`-2`, `-3`, etc.).
-3. **No existing ledger:** Create fresh.
+2. **New session with existing ledger:** If the namespaced ledger exists but pipeline-status.md is missing or its `Started` timestamp doesn't match the ledger's `Run`, prompt: "Found existing ledger for '[goal]' (started [timestamp], Phase N [status]). Resume this run? [y/n]". On "no", archive it via Bash `mv` to `<build-scratch>/build-gate-ledger-<old-timestamp>.md`. If target filename exists, append a counter suffix (`-2`, `-3`, etc.).
+3. **No existing ledger:** Create fresh at `<build-scratch>/build-gate-ledger.md`.
 
-### Orphan Cleanup
+### Verdict Marker Isolation
 
-**Requires:** Active PipelineID established (from Ledger Initialization + Run Isolation). This step runs AFTER the resume/fresh decision is resolved.
-
-Scan `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md` for verdict markers. Delete any whose `PipelineID` does not match the active PipelineID. If resuming: use the resumed build's PipelineID (from the existing ledger). If starting fresh: use the newly generated PipelineID.
-
-Note: If the session is recovering via INFERRED reconstruction (new PipelineID generated), markers from the old run will be cleaned up. This is intentional — the design requires a fresh QG run for INFERRED→PASS upgrade, not reuse of old markers.
+The quality-gate verdict directory remains project-wide: `~/.claude/projects/<project-hash>/memory/quality-gate/`. Do NOT delete markers whose `PipelineID` differs from the active build. A different ID does not prove a marker is stale; it may belong to a live build in another worktree. Verification already filters by the active `PipelineID`, and normal ledger verification deletes this build's marker after use. Leave unconsumed markers untouched.
 
 ### Timestamps and File Operations
 
@@ -217,7 +213,7 @@ Note: If the session is recovering via INFERRED reconstruction (new PipelineID g
 
 ### Enforcement Rules
 
-Before each phase transition, read `build-gate-ledger.md` and check the previous phase's status:
+Before each phase transition, read `<build-scratch>/build-gate-ledger.md` and check the previous phase's status:
 
 - **Gate check:** If the previous phase's Status is NOT in {`PASS`, `COMPLETE` (Phase 3 only), `SKIPPED` with `Acknowledged: true`}, output:
   ```
@@ -234,7 +230,7 @@ Before each phase transition, read `build-gate-ledger.md` and check the previous
 
 After quality-gate returns with a verdict, verify the verdict marker before writing to the ledger:
 
-1. Glob for verdict markers: `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md`
+1. Glob for verdict markers: `~/.claude/projects/<project-hash>/memory/quality-gate/gate-verdict-*.md` (project-wide directory; filter by active PipelineID, never delete other markers).
 2. Filter by `PipelineID` match — only markers with the current build's PipelineID
 3. Sort by the `Timestamp` field value inside the marker file (parsed as ISO-8601), take the most recent
 4. Verify: marker exists, `Verdict` is `PASS`, `PipelineID` matches current build's PipelineID
@@ -311,9 +307,9 @@ Phase 4: Completion
 
 build-gate-ledger.md is on disk and survives compaction. Recovery precedence when state is partial:
 
-- **Ledger exists, handoff manifest missing:** Use ledger to determine which phase to resume from. Prompt: "Gate ledger shows Phase N passed, but the phase handoff context was lost. Confirm resume from Phase N+1?" If PASS but no handoff, also prompt for Phase N inputs (design doc path, plan path, etc.) before proceeding.
-- **Handoff manifest exists, ledger missing:** Reconstruct ledger from manifests. Mark the current phase as `INFERRED` (not `PASS`). Mark predecessor phases as `PASS` (handoff existence proves the boundary was crossed). Generate a new PipelineID and write it to the reconstructed ledger header. After writing, re-read the ledger header to extract the PipelineID into active state. INFERRED phases trigger the gate-blocked check — the orchestrator must run a fresh quality gate (with matching PipelineID) or the user must type SKIP GATE.
-- **Both missing:** Fresh start. Prompt user.
+- **Ledger exists, handoff manifest missing:** Use namespaced ledger to determine which phase to resume from. Prompt: "Gate ledger shows Phase N passed, but the phase handoff context was lost. Confirm resume from Phase N+1?" If PASS but no handoff, also prompt for Phase N inputs (design doc path, plan path, etc.) before proceeding.
+- **Handoff manifest exists, ledger missing:** Reconstruct ledger from manifests in `<build-scratch>`. Mark the current phase as `INFERRED` (not `PASS`). Mark predecessor phases as `PASS` (handoff existence proves the boundary was crossed). Generate a new PipelineID and write it to the reconstructed ledger header. After writing, re-read the ledger header to extract the PipelineID into active state. INFERRED phases trigger the gate-blocked check — the orchestrator must run a fresh quality gate (with matching PipelineID) or the user must type SKIP GATE.
+- **Both missing:** Fresh start in `<build-scratch>`. Prompt user.
 
 ## Quality Gate Requirement (Non-Negotiable)
 
@@ -335,7 +331,7 @@ Quality gates are unconditional at all three gate points:
 
 ## Pipeline Status
 
-Write a status file to `~/.claude/projects/<hash>/memory/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
+Write a status file to `<build-scratch>/pipeline-status.md` at every narration point. This file is overwritten (not appended) and provides ambient awareness for the user in a second terminal.
 
 ### Write Triggers
 
@@ -539,7 +535,7 @@ Propagate refactor mode to subagents through:
 
 1. **New refactor-specific prompt templates** — `contract-test-writer-prompt.md` and `refactor-implementer-addendum.md` are standalone files used only in refactor mode. Select these instead of (or in addition to) the feature-mode equivalents.
 2. **Appended context blocks** — For existing prompts that serve both modes (`plan-writer-prompt.md`, `build-implementer-prompt.md`), append a "Refactor Mode Context" section when composing the dispatch file. The templates remain flat markdown — the orchestrator decides what to include.
-3. **Scratch file for compaction recovery** — Persist the current mode in `/tmp/crucible-build-mode.md` containing `mode: refactor` or `mode: feature` plus the baseline commit SHA. Only one build runs per session, so a well-known filename is sufficient.
+3. **Scratch file for compaction recovery** — Persist current mode in `<build-scratch>/build-mode.md` containing `mode: refactor` or `mode: feature` plus baseline commit SHA. The worktree namespace prevents concurrent builds from overwriting it.
 
 ### Compaction Recovery
 
@@ -547,35 +543,37 @@ Build's existing compaction step must read the Compression State FIRST (step 0 f
 
 0. **Read `## Compression State` from pipeline-status.md** — recover goal, decisions, constraints, next steps.
 0.5. **Check for handoff manifests** (`handoff-*-to-*.md`) in the scratch directory. If the most recent manifest exists, use its Inputs and Mode to bootstrap recovery — this supersedes the mode file for phase-boundary state.
-1. **Read `/tmp/crucible-build-mode.md`** — recover mode and baseline commit SHA.
+1. **Read `<build-scratch>/build-mode.md`** — recover mode and baseline commit SHA.
 2. **If file is missing:** Default to feature mode and warn.
 3. **If mode is `refactor`:** Verify baseline commit SHA exists.
-4. **Read `build-gate-ledger.md`** — if it exists, apply Gate Ledger Compaction Recovery (see Compaction Recovery subsection under Gate Ledger Protocol). Use the ledger's phase statuses to determine the resume point. If the ledger is missing but handoff manifests exist, reconstruct with INFERRED status.
+4. **Read `<build-scratch>/build-gate-ledger.md`** — if it exists, apply Gate Ledger Compaction Recovery (see Compaction Recovery subsection under Gate Ledger Protocol). Use the ledger's phase statuses to determine the resume point. If the ledger is missing but handoff manifests exist, reconstruct with INFERRED status.
 5. **After mode and ledger are recovered:** Proceed with general state reconstruction (task list, phase, health).
 
 ## Phase 1: Design (Interactive)
 
 ### Step -1: Resume Detection and Pipeline-Active Marker
 
-Before any design or dispatch work, check for a crashed prior pipeline:
+Before any design or dispatch work, derive `<build-scratch>` as `~/.claude/projects/<project-hash>/memory/builds/<worktree-key>/`, where `<worktree-key>` is the full hex digest output by `printf '%s' "$(git rev-parse --show-toplevel)" | sha256sum | cut -d' ' -f1`. Store this build's three recovery files only here: `.pipeline-active`, `build-gate-ledger.md`, and `pipeline-status.md`. The worktree path, not branch, defines identity.
 
-1. **Check `<scratch>/.pipeline-active`** (where `<scratch>` is `~/.claude/projects/<hash>/memory/`)
-2. **Not found:** Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"build"`, `phase` set to `"1"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` set to the scratch directory path, `dispatch_dir` set to the dispatch directory path, `branch` from `git branch --show-current`, `baseline_sha` from `git rev-parse HEAD`). Proceed to Step 0.
+**First-run handling for legacy shared state:** If `<build-scratch>` has no state yet, inspect the old shared files at `~/.claude/projects/<project-hash>/memory/{.pipeline-active,build-gate-ledger.md,pipeline-status.md}`. If any exist, tell the user which exist and offer (a) copy existing files into `<build-scratch>` and continue normal recovery, or (b) start fresh in `<build-scratch>`. Never silently ignore or auto-adopt the old state. Adoption copies only files that exist and does not overwrite namespaced files; preserve the originals in place. Before adopting `.pipeline-active`, compare its `worktree_root` with current `git rev-parse --show-toplevel`: if present and different, treat it and the shared state set as foreign; do not adopt any of them, offer only fresh namespaced state, and leave originals untouched. If `worktree_root` is absent, state that ownership cannot be verified and adopt only after explicit user confirmation. Before adopting a present ledger/status with the marker, verify ledger `PipelineID` equals marker `pipeline_id` and status `Started` equals ledger `Run`; if either comparison fails, do not adopt the shared state set. When copying an owned `.pipeline-active`, update only its `scratch_dir` field to `<build-scratch>` and preserve `dispatch_dir` and other fields. Starting fresh leaves all legacy files untouched. This is a one-time decision: once namespaced state exists, do not consult or mutate the shared legacy paths again.
+
+1. **Check `<build-scratch>/.pipeline-active`**
+2. **Not found:** If adopting legacy state, run the resume checks on the adopted files before proceeding. Otherwise create new ledger and status under `<build-scratch>` and never read or write legacy singleton paths again. Write the pipeline-active marker (JSON with `pipeline_id` set to current session ID, `skill` set to `"build"`, `phase` set to `"1"`, `start_time` set to current ISO-8601 timestamp, `scratch_dir` set to `<build-scratch>`, `dispatch_dir` set to the dispatch directory path, `branch` from `git branch --show-current`, `worktree_root` from `git rev-parse --show-toplevel`, `baseline_sha` from `git rev-parse HEAD`). Proceed to Step 0.
 3. **Found, same `pipeline_id` as current session:** This is a compaction recovery scenario. Follow existing compaction recovery procedures. Do not re-write the marker.
 4. **Found, different `pipeline_id`:**
    a. **Branch guard:** Compare marker's `branch` field against current `git branch --show-current`. If they differ, warn: *"Previous build on branch [marker.branch] crashed at Phase [phase]. You are currently on [current-branch]. Switch to [marker.branch] before resuming? [switch+resume / start fresh / abort]"*. Do NOT offer resume on the wrong branch.
-   b. Read `manifest.jsonl` from the marker's `dispatch_dir` (or from the scratch directory copy if `/tmp` was lost)
+   b. Read `manifest.jsonl` from the marker's `dispatch_dir` (or from `<build-scratch>` if `/tmp` was lost)
    c. Identify the last successful phase boundary by scanning manifest entries grouped by phase. A phase boundary is verified when all dispatches in that phase have `status: "completed"`.
    d. Present resume option to the user:
       > "Previous build on branch [marker.branch] crashed at Phase [N], [context]. Resume from [last good boundary] ([checkpoint reason], [estimated time preserved] of work preserved)? [yes / no / fresh]"
-   e. **User accepts:** Invoke `crucible:replay` in resume mode, passing the scratch directory path. The replay skill handles checkpoint restore, state reconstruction, and re-dispatch. The build pipeline does not continue -- replay takes over.
-   f. **User declines (fresh):** Delete the stale `.pipeline-active` marker. Write a fresh marker with the current session. Proceed to Step 0 as a new pipeline run.
+   e. **User accepts:** Invoke `crucible:replay` in resume mode, passing `<build-scratch>`. The replay skill handles checkpoint restore, state reconstruction, and re-dispatch. The build pipeline does not continue -- replay takes over.
+   f. **User declines (fresh):** Delete only `<build-scratch>/.pipeline-active`. Write a fresh marker with the current session. Proceed to Step 0 as a new pipeline run.
 
-**Marker updates during pipeline:** Update the `phase` field in `.pipeline-active` at each phase boundary (1->2, 2->3, 3->4) to track progress for crash detection.
+**Marker updates during pipeline:** Update the `phase` field in `<build-scratch>/.pipeline-active` at each phase boundary (1->2, 2->3, 3->4) to track progress for crash detection.
 
-**Marker cleanup:** Delete `.pipeline-active` at Phase 4 step 12 (after finish skill completes).
+**Marker cleanup:** Delete `<build-scratch>/.pipeline-active` at Phase 4 step 12 (after finish skill completes).
 
-**Gate Ledger Initialization:** After the pipeline-active marker is written (or recovered) and mode detection is complete, run the Gate Ledger Protocol's Ledger Initialization and Orphan Cleanup steps. The ledger must exist before Phase 1 transitions to IN_PROGRESS.
+**Gate Ledger Initialization:** After the pipeline-active marker is written (or recovered) and mode detection is complete, run the Gate Ledger Initialization and Verdict Marker Isolation steps. The ledger must exist before Phase 1 transitions to IN_PROGRESS.
 
 **Compass Arc Emit (build orchestrator only — D14):**
 <!-- CANONICAL: shared/compass-protocol.md -->
@@ -1092,7 +1090,7 @@ When in refactor mode, Phase 3 execution differs from feature mode in several wa
 Before the first task executes:
 1. Run all contract tests from Phase 1 — confirm GREEN
 2. Run the full test suite — confirm GREEN (pre-execution baseline)
-3. Record the "baseline commit" SHA in `/tmp/crucible-build-mode.md` — this is the rollback target
+3. Record the "baseline commit" SHA in `<build-scratch>/build-mode.md` — this is the rollback target
 
 ##### Tiered Test Strategy
 
@@ -1128,7 +1126,7 @@ After a successful atomic commit (step 4), the rest of the per-task pipeline con
 ##### Refactoring Rollback Policy
 
 ###### Baseline Commit
-The orchestrator records the baseline commit SHA before the first refactoring task executes (during pre-execution coverage check). Persisted in `/tmp/crucible-build-mode.md`.
+The orchestrator records the baseline commit SHA before the first refactoring task executes (during pre-execution coverage check). Persisted in `<build-scratch>/build-mode.md`.
 
 ###### Per-Task Rollback
 When a single task fails after the executor's retry attempt:
@@ -1244,7 +1242,7 @@ After all tasks complete:
 10. Report to user
 10.5. **Session index event:** Emit a `skill_end` event to the outbox: `{"ts":"<now>","seq":0,"type":"skill_end","summary":"/build complete: <outcome summary>","detail":{"skill":"build","outcome":"success|failure|escalated"}}`.
 11. **REQUIRED SUB-SKILL:** Use crucible:finish — **skip finish's warden call** (warden already ran in build Phase 4 at step 3 — this is the structural double-temper kill), **AND skip finish's Step 2.5 (test-coverage)** since test-coverage ran per-task in Phase 3. Tell finish to skip both.
-12. **Delete pipeline-active marker:** Remove `<scratch>/.pipeline-active`. This signals that the pipeline completed successfully. If deletion fails (permissions, missing file), log a warning but do not fail the pipeline.
+12. **Delete pipeline-active marker:** Remove `<build-scratch>/.pipeline-active`. This signals that the pipeline completed successfully. If deletion fails (permissions, missing file), log a warning but do not fail the pipeline.
 
 ### Session Metrics
 
