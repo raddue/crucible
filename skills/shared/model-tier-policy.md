@@ -4,9 +4,16 @@ Status: v1 (#392). Canonical home for which subagent roles may run which model
 tier, why, and exactly what the guardrail does and does not enforce. Skills
 that pin a non-default tier link here — link, never copy (CLAUDE.md).
 
+> **Tier names, not versions** (last checked 2026-10-10). The pins in this repo
+> are tier names — `opus`, `sonnet`, `haiku`, `fable` — never a versioned id.
+> Where a version or a cost multiple appears below, it is context for a
+> measurement or a fallback floor, not a pin, and it drifts behind on every
+> provider release: the Claude line was Fable 5.1 / Opus 5.5 / Sonnet 5.5 /
+> Haiku 5.5 at that date. Re-derive the Fable cost multiple on each release.
+
 ## TL;DR
 
-- **Opus 4.8 is the default** for every reasoning role except three roles
+- **Opus is the default** for every reasoning role except three roles
   that are not Opus-pinned — `crucible-qg-fix` (Sonnet, below), the
   standalone `/red-team` fix dispatch, and dependency-audit's inline path
   (the latter two unpinned/session, residual (a)); Sonnet for cheap
@@ -15,19 +22,19 @@ that pin a non-default tier link here — link, never copy (CLAUDE.md).
   main-loop fix output is re-reviewed on single-model rounds that reach a
   subsequent red-team; **not** bounded on the post-pass quick-fix, the
   fix-agent terminal exits, or any escalation exit — see the row below;
-  #537). **Fable 5 nowhere**, except behind an eval-gated pilot.
+  #537). **Fable nowhere**, except behind an eval-gated pilot.
 - **Eval-before-default:** no role flips model tier without its own A/B eval
   showing a lift that justifies Fable's **~2.6× effective cost** (2× sticker
-  price × ~1.3× tokenizer overhead — Fable uses the Opus-4.7 tokenizer).
+  price × ~1.3× tokenizer overhead — Fable's tokenizer is not the Opus line's).
 - `scripts/check_model_pins.py` (CI + `/stocktake`) fails any fable-family pin
   on a `<!-- MODEL-TIER: security-hard-out -->`-marked file and any
   security-surface file missing that marker.
 
 ## The offensive/defensive boundary — UNVERIFIED working hypothesis
 
-Fable 5 has hard safety limits: on cybersecurity, biology, chemistry, and
+Fable has hard safety limits: on cybersecurity, biology, chemistry, and
 model-distillation content it **blocks its own response and silently falls
-back to Opus 4.8** — per-response, inside the provider, **undetectable with
+back to Opus** — per-response, inside the provider, **undetectable with
 current primitives** (the repo's fallback-detection keys on type-resolution
 failure, and `message.model` is whole-run granularity only).
 
@@ -51,7 +58,7 @@ historically fired on *topic*, not *intent*, so the safe default is:
 | crucible-qg-fix | sonnet | **OUT (keep Sonnet)** — fix agent / plan reviser; per-round red-team re-review on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop); see `harness-adapter.md` Mapping 1b for the sites this bound does not cover (post-pass quick-fix, fix-agent terminal exits, any escalation exit) (#537). The `Eval-before-default` rule is **waived** for this downgrade, with the downstream per-round Opus red-team re-review as a partial measurement surrogate — it addresses output quality but not the rule's other named concern (calibration distribution); round-count and calibration-distribution effects remain unmeasured and are tracked in #539. Counter-evidence to weigh: #528 measures a 38% iatrogenic rate under the pre-#537 `inherit` fixer (tier unrecorded in the issue). **(unmarked)** — a future fable pin here is not checker-blocked; mark the file if the re-review bound is ever removed. |
 | red-team fix dispatch (standalone/finish) | none (subagent on inherited/session model) | **Constrained by orchestrator policy** — see residual (a) |
 | build implementer, delve/inquisitor, audit lenses | opus | **ELIGIBLE-PENDING-VERIFICATION** — probe-gated + eval-gated, NOT checker-blocked |
-| plan/spec-writer (`build/plan-writer-prompt.md`, `spec/spec-writer-prompt.md`) | opus | **ELIGIBLE — pilot candidate** (eval-gated; a silent fallback here is harmless: fallback floor = Opus 4.8, no Tier-A verdict) |
+| plan/spec-writer (`build/plan-writer-prompt.md`, `spec/spec-writer-prompt.md`) | opus | **ELIGIBLE — pilot candidate** (eval-gated; a silent fallback here is harmless: fallback floor = Opus, no Tier-A verdict) |
 
 ## Eval-before-default rule
 
