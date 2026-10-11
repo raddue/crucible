@@ -33,7 +33,7 @@ Pin-surface forms (all case-insensitive — the tree has real casing drift,
 e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
 or single/double-quoted, indented (form 1 — nested config is a live
 convention, see skills/consensus/SKILL.md), or bracket-suffixed
-(`claude-fable-5[1m]`, this repo's own live pin convention). The neutral
+(`claude-fable-*[1m]`, this repo's own bracket-suffix pin form). The neutral
 `model_profile:` key introduced by the model-agnostic dispatch policy is
 scanned alongside `model:` so a security-named file cannot evade the
 marker requirement by migrating to profile vocabulary. EVERY id-shaped
