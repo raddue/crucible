@@ -74,7 +74,7 @@ runtime dispatch gate and must not be used to stop a live dispatch.
   **Restricted-trust models are nowhere**, except behind an eval-gated pilot;
   the current static checker maps that restriction to the Fable family.
 - **Eval-before-default:** no role flips model tier without its own A/B eval
-  showing a lift that justifies Fable's **~2.6× effective cost** — Fable 5.1 is
+  showing a lift that justifies Fable's **~2.5× effective cost** — Fable 5.1 is
   $10/$50 per MTok against Opus 5.5's $4/$20, so the sticker ratio is **~2.5×**
   as of 2026-10-10. The earlier 2× sticker × ~1.3× tokenizer decomposition no
   longer describes this pair and is retired: Fable shares the tokenizer
@@ -121,7 +121,7 @@ A model swap changes both output quality and the calibration distribution, so
 every flip is A/B-measured, never assumed — and the eval fixtures must be
 scoped so a silent Fable→Opus fallback cannot contaminate the measured Fable
 arm (for the plan/spec-writer pilot: **non-security planning tasks only**).
-Keep a flip iff the measured lift justifies ~2.6×; otherwise revert. The
+Keep a flip iff the measured lift justifies ~2.5×; otherwise revert. The
 pilot's keep/revert evidence requirements live in issue #392 (item 4 + AC3).
 
 ## Enforcement boundary — what the checker covers, exactly
