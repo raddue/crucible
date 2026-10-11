@@ -45,6 +45,24 @@ class MemoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as outside:
             self.run_cli("add", "--kind", "decision", "--text", "No repo", code=1, cwd=outside)
 
+    def test_refusals_leave_existing_file_byte_identical(self):
+        old = self.add("Use SQLite").stdout.strip()
+        path = self.root / "docs/memory.md"
+        before = path.read_bytes()
+        self.run_cli("add", "--kind", "decision", "--text", "Use Postgres", "--supersedes", "deadbeef", code=2)
+        self.assertEqual(path.read_bytes(), before)
+        self.run_cli("add", "--kind", "decision", "--text", "Use Postgres", "--supersedes", old, code=0)
+        superseded = path.read_bytes()
+        self.run_cli("add", "--kind", "rule", "--text", "Replace again", "--supersedes", old, code=2)
+        self.assertEqual(path.read_bytes(), superseded)
+
+    def test_check_rejects_bad_grammar_and_unknown_by_target(self):
+        path = self.root / "docs/memory.md"
+        path.write_text("# Memory\n\n- [decision] malformed\n")
+        self.run_cli("check", code=2)
+        path.write_text("# Memory\n\n- [superseded] Old → id:deadbeef <!-- id:00000001 ts:2026-10-05T14:00Z conf:1.00 by:deadbeef -->\n")
+        self.run_cli("check", code=2)
+
     def test_forbidden_content_classes(self):
         samples = ["/home/alice/file", "https://example.com", "AKIA1234567890123456", "abc@example.com", "4111111111111111", "+1 (555) 123-4567"]
         for sample in samples:
