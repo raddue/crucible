@@ -33,7 +33,7 @@ Pin-surface forms (all case-insensitive — the tree has real casing drift,
 e.g. `model: Sonnet` in skills/prospector/SKILL.md:335. Values may be bare
 or single/double-quoted, indented (form 1 — nested config is a live
 convention, see skills/consensus/SKILL.md), or bracket-suffixed
-(`claude-fable-5[1m]`, this repo's own live pin convention). EVERY
+(`claude-fable-*[1m]`, this repo's own bracket-suffix pin form). EVERY
 id-shaped token in the value region is checked, not just the first — the
 repo's live disjunction convention (`model: opus or sonnet — lead
 decides`, see skills/build/build-reviewer-prompt.md) would otherwise hide

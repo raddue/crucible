@@ -6,10 +6,12 @@ that pin a non-default tier link here — link, never copy (CLAUDE.md).
 
 > **Tier names, not versions** (last checked 2026-10-10). The pins in this repo
 > are tier names — `opus`, `sonnet`, `haiku`, `fable` — never a versioned id.
-> Where a version or a cost multiple appears below, it is context for a
-> measurement or a fallback floor, not a pin, and it drifts behind on every
-> provider release: the Claude line was Fable 5.1 / Opus 5.5 / Sonnet 5.5 /
-> Haiku 5.5 at that date. Re-derive the Fable cost multiple on each release.
+> Provider-config examples are the exception: consensus membership carries raw
+> provider ids by design (residual (b)). Where a version or a cost multiple
+> appears below, it is context for a measurement or a fallback floor, not a pin,
+> and it drifts behind on every provider release: the Claude line was Fable 5.1 /
+> Opus 5.5 / Sonnet 5.5 / Haiku 5.5 at that date. Re-derive the Fable cost
+> multiple on each release.
 
 ## TL;DR
 
@@ -24,8 +26,13 @@ that pin a non-default tier link here — link, never copy (CLAUDE.md).
   fix-agent terminal exits, or any escalation exit — see the row below;
   #537). **Fable nowhere**, except behind an eval-gated pilot.
 - **Eval-before-default:** no role flips model tier without its own A/B eval
-  showing a lift that justifies Fable's **~2.6× effective cost** (2× sticker
-  price × ~1.3× tokenizer overhead — Fable's tokenizer is not the Opus line's).
+  showing a lift that justifies Fable's **~2.6× effective cost** — Fable 5.1 is
+  $10/$50 per MTok against Opus 5.5's $4/$20, so the sticker ratio is **~2.5×**
+  as of 2026-10-10. The earlier 2× sticker × ~1.3× tokenizer decomposition no
+  longer describes this pair and is retired: Fable shares the tokenizer
+  introduced in Opus 4.7, so the ~1.3× token overhead applies against
+  **pre-4.7** tokenizers, and there is **no** tokenizer premium against the
+  current Opus line.
 - `scripts/check_model_pins.py` (CI + `/stocktake`) fails any fable-family pin
   on a `<!-- MODEL-TIER: security-hard-out -->`-marked file and any
   security-surface file missing that marker.
