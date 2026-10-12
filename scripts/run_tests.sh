@@ -261,6 +261,7 @@ run python3 scripts/test_aacr_bench_measure.py
 
 # --- Catalog unit suite ---
 run python3 scripts/test_catalog.py
+run python3 eval/memory/test_memory.py
 
 # --- Build-routing advisor + reconcile hooks ---
 run bash hooks/tests/test-build-routing-advisor.sh

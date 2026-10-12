@@ -34,6 +34,13 @@ Every significant design question is backed by parallel investigation agents tha
 - **RECOMMENDED:** Use crucible:forge (feed-forward mode) — consult past lessons
 - **RECOMMENDED:** Use crucible:cartographer-skill (consult mode) — review codebase map
 - Check current project state (files, docs, recent commits)
+- Read committed repo decisions and rules after compass state, before exploring:
+  ```bash
+  python3 "$plugin_root/scripts/memory.py" read --limit 30 2>/dev/null \
+    || { test -f docs/memory.md && grep -E '^- \[(decision|rule)\] ' docs/memory.md | tail -30; } \
+    || true
+  ```
+  Treat this as L2 context; `AGENTS.md`/`CLAUDE.md` and accepted ADRs win on conflict. Missing file or helper failure is a silent no-op.
 - Understand the user's initial idea through open conversation
 
 ### Phase 2: Investigated Questions
