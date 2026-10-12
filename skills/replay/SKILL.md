@@ -16,7 +16,7 @@ Resume interrupted pipelines from their last successful phase boundary, or repla
 
 **Skill type:** Orchestrator -- dispatches subagents via existing dispatch convention. Does NOT re-implement pipeline phases -- restores state and delegates to the original skill's phase logic.
 
-**Key insight:** The dispatch convention was explicitly designed for this. Manifests, dispatch files, and checkpoints are all on disk. Replay is the orchestration layer that reads them and re-dispatches.
+**Key insight:** The dispatch convention was explicitly designed for this. Manifests, dispatch files, and checkpoints are all on disk. Replay is the orchestration layer that reads them and re-dispatches. When resuming `/build`, the caller supplies that run's `<build-scratch>` directory; use it for all state paths below.
 
 ## Invocation
 
@@ -35,7 +35,8 @@ Resume interrupted pipelines from their last successful phase boundary, or repla
 **Path resolution:**
 - If path ends in `manifest.jsonl`: use directly
 - If path is a directory: look for `manifest.jsonl` in that directory, then in `<path>/dispatch-*/manifest.jsonl`
-- If path matches a scratch directory: read `.pipeline-active` to find the dispatch directory, then read its manifest
+- If path matches a scratch directory: read `<path>/.pipeline-active` to find the dispatch directory, then read its manifest
+- For a build whose `/tmp` dispatch directory was lost: use the durable dispatch directory `~/.claude/projects/<project-hash>/memory/crucible-dispatch-<session-id>/` supplied by the caller; use the separate `<build-scratch>` argument for build recovery files.
 
 ## Modes
 
@@ -192,12 +193,12 @@ Reconstruct the orchestrator's internal state from disk sources. This seeds the 
 
 **Sources, in priority order:**
 
-1. **Phase Handoff Manifests** (`handoff-N-to-M.md` in scratch directory)
+1. **Phase Handoff Manifests** (`<build-scratch>/handoff-N-to-M.md`) — use the build worktree scratch path supplied by the caller.
    - If resuming at a phase boundary and the handoff manifest exists, this is the primary state source
    - Contains: Goal, Mode, Inputs for next phase, Decisions Carried Forward, Active Constraints, Shed Receipt
    - This is the richest state source -- prefer it over all others when available
 
-2. **Pipeline-status.md Compression State** (`~/.claude/projects/<hash>/memory/pipeline-status.md`)
+2. **Pipeline-status.md Compression State** (`<build-scratch>/pipeline-status.md`) — use the build worktree scratch path supplied by the caller.
    - Read the `## Compression State` section for: Goal, Key Decisions, Active Constraints, Next Steps
    - Fallback when handoff manifest is missing
 
@@ -213,9 +214,9 @@ Reconstruct the orchestrator's internal state from disk sources. This seeds the 
    - Filesystem state at the resume point
    - The foundation -- all code, test, and config files at the exact state they were when the checkpoint was taken
 
-6. **Build mode file** (`/tmp/crucible-build-mode.md`)
+6. **Build mode file** (`<build-scratch>/build-mode.md`)
    - Mode (feature/refactor) and baseline commit SHA
-   - If missing (ephemeral /tmp lost): default to feature mode and warn
+   - If missing: default to feature mode and warn
 
 ### Emit Synthetic CSB
 

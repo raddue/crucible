@@ -75,7 +75,7 @@ Remove the `PostToolUse` entry from your `settings.json`. Existing session index
 
 ## Gate Ledger Guard
 
-External enforcement hook for the build pipeline's gate ledger. Blocks unauthorized `Status: PASS` writes to `build-gate-ledger.md` when no matching quality-gate verdict marker exists. This is the mechanical enforcement layer — Claude cannot bypass it because it runs as an external process.
+External enforcement hook for the build pipeline's gate ledger. Blocks unauthorized `Status: PASS` writes to legacy root or per-worktree `build-gate-ledger.md` paths when no matching quality-gate verdict marker exists. This is the mechanical enforcement layer — Claude cannot bypass it because it runs as an external process.
 
 ### Setup
 
@@ -111,7 +111,7 @@ BLOCKED: Cannot write PASS to gate ledger — no matching verdict marker found.
 ### How It Works
 
 1. **PreToolUse hook** (`gate-ledger-guard.sh`) fires before every Write/Edit tool call
-2. Checks if the write target is `build-gate-ledger.md` — exits 0 (allows) for all other files
+2. Checks if the write target ends in `build-gate-ledger.md` — exits 0 (allows) for all other files
 3. Compares incoming content against the existing file to detect new `Status: PASS` entries per phase
 4. If a new PASS is detected, cross-checks against verdict markers in `~/.claude/projects/<hash>/memory/quality-gate/`:
    - PipelineID must match between the ledger content and the verdict marker
@@ -128,7 +128,7 @@ Run the test suite:
 bash hooks/tests/test-gate-ledger-guard.sh
 ```
 
-27 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, PipelineID change detection, legacy `.tool`/`.input` fallback (Write and Edit paths), indented old_string, backslash old_string, double-space phase headers, and non-canonical `build-gate-ledger.md` paths ignored.
+32 test cases covering: non-ledger writes, non-PASS writes, valid markers, missing markers, PipelineID mismatch, missing jq, missing directories, malformed JSON, COMPLETE writes, wrong-phase markers, Phase 3 PASS blocking, first-run bypass, INFERRED-to-PASS promotion, Edit tool PASS introduction, trailing-space PASS, missing PipelineID, PipelineID change detection, legacy `.tool`/`.input` fallback (Write and Edit paths), indented old_string, backslash old_string, double-space phase headers, non-canonical `build-gate-ledger.md` paths ignored, and namespaced build ledgers enforced.
 
 `bash hooks/tests/test-plugin-manifest-hooks.sh` separately checks that `.claude-plugin/plugin.json` actually declares the `PreToolUse` registration described above (matcher, `type: command`, `${CLAUDE_PLUGIN_ROOT}` path) — a wiring check, not a runtime liveness check (#591 item 3).
 
@@ -184,7 +184,7 @@ Add the following to **user-global `~/.claude/settings.json`** (NOT `.claude/set
    **Trigger rule:** `IMPLEMENT ≥ 1 AND (DESIGN ≥ 1 OR SHIP ≥ 1) AND TOTAL_DISTINCT ≥ 2`. If not triggered → exit 0.
 9. **Lazy PROJECT_ROOT derivation** (MIN-3) — `git rev-parse --show-toplevel` on the current cwd; falls back to `pwd` outside a git repo. Prevents cwd drift between dispatches from breaking derivation.
 10. **Sentinel kill-switch** — if `$PROJECT_MEMORY/.build-routing-advisor-disabled` exists, honor it (with optional auto-expiry — see Kill Switch below).
-11. **Marker check** — inspect `$PROJECT_MEMORY/.pipeline-active` (see Suppression Rules).
+11. **Marker check** — inspect the current-worktree build marker at `$PROJECT_MEMORY/builds/<sha256-worktree-root>/.pipeline-active`; legacy shared markers suppress only when `worktree_root` proves they belong to this worktree (see Suppression Rules).
 12. **Dedup** — SHA256(prompt) truncated to 16 hex chars; suppress if same fingerprint within 5 minutes (increments `fires-total` but not `fires-today`, no advisory emitted).
 13. **Emit advisory** — exactly 2 lines on stderr:
     - `ADVISORY: Dispatch looks build-shaped. If single-phase, ignore.`
@@ -202,7 +202,7 @@ Per T1's payload-capture finding, the canonical JSON paths are:
 
 ### Suppression Rules
 
-The pipeline-active marker at `$PROJECT_MEMORY/.pipeline-active` suppresses the advisory when ALL of the following hold:
+The current-worktree build marker at `$PROJECT_MEMORY/builds/<sha256-worktree-root>/.pipeline-active` suppresses the advisory when ALL of the following hold. A legacy `$PROJECT_MEMORY/.pipeline-active` marker is considered only for non-build pipeline types or when a build marker's `worktree_root` matches the current repo root; an ownerless legacy build marker cannot suppress another worktree's advisory.
 
 - `.skill` ∈ `{build, spec, debugging, migrate}`
 - `.start_time` parses as ISO-8601 (`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}`) AND is within 24h of now. Unparseable or non-ISO-8601 values are treated as **stale**, not silently honored (plan line 275) — a numeric literal like `"0"` would parse via GNU `date -d` as today's midnight and spuriously suppress the advisory; the regex prefilter prevents this.
