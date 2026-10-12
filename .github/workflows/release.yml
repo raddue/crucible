@@ -41,7 +41,9 @@ jobs:
         run: bash scripts/run_tests.sh
       - name: Validate version and changelog
         id: version
-        run: echo "version=$(python3 scripts/package_release.py --validate-release)" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(python3 scripts/package_release.py --validate-release)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Ensure release tag does not already exist
         run: |
           if git rev-parse -q --verify "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null; then
