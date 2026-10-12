@@ -50,11 +50,16 @@ def check(sources: dict[str, str]) -> list[str]:
         missing.append("legacy singleton paths and explicit first-run choice")
     if "<build-scratch>/pipeline-status.md" not in build or "<build-scratch>/build-mode.md" not in build:
         missing.append("build compaction recovery uses namespaced files")
-    for stale in ("/tmp/crucible-build-mode.md", "~/.claude/projects/<hash>/memory/pipeline-status.md"):
-        if stale in sources["replay"]:
+    durable_dispatch = "<build-scratch>/crucible-dispatch-<marker.pipeline_id>/"
+    if durable_dispatch not in build or durable_dispatch not in sources["replay"]:
+        missing.append("build recovery and replay use the durable per-worktree dispatch copy")
+    if "marker.pipeline_id` identifies the crashed run" not in sources["replay"]:
+        missing.append("replay identifies durable dispatch copy by crashed run ID")
+    for stale in ("/tmp/crucible-build-mode.md", "~/.claude/projects/<hash>/memory/pipeline-status.md", "~/.claude/projects/<project-hash>/memory/crucible-dispatch-<session-id>/"):
+        if stale in sources["replay"] or (stale.startswith("~/.claude") and stale in build):
             missing.append(f"replay retains stale shared path: {stale}")
     pins = {
-        "replay": ("<build-scratch>/pipeline-status.md", "<build-scratch>/build-mode.md", "<build-scratch>/handoff-N-to-M.md"),
+        "replay": ("<build-scratch>/pipeline-status.md", "<build-scratch>/build-mode.md", "<build-scratch>/handoff-N-to-M.md", "<build-scratch>/crucible-dispatch-<marker.pipeline_id>/"),
         "advisor": ("builds/$WORKTREE_KEY/.pipeline-active", "MARKER_SKILL"),
         "reconcile": ("builds/*/build-gate-ledger.md", "LEDGER_PATHS"),
         "guard": ("*build-gate-ledger.md)", "memory/.*|\\1|p"),
@@ -70,7 +75,7 @@ def check(sources: dict[str, str]) -> list[str]:
 def sample_sources(build: str) -> dict[str, str]:
     return {
         "build": build,
-        "replay": "<build-scratch>/pipeline-status.md <build-scratch>/build-mode.md <build-scratch>/handoff-N-to-M.md",
+        "replay": "<build-scratch>/pipeline-status.md <build-scratch>/build-mode.md <build-scratch>/handoff-N-to-M.md <build-scratch>/crucible-dispatch-<marker.pipeline_id>/ marker.pipeline_id` identifies the crashed run",
         "advisor": "builds/$WORKTREE_KEY/.pipeline-active MARKER_SKILL",
         "reconcile": "builds/*/build-gate-ledger.md LEDGER_PATHS",
         "guard": "*build-gate-ledger.md) memory/.*|\\1|p",
@@ -82,7 +87,7 @@ def selftest() -> int:
     step = "### Step -1: Resume Detection and Pipeline-Active Marker\n"
     step += "\n".join(STEP_MINUS_ONE_REQUIRED)
     step += "\n" + "\n".join(BUILD_PATH_REQUIRED)
-    step += "\n<build-scratch>/pipeline-status.md"
+    step += "\n<build-scratch>/pipeline-status.md\n<build-scratch>/crucible-dispatch-<marker.pipeline_id>/"
     step += '\nfull hex digest output by `printf \'%s\' "$(git rev-parse --show-toplevel)" | sha256sum | cut -d\' \' -f1`\n'
     step += "~/.claude/projects/<project-hash>/memory/{.pipeline-active,build-gate-ledger.md,pipeline-status.md}\n### Step 0:\n"
     good = sample_sources(step + "\n".join(BUILD_PATH_REQUIRED))
@@ -95,7 +100,7 @@ def selftest() -> int:
         bad = good.copy()
         bad[name] = ""
         assert check(bad), f"missing consumer not detected: {name}"
-    for stale in ("/tmp/crucible-build-mode.md", "~/.claude/projects/<hash>/memory/pipeline-status.md"):
+    for stale in ("/tmp/crucible-build-mode.md", "~/.claude/projects/<hash>/memory/pipeline-status.md", "~/.claude/projects/<project-hash>/memory/crucible-dispatch-<session-id>/"):
         bad = good.copy()
         bad["replay"] += " " + stale
         assert any(stale in item for item in check(bad)), f"stale replay path not detected: {stale}"

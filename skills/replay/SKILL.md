@@ -36,7 +36,7 @@ Resume interrupted pipelines from their last successful phase boundary, or repla
 - If path ends in `manifest.jsonl`: use directly
 - If path is a directory: look for `manifest.jsonl` in that directory, then in `<path>/dispatch-*/manifest.jsonl`
 - If path matches a scratch directory: read `<path>/.pipeline-active` to find the dispatch directory, then read its manifest
-- For a build whose `/tmp` dispatch directory was lost: use the durable dispatch directory `~/.claude/projects/<project-hash>/memory/crucible-dispatch-<session-id>/` supplied by the caller; use the separate `<build-scratch>` argument for build recovery files.
+- For a build whose `/tmp` dispatch directory was lost: use the durable dispatch directory `<build-scratch>/crucible-dispatch-<marker.pipeline_id>/` supplied by the caller; `marker.pipeline_id` identifies the crashed run, not the current replay session. Use the separate `<build-scratch>` argument for build recovery files.
 
 ## Modes
 
