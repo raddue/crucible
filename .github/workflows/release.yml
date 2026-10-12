@@ -57,7 +57,7 @@ jobs:
           cd "$RUNNER_TEMP"
           sha256sum "crucible-v${{ steps.version.outputs.version }}.zip" > "crucible-v${{ steps.version.outputs.version }}.zip.sha256"
           {
-            printf '\n## Install\n\nExtract ZIP into `~/repos/crucible`, then use README symlink commands unchanged:\n\n```bash\nmkdir -p ~/repos/crucible\nunzip -o crucible-v${{ steps.version.outputs.version }}.zip -d ~/repos/crucible\nln -sf ~/repos/crucible/skills/* ~/.claude/skills/\nmkdir -p ~/.claude/agents\nln -sf ~/repos/crucible/agents/* ~/.claude/agents/\n```\n\nSHA-256: `'
+            printf '\n## Install\n\nExtract ZIP into `~/repos/crucible`, then use README symlink commands unchanged:\n\n```bash\nmkdir -p ~/repos/crucible\nunzip -o crucible-v${{ steps.version.outputs.version }}.zip -d ~/repos/crucible\nmkdir -p ~/.claude/skills\nln -sf ~/repos/crucible/skills/* ~/.claude/skills/\nmkdir -p ~/.claude/agents\nln -sf ~/repos/crucible/agents/* ~/.claude/agents/\n```\n\nSHA-256: `'
             cut -d ' ' -f1 "crucible-v${{ steps.version.outputs.version }}.zip.sha256"
             printf '`\n'
           } >> release-notes.md

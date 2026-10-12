@@ -28,10 +28,30 @@ def version(root):
 
 def release_notes(root, value):
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    first_heading = re.search(r"^##\s*\S.*$", text, re.M)
+    if not first_heading:
+        raise ValueError("CHANGELOG.md has no section headings")
+    if not re.match(rf"^## v{re.escape(value)}(?:\s|$)", first_heading.group(0)):
+        raise ValueError(f"CHANGELOG.md must begin its first section with ## v{value}")
     match = re.search(rf"^## v{re.escape(value)}(?:\s|$).*?(?=^## |\Z)", text, re.M | re.S)
     if not match:
         raise ValueError(f"CHANGELOG.md missing heading for v{value}")
     return match.group(0).rstrip()
+
+
+def _frontmatter(path):
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}
+    result = {}
+    for line in text[3:end].splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            result[key.strip()] = value.strip()
+    return result
 
 
 def validate_release(root):
@@ -89,9 +109,9 @@ def smoke_check(root):
     skill_files = list(skills.glob("*/SKILL.md"))
     if not skill_files:
         raise ValueError("extracted archive has no loadable skills")
-    first_skill = skill_files[0].read_text(encoding="utf-8")
-    if not re.search(r"(?m)^name:\s*\S+", first_skill) or not re.search(r"(?m)^description:\s*.+", first_skill):
-        raise ValueError(f"skill frontmatter invalid: {skill_files[0].relative_to(root)}")
+    for skill_file in skill_files:
+        if not {"name", "description"} <= set(_frontmatter(skill_file)):
+            raise ValueError(f"skill frontmatter invalid: {skill_file.relative_to(root)}")
     hooks = manifest.get("hooks", {})
     if not isinstance(hooks, dict):
         raise ValueError("plugin hooks must be an object")
@@ -103,25 +123,25 @@ def smoke_check(root):
                     hook_path = root / match.group(1)
                     if not hook_path.is_file():
                         raise ValueError(f"registered hook is missing: {match.group(1)}")
-                    result = subprocess.run(
-                        ["bash", str(hook_path)], input='{"tool_name":"Read"}\n',
-                        text=True, capture_output=True, timeout=10,
-                    )
+                    if subprocess.run(["bash", "-n", str(hook_path)], capture_output=True, text=True).returncode:
+                        raise ValueError(f"registered hook syntax invalid: {match.group(1)}")
+                    payload = '{"tool_name":"Write","tool_input":{"file_path":"/tmp/crucible-smoke-nonledger.md","content":"x"}}\n'
+                    result = subprocess.run(["bash", str(hook_path)], input=payload, text=True, capture_output=True, timeout=10)
                     if result.returncode:
-                        raise ValueError(f"registered hook smoke check failed: {match.group(1)} ({result.returncode})")
+                        raise ValueError(f"registered hook failed smoke execution: {match.group(1)} ({result.returncode})")
     if not (root / "README.md").is_file() or not (root / "agents").is_dir():
         raise ValueError("archive missing documented install inputs")
     readme = (root / "README.md").read_text(encoding="utf-8").splitlines()
     commands = [line.strip() for line in readme if line.strip().startswith((
-        "ln -sf ~/repos/crucible/skills/", "mkdir -p ~/.claude/agents", "ln -sf ~/repos/crucible/agents/"
+        "mkdir -p ~/.claude/skills", "ln -sf ~/repos/crucible/skills/",
+        "mkdir -p ~/.claude/agents", "ln -sf ~/repos/crucible/agents/",
     ))]
-    if len(commands) != 3:
+    if len(commands) != 4:
         raise ValueError("README install commands changed; update release smoke check")
     with tempfile.TemporaryDirectory() as temp:
         home = Path(temp)
         install_root = home / "repos" / "crucible"
         install_root.parent.mkdir(parents=True)
-        (home / ".claude/skills").mkdir(parents=True)
         if root != install_root:
             subprocess.run(["cp", "-a", str(root) + "/.", str(install_root)], check=True)
         result = subprocess.run(
@@ -130,8 +150,6 @@ def smoke_check(root):
         )
         if result.returncode:
             raise ValueError(f"README symlink install failed: {result.stderr.strip()}")
-        (home / ".claude/skills").mkdir(parents=True, exist_ok=True)
-        (home / ".claude/agents").mkdir(parents=True, exist_ok=True)
         skills_dir = home / ".claude/skills"
         agents_dir = home / ".claude/agents"
         skill_links = list(skills_dir.iterdir()) if skills_dir.is_dir() else []

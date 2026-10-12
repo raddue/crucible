@@ -34,6 +34,7 @@ See [docs/architecture.md](docs/architecture.md) for how the orchestrator skills
 
 ```bash
 git clone git@github.com:raddue/crucible.git ~/repos/crucible
+mkdir -p ~/.claude/skills
 ln -sf ~/repos/crucible/skills/* ~/.claude/skills/
 mkdir -p ~/.claude/agents
 ln -sf ~/repos/crucible/agents/* ~/.claude/agents/

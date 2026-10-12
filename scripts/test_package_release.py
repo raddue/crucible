@@ -35,7 +35,7 @@ class PackageReleaseTest(unittest.TestCase):
             }]}]},
         }), encoding="utf-8")
         (root / "README.md").write_text(
-            "```bash\nln -sf ~/repos/crucible/skills/* ~/.claude/skills/\nmkdir -p ~/.claude/agents\nln -sf ~/repos/crucible/agents/* ~/.claude/agents/\n```\n",
+            "```bash\nmkdir -p ~/.claude/skills\nln -sf ~/repos/crucible/skills/* ~/.claude/skills/\nmkdir -p ~/.claude/agents\nln -sf ~/repos/crucible/agents/* ~/.claude/agents/\n```\n",
             encoding="utf-8",
         )
         for name in ("LICENSE", "PLATFORMS.md", "PRIVACY.md", "CLAUDE.md"):
