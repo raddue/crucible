@@ -96,7 +96,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "<!-- MODEL-TIER: security-hard-out -->"
 
 DIR_ALLOWLIST = ("skills/siege/", "skills/dependency-audit/")
-EXPLICIT_FILES = {"agents/crucible-red-team.md"}
+EXPLICIT_FILES = {"agents/crucible-red-team.md", "agents/pi/crucible-red-team.md"}
 NAME_STEMS = ("siege", "dependency-audit", "security", "vuln", "cve",
               "exploit", "threat")
 CARVE_OUTS = ("skills/audit/", "skills/test-coverage/", "skills/stocktake/")

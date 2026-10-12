@@ -71,6 +71,16 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(last["model_profile"], "high")
         self.assertEqual(last["actual_model"], "observed-model")
 
+    def test_after_records_pi_dispatch_provenance(self):
+        dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "crucible-red-team", None, None, "high"))
+        self.assertEqual(dispatch.main([
+            "after", "--dir", self.ddir, "--seq", "1", "--status", "completed",
+            "--actual-model", "provider/model", "--dispatch-ref", "run-123", "--harness", "pi",
+        ]), 0)
+        row = read_manifest(self.ddir)[-1]
+        self.assertEqual(row["dispatch_ref"], "run-123")
+        self.assertEqual(row["harness"], "pi")
+
     def test_seq_recovery_after_entries(self):
         dispatch.cmd_before(_Args(self.ddir, 1, self.dfile, "plan-writer", None, None, "opus"))
         dispatch.cmd_after(_Args(self.ddir, status="completed", seq=1))

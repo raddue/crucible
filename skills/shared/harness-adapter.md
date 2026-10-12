@@ -30,7 +30,7 @@
 | **OpenCode** | `.opencode/commands/<name>.md`, `description`/`agent`/`subtask` frontmatter, `$ARGUMENTS` + `@file` includes | `subtask: true` command (parallel where the host model supports it) | none — BYO reference harness | **Runtime validation: non-gating follow-up #337** |
 | **Codex CLI** | prompt file in the Codex prompts dir, prompt metadata header | sequential in-context (no first-class parallel-subagent primitive) → **degradation fallback** | `@codex review` (closed product feature, optional) | Authored-to; runtime validation deferred |
 | **Cursor** | rule / command file in the Cursor commands location | sequential in-context → **degradation fallback** | Bugbot (closed, server-side, optional) | Authored-to; runtime validation deferred |
-| **Pi** | unknown / BYO | unknown → assume **degradation fallback** until probed | unknown | Unknown / BYO; not authored-against |
+| **Pi** | `~/.pi/agent/agents/<name>.md`; invoke skill by path | `subagent` + disk-mediated dispatch (`shared/dispatch-convention.md`) | none | Authored-to-spec; live validation pending |
 
 > The five mappings below are keyed by these harness names. Where a harness lacks a primitive, the
 > mapping says **which fallback** applies — never "unsupported". A skill that cannot fan out in
@@ -120,7 +120,8 @@ source; to change a role's tier, edit the agent def, not the prose.
 |---|---|---|
 | **Claude Code** | `~/.claude/agents/crucible-<role>.md` with `model:` frontmatter (symlinked from `<repo>/agents/`). Current aliases: `high`→`opus`, `standard`→`sonnet`, `fast`→`haiku`. The agent-def `model:` binds via the precedence chain above. | **Confirmed** mechanism (docs; runtime-proven by the on-disk transcript read in the enforcement-proof note below). |
 | **OpenCode** | An `agent:` profile per role, named with the intended profile; the skill's OpenCode frontmatter names the profile. | **Authored-to-spec, UNCONFIRMED.** Mapping 1 establishes only that OpenCode reads the `agent:` key — NOT that an `agent:` profile can pin a *model*. #337 confirms. If it cannot, OpenCode degrades to the operator-default floor below without stopping dispatch. |
-| **Codex / Cursor / Pi** | no first-class per-agent model pin | **Degradation:** omit the unsupported profile/model field; model = whatever the harness runs or operator configures. Record actual model when available. The recall guarantee relies on the **operator setting a strong default model**. Bounded and documented, never silent, never a dispatch stop. |
+| **Codex / Cursor** | no first-class per-agent model pin | **Degradation:** omit the unsupported profile/model field; model = whatever the harness runs or operator configures. Record actual model when available. The recall guarantee relies on the **operator setting a strong default model**. Bounded and documented, never silent, never a dispatch stop. |
+| **Pi** | `subagents.agentOverrides.<role>.model` + `thinking` (profile-to-model mapping configured on the machine) | Gate-bearing roles fail closed on missing/unmapped binding or model mismatch; non-gate roles retain no-stop behavior. |
 
 **Enforcement is proven by the on-disk subagent transcript model, not a pre-dispatch intent field
 (#335 cross-link).** Two readouts must not be conflated:
@@ -147,7 +148,7 @@ Where the installed file goes. This is the only path an installer needs to write
 | OpenCode | `.opencode/commands/<name>.md` | `/<name>` |
 | Codex CLI | the Codex prompts directory (prompt file) | the harness's prompt-invocation convention |
 | Cursor | the Cursor commands / rules location | the harness's command-invocation convention |
-| Pi | unknown / BYO | unknown |
+| Pi | `agents/pi/*.md` symlinked to `~/.pi/agent/agents/` | Crucible skills remain loaded from skill paths; subagent profiles use machine-local `agentOverrides`. |
 
 > Shared engine/convention files (`shared/delve-engine.md`, `shared/severity-verdict-contract.md`,
 > `shared/dispatch-convention.md`, **this file**) are *referenced by* the skills via
@@ -166,7 +167,7 @@ harness-specific call inline** (I1); this row is where the abstract name becomes
 | OpenCode | `subtask: true` commands, one per angle | spawn the angle subtasks; the host model runs them concurrently where it can |
 | Codex CLI | **none** → Mapping 4 sequential fallback | run angles as multiple sequential passes (§5) |
 | Cursor | **none** → Mapping 4 sequential fallback | run angles as multiple sequential passes (§5) |
-| Pi | unknown → assume Mapping 4 fallback | sequential passes until a primitive is confirmed |
+| Pi | `subagent` workflow (`runs.all`) | parallel fan-out using roster roles; protocol defined in `shared/dispatch-convention.md` |
 
 **Caller vs. mechanism (design §5.1, r3fix-S5).** This adapter is the dispatch **mechanism** that
 `delve-engine` *invokes* to run its angles — it is **not** a caller of the engine. The engine's two
@@ -346,10 +347,11 @@ the install checklist — concrete enough to install by (AC6 doc portion).
 - **Comments:** Bugbot is a closed accelerator, not a dependency; `--comment` uses the forge CLI rows,
   else paste-mode.
 
-### Pi *(unknown / BYO — not authored-against)*
-- **Where / invoked / frontmatter:** unknown until probed.
-- **Dispatch:** assume **Mapping 4 sequential passes** until a parallel primitive is confirmed.
-- **Comments:** forge CLI rows if a shell is available (unconfirmed for Pi), else paste-mode (the universal floor).
+### Pi *(authored-to-spec; live validation pending)*
+- **Where:** symlink `agents/pi/*.md` to `~/.pi/agent/agents/`; invoke Crucible skills through Pi's skill loader or by reading the skill path.
+- **Agent profiles:** machine-local `subagents.agentOverrides.<role>.{model,thinking}` binds profile to physical model. Gate-bearing roles block on missing/mismatched bindings; do not inherit or self-review.
+- **Dispatch:** `subagent` with the roster role; parallel fan-out via one `runs.all` workflow, per `shared/dispatch-convention.md`.
+- **Comments:** forge CLI rows if a shell is available, else paste-mode.
 
 > **Drift risk (design §9, R5).** This is a documented contract, not a runtime check, so it can drift
 > from a harness's actual behavior as harnesses evolve. The milestone's defense is the #335 portability
