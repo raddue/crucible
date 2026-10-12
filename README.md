@@ -49,6 +49,10 @@ git clone git@github.com:raddue/crucible.git ~/repos/crucible
 
 Then point your platform at the cloned skills directory. See [Cursor plugin docs](https://cursor.com/docs/plugins/building) and [Codex skills docs](https://developers.openai.com/codex/skills/). Some advanced features (parallel subagent dispatch, agent teams, persistent memory) are platform-specific and degrade gracefully — see [PLATFORMS.md](PLATFORMS.md).
 
+**Windows:** clone with `git config core.symlinks true` (or set it afterwards and re-check out). The repo tracks `AGENTS.md` as a symlink to `CLAUDE.md`; without symlink support that file lands as a one-line text file containing the string `CLAUDE.md` instead of the guidelines.
+
+These root instruction files apply to agents working *in this repo*. Installing Crucible links or copies `skills/` (and `agents/`, if you wire those) only — it never writes a root instruction file into your project, your home directory, or any global config, so your own `AGENTS.md`/`CLAUDE.md` is left untouched. Watch the surrounding scope rather than the install: Claude Code reads `AGENTS.md` **only when no `CLAUDE.md` exists in the current directory or any parent**, so a repo with a hand-maintained `AGENTS.md` and any ancestor `CLAUDE.md` will have the `AGENTS.md` silently ignored.
+
 ## Setup essentials
 
 **Run in auto mode** for autonomous pipelines (`/build`, `/debugging`, long `/quality-gate` runs). Auto mode lets Claude execute tool calls without per-action prompts while still confirming destructive operations. It supersedes earlier `--dangerously-skip-permissions` guidance.

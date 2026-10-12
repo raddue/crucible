@@ -604,9 +604,13 @@ EXPECTED_ADDED_LINES = [
     "(`grudge-resolution-guard.sh`) will block the session's next Stop event "
     "until a grudge is recorded or explicitly skipped — see `hooks/README.md`.",
     "",
+    '- **Fix:** Never bypass branch protection on your own initiative — see "Merging PRs (branch protection)" in the root instruction file for the one case it permits. Otherwise report the protection rule and let the user resolve it properly.',
+    '- Use `--admin` (or bypass branch protection by any other means) except under the conditions in "Merging PRs (branch protection)" in the root instruction file',
 ]
 EXPECTED_REMOVED_LINES = [
     '  --files "<comma-separated files the PR changed>" \\',
+    '- **Fix:** Never use `--admin` flag. Report the protection rule and let the user resolve it properly.',
+    '- Use `--admin` to bypass branch protection',
 ]
 
 # Command words that may precede the real command word in a simple command.
