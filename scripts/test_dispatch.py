@@ -391,6 +391,19 @@ class GateProvenanceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("receipt", result.stdout.lower())
 
+    def test_same_dispatch_cannot_cover_two_roles(self):
+        with open(os.path.join(self.ddir, "manifest.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(self.row) + "\n")
+            f.write(json.dumps({**self.row, "seq": 2, "role": "crucible-security"}) + "\n")
+        with open(self.marker, "w", encoding="utf-8") as f:
+            f.write("Harness: pi\nVerdict: PASS\nRequired-Legs: crucible-red-team, crucible-security\n"
+                    "Mapped-Model: crucible-red-team=provider/model\n"
+                    "Mapped-Model: crucible-security=provider/model\n")
+        self.write_receipt()
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("already covers role", result.stdout)
+
 
 class _Args:
     """Tiny namespace standing in for argparse.Namespace."""
