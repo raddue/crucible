@@ -403,6 +403,11 @@ run python3 scripts/check_grudge_guard_witness_wiring.py
 run python3 scripts/check_qg_closure_modes.py --selftest
 run python3 scripts/check_qg_closure_modes.py
 
+# --- orchestrator fleet-file helpers + liveness detectors ---
+run python3 scripts/test_orchestrator_fleet.py
+run python3 scripts/test_orchestrator_scan.py
+run python3 scripts/test_orchestrator_ping.py
+
 # --- Summary ---
 if [ ${#failed[@]} -ne 0 ]; then
   echo

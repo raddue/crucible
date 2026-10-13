@@ -91,7 +91,7 @@ class FleetTest(unittest.TestCase):
 
     def test_registration_rotation_preserves_old_identity(self):
         of.main(["init", "-p", self.path])
-        self.register()
+        self.register(status="done")
         self.register(pane=self.pane("w9:p2", "term-2"))
         worker = self._load()["workers"][0]
         self.assertEqual(worker["pane_history"][0]["terminal_id"], "term-1")

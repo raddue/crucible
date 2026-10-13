@@ -66,6 +66,8 @@ python3 scripts/orchestrator_ping.py -p "$FLEET" --name <worker>                
 
 Each entry: `{name, pane_id, tab_id, worktree, branch, issue, task, backend, listagents_name, status, depends_on?, updated_at}`. Doc-level: `backlog` (FIFO for `queue`), `pending` (free-text next-action, written by `log`), sibling `<repo>-boss.log`. `depends_on` names workers that must reach `done` before this one shows in `ready`.
 
+`pane_identity` is the pane / terminal / agent-session record that `register` and `bind` check against Herdr's live state and against the receipts; when a worker legitimately rotates to a new pane, the superseded record is appended to `pane_history` with `cleanup: pending`. Rotation is a **guarded close**: `register` refuses to replace a pane while the worker is still `dispatched` or `working`, so mark it `done` or `blocked` first — the refusal is deliberate, not a bug to work around.
+
 Write the entry when you dispatch (step 4), update on rotation and close (step 7), `log` every transition so your own intent survives *your* compaction, and `sync` before trusting it (step 3).
 
 ## 3 — Reconstruct in-flight state before starting anything new
