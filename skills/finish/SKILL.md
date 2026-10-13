@@ -157,6 +157,8 @@ Silently-missing tools are NOT a pass — they are an "unknown." Either run the 
 
 For ecosystems not in this matrix, extend it: manifest → type-check → lint → format-check → test. Do not skip an ecosystem because it isn't listed.
 
+- **Crucible repo (has `scripts/grudge_guard_doctor.py`): additionally run `python3 scripts/grudge_guard_doctor.py --grudge-guard`.** This reads the grudge-resolution Stop hook's write-only outcome witness (design §5b — the hook never reads it; this doctor is its only reader). A non-zero exit means a possibly-*stuck* stop hook: a stale un-terminated `BLOCK` session (no `CLEARED`/`GIVEUP`, no later `BLOCK`). Treat it as a hard stop per this checkpoint — report it, resolve or retire it, then re-run. A missing script or an empty witness is a skip with narration, never a masked pass.
+
 **Exit-code interpretation:** treat each tool's documented exit-code contract authoritatively, not just 0 vs non-0. Example: `gh pr checks` exits 8 for "checks pending" — a legitimate non-terminal state, not a failure. The rule is "never mask an exit code without interpreting it," not "non-zero is always failure." If a tool's contract is unclear, treat non-zero as failure and ask the user.
 
 **On ANY unhandled non-zero exit (after exit-code interpretation): STOP.** Report the failure, dispatch a fix, and re-run the full matrix from scratch. Do not partially re-run — a fix in one layer can regress another.

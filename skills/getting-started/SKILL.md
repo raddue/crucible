@@ -38,8 +38,6 @@ These actions ALWAYS have a matching skill — invoke it, no exceptions:
 |--------|-------|
 | Building a feature, adding functionality | design → build |
 | Fixing a bug or test failure | debugging |
-| Implementing from a mockup/visual spec | mock-to-unity |
-| Creating a UI mockup | mockup-builder |
 | Writing implementation code | test-driven-development |
 | Claiming work is done | verify → finish |
 | Receiving code review feedback | review-feedback |
@@ -84,7 +82,7 @@ These thoughts mean STOP — you're rationalizing skipping a skill:
 When multiple skills could apply:
 
 1. **Process skills first** (design, debugging) — determine HOW to approach
-2. **Implementation skills second** (mock-to-unity, TDD) — guide execution
+2. **Implementation skills second** (TDD) — guide execution
 
 "Build X" → design first, then build.
 "Fix this bug" → debugging first, then domain skills.

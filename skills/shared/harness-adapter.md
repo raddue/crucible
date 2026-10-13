@@ -60,6 +60,7 @@ subtasks. Nothing in the authored body changes — only the frontmatter is re-ex
 of these frontmatter fields — it lives as a column-0 body line under a `## Dispatch` heading (see §7),
 so that no harness's frontmatter loader parses or strips it.
 
+<!-- CANONICAL: shared/model-tier-policy.md -->
 ## 2b. Mapping 1b — Per-role model tiers (recall-critical dispatch model enforcement)
 
 The quality-gate / red-team loop is **recall-critical**: an Opus reviewer finds Fatals a Sonnet
@@ -130,7 +131,7 @@ source; to change a role's tier, edit the agent def, not the prose.
   `message.model` = the model the subagent **actually ran on** (empirically confirmed to exist on this
   machine: Opus and Sonnet values observed across real transcripts; the `<synthetic>` sentinel is real
   and must be filtered). Enforcement is proven by reading that file and confirming `crucible-red-team`
-  executed on `claude-opus-4-*` (qg-* on `claude-sonnet-4-*`). A
+  executed on `claude-opus-*` (qg-* on `claude-sonnet-*`). A
   model-discriminating *behavioral* fixture is explicitly out of scope (a behavioral PASS is consistent
   with the pin having silently failed). This direct read is the #335 runtime defense against the
   "documented contract can drift" risk below.

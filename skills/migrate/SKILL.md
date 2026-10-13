@@ -397,7 +397,7 @@ Present the complete plan:
 
 **On approval:** Save the plan to `docs/plans/YYYY-MM-DD-<topic>-migration-plan.md`. If `--plan-only` mode: stop here, report success.
 
-**REQUIRED SUB-SKILL:** Use crucible:quality-gate on the migration plan with artifact type "plan". Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
+**REQUIRED SUB-SKILL:** Use crucible:quality-gate on the migration plan with artifact type "plan" and explicit `mode: standard` (or caller-requested `full`). Persist selected mode across retries/resume; never coerce invalid mode. Iterate until clean or stagnation. **(Non-negotiable — see Quality Gate Requirement.)**
 
 ---
 
@@ -504,8 +504,8 @@ Escalate to the user when:
 | `crucible:forge` | Retrospective | Phase 8 (capture migration outcome) |
 | `crucible:build` | Refactor mode | Phase 7 (per-phase execution for restructuring phases) |
 | `crucible:build` | Feature mode | Phase 7 (per-phase execution for additive phases) |
-| `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase) |
-| `crucible:quality-gate` | Plan gate | After Phase 5 (artifact type: plan, on migration plan) |
+| `crucible:quality-gate` | Per-phase gate | Phase 7 (artifact type: code, per phase; explicit immutable mode) |
+| `crucible:quality-gate` | Plan gate | After Phase 5 (artifact type: plan, on migration plan; explicit immutable mode) |
 | `crucible:test-coverage` | Per-phase audit | Phase 7 (test alignment after each phase) |
 | `crucible:prospector` | Upstream | Prospector discovers "modernize X"; migrate plans the transition |
 
@@ -523,7 +523,7 @@ Escalate to the user when:
 
 Migration work is especially vulnerable to "this is mechanical/boilerplate" rationalization. Mechanical changes still introduce bugs — mismatched imports, forgotten call sites, subtle behavioral differences in new APIs. Quality gates catch these regardless of how "simple" the migration step appears.
 
-**Fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a clean verification round (0 Fatal, 0 Significant on a fresh review).
+**Fixing findings is NOT the same as passing the gate.** The iteration loop must complete with a mode-clean fresh reverify (`0 Fatal` in default `standard`; `0 Fatal, 0 Significant` when the caller passes `mode: full`). Standard residual Significant/Minor findings must be disclosed.
 
 **The only valid skip** is an unambiguous user instruction specifically referencing the gate. General feedback is not skip approval.
 

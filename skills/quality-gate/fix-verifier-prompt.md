@@ -15,7 +15,7 @@ You will receive:
 1. **Round N findings** — the red-team findings that the fix agent was asked to address
 2. **Fix journal entry** — the `## Round N Fix` section describing what the fix agent claims it did (approach taken, files changed, reasoning)
 3. **Prepared artifact** — varies by artifact type:
-   - **Non-code artifacts** (design docs, plans, hypotheses, mockups, translations): the full post-fix artifact
+   - **Non-code artifacts** (design docs, plans, hypotheses): the full post-fix artifact
    - **Code artifacts**: the diff plus the full post-fix source of files touched by the diff
 
 ## Procedure

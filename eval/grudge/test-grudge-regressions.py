@@ -58,7 +58,7 @@ def test_metachar_filename_surfaces_and_survives():
     try:
         _write(repo_root, "pages/[id].js")
         ga.append(symptom="dynamic route 500s", files_touched=["pages/[id].js"],
-                  repo="r", repo_root=repo_root, base_dir=base)
+                  repo="r", store_root=repo_root, base_dir=base)
         m, _ = gq.query(["pages/[id].js"], "r", repo_root, base_dir=base)
         _check("O-9 literal metachar filename matches itself", bool(m),
                "grudge on pages/[id].js did not surface")
@@ -81,7 +81,7 @@ def test_intentional_glob_still_works():
     try:
         _write(repo_root, "src/auth/login.py")
         ga.append(symptom="auth-wide bug", files_touched=["src/auth/*"],
-                  repo="r", repo_root=repo_root, base_dir=base)
+                  repo="r", store_root=repo_root, base_dir=base)
         m, _ = gq.query(["src/auth/login.py"], "r", repo_root, base_dir=base)
         _check("O-9b intentional glob entry still matches a concrete scope file", bool(m))
         # delete the only matching file -> glob no longer survives -> culled
@@ -102,7 +102,7 @@ def test_dashes_in_frontmatter_value():
         ga.append(symptom="parser chokes --- on rule lines",  # value contains ---
                   root_cause="split on --- anywhere",
                   files_touched=["src/parser.py"], repo="r",
-                  repo_root=repo_root, base_dir=base)
+                  store_root=repo_root, base_dir=base)
         m, _ = gq.query(["src/parser.py"], "r", repo_root, base_dir=base)
         _check("O-10 grudge with '---' in a value still surfaces (files_touched intact)",
                bool(m), "frontmatter truncated -> files_touched dropped")
@@ -123,7 +123,7 @@ def test_dashes_in_body():
         _write(repo_root, "src/x.py")
         ga.append(symptom="body fence bug", files_touched=["src/x.py"],
                   repro="see diff:\n---\n- old\n+ new\n---\n", repo="r",
-                  repo_root=repo_root, base_dir=base)
+                  store_root=repo_root, base_dir=base)
         m, _ = gq.query(["src/x.py"], "r", repo_root, base_dir=base)
         _check("O-10b grudge with '---' fences in body still surfaces", bool(m))
     finally:
@@ -141,7 +141,7 @@ def test_pathological_signature_does_not_hang():
         _write(repo_root, "src/target.py", "a" * 60 + "!\n")
         ga.append(symptom="redos", files_touched=["src/keep.py"],
                   anti_pattern_signature=r"(a+)+$", repo="r",
-                  repo_root=repo_root, base_dir=base)
+                  store_root=repo_root, base_dir=base)
         t0 = time.time()
         m, _ = gq.query(["src/target.py"], "r", repo_root, base_dir=base,
                         with_signatures=True)

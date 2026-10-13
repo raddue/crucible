@@ -20,14 +20,14 @@ Adversarial review of any artifact. Dispatches a Devil's Advocate subagent to at
 
 | Argument | Type | Default | Effect |
 |---|---|---|---|
-| `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis/mockup/translation defaults) | Standalone-mode only: LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. |
+| `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis defaults) | Standalone-mode only: LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. |
 | `dr_signal_findings` | int \| null | `2` if `suppression_threshold > 3` else `null` | Standalone-mode only: count of NEW (delta-vs-prior-round) Fatal+Significant findings at or below which the DR signal fires (interactive only). |
 
 These args apply ONLY in standalone-mode iterative-loop invocations. When red-team is invoked single-pass by `crucible:quality-gate`, QG owns the loop and these args are ignored — QG emits its own ledger.
 
 **Term definitions (standalone red-team).** Both defaults above reference two values red-team resolves at invocation:
 
-- `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/SKILL.md`): **10** for code artifacts, **3** for hypothesis / mockup / translation artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
+- `suppression_threshold` — the artifact-type-keyed pre-threshold suppression value, identical to quality-gate's (see `skills/quality-gate/SKILL.md`): **10** for code artifacts, **3** for hypothesis artifacts. The `> 3` test is therefore true only for code, so the cost-cap and DR signals auto-enable for code artifacts and auto-null for the threshold-3 artifact types (matching QG's INV-303-5).
 - `interactive` — whether this invocation may prompt the user. True for a user-invoked standalone `/red-team`; false when a non-interactive caller (e.g., `build` / `finish`) drives the loop. In non-interactive mode the signals log to the ledger instead of prompting (see the DR and cost-cap rules below).
 
 ## When to Use
@@ -91,7 +91,7 @@ The Devil's Advocate MUST classify every challenge:
 ```
 # Round N Ledger
 
-Artifact-type: <code | hypothesis | mockup | translation>
+Artifact-type: <code | design | plan | hypothesis>
 Total findings: N (F: x, S: y, M: z)
 New since round N-1: K   (on round 1, K = total findings — no prior round)
 Accepted: P (all findings — v0.1)

@@ -448,6 +448,8 @@ def _cli_emit(ledger_arg: str, entry: dict) -> int:
     # unconditionally (an emitter sending the stale `1` must not produce a
     # hybrid v1+repo row). Fill `repo` when absent OR explicitly null/empty —
     # setdefault would miss the null case, silently voiding provenance.
+    if not entry.get("model_resolution"):
+        entry["model_resolution"] = None
     if not entry.get("repo"):
         entry["repo"] = default_repo()
     entry["schema_version"] = SCHEMA_VERSION

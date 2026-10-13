@@ -32,6 +32,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 from scripts.grudge_append import (  # noqa: E402
     default_base_dir, grudges_dir, normalize_path, resolve_repo,
+    resolve_store_repo,
 )
 from scripts.pathmatch import glob_match as _glob_match  # noqa: E402
 
@@ -374,6 +375,218 @@ def cull(repo: str, repo_root: str, base_dir: Optional[str] = None) -> List[str]
     return removed
 
 
+# --------------------------------------------------------------------------- #
+# #559: resolution lookups for the grudge-resolution Stop hook.               #
+#                                                                             #
+# store_repo_root locates/filters the grudge store; session_root is the        #
+# checkout every git call runs against (`git -C <session_root>`). The two are  #
+# distinct: a linked worktree shares the store of its checkout root but has    #
+# its own HEAD and its own on-disk files.                                     #
+# --------------------------------------------------------------------------- #
+# `git -C <dir>` only chdirs — it does NOT clear the inherited environment, and
+# two families of variables there outrank everything on the command line:
+#   * repository LOCATION — GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, … — which
+#     take precedence over discovery-from-cwd, so an inherited GIT_DIR (a Stop
+#     hook firing while a git hook is on the stack, or any shell that exported
+#     it) silently sends every call below at a DIFFERENT repository;
+#   * git CONFIG — GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n,
+#     GIT_CONFIG_GLOBAL and GIT_CONFIG_PARAMETERS (`git -c`'s own transport).
+#     A single bad key in any of them turns EVERY call here into
+#     `fatal: unable to parse command-line config` (rc=128), which this module
+#     reads as an ordinary miss — measured: with `GIT_CONFIG_COUNT=1` inherited,
+#     a --by-commit lookup that answers `matched=1` answers `matched=0` instead,
+#     so the Stop hook's step-13 clearance flips from cleared to blocked with
+#     nothing in its output to say why.
+# Either way the wrong answer is indistinguishable from a right one.
+#
+# This is therefore an ALLOWLIST, not a denylist, mirroring the Stop hook's own
+# `env -i PATH HOME git` (hooks/grudge-resolution-guard.sh). A denylist CANNOT
+# be complete here even in principle: GIT_CONFIG_KEY_n is INDEXED, so the set of
+# names to drop is unbounded and no literal tuple can name them all. git is
+# handed only what it genuinely needs — PATH (git must be findable at all) and
+# HOME (git's per-user config, where a legitimate `safe.directory` lives).
+# Everything git needs about the repository it is being asked about arrives as
+# an argument, which covers the repository-location family for free.
+_GIT_ENV_KEEP = ("PATH", "HOME")
+
+
+def _git_env() -> Dict[str, str]:
+    return {k: os.environ[k] for k in _GIT_ENV_KEEP if k in os.environ}
+
+
+def _git(session_root: str, *args: str) -> Tuple[int, str]:
+    """Run `git -C <session_root> <args>`; return (returncode, stripped stdout).
+    A missing/failing git is a non-zero returncode, never a raised error."""
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["git", "-C", session_root, *args],
+            capture_output=True, text=True, timeout=30, env=_git_env(),
+        )
+    except (OSError, ValueError):
+        return (1, "")
+    return (proc.returncode, proc.stdout.strip())
+
+
+def _fs_root(session_root: str) -> str:
+    """The checkout root `session_root` names, for the FILESYSTEM half of the
+    lookup. git resolves a repository from any subdirectory, but files_touched
+    are stored repo-relative, so joining them onto a session_root that is a
+    subdirectory makes every stored path "not exist" and every grudge look
+    0-survivor. --session-root defaults to cwd and a Stop hook's cwd is routinely
+    a subdirectory, so this is the default path, not an exotic argument.
+    A session_root that is not inside a repository at all falls back to itself —
+    an ordinary miss, never an internal error."""
+    rc, top = _git(session_root, "rev-parse", "--show-toplevel")
+    if rc != 0 or not top:
+        return session_root
+    return os.path.realpath(top)
+
+
+_HEX_TOKEN = _re.compile(r"^[0-9a-fA-F]{4,40}$")
+
+
+def _resolve_commit(session_root: str, sha: str) -> Optional[str]:
+    """Full 40-char commit id for `sha`, or None when it is empty, unresolvable
+    or ambiguous. "Cannot resolve" is a miss, never an internal error.
+
+    A hex-shaped token — exactly what fixed_in_commit stores — is disambiguated
+    into the OBJECT namespace first. `rev-parse --verify <s>^{commit}` prefers a
+    REF named <s> over the object whose abbreviation is <s> (announcing it only
+    as "refname is ambiguous" on stderr, which _git discards), so a repository
+    holding a tag or branch named like a short SHA would otherwise resolve a
+    stored abbreviation to a completely unrelated commit. Each candidate object
+    is still peeled through the contract's pinned
+    `rev-parse --verify <sha>^{commit}` form; a prefix that peels to more than
+    one commit is genuinely ambiguous and stays a miss."""
+    s = (sha or "").strip()
+    if not s:
+        return None
+    if _HEX_TOKEN.match(s):
+        rc, out = _git(session_root, "rev-parse", f"--disambiguate={s}")
+        if rc != 0:
+            return None
+        commits = set()
+        for oid in out.split():
+            crc, cout = _git(session_root, "rev-parse", "--verify", f"{oid}^{{commit}}")
+            if crc == 0 and len(cout) == 40:
+                commits.add(cout)
+        return commits.pop() if len(commits) == 1 else None
+    rc, out = _git(session_root, "rev-parse", "--verify", f"{s}^{{commit}}")
+    if rc != 0 or len(out) != 40:
+        return None
+    return out
+
+
+def find_by_commit(sha: str, repo: str, store_repo_root: str, session_root: str) -> Optional[Dict]:
+    """The grudge whose fixed_in_commit is the same commit as `sha`, or None.
+
+    BOTH sides go through `git rev-parse --verify <x>^{commit}` first, so a full
+    40-char candidate matches a stored 7-char abbreviation. A non-zero rev-parse
+    on either side means "no match"."""
+    target = _resolve_commit(session_root, sha)
+    if target is None:
+        return None
+    for g in load_grudges(repo, store_repo_root):
+        stored = _resolve_commit(session_root, g.get("fixed_in_commit", ""))
+        if stored is not None and stored == target:
+            return g
+    return None
+
+
+def _patch_id(session_root: str, sha: str, path: str) -> str:
+    """Field 1 (the patch-id) of `diff-tree -p <sha> -- <path> | patch-id
+    --stable`, or "" when either side produces nothing. Field 2 is the commit id,
+    which differs by construction between a rewrite and its original."""
+    import subprocess
+    try:
+        # --root: without it `diff-tree -p` prints NOTHING for a parentless root
+        # commit, so _patch_id returns "" and _structural_match's bool() guard
+        # can never match one. Root commits are a real case here (orphan
+        # branches, fresh repos, squash-to-orphan); the flag is a no-op for a
+        # commit that has a parent.
+        diff = subprocess.run(
+            ["git", "-C", session_root, "diff-tree", "--root", "-p", sha, "--", path],
+            capture_output=True, text=True, timeout=30, env=_git_env(),
+        )
+        if diff.returncode != 0 or not diff.stdout.strip():
+            return ""
+        pid = subprocess.run(
+            ["git", "-C", session_root, "patch-id", "--stable"],
+            input=diff.stdout, capture_output=True, text=True, timeout=30,
+            env=_git_env(),
+        )
+    except (OSError, ValueError):
+        return ""
+    if pid.returncode != 0:
+        return ""
+    fields = pid.stdout.split()
+    return fields[0] if fields else ""
+
+
+def _structural_match(grudge: Dict, survivor: str, session_root: str, candidate_sha: str) -> bool:
+    """==1-survivor branch: the stored fix resolves, is NOT already reachable
+    from the session's HEAD (the exact-SHA path covers reachable ones), and
+    carries the same patch as the candidate for that one file."""
+    stored = _resolve_commit(session_root, grudge.get("fixed_in_commit", ""))
+    if stored is None:
+        return False
+    rc, _ = _git(session_root, "merge-base", "--is-ancestor", stored, "HEAD")
+    if rc == 0:
+        return False
+    stored_pid = _patch_id(session_root, stored, survivor)
+    cand_pid = _patch_id(session_root, candidate_sha, survivor)
+    return bool(stored_pid) and bool(cand_pid) and stored_pid == cand_pid
+
+
+def find_by_files(
+    files: List[str],
+    repo: str,
+    store_repo_root: str,
+    session_root: str,
+    candidate_sha: str,
+    candidate_at: int,
+) -> Optional[Dict]:
+    """The grudge already resolving the candidate commit's file set, or None.
+
+    survivors(g, session_root) is BOTH the branch selector and the match test, so
+    a grudge with >=1 survivor is checked by exactly one branch: >=2 survivors ->
+    subset of the candidate's files AND date_fixed not after the candidate's UTC
+    author date; ==1 -> structural patch-id identity."""
+    import datetime as _dt
+    # git resolves the repo from any subdirectory, but files_touched are stored
+    # repo-relative — so the FILESYSTEM half of this lookup must run against the
+    # checkout root, not against a session_root that may be below it.
+    fs_root = _fs_root(session_root)
+    cand = {normalize_path(f, fs_root) for f in (files or []) if f and f.strip()}
+    cand_date = _dt.datetime.fromtimestamp(int(candidate_at), _dt.timezone.utc).date()
+    for g in load_grudges(repo, store_repo_root):
+        # parse_grudge's #408 F4 guard catches only a JSON decode error, so a
+        # hand-written files_touched that decodes to a non-list (`5`, `null`) or
+        # a list holding a non-string reaches survivors() and raises. A malformed
+        # record is a silent miss, never the CLI's exit 3.
+        try:
+            surv = survivors(g, fs_root)
+        except (TypeError, AttributeError):
+            _qwarn(f"unusable files_touched in {g.get('_path')}; grudge cannot match")
+            continue
+        if not surv:
+            continue
+        if len(surv) >= 2:
+            if not set(surv) <= cand:
+                continue
+            try:
+                fixed_on = _dt.date.fromisoformat(g.get("date_fixed", ""))
+            except (ValueError, TypeError):
+                _qwarn(f"unusable date_fixed in {g.get('_path')}; grudge cannot match")
+                continue
+            if fixed_on <= cand_date:
+                return g
+        elif _structural_match(g, surv[0], session_root, candidate_sha):
+            return g
+    return None
+
+
 def _main(argv: List[str]) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="Query the Book of Grudges for files about to be touched.")
@@ -384,15 +597,62 @@ def _main(argv: List[str]) -> int:
     ap.add_argument("--cull", action="store_true", help="remove grudges whose files_touched are all gone")
     ap.add_argument("--repo-root", default=None, help="override git toplevel realpath (tests)")
     ap.add_argument("--repo", default=None, help="override repo basename (tests)")
+    ap.add_argument("--by-commit", default=None, metavar="SHA",
+                    help="#559: print the stem of the grudge fixed by this commit")
+    # Repeatable, EQUALS-form: --by-files=PATH one per touched path (action=
+    # "append"). Each value is a single argv element, so a comma in a filename
+    # is data, not a delimiter, and a value beginning with `-` stays inert
+    # (C-m, DEC-5/#568).
+    ap.add_argument("--by-files", action="append", default=None, metavar="PATH",
+                    help="#559: a file the candidate commit touched (repeatable)")
+    ap.add_argument("--candidate-sha", default=None, help="#559: candidate commit for --by-files")
+    ap.add_argument("--candidate-at", type=int, default=None,
+                    help="#559: candidate commit author date, epoch seconds")
+    ap.add_argument("--session-root", default=None, metavar="PATH",
+                    help="#559: checkout every git call runs against (default: cwd)")
     args = ap.parse_args(argv)
 
     if args.repo_root:
         repo_root = os.path.realpath(args.repo_root)
         repo = args.repo or os.path.basename(repo_root) or "unknown"
     else:
-        repo, repo_root = resolve_repo()
+        # DEC-4 / R3 (#580): the grudge STORE is keyed by store identity
+        # (git-common-dir parent), not the worktree — a query run from a linked
+        # worktree must find records written from the main checkout (T-j). The
+        # hook already passes --repo-root explicitly; the default is steadied to
+        # the same store identity.
+        repo, repo_root = resolve_store_repo()
         if args.repo:
             repo = args.repo
+
+    # #559 resolution lookups. Exit-code contract (distinct from argparse's own
+    # exit 2 for a bad argument, AMB-7): match -> 0 + the record's filename stem
+    # on stdout; ordinary miss (including unresolvable/ambiguous/empty SHAs) ->
+    # 0 + empty stdout; internal error -> 3 + stderr diagnostic + empty stdout.
+    # A malformed grudge record is NOT an internal error — load_grudges and
+    # parse_grudge deliberately never raise on those.
+    if args.by_commit is not None or args.by_files is not None:
+        session_root = os.path.realpath(args.session_root) if args.session_root else os.getcwd()
+        try:
+            scanned = len(load_grudges(repo, repo_root))
+            if args.by_commit is not None:
+                hit = find_by_commit(args.by_commit, repo, repo_root, session_root)
+            else:
+                # DEC-5 (#568): --by-files is repeatable equals-form, one
+                # `--by-files=path` per touched path. Each value is a single
+                # argv element — a comma in a filename is data, never split.
+                hit = find_by_files(
+                    args.by_files or [],
+                    repo, repo_root, session_root,
+                    args.candidate_sha or "", args.candidate_at or 0,
+                )
+            print(f"grudge: scanned={scanned} matched={1 if hit else 0}", file=sys.stderr)
+            if hit:
+                print(os.path.splitext(os.path.basename(hit["_path"]))[0])
+            return 0
+        except Exception as exc:  # noqa: BLE001 — any failure is exit 3, never a match
+            print(f"grudge: lookup failed: {exc!r}", file=sys.stderr)
+            return 3
 
     if args.cull:
         removed = cull(repo, repo_root)

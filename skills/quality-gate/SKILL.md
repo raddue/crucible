@@ -1,6 +1,6 @@
 ---
 name: quality-gate
-description: Iterative red-teaming of any artifact (design docs, plans, code, hypotheses, mockups). Loops until clean or stagnation. Invoked by artifact-producing skills or their parent orchestrator.
+description: Iterative red-teaming of any artifact (design docs, plans, code, hypotheses). Loops until clean or stagnation. Invoked by artifact-producing skills or their parent orchestrator.
 origin: crucible
 ---
 
@@ -212,7 +212,7 @@ would create non-deterministic stagnation behavior.
 | `interactive` | bool | `true` if invoked from a standalone session, `false` if invoked by a parent orchestrator (build, debugging, spec). **Detection:** The orchestrator infers `interactive` from the presence of the `Context from invoking orchestrator` block in its dispatch context: BOTH `Phase` AND `PipelineID` present → treated as sub-skill invocation (`interactive: false`). Either field alone or both absent → standalone (`interactive: true`). Sub-skill parents (debugging, spec) MUST follow the build pattern; any parent that fails to pass Phase+PipelineID will cause QG to default to `interactive: true` and emit between-rounds check-ins, which will hang non-interactive pipelines. Parent skills can also explicitly pass `interactive: false` to override detection if they do not have a natural Phase/PipelineID to provide. Explicit `interactive:` argument overrides detection in either direction. | When true, the orchestrator emits a between-rounds check-in at round `ceil(suppression_threshold/2)` offering the user options: continue, escalate-now, or skip. Non-interactive contexts skip this prompt. |
 | `force_siege` | bool | `false` | When true, always dispatch `crucible:siege` in parallel with the first red-team round regardless of security-surface detection. Use for: explicit security PRs, scheduled security audits, post-incident review. |
 | `skip_siege` | bool | `false` | When true, never dispatch siege even if security-surface detection fires. Use for: artifacts the user already siege-tested separately, or repeated re-runs after siege already passed. Mutually exclusive with `force_siege` — passing both is an error. |
-| `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis/mockup/translation) | LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. Auto-null when `suppression_threshold ≤ 3` to avoid collision with the existing `DIMINISHING_RETURNS` judge verdict at the same round. See `## Cost-Cap and Diminishing-Return Signals` for behavior. (Added by #303.) |
+| `cost_cap_threshold` | int \| null | `3` if `suppression_threshold > 3` else `null` (auto-null on hypothesis) | LOCAL round at which the cost-cap prompt fires (interactive only). Set to `null` to disable. Auto-null when `suppression_threshold ≤ 3` to avoid collision with the existing `DIMINISHING_RETURNS` judge verdict at the same round. See `## Cost-Cap and Diminishing-Return Signals` for behavior. (Added by #303.) |
 | `dr_signal_findings` | int \| null | `2` if `suppression_threshold > 3` else `null` | Count of NEW (delta-vs-prior-round) Fatal+Significant findings at or below which the DR signal fires (interactive only). Same auto-null rule as `cost_cap_threshold`. (Added by #303.) |
 
 ### Closure-mode contract (#624)
@@ -249,8 +249,6 @@ finding identity; full PASS always records `ResidualSignificant: 0`).
 | `design` | 10 | Iterative refinement on complex documents |
 | `plan` | 10 | Same as design |
 | `hypothesis` | 3 | 1-2 sentence artifacts; 10 rounds is wildly disproportionate |
-| `mockup` | 3 | Visual artifact; convergence is fast |
-| `translation` | 3 | Mock-to-Unity translation; fast iteration loop |
 
 The threshold can be overridden per invocation. Build typically uses the defaults; debugging's Phase 3.5 hypothesis review uses the hypothesis default (3); a user running `/design` directly inherits the design default (10) unless they pass `--suppression-threshold N`.
 
@@ -372,7 +370,7 @@ The user's response routes to: continue (loop with suppression intact), escalate
    - **Same or higher score** → dispatch the Stagnation Judge (see Stagnation Detection below); the Persistence Check and Fix-Generated Defect Tracking triggers run on this branch too, per their own trigger conditions
 8. Read the judge's verdict and act on it (see Stagnation Detection below). See `## Stagnation Detection > Persistence Check` for the orchestrator step that runs on both branches of step 7, before judge dispatch on the branch where the judge runs (Component 4 / #265, round 4 S3), and `## Stagnation Detection > Verdict-Level Promotion` for the post-judge promotion step that may convert a `PROGRESS` verdict to `STAGNATION, Reason: persistent-finding-corroborated`. See `## Stagnation Detection > Fix-Generated Defect Tracking` for the sibling telemetry check (#546), dispatched after the persistence checker resolves, that tracks whether fresh Fatals keep landing inside the immediately-preceding round's own fix, independent of the judge's verdict.
 9. **Progress notification.** After round `ceil(suppression_threshold / 2)` and every `max(1, suppression_threshold // 3)` rounds thereafter (rounds 5, 8, 11, 14 for threshold 10; rounds 2, 3, 4, ... for threshold 3), emit: "Quality gate round [N]: score progression [list]." If the judge was dispatched, append recurring/new counts. Informational only — no pause. (Start round uses `ceil` — rounds up — so the first notification lands no earlier than the midpoint; cadence uses `max(1, // 3)` — floors with a 1-minimum — so worked examples match: threshold 10 yields cadence 3, threshold 3 yields cadence 1.)
-10. **Pre-threshold escalation suppression.** Before round `suppression_threshold` (default 10 for code/design/plan; 3 for hypothesis/mockup/translation — see Skill Arguments), the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched on rounds 1 through `suppression_threshold - 4` (i.e., rounds 1-6 for threshold 10). On rounds `max(1, suppression_threshold - 3)` through `suppression_threshold - 1` (rounds 7-9 for threshold 10), **and only when `suppression_threshold ≥ 6`**, the judge runs in silent mode to seed comparison history (see Stagnation Detection > Judge Dispatch). For thresholds < 6 (hypothesis, mockup, translation defaults), there are no silent-seed rounds — the judge dispatches only at round ≥ `suppression_threshold` in normal mode. Regression detection is recorded in the round notes but does not escalate on a single round.
+10. **Pre-threshold escalation suppression.** Before round `suppression_threshold` (default 10 for code/design/plan; 3 for hypothesis — see Skill Arguments), the gate does NOT escalate to the user for stagnation, diminishing returns, or single-round regression. These signals are suppressed in favor of continued iteration — most artifacts converge to 0 Fatal / 0 Significant within a few rounds, and early escalation interrupts the user before that convergence has a chance to happen. The stagnation judge is NOT dispatched on rounds 1 through `suppression_threshold - 4` (i.e., rounds 1-6 for threshold 10). On rounds `max(1, suppression_threshold - 3)` through `suppression_threshold - 1` (rounds 7-9 for threshold 10), **and only when `suppression_threshold ≥ 6`**, the judge runs in silent mode to seed comparison history (see Stagnation Detection > Judge Dispatch). For thresholds < 6 (hypothesis defaults), there are no silent-seed rounds — the judge dispatches only at round ≥ `suppression_threshold` in normal mode. Regression detection is recorded in the round notes but does not escalate on a single round.
 
     **Sustained-regression hard exit (convergence guarantee).** Pre-threshold suppression does NOT extend to a regression that persists across two consecutive rounds. If `score(N) > score(N-1)` AND `score(N-1) > score(N-2)` (i.e., weighted score has strictly increased two rounds running), the gate escalates immediately regardless of round number. Report: "Sustained regression detected: scores [N-2: X, N-1: Y, N: Z] strictly increasing. Fix cycle is actively worsening the artifact. Escalating." This rule guarantees loop termination even under suppression — without it, an oscillating fix agent (score 4 ↔ 5 ↔ 4) could burn rounds 1-9 with zero progress. Two consecutive strict increases is a structural signal that no further looping will help; one increase remains suppressed because single-round noise is expected during convergence.
 
@@ -405,7 +403,7 @@ The dispatch file written by the orchestrator records `tail_rubric: true` so the
 
 ### Multi-Model Red-Team Review (when available)
 
-**Applies to:** Round 1, and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15. For the default `suppression_threshold` of 10, this yields cadence 3 → rounds 1, 4, 7, 10, 13. For `suppression_threshold` of 3 (hypothesis/mockup/translation), this yields cadence 1 → rounds 1, 2, 3 (effectively every pre-threshold round — short-threshold artifacts have less room to converge, so multi-model coverage on every round is justified). The `max(1, ...)` floor handles thresholds 1-2 (rare) by collapsing to cadence 1.
+**Applies to:** Round 1, and every `max(1, suppression_threshold // 3)` rounds thereafter, up to round 15. For the default `suppression_threshold` of 10, this yields cadence 3 → rounds 1, 4, 7, 10, 13. For `suppression_threshold` of 3 (hypothesis), this yields cadence 1 → rounds 1, 2, 3 (effectively every pre-threshold round — short-threshold artifacts have less room to converge, so multi-model coverage on every round is justified). The `max(1, ...)` floor handles thresholds 1-2 (rare) by collapsing to cadence 1.
 **Intermediate rounds:** Standard single-model red-team dispatch (no change).
 **Tail-rubric and consensus rounds:** When `tail_rubric: true` AND the round is consensus-eligible, the orchestrator concatenates the tightened-rubric addendum to the prompt body passed to `consensus_query(mode: "review")` the same way it does for single-model dispatch. Consensus participants see the tightened rubric uniformly; per-model variance applies to the tightening, not its presence.
 
@@ -449,7 +447,7 @@ Emission is unconditional and independent of `cost_cap_threshold` / `dr_signal_f
 ```markdown
 # Round N Ledger
 
-Artifact-type: <code | hypothesis | mockup | translation>
+Artifact-type: <code | design | plan | hypothesis>
 Total findings: N (F: x, S: y, M: z)
 New since round N-1: K   (on round 1, K = total findings — no prior round)
 Accepted: P (all findings — v0.1)
@@ -565,12 +563,11 @@ The orchestrator coordinates the loop but does NOT fix artifacts directly. Fixes
 | plan | Plan Writer subagent revises the plan |
 | code | Fix subagent (new, not the original implementer) |
 | hypothesis | Debugging skill's hypothesis refinement (see below) |
-| mockup | Fix subagent |
-| translation | Fix subagent revises the translation map |
 
-**Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason "pre-qg-fix-round-N". Non-code artifacts (design, plan, hypothesis, mockup, translation) skip this step — they are fully captured by the existing artifact-N.md snapshots.
+**Before dispatching the fix agent (code artifacts only):** If crucible:checkpoint is available, create checkpoint with reason "pre-qg-fix-round-N". Non-code artifacts (design, plan, hypothesis) skip this step — they are fully captured by the existing artifact-N.md snapshots.
 
-The fix agent (the design / plan / code / mockup / translation rows above) is dispatched with `subagent_type: crucible-qg-fix`, which is **pinned to Sonnet** (`agents/crucible-qg-fix.md`) — the **main-loop** fix output is re-reviewed by the Opus red-team each round on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop); see `shared/harness-adapter.md` Mapping 1b for the sites this bound does **not** cover; do not pass a call-level `model:`. (The `hypothesis` row is the one exception — it routes to the **debugging skill's own** hypothesis-refinement agent, not `crucible-qg-fix`; that agent is outside this skill's surface.) The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round. If `subagent_type: crucible-qg-fix` fails to resolve (agent defs not installed — see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose` on the orchestrator's inherited model and the Sonnet pin is **not** enforced; emit a one-time visible warning of its own ("agent type `crucible-qg-fix` not installed; the fix agent is running on the inherited/session model — the Sonnet pin is NOT enforced; install per harness-adapter §8") rather than degrading silently.
+<!-- CANONICAL: shared/model-tier-policy.md -->
+The fix agent (the design / plan / code rows above) is dispatched with `subagent_type: crucible-qg-fix`, which is **pinned to Sonnet** (`agents/crucible-qg-fix.md`) — the **main-loop** fix output is re-reviewed by the Opus red-team each round on single-model rounds — a weaker fix is *caught* on rounds that reach a subsequent red-team; the cost is **at least** an extra round and is not bounded above (#528 §1 measures fix-authored defects breeding across generations, and §4 shows the stagnation judge scores the catch as PROGRESS, so the extra rounds are not observable to the loop); see `shared/harness-adapter.md` Mapping 1b for the sites this bound does **not** cover; do not pass a call-level `model:`. (The `hypothesis` row is the one exception — it routes to the **debugging skill's own** hypothesis-refinement agent, not `crucible-qg-fix`; that agent is outside this skill's surface.) The fix agent receives: (a) the current artifact, (b) the red-team findings, (c) project context, and (d) the **fix journal** from prior rounds (see Fix Memory below). It returns the revised artifact. The orchestrator writes the revised artifact to the scratch directory and dispatches the next red-team round. If `subagent_type: crucible-qg-fix` fails to resolve (agent defs not installed — see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose` on the orchestrator's inherited model and the Sonnet pin is **not** enforced; emit a one-time visible warning of its own ("agent type `crucible-qg-fix` not installed; the fix agent is running on the inherited/session model — the Sonnet pin is NOT enforced; install per harness-adapter §8") rather than degrading silently.
 
 The orchestrator never applies fixes directly. Even trivial fixes go through a fix agent to maintain separation of concerns. The cost of dispatching for a small fix is negligible; the risk of the orchestrator conflating coordination with fixing is not.
 
@@ -643,12 +640,19 @@ The `suppressed-signal` and `no-op-fix` fields are copied from `round-N-score.md
 After each fix agent completes and before the next red-team round, dispatch a **Fix Verifier** — a dedicated Sonnet agent that checks whether each fix actually resolves its stated finding. No re-fix sub-loop; the verifier checks once, and its output feeds into the fix journal for the next round.
 
 **Dispatch method:** Task tool, `subagent_type: crucible-qg-verifier` (the agent def pins **Sonnet** — `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`), same pattern as the stagnation judge. The verifier needs no file access; the orchestrator includes all input in the dispatch file directly.
+**If `subagent_type: crucible-qg-verifier` fails to resolve (agent defs not installed —
+see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose`
+on the orchestrator's inherited model and the Sonnet pin is not enforced; emit a
+one-time visible warning of its own ("agent type `crucible-qg-verifier` not
+installed; the verifier is running on the inherited/session model — the Sonnet pin
+is NOT enforced; install per harness-adapter §8") rather than degrading silently.**
+
 
 **Input the orchestrator provides:**
 1. Round N findings (the findings the fix agent was asked to address)
 2. The current round's fix journal entry only — the `## Round N Fix` section just appended (not the full journal)
 3. Prepared artifact:
-   - Non-code (design docs, plans, hypotheses, mockups, translations): post-fix version in full
+   - Non-code (design docs, plans, hypotheses): post-fix version in full
    - Code: diff + full post-fix source of files touched by the diff. For large implementations (>2000 lines), dispatch one verifier call per finding if context exceeds limits.
 4. The full content of `fix-verifier-prompt.md` as the agent's instructions
 
@@ -748,6 +752,9 @@ The orchestrator dispatches a **persistence checker** between a non-clean red-te
 **Verifier-error rounds** (where the round-N fix-verifier dispatch failed or its `### Verifier Assessment` sub-section is malformed/absent) implicitly skip the persistence checker per fail-open semantics — the `≥1 Unresolved` gate is vacuous, so the trigger does not fire. The F1 promotion is also skipped (vacuous gating on condition (d) below).
 
 **Dispatch.** When the trigger fires, dispatch the persistence checker as a fresh Task with `subagent_type: crucible-qg-verifier` (reused — both the fix verifier and the persistence checker are Sonnet mechanical structural checks; the agent def pins **Sonnet**, `agents/crucible-qg-verifier.md`; do not pass a call-level `model:`) and `persistence-checker-prompt.md` as the prompt. The persistence checker emits a JSON correspondence object, not an Evidence Receipt — the shared `crucible-qg-verifier` def is deliberately return-format-neutral so it does not conflict with that (the persistence checker is not a receipt-bearing role — its JSON is consumed directly by the orchestrator, written to `round-(N+1)-persistence.md` per the flow below, and is NOT run through the receipt linter; this is a pre-existing exemption that #352 does not change). Inputs supplied verbatim by the orchestrator:
+(Same resolution-failure fallback and warning as the fix-verifier dispatch above —
+see Fix Verifier's Dispatch method.)
+
 
 1. `round-N-findings.md` (prior round's findings)
 2. `round-(N+1)-findings.md` (current round's findings)
@@ -769,13 +776,16 @@ The persistence checker (above) catches a finding that *survives* a fix. This ch
 
 **Trigger.** Fires on every non-clean red-team round N+1 where round N had a fix dispatched (i.e., a `## Round N Fix` fix-journal entry exists for round N) **and the artifact type is not `code`** (see Artifact-class scope below). Unlike the persistence checker, this does NOT require any round-N Unresolved finding — a fix can fully resolve what it targeted and still generate a new defect elsewhere in what it wrote. **This trigger is evaluated on every non-clean round, on BOTH branches of How It Works step 7** — the "strictly lower score, progress, loop again" branch and the "same or higher score, dispatch the Stagnation Judge" branch alike. It is trigger-driven, not judge-dispatch-driven: it does not wait for, and is not conditioned on, the Stagnation Judge being dispatched.
 
-**Artifact-class scope (round 3, S1).** Because chunking is defined only for `code` artifacts (see Artifact Preparation › Code artifacts › Large implementations) and this checker never fires on `code` (below), no chunked gate currently reaches this mechanism; the per-chunk `artifact-0.md` placement, the `<chunk_id>:<local_round>` element grammar on `FanOutRounds`, and the per-chunk streak scoping stated below are retained for grammar consistency with `PersistentFindingRounds` and are unreachable today (round 5, S2). For `design | plan | hypothesis | mockup | translation` artifacts, `artifact-(N-1).md` → `artifact-N.md` is the fix diff (input #2 below) and the checker fires per the Trigger above. For **`code`** artifacts, this checker does NOT fire: the artifact the loop circulates for code is the *prepared* artifact — full source of high-risk files plus lossy summaries of routine changes (see Artifact Preparation › Code artifacts) — not a raw diff, so no reliable diff exists between `artifact-(N-1).md` and `artifact-N.md`. A defect planted in a file classed "routine" can appear as only a changed one-line summary (false negative), while representation/summarization deltas can present as large changed regions (false positive) — and neither trips `status: error`, so corrupted judgments would enter the telemetry silently. <!-- CONTRACT:qg-fan-out-code-exclusion:START -->On a `code` gate, record `fix-generated-count: n/a` in `round-N-score.md` (`n/a` means the checker did not fire; `0` means it fired and found nothing) and do NOT increment `FanOutCheckCount` / `fan_out_check_count` for that round.<!-- CONTRACT:qg-fan-out-code-exclusion:END -->
+**Artifact-class scope (round 3, S1).** Because chunking is defined only for `code` artifacts (see Artifact Preparation › Code artifacts › Large implementations) and this checker never fires on `code` (below), no chunked gate currently reaches this mechanism; the per-chunk `artifact-0.md` placement, the `<chunk_id>:<local_round>` element grammar on `FanOutRounds`, and the per-chunk streak scoping stated below are retained for grammar consistency with `PersistentFindingRounds` and are unreachable today (round 5, S2). For `design | plan | hypothesis` artifacts, `artifact-(N-1).md` → `artifact-N.md` is the fix diff (input #2 below) and the checker fires per the Trigger above. For **`code`** artifacts, this checker does NOT fire: the artifact the loop circulates for code is the *prepared* artifact — full source of high-risk files plus lossy summaries of routine changes (see Artifact Preparation › Code artifacts) — not a raw diff, so no reliable diff exists between `artifact-(N-1).md` and `artifact-N.md`. A defect planted in a file classed "routine" can appear as only a changed one-line summary (false negative), while representation/summarization deltas can present as large changed regions (false positive) — and neither trips `status: error`, so corrupted judgments would enter the telemetry silently. <!-- CONTRACT:qg-fan-out-code-exclusion:START -->On a `code` gate, record `fix-generated-count: n/a` in `round-N-score.md` (`n/a` means the checker did not fire; `0` means it fired and found nothing) and do NOT increment `FanOutCheckCount` / `fan_out_check_count` for that round.<!-- CONTRACT:qg-fan-out-code-exclusion:END -->
 
 **Dispatch ordering.** <!-- CONTRACT:qg-fan-out-dispatch-ordering:START -->Dispatched strictly AFTER the persistence checker (above) resolves for round N+1, never in parallel<!-- CONTRACT:qg-fan-out-dispatch-ordering:END --> — it consumes the persistence checker's resolved status (input #3 below) and cannot judge correctly without it. **Orchestrator-side fail-open (round 5, S4).** <!-- CONTRACT:qg-fan-out-orchestrator-fail-open:START -->When `persistence_status` resolves to `verifier-error`, `error`, or `absent`, the orchestrator does **not** dispatch the fix-generated-defect checker at all: it writes the `status: error` object — with `error_cause: "persistence-unknown"` (round 6, F1/S3) — to `round-(N+1)-fix-generated.md` itself and increments `FanOutCheckCount`/`FanOutErrorCount` as for any error dispatch.<!-- CONTRACT:qg-fan-out-orchestrator-fail-open:END --> The orchestrator already computed `persistence_status` from state it holds, before dispatch — dispatching anyway would pay for a subagent round-trip to be told something already known, and would trust the subagent's own compliance with the prompt's fail-open paragraph (kept below as defense-in-depth for genuinely-unanticipated cases) as the only guard against the one forbidden outcome (a well-formed `ok` object with zero exclusions on a persistence-unknown round). An `ok` object returned on any pre-dispatch-interception path — the three `persistence_status` tokens above, or an oversized round-N diff (round 6, F1's separate interception at input #2 below; round 9, S2 generalizes this discard rule to cover it) — is discarded and replaced with `status: error` carrying that path's `error_cause`, if the checker is ever dispatched on one anyway (e.g. during a future refactor).
 
 **Simpler decomposition considered (round 3, S5).** Folding this judgment into the existing persistence-checker dispatch — adding the fix diff as a fourth input to `persistence-checker-prompt.md`, with `fix_generated | ambiguous | pre-existing` as a per-correspondence field — was considered and NOT adopted this round. The two checks' triggers differ: persistence requires ≥1 round-N Unresolved finding, while this check must also fire on fully-Resolved rounds. A merged checker would need the persistence half to short-circuit to an empty correspondence list on the fully-Resolved branch (computed in-process instead of serialized through the `persistence_status` enum) — a real but small redesign, left to a follow-up rather than re-cut here so the reasoning is not lost if the merge is picked up later.
 
 **Dispatch.** Reuses `subagent_type: crucible-qg-verifier` (Sonnet — same mechanical-check role as the fix verifier and persistence checker; do not pass a call-level `model:`) with `fix-generated-defect-prompt.md` as the agent's instructions. Inputs supplied verbatim:
+(Same resolution-failure fallback and warning as the fix-verifier dispatch above —
+see Fix Verifier's Dispatch method.)
+
 
 1. `round-(N+1)-findings.md` (current round's findings) — <!-- CONTRACT:qg-fan-out-population-scope:START -->the checker's in-scope population is **every Fatal/Significant-severity finding entry in this file, regardless of which section it appears under** — including entries in a required `### Second Pass Findings` section (`skills/red-team/red-team-prompt.md`'s mandated fourth section, which also carries Fatal/Significant entries under the full steel-man protocol). Only Minor/Nit-severity entries are out of scope. (Round 3, F1 originally narrowed this to the `### Fatal Challenges`/`### Significant Challenges` headings only, to keep the completeness invariant below arithmetically satisfiable against the orchestrator's #366 Score-source count. Round 5, F3 widened it back: the narrower scope made the checker permanently blind to exactly the late-round, second-pass-surfaced defects #488 c1's evidence is made of, and round 3's own fix already demoted the completeness audit from a voiding `status: error` check to a non-voiding narration-log flag — so the arithmetic no longer needs to close against #366's population for `fix_generated_count` to be trusted. See the completeness-audit paragraph below, which decouples this checker's comparand from the #366 count instead of re-narrowing the population.)<!-- CONTRACT:qg-fan-out-population-scope:END -->.
 2. The round-N fix diff — `artifact-(N-1).md` before round N's fix vs. `artifact-N.md` after it, uniformly for all N ≥ 1 (round 1's "before" side is `artifact-0.md`, written per-chunk at Artifact Preparation before that chunk's first red-team dispatch — see the Round History file list) — plus the **full** `## Round N Fix` fix-journal entry (all fields, matching what the persistence checker receives per `## Stagnation Detection > Persistence Check`) as supporting context. The diff is the primary evidence; the journal entry supplies the fix's own account of intent. **Orchestrator-side oversized-diff interception (round 6, F1).** The orchestrator measures the diff's size BEFORE dispatch — the same disposition round 5 S4 chose for `persistence_status` — and if it is too large for the dispatch, does NOT dispatch the checker: it writes the fail-open `status: error` object itself, with <!-- CONTRACT:qg-fan-out-oversized-diff-error-cause:START -->`error_cause: "oversized-diff"`<!-- CONTRACT:qg-fan-out-oversized-diff-error-cause:END --> (see `fix-generated-defect-prompt.md`'s Fail-open schema and `fix-generated-error-cause` under Round History below), rather than capping the diff or falling back to the journal entry alone — a truncated diff is not ground truth (round 5, S1). The prompt's own "diff too large to process" fail-open clause (see Failure modes below) is retained only as defense-in-depth for the residual case where the checker is dispatched anyway (e.g. a future refactor) and independently finds the diff unworkable. **Size measurement and interception order (round 7, S4).** The orchestrator records the measured diff size in `round-(N+1)-score.md` as `fix-generated-diff-bytes:` on every round the checker's trigger fires, regardless of outcome (see Round History), so `fan_out_oversized_count` is interpretable against the size distribution that produced it rather than remaining an uncalibrated counter that can silently read low or zero for the same reason round 6's F1 was filed; "too large" means the diff would not fit the dispatch's input budget alongside inputs #1 and #3. When both pre-dispatch interception conditions hold on the same round (the diff is oversized AND `persistence_status` resolves to `verifier-error`/`error`/`absent`), <!-- CONTRACT:qg-fan-out-interception-order:START -->`error_cause` is `oversized-diff` — the size measurement is orchestrator-local and always available, so it is checked first — and `persistence-unknown` is the residual cause, recorded only when the diff was not oversized.<!-- CONTRACT:qg-fan-out-interception-order:END -->
@@ -819,11 +829,18 @@ Silent dispatch seeds the consecutive-round comparison history that the judge's 
 
 For thresholds 3-5 the short window means no silent-seed pass is feasible; the judge dispatches at the threshold with whatever comparison state exists. For threshold ≥ 6 the full skip-then-seed-then-normal pattern applies.
 
-**Short-threshold behavior note (thresholds 4 and 5):** The silent-seed window only opens at `suppression_threshold ≥ 6`. For thresholds 4 and 5, the at-threshold judge dispatches without any prior `round-*-comparison.md` history. The judge's "recurring-Significant for 2 consecutive rounds" rule requires comparison history; with none, the judge's fail-open default classifies findings as PROGRESS or New rather than recurring, making STAGNATION effectively unreachable on the first at-threshold round. By round `threshold+1`, one comparison file exists and the judge can detect stuck patterns normally. This is an intentional trade-off: short-threshold artifacts (hypothesis/mockup/translation in particular) prioritize fast convergence over early stagnation detection.
+**Short-threshold behavior note (thresholds 4 and 5):** The silent-seed window only opens at `suppression_threshold ≥ 6`. For thresholds 4 and 5, the at-threshold judge dispatches without any prior `round-*-comparison.md` history. The judge's "recurring-Significant for 2 consecutive rounds" rule requires comparison history; with none, the judge's fail-open default classifies findings as PROGRESS or New rather than recurring, making STAGNATION effectively unreachable on the first at-threshold round. By round `threshold+1`, one comparison file exists and the judge can detect stuck patterns normally. This is an intentional trade-off: short-threshold artifacts (hypothesis in particular) prioritize fast convergence over early stagnation detection.
 
 **At round `suppression_threshold` and later, if neither progress condition is met AND the score did not increase** (i.e., same score, no Fatal count improvement), dispatch the **Stagnation Judge** — a dedicated Sonnet agent that performs semantic comparison of findings across rounds. If the `consensus_query` tool is not available in the environment, this step uses the standard single-Sonnet dispatch described below.
 
 **Dispatch method:** Task tool, `subagent_type: crucible-qg-judge` (the agent def pins **Sonnet** — `agents/crucible-qg-judge.md`; do not pass a call-level `model:`). The judge needs no file access; the orchestrator includes all input in the dispatch file directly.
+**If `subagent_type: crucible-qg-judge` fails to resolve (agent defs not installed
+— see `shared/harness-adapter.md` §8), the dispatch falls back to `general-purpose`
+on the orchestrator's inherited model and the Sonnet pin is not enforced; emit a
+one-time visible warning of its own ("agent type `crucible-qg-judge` not installed;
+the judge is running on the inherited/session model — the Sonnet pin is NOT
+enforced; install per harness-adapter §8") rather than degrading silently.**
+
 
 **Input the orchestrator provides:**
 1. The content of `round-N-findings.md` (current round)
@@ -866,9 +883,9 @@ The stagnation judge's own output is unchanged in both fire and no-fire cases (t
 
 ## Artifact Preparation
 
-**Round-0 baseline snapshot (#546).** Before the first red-team dispatch, on `design | plan | hypothesis | mockup | translation` artifacts (round 4, M1 — scoped to match Fix-Generated Defect Tracking › Artifact-class scope; `code` gates never consult this file, so writing it there would have no reader), write the artifact content **as prepared for that dispatch** — the same representation subsequently used for every `artifact-N.md` (see Round History) — to `artifact-0.md`, written into `<findings-root>`, which the create-before-lint rule (Receipt Linter) has already created (round 4, M2). This is the "before" side of round 1's fix diff — the input the Fix-Generated Defect Tracking checker needs for round N=1 (see Fix-Generated Defect Tracking › Artifact-class scope), matching every N>1's `artifact-(N-1).md` baseline uniformly. Without it, round 1's fix would edit the artifact in place with the pre-fix bytes preserved nowhere on disk. **On a chunked gate this is written per chunk (round 3, S2)** — `chunk-K/artifact-0.md`, immediately before that chunk's first red-team dispatch, containing that chunk's own content. The cross-chunk integration round's own `artifact-0.md` is subject to the same unpinned-home known gap this document already declares for that round's other files (round 4, M3 — see Write/lint ordering on `fix-journal.md` › "Known gap — the cross-chunk integration round"), not a resolved location.
+**Round-0 baseline snapshot (#546).** Before the first red-team dispatch, on `design | plan | hypothesis` artifacts (round 4, M1 — scoped to match Fix-Generated Defect Tracking › Artifact-class scope; `code` gates never consult this file, so writing it there would have no reader), write the artifact content **as prepared for that dispatch** — the same representation subsequently used for every `artifact-N.md` (see Round History) — to `artifact-0.md`, written into `<findings-root>`, which the create-before-lint rule (Receipt Linter) has already created (round 4, M2). This is the "before" side of round 1's fix diff — the input the Fix-Generated Defect Tracking checker needs for round N=1 (see Fix-Generated Defect Tracking › Artifact-class scope), matching every N>1's `artifact-(N-1).md` baseline uniformly. Without it, round 1's fix would edit the artifact in place with the pre-fix bytes preserved nowhere on disk. **On a chunked gate this is written per chunk (round 3, S2)** — `chunk-K/artifact-0.md`, immediately before that chunk's first red-team dispatch, containing that chunk's own content. The cross-chunk integration round's own `artifact-0.md` is subject to the same unpinned-home known gap this document already declares for that round's other files (round 4, M3 — see Write/lint ordering on `fix-journal.md` › "Known gap — the cross-chunk integration round"), not a resolved location.
 
-### Small artifacts (design docs, plans, hypotheses, mockups, translations)
+### Small artifacts (design docs, plans, hypotheses)
 
 Pass the full artifact content to the red-team subagent. No preparation needed.
 
@@ -1085,7 +1102,7 @@ Quality gate writes round state to disk for compaction recovery.
   - <!-- CONTRACT:qg-fan-out-diff-bytes-field:START -->`fix-generated-diff-bytes`: integer byte count of the round-N diff (`artifact-(N-1).md` → `artifact-N.md`, per input #2) — **orchestrator-estimated, not a byte-exact measurement** (round 9, S0: the scratch-directory Tool constraint's exemption list is closed and grants no subprocess for this operation, so the orchestrator constructs the diff by reading both artifacts in context and reports a byte count for that in-context reconstruction; the same estimation caveat the pre-existing, unmodified-by-#546 `no-op-fix` field's byte-identity comparison already implicitly carries) — measured by the orchestrator BEFORE dispatch on every round the fix-generated-defect checker's trigger fires, regardless of outcome (round 7, S4). Absent on rounds where the trigger did not fire. Telemetry only — never used for any verdict or escalation. Present so `fan_out_oversized_count` (see Convergence Telemetry) is interpretable against the size distribution that produced it, rather than remaining an uncalibrated counter that can read low or zero for the same reason round 6's F1 was filed (no writer) through a different mechanism (no threshold to compare against).<!-- CONTRACT:qg-fan-out-diff-bytes-field:END -->
   - <!-- CONTRACT:qg-fan-out-exclusion-basis-field:START -->`fix-generated-exclusion-basis`: `fired-clean` | `not-triggered` | `n/a` (round 7, S6). Mirrors the resolved `persistence_status` on rounds where the fix-generated-defect checker actually ran with a well-formed `status: "ok"` judgment; `n/a` when the checker did not fire (code-artifact round, or trigger did not fire) **or on any round recording `fix-generated-count: error` — whether the orchestrator intercepted before dispatch or the checker itself returned `status: error`** (round 9, S1 — makes the `n/a` clause exhaustive; the prior "fired only via an orchestrator-side error interception" wording left a dispatched-and-returned `transport` error undefined, since that round is neither a well-formed `ok` round nor an orchestrator-side interception) — persistence exclusions are not meaningfully "available or not" on those rounds. Present so the base rate can be stratified by whether persistence exclusions were available before a low measured rate is read as "fixes rarely generate defects" (see the Telemetry-only paragraph's residual-bias discussion above) — a `not-triggered` round has zero persistence-exclusions and relies solely on the round-N verifier's `Resolved` verdict, a bias in the opposite direction from the oversized-diff/persistence-unknown censoring biases.<!-- CONTRACT:qg-fan-out-exclusion-basis-field:END -->
 - `round-N-findings.md`: the red-team findings for this round
-- `artifact-0.md`: the artifact snapshot **before any fix**, in the same representation as `artifact-N.md` (see below) — the "before" side of round 1's fix diff (#546), written only on `design | plan | hypothesis | mockup | translation` artifacts (round 4, M1). Written once **per chunk**, at that chunk's Artifact Preparation, before its first red-team dispatch (`chunk-K/artifact-0.md` on a chunked gate; the cross-chunk integration round's own `artifact-0.md` is subject to the same unpinned-home known gap as that round's other files, not a resolved location — round 3, S2; round 4, M3).
+- `artifact-0.md`: the artifact snapshot **before any fix**, in the same representation as `artifact-N.md` (see below) — the "before" side of round 1's fix diff (#546), written only on `design | plan | hypothesis` artifacts (round 4, M1). Written once **per chunk**, at that chunk's Artifact Preparation, before its first red-team dispatch (`chunk-K/artifact-0.md` on a chunked gate; the cross-chunk integration round's own `artifact-0.md` is subject to the same unpinned-home known gap as that round's other files, not a resolved location — round 3, S2; round 4, M3).
 - `artifact-N.md`: the artifact snapshot after fixes (input to round N+1)
 - `fix-journal.md`: cumulative fix journal (appended after each fix agent completes; see Fix Memory above). Like every other file in this list it is **per-chunk** on a chunked gate — `chunk-N/fix-journal.md`, one journal per chunk, never at the parent scratch top level. That single home is what keeps a receipt's declared hash for it resolvable under `<findings-root>` and unambiguous under layout pin (b) (Receipt Linter), and it scopes fix memory per chunk (Chunked Gate Counter Semantics). The cross-chunk integration round is the declared gap noted there.
 - `round-N-comparison.md`: stagnation judge output (only exists for rounds where the judge was dispatched — absence on clean-progress rounds is expected, not an error). When multi-model consensus was used, this file also contains consensus metadata: models queried, models responded, agreement level, and any dissenting verdicts. Silent-seed dispatches (rounds threshold-3 through threshold-1) include a `silent-mode: true` line.
@@ -1248,6 +1265,242 @@ Highest-Finding: "<one-line quote of the most severe finding, or empty string if
 <!-- CANONICAL: shared/ledger-append.md -->
 
 **Ledger emit at verdict-emit.** When emitting your terminal verdict, also emit one JSONL line to the **central ledger** (`~/.claude/crucible/ledger/runs.jsonl`, override `CRUCIBLE_LEDGER_DIR`) via the `emit` CLI per the canonical protocol at `skills/shared/ledger-append.md` — resolve `scripts/ledger_append.py` by absolute path from the plugin root and run `python3 <script> emit - '<json>'` (`-` = central default). The `emit` CLI owns the mechanics: it honors `CRUCIBLE_CALIBRATION_DISABLED=1` as a graceful skip, dedups by `(run_id, skill)` (L-2), and auto-fills `repo` + `schema_version` — so you only construct the entry. If the script can't be resolved, warn to stderr and skip; a missing emit must never block the gate.
+**`model_resolution` populator (Tier A only — #493).** Before constructing the
+ledger entry, build `model_resolution` as an object keyed by role name (`red-team`,
+`qg-fix`, `qg-verifier`, `qg-judge` — whichever of these four this round actually
+dispatched), each value a JSON array of `{ran, basis, prov}` objects per
+`skills/shared/ledger-append.md`'s `model_resolution` shape section, one array
+entry per dispatch of that role this round (a role dispatched more than once in one
+round — e.g. `qg-fix` across multiple fix-loop iterations — contributes multiple
+array entries, oldest first). **Consensus reviewer keying (S3/S7, round 2).** The reviewer key is
+`consensus` only when the emitter actually received and used a **completed or
+partial consensus REVIEW result for this round** — the
+`consensus_query(mode="review")` call that produces red-team findings at
+`skills/quality-gate/SKILL.md:385-393`. Two pitfalls are fixed here:
+- **Mode (S7):** `skills/quality-gate/SKILL.md:394` and `:671-694` also invoke
+  `consensus_query(mode="verdict")` for the stagnation judge *later in the same
+  round*. That result's `per_model` describes the **judge**, not the artifact
+  reviewer, and the two arrays can differ (separate call, separate
+  failures/bridges). Capture and retain the `mode="review"` result at dispatch
+  time and source the `consensus` key **only** from it. Never use the
+  verdict-mode result for the reviewer key; the consensus stagnation judge is
+  **not** represented in `model_resolution` (design §9 reserves no key for it).
+- **Eligibility is not occurrence (S3):** `skills/quality-gate/SKILL.md:385-393`
+  falls back to a single red-team when consensus is unavailable on an eligible
+  round. On that reachable path the key must be `red-team` — the model that
+  actually reviewed — not `consensus`. Never key from calendar/config
+  eligibility alone. The fallback is recorded via the single-model rule below
+  (the red-team agent def's own pin), and on that path `consensus` must be
+  **absent**: an unavailable result still carries a nonempty `per_model` of
+  attempted-but-failed members (`mcp-servers/crucible-consensus/aggregator.py:179-205`
+  builds `per_model` from **all** attempted responses), so keying from the list's
+  presence would attribute reviewers whose results were never used. Pass the
+  review result's use status explicitly (`review_used` below); do not infer it
+  from a non-`None` list (S1, round 5). **Test:** an unavailable consensus result
+  that falls back to a red-team pass yields only the `red-team` key, and a
+  two-member `per_model` from the verdict-mode call does not leak into it.
+
+**A `consensus` entry is sourced from the retained `mode="review"` result's
+`per_model` list** (`ConsensusResult.to_dict()["per_model"]`,
+`mcp-servers/crucible-consensus/aggregator.py:179-184`; built from **all**
+responses including failures, and bridged `external_review` members arrive in
+this same list via `additional_responses`). Every element is uniformly
+`{ran, basis, prov}` with:
+- `ran`: `"unknown"` for **every** consensus member (S2, round 4) —
+  `per_model[i].model_id` is copied from the provider *config*
+  (`mcp-servers/crucible-consensus/providers.py`: every `query()` returns
+  `self.config.model_id`; no adapter reads the endpoint-reported name), so it
+  records what was *requested*, not what ran. Design §9 defines `ran` as an
+  endpoint-reported ID or `unknown`; until an adapter returns the response's
+  model name, `unknown` is the only honest value.
+- `basis`: `indeterminate` for **every** consensus member — nothing endpoint-
+  observed backs a rung, so `asserted` must not be stamped on a config alias
+  that may be retargeted (S2/S4). The members' *count* still attests the
+  review call's returned membership.
+- `prov`: `intent` (v1).
+If the emitter has no membership list, it must first read the round's persisted
+review result back from disk (`<findings-root>/round-<N>-review-result.json`, written at
+dispatch time — see **Recovery across compaction (S3, round 9)** below) before falling
+back to `null`. Only a genuinely absent on-disk record justifies a null: a value merely
+lost from memory by a checkpoint is recoverable and must be recovered, not discarded.
+**Test (S2/S4/S7):** a review-mode result of three
+members (`responded` true/true/false, mixed vendors) and a verdict-mode result of
+one member (different `model_id`) → the `consensus` array holds **three**
+`{unknown, indeterminate, intent}` entries — membership from the *review* call,
+never the verdict call; and an alias case where the config `model_id` differs
+from the endpoint-reported name still yields `ran: "unknown"` (no adapter
+observes the response name today).
+
+**Recovery across compaction (S3, round 9).** The gate checkpoints every three rounds
+and carries recovery state from disk (`skills/quality-gate/SKILL.md:1093-1117`,
+`:1121-1125`), so a review result living only in memory across the review→verdict seam
+is a normal lifecycle transition, not an edge case. Persist the review-mode `per_model`
+list and its use status to `<findings-root>/round-<N>-review-result.json` **at dispatch time,
+before any other dispatch**, and read that file back at terminal emit before deciding
+the row. The `null` branch stays only for a genuinely unavailable record — nothing
+persisted and nothing in memory.
+
+**Rollback invalidates the record (S5, round 10).** Retention across compaction and
+invalidation on rollback are different requirements: existing recovery discards an
+incomplete `round-(N+1)-*.md` (`skills/quality-gate/SKILL.md:1091-1095`) but would leave
+this JSON in place, so a replayed round could consume a stale `review_used`/`per_model`
+and falsely attribute an abandoned review. Two rules prevent that: the JSON records the
+**review dispatch id** it was written for, and the emitter consumes it **only** when that
+id matches the review dispatch of the current (completed) round; and on incomplete-round
+recovery the corresponding JSON is deleted alongside the discarded Markdown state, while
+a fallback or no-review path overwrites (or removes) the file rather than leaving it
+stale. Item 4(c) exercises exactly this replay.
+
+**Chunk coordinate (SP3, round 11).** The round counter is LOCAL per chunk while
+the scratch dir is shared, so a flat `<scratch>/round-<N>-review-result.json` lets
+chunk K's local round 1 overwrite chunk K−1's record (and a rollback delete the
+wrong chunk's evidence). The record therefore lives at the top level of **that
+round's findings root** — `<scratch>` on a non-chunked gate, `<scratch>/chunk-K` for
+the in-progress chunk of a chunked gate (`skills/quality-gate/SKILL.md:342`) — and
+carries its `chunk`, its **local** round, and the review dispatch id. Consumption
+requires all three to match the current completed round; rollback deletion is
+scoped to that same findings root. **Test:** two chunks whose local round 1 both
+persist a record must both survive, and a rollback in one chunk must not delete the
+other chunk's record (nor force a false `null` row).
+
+**Cross-chunk integration round (S4, round 12).** The integration round's directory
+is the reserved `cross-chunk` (INV-A15), which no `chunk-K` substitution names — the
+gate pins a home for none of its round files (`skills/quality-gate/SKILL.md:293`). It
+therefore gets its own root and coordinate here: the record is
+`<scratch>/cross-chunk/round-N-review-result.json` with coordinate
+`chunk="cross-chunk"`, and its rollback scope is that directory only. Test it
+against a preceding chunk's **same local round**: recovery must read the integration
+record rather than that chunk's, and neither rollback may delete the other's.
+
+**The record home is not the findings root (S5, round 13).** `skills/quality-gate/SKILL.md`
+leaves **every** integration-round file home and the `<findings-root>` itself unpinned
+(`SKILL.md:293` and its Round History), so pinning this record's path is not enough: the
+round's findings, journal, coverage and linter second root can land elsewhere or nowhere
+while the emitter still reads a `cross-chunk` record. This plan therefore does **not** pin
+that layout unilaterally — it **blocks the integration populator** until the gate's
+integration findings root is pinned, and it must fail loud, not write silently:
+the run asserts that the record's directory **is** that round's findings root -
+`test "$(dirname "$record")" = "$FINDINGS_ROOT"` and
+`test "$(dirname "$record")" = "$(dirname "$ROUND_FINDINGS")"` - and never against
+the **receipt's** directory: the receipt legitimately lives in the dispatch root or is
+piped to the linter as `-` (`skills/quality-gate/SKILL.md:30`), so comparing the two is
+unsatisfiable for the normal layout and would stop every integration round instead of
+verifying co-location (F1, round 17). A missing `$FINDINGS_ROOT` refuses the round, naming
+the unpinned-root gap rather than emitting a record no linter root covers.
+
+**Row unit (S5, round 2).** The Tier-A ledger row is emitted **once per gate
+run** (`skills/quality-gate/SKILL.md:1204`), but `model_resolution` describes
+**only the round that produced this emitted verdict** (the terminal round) —
+the only round whose `per_model` the emitter can trust at emit time. Earlier
+rounds' contributors are deliberately **excluded** and must not be inferred
+from this row; cross-round aggregation is out of scope of this task.
+**Test:** a gate whose round 1 is a consensus review and whose terminal round is
+a single-model PASS emits a `model_resolution` for the terminal round only.
+
+**Fixer provenance (F1, round 8).** "Only the verdict-producing round" must not be
+read as "only that round's *reviewer*". The accepted artifact is normally produced
+by the **previous** round's `qg-fix` dispatch — round N fixes, round N+1 reviews the
+revised artifact and PASSes, and the single row is emitted at N+1 — so a row built
+from N+1 alone would carry the reviewer but drop the fixer that produced the accepted
+revision. That is the *normal successful* path, and it is exactly the model flip
+design §9 creates this field to expose. The row must therefore include the **final
+accepted artifact's producing `qg-fix` dispatch** (plus any post-pass quick-fix)
+alongside the terminal round's reviewers; only that fixer contributes, so discarded
+earlier fix attempts remain excluded. The orchestrator supplies it as a `qg-fix`
+entry in the `roles` map (acceptance case 13). An explicit design amendment is the
+only alternative to this attribution — a maintainer checkpoint, not a plan decision.
+
+**Maintainer checkpoints (S3, S5) — do NOT record approval as granted.** Two
+design-level questions are unresolved and block any claim beyond the above:
+(a) design §9 says `consensus` is present exactly when a round is
+consensus-*eligible*, which is inconsistent with the pre-existing
+unavailable-consensus fallback path; (b) design §9 does not pin whether
+`model_resolution` is per-round or run-wide, so a run-wide intent would require
+persisting per-round `per_model` in round history at review time (a
+design-level change); (c) at/above the stagnation threshold,
+`consensus_query(mode="verdict")` **replaces** the single `qg-judge` dispatch
+(`skills/quality-gate/SKILL.md:673-687`), so the consensus judge that actually
+decided termination can be absent from the row entirely — design §9 reserves no key
+for it, and inventing a separate verdict-judge consensus key is an architectural
+change the plan must not make on its own (S4, round 5); (d) `quality-gate` step 5.4
+re-dispatches `crucible-red-team` for **look-harder** on a candidate-clean
+consensus-eligible round, so one round can legitimately contain *both* a consensus
+review and an ordinary red-team dispatch. Design §9 promises the consensus-vs-single
+distinction from the key **name alone**, which a round holding both keys breaks —
+the plan records the look-harder dispatch under `red-team` and must not silently pool
+it with the ordinary reviewer, but a site-discriminating key (or a documented
+exclusion) is a design amendment needing approval (S1, round 6); (e) design §9
+defines `ran` as an *endpoint-reported* id or `unknown`, so a static brand alias must
+not be recorded as the model that ran — likewise a design-interpretation question the
+plan stops on (S2, round 6).
+(f) design §9 defines the `consensus` array as **one element per *polled*
+member** with a uniform `{unknown, indeterminate, intent}` shape, but
+`aggregator.py:185-205` also returns failed attempted members (`responded` false)
+and can return a partial result — so a row cannot distinguish "three models
+reviewed" from "three polled, one failed", even though design §9 claims the field
+can express "three vendors voted" and reads the consensus-vs-single distinction
+from the key **name** alone (S2, round 7). The plan does **not** invent a
+status-bearing element or a separate participation field: pending approval it
+scopes the array to **attempted membership**, forbids reading its length as
+evidence of votes or cross-model coverage, and pins that reading with a
+partial-result acceptance case (case 12). Approval of a status-bearing uniform
+element or participation field would supersede the scoping; that choice is a
+design amendment needing approval, not a plan decision.
+**Before finalizing the keying, row-unit, or `ran` behavior, the plan stops for
+explicit maintainer approval** on all six; this plan implements the honest fallback,
+the final-round-only reading, uniform `{unknown, indeterminate, intent}`, and an
+explicit **documented exclusion** of the verdict-mode judge (named as excluded from
+cross-model comparability) rather than a silent omission — and does **not** invent
+the design's intent or record approval as granted. **Test:** one configured consensus
+member plus one bridged external response must yield **two** entries — the
+membership *count* reflects the review call, while each entry is
+`{unknown, indeterminate, intent}` under S2's config-vs-endpoint rule (no
+adapter observes the endpoint-reported model name).
+
+**Type-resolution fallback (S1, round 4).** When the harness cannot resolve an
+agent type and the dispatch runs as `general-purpose` on the inherited/session
+model (`skills/quality-gate/SKILL.md:244,535`, plus Task 9's new qg-verifier and
+qg-judge warnings), the named agent def was **not** dispatched. Recording its
+nominal `model:` pin as `ran` would log an inherited Opus verifier as `sonnet`,
+or an inherited Sonnet red-team as `opus` — precisely the model flip this feature
+exists to expose. For any dispatch that hit a type-resolution failure, write
+`{"ran": "unknown", "basis": "indeterminate", "prov": "intent"}` (or an actual
+fallback model ID, if one is observed) — never the absent def's pin. The one-time
+fallback warning does not retro-correct stored `model_resolution`.
+
+For each **single-model** dispatch: `ran` is `unknown` and `basis`
+`indeterminate` in v1 — design §9 defines `ran` as an endpoint-reported id or
+`unknown`, and the dispatch's static `model:` pin (e.g. `opus`, `sonnet`) is
+*requested*, not observed: no `RESOLVED:` producer or transcript oracle ships
+(design §6.2). Recording the alias would pool a silent provider-side fallback with
+the requested model, so the requested pin is not carried in `ran` at all (S2,
+round 6). `basis` becomes `asserted` (brand→rung table,
+`skills/shared/model-tier-policy.md` §6.1) only when an observed resolution exists
+to back it. `prov` is `intent` in v1, unconditionally, for every entry: the only
+available source is the agent def's static pin and the brand table — exactly the
+manifest-derived path design §9 classifies as `intent`, not `receipt`. Do not write
+`prov: "receipt"`; it becomes reachable only once the `RESOLVED:`-producer follow-up
+(Task 13) ships.
+
+If the round dispatches none of
+the four `MODEL-REQ`-bearing roles (a pure look-harder or escalation round), set
+`model_resolution: null` for that verdict entry **only if the round contributed
+no reviewer data at all** — no in-scope single-model role **and** no actually
+used review-mode consensus result (SP2, round 3); a consensus-only clean round is
+non-null via the `consensus` key. Never an empty object, which
+would falsely claim "checked, found nothing" rather than "not applicable this
+round." **Every array element is uniformly `{ran, basis, prov}` (S4):** an earlier
+draft capped each role array at 32 entries by inserting a `{"elided": <N>}`
+element between the retained head and tail; that element is not
+`{ran, basis, prov}`, so it broke design §9/T19's uniform-array contract precisely
+when the cap activated, with no reader scoped to handle it. The cap and the marker
+are removed. The unbounded-size residual design §9 already discloses stands:
+`append()`'s 16384-byte row cap drops an oversize row rather than truncating it and
+`_truncate_payload` does not cover this field, so a very large array can lose its
+whole row through that pre-existing disclosed path — reported by `append()`, not
+hidden behind an undocumented array element. See
+`skills/shared/ledger-append.md`'s `model_resolution` shape section.
+
 
 **`predicted_falsifier` (Phase 7 prediction market).** When constructing the entry, set `predicted_falsifier` to a pre-registered, machine-checkable predicate ONLY when `verdict ∈ {PASS, FAIL}` AND `artifact_type == "code"`; otherwise `null` (all escalation verdicts — STAGNATION/ESCALATED/ARCHITECTURAL/SUSTAINED_REGRESSION — and all non-code artifact types). In one sentence, describe the future evidence that would prove this verdict wrong, using the canonical grammar where possible: `{verb} touching {file-or-glob[,file-or-glob,...]} within {N}d` (e.g., `fix touching src/auth/token.ts within 30d`). Free-form prose is permitted but counts as "unparseable" for auto-checking. Max 256 chars. Full grammar (three forms, verbs, glob/hash/token variants) is the canonical `predicted_falsifier` protocol in `skills/shared/ledger-append.md`. Do NOT write the retired `"<DEFERRED:pre-phase-7>"` sentinel.
 
@@ -1287,7 +1540,7 @@ The convergence-log mirrors this stamp via `marker_version` (see Convergence Tel
 - `caller-detected-failure` — Verdict: FAIL. Valid ONLY when `Verdict: FAIL`; written by callers (e.g., build's gate ledger) recording a downstream-detected failure of the gate's output. Quality-gate itself never writes this combination.
 - `severity-counts-discrepancy` — Verdict: ESCALATED, from the Score source rule's Empty-work-order exception (step 7): a discrepancy-blocked round (or discrepancy-demoted look-harder round) whose orchestrator-counted population is 0 Fatal/0 Significant. See Exit Precedence slot #4.
 
-**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0 OR ConsensusAvailable: false)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis/mockup/translation gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate. `MaxScore` is computed under the #561-widened population; runs whose convergence-log entries predate that change (no `score_population` key, per the Score source rule's comparability note) are excluded from fragility-rate denominators.
+**Fragile-pass detection:** Downstream consumers (build's gate ledger, forge retrospectives, future telemetry) detect a fragile pass via `Verdict: PASS AND (SuppressedRegressions > 0 OR MaxScore > FinalScore + max(2, ceil(suppression_threshold / 3)) OR NoOpFixes > 0 OR ConsensusAvailable: false)`. The `max(2, ceil(threshold/3))` term scales the score-swing tolerance to the convergence window: a code/design/plan gate (threshold 10) tolerates a 4-point swing; a hypothesis gate (threshold 3) tolerates 2 points. (Note: fragile-pass detection intentionally uses `ceil` — slightly more permissive tolerance — while the consensus/notification *cadence* uses `max(1, // 3)` floor for a precise per-round schedule. The two formulas serve different purposes and are not expected to match.) The rationale is that longer convergence windows naturally produce larger transient scores, and a flat `+2` would over-flag normal convergence on artifacts allowed more rounds. A fragile pass is still a PASS — these fields are advisory signal for human review or telemetry filtering, not for failing the gate. `MaxScore` is computed under the #561-widened population; runs whose convergence-log entries predate that change (no `score_population` key, per the Score source rule's comparability note) are excluded from fragility-rate denominators.
 
 **Fragile-pass disjunct partitioning (advisory).** Consumers SHOULD partition `ConsensusAvailable: false` from the other disjuncts (SuppressedRegressions, MaxScore drift, NoOpFixes) when reporting fragility rates. The consensus disjunct reflects a **cross-model coverage gap** — the gate ran against a single model family and correlated blind spots are possible. The other disjuncts reflect **within-loop convergence instability**. Each consumer may choose to display them as separate metrics rather than a single fragility boolean; collapsing the two onto one axis obscures the underlying cause of the fragility flag.
 
@@ -1397,8 +1650,6 @@ Quality-gate reads these values from its dispatch context and includes them in t
 | plan | `crucible:planning` | After plan passes review |
 | hypothesis | `crucible:debugging` | Phase 3.5, before implementation |
 | code | `crucible:debugging`, build | After implementation/fix |
-| mockup | `crucible:mockup-builder` | After mockup is created |
-| translation | `crucible:mock-to-unity` | After self-verification |
 
 ### Documentation Convention
 
@@ -1567,7 +1818,7 @@ The invariants below govern the look-harder verification (Component 1), the tail
 | INV-546-1 | Fix-generated-defect checker fires on every non-clean round N+1 where round N has a `## Round N Fix` fix-journal entry — independent of the round-N verifier's Resolved/Unresolved outcome (distinct trigger from the persistence checker, INV-A10) — **AND `persistence_status` resolves to `fired-clean` or `not-triggered` AND the round-N diff is not oversized; on `verifier-error`/`error`/`absent`, OR on an oversized round-N diff, the orchestrator writes the `status: error` object itself and does not dispatch (Dispatch ordering › Orchestrator-side fail-open, round 5 S4; input #2's oversized-diff interception, round 6 F1 — round 9, S2 names both interception conditions here, where this row previously named only the persistence one). This precondition is stated once, here, and every restatement of the trigger — Compaction Recovery 6e's re-dispatch branch and the Anti-Rationalization Table's row — inherits it by reference (round 7, S3, consolidating round 6 S1's 6e-only fix)**; dispatched strictly AFTER the persistence checker resolves for round N+1, never in parallel. Evaluated on BOTH branches of How It Works step 7 (progress and same-or-higher-score) — not conditioned on the Stagnation Judge being dispatched. Does NOT fire when the artifact type is `code` (see INV-546-10, round 3 S1) — this `code` exclusion applies identically on the Compaction Recovery 6e path and in the Anti-Rationalization Table's restatements of this trigger, not just at its owning Artifact-class-scope paragraph (round 5, F1). Compaction Recovery 6e's re-dispatch branch inherits the `persistence_status`/oversized-diff precondition above rather than re-deriving it (round 6, S1; round 9, S2) |
 | INV-546-2 | Telemetry only: `SUSTAINED_FAN_OUT` is NOT a shipped verdict this round. A streak of 2 consecutive rounds with `fix-generated-count ≥ 1` records a free-text `fan-out-streak-note:` line in `round-N-score.md` only — never escalates, never changes the verdict or precedence, and is explicitly NOT a Minor observation: it does not enter `round-N-findings.md`, does not count toward the round's Minor count / `MinorTrajectory` / `minor_trajectory`, does not enter `m_exit` density or the clean-pass Minor advisory, and is not passed to the post-gate Minor quick-fix pass. The streak is per-chunk and resets at chunk boundaries (same chunk-scoping as `PersistentFindingRounds`). A checker-error round breaks the streak (fail-open) rather than continuing it; an `n/a` round (checker did not fire) is skipped, neither extending nor breaking it (round 6, M2). The note fires once per streak (naming the last two rounds), not on every round of a longer streak (round 3, M6). `round-N-score.md` is written at How It Works step 7 as before; the fix-generated-defect checker's telemetry fields are added afterward via Read → merge → Write, never a bare re-write (round 4, S2 — reverts round 3's S4 write-after default, which widened the compaction crash window Compaction Recovery step 2 depends on) |
 | INV-546-3 | Fix-generated-defect checker output flows only to the orchestrator's fan-out-streak tracking — never to the red-team prompt, never to the stagnation judge's input set |
-| INV-546-4 | Checker fires only on `design \| plan \| hypothesis \| mockup \| translation` artifacts, NOT `code` (see INV-546-10); input #2 is the round-N fix diff (`artifact-(N-1).md` before round N's fix vs. `artifact-N.md` after, uniform for all N ≥ 1 — round 1's baseline is `artifact-0.md`, written per-chunk at that chunk's Artifact Preparation before its first red-team dispatch, round 3 S2) plus the full `## Round N Fix` fix-journal entry, not the journal entry alone; input #3 carries an explicit `persistence_status: fired-clean \| not-triggered \| verifier-error \| error \| absent` token, and the checker fails open (`status: error`) on `verifier-error`/`error`/`absent` rather than proceeding with zero exclusions or treating every finding as new. `not-triggered` is cause-conjunct-complete — it asserts confirmed full-Resolved specifically; any other non-firing reason (e.g. an input findings file absent) maps to `absent` (round 3, S3) |
+| INV-546-4 | Checker fires only on `design \| plan \| hypothesis` artifacts, NOT `code` (see INV-546-10); input #2 is the round-N fix diff (`artifact-(N-1).md` before round N's fix vs. `artifact-N.md` after, uniform for all N ≥ 1 — round 1's baseline is `artifact-0.md`, written per-chunk at that chunk's Artifact Preparation before its first red-team dispatch, round 3 S2) plus the full `## Round N Fix` fix-journal entry, not the journal entry alone; input #3 carries an explicit `persistence_status: fired-clean \| not-triggered \| verifier-error \| error \| absent` token, and the checker fails open (`status: error`) on `verifier-error`/`error`/`absent` rather than proceeding with zero exclusions or treating every finding as new. `not-triggered` is cause-conjunct-complete — it asserts confirmed full-Resolved specifically; any other non-firing reason (e.g. an input findings file absent) maps to `absent` (round 3, S3) |
 | INV-546-5 | `FanOutRounds`/`FanOutCheckCount`/`FanOutErrorCount` always present on `MarkerVersion: 2` markers written by a post-#546 gate (omit-when-empty for `FanOutRounds`, parallel to `PersistentFindingRounds`/`PersistentCheckCount`); absent — not `0` — on pre-#546 `MarkerVersion: 2` markers, since no `MarkerVersion` bump accompanied this change; key absence, not `0`, is what distinguishes a pre-#546 run from a run with no fan-out dispatches (round 4, M6). Invariants `len(FanOutRounds) ≤ FanOutCheckCount` and `FanOutErrorCount ≤ FanOutCheckCount` (`FanOutErrorCount` added round 3, F2). The pre-existing `persistent_*` keys carry no analogous discriminator of their own — their cross-#546-boundary comparability instead relies on `fan_out_check_count` key presence as a proxy (see INV-546-11, round 5 M6) |
 | INV-546-6 | `check_qg_fan_out.py` (path-pinned to `quality-gate/SKILL.md` + `fix-generated-defect-prompt.md` + `persistence-checker-prompt.md`, never rglobs — the third target added round 8, F1, round 9 S3 corrects this row, which had gone stale for it) pins: `SUSTAINED_FAN_OUT`/`sustained-fan-out` absent from the closed `Verdict:`/`Reason:` marker enum lines; `FanOutRounds`/`FanOutCheckCount`/`FanOutErrorCount` + BOTH the `len(...) ≤ ...` invariants (`len(FanOutRounds) ≤ FanOutCheckCount` and `FanOutErrorCount ≤ FanOutCheckCount`, round 5 M2); convergence-log `fan_out_rounds`/`fan_out_check_count`/`fan_out_error_count`/`fan_out_oversized_count`/`fan_out_ambiguous_count`/`fan_out_not_triggered_count`/`fan_out_rounds_not_triggered`/`fan_out_diff_bytes_max`/`fan_out_diff_bytes_total` present (the middle six keys added round 5 S1/S3, round 7 S6, round 8 S2, and round 9 S4 respectively — round 9 S3 appends the round-5/7/8 keys to this row's enumeration, which had gone stale, and S4's own new key) and the retired boolean verdict-mirror field (M1) absent; the `persistence_status` value-set (CONTRACT-block scoped); the dispatch-ordering statement; the all-sections population-scope phrase (round 3, F1; widened round 5, F3); the never-escalates guarantee text; the `n/a` fix-generated-count/code-exclusion phrase (round 3, S1), including its Compaction Recovery 6e restatement (round 5, F1) — now also requiring the `persistence_status`/oversized-diff recovery-trigger conditions (round 6, S1; round 9, S2); the `fix-generated-count`/`fix-generated-ambiguous-count` three-value encodings, each point-anchored inside `CONTRACT:qg-fan-out-score-field-encoding-count`/`-ambiguous` rather than a file-wide search (round 6, S4 — mutation-verified maskable, reproducing the round-4 S1 defect at these two sites); the `persistence-checker-prompt.md` ordinal-identity rule (see INV-546-13); and the checker prompt's JSON schema keys + `persistence_status` tokens. **Pin-shape decision (round 9, S5):** a subset of this checker's assertions previously pinned verbatim English sentences rather than the contract tokens `scripts/CHECKER_CONVENTIONS.md` §1 calls for; round 9 converted the flagged sites (the interception-order check, the completeness-audit line-counting check, and check (z2)'s `count ≥ 5` threshold) to token/order/per-site-anchor assertions, and anchored several previously-bare sentence checks to at least remove the masking risk, without re-auditing the checker's full pin set end-to-end — a residual, out-of-scope-for-this-round item, not a claim that every pin here is now shaped per convention. Wired into `run_tests.sh` |
 | INV-546-7 | `excluded_as_persistent`, `round_n_plus_1_finding_count`, and `len(judgments)` are all scoped to Fatal/Significant findings only (a high-confidence persistence match on a Minor finding is never excluded here), and count every such finding in `round-(N+1)-findings.md` regardless of section — including a required `### Second Pass Findings` section (round 3, F1 originally scoped this to the `### Fatal Challenges`/`### Significant Challenges` headings only; round 5, F3 widened it to all sections, since the narrower scope made the checker permanently blind to second-pass-surfaced defects — #488 c1's own signature). On a `status: "ok"` object, the orchestrator's completeness audit compares `excluded_as_persistent + len(judgments)` against its OWN independently-computed Fatal+Significant count for `round-(N+1)-findings.md`, scoped identically to this all-sections population — **deliberately NOT the #366 Score-source count**, which stays heading-scoped for a different reason (un-spoofability of the *scored* value; the two counts diverge by design on any round with second-pass Fatal/Significant findings, round 5 F3) — not against the checker's self-declared `round_n_plus_1_finding_count`, which is a reviewer-declared cross-check only. Both the checker's and the orchestrator's counts are computed by counting `**Severity:** Fatal` and `**Severity:** Significant` lines across the whole file — a mechanical rule, not a semantic read, so the two counts can be trusted to segment the free-form report identically (round 6, S5). **A mismatch does NOT set `status: error`** — the orchestrator flags the discrepancy in the narration log and uses the checker's own reported `fix_generated_count` for streak purposes (the #366 disposition); `status: error` is reserved for a checker that returns no usable object at all. The audit does not apply to `status: "error"` objects. **This all-sections population coverage applies only to a round the checker's trigger actually fires on (round 8, S3)** — the trigger itself still keys on the #366 heading-scoped non-clean score, so a round whose only Fatal/Significant entries sit under `### Second Pass Findings` never fires the checker at all; this row's all-sections guarantee is not unconditional all-rounds coverage |
@@ -1597,7 +1848,5 @@ The invariants below govern the look-harder verification (Component 1), the tail
 - **crucible:design** — Produces design docs (gateable artifact)
 - **crucible:planning** — Produces plans (gateable artifact)
 - **crucible:debugging** — Produces hypotheses and fixes (gateable artifacts). **Note:** Debugging's Phase 5 must invoke `crucible:quality-gate` for fix review, not `crucible:red-team` directly. This ensures fixes get iteration tracking, compaction recovery, and user checkpoints.
-- **crucible:mockup-builder** — Produces mockups (gateable artifact)
-- **crucible:mock-to-unity** — Produces translation maps and implementations (gateable artifacts)
 - **crucible:build** — Outermost orchestrator, controls all gates in pipeline
 - **crucible:checkpoint** — Shadow git checkpoints before code-artifact fix rounds (recommended). Provides rollback target when fix rounds introduce regressions.

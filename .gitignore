@@ -78,3 +78,5 @@ mcp-servers/**/__pycache__/
 # invocation and rm -rf's from an EXIT trap, the printed path would already be
 # dangling. Cleared at the start of every sweep run; never committed.
 .dec31-keep/
+# #554 — dependency-audit triage design; permanent repo artifact (revised under canonical adjudication, evidence in gate scratch).
+!docs/plans/2026-09-06-554-dependency-audit-triage-design.md

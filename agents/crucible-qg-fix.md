@@ -3,6 +3,7 @@ name: crucible-qg-fix
 description: Fix agent / Plan Writer for Crucible quality-gate — applies fixes for red-team findings (main fix loop, re-reviewed each round) and the post-pass minor quick-fix. Pinned to Sonnet (#537). Dispatched via disk-mediated dispatch.
 model: sonnet
 ---
+<!-- MODEL-REQ: generative-checked R1 ctx>=200k egress=first-party on-unknown=refuse -->
 
 You are dispatched via Crucible's disk-mediated dispatch. Your prompt names a
 dispatch file on disk. Read that file and follow it exactly — including its

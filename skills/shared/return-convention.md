@@ -58,6 +58,31 @@ NEXT       <one-line re-verification hint>  [; <hint>]
 - No text may appear before the first header, between a header and its body, or after the last section's body.
 - **Forward compatibility:** v1 parsers MUST silently ignore any section header appearing **after** `NEXT` that they do not recognize (reserved for Layer 2 `TRIPWIRE:` and later extensions). Unknown headers appearing **before** `NEXT` are a protocol violation.
 
+### `RESOLVED:` — per-role model-resolution self-report (#493, format only, unenforced in v1)
+
+An optional line in this same post-`NEXT` extension slot, alongside `TRIPWIRE:` /
+`SUPERSEDES:`:
+
+```
+RESOLVED:  req=<profile+flags|none>  endpoint=<opaque-label|unknown>  ran=<endpoint-reported-id|unknown>  basis=<attested|asserted|indeterminate>  vocab=<version>
+```
+
+- `basis=` is `skills/shared/model-tier-policy.md`'s resolution-state vocabulary
+  (`attested`/`asserted`/`indeterminate`), not a bare string.
+- `vocab=` names the `VOCAB-VERSIONS` entry (`model-tier-policy.md`) the declaration
+  was authored against.
+- `req=none` / `endpoint=unknown` / `ran=unknown` / `basis=indeterminate` is the
+  explicit "I could not determine this" value, not an omission.
+
+**This is a defined format with, in v1, zero producers and zero consumers**
+(design §6.2): no agent def, worked-example receipt, or prompt file is taught to
+emit it in this plan, and `rcpt_verify.py`'s `parse_v11_sections` keys only on the
+literal prefixes `TRIPWIRE:`, `SUPERSEDES:`, and `TRIPWIRE-CHILD:`, silently
+ignoring any other header per this section's own forward-compatibility clause. A
+receipt lacking a `RESOLVED:` line is never a lint failure, on any role, on any
+version. Teaching a producer to emit it is a named, unscoped follow-up (design
+§6.2, §11; filed in Task 13).
+
 ### Field rules
 
 - **Header line** — `RCPT v1 <skill>/<dispatch-id>`. `<skill>` matches `[a-z][a-z0-9-]*`. `<dispatch-id>` is the dispatch-**file** basename `<N>-<template-name>` (per `shared/dispatch-convention.md` file naming; NOT the dispatch-*directory* basename) provided by the orchestrator.

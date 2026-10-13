@@ -59,9 +59,6 @@ CATEGORIES: dict[str, list[str]] = {
         "stocktake", "merge-pr", "anvil", "getting-started", "handoff",
         "workshop", "orchestrator",
     ],
-    "Unity UI (Domain-Specific)": [
-        "mockup-builder", "mock-to-unity", "ui-verify",
-    ],
     "Eval & Maintenance (internal)": [
         "cartographer-skill", "temper-eval-collect", "temper-eval-calibrate",
         "skill-selection-evals",

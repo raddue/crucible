@@ -29,7 +29,14 @@ INPUT="$(cat)"
 
 # ── 2. Dependency checks (jq + python3) — absent → exit 0 silently ─────
 command -v jq >/dev/null 2>&1 || exit 0
-command -v python3 >/dev/null 2>&1 || exit 0
+# `command -v` proves a NAME resolves, not that it RUNS. On Windows the Microsoft
+# Store App Execution Alias is a real `python3.exe` on PATH that exits non-zero
+# ("Python was not found; run without arguments to install from the Microsoft
+# Store"), so `command -v` alone let a missing interpreter through and surfaced
+# the exec failure as a bogus "structural lint failed" advisory naming the
+# receipt. Prove the interpreter runs before depending on it.
+PYTHON3="$(command -v python3 2>/dev/null)" || exit 0
+"$PYTHON3" -c '' >/dev/null 2>&1 || exit 0
 
 # ── 3. Transcript path ─────────────────────────────────────────────────
 TRANSCRIPT="$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)"
@@ -80,7 +87,7 @@ LINTER="$HOOK_DIR/../scripts/rcpt_verify.py"
 [ -f "$LINTER" ] || exit 0
 
 # ── 7. Run the Tier-1 structural lint (advisory only) ─────────────────
-ERR="$(printf '%s\n' "$RCPT_BLOCK" | python3 "$LINTER" --tier1 - 2>&1 1>/dev/null)"
+ERR="$(printf '%s\n' "$RCPT_BLOCK" | "$PYTHON3" "$LINTER" --tier1 - 2>&1 1>/dev/null)"
 RC=$?
 if [ "$RC" -ne 0 ]; then
   FIRST_BULLET="$(printf '%s\n' "$ERR" | head -n 1)"

@@ -5,7 +5,7 @@ description: Tour of the Crucible workshop — the headline orchestrators users 
 
 # Workshop
 
-A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~52 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
+A curated tour of the headline Crucible skills — the orchestrators a user typically invokes directly. Crucible ships ~49 skills total, but most of those are sub-skills that orchestrators dispatch internally. This skill is the **front door**: when you don't know which command to type, start here.
 
 **Skill type:** Reference. Read this skill when the user is choosing what to do; do not dispatch subagents from it.
 
@@ -26,7 +26,7 @@ A curated tour of the headline Crucible skills — the orchestrators a user typi
 |---|---|
 | `/temper` | Iterative code review on a PR or `<base>..<head>` range. Loops fresh-eyes reviewers until clean. Forge-agnostic (GitHub / GitLab / Bitbucket / self-hosted). Renamed from `/code-review` on 2026-05-17. |
 | `/debugging` | Any bug, test failure, or unexpected behavior. Hypothesis loop, fix dispatch, verification. |
-| `/quality-gate` | Iterative red-team on any artifact (design doc, plan, code, hypothesis, mockup). Loops until clean or stagnation. Invoked by other orchestrators; invoke directly when the artifact is standalone. |
+| `/quality-gate` | Iterative red-team on any artifact (design doc, plan, code, hypothesis). Loops until clean or stagnation. Invoked by other orchestrators; invoke directly when the artifact is standalone. |
 | `/migrate` | Framework upgrade, API version bump, major dependency change, deprecation removal. Produces a phased migration plan and optionally executes it via build's refactor mode. |
 
 ### Inspection and discovery
@@ -79,9 +79,8 @@ The big skills compose. The most common pipelines:
 
 ## What's not in this list (intentionally)
 
-Crucible has ~52 skills; this list curates ~15. Skills omitted here are either:
+Crucible has ~49 skills; this list curates ~15. Skills omitted here are either:
 - **Sub-skills** dispatched by orchestrators (e.g., `red-team`, `inquisitor`, `adversarial-tester`, `checkpoint`, `verify`, `assay`, `innovate`, `cartographer-skill`) — invoked indirectly, not part of the user-facing menu.
-- **Domain-specific** (e.g., `mock-to-unity`, `ui-verify`, `mockup-builder`) — load when their domain triggers.
 - **Utility / meta** (e.g., `anvil`, `stocktake`, `recall`, `replay`, `worktree`, `parallel`, `merge-pr`, `distill`, `test-coverage`, `review-feedback`, `consensus`, `getting-started`, `project-init`, `test-driven-development`) — domain knowledge or workflow plumbing rather than direct-invocation commands.
 
 Run `/skills` (Claude Code built-in) for the full catalog.
@@ -90,4 +89,4 @@ Run `/skills` (Claude Code built-in) for the full catalog.
 
 - `README.md` — top-level pitch, install, what-you-get bullets
 - `docs/architecture.md` — how the orchestrators compose
-- `docs/skills.md` — full 52-skill catalog with eval deltas
+- `docs/skills.md` — full 49-skill catalog with eval deltas

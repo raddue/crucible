@@ -54,6 +54,23 @@ def grudges_dir(repo: str, base_dir: Optional[str] = None) -> str:
     return os.path.join(base, repo, "grudges")
 
 
+# #605 / C-l: every git shell-out in the grudge subsystem runs git through this
+# PATH+HOME-only allowlist, never the inherited process environment — git
+# obeys repository-LOCATION variables (GIT_DIR, GIT_WORK_TREE, …) and
+# config-transport variables (GIT_CONFIG_COUNT/KEY_n/VALUE_n,
+# GIT_CONFIG_PARAMETERS, …) that outrank any `-C` argument, so a single
+# inherited variable can silently retarget or misreport a query. A denylist
+# cannot be complete (GIT_CONFIG_KEY_n is indexed); an allowlist only has to
+# name what git genuinely needs: PATH (findable at all) and HOME (per-user
+# config, where a legitimate `safe.directory` lives). Mirrors the hook's
+# `env -i PATH HOME git` and grudge_query.py's `_git_env()`.
+_GIT_ENV_KEEP = ("PATH", "HOME")
+
+
+def _git_env() -> dict:
+    import os as _os
+    return {k: _os.environ[k] for k in _GIT_ENV_KEEP if k in _os.environ}
+
 def _walk_up_git_root(base: str) -> Optional[str]:
     """Env-free repo-root detector: walk up from `base` looking for a `.git`
     entry (a dir in a normal clone, a file in a worktree/submodule). Returns the
@@ -112,6 +129,48 @@ def resolve_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
         return (os.path.basename(walked.rstrip("/")) or walked, walked)
     root = os.path.realpath(os.path.abspath(base))
     return (os.path.basename(root) or "unknown", root)
+
+
+def resolve_store_repo(start_dir: Optional[str] = None) -> Tuple[str, str]:
+    """(repo_basename, store_root) — the STORE identity for the repo at
+    start_dir: the git-common-dir parent, RESOLVED AGAINST start_dir (never
+    the process cwd — SIEGE-R2-M8: git returns `--git-common-dir` relative to
+    its `-C` directory for an ordinary clone), when that resolved path's final
+    component is '.git' AND its own parent is not itself literally named
+    'modules' (SIEGE-R2-M7 — a submodule's common-dir is
+    `<super>/.git/modules/<name>`, whose parent `modules` is excluded so a
+    submodule an attacker names `.git` cannot defeat the discriminator, and
+    sibling submodules do not collide); otherwise falls back to
+    `resolve_repo()` — the worktree root — and records that the fallback fired
+    (submodule, bare repo, or an unresolvable common-dir) via a WARN.
+
+    Distinct from `resolve_repo()` (FILESYSTEM identity = `--show-toplevel`,
+    the worktree). Never used for filesystem existence checks. Invokes git via
+    the same PATH/HOME allowlist (#605/C-l)."""
+    base = start_dir or os.getcwd()
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["git", "-C", base, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5, env=_git_env(),
+        )
+        common = proc.stdout.strip()
+        if proc.returncode == 0 and common:
+            # Resolve the R E L A T I V E common-dir against start_dir, not the
+            # process cwd (SIEGE-R2-M8): `ledger_doctor`/`brier_advisory` call
+            # in with a start_dir that differs from cwd.
+            resolved = common if os.path.isabs(common) \
+                else os.path.realpath(os.path.join(base, common))
+            if os.path.basename(resolved) == ".git" \
+                    and os.path.basename(os.path.dirname(resolved)) != "modules":
+                parent = os.path.dirname(resolved)
+                return (os.path.basename(parent) or parent, parent)
+    except Exception:  # noqa: BLE001 — best-effort, never fatal
+        pass
+    _warn("resolve_store_repo: store-identity discriminator failed — fell back "
+          "to resolve_repo()'s worktree root (submodule, bare repo, or an "
+          "unresolvable git-common-dir)")
+    return resolve_repo(base)
 
 
 def normalize_path(p: str, repo_root: str) -> str:
@@ -207,14 +266,26 @@ def append(
     repro: str = "",
     why: str = "",
     repo: str,
-    repo_root: str,
+    store_root: str,
+    worktree_root: Optional[str] = None,
     base_dir: Optional[str] = None,
     date_fixed: Optional[str] = None,
 ) -> Optional[str]:
     """Record (write/overwrite) one grudge. Returns the file path, or None if the
     write was refused/skipped. Overwrite-on-same-key (last write wins) — NOT the
-    ledger's append-only-skip model (stated honestly per fix #2)."""
-    files_norm = sorted({normalize_path(f, repo_root) for f in (files_touched or []) if f and f.strip()})
+    ledger's append-only-skip model (stated honestly per fix #2).
+
+    DEC-4 / §4.2: store identity and filesystem identity are DIFFERENT concepts
+    (S5 / siege S-2 — one root cannot serve both once they diverge in a linked
+    worktree). `store_root` (git-common-dir parent) feeds compute_hash() and the
+    recorded `repo_root` frontmatter field; `worktree_root` (--show-toplevel),
+    defaulting to `store_root` for the ordinary-clone case, feeds normalize_path()
+    and the fix-#6 privacy guard. The guard refuses when the target is inside
+    EITHER root (SIEGE-R2-H7): a store placed inside the main clone is caught
+    even when recording from a linked worktree whose own worktree_root is not a
+    parent of it."""
+    worktree_root = worktree_root or store_root
+    files_norm = sorted({normalize_path(f, worktree_root) for f in (files_touched or []) if f and f.strip()})
     if not files_norm:
         _warn("no files_touched — grudge needs at least one file to hold a grudge against; skipped")
         return None
@@ -226,20 +297,24 @@ def append(
 
     target_dir = grudges_dir(repo, base_dir)
 
-    # Privacy guard (fix #6): never write the live store into the repo we're in.
-    if _is_inside(target_dir, repo_root):
+    # Privacy guard (fix #6, SIEGE-R2-H7): never write the live store into ANY
+    # git working tree the write could reach — the worktree the recording runs
+    # from, OR the store identity's main clone (public, tracked). With a single
+    # root, a store under the main clone escaped the guard when recording from a
+    # linked worktree (its worktree_root is not a parent of the main clone).
+    if _is_inside(target_dir, worktree_root) or _is_inside(target_dir, store_root):
         _warn(
             f"refusing to write grudges into the repo tree ({target_dir} is inside "
-            f"{repo_root}); grudges carry private paths and must live outside any repo. "
-            f"Unset/relocate CRUCIBLE_GRUDGE_DIR."
+            f"{worktree_root} or {store_root}); grudges carry private paths and must "
+            f"live outside any repo. Unset/relocate CRUCIBLE_GRUDGE_DIR."
         )
         return None
 
-    h = compute_hash(repo_root, files_norm, disc)
+    h = compute_hash(store_root, files_norm, disc)
     record = {
         "hash": h,
         "repo": repo,
-        "repo_root": repo_root,
+        "repo_root": store_root,
         "fixed_in_commit": fixed_in_commit or "",
         "symptom": (symptom or "").strip(),
         "root_cause": (root_cause or "").strip(),
@@ -258,6 +333,16 @@ def append(
     return path
 
 
+def _read_files_from(path: str) -> List[str]:
+    """Read a NUL-delimited path list (the `$STATE_DIR/<sha>.files` artifact,
+    DEC-5). Python reads the file itself — the shell never re-tokenizes its
+    contents — so every byte a path can hold (TAB, LF, comma, backtick) comes
+    through unchanged. Invalid UTF-8 round-trips via surrogateescape."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    return [p.decode("utf-8", "surrogateescape") for p in data.split(b"\0") if p]
+
+
 # --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
@@ -266,28 +351,70 @@ def _main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="Record a grudge (fixed bug) into the Book of Grudges.")
     ap.add_argument("--symptom", required=True)
     ap.add_argument("--root-cause", default="")
-    ap.add_argument("--files", required=True, help="comma-separated files_touched")
+    # Repeatable, EQUALS-form: --files=PATH one per touched path. A value is a
+    # single argv element, so a comma in a filename is data, not a delimiter,
+    # and a value beginning with `-` stays inert (C-m, DEC-5/#568).
+    ap.add_argument("--files", action="append", metavar="PATH",
+                    help="a touched file (repeatable: one --files= per path)")
+    ap.add_argument("--files-from", dest="files_from", default=None, metavar="PATH",
+                    help="NUL-delimited file of touched paths (the hook's paste-me remedy)")
     ap.add_argument("--signature", default="", help="anti_pattern_signature (regex or literal snippet)")
-    ap.add_argument("--commit", default="", help="fixed_in_commit SHA")
+    ap.add_argument("--commit", dest="fixed_in_commit", default="",
+                    help="fixed_in_commit SHA")
+    ap.add_argument("--candidate-sha", dest="fixed_in_commit", default="",
+                    help="alias for --commit (hook paste-me form)")
     ap.add_argument("--repro", default="")
     ap.add_argument("--why", default="")
-    ap.add_argument("--repo-root", default=None, help="override git toplevel realpath (tests)")
+    ap.add_argument("--repo-root", default=None,
+                    help="override STORE identity realpath (git-common-dir "
+                    "parent; tests / explicit store identity)")
+    ap.add_argument("--worktree-root", default=None,
+                    help="override FILESYSTEM identity realpath "
+                    "(--show-toplevel; defaults to resolve_repo())")
     ap.add_argument("--repo", default=None, help="override repo basename (tests)")
     args = ap.parse_args(argv)
 
     if args.repo_root:
-        repo_root = os.path.realpath(args.repo_root)
-        repo = args.repo or os.path.basename(repo_root) or "unknown"
+        store_root = os.path.realpath(args.repo_root)
+        repo = args.repo or os.path.basename(store_root) or "unknown"
     else:
-        repo, repo_root = resolve_repo()
+        repo, store_root = resolve_store_repo()
         if args.repo:
             repo = args.repo
-
-    files = [f for f in (args.files.split(",") if args.files else []) if f.strip()]
+    worktree_root = None
+    if args.worktree_root:
+        worktree_root = os.path.realpath(args.worktree_root)
+    else:
+        # --worktree-root defaults to the filesystem root the recording runs
+        # from (resolve_repo), NOT store_root — the two diverge in a linked
+        # worktree and normalize_path must see the worktree (T-w, DEC-4).
+        _basename, worktree_root = resolve_repo()
+        # resolve_repo() silently falls back to the realpath of cwd when cwd is
+        # NOT in a git work tree. A non-git cwd carries no filesystem identity:
+        # trusting that path makes the two-root guard refuse a store that merely
+        # sits under an unrelated parent (an explicit --repo-root caller like
+        # test_558_559_acceptance, cwd = a tmp dir). Steady default: the store
+        # identity itself, the old single-root semantics.
+        import subprocess as _core_sp
+        try:
+            _in_tree = _core_sp.run(
+                ["git", "-C", os.getcwd(), "rev-parse", "--is-inside-work-tree"],
+                capture_output=True, text=True, timeout=5, env=_git_env(),
+            ).returncode == 0
+        except (OSError, ValueError, _core_sp.TimeoutExpired):  # git absent/hung
+            _in_tree = False
+        if not _in_tree:
+            worktree_root = store_root
+    if args.files_from:
+        files = _read_files_from(args.files_from)
+    else:
+        files = list(args.files or [])
+    files = [f for f in files if f and f.strip()]
     path = append(
         symptom=args.symptom, root_cause=args.root_cause, files_touched=files,
-        anti_pattern_signature=args.signature, fixed_in_commit=args.commit,
-        repro=args.repro, why=args.why, repo=repo, repo_root=repo_root,
+        anti_pattern_signature=args.signature, fixed_in_commit=args.fixed_in_commit,
+        repro=args.repro, why=args.why, repo=repo, store_root=store_root,
+        worktree_root=worktree_root,
     )
     if path:
         print(path)

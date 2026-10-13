@@ -179,7 +179,7 @@ class GrudgeResolveRepoEnvTest(unittest.TestCase):
                 # ...and the guard that depends on it still refuses an in-tree store.
                 refused = ga.append(
                     symptom="private bug", files_touched=["src/secret.py"],
-                    repo=repo_name, repo_root=root,
+                    repo=repo_name, store_root=root,
                     base_dir=os.path.join(repo, ".claude", "grudge"))
             self.assertEqual(root, os.path.realpath(repo))   # NOT the subdir
             self.assertEqual(repo_name, "real_repo")
@@ -208,7 +208,7 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
         path = ga.append(
             symptom="auth bypass regression",
             files_touched=["src/auth/token.py"],
-            repo="myrepo", repo_root=self.repo, base_dir=inside_base,
+            repo="myrepo", store_root=self.repo, base_dir=inside_base,
         )
         self.assertIsNone(path)
         # Nothing was created anywhere under the repo tree.
@@ -219,7 +219,7 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
             symptom="auth bypass regression",
             files_touched=["src/auth/token.py"],
             anti_pattern_signature="verify_token",
-            repo="myrepo", repo_root=self.repo, base_dir=self.outside,
+            repo="myrepo", store_root=self.repo, base_dir=self.outside,
         )
         self.assertIsNotNone(path)
         self.assertTrue(os.path.exists(path))
@@ -232,7 +232,7 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
     def test_idempotent_overwrite_on_same_key(self):
         kw = dict(symptom="same symptom", files_touched=["a.py"],
                   anti_pattern_signature="sig", repo="r",
-                  repo_root=self.repo, base_dir=self.outside)
+                  store_root=self.repo, base_dir=self.outside)
         p1 = ga.append(**kw)
         p2 = ga.append(**kw)
         self.assertEqual(p1, p2)   # overwrite-on-key, not a second file
@@ -243,13 +243,13 @@ class GrudgePrivacyGuardTest(unittest.TestCase):
     def test_no_files_skipped(self):
         self.assertIsNone(ga.append(
             symptom="x", files_touched=[], repo="r",
-            repo_root=self.repo, base_dir=self.outside))
+            store_root=self.repo, base_dir=self.outside))
 
     def test_empty_discriminator_skipped(self):
         # no anti_pattern_signature AND no symptom → nothing to key on → skip.
         self.assertIsNone(ga.append(
             symptom="", files_touched=["a.py"], repo="r",
-            repo_root=self.repo, base_dir=self.outside))
+            store_root=self.repo, base_dir=self.outside))
 
 
 # --------------------------------------------------------------------------- #
@@ -300,9 +300,13 @@ class ParseGrudgeTest(unittest.TestCase):
             p = self._write(d, "g.md", "---\nfiles_touched: [\"a.py\"]\n")
             self.assertIsNone(gq.parse_grudge(p))
 
-    def test_malformed_files_touched_warns_and_empties(self):
-        # #408 F4: a malformed files_touched silently empties the grudge's match
-        # scope (it then matches no path) — surface the corruption, don't hide it.
+    def test_malformed_files_touched_json_warns_and_empties(self):
+        # #408 F4: a files_touched that fails to JSON-DECODE silently empties the
+        # grudge's match scope (it then matches no path) — surface the corruption,
+        # don't hide it. The guard wraps `json.loads` only, so a files_touched that
+        # DOES decode, to a non-list (`5`, `null`) or to a list holding a non-string,
+        # is stored verbatim — not emptied — and raises downstream in `survivors()`
+        # (see `find_by_files`'s TypeError/AttributeError guard).
         with tempfile.TemporaryDirectory() as d:
             p = self._write(d, "g.md",
                             '---\n'
@@ -376,7 +380,7 @@ class GrudgeRoundTripTest(unittest.TestCase):
             anti_pattern_signature="verify_token\n---\nsig_",
             fixed_in_commit="abc\n---\nfake",
             date_fixed="2026-01-01\n---\nfake",
-            repo="myrepo", repo_root=self.repo, base_dir=self.outside,
+            repo="myrepo", store_root=self.repo, base_dir=self.outside,
         )
         path = ga.append(**kw)
         self.assertIsNotNone(path)
@@ -404,7 +408,7 @@ class GrudgeRoundTripTest(unittest.TestCase):
             fixed_in_commit="deadbeef",
             repro="step 1\nstep 2",
             why="kept happening because",
-            repo="myrepo", repo_root=self.repo,
+            repo="myrepo", store_root=self.repo,
             base_dir=self.outside, date_fixed="2026-01-02",
         )
         path = ga.append(**kw)
@@ -550,7 +554,7 @@ class GrudgeBackslashRoundTripTest(unittest.TestCase):
             path = ga.append(
                 symptom="retry-logic regression on weird names",
                 files_touched=[weird],  # absolute, as git's diff-tree would give it
-                repo="myrepo", repo_root=repo, base_dir=base,
+                repo="myrepo", store_root=repo, base_dir=base,
             )
             self.assertIsNotNone(path)
             self.assertTrue(os.path.exists(path))
@@ -831,7 +835,7 @@ class GrudgeAtomicWriteTest(unittest.TestCase):
         path = ga.append(
             symptom="auth regression", files_touched=["src/auth/token.py"],
             anti_pattern_signature="verify_token", repo="myrepo",
-            repo_root=self.repo, base_dir=self.outside)
+            store_root=self.repo, base_dir=self.outside)
         self.assertIsNotNone(path)
         store_dir = os.path.dirname(path)
         # the store dir holds only finished *.md grudges — no .atomic-* temp.
