@@ -78,7 +78,11 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
         mapped = mappings.get(role)
         if mapped and row.get("actual_model") != mapped:
             violations.append(f"GATE-NOT-RUN:{role} (actual_model differs from mapped model)")
-        dispatch_id = pathlib.Path(row.get("file", "")).stem
+        filename = row.get("file")
+        if not isinstance(filename, str):
+            violations.append(f"GATE-NOT-RUN:{role} (invalid manifest file: expected string)")
+            continue
+        dispatch_id = pathlib.Path(filename).stem
         receipts = sorted(p for p in dispatch_dir.iterdir() if p.is_file()
                           and p.name != row.get("file")
                           and (p.name.startswith(dispatch_id + "-") or p.name.startswith(dispatch_id + ".")))
@@ -106,11 +110,17 @@ def check(dispatch_dir: pathlib.Path, marker: pathlib.Path | None = None) -> lis
             except OSError as exc:
                 errors.append(f"receipt verifier unavailable: {exc}")
                 continue
-            if result.returncode:
+            coverage = re.search(r"^TIER2-COVERAGE: artifacts (\d+)/(\d+)\b.*$",
+                                 result.stderr, re.M)
+            if result.returncode or coverage is None:
                 errors.append(f"receipt verification failed: {result.stderr.strip()}")
                 continue
+            verified_artifacts, declared_artifacts = map(int, coverage.groups())
             if not re.match(rf"^RCPT v1(?:\.1)? \S+/{re.escape(dispatch_id)}\s*$", text.split("\n", 1)[0]):
                 errors.append(f"receipt dispatch ID mismatch: {receipt.name}")
+                continue
+            if verified_artifacts < 1:
+                errors.append(f"receipt has no resolved artifact evidence: {verified_artifacts}/{declared_artifacts}")
                 continue
             break
         else:
@@ -125,7 +135,18 @@ def selftest() -> int:
         result = check(d)
         assert result[0] == "BLOCKED: DISPATCH-UNAVAILABLE", "missing manifest must block"
         (d / "manifest.jsonl").write_text(json.dumps({"seq": 1, "role": "crucible-red-team", "status": "completed", "file": "1-red-team.md", "dispatch_ref": "run-1", "actual_model": "provider/model", "harness": "pi"}) + "\n")
-        receipt = "RCPT v1.1 quality-gate/1-red-team\nVERDICT  PASS  conf=0.90\nARTIFACTS\n  (none)\nTRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\nWITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\nSUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\nTRIPWIRE-CHILD: none\n"
+        artifact = "finding.md"
+        artifact_bytes = b"finding\n"
+        (d / artifact).write_bytes(artifact_bytes)
+        artifact_hash = hashlib.sha256(artifact_bytes).hexdigest()
+        receipt = (
+            "RCPT v1.1 quality-gate/1-red-team\nVERDICT  PASS  conf=0.90\n"
+            "ARTIFACTS\n  finding.md sha256:" + artifact_hash + " 8\n"
+            "TRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
+            "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
+            "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+            "TRIPWIRE-CHILD: none\n"
+        )
         (d / "1-red-team-receipt.md").write_text(receipt)
         (d / "receipt-ledger.jsonl").write_text(json.dumps({"dispatch_id": "1-red-team", "phase": "quality-gate:round/1", "rcpt_sha256": hashlib.sha256(receipt.encode()).hexdigest(), "verdict": "PASS"}) + "\n")
         marker = d / "gate-verdict.md"

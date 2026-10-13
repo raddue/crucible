@@ -251,13 +251,18 @@ class GateProvenanceTest(unittest.TestCase):
                 "rcpt_sha256": "0" * 64, "verdict": "PASS"}) + "\n")
 
     def write_receipt(self, text=None):
-        text = text if text is not None else (
-            "RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
-            "ARTIFACTS\n  (none)\nTRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
-            "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
-            "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
-            "TRIPWIRE-CHILD: none\n"
-        )
+        if text is None:
+            artifact_hash = hashlib.sha256(b"finding\n").hexdigest()
+            with open(os.path.join(self.ddir, "finding.md"), "w", encoding="utf-8") as f:
+                f.write("finding\n")
+            text = (
+                "RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
+                "ARTIFACTS\n  finding.md sha256:" + artifact_hash + " 8\n"
+                "TRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
+                "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
+                "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+                "TRIPWIRE-CHILD: none\n"
+            )
         with open(os.path.join(self.ddir, "1-crucible-red-team-receipt.md"), "w", encoding="utf-8") as f:
             f.write(text)
         self.write_ledger(json.dumps({"dispatch_id": "1-crucible-red-team",
@@ -297,6 +302,58 @@ class GateProvenanceTest(unittest.TestCase):
         self.write_receipt()
         result = self.run_checker()
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_vacuous_receipt_fails_coverage_requirement(self):
+        self.write_manifest()
+        text = ("RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
+                "ARTIFACTS\n  (none)\nTRACE\n  1  SKIPPED  no-artifacts\nCLAIMS\n  (none)\n"
+                "WITNESS    lint:trace-consistent  expect-fail=/inconsistent/  ran=TRACE#1\n"
+                "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+                "TRIPWIRE-CHILD: none\n")
+        self.write_receipt(text)
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("no resolved artifact evidence: 0/0", result.stdout)
+
+    def test_unresolved_bare_artifact_fails_coverage_requirement(self):
+        self.write_manifest()
+        self.write_receipt(
+            "RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
+            "ARTIFACTS\n  finding.md sha256:" + "a" * 64 + " 22\n"
+            "TRACE\n  1  WROTE  finding.md sha256:" + "a" * 64 + "\n"
+            "CLAIMS\n  (none)\nWITNESS    grep:finding.md#L1-L1  expect-fail=/never/  ran=TRACE#1\n"
+            "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+            "TRIPWIRE-CHILD: none\n"
+        )
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("no resolved artifact evidence: 0/1", result.stdout)
+
+    def test_resolved_bare_artifact_satisfies_coverage(self):
+        self.write_manifest()
+        artifact_hash = hashlib.sha256(b"finding\n").hexdigest()
+        with open(os.path.join(self.ddir, "finding.md"), "w", encoding="utf-8") as f:
+            f.write("finding\n")
+        self.write_receipt(
+            "RCPT v1.1 quality-gate/1-crucible-red-team\nVERDICT  PASS  conf=0.90\n"
+            "ARTIFACTS\n  finding.md sha256:" + artifact_hash + " 8\n"
+            "TRACE\n  1  WROTE  finding.md sha256:" + artifact_hash + "\n"
+            "CLAIMS\n  (none)\nWITNESS    grep:finding.md#L1-L1  expect-fail=/absent/  ran=TRACE#1\n"
+            "SUSPICION  0.00\nNEXT       (none)\nTRIPWIRE: none\nSUPERSEDES: none\n"
+            "TRIPWIRE-CHILD: none\n"
+        )
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_non_string_manifest_file_returns_violation(self):
+        self.write_manifest()
+        for value in (None, 7, [], {}):
+            self.row["file"] = value
+            self.write_manifest()
+            result = self.run_checker()
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertNotIn("Traceback", result.stdout)
+            self.assertIn("file", result.stdout.lower())
 
     def test_malformed_ledger_cannot_pass(self):
         self.write_manifest()
